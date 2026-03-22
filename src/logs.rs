@@ -14,43 +14,22 @@ const LOG_STREAM_CAPACITY: usize = 2048;
 const LOG_HISTORY_LIMIT: usize = 5000;
 
 /// Profile/user context for scoping log records.
-/// Set via [`set_task_profile_scope`] in the agent loop; read by [`SseLogLayer`].
+/// Set via [`TASK_PROFILE_SCOPE.scope()`] in the agent loop; read by [`SseLogLayer`].
 #[derive(Debug, Clone)]
 pub struct ProfileScope {
     pub profile_id: Option<i64>,
     pub user_id: Option<String>,
 }
 
-std::thread_local! {
-    /// Thread-local profile scope. Safe for tokio async because `on_event` runs
-    /// synchronously on the same thread as the `tracing::info!()` call site.
-    static THREAD_PROFILE_SCOPE: std::cell::RefCell<Option<ProfileScope>> =
-        const { std::cell::RefCell::new(None) };
+tokio::task_local! {
+    /// Task-local profile scope. Survives `.await` and thread migration —
+    /// tied to the tokio task, not the OS thread.
+    pub static TASK_PROFILE_SCOPE: ProfileScope;
 }
 
-/// Set the profile scope for all log records emitted on this thread.
-/// Returns an RAII guard — scope is active until the guard is dropped.
-pub fn set_task_profile_scope(scope: ProfileScope) -> ProfileScopeGuard {
-    THREAD_PROFILE_SCOPE.with(|cell| {
-        cell.replace(Some(scope));
-    });
-    ProfileScopeGuard
-}
-
-/// RAII guard that clears the profile scope on drop.
-pub struct ProfileScopeGuard;
-
-impl Drop for ProfileScopeGuard {
-    fn drop(&mut self) {
-        THREAD_PROFILE_SCOPE.with(|cell| {
-            cell.replace(None);
-        });
-    }
-}
-
-/// Read the current profile scope (if any).
+/// Read the current profile scope (if any) from the task-local.
 fn current_profile_scope() -> Option<ProfileScope> {
-    THREAD_PROFILE_SCOPE.with(|cell| cell.borrow().clone())
+    TASK_PROFILE_SCOPE.try_with(|s| s.clone()).ok()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

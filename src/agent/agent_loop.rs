@@ -661,17 +661,14 @@ impl AgentLoop {
         };
 
         // Tag all tracing events in this turn with profile/user context.
-        // SseLogLayer reads ProfileScope from span extensions to populate LogRecord fields.
-        // NOTE: Span::enter() is !Send and can't be held across .await.
-        // We use a dispatch-level approach instead: store ProfileScope in a
-        // task-local and read it in the Layer. This avoids the Instrument refactor
-        // that would require splitting process_message_inner into sub-futures.
-        let _profile_scope_guard = crate::logs::set_task_profile_scope(
-            crate::logs::ProfileScope {
-                profile_id: Some(active_profile_id),
-                user_id: Some(crate::user::DEFAULT_ADMIN_USER_ID.to_string()),
-            },
-        );
+        // SseLogLayer reads ProfileScope from the task-local to populate LogRecord fields.
+        // Using tokio::task_local ensures correctness across .await and thread migration.
+        let profile_scope = crate::logs::ProfileScope {
+            profile_id: Some(active_profile_id),
+            user_id: Some(crate::user::DEFAULT_ADMIN_USER_ID.to_string()),
+        };
+
+        crate::logs::TASK_PROFILE_SCOPE.scope(profile_scope, async {
 
         // Resolve visible profile IDs for memory/RAG scoping (active + readable_from)
         let active_visible_profile_ids = if let Ok(Some(profile)) =
@@ -1867,6 +1864,8 @@ impl AgentLoop {
         .await;
 
         Ok(safe_response)
+
+        }).await // end TASK_PROFILE_SCOPE.scope()
     }
 
     // try_activate_skill → skill_activator.rs
