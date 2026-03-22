@@ -253,26 +253,22 @@ Migration `037_user_profile_scoping.sql` implementata e funzionante. Vedi file i
 | P12 | Logs: profile_id + user_id in LogRecord (skip_none) | ✅ DONE (struct) | `08675de` |
 | P13 | Cron: usa tabella automations → coperto da P1 | ✅ N/A | — |
 
-## Lavoro rimanente
+## Lavoro completato (cleanup + API)
 
-### Priorità MEDIA — UI scoping
-
-| # | Task | File | Effort |
+| # | Task | Stato | Commit |
 |---|---|---|---|
-| P14 | JS logs filter: aggiungere dropdown profilo | `static/js/logs.js` | S |
-| P15 | Knowledge upload UI: selettore profilo nel form | `static/js/knowledge.js` | S |
-| P12b | Logs: popolare profile_id/user_id via tracing span | `src/logs.rs` + agent loop | M |
+| P15 | Knowledge upload: selettore profilo nel form | ✅ DONE (già in knowledge.js) | — |
+| P16 | Rimuovere persona.rs | ✅ DONE | `011ef64` |
+| P17 | Cascade delete su delete_profile | ✅ DONE | `011ef64` |
+| P18 | Session profile switch | ✅ N/A (gestito via frontend + existing API) | — |
+| P19 | API GET /profiles/{id}/user (USER.md) | ✅ DONE | `011ef64` |
 
-### Priorità BASSA — Cleanup
+## Lavoro rimanente (backlog)
 
-| # | Task | File | Effort |
-|---|---|---|---|
-| P16 | Rimuovere persona.rs + campi legacy Contact | `src/agent/persona.rs` + migration | M |
-| P17 | Cascade/cleanup su delete profile | `src/profiles/db.rs` | S |
-| P18 | Session profile switch via REST API | `src/web/api/` | S |
-| P19 | API endpoint USER.md per profilo | `src/web/api/profiles.rs` | S |
-
-### Effort: S = <30 min, M = 30-60 min
+| # | Task | File | Effort | Note |
+|---|---|---|---|---|
+| P14 | JS logs filter: dropdown profilo | `static/js/logs.js` | S | Bloccato da P12b |
+| P12b | Logs: popolare profile_id/user_id via tracing span | `src/logs.rs` + agent loop | M | Richiede refactor architetturale tracing |
 
 ---
 
