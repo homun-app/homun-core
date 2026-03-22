@@ -13,6 +13,13 @@ pub use crate::storage::{
     UserIdentityRow as UserIdentity, UserRow as User, WebhookTokenRow as WebhookToken,
 };
 
+/// Default admin user ID — seeded in migration 037.
+///
+/// In v2 (single-user mode) this is the only user. All scoped data
+/// (profiles, memory, knowledge, contacts, etc.) belongs to this user.
+/// In v3, additional users will be created with random UUIDs.
+pub const DEFAULT_ADMIN_USER_ID: &str = "00000000-0000-0000-0000-000000000001";
+
 /// User roles for permission checks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

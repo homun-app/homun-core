@@ -1,453 +1,347 @@
 # SPEC: Profile System (Profilo-First Architecture)
 
-> Status: DESIGN — non implementare prima dell'approvazione
-> Data: 2026-03-22
-> Revisione: 2 — aggiunto modello user_id + profile_id + DB esterni
+> Status: **IN PRODUCTION** — profile_id + user_id implementati; scoping write-path da completare
+> Data originale: 2026-03-22
+> Revisione: 5 — user_id implementato su DB + struct + agent loop (2026-03-22)
 
-## Problema
+## Panoramica
 
-Oggi Homun ha un'identità singleton: un unico SOUL.md, USER.md, INSTRUCTIONS.md globali. Le persona sono 4 stringhe hardcodate (bot/owner/company/custom) con un match in `persona.rs`. Non c'è modo di:
+Homun supporta **N profili per singolo utente** (v2). Ogni profilo è un'identità separata con memoria, knowledge, vault, contatti, sessioni, automazioni e workflow scoped.
 
-- Accumulare conoscenze diverse per contesti diversi (personale vs aziendale)
-- Avere skill specifiche per contesto
-- Filtrare documenti RAG per contesto
-- Gestire identità strutturate (stile AIEOS)
-- Supportare scenari multi-utente (enterprise)
-
-## Evoluzione a 3 livelli
+### Modello architetturale
 
 ```
-v1 (oggi):     1 utente, 1 identità
-v2 (profili):  1 utente, N profili — ★ IMPLEMENTAZIONE ATTUALE
-v3 (futuro):   N utenti, N profili, admin, permessi RBAC
+v1 (legacy):     1 utente, 1 identità (SOUL.md + persona enum)
+v2 (attuale):    1 utente, N profili — profile_id implementato, user_id da aggiungere
+v2.5 (prossimo): 1 utente admin di default, user_id + profile_id su tutte le tabelle scoped
+v3 (futuro):     N utenti, N profili, RBAC — solo logica multi-utente + UI admin
 ```
 
-v2 introduce `user_id` + `profile_id` ovunque. In v2 esiste un solo utente (`user_id = 1`, admin, non visibile nella UI). In v3 si aggiunge la tabella `users` e la gestione multi-utente con cambiamenti minimi perché le FK sono già in posizione.
+---
 
-## Modello: User + Profile
+## Audit completo del database
 
-### Tabella users (v2: un solo record, v3: multi-utente)
+### Classificazione tabelle
+
+Ogni tabella del DB è classificata in una delle seguenti categorie:
+
+- **Parent scoped**: tabella con dati utente che ha (o deve avere) `user_id` + `profile_id` diretti
+- **Child (eredita)**: tabella figlia con FK verso una parent scoped — eredita scoping via JOIN
+- **System**: tabella infrastrutturale che non richiede scoping utente/profilo
+
+### Tabella: users (migration 003 + 017)
 
 ```sql
 CREATE TABLE users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
-    display_name TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'admin',  -- v2: sempre 'admin'; v3: 'admin'|'user'|'viewer'
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    id TEXT PRIMARY KEY,                    -- UUID v4
+    username TEXT NOT NULL UNIQUE,
+    roles TEXT NOT NULL DEFAULT '[]',       -- JSON array: ["admin","user","guest"]
+    password_hash TEXT,                     -- aggiunto in 017
+    created_at TEXT, updated_at TEXT, metadata TEXT
 );
-
--- v2: seed unico utente admin (invisibile nella UI)
-INSERT INTO users (username, display_name, role) VALUES ('admin', 'Admin', 'admin');
 ```
 
-### Tabella profiles
+**Stato attuale**: esiste, funzionante, usata per web auth e webhook tokens. Ha `UserManager` in `src/user/mod.rs` con CRUD + ruoli (Admin/User/Guest). Nessun utente auto-seed — creazione solo via CLI (`homun user add --admin`).
+
+**Da fare**: seed di un utente admin di default nella migration.
+
+### Tabella: profiles (migration 034)
 
 ```sql
 CREATE TABLE profiles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL REFERENCES users(id),  -- proprietario del profilo
-    slug TEXT UNIQUE NOT NULL,              -- "default", "fabio-personal", "acme-corp"
-    display_name TEXT NOT NULL,             -- "Fabio Personale", "AcmeCorp"
-    avatar_emoji TEXT DEFAULT '👤',
-    profile_json TEXT NOT NULL DEFAULT '{}',  -- PROFILE.json content (AIEOS-inspired)
-    is_default INTEGER NOT NULL DEFAULT 0,    -- esattamente un record = 1 per user
-    storage_config TEXT NOT NULL DEFAULT '{}', -- config DB esterni (vedi sezione)
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    slug TEXT UNIQUE NOT NULL,
+    display_name TEXT NOT NULL,
+    avatar_emoji TEXT NOT NULL DEFAULT '👤',
+    profile_json TEXT NOT NULL DEFAULT '{}',    -- AIEOS-inspired identity JSON
+    is_default INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT, updated_at TEXT
 );
-
--- v2: seed profilo default per l'admin
-INSERT INTO profiles (user_id, slug, display_name, is_default)
-    VALUES (1, 'default', 'Default', 1);
+-- Seed: ('default', 'Default', 1)
 ```
 
-### Struttura directory brain
+**Stato attuale**: funzionante. `user_id` FK aggiunto in migration 037.
+
+---
+
+### Audit tabella per tabella
+
+#### PARENT SCOPED — user_id + profile_id diretti
+
+| Tabella | Migration | Ha profile_id | Ha user_id | Stato |
+|---|---|---|---|---|
+| `profiles` | 034+037 | N/A (è il profilo) | ✅ SÌ | ✅ Migration 037 |
+| `memory_chunks` | 002+035+037 | ✅ SÌ | ✅ SÌ | ✅ Migration 037 |
+| `rag_chunks` | 011+035+037 | ✅ SÌ | ✅ SÌ | ✅ Migration 037 |
+| `rag_sources` | 011+037 | ✅ SÌ | ✅ SÌ | ✅ Migration 037 |
+| `contacts` | 020+035+037 | ✅ SÌ | ✅ SÌ | ✅ Migration 037 |
+| `sessions` | 001+035+037 | ✅ SÌ | ✅ SÌ | ✅ Migration 037 |
+| `automations` | 006+036+037 | ✅ SÌ | ✅ SÌ | ✅ Migration 037 |
+| `workflows` | 013+036+037 | ✅ SÌ | ✅ SÌ | ✅ Migration 037 |
+| `memory_summaries` | 029+037 | ✅ SÌ | ✅ SÌ | ✅ Migration 037 |
+| `businesses` | 015+037 | ✅ SÌ | ✅ SÌ | ✅ Migration 037 |
+| `email_pending` | 005+037 | ✅ SÌ | ✅ SÌ | ✅ Migration 037 |
+
+#### CHILD — Ereditano via JOIN, nessuna colonna diretta
+
+| Tabella | FK padre | Eredita da |
+|---|---|---|
+| `messages` | `session_key → sessions(key)` | sessions.user_id + sessions.profile_id |
+| `web_chat_runs` | `session_key → sessions(key)` | sessions.user_id + sessions.profile_id |
+| `token_usage` | `session_key → sessions(key)` | sessions.user_id + sessions.profile_id |
+| `automation_runs` | implicita → automations | automations.user_id + automations.profile_id |
+| `workflow_steps` | `workflow_id → workflows(id)` | workflows.user_id + workflows.profile_id |
+| `contact_identities` | `contact_id → contacts(id)` | contacts.user_id + contacts.profile_id |
+| `contact_relationships` | `contact_id → contacts(id)` | contacts.user_id + contacts.profile_id |
+| `contact_events` | `contact_id → contacts(id)` | contacts.user_id + contacts.profile_id |
+| `pending_responses` | `contact_id → contacts(id)` | contacts.user_id + contacts.profile_id |
+| `business_strategies` | `business_id → businesses(id)` | businesses.user_id + businesses.profile_id |
+| `products` | `business_id → businesses(id)` | businesses.user_id + businesses.profile_id |
+| `transactions` | `business_id → businesses(id)` | businesses.user_id + businesses.profile_id |
+| `orders` | `business_id → businesses(id)` | businesses.user_id + businesses.profile_id |
+| `market_insights` | `business_id → businesses(id)` | businesses.user_id + businesses.profile_id |
+| `memory_fts` | content-sync → memory_chunks | virtuale, auto-sincronizzata |
+| `rag_fts` | content-sync → rag_chunks | virtuale, auto-sincronizzata |
+
+#### SYSTEM — Nessun scoping necessario
+
+| Tabella | Migration | Motivazione |
+|---|---|---|
+| `users` | 003 | È l'utente stesso, non ha bisogno di FK a sé |
+| `user_identities` | 003 | Mapping canale→utente, infrastruttura auth |
+| `webhook_tokens` | 003 | Token API per utente, FK users.id già presente |
+| `trusted_devices` | 030 | 2FA device fingerprint, FK users.id già presente |
+| `vault_access_log` | 019 | Audit trail del vault, cross-profile per design |
+| `skill_audit` | 016 | Log attivazione skill, cross-profile per design |
+| `memories` (legacy) | 001 | Tabella legacy pre-memory_chunks, non più usata attivamente |
+
+---
+
+## Stato componenti Rust + JS
+
+### Componenti implementati (✅ DONE)
+
+| Componente | File | Note |
+|---|---|---|
+| Profile domain + registry | `src/profiles/mod.rs` (388 LOC) | Profile, ProfileJson, ProfileRegistry, resolve_visible_profile_ids |
+| Profile CRUD DB | `src/profiles/db.rs` (365 LOC) | Insert/load/update/delete + persona migration |
+| Profile resolver | `src/agent/profile_resolver.rs` (102 LOC) | Catena: Contact > Channel > Config > "default" |
+| Agent loop integration | `src/agent/agent_loop.rs` (lines 600-700) | Risolve profilo, carica brain files, inietta context, visible_profile_ids |
+| Bootstrap watcher | `src/agent/bootstrap_watcher.rs` | Watch `brain/profiles/{slug}/` + fallback `brain/` |
+| Prompt ProfileSection | `src/agent/prompt/sections.rs` (lines 529-549) | Inietta linguistics/personality/capabilities |
+| Remember tool | `src/tools/remember.rs` | Scrive `brain/profiles/{slug}/USER.md` |
+| Memory consolidation | `src/agent/memory.rs` | INSTRUCTIONS.md, HISTORY.md, daily files — in `profiles/{slug}/` |
+| Memory search | `src/agent/memory_search.rs` | `search_scoped_full(..., profile_ids)` con RRF |
+| Memory DB | `src/agent/memory_db.rs` | insert/count con profile_id |
+| RAG search | `src/rag/engine.rs` | Filtra per profile_id (NULL = globale) |
+| Skills loader | `src/skills/loader.rs` | `scan_profile_skills()`, tag `profile_slug`, `list_profile_scopes()` |
+| Cognition discovery | `src/agent/cognition/engine.rs` | `visible_profile_ids` + `active_profile_slug` |
+| Vault tool | `src/tools/vault.rs` | Key-prefix: `vault.{name}` (default), `vault.p:{slug}.{name}` |
+| Config | `src/config/schema.rs` | `ProfilesConfig { default }` + `ChannelBehavior::default_profile()` |
+| Session DB | `src/storage/db.rs` | `get/set_session_profile_id()` |
+| Gateway | `src/agent/gateway.rs` | `/profile` e `/profile <slug>` commands |
+| API profiles | `src/web/api/profiles.rs` (340 LOC) | 10 endpoint: CRUD + soul R/W + instructions R + generate |
+| API filters | `web/api/{memory,knowledge,automations,workflows}.rs` | `?profile={slug}` query param |
+| JS profiles page | `static/js/profiles.js` (631 LOC) | Master-detail, CRUD, SOUL.md editor, LLM generation |
+| JS chat profile pill | `static/js/chat.js` (lines 3815-3861) | Dropdown switch profilo |
+| JS contact dropdown | `static/js/contacts.js` | `#ef-profile` select |
+| JS filters (6 pagine) | memory, knowledge, vault, automations, workflows | `#*-profile-filter` select |
+| Brain dir migration | `src/profiles/mod.rs` | Auto-migra `brain/` → `brain/profiles/default/` |
+| Persona→Profile migration | `src/profiles/db.rs` | `migrate_contact_personas()` all'avvio |
+
+### Componenti parziali (⚠️)
+
+| Componente | Problema | Fix |
+|---|---|---|
+| Automations tool | `handle_create()` non passa `ctx.profile_id` → INSERT con NULL | Passare `ctx.profile_id` |
+| Workflows tool | Stesso problema di automations | Passare `ctx.profile_id` |
+| RAG ingest | `insert_rag_chunk(..., profile_id: None)` — commento "set via API Sprint 4" | Passare profile dalla API upload |
+| persona.rs | Deprecated ma ancora presente come fallback | Rimuovere dopo verifica migrazione |
+
+### Componenti mancanti (❌ TODO)
+
+| Componente | Descrizione |
+|---|---|
+| ~~user_id su profiles~~ | ~~FK `profiles.user_id → users(id)`~~ ✅ DONE (migration 037) |
+| ~~user_id su 11 tabelle parent scoped~~ | ✅ DONE (migration 037 + backfill Rust) |
+| ~~profile_id su 4 tabelle~~ | ✅ DONE (migration 037) |
+| ~~Seed admin user~~ | ✅ DONE (migration 037: `00000000-...-000000000001`) |
+| ~~ToolContext.user_id~~ | ✅ DONE — campo aggiunto, agent loop lo setta |
+| ~~Profile.user_id~~ | ✅ DONE — campo aggiunto a struct + DB queries |
+| Logs profile_id | LogRecord non ha profile_id (file-based JSONL) |
+| Cron profile_id | Job cron senza contesto profilo |
+| JS logs filter | Nessun dropdown profilo in logs.js |
+
+---
+
+## Design decisions confermate
+
+### 1. Riuso tabella users esistente
+
+La tabella `users` di migration 003 (id TEXT/UUID, roles JSON, password_hash) è già funzionante per web auth. La riusiamo — `user_id` sarà TEXT su tutte le FK. Seediamo un admin di default.
+
+### 2. user_id su ogni tabella parent scoped (non solo profiles)
+
+Permette query dirette `WHERE user_id = ? AND profile_id = ?` senza JOIN. Più ridondante ma più veloce e semplice da ragionare.
+
+### 3. Child tables ereditano via JOIN
+
+Tabelle figlie (messages, token_usage, workflow_steps, contact_identities, ecc.) non hanno colonne dirette — ereditano dallo scope della tabella padre.
+
+### 4. Vault resta con key-prefix
+
+Il vault è backed da OS keychain + encrypted file, non da SQLite. Il pattern `vault.p:{slug}.{name}` funziona correttamente. Non serve aggiungere colonne DB.
+
+### 5. ProfileJson schema (AIEOS-inspired) — confermato
+
+5 sezioni: identity, linguistics, personality, capabilities, visibility. `visibility.readable_from` controlla accesso cross-profilo.
+
+### 6. Brain directory structure — confermata
 
 ```
-~/.homun/brain/profiles/
-├── default/                    # sempre presente, non eliminabile
-│   ├── PROFILE.json            # identità strutturata (AIEOS-inspired)
-│   ├── SOUL.md                 # personalità in prosa
-│   ├── USER.md                 # chi sono in questo contesto
-│   ├── INSTRUCTIONS.md         # istruzioni apprese operando come questo profilo
-│   └── skills/                 # skill specifiche di questo profilo
-├── fabio-personal/
-│   ├── PROFILE.json
-│   ├── SOUL.md
-│   ├── USER.md
-│   ├── INSTRUCTIONS.md
-│   └── skills/
-└── acme-corp/
-    ├── ...
+~/.homun/brain/profiles/{slug}/
+├── SOUL.md, USER.md, INSTRUCTIONS.md
+└── skills/
+
+~/.homun/memory/profiles/{slug}/
+├── YYYY-MM-DD.md
+└── HISTORY.md
 ```
 
-### PROFILE.json (AIEOS-inspired)
+### 7. Catena risoluzione profilo — confermata
 
-Struttura generata/assistita da LLM, editabile dall'utente:
+1. Contact.profile_id > 2. Channel.default_profile > 3. Config.profiles.default > 4. "default" (id=1)
 
-```json
-{
-  "version": "1.0",
-  "identity": {
-    "name": "Fabio Cannavò",
-    "display_name": "Fabio",
-    "bio": "Software engineer, padre di Felicia",
-    "role": "personal",
-    "avatar_emoji": "👤"
-  },
-  "linguistics": {
-    "language": "it",
-    "formality": "informal",
-    "style": "direct, warm, concise",
-    "forbidden_words": [],
-    "catchphrases": []
-  },
-  "personality": {
-    "traits": ["curious", "pragmatic", "protective"],
-    "tone": "friendly",
-    "humor": true
-  },
-  "capabilities": {
-    "tools_emphasis": ["remember", "web_search"],
-    "domains": ["tech", "family", "finance"]
-  },
-  "visibility": {
-    "readable_from": ["default"]
-  }
-}
-```
+### 8. No storage_config / DB esterni — rimandato
 
-`visibility.readable_from` controlla l'isolamento:
-- `["default"]` → questo profilo può leggere anche dal profilo default
-- `["*"]` → può leggere da tutti i profili
-- `[]` → completamente isolato
+storage_config per Postgres/Qdrant/Pinecone/S3 non implementato. Rimandato a quando serve davvero.
 
-## DB Esterni e RAG esterno
+---
 
-Ogni profilo può avere il proprio storage backend per dati che non stanno nel SQLite locale.
+## Migration 037 — ✅ IMPLEMENTATA
 
-### storage_config nel profilo
+Migration `037_user_profile_scoping.sql` implementata e funzionante. Vedi file in `migrations/037_user_profile_scoping.sql`.
 
-```json
-{
-  "database": {
-    "type": "sqlite",
-    "url": null
-  },
-  "vector_store": {
-    "type": "local",
-    "url": null
-  },
-  "rag_sources": []
-}
-```
+**Cosa fa:**
+1. Seed admin user (`00000000-0000-0000-0000-000000000001`)
+2. `user_id TEXT REFERENCES users(id)` su 7 tabelle che avevano solo profile_id
+3. `user_id` + `profile_id` su 4 tabelle che non avevano nessuno dei due
+4. Indici su tutte le nuove colonne
 
-Valori possibili:
+**Backfill Rust** (`storage/db.rs::backfill_user_ids`): popola tutti i record NULL con admin user_id e default profile_id (1).
 
-**database.type:**
-- `"sqlite"` (default) — usa il DB locale `homun.db`
-- `"postgres"` — connessione esterna: `"url": "postgres://user:pass@host/db"`
-- `"mysql"` — connessione esterna
+**Costante**: `crate::user::DEFAULT_ADMIN_USER_ID` in `src/user/mod.rs`.
 
-**vector_store.type:**
-- `"local"` (default) — HNSW locale in SQLite
-- `"qdrant"` — `"url": "http://localhost:6333"`
-- `"pinecone"` — `"url": "...", "api_key": "vault:pinecone_key"`
+**Struct aggiornate:**
+- `Profile.user_id: Option<String>` — in `src/profiles/mod.rs`
+- `ToolContext.user_id: Option<String>` — in `src/tools/registry.rs`
+- Agent loop setta `user_id = DEFAULT_ADMIN_USER_ID` nel ToolContext
 
-**rag_sources:** — fonti aggiuntive per questo profilo
-- `{"type": "mcp", "server": "notion"}` — documenti via MCP
-- `{"type": "s3", "bucket": "company-docs", "prefix": "legal/"}` — S3
-- `{"type": "directory", "path": "/mnt/shared/company-docs"}` — directory locale/montata
+---
 
-### Implementazione v2
+## Lavoro rimanente
 
-In v2 solo `sqlite` + `local` sono implementati. I tipi esterni sono definiti nel config ma restituiscono errore "not yet implemented" se usati. Questo permette di:
-- Validare il modello dati
-- Mostrare i campi nella UI (disabilitati con tooltip "coming soon")
-- Implementare i connettori uno alla volta senza breaking change
+### Priorità ALTA — Bug fix (scoping write-path)
 
-## Colonne user_id + profile_id aggiunte
+| # | Task | File | Effort |
+|---|---|---|---|
+| P1 | Automations tool: passare `ctx.profile_id` + `ctx.user_id` a insert | `src/tools/automation.rs` | S |
+| P2 | Workflows tool: passare `ctx.profile_id` + `ctx.user_id` a insert | `src/tools/workflow.rs` | S |
+| P3 | RAG ingest: passare profile_id + user_id dall'API upload | `src/rag/engine.rs` + `web/api/knowledge.rs` | M |
 
-```sql
--- Tutte le tabelle con dati scoped ricevono entrambe le FK.
--- In v2 user_id è sempre 1. In v3 filtra per utente.
+### Priorità MEDIA — Completare scoping
 
-ALTER TABLE memory_chunks ADD COLUMN user_id INTEGER REFERENCES users(id) DEFAULT 1;
-ALTER TABLE memory_chunks ADD COLUMN profile_id INTEGER REFERENCES profiles(id);
+| # | Task | File | Effort |
+|---|---|---|---|
+| P8 | Memory summaries: passare user_id + profile_id alla creazione | `src/agent/memory.rs` | S |
+| P9 | RAG sources: taggare con user_id + profile_id all'ingest | `src/rag/engine.rs` + `src/rag/db.rs` | M |
+| P10 | Businesses: passare user_id + profile_id alla creazione | `src/business/engine.rs` | S |
+| P11 | Email pending: passare user_id + profile_id | `src/channels/email.rs` o `src/tools/email_inbox.rs` | S |
+| P12 | Logs: aggiungere profile_id + user_id a LogRecord (JSONL) | `src/logs.rs` | M |
+| P13 | Cron: aggiungere profile_id al job context | `src/scheduler/cron.rs` | M |
+| P14 | JS logs filter: aggiungere dropdown profilo | `static/js/logs.js` | S |
+| P15 | Knowledge upload UI: selettore profilo nel form | `static/js/knowledge.js` | S |
 
-ALTER TABLE knowledge_chunks ADD COLUMN user_id INTEGER REFERENCES users(id) DEFAULT 1;
-ALTER TABLE knowledge_chunks ADD COLUMN profile_id INTEGER REFERENCES profiles(id);
+### Priorità BASSA — Cleanup
 
-ALTER TABLE contacts ADD COLUMN user_id INTEGER REFERENCES users(id) DEFAULT 1;
-ALTER TABLE contacts ADD COLUMN profile_id INTEGER REFERENCES profiles(id);
+| # | Task | File | Effort |
+|---|---|---|---|
+| P16 | Rimuovere persona.rs + campi legacy Contact | `src/agent/persona.rs` + migration | M |
+| P17 | Cascade/cleanup su delete profile | `src/profiles/db.rs` | S |
+| P18 | Session profile switch via REST API | `src/web/api/` | S |
+| P19 | API endpoint USER.md per profilo | `src/web/api/profiles.rs` | S |
 
-ALTER TABLE sessions ADD COLUMN user_id INTEGER REFERENCES users(id) DEFAULT 1;
-ALTER TABLE sessions ADD COLUMN profile_id INTEGER REFERENCES profiles(id);
+### Effort: S = <30 min, M = 30-60 min
 
-ALTER TABLE vault_entries ADD COLUMN user_id INTEGER REFERENCES users(id) DEFAULT 1;
-ALTER TABLE vault_entries ADD COLUMN profile_id INTEGER REFERENCES profiles(id);
+---
 
-ALTER TABLE workflows ADD COLUMN user_id INTEGER REFERENCES users(id) DEFAULT 1;
-ALTER TABLE workflows ADD COLUMN profile_id INTEGER REFERENCES profiles(id);
-
-ALTER TABLE automations ADD COLUMN user_id INTEGER REFERENCES users(id) DEFAULT 1;
-ALTER TABLE automations ADD COLUMN profile_id INTEGER REFERENCES profiles(id);
-
-ALTER TABLE logs ADD COLUMN user_id INTEGER REFERENCES users(id) DEFAULT 1;
-ALTER TABLE logs ADD COLUMN profile_id INTEGER REFERENCES profiles(id);
-
--- Indici per performance
-CREATE INDEX idx_memory_chunks_profile ON memory_chunks(profile_id);
-CREATE INDEX idx_knowledge_chunks_profile ON knowledge_chunks(profile_id);
-CREATE INDEX idx_sessions_profile ON sessions(profile_id);
-CREATE INDEX idx_workflows_profile ON workflows(profile_id);
-CREATE INDEX idx_automations_profile ON automations(profile_id);
-```
-
-## Isolamento: lettura cross-profile, scrittura isolata
-
-- **Scrittura**: sempre nel profilo attivo. Remember tool, consolidation, RAG ingest, vault, workflow, automations scrivono con `user_id` + `profile_id` correnti.
-- **Lettura**: il profilo attivo vede i propri dati + quelli dei profili elencati in `visibility.readable_from`.
-- **Query**: tutte le query aggiungono `WHERE user_id = ? AND profile_id IN (attivo, ...readable_from)`.
-- **v3 multi-utente**: il filtro `user_id` diventa significativo. L'admin vede tutto, l'utente vede solo i propri profili.
-
-## Skill: globali + per-profilo
-
-- Le skill in `~/.homun/skills/` e `./skills/` sono **globali** (disponibili a tutti i profili).
-- Le skill in `~/.homun/brain/profiles/{slug}/skills/` sono **specifiche** di quel profilo.
-- Il loader scansiona entrambi: globali + profilo attivo.
-- Nella cognition phase, `list_skills` restituisce l'unione.
-- Nella UI: ogni skill ha un flag `profile: "all" | "profile-slug"`.
-
-## Impatto sui componenti
-
-### Agent Loop (`agent_loop.rs`)
+## Ordine di esecuzione suggerito
 
 ```
-Messaggio in arrivo
-  → identifica utente (v2: sempre admin; v3: da auth)
-  → identifica contatto (channel:chat_id → Contact)
-  → risolvi profilo: Contact.profile_id > Channel.default_profile > "default"
-  → carica brain files dal profilo attivo:
-      SOUL.md    = profiles/{slug}/SOUL.md
-      USER.md    = profiles/{slug}/USER.md
-      INSTRUCTIONS.md = profiles/{slug}/INSTRUCTIONS.md
-  → carica PROFILE.json per linguistics/personality/capabilities
-  → inietta nel prompt
-  → esegui con tool scoped a user_id + profile_id
+1. Migration 037 (SQL + Rust backfill)       ← fondazione
+2. P5 Profile struct user_id                 ← tipo aggiornato
+3. P6 ToolContext user_id                    ← contesto tool
+4. P7 Agent loop passa user_id              ← tutto il flusso ha user_id
+5. P4 Backfill user_id                      ← dati esistenti ok
+6. P1-P2 Fix automations/workflows          ← bug fix
+7. P3 RAG ingest profile_id                 ← bug fix
+8. P8-P11 Memory summaries, RAG sources, businesses, email  ← completamento
+9. P12-P15 Logs, cron, JS filters           ← UI completamento
+10. P16-P19 Cleanup                          ← pulizia finale
 ```
 
-### Prompt Builder (`prompt/sections.rs`)
-
-- `IdentitySection`: carica SOUL.md dal profilo attivo (non più globale)
-- Nuova sezione `ProfileSection`: inietta info strutturate da PROFILE.json (linguistics, personality)
-- `PersonaSection` → rinominata/rimossa (il profilo sostituisce la persona)
-
-### Bootstrap Watcher (`bootstrap_watcher.rs`)
-
-- Watch su `brain/profiles/{active_slug}/` invece di `brain/`
-- Quando cambia profilo attivo, ricarica i file
-- Fallback: se un file non esiste nel profilo, usa quello del default
-
-### Remember Tool (`tools/remember.rs`)
-
-- Riceve `profile_id` dal contesto della sessione
-- Scrive su `brain/profiles/{slug}/USER.md` invece di `brain/USER.md`
-
-### Memory Consolidation (`memory.rs`)
-
-- `consolidate()` riceve `user_id` + `profile_id` + `contact_id`
-- Appende a `brain/profiles/{slug}/INSTRUCTIONS.md`
-- Nuovi memory_chunks salvati con `user_id` + `profile_id`
-
-### Memory Search (`memory_search.rs`)
-
-- `search_scoped_full(query, topk, contact_id, user_id, profile_id)` → aggiunge filtri
-- Cerca in: `user_id = attivo AND (profile_id = attivo OR profile_id IN readable_from OR profile_id IS NULL)`
-
-### RAG (`rag/engine.rs`)
-
-- Ingest: tag `user_id` + `profile_id` su ogni chunk
-- Search: filtra per `user_id` + `profile_id IN (attivo, ...readable_from, NULL)`
-- UI: quando fai upload, scegli il profilo destinazione
-
-### Skills (`skills/loader.rs`)
-
-- Scansiona: `~/.homun/skills/` (globali) + `brain/profiles/{slug}/skills/` (per-profilo)
-- `SkillDefinition` aggiunge campo `profile: Option<String>`
-- Cognition discovery filtra per profilo attivo
-
-### Vault (`storage/secrets.rs`)
-
-- Entries taggati con `user_id` + `profile_id`
-- v2: un profilo aziendale ha le proprie API key separate dal profilo personale
-- Query: `WHERE user_id = ? AND (profile_id = ? OR profile_id IS NULL)`
-
-### Workflows + Automations (`workflows/`, `scheduler/automations.rs`)
-
-- Ogni workflow/automation appartiene a un `user_id` + `profile_id`
-- Un'automation del profilo aziendale non triggera nel profilo personale
-- Query: filtro per profilo attivo
-
-### Logs
-
-- Ogni log entry taggato con `user_id` + `profile_id`
-- Filtrabile nella UI logs per profilo
-
-### Config (`config/schema.rs`)
-
-```toml
-[profiles]
-default = "default"
-
-[channels.telegram]
-default_profile = "fabio-personal"
-
-[channels.whatsapp]
-default_profile = "fabio-personal"
-```
-
-`ChannelBehavior` trait: `fn persona(&self)` → `fn default_profile(&self)`
-
-### Contacts (`contacts/mod.rs`)
-
-```rust
-pub struct Contact {
-    // Aggiunto:
-    pub user_id: i64,                 // FK a users (v2: sempre 1)
-    pub profile_id: Option<i64>,      // FK a profiles, NULL = usa default canale
-    // Mantenuti per backward compat durante transizione:
-    pub persona_override: Option<String>,
-    pub persona_instructions: String,
-}
-```
-
-### Session (`session/manager.rs`)
-
-- `SessionRow.user_id: i64` — utente della sessione (v2: sempre 1)
-- `SessionRow.profile_id: Option<i64>` — profilo attivo per la sessione
-- Settato all'inizio della sessione, modificabile dall'utente
-- Usato da agent loop per risolvere il profilo
-
-### API (`web/api/`)
-
-Nuovi endpoint:
-
-```
-GET    /api/v1/profiles                    # lista profili (dell'utente corrente)
-POST   /api/v1/profiles                    # crea profilo
-GET    /api/v1/profiles/{id}               # dettaglio
-PUT    /api/v1/profiles/{id}               # aggiorna
-DELETE /api/v1/profiles/{id}               # elimina (non default)
-POST   /api/v1/profiles/{id}/generate      # genera PROFILE.json via LLM
-GET    /api/v1/profiles/{id}/soul          # leggi SOUL.md
-PUT    /api/v1/profiles/{id}/soul          # scrivi SOUL.md
-GET    /api/v1/profiles/{id}/user          # leggi USER.md
-PUT    /api/v1/profiles/{id}/user          # scrivi USER.md
-GET    /api/v1/profiles/{id}/instructions  # leggi INSTRUCTIONS.md
-```
-
-Query param globale: `?profile={slug}` su endpoint che supportano scoping (memory, knowledge, skills, vault, workflows, automations, logs). Se omesso, usa profilo della sessione o default.
-
-### Chat UI
-
-- **Selettore profilo** nella toolbar della chat (dropdown con emoji + nome)
-- Cambiare profilo cambia il `profile_id` della sessione
-- Indicatore visivo del profilo attivo (emoji badge accanto al nome della chat)
-- Il messaggio di benvenuto riflette il profilo ("Ciao, sto rispondendo come AcmeCorp")
-
-### Chat da canali (Telegram, WhatsApp, etc.)
-
-- Comando `/profile <slug>` per cambiare profilo mid-conversation
-- Se non specificato, usa: Contact.profile_id > Channel.default_profile > "default"
-- Il profilo viene memorizzato nella sessione corrente
-
-### Profiles Page (Settings → Profiles)
-
-Layout master-detail come la rubrica contatti:
-
-- **Sidebar**: lista profili con emoji + nome, profilo default evidenziato
-- **Detail pane**:
-  - Header: emoji grande + nome + slug + "Default" badge
-  - **Identity section**: campi da PROFILE.json (name, bio, role)
-  - **Linguistics section**: formality, style, forbidden_words
-  - **Personality section**: traits, tone, humor
-  - **Visibility section**: checkbox profili da cui leggere
-  - **Storage section**: config DB/vector store (v2: solo local, campi disabilitati per esterni)
-  - **Brain files section**: editor SOUL.md, link a USER.md e INSTRUCTIONS.md
-  - **Skills section**: lista skill associate a questo profilo
-- **Genera con AI**: bottone che chiama `/api/v1/profiles/{id}/generate` con un prompt per generare PROFILE.json a partire da una descrizione testuale
-
-## Migrazione dati esistenti
-
-1. Crea tabella `users` con seed admin (`id=1`)
-2. Crea tabella `profiles` con seed default (`id=1, user_id=1`)
-3. Sposta `~/.homun/brain/SOUL.md` → `~/.homun/brain/profiles/default/SOUL.md`
-4. Sposta `~/.homun/brain/USER.md` → `~/.homun/brain/profiles/default/USER.md`
-5. Sposta `~/.homun/brain/INSTRUCTIONS.md` → `~/.homun/brain/profiles/default/INSTRUCTIONS.md`
-6. Tutti i record esistenti → `user_id = 1, profile_id = 1` (default)
-7. `Contact.persona_override = "owner"` → crea profilo "owner", associa
-8. `Contact.persona_override = "company"` → crea profilo "company", associa
-9. `Contact.persona_override = "custom"` → crea profilo con `persona_instructions` come SOUL.md
-
-## Piano di implementazione (ordine suggerito)
-
-### Sprint 1: Foundation (DB + Config + Brain files)
-1. Migration: `users` table + seed admin
-2. Migration: `profiles` table + seed default
-3. Migration: `user_id` + `profile_id` su tutte le tabelle (memory_chunks, knowledge_chunks, contacts, sessions, vault_entries, workflows, automations, logs) + indici
-4. `src/profiles/mod.rs` — struct Profile, ProfileRegistry, load/save PROFILE.json
-5. `src/profiles/db.rs` — CRUD
-6. Migration script dati esistenti (sposta file, tagga record)
-7. Config: `[profiles]` section, `default_profile` su canali
-
-### Sprint 2: Agent Loop Integration
-8. Refactor `persona.rs` → `profile_resolver.rs` (risolve profilo, non persona)
-9. `agent_loop.rs` — risolvi profilo, carica brain files dal profilo attivo, passa user_id + profile_id ai tool
-10. `bootstrap_watcher.rs` — watch su directory profilo attivo
-11. `prompt/sections.rs` — IdentitySection carica dal profilo, nuova ProfileSection
-12. `remember.rs` — scrive nel profilo attivo
-13. `memory.rs` — consolidation nel profilo attivo con user_id + profile_id
-
-### Sprint 3: Search + Skills + Storage Scoping
-14. `memory_search.rs` — filtro user_id + profile_id + readable_from
-15. `rag/engine.rs` — tag + filtro user_id + profile_id
-16. `skills/loader.rs` — scan globali + per-profilo
-17. `cognition/discovery.rs` — filtra skill per profilo
-18. `vault` — scoping per user_id + profile_id
-19. `workflows` + `automations` — scoping per user_id + profile_id
-20. `logs` — tagging per user_id + profile_id
-
-### Sprint 4: API + Web UI
-21. `web/api/profiles.rs` — CRUD + generate + brain file endpoints
-22. `static/js/profiles.js` — pagina gestione profili (master-detail)
-23. `web/pages.rs` — template pagina profili + sidebar link
-24. Chat UI — selettore profilo + indicatore
-25. Contacts UI — dropdown profili (già predisposto in contacts.js)
-26. `/profile` comando nei canali
-27. Filtro per profilo nelle pagine: vault, workflows, automations, logs, knowledge
-
-## Preparazione v3 (multi-utente) — NON implementare ora
-
-Quando serve, il passaggio a v3 richiede:
-
-1. **Auth per utente**: la tabella `users` ha già lo schema. Aggiungere `password_hash`, `email`, `last_login`
-2. **RBAC**: `users.role` diventa significativo. Admin vede tutto, user vede solo i propri profili
-3. **API scoping**: ogni endpoint filtra per `user_id` dalla sessione autenticata
-4. **UI admin**: pagina gestione utenti (CRUD), assegnazione profili
-5. **Inviti**: flow di invito utente con email + OTP
-6. **DB per utente**: `storage_config` del profilo può puntare a DB diversi per tenant isolation
-
-Il costo stimato per v3 è basso perché `user_id` è già FK ovunque — serve solo la logica di auth multi-utente e la UI admin.
+---
 
 ## Rischi e mitigazioni
 
-| Rischio | Mitigazione |
-|---|---|
-| Breaking change sui brain files | Migrazione automatica all'avvio + fallback su path legacy |
-| Performance query con filtro user_id + profile_id | Indici compositi sulle tabelle |
-| Complessità prompt (troppi file) | PROFILE.json è opzionale, SOUL.md resta il minimo |
-| Confusione utente | Profilo "default" sempre presente, funziona senza configurare nulla |
-| DB esterni non implementati in v2 | Campi visibili ma disabilitati con "coming soon" |
-| user_id sempre 1 in v2 | Invisibile nella UI, DEFAULT 1 nelle migration |
+| Rischio | Stato | Mitigazione |
+|---|---|---|
+| Breaking change brain files | ✅ Risolto | Auto-migrazione su startup + fallback legacy |
+| Performance query con filtro | ✅ Risolto | Indici su user_id e profile_id |
+| user_id TEXT vs INTEGER mismatch | ⚠️ Design choice | Si riusa users.id TEXT (UUID) — consistente con migration 003. Performance OK con indice. |
+| Backfill su DB grandi | ⚠️ Basso rischio | UPDATE batch idempotenti, tutti i record → admin user ID |
+| Dati orfani su delete profilo | ⚠️ Aperto | P17: cleanup in delete_profile() |
+| Automazioni/workflow create senza profilo | ⚠️ Aperto | P1-P2: fix urgente |
+| RAG ingest senza profilo | ⚠️ Aperto | P3: fix upload API |
+| persona.rs residuo | ⚠️ Aperto | P16: rimuovere dopo verifica |
+| admin user con UUID fisso | ⚠️ Basso rischio | UUID deterministico `0...01` — solo per seed. In v3 utenti creati con UUID random. |
+
+---
+
+## File reference completa
+
+| Componente | File | LOC |
+|---|---|---|
+| User manager | `src/user/mod.rs` | ~280 |
+| User DB ops | `src/storage/db.rs` | UserRow, create/load/update/delete |
+| Profile domain + registry | `src/profiles/mod.rs` | 388 |
+| Profile CRUD DB | `src/profiles/db.rs` | 365 |
+| Profile resolver | `src/agent/profile_resolver.rs` | 102 |
+| Persona (deprecated) | `src/agent/persona.rs` | ~135 |
+| Agent loop integration | `src/agent/agent_loop.rs` | lines 600-700 |
+| Prompt ProfileSection | `src/agent/prompt/sections.rs` | lines 529-549 |
+| Bootstrap watcher | `src/agent/bootstrap_watcher.rs` | profile dir support |
+| Agent context | `src/agent/context.rs` | profile_context, reload_bootstrap |
+| Memory consolidation | `src/agent/memory.rs` | profile-scoped file paths |
+| Memory search | `src/agent/memory_search.rs` | profile_ids filter |
+| Memory DB | `src/agent/memory_db.rs` | insert/count with profile_id |
+| RAG engine | `src/rag/engine.rs` | search filter, ingest TODO |
+| RAG DB | `src/rag/db.rs` | rag_sources + rag_chunks ops |
+| Skills loader | `src/skills/loader.rs` | scan_profile_skills, profile_slug |
+| Cognition | `src/agent/cognition/engine.rs` | visible_profile_ids |
+| Vault tool | `src/tools/vault.rs` | key-prefix namespacing |
+| Remember tool | `src/tools/remember.rs` | writes to profile brain dir |
+| Automation tool | `src/tools/automation.rs` | handle_create missing profile_id |
+| Workflow tool | `src/tools/workflow.rs` | handle_create missing profile_id |
+| Config | `src/config/schema.rs` | ProfilesConfig + ChannelBehavior |
+| Session DB | `src/storage/db.rs` | get/set_session_profile_id |
+| Gateway | `src/agent/gateway.rs` | /profile command |
+| Logs | `src/logs.rs` | LogRecord — no profile_id |
+| API profiles | `src/web/api/profiles.rs` | 340 |
+| API memory/knowledge/etc | `src/web/api/*.rs` | profile filter params |
+| Pages | `src/web/pages.rs` | profiles page + filter dropdowns |
+| JS profiles | `static/js/profiles.js` | 631 |
+| JS chat profile | `static/js/chat.js` | profile pill |
+| JS contacts | `static/js/contacts.js` | profile dropdown |
+| JS domain filters | `static/js/{memory,knowledge,vault,automations,workflows}.js` | profile filter selects |
+| JS logs | `static/js/logs.js` | NO profile filter (TODO) |

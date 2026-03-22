@@ -6,6 +6,7 @@ use anyhow::{bail, Context, Result};
 use sqlx::{Pool, Sqlite};
 
 use super::Profile;
+use crate::user::DEFAULT_ADMIN_USER_ID;
 
 // ── CRUD ────────────────────────────────────────────────────────────
 
@@ -16,16 +17,18 @@ pub async fn insert_profile(
     display_name: &str,
     avatar_emoji: &str,
     profile_json: &str,
+    user_id: Option<&str>,
 ) -> Result<i64> {
     let id = sqlx::query_scalar::<_, i64>(
-        "INSERT INTO profiles (slug, display_name, avatar_emoji, profile_json)
-         VALUES (?, ?, ?, ?)
+        "INSERT INTO profiles (slug, display_name, avatar_emoji, profile_json, user_id)
+         VALUES (?, ?, ?, ?, ?)
          RETURNING id",
     )
     .bind(slug)
     .bind(display_name)
     .bind(avatar_emoji)
     .bind(profile_json)
+    .bind(user_id)
     .fetch_one(pool)
     .await
     .with_context(|| format!("Failed to insert profile '{slug}'"))?;
@@ -170,7 +173,7 @@ async fn migrate_simple_persona(
     let profile_id = match existing {
         Some(p) => p.id,
         None => {
-            let id = insert_profile(pool, persona, display_name, emoji, "{}").await?;
+            let id = insert_profile(pool, persona, display_name, emoji, "{}", Some(DEFAULT_ADMIN_USER_ID)).await?;
             tracing::info!(profile = persona, "Created profile from persona migration");
             id
         }
@@ -222,7 +225,7 @@ async fn migrate_custom_personas(
 
         let display_name = format!("Custom ({contact_name})");
         let profile_id =
-            insert_profile(pool, &slug, &display_name, "✨", "{}").await?;
+            insert_profile(pool, &slug, &display_name, "✨", "{}", Some(DEFAULT_ADMIN_USER_ID)).await?;
 
         // Write persona_instructions as SOUL.md for the new profile
         if !instructions.is_empty() {
@@ -270,7 +273,7 @@ mod tests {
             .await
             .expect("in-memory SQLite");
 
-        // Create profiles table
+        // Create profiles table (matches migration 034 + 037)
         sqlx::query(
             "CREATE TABLE profiles (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -279,6 +282,7 @@ mod tests {
                 avatar_emoji TEXT NOT NULL DEFAULT '👤',
                 profile_json TEXT NOT NULL DEFAULT '{}',
                 is_default INTEGER NOT NULL DEFAULT 0,
+                user_id TEXT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             )",
@@ -303,7 +307,7 @@ mod tests {
         let pool = test_pool().await;
 
         // Insert
-        let id = insert_profile(&pool, "acme", "Acme Corp", "🏢", "{}")
+        let id = insert_profile(&pool, "acme", "Acme Corp", "🏢", "{}", None)
             .await
             .expect("insert");
         assert!(id > 1); // default is id=1
@@ -347,10 +351,10 @@ mod tests {
     #[tokio::test]
     async fn duplicate_slug_rejected() {
         let pool = test_pool().await;
-        insert_profile(&pool, "test", "Test", "🧪", "{}")
+        insert_profile(&pool, "test", "Test", "🧪", "{}", None)
             .await
             .expect("first insert");
-        let result = insert_profile(&pool, "test", "Test 2", "🧪", "{}").await;
+        let result = insert_profile(&pool, "test", "Test 2", "🧪", "{}", None).await;
         assert!(result.is_err());
     }
 

@@ -47,6 +47,8 @@ pub struct ToolContext {
     /// SKL-5: Skill-specific env vars to inject into subprocess execution.
     /// Set when a skill with configured env is activated.
     pub skill_env: Option<HashMap<String, String>>,
+    /// Active user ID (FK to users.id). In v2 always DEFAULT_ADMIN_USER_ID.
+    pub user_id: Option<String>,
     /// Active profile ID for profile-scoped operations (remember, memory, etc.).
     pub profile_id: Option<i64>,
     /// Brain directory for the active profile (e.g. `~/.homun/brain/profiles/default/`).
@@ -249,6 +251,7 @@ mod tests {
             message_tx: None,
             approval_manager: None,
             skill_env: None,
+            user_id: None,
             profile_id: None,
             profile_brain_dir: None,
             profile_slug: None,

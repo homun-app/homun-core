@@ -866,6 +866,7 @@ impl AgentLoop {
             message_tx: self.message_tx.clone(),
             approval_manager: crate::tools::global_approval_manager(),
             skill_env: None,
+            user_id: Some(crate::user::DEFAULT_ADMIN_USER_ID.to_string()),
             profile_id: Some(active_profile_id),
             profile_brain_dir: active_profile_brain_dir.clone(),
             profile_slug: active_profile_slug.clone(),

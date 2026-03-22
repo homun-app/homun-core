@@ -27,6 +27,9 @@ pub struct Profile {
     pub profile_json: String,
     /// 1 = default profile, 0 = non-default. Exactly one row should be 1.
     pub is_default: i64,
+    /// Owner user ID (FK to users.id). NULL for legacy data before migration 037.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -375,6 +378,7 @@ mod tests {
             avatar_emoji: "🏢".into(),
             profile_json: "{}".into(),
             is_default: 0,
+            user_id: None,
             created_at: String::new(),
             updated_at: String::new(),
         };

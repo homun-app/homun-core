@@ -365,6 +365,17 @@ impl Database {
         )
         .await?;
 
+        // Migration 037 — user_id on all parent-scoped tables + seed admin
+        Self::apply_migration(
+            pool,
+            "037_user_profile_scoping",
+            include_str!("../../migrations/037_user_profile_scoping.sql"),
+        )
+        .await?;
+
+        // Backfill user_id on all existing records after migration 037.
+        Self::backfill_user_ids(pool).await?;
+
         Ok(())
     }
 
@@ -443,6 +454,83 @@ impl Database {
                 _ => {}
             }
         }
+        Ok(())
+    }
+
+    /// Backfill NULL user_id to the default admin user on all parent-scoped tables.
+    ///
+    /// Also backfills profile_id on tables added in migration 037
+    /// (memory_summaries, rag_sources, businesses, email_pending).
+    async fn backfill_user_ids(pool: &Pool<Sqlite>) -> Result<()> {
+        use crate::user::DEFAULT_ADMIN_USER_ID;
+
+        // Tables that already had profile_id and now get user_id
+        let user_only_tables = [
+            "profiles",
+            "memory_chunks",
+            "rag_chunks",
+            "contacts",
+            "sessions",
+            "automations",
+            "workflows",
+        ];
+
+        for table in &user_only_tables {
+            let sql = format!("UPDATE {table} SET user_id = ? WHERE user_id IS NULL");
+            let result = sqlx::query(&sql)
+                .bind(DEFAULT_ADMIN_USER_ID)
+                .execute(pool)
+                .await;
+            match result {
+                Ok(r) if r.rows_affected() > 0 => {
+                    tracing::info!(table, rows = r.rows_affected(), "Backfilled user_id");
+                }
+                Err(e) => {
+                    tracing::warn!(table, error = %e, "Failed to backfill user_id (table may not exist)");
+                }
+                _ => {}
+            }
+        }
+
+        // Tables that got both user_id + profile_id in migration 037
+        let both_tables = [
+            "memory_summaries",
+            "rag_sources",
+            "businesses",
+            "email_pending",
+        ];
+
+        for table in &both_tables {
+            // Backfill user_id
+            let sql = format!("UPDATE {table} SET user_id = ? WHERE user_id IS NULL");
+            let result = sqlx::query(&sql)
+                .bind(DEFAULT_ADMIN_USER_ID)
+                .execute(pool)
+                .await;
+            match result {
+                Ok(r) if r.rows_affected() > 0 => {
+                    tracing::info!(table, rows = r.rows_affected(), "Backfilled user_id");
+                }
+                Err(e) => {
+                    tracing::warn!(table, error = %e, "Failed to backfill user_id");
+                }
+                _ => {}
+            }
+
+            // Backfill profile_id to default (1)
+            let sql = format!("UPDATE {table} SET profile_id = 1 WHERE profile_id IS NULL");
+            let result = sqlx::query(&sql).execute(pool).await;
+            match result {
+                Ok(r) if r.rows_affected() > 0 => {
+                    tracing::info!(table, rows = r.rows_affected(), "Backfilled profile_id");
+                }
+                Err(e) => {
+                    tracing::warn!(table, error = %e, "Failed to backfill profile_id");
+                }
+                _ => {}
+            }
+        }
+
         Ok(())
     }
 

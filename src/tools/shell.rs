@@ -570,6 +570,7 @@ mod tests {
             message_tx: None,
             approval_manager: None,
             skill_env: None,
+            user_id: None,
             profile_id: None,
             profile_brain_dir: None,
             profile_slug: None,

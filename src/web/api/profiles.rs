@@ -114,7 +114,10 @@ async fn create_profile(
     let emoji = body.avatar_emoji.as_deref().unwrap_or("👤");
     let pj = body.profile_json.as_deref().unwrap_or("{}");
 
-    let id = profiles::db::insert_profile(db.pool(), &body.slug, &body.display_name, emoji, pj)
+    // In v2 all profiles belong to the default admin user.
+    // In v3 this will come from the authenticated session.
+    let user_id = Some(crate::user::DEFAULT_ADMIN_USER_ID);
+    let id = profiles::db::insert_profile(db.pool(), &body.slug, &body.display_name, emoji, pj, user_id)
         .await
         .map_err(internal)?;
 
