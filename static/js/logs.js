@@ -54,12 +54,25 @@ function statusBadgeClass(status) {
 function initLogsPage() {
     const viewerEl = document.getElementById('log-viewer');
     const levelEl = document.getElementById('logs-level');
+    const profileEl = document.getElementById('logs-profile');
     const autoScrollEl = document.getElementById('logs-autoscroll');
     const clearEl = document.getElementById('logs-clear');
     const countEl = document.getElementById('logs-count');
     const statusEl = document.getElementById('logs-status');
 
     if (!viewerEl || !levelEl || !autoScrollEl || !clearEl || !countEl || !statusEl) return;
+
+    // Load profile dropdown options
+    if (profileEl) {
+        fetch('/api/v1/profiles').then(r => r.ok ? r.json() : []).then(profiles => {
+            profiles.forEach(p => {
+                const opt = document.createElement('option');
+                opt.value = p.id;
+                opt.textContent = (p.avatar_emoji || '\u{1F464}') + ' ' + p.display_name;
+                profileEl.appendChild(opt);
+            });
+        }).catch(() => {});
+    }
 
     const events = [];
     let source = null;
@@ -77,7 +90,12 @@ function initLogsPage() {
     function render() {
         renderQueued = false;
         const filterLevel = normalizeLevel(levelEl.value);
-        const visible = events.filter((event) => levelPassesFilter(event.level, filterLevel));
+        const filterProfile = profileEl ? profileEl.value : '';
+        const visible = events.filter((event) => {
+            if (!levelPassesFilter(event.level, filterLevel)) return false;
+            if (filterProfile && event.profile_id != filterProfile) return false;
+            return true;
+        });
 
         if (visible.length === 0) {
             viewerEl.innerHTML = '<div class="empty-state log-empty"><p>No logs for this filter yet.</p></div>';
@@ -130,6 +148,8 @@ function initLogsPage() {
                         value: String(field.value ?? '')
                     }))
                 : [],
+            profile_id: rawEvent.profile_id ?? null,
+            user_id: rawEvent.user_id ?? null,
         };
 
         const last = events[events.length - 1];
@@ -184,6 +204,7 @@ function initLogsPage() {
     }
 
     levelEl.addEventListener('change', queueRender);
+    if (profileEl) profileEl.addEventListener('change', queueRender);
     clearEl.addEventListener('click', () => {
         events.length = 0;
         queueRender();

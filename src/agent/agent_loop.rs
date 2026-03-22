@@ -660,6 +660,19 @@ impl AgentLoop {
             (summary, profile_id, profile_brain_dir, active_profile_slug)
         };
 
+        // Tag all tracing events in this turn with profile/user context.
+        // SseLogLayer reads ProfileScope from span extensions to populate LogRecord fields.
+        // NOTE: Span::enter() is !Send and can't be held across .await.
+        // We use a dispatch-level approach instead: store ProfileScope in a
+        // task-local and read it in the Layer. This avoids the Instrument refactor
+        // that would require splitting process_message_inner into sub-futures.
+        let _profile_scope_guard = crate::logs::set_task_profile_scope(
+            crate::logs::ProfileScope {
+                profile_id: Some(active_profile_id),
+                user_id: Some(crate::user::DEFAULT_ADMIN_USER_ID.to_string()),
+            },
+        );
+
         // Resolve visible profile IDs for memory/RAG scoping (active + readable_from)
         let active_visible_profile_ids = if let Ok(Some(profile)) =
             crate::profiles::db::load_profile_by_id(self.db.pool(), active_profile_id).await

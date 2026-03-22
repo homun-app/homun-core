@@ -13,6 +13,46 @@ use tracing_subscriber::layer::{Context, Layer};
 const LOG_STREAM_CAPACITY: usize = 2048;
 const LOG_HISTORY_LIMIT: usize = 5000;
 
+/// Profile/user context for scoping log records.
+/// Set via [`set_task_profile_scope`] in the agent loop; read by [`SseLogLayer`].
+#[derive(Debug, Clone)]
+pub struct ProfileScope {
+    pub profile_id: Option<i64>,
+    pub user_id: Option<String>,
+}
+
+std::thread_local! {
+    /// Thread-local profile scope. Safe for tokio async because `on_event` runs
+    /// synchronously on the same thread as the `tracing::info!()` call site.
+    static THREAD_PROFILE_SCOPE: std::cell::RefCell<Option<ProfileScope>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Set the profile scope for all log records emitted on this thread.
+/// Returns an RAII guard — scope is active until the guard is dropped.
+pub fn set_task_profile_scope(scope: ProfileScope) -> ProfileScopeGuard {
+    THREAD_PROFILE_SCOPE.with(|cell| {
+        cell.replace(Some(scope));
+    });
+    ProfileScopeGuard
+}
+
+/// RAII guard that clears the profile scope on drop.
+pub struct ProfileScopeGuard;
+
+impl Drop for ProfileScopeGuard {
+    fn drop(&mut self) {
+        THREAD_PROFILE_SCOPE.with(|cell| {
+            cell.replace(None);
+        });
+    }
+}
+
+/// Read the current profile scope (if any).
+fn current_profile_scope() -> Option<ProfileScope> {
+    THREAD_PROFILE_SCOPE.with(|cell| cell.borrow().clone())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogFieldRecord {
     pub key: String,
@@ -204,6 +244,9 @@ where
             message = metadata.name().to_string();
         }
 
+        // Read profile/user context from thread-local (set by agent loop).
+        let scope = current_profile_scope();
+
         let record = LogRecord {
             timestamp: chrono::Utc::now().to_rfc3339(),
             level: metadata.level().as_str().to_ascii_lowercase(),
@@ -213,8 +256,8 @@ where
             file: metadata.file().map(ToString::to_string),
             line: metadata.line(),
             fields: visitor.extra_fields,
-            profile_id: None, // TODO: extract from tracing span context
-            user_id: None,
+            profile_id: scope.as_ref().and_then(|s| s.profile_id),
+            user_id: scope.and_then(|s| s.user_id),
         };
 
         persist_record(&record);

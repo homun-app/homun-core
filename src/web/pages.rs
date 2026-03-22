@@ -2501,6 +2501,12 @@ async fn logs_page() -> Html<String> {
                             <option value="error">Error only</option>
                         </select>
                     </label>
+                    <label class="form-group logs-toolbar-item">
+                        <span>Profile</span>
+                        <select id="logs-profile" class="input">
+                            <option value="">All profiles</option>
+                        </select>
+                    </label>
                     <label class="checkbox-label logs-toolbar-item">
                         <input type="checkbox" id="logs-autoscroll" checked>
                         Auto-scroll
