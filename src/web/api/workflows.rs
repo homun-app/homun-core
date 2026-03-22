@@ -132,7 +132,7 @@ async fn create_workflow_api(
         "Workflow engine not available".into(),
     ))?;
     let workflow_id = engine
-        .create_and_start(req, "web", "web")
+        .create_and_start(req, "web", "web", None, Some(&auth.user_id))
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
     Ok(Json(serde_json::json!({ "workflow_id": workflow_id })))

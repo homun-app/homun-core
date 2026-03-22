@@ -54,6 +54,8 @@ impl WorkflowEngine {
         req: WorkflowCreateRequest,
         channel: &str,
         chat_id: &str,
+        profile_id: Option<i64>,
+        user_id: Option<&str>,
     ) -> Result<String> {
         if req.steps.is_empty() {
             bail!("Workflow must have at least one step");
@@ -65,7 +67,7 @@ impl WorkflowEngine {
         let workflow_id = uuid::Uuid::new_v4().to_string()[..8].to_string();
         let created_by = format!("{channel}:{chat_id}");
         self.db
-            .insert_workflow(&workflow_id, &req, Some(&created_by))
+            .insert_workflow(&workflow_id, &req, Some(&created_by), profile_id, user_id)
             .await?;
 
         tracing::info!(

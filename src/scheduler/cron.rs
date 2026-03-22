@@ -207,7 +207,8 @@ impl CronScheduler {
                                 automation_run_id: Some(run_id.clone()),
                             };
                             let channel = automation.deliver_to.as_deref().unwrap_or("automation");
-                            match engine.create_and_start(req, channel, channel).await {
+                            // Cron: use automation's profile_id, no user context
+                            match engine.create_and_start(req, channel, channel, automation.profile_id, None).await {
                                 Ok(wf_id) => {
                                     // Mark as "running" — will be completed by
                                     // WorkflowEngine when the workflow finishes.

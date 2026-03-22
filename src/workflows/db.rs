@@ -16,14 +16,16 @@ impl Database {
         id: &str,
         req: &WorkflowCreateRequest,
         created_by: Option<&str>,
+        profile_id: Option<i64>,
+        user_id: Option<&str>,
     ) -> Result<()> {
         let now = Utc::now().to_rfc3339();
         let status = WorkflowStatus::Pending.as_str();
         let deliver_to = req.deliver_to.as_deref();
 
         sqlx::query(
-            "INSERT INTO workflows (id, name, objective, status, created_by, deliver_to, automation_id, automation_run_id, context_json, current_step_idx, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, '{}', 0, ?)",
+            "INSERT INTO workflows (id, name, objective, status, created_by, deliver_to, automation_id, automation_run_id, context_json, current_step_idx, created_at, profile_id, user_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, '{}', 0, ?, ?, ?)",
         )
         .bind(id)
         .bind(&req.name)
@@ -34,6 +36,8 @@ impl Database {
         .bind(req.automation_id.as_deref())
         .bind(req.automation_run_id.as_deref())
         .bind(&now)
+        .bind(profile_id)
+        .bind(user_id)
         .execute(self.pool())
         .await
         .with_context(|| format!("Failed to insert workflow {id}"))?;
@@ -422,22 +426,22 @@ mod tests {
 
         // Create and insert 3 workflows with different statuses
         let req = sample_request();
-        db.insert_workflow("wf-running", &req, None).await.unwrap();
+        db.insert_workflow("wf-running", &req, None, None, None).await.unwrap();
         db.update_workflow_status("wf-running", WorkflowStatus::Running, None)
             .await
             .unwrap();
 
-        db.insert_workflow("wf-paused", &req, None).await.unwrap();
+        db.insert_workflow("wf-paused", &req, None, None, None).await.unwrap();
         db.update_workflow_status("wf-paused", WorkflowStatus::Paused, None)
             .await
             .unwrap();
 
-        db.insert_workflow("wf-completed", &req, None).await.unwrap();
+        db.insert_workflow("wf-completed", &req, None, None, None).await.unwrap();
         db.update_workflow_status("wf-completed", WorkflowStatus::Completed, None)
             .await
             .unwrap();
 
-        db.insert_workflow("wf-pending", &req, None).await.unwrap();
+        db.insert_workflow("wf-pending", &req, None, None, None).await.unwrap();
         // pending is the default status — no update needed
 
         let resumable = db.load_resumable_workflows().await.unwrap();
@@ -456,7 +460,7 @@ mod tests {
     async fn test_workflow_insert_and_load_roundtrip() {
         let db = test_db().await;
         let req = sample_request();
-        db.insert_workflow("wf-rt", &req, Some("web:test"))
+        db.insert_workflow("wf-rt", &req, Some("web:test"), None, None)
             .await
             .unwrap();
 
@@ -495,7 +499,7 @@ mod tests {
         req.automation_id = Some("auto-123".to_string());
         req.automation_run_id = Some("run-456".to_string());
 
-        db.insert_workflow("wf-linked", &req, None).await.unwrap();
+        db.insert_workflow("wf-linked", &req, None, None, None).await.unwrap();
 
         let wf = db.load_workflow("wf-linked").await.unwrap().unwrap();
         assert_eq!(wf.automation_id.as_deref(), Some("auto-123"));
@@ -506,7 +510,7 @@ mod tests {
     async fn test_workflow_without_automation_link() {
         let db = test_db().await;
         let req = sample_request();
-        db.insert_workflow("wf-solo", &req, None).await.unwrap();
+        db.insert_workflow("wf-solo", &req, None, None, None).await.unwrap();
 
         let wf = db.load_workflow("wf-solo").await.unwrap().unwrap();
         assert!(wf.automation_id.is_none());

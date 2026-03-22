@@ -182,7 +182,7 @@ impl WorkflowTool {
         };
 
         match engine
-            .create_and_start(req, &ctx.channel, &ctx.chat_id)
+            .create_and_start(req, &ctx.channel, &ctx.chat_id, ctx.profile_id, ctx.user_id.as_deref())
             .await
         {
             Ok(id) => Ok(ToolResult::success(format!(
