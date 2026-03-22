@@ -244,7 +244,7 @@ Migration `037_user_profile_scoping.sql` implementata e funzionante. Vedi file i
 | # | Task | Stato | Commit |
 |---|---|---|---|
 | P1 | Automations: `ctx.profile_id` + `ctx.user_id` a insert | ✅ DONE | `90d1405` |
-| P2 | Workflows: passare `ctx.profile_id` + `ctx.user_id` a insert | ⚠️ TODO | — |
+| P2 | Workflows: passare `ctx.profile_id` + `ctx.user_id` a insert | ✅ DONE | `7967f49` |
 | P3 | RAG ingest: profile_id + user_id in source + chunk | ✅ DONE | `90d1405` |
 | P8 | Memory summaries: profile_id + user_id alla creazione | ✅ DONE | `08675de` |
 | P9 | RAG sources: taggato con profile_id + user_id | ✅ DONE (parte di P3) | `90d1405` |
@@ -254,12 +254,6 @@ Migration `037_user_profile_scoping.sql` implementata e funzionante. Vedi file i
 | P13 | Cron: usa tabella automations → coperto da P1 | ✅ N/A | — |
 
 ## Lavoro rimanente
-
-### Priorità ALTA
-
-| # | Task | File | Effort |
-|---|---|---|---|
-| P2 | Workflows tool: passare `ctx.profile_id` + `ctx.user_id` a insert | `src/tools/workflow.rs` | S |
 
 ### Priorità MEDIA — UI scoping
 
