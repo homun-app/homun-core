@@ -239,28 +239,35 @@ Migration `037_user_profile_scoping.sql` implementata e funzionante. Vedi file i
 
 ---
 
+## Lavoro completato (write-path scoping)
+
+| # | Task | Stato | Commit |
+|---|---|---|---|
+| P1 | Automations: `ctx.profile_id` + `ctx.user_id` a insert | ✅ DONE | `90d1405` |
+| P2 | Workflows: passare `ctx.profile_id` + `ctx.user_id` a insert | ⚠️ TODO | — |
+| P3 | RAG ingest: profile_id + user_id in source + chunk | ✅ DONE | `90d1405` |
+| P8 | Memory summaries: profile_id + user_id alla creazione | ✅ DONE | `08675de` |
+| P9 | RAG sources: taggato con profile_id + user_id | ✅ DONE (parte di P3) | `90d1405` |
+| P10 | Businesses: profile_id + user_id nella struct + INSERT | ✅ DONE | `08675de` |
+| P11 | Email pending: profile_id + user_id nella struct + INSERT | ✅ DONE | `08675de` |
+| P12 | Logs: profile_id + user_id in LogRecord (skip_none) | ✅ DONE (struct) | `08675de` |
+| P13 | Cron: usa tabella automations → coperto da P1 | ✅ N/A | — |
+
 ## Lavoro rimanente
 
-### Priorità ALTA — Bug fix (scoping write-path)
+### Priorità ALTA
 
 | # | Task | File | Effort |
 |---|---|---|---|
-| P1 | Automations tool: passare `ctx.profile_id` + `ctx.user_id` a insert | `src/tools/automation.rs` | S |
 | P2 | Workflows tool: passare `ctx.profile_id` + `ctx.user_id` a insert | `src/tools/workflow.rs` | S |
-| P3 | RAG ingest: passare profile_id + user_id dall'API upload | `src/rag/engine.rs` + `web/api/knowledge.rs` | M |
 
-### Priorità MEDIA — Completare scoping
+### Priorità MEDIA — UI scoping
 
 | # | Task | File | Effort |
 |---|---|---|---|
-| P8 | Memory summaries: passare user_id + profile_id alla creazione | `src/agent/memory.rs` | S |
-| P9 | RAG sources: taggare con user_id + profile_id all'ingest | `src/rag/engine.rs` + `src/rag/db.rs` | M |
-| P10 | Businesses: passare user_id + profile_id alla creazione | `src/business/engine.rs` | S |
-| P11 | Email pending: passare user_id + profile_id | `src/channels/email.rs` o `src/tools/email_inbox.rs` | S |
-| P12 | Logs: aggiungere profile_id + user_id a LogRecord (JSONL) | `src/logs.rs` | M |
-| P13 | Cron: aggiungere profile_id al job context | `src/scheduler/cron.rs` | M |
 | P14 | JS logs filter: aggiungere dropdown profilo | `static/js/logs.js` | S |
 | P15 | Knowledge upload UI: selettore profilo nel form | `static/js/knowledge.js` | S |
+| P12b | Logs: popolare profile_id/user_id via tracing span | `src/logs.rs` + agent loop | M |
 
 ### Priorità BASSA — Cleanup
 
@@ -272,23 +279,6 @@ Migration `037_user_profile_scoping.sql` implementata e funzionante. Vedi file i
 | P19 | API endpoint USER.md per profilo | `src/web/api/profiles.rs` | S |
 
 ### Effort: S = <30 min, M = 30-60 min
-
----
-
-## Ordine di esecuzione suggerito
-
-```
-1. Migration 037 (SQL + Rust backfill)       ← fondazione
-2. P5 Profile struct user_id                 ← tipo aggiornato
-3. P6 ToolContext user_id                    ← contesto tool
-4. P7 Agent loop passa user_id              ← tutto il flusso ha user_id
-5. P4 Backfill user_id                      ← dati esistenti ok
-6. P1-P2 Fix automations/workflows          ← bug fix
-7. P3 RAG ingest profile_id                 ← bug fix
-8. P8-P11 Memory summaries, RAG sources, businesses, email  ← completamento
-9. P12-P15 Logs, cron, JS filters           ← UI completamento
-10. P16-P19 Cleanup                          ← pulizia finale
-```
 
 ---
 
