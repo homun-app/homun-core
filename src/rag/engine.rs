@@ -58,7 +58,16 @@ impl RagEngine {
     }
 
     /// Ingest a single file. Returns source_id if successful, None if already indexed (dedup).
-    pub async fn ingest_file(&mut self, path: &Path, source_channel: &str) -> Result<Option<i64>> {
+    ///
+    /// `profile_id` and `user_id` scope the source and its chunks to a specific profile/user.
+    /// Pass `None` for global (unscoped) ingestion.
+    pub async fn ingest_file(
+        &mut self,
+        path: &Path,
+        source_channel: &str,
+        profile_id: Option<i64>,
+        user_id: Option<&str>,
+    ) -> Result<Option<i64>> {
         if !is_supported(path) {
             anyhow::bail!(
                 "Unsupported file type: {}",
@@ -95,6 +104,8 @@ impl RagEngine {
                 &doc_type,
                 content.len() as i64,
                 Some(source_channel),
+                profile_id,
+                user_id,
             )
             .await?;
 
@@ -129,7 +140,8 @@ impl RagEngine {
                             &chunk.content,
                             chunk.token_count as i64,
                             is_sensitive,
-                            None, // profile_id: set via API in Sprint 4
+                            profile_id,
+                            user_id,
                         )
                         .await?;
 
@@ -170,6 +182,8 @@ impl RagEngine {
         dir: &Path,
         recursive: bool,
         source_channel: &str,
+        profile_id: Option<i64>,
+        user_id: Option<&str>,
     ) -> Result<Vec<i64>> {
         let mut indexed = Vec::new();
 
@@ -187,7 +201,7 @@ impl RagEngine {
             if !path.is_file() || !is_supported(&path) {
                 continue;
             }
-            match self.ingest_file(&path, source_channel).await {
+            match self.ingest_file(&path, source_channel, profile_id, user_id).await {
                 Ok(Some(id)) => indexed.push(id),
                 Ok(None) => {} // already indexed
                 Err(e) => {
@@ -288,6 +302,8 @@ impl RagEngine {
         &mut self,
         path: &Path,
         source_channel: &str,
+        profile_id: Option<i64>,
+        user_id: Option<&str>,
     ) -> Result<Option<i64>> {
         let content =
             std::fs::read(path).with_context(|| format!("Cannot read {}", path.display()))?;
@@ -306,7 +322,7 @@ impl RagEngine {
             self.remove_source(existing.id).await?;
         }
 
-        self.ingest_file(path, source_channel).await
+        self.ingest_file(path, source_channel, profile_id, user_id).await
     }
 
     /// Remove a source and its chunks.
@@ -563,7 +579,7 @@ mod tests {
             "# Heading One\n\nSome content about Rust.\n\n# Heading Two\n\nMore about async.",
         );
 
-        let result = rag.ingest_file(&md, "test").await.unwrap();
+        let result = rag.ingest_file(&md, "test", None, None).await.unwrap();
         assert!(result.is_some(), "Should return source_id");
 
         let sources = rag.list_sources().await.unwrap();
@@ -579,10 +595,10 @@ mod tests {
 
         let md = write_test_md(dir.path(), "dedup.md", "# Test\n\nContent.");
 
-        let first = rag.ingest_file(&md, "test").await.unwrap();
+        let first = rag.ingest_file(&md, "test", None, None).await.unwrap();
         assert!(first.is_some());
 
-        let second = rag.ingest_file(&md, "test").await.unwrap();
+        let second = rag.ingest_file(&md, "test", None, None).await.unwrap();
         assert!(second.is_none(), "Same file should be deduplicated");
 
         let sources = rag.list_sources().await.unwrap();
@@ -600,7 +616,7 @@ mod tests {
              # Databases\n\nSQLite is a lightweight embedded database engine.",
         );
 
-        rag.ingest_file(&md, "test").await.unwrap();
+        rag.ingest_file(&md, "test", None, None).await.unwrap();
 
         let results = rag.search("neural networks", 5).await.unwrap();
         assert!(!results.is_empty(), "Search should return results");
@@ -619,7 +635,7 @@ mod tests {
             "# Config\n\napi_key: sk-abc123456789012345678901234567890123456789\n\nDon't share this.",
         );
 
-        rag.ingest_file(&md, "test").await.unwrap();
+        rag.ingest_file(&md, "test", None, None).await.unwrap();
 
         let results = rag.search("api key config", 5).await.unwrap();
         // Find the sensitive chunk — it should be redacted
@@ -642,7 +658,7 @@ mod tests {
             "# Remove\n\nThis will be removed.",
         );
 
-        let source_id = rag.ingest_file(&md, "test").await.unwrap().unwrap();
+        let source_id = rag.ingest_file(&md, "test", None, None).await.unwrap().unwrap();
 
         let removed = rag.remove_source(source_id).await.unwrap();
         assert!(removed, "Should return true for existing source");
@@ -664,7 +680,7 @@ mod tests {
             "stats.md",
             "# Section A\n\nContent A.\n\n# Section B\n\nContent B.",
         );
-        rag.ingest_file(&md, "test").await.unwrap();
+        rag.ingest_file(&md, "test", None, None).await.unwrap();
 
         let stats_after = rag.stats().await.unwrap();
         assert_eq!(stats_after.source_count, 1);
@@ -680,7 +696,7 @@ mod tests {
             "reindex.md",
             "# Topic A\n\nInformation about topic A.\n\n# Topic B\n\nDetails on topic B.",
         );
-        rag.ingest_file(&md, "test").await.unwrap();
+        rag.ingest_file(&md, "test", None, None).await.unwrap();
 
         let stats = rag.stats().await.unwrap();
         let chunk_count_before = stats.chunk_count;

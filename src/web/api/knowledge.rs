@@ -225,7 +225,8 @@ mod inner {
             }
 
             let mut engine = rag.lock().await;
-            match engine.ingest_file(&tmp_path, "web").await {
+            // TODO: accept profile_id from request query/body when UI supports it
+            match engine.ingest_file(&tmp_path, "web", None, Some(&auth.user_id)).await {
                 Ok(Some(id)) => {
                     ingested.push(serde_json::json!({"file": file_name, "source_id": id}))
                 }
@@ -293,7 +294,8 @@ mod inner {
         }
 
         let mut engine = rag.lock().await;
-        match engine.ingest_directory(&path, recursive, "web").await {
+        // TODO: accept profile_id from request when UI supports it
+        match engine.ingest_directory(&path, recursive, "web", None, Some(&auth.user_id)).await {
             Ok(ids) => Json(serde_json::json!({
                 "indexed": ids.len(),
                 "source_ids": ids,

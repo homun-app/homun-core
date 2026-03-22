@@ -135,7 +135,7 @@ impl Tool for KnowledgeTool {
         })
     }
 
-    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
         let action = get_string_param(&args, "action")?;
 
         match action.as_str() {
@@ -186,13 +186,21 @@ impl Tool for KnowledgeTool {
                 let mut engine = self.engine.lock().await;
 
                 if path.is_dir() {
-                    let ids = engine.ingest_directory(&path, recursive, "tool").await?;
+                    let ids = engine
+                        .ingest_directory(
+                            &path,
+                            recursive,
+                            "tool",
+                            ctx.profile_id,
+                            ctx.user_id.as_deref(),
+                        )
+                        .await?;
                     Ok(ToolResult {
                         output: format!("Ingested {} files from {}", ids.len(), path.display()),
                         is_error: false,
                     })
                 } else if path.is_file() {
-                    match engine.ingest_file(&path, "tool").await? {
+                    match engine.ingest_file(&path, "tool", ctx.profile_id, ctx.user_id.as_deref()).await? {
                         Some(id) => Ok(ToolResult {
                             output: format!("File {} indexed (source_id={})", path.display(), id),
                             is_error: false,

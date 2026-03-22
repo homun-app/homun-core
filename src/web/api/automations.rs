@@ -48,6 +48,8 @@ struct CreateAutomationRequest {
     deliver_to: Option<String>,
     workflow_steps: Option<Vec<serde_json::Value>>,
     flow_json: Option<String>,
+    /// Profile to scope this automation to (optional, defaults to None = global).
+    profile_id: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -427,6 +429,8 @@ async fn create_automation(
         &dependencies_json,
         compiled_plan.plan.version,
         validation_errors_json.as_deref(),
+        req.profile_id,
+        Some(&auth.user_id),
     )
     .await
     .map_err(|e| {

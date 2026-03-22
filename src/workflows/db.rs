@@ -485,6 +485,8 @@ mod tests {
             None,
             "always",
             None,
+            None, // profile_id
+            None, // user_id
         )
         .await
         .unwrap();

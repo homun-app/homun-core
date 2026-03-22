@@ -21,6 +21,8 @@ impl Database {
         deliver_to: Option<&str>,
         trigger_kind: &str,
         trigger_value: Option<&str>,
+        profile_id: Option<i64>,
+        user_id: Option<&str>,
     ) -> Result<()> {
         self.insert_automation_with_plan(
             id,
@@ -36,6 +38,8 @@ impl Database {
             "[]",
             1,
             None,
+            profile_id,
+            user_id,
         )
         .await
     }
@@ -57,12 +61,14 @@ impl Database {
         dependencies_json: &str,
         plan_version: i64,
         validation_errors: Option<&str>,
+        profile_id: Option<i64>,
+        user_id: Option<&str>,
     ) -> Result<()> {
         sqlx::query(
             "INSERT INTO automations
                  (id, name, prompt, schedule, enabled, status, deliver_to, trigger_kind, trigger_value,
-                  plan_json, dependencies_json, plan_version, validation_errors, profile_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                  plan_json, dependencies_json, plan_version, validation_errors, profile_id, user_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(id)
         .bind(name)
@@ -77,7 +83,8 @@ impl Database {
         .bind(dependencies_json)
         .bind(plan_version)
         .bind(validation_errors)
-        .bind(Option::<i64>::None) // profile_id set via API or tool context
+        .bind(profile_id)
+        .bind(user_id)
         .execute(self.pool())
         .await
         .context("Failed to insert automation")?;

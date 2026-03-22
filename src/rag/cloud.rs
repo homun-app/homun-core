@@ -105,7 +105,8 @@ impl CloudSync {
                     // Ingest into RAG
                     let mut engine = self.engine.lock().await;
                     let source = format!("mcp:{server_name}");
-                    if let Err(e) = engine.reingest_file(&file_path, &source).await {
+                    // Cloud sync: no profile/user context
+                    if let Err(e) = engine.reingest_file(&file_path, &source, None, None).await {
                         report
                             .errors
                             .push(format!("{filename}: ingest failed: {e}"));

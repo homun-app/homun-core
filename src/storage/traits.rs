@@ -175,6 +175,8 @@ pub trait RagStore: Send + Sync {
         doc_type: &str,
         file_size: i64,
         source_channel: Option<&str>,
+        profile_id: Option<i64>,
+        user_id: Option<&str>,
     ) -> Result<i64>;
 
     /// Find a source by its content hash (deduplication).
@@ -211,6 +213,7 @@ pub trait RagStore: Send + Sync {
         token_count: i64,
         sensitive: bool,
         profile_id: Option<i64>,
+        user_id: Option<&str>,
     ) -> Result<i64>;
 
     /// Update a chunk's heading (after LLM enrichment).

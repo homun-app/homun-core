@@ -93,7 +93,8 @@ impl RagWatcher {
                     // Ingest collected files
                     let mut engine = self.engine.lock().await;
                     for p in paths {
-                        match engine.reingest_file(&p, "watcher").await {
+                        // Watcher: no profile/user context
+                        match engine.reingest_file(&p, "watcher", None, None).await {
                             Ok(Some(id)) => {
                                 tracing::info!(path = %p.display(), source_id = id, "Auto-ingested file");
                             }

@@ -2283,6 +2283,8 @@ async fn main() -> Result<()> {
                         &dependencies_json,
                         compiled_plan.plan.version,
                         validation_errors_json.as_deref(),
+                        None, // profile_id: CLI has no profile context yet
+                        None, // user_id: CLI has no auth context yet
                     )
                     .await?;
 
@@ -2560,12 +2562,12 @@ async fn main() -> Result<()> {
 
                     let mut engine = rag_handle.lock().await;
                     if target.is_dir() {
-                        match engine.ingest_directory(&target, recursive, "cli").await {
+                        match engine.ingest_directory(&target, recursive, "cli", None, None).await {
                             Ok(ids) => println!("Indexed {} file(s)", ids.len()),
                             Err(e) => eprintln!("Error: {e}"),
                         }
                     } else if target.is_file() {
-                        match engine.ingest_file(&target, "cli").await {
+                        match engine.ingest_file(&target, "cli", None, None).await {
                             Ok(Some(id)) => println!("Indexed (source_id={id})"),
                             Ok(None) => println!("Already indexed (duplicate)"),
                             Err(e) => eprintln!("Error: {e}"),

@@ -2329,8 +2329,8 @@ impl super::traits::MemoryStore for Database {
 
 #[async_trait::async_trait]
 impl super::traits::RagStore for Database {
-    async fn insert_rag_source(&self, file_path: &str, file_name: &str, file_hash: &str, doc_type: &str, file_size: i64, source_channel: Option<&str>) -> Result<i64> {
-        Database::insert_rag_source(self, file_path, file_name, file_hash, doc_type, file_size, source_channel).await
+    async fn insert_rag_source(&self, file_path: &str, file_name: &str, file_hash: &str, doc_type: &str, file_size: i64, source_channel: Option<&str>, profile_id: Option<i64>, user_id: Option<&str>) -> Result<i64> {
+        Database::insert_rag_source(self, file_path, file_name, file_hash, doc_type, file_size, source_channel, profile_id, user_id).await
     }
     async fn find_rag_source_by_hash(&self, file_hash: &str) -> Result<Option<RagSourceRow>> {
         Database::find_rag_source_by_hash(self, file_hash).await
@@ -2350,8 +2350,8 @@ impl super::traits::RagStore for Database {
     async fn count_rag_sources(&self) -> Result<i64> {
         Database::count_rag_sources(self).await
     }
-    async fn insert_rag_chunk(&self, source_id: i64, chunk_index: i64, heading: &str, content: &str, token_count: i64, sensitive: bool, profile_id: Option<i64>) -> Result<i64> {
-        Database::insert_rag_chunk(self, source_id, chunk_index, heading, content, token_count, sensitive, profile_id).await
+    async fn insert_rag_chunk(&self, source_id: i64, chunk_index: i64, heading: &str, content: &str, token_count: i64, sensitive: bool, profile_id: Option<i64>, user_id: Option<&str>) -> Result<i64> {
+        Database::insert_rag_chunk(self, source_id, chunk_index, heading, content, token_count, sensitive, profile_id, user_id).await
     }
     async fn update_rag_chunk_heading(&self, chunk_id: i64, heading: &str) -> Result<()> {
         Database::update_rag_chunk_heading(self, chunk_id, heading).await
@@ -2614,6 +2614,8 @@ END;
             Some("cli:default"),
             "always",
             None,
+            None, // profile_id
+            None, // user_id
         )
         .await
         .unwrap();

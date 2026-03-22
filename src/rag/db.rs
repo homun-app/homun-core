@@ -19,10 +19,12 @@ impl Database {
         doc_type: &str,
         file_size: i64,
         source_channel: Option<&str>,
+        profile_id: Option<i64>,
+        user_id: Option<&str>,
     ) -> Result<i64> {
         let result = sqlx::query(
-            "INSERT INTO rag_sources (file_path, file_name, file_hash, doc_type, file_size, source_channel)
-             VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO rag_sources (file_path, file_name, file_hash, doc_type, file_size, source_channel, profile_id, user_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(file_path)
         .bind(file_name)
@@ -30,6 +32,8 @@ impl Database {
         .bind(doc_type)
         .bind(file_size)
         .bind(source_channel)
+        .bind(profile_id)
+        .bind(user_id)
         .execute(self.pool())
         .await
         .context("Failed to insert RAG source")?;
@@ -116,6 +120,7 @@ impl Database {
     }
 
     /// Insert a document chunk. Returns the chunk ID.
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_rag_chunk(
         &self,
         source_id: i64,
@@ -125,10 +130,11 @@ impl Database {
         token_count: i64,
         sensitive: bool,
         profile_id: Option<i64>,
+        user_id: Option<&str>,
     ) -> Result<i64> {
         let result = sqlx::query(
-            "INSERT INTO rag_chunks (source_id, chunk_index, heading, content, token_count, sensitive, profile_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO rag_chunks (source_id, chunk_index, heading, content, token_count, sensitive, profile_id, user_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(source_id)
         .bind(chunk_index)
@@ -137,6 +143,7 @@ impl Database {
         .bind(token_count)
         .bind(sensitive)
         .bind(profile_id)
+        .bind(user_id)
         .execute(self.pool())
         .await
         .context("Failed to insert RAG chunk")?;

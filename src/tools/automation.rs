@@ -184,6 +184,8 @@ impl AutomationTool {
                 &dependencies_json,
                 compiled_plan.plan.version,
                 validation_errors_json.as_deref(),
+                ctx.profile_id,
+                ctx.user_id.as_deref(),
             )
             .await
         {
