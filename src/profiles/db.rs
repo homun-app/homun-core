@@ -98,7 +98,10 @@ pub async fn update_profile(
     Ok(())
 }
 
-/// Delete a profile. Refuses to delete the default profile.
+/// Delete a profile and all its scoped data. Refuses to delete the default profile.
+///
+/// Cascades deletion to: memory_chunks, rag_chunks, rag_sources, contacts,
+/// sessions, automations, workflows, memory_summaries, businesses, email_pending.
 pub async fn delete_profile(pool: &Pool<Sqlite>, id: i64) -> Result<()> {
     let is_default: i64 =
         sqlx::query_scalar("SELECT is_default FROM profiles WHERE id = ?")
@@ -110,6 +113,35 @@ pub async fn delete_profile(pool: &Pool<Sqlite>, id: i64) -> Result<()> {
 
     if is_default != 0 {
         bail!("Cannot delete the default profile");
+    }
+
+    // Cascade: delete all scoped data before removing the profile.
+    // Errors for missing tables are silently ignored (test DBs may not have all tables).
+    let scoped_tables = [
+        "memory_chunks",
+        "rag_chunks",
+        "rag_sources",
+        "contacts",
+        "sessions",
+        "automations",
+        "workflows",
+        "memory_summaries",
+        "businesses",
+        "email_pending",
+    ];
+    for table in &scoped_tables {
+        let result = sqlx::query(&format!("DELETE FROM {table} WHERE profile_id = ?"))
+            .bind(id)
+            .execute(pool)
+            .await;
+        if let Err(e) = &result {
+            // "no such table" is expected in test DBs that only have the profiles table
+            if !e.to_string().contains("no such table") {
+                result.with_context(|| {
+                    format!("Failed to cascade delete {table} for profile {id}")
+                })?;
+            }
+        }
     }
 
     sqlx::query("DELETE FROM profiles WHERE id = ?")

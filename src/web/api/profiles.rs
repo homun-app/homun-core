@@ -56,6 +56,7 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
             "/v1/profiles/{id}/instructions",
             get(read_instructions),
         )
+        .route("/v1/profiles/{id}/user", get(read_user_md))
         .route(
             "/v1/profiles/{id}/generate",
             post(generate_profile_json),
@@ -266,6 +267,29 @@ async fn read_instructions(
 
     let data_dir = Config::data_dir();
     let path = profile.brain_dir(&data_dir).join("INSTRUCTIONS.md");
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    Ok(Json(json!({"content": content})))
+}
+
+/// Read USER.md from a profile's brain directory.
+async fn read_user_md(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+) -> Result<Json<Value>, ApiErr> {
+    let db = require_db(&state)?;
+    let profile = profiles::db::load_profile_by_id(db.pool(), id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| not_found("Profile not found"))?;
+
+    let data_dir = Config::data_dir();
+    let path = profile.brain_dir(&data_dir).join("USER.md");
 
     let content = if path.exists() {
         std::fs::read_to_string(&path).unwrap_or_default()

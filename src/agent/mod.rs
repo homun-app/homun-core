@@ -18,7 +18,6 @@ mod memory_db;
 pub mod orchestrator;
 pub mod heartbeat;
 pub mod memory;
-pub(crate) mod persona;
 pub(crate) mod profile_resolver;
 pub mod prompt; // New modular prompt system
 pub mod registry;
