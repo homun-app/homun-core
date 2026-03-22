@@ -102,6 +102,21 @@ async function selectContact(id) {
     try {
         const c = allContacts.find(x => x.id === id);
         if (!c) return;
+        // Resolve profile display label
+        if (!_cachedProfiles) {
+            try {
+                const pr = await fetch('/api/v1/profiles');
+                if (pr.ok) _cachedProfiles = await pr.json();
+            } catch (_) {}
+        }
+        if (_cachedProfiles && c.profile_id) {
+            const prof = _cachedProfiles.find(p => p.id === c.profile_id);
+            c._profile_display = prof
+                ? (prof.avatar_emoji || '\u{1F464}') + ' ' + prof.display_name
+                : 'ID ' + c.profile_id;
+        } else {
+            c._profile_display = 'channel default';
+        }
         const [ids, rels, events] = await Promise.all([
             fetch(API + '/' + id + '/identities').then(r => r.json()),
             fetch(API + '/' + id + '/relationships').then(r => r.json()),
@@ -155,10 +170,8 @@ function showDetail(c, identities, relationships, events) {
         : '<p class="contact-no-data">No events</p>';
 
     const bioHtml = c.bio ? '<p style="margin:0;color:var(--t2);font-size:14px">' + esc(c.bio) + '</p>' : '';
-    const personaNote = c.persona_instructions
-        ? '<div class="contact-section"><div class="contact-section-header"><h3>Persona Instructions</h3></div>'
-        + '<p style="font-size:13px;color:var(--t2);margin:0">' + esc(c.persona_instructions) + '</p></div>'
-        : '';
+    // Resolve profile display name for the detail view
+    const profileLabel = c._profile_display || 'channel default';
 
     // All dynamic content sanitized through esc()
     el.innerHTML = '<div class="contact-detail-inner">'
@@ -188,10 +201,9 @@ function showDetail(c, identities, relationships, events) {
         + metaItem('Mode', c.response_mode)
         + metaItem('Tone', c.tone_of_voice)
         + metaItem('Birthday', c.birthday)
-        + metaItem('Persona', c.persona_override || 'channel default')
+        + metaItem('Profile', profileLabel)
         + metaItem('Agent', c.agent_override)
         + '</div></div>'
-        + personaNote
         // Identities
         + '<div class="contact-section">'
         + '<div class="contact-section-header"><h3>Identities</h3>'
@@ -356,18 +368,7 @@ function showEditForm(id) {
         + '<option value="">Channel default</option>'
         + '</select>'
         + '<p style="font-size:12px;color:var(--t3);margin:4px 0 0">Choose which profile the agent uses when responding to this contact.</p></div>'
-        + '<div class="form-group"><label for="ef-persona">Persona Override</label>'
-        + '<select id="ef-persona" name="persona_override" class="input" onchange="document.getElementById(\'persona-instr-group\').style.display=this.value===\'custom\'?\'block\':\'none\'">'
-        + '<option value=""' + (!c.persona_override ? ' selected' : '') + '>Channel default</option>'
-        + '<option value="bot"' + (c.persona_override === 'bot' ? ' selected' : '') + '>Bot</option>'
-        + '<option value="owner"' + (c.persona_override === 'owner' ? ' selected' : '') + '>Owner</option>'
-        + '<option value="company"' + (c.persona_override === 'company' ? ' selected' : '') + '>Company</option>'
-        + '<option value="custom"' + (c.persona_override === 'custom' ? ' selected' : '') + '>Custom</option>'
-        + '</select></div>'
-        + '<div id="persona-instr-group" style="display:' + (c.persona_override === 'custom' ? 'block' : 'none') + '">'
-        + '<div class="form-group"><label for="ef-persona-instr">Persona Instructions</label>'
-        + '<textarea id="ef-persona-instr" name="persona_instructions" class="input" rows="3" placeholder="Custom instructions for how the agent should present itself to this contact">' + esc(c.persona_instructions || '') + '</textarea></div>'
-        + '</div>'
+        // Legacy persona fields removed — the Profile dropdown above replaces persona_override.
         + '<div style="display:flex;gap:8px;margin-top:16px">'
         + '<button type="submit" class="btn btn-primary btn-sm">Save</button>'
         + '<button type="button" class="btn btn-ghost btn-sm" onclick="selectContact(' + id + ')">Cancel</button>'

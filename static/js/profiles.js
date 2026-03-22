@@ -196,28 +196,28 @@ function showDetail(profile, soulContent) {
     header.appendChild(actions);
     inner.appendChild(header);
 
-    // Sections
-    appendSection(inner, 'Identity', [
+    // Sections — use 2-column meta grid matching contacts design
+    appendGridSection(inner, 'Identity', [
         ['Name', identity.name],
-        ['Bio', identity.bio],
         ['Role', identity.role],
+        ['Bio', identity.bio],
     ]);
-    appendSection(inner, 'Linguistics', [
+    appendGridSection(inner, 'Linguistics', [
         ['Language', linguistics.language],
         ['Formality', linguistics.formality],
         ['Style', linguistics.style],
         ['Forbidden words', (linguistics.forbidden_words || []).join(', ')],
     ]);
-    appendSection(inner, 'Personality', [
+    appendGridSection(inner, 'Personality', [
         ['Traits', (personality.traits || []).join(', ')],
         ['Tone', personality.tone],
         ['Humor', personality.humor ? 'Yes' : 'No'],
     ]);
-    appendSection(inner, 'Capabilities', [
+    appendGridSection(inner, 'Capabilities', [
         ['Domains', (capabilities.domains || []).join(', ')],
         ['Tool emphasis', (capabilities.tools_emphasis || []).join(', ')],
     ]);
-    appendSection(inner, 'Visibility', [
+    appendGridSection(inner, 'Visibility', [
         ['Readable from', (visibility.readable_from || []).join(', ') || 'None (isolated)'],
     ]);
 
@@ -250,7 +250,8 @@ function showDetail(profile, soulContent) {
     detail.appendChild(inner);
 }
 
-function appendSection(container, title, fields) {
+/** Render a 2-column meta grid section (same layout as contacts detail). */
+function appendGridSection(container, title, fields) {
     const visibleFields = fields.filter(([, val]) => val);
     if (!visibleFields.length) return;
 
@@ -263,20 +264,22 @@ function appendSection(container, title, fields) {
     headerDiv.appendChild(h3);
     sec.appendChild(headerDiv);
 
+    const grid = document.createElement('div');
+    grid.className = 'contact-meta-grid';
     visibleFields.forEach(([label, value]) => {
-        const row = document.createElement('div');
-        row.className = 'contact-field';
-        row.style.cssText = 'display:flex;gap:8px;padding:6px 0';
-        const labelEl = document.createElement('span');
-        labelEl.style.cssText = 'font-weight:600;min-width:130px;font-size:13px;color:var(--t3)';
+        const item = document.createElement('div');
+        item.className = 'contact-meta-item';
+        const labelEl = document.createElement('div');
+        labelEl.className = 'contact-meta-label';
         labelEl.textContent = label;
-        row.appendChild(labelEl);
-        const valueEl = document.createElement('span');
-        valueEl.style.cssText = 'font-size:14px;color:var(--t1)';
+        item.appendChild(labelEl);
+        const valueEl = document.createElement('div');
+        valueEl.className = 'contact-meta-value';
         valueEl.textContent = value;
-        row.appendChild(valueEl);
-        sec.appendChild(row);
+        item.appendChild(valueEl);
+        grid.appendChild(item);
     });
+    sec.appendChild(grid);
 
     container.appendChild(sec);
 }
