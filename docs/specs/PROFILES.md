@@ -1,8 +1,8 @@
 # SPEC: Profile System (Profilo-First Architecture)
 
-> Status: **IN PRODUCTION** — profile_id + user_id implementati; scoping write-path da completare
+> Status: **COMPLETE** — all tasks done (P1-P19, P12b, P14)
 > Data originale: 2026-03-22
-> Revisione: 5 — user_id implementato su DB + struct + agent loop (2026-03-22)
+> Revisione: 6 — all tasks complete, log scoping + UI filter done (2026-03-22)
 
 ## Panoramica
 
@@ -149,28 +149,32 @@ CREATE TABLE profiles (
 | Brain dir migration | `src/profiles/mod.rs` | Auto-migra `brain/` → `brain/profiles/default/` |
 | Persona→Profile migration | `src/profiles/db.rs` | `migrate_contact_personas()` all'avvio |
 
-### Componenti parziali (⚠️)
+### Tutti i componenti — ✅ COMPLETATI
 
-| Componente | Problema | Fix |
+| Task | Stato | Commit |
 |---|---|---|
-| Automations tool | `handle_create()` non passa `ctx.profile_id` → INSERT con NULL | Passare `ctx.profile_id` |
-| Workflows tool | Stesso problema di automations | Passare `ctx.profile_id` |
-| RAG ingest | `insert_rag_chunk(..., profile_id: None)` — commento "set via API Sprint 4" | Passare profile dalla API upload |
-| persona.rs | Deprecated ma ancora presente come fallback | Rimuovere dopo verifica migrazione |
-
-### Componenti mancanti (❌ TODO)
-
-| Componente | Descrizione |
-|---|---|
-| ~~user_id su profiles~~ | ~~FK `profiles.user_id → users(id)`~~ ✅ DONE (migration 037) |
-| ~~user_id su 11 tabelle parent scoped~~ | ✅ DONE (migration 037 + backfill Rust) |
-| ~~profile_id su 4 tabelle~~ | ✅ DONE (migration 037) |
-| ~~Seed admin user~~ | ✅ DONE (migration 037: `00000000-...-000000000001`) |
-| ~~ToolContext.user_id~~ | ✅ DONE — campo aggiunto, agent loop lo setta |
-| ~~Profile.user_id~~ | ✅ DONE — campo aggiunto a struct + DB queries |
-| Logs profile_id | LogRecord non ha profile_id (file-based JSONL) |
-| Cron profile_id | Job cron senza contesto profilo |
-| JS logs filter | Nessun dropdown profilo in logs.js |
+| P1: Automations write-path (profile_id + user_id) | ✅ | `90d1405` |
+| P2: Workflows write-path (profile_id + user_id) | ✅ | `7967f49` |
+| P3: RAG ingest write-path (profile_id + user_id) | ✅ | `90d1405` |
+| P4: Backfill user_id su record esistenti | ✅ | `b9e5ee3` |
+| P5: Profile.user_id struct | ✅ | `b9e5ee3` |
+| P6: ToolContext.user_id | ✅ | `b9e5ee3` |
+| P7: Agent loop user_id nel contesto | ✅ | `b9e5ee3` |
+| P8: Memory summaries user_id + profile_id | ✅ | `08675de` |
+| P9: RAG sources user_id + profile_id | ✅ | `90d1405` |
+| P10: Businesses user_id + profile_id | ✅ | `08675de` |
+| P11: Email pending user_id + profile_id | ✅ | `08675de` |
+| P12: Daily logs profile_id | ✅ | `63ef7c4` |
+| P12b: LogRecord profile_id via thread-local | ✅ | `a48fa01` |
+| P13: Cron profile_id | ✅ | `08675de` |
+| P14: JS logs profile filter | ✅ | `a48fa01` |
+| P15: Knowledge upload profile selector | ✅ | (already existed) |
+| P16: Remove persona.rs | ✅ | `69e16f5` |
+| P17: Cascade delete on profile | ✅ | `69e16f5` |
+| P18: Session profile switch REST API | ✅ | (already existed) |
+| P19: USER.md API per profilo | ✅ | `69e16f5` |
+| UX: Contact Persona→Profile | ✅ | `82b0968` |
+| UX: Profiles 2-col layout | ✅ | `82b0968` |
 
 ---
 
