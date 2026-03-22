@@ -294,6 +294,8 @@ mod tests {
             notify_session_key: None,
             created_at: "2024-01-01".into(),
             updated_at: None,
+            profile_id: None,
+            user_id: None,
         };
         let formatted = EmailApprovalHandler::format_draft_notification(&row, 1, 1);
         assert!(formatted.contains("📧 Email da approvare"));
@@ -317,6 +319,8 @@ mod tests {
             notify_session_key: None,
             created_at: "2024-01-01".into(),
             updated_at: None,
+            profile_id: None,
+            user_id: None,
         };
         let formatted = EmailApprovalHandler::format_draft_notification(&row, 1, 3);
         assert!(formatted.contains("[1/3]"));
@@ -336,6 +340,8 @@ mod tests {
             notify_session_key: None,
             created_at: "2024-01-01".into(),
             updated_at: None,
+            profile_id: None,
+            user_id: None,
         };
 
         let ctx = EmailApprovalHandler::build_modification_context(&row, "sii più formale");

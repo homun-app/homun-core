@@ -206,6 +206,10 @@ pub struct Business {
     pub created_at: String,
     pub updated_at: Option<String>,
     pub closed_at: Option<String>,
+    /// Profile scoping (None = global).
+    pub profile_id: Option<i64>,
+    /// Owner user ID.
+    pub user_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

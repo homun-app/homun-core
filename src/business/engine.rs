@@ -65,6 +65,8 @@ impl BusinessEngine {
             created_at: now,
             updated_at: None,
             closed_at: None,
+            profile_id: None, // TODO: accept from caller context
+            user_id: None,    // TODO: accept from caller context
         };
 
         self.db.insert_business(&biz).await?;

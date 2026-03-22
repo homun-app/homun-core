@@ -196,10 +196,12 @@ impl Database {
         content: &str,
         contact_id: Option<i64>,
         agent_id: Option<&str>,
+        profile_id: Option<i64>,
+        user_id: Option<&str>,
     ) -> Result<i64> {
         let result = sqlx::query(
-            "INSERT INTO memory_summaries (period, start_date, end_date, content, contact_id, agent_id)
-             VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO memory_summaries (period, start_date, end_date, content, contact_id, agent_id, profile_id, user_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(period)
         .bind(start_date)
@@ -207,6 +209,8 @@ impl Database {
         .bind(content)
         .bind(contact_id)
         .bind(agent_id)
+        .bind(profile_id)
+        .bind(user_id)
         .execute(self.pool())
         .await
         .context("Failed to insert memory summary")?;

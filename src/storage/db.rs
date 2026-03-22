@@ -1672,8 +1672,9 @@ impl Database {
     pub async fn insert_email_pending(&self, row: &EmailPendingRow) -> Result<()> {
         sqlx::query(
             "INSERT INTO email_pending (id, account_name, from_address, subject, body_preview,
-             message_id, draft_response, status, notify_session_key, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+             message_id, draft_response, status, notify_session_key, created_at,
+             profile_id, user_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?)",
         )
         .bind(&row.id)
         .bind(&row.account_name)
@@ -1684,6 +1685,8 @@ impl Database {
         .bind(&row.draft_response)
         .bind(&row.status)
         .bind(&row.notify_session_key)
+        .bind(row.profile_id)
+        .bind(&row.user_id)
         .execute(&self.pool)
         .await
         .context("Failed to insert email_pending")?;
@@ -1724,7 +1727,7 @@ impl Database {
         let rows = sqlx::query_as::<_, EmailPendingRow>(
             "SELECT id, account_name, from_address, subject, body_preview,
                     message_id, draft_response, status, notify_session_key,
-                    created_at, updated_at
+                    created_at, updated_at, profile_id, user_id
              FROM email_pending
              WHERE notify_session_key = ? AND status = 'pending'
              ORDER BY created_at ASC",
@@ -1741,7 +1744,7 @@ impl Database {
         let row = sqlx::query_as::<_, EmailPendingRow>(
             "SELECT id, account_name, from_address, subject, body_preview,
                     message_id, draft_response, status, notify_session_key,
-                    created_at, updated_at
+                    created_at, updated_at, profile_id, user_id
              FROM email_pending WHERE id = ?",
         )
         .bind(id)
@@ -2170,6 +2173,10 @@ pub struct EmailPendingRow {
     pub notify_session_key: Option<String>,
     pub created_at: String,
     pub updated_at: Option<String>,
+    /// Profile scoping (None = global).
+    pub profile_id: Option<i64>,
+    /// Owner user ID.
+    pub user_id: Option<String>,
 }
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks.
@@ -2316,8 +2323,8 @@ impl super::traits::MemoryStore for Database {
     async fn reset_all_memory(&self) -> Result<()> {
         Database::reset_all_memory(self).await
     }
-    async fn insert_memory_summary(&self, period: &str, start_date: &str, end_date: &str, content: &str, contact_id: Option<i64>, agent_id: Option<&str>) -> Result<i64> {
-        Database::insert_memory_summary(self, period, start_date, end_date, content, contact_id, agent_id).await
+    async fn insert_memory_summary(&self, period: &str, start_date: &str, end_date: &str, content: &str, contact_id: Option<i64>, agent_id: Option<&str>, profile_id: Option<i64>, user_id: Option<&str>) -> Result<i64> {
+        Database::insert_memory_summary(self, period, start_date, end_date, content, contact_id, agent_id, profile_id, user_id).await
     }
     async fn has_memory_summary(&self, period: &str, start_date: &str) -> Result<bool> {
         Database::has_memory_summary(self, period, start_date).await

@@ -1951,6 +1951,8 @@ async fn dispatch_to_agent(
                 notify_session_key: Some(notify_key.clone()),
                 created_at: String::new(),
                 updated_at: None,
+                profile_id: None, // Email channel: no profile context yet
+                user_id: None,
             };
 
             if let Err(e) = task_db.insert_email_pending(&row).await {

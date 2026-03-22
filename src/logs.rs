@@ -29,6 +29,13 @@ pub struct LogRecord {
     pub file: Option<String>,
     pub line: Option<u32>,
     pub fields: Vec<LogFieldRecord>,
+    /// Profile scoping — populated when log originates from a profile-scoped context.
+    /// Currently None; requires tracing span propagation to populate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<i64>,
+    /// User scoping — populated when log originates from an authenticated context.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
 }
 
 static LOG_STREAM: OnceLock<broadcast::Sender<LogRecord>> = OnceLock::new();
@@ -206,6 +213,8 @@ where
             file: metadata.file().map(ToString::to_string),
             line: metadata.line(),
             fields: visitor.extra_fields,
+            profile_id: None, // TODO: extract from tracing span context
+            user_id: None,
         };
 
         persist_record(&record);
@@ -295,6 +304,8 @@ mod tests {
                 key: "chat_id".to_string(),
                 value: "abc".to_string(),
             }],
+            profile_id: None,
+            user_id: None,
         });
 
         let records = recent(10);

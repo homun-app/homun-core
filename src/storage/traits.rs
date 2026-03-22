@@ -146,6 +146,8 @@ pub trait MemoryStore: Send + Sync {
         content: &str,
         contact_id: Option<i64>,
         agent_id: Option<&str>,
+        profile_id: Option<i64>,
+        user_id: Option<&str>,
     ) -> Result<i64>;
 
     /// Check if a summary already exists for a period.

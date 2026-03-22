@@ -32,6 +32,8 @@ struct BusinessRow {
     created_at: String,
     updated_at: Option<String>,
     closed_at: Option<String>,
+    profile_id: Option<i64>,
+    user_id: Option<String>,
 }
 
 impl BusinessRow {
@@ -60,6 +62,8 @@ impl BusinessRow {
             created_at: self.created_at,
             updated_at: self.updated_at,
             closed_at: self.closed_at,
+            profile_id: self.profile_id,
+            user_id: self.user_id,
         }
     }
 }
@@ -264,8 +268,9 @@ impl Database {
         sqlx::query(
             "INSERT INTO businesses (id, name, description, status, autonomy_level,
              budget_total, budget_spent, budget_currency, ooda_automation_id, ooda_interval,
-             created_by, deliver_to, context_json, fiscal_config_json, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             created_by, deliver_to, context_json, fiscal_config_json, created_at,
+             profile_id, user_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&biz.id)
         .bind(&biz.name)
@@ -282,6 +287,8 @@ impl Database {
         .bind(&context_json)
         .bind(&fiscal_json)
         .bind(&biz.created_at)
+        .bind(biz.profile_id)
+        .bind(&biz.user_id)
         .execute(self.pool())
         .await
         .with_context(|| format!("Failed to insert business {}", biz.id))?;

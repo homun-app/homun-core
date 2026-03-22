@@ -2065,6 +2065,8 @@ impl AgentLoop {
                                     &model,
                                     contact_id,
                                     agent_id.as_deref(),
+                                    profile_id,
+                                    Some(crate::user::DEFAULT_ADMIN_USER_ID),
                                 )
                                 .await
                             {

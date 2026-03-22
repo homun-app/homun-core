@@ -576,6 +576,8 @@ impl MemoryConsolidator {
         model: &str,
         contact_id: Option<i64>,
         agent_id: Option<&str>,
+        profile_id: Option<i64>,
+        user_id: Option<&str>,
     ) -> Result<()> {
         let today = chrono::Local::now().date_naive();
 
@@ -589,7 +591,7 @@ impl MemoryConsolidator {
             let end = last_sunday.format("%Y-%m-%d").to_string();
 
             if !self.store.has_memory_summary("week", &start).await? {
-                self.summarize_range("week", &start, &end, provider, model, contact_id, agent_id)
+                self.summarize_range("week", &start, &end, provider, model, contact_id, agent_id, profile_id, user_id)
                     .await?;
             }
         }
@@ -613,7 +615,7 @@ impl MemoryConsolidator {
                     let end = month_end.format("%Y-%m-%d").to_string();
                     if !self.store.has_memory_summary("month", &start).await? {
                         self.summarize_range(
-                            "month", &start, &end, provider, model, contact_id, agent_id,
+                            "month", &start, &end, provider, model, contact_id, agent_id, profile_id, user_id,
                         )
                         .await?;
                     }
@@ -635,6 +637,8 @@ impl MemoryConsolidator {
         model: &str,
         contact_id: Option<i64>,
         agent_id: Option<&str>,
+        profile_id: Option<i64>,
+        user_id: Option<&str>,
     ) -> Result<()> {
         let chunks = self.store.load_chunks_in_range(start_date, end_date).await?;
         if chunks.is_empty() {
@@ -679,7 +683,7 @@ impl MemoryConsolidator {
 
         if let Some(summary) = response.content.filter(|s| !s.trim().is_empty()) {
             self.store
-                .insert_memory_summary(period, start_date, end_date, &summary, contact_id, agent_id)
+                .insert_memory_summary(period, start_date, end_date, &summary, contact_id, agent_id, profile_id, user_id)
                 .await?;
             tracing::info!(
                 period,
