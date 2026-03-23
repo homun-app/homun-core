@@ -6,38 +6,40 @@
 }
 
 
-/* ═══ NAV BAR (Editorial Canvas) ═══
-   Vertical icon bar, dark by default, accent-colored via theme.
-   80px wide, icons centered, tooltips on hover.
+/* ═══ NAV BAR — Collapsible Sidebar ═══
+   Manus-inspired: 56px collapsed (icons), 280px expanded (icons + labels).
+   Dark background, accent-colored via theme.
 */
 .sidebar {
-    width: var(--nav-w);
+    width: 56px;
     background: var(--nav-bg);
     display: flex;
     flex-direction: column;
-    align-items: center;
     flex-shrink: 0;
     z-index: 30;
-    padding: 16px 0;
+    padding: 12px 0;
     border: none;
+    transition: width var(--med) var(--ease);
+    overflow: hidden;
 }
+.sidebar.is-expanded { width: 260px; }
 
-/* All three columns (nav, subnav, content) share a fixed header-row
-   height so that logo, section title, and page title align vertically. */
+/* Sidebar header — logo + brand name + toggle */
 .sidebar-header {
-    height: var(--header-row, 44px);
     display: flex;
     align-items: center;
-    justify-content: center;
-    padding: 0;
-    margin-bottom: 12px;
+    gap: 10px;
+    padding: 0 12px;
+    height: 40px;
+    margin-bottom: 8px;
+    flex-shrink: 0;
 }
 
 .logo-link {
     text-decoration: none;
     display: flex;
     align-items: center;
-    justify-content: center;
+    flex-shrink: 0;
     transition: opacity var(--fast) var(--ease);
 }
 .logo-link:hover { opacity: 0.8; }
@@ -52,72 +54,149 @@
     background-position: center center;
 }
 
+.sidebar-brand {
+    font-size: 18px;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    letter-spacing: -0.02em;
+}
+
+/* Toggle button — only visible when expanded */
+.sidebar-toggle-btn {
+    margin-left: auto;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--nav-text);
+    padding: 4px;
+    border-radius: var(--r-sm);
+    display: flex;
+    align-items: center;
+    opacity: 0;
+    transition: opacity var(--fast) var(--ease);
+}
+.sidebar-toggle-btn svg { width: 18px; height: 18px; }
+.sidebar-toggle-btn:hover { color: var(--nav-text-hover); }
+.sidebar.is-expanded .sidebar-toggle-btn { opacity: 1; }
+
 /* Nav sections */
 .nav {
     flex: 1;
     display: flex;
     flex-direction: column;
-    align-items: center;
-    gap: 4px;
+    gap: 2px;
     width: 100%;
     padding: 0 8px;
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .nav-bottom {
     display: flex;
     flex-direction: column;
-    align-items: center;
-    gap: 4px;
+    gap: 2px;
     width: 100%;
-    padding: 0 8px 0;
+    padding: 0 8px;
     margin-top: auto;
+    flex-shrink: 0;
 }
 
-/* Nav links — icon buttons, no background on hover/active */
+/* Nav links — icon + optional label */
 .nav-link {
     display: flex;
     align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
+    gap: 10px;
+    width: 100%;
+    height: 38px;
     border-radius: var(--r-md);
     color: var(--nav-text);
     text-decoration: none;
-    font-size: 13px;
-    font-weight: 500;
-    transition: color var(--fast) var(--ease);
+    font-size: 14px;
+    font-weight: 400;
+    font-family: var(--sans);
+    transition: color var(--fast) var(--ease), background var(--fast) var(--ease);
     position: relative;
-    padding: 0;
+    padding: 0 10px;
     background: transparent;
+    white-space: nowrap;
+    box-sizing: border-box;
+    cursor: pointer;
+    border: none;
 }
+/* Collapsed: center icon */
+.sidebar:not(.is-expanded) .nav-link { justify-content: center; padding: 0; }
 
 .nav-link:hover {
     color: var(--nav-text-hover);
+    background: rgba(255, 255, 255, 0.06);
 }
 
 .nav-link.active {
     color: var(--nav-active-text);
+    background: rgba(255, 255, 255, 0.10);
+    font-weight: 500;
 }
 
 .nav-icon {
     width: 20px;
     height: 20px;
     flex-shrink: 0;
-    transition: color var(--fast);
 }
 
-/* Featured nav group (Chat) — extra spacing below */
-.nav-group-featured {
-    margin-bottom: 4px;
+/* Labels — hidden when collapsed, shown when expanded */
+.nav-label {
+    display: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
+.sidebar.is-expanded .nav-label { display: inline; }
 
-/* Hidden label (icon-only) */
-.nav-label { display: none; }
+/* Section separator & label */
+.nav-separator {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.08);
+    margin: 8px 4px;
+}
+.sidebar:not(.is-expanded) .nav-separator { margin: 8px 12px; }
 
-.sidebar-footer { justify-content: center; padding: 12px 8px; }
-.sidebar-footer .version-badge { display: none; }
+.nav-section-label {
+    font-size: 11px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.3);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 4px 12px 2px;
+    white-space: nowrap;
+}
+.sidebar:not(.is-expanded) .nav-section-label { display: none; }
 
-/* ─── Nav tooltips on hover ─── */
+/* Recent sessions */
+.nav-recent { display: flex; flex-direction: column; gap: 1px; }
+.nav-recent-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: var(--r-sm);
+    color: var(--nav-text);
+    text-decoration: none;
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: color var(--fast), background var(--fast);
+}
+.nav-recent-item:hover { color: var(--nav-text-hover); background: rgba(255,255,255,0.06); }
+.nav-recent-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.2);
+    flex-shrink: 0;
+}
+.sidebar:not(.is-expanded) .nav-recent { display: none; }
+
+/* ─── Nav tooltips (collapsed only) ─── */
 .nav-link::after {
     content: attr(data-label);
     position: absolute;
@@ -138,7 +217,8 @@
     opacity: 0;
     transition: opacity var(--fast) var(--ease);
 }
-.nav-link:hover::after { opacity: 1; }
+.sidebar:not(.is-expanded) .nav-link:hover::after { opacity: 1; }
+.sidebar.is-expanded .nav-link::after { display: none; }
 .nav-link:not([data-label])::after { display: none; }
 
 /* ─── Emergency Stop nav button ─── */

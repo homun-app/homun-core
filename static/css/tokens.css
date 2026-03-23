@@ -137,9 +137,9 @@
     --overlay-heavy:  rgba(0, 0, 0, 0.35);
 
     /* Layout */
-    --nav-w:          70px;
-    --sidebar-w:      70px;
-    --sidebar-collapsed-w: 70px;
+    --nav-w:          56px;
+    --sidebar-w:      56px;
+    --sidebar-collapsed-w: 56px;
     --content-radius: 20px;
     --header-row:     44px;
 
