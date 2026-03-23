@@ -1140,9 +1140,8 @@ async fn appearance_page(State(state): State<Arc<AppState>>) -> Html<String> {
 
 // ─── Channels ──────────────────────────────────────────────────
 
-async fn channels_page(State(state): State<Arc<AppState>>) -> Html<String> {
-    let config = state.config.read().await;
-    let channels_html = build_channels_cards_html(&config);
+async fn channels_page(State(_state): State<Arc<AppState>>) -> Html<String> {
+    let channels_html = build_channels_cards_static();
 
     let body = format!(
         r##"<main class="content">
@@ -1363,7 +1362,7 @@ async fn channels_page(State(state): State<Arc<AppState>>) -> Html<String> {
         channels_html = channels_html,
     );
 
-    Html(page_html("Channels", "channels", &body, &["setup.js"]))
+    Html(page_html("Channels", "channels", &body, &["channels.js"]))
 }
 
 // ─── Browser ──────────────────────────────────────────────────
@@ -3760,13 +3759,17 @@ mod build_providers_html {
     }
 }
 
-fn build_channels_cards_html(config: &crate::config::Config) -> String {
+/// Build channel type cards with static metadata.
+///
+/// Cards start in unconfigured state. JS (`channels.js`) updates them
+/// dynamically from the gateways API after page load.
+fn build_channels_cards_static() -> String {
     struct ChannelMeta {
         name: &'static str,
         display: &'static str,
         desc: &'static str,
         icon: &'static str,
-        has_token: bool,
+        is_web: bool,
     }
 
     let channels = [
@@ -3775,133 +3778,60 @@ fn build_channels_cards_html(config: &crate::config::Config) -> String {
             display: "Telegram",
             desc: "Send and receive messages via Telegram bot",
             icon: ICON_TELEGRAM,
-            has_token: true,
+            is_web: false,
         },
         ChannelMeta {
             name: "discord",
             display: "Discord",
             desc: "Discord bot via gateway connection",
             icon: ICON_DISCORD,
-            has_token: true,
+            is_web: false,
         },
         ChannelMeta {
             name: "slack",
             display: "Slack",
             desc: "Slack workspace integration via Web API",
             icon: ICON_SLACK,
-            has_token: true,
+            is_web: false,
         },
         ChannelMeta {
             name: "whatsapp",
             display: "WhatsApp",
             desc: "Native WhatsApp Web client (no bridge needed)",
             icon: ICON_PHONE,
-            has_token: false,
+            is_web: false,
         },
         ChannelMeta {
             name: "email",
             display: "Email",
             desc: "IMAP/SMTP email integration",
             icon: ICON_EMAIL,
-            has_token: false,
+            is_web: false,
         },
         ChannelMeta {
             name: "web",
             display: "Web UI",
             desc: "Browser-based chat interface",
             icon: ICON_WEB,
-            has_token: false,
+            is_web: true,
         },
     ];
 
     channels
         .iter()
         .map(|ch| {
-            let configured = config.is_channel_configured(ch.name);
-            let enabled = match ch.name {
-                "telegram" => config.channels.telegram.enabled,
-                "discord" => config.channels.discord.enabled,
-                "slack" => config.channels.slack.enabled,
-                "whatsapp" => config.channels.whatsapp.enabled,
-                "email" => config.channels.email.enabled,
-                "web" => config.channels.web.enabled,
-                _ => false,
-            };
-            let is_web = ch.name == "web";
-
-            let mut classes = String::from("provider-card channel-card");
-            if configured || is_web {
-                classes.push_str(" is-configured");
-            }
-            if enabled || is_web {
-                classes.push_str(" is-active");
-            }
-
-            let toggle_checked = if enabled || is_web { "checked" } else { "" };
+            let is_web = ch.is_web;
+            let web_class = if is_web { " is-configured is-active" } else { "" };
+            let toggle_checked = if is_web { "checked" } else { "" };
             let toggle_disabled = if is_web { "disabled" } else { "" };
-
-            // Badge: "Active" for enabled channels
-            let badge = if enabled || is_web {
+            let badge = if is_web {
                 r#"<span class="provider-default-badge">Active</span>"#
             } else {
-                ""
+                r#"<span class="provider-default-badge" style="display:none">Active</span>"#
             };
-
-            // Channel-specific data attributes (resolve encrypted tokens)
-            let token_mask = match ch.name {
-                "telegram" if configured => resolve_and_mask_token("telegram", &config.channels.telegram.token),
-                "discord" if configured => resolve_and_mask_token("discord", &config.channels.discord.token),
-                "slack" if configured => resolve_and_mask_token("slack", &config.channels.slack.token),
-                _ => String::new(),
-            };
-            let allow_from = match ch.name {
-                "telegram" => config.channels.telegram.allow_from.join(","),
-                "discord" => config.channels.discord.allow_from.join(","),
-                "slack" => config.channels.slack.allow_from.join(","),
-                "whatsapp" => config.channels.whatsapp.allow_from.join(","),
-                "email" => config.channels.email.allow_from.join(","),
-                _ => String::new(),
-            };
-            let phone = &config.channels.whatsapp.phone_number;
-            let discord_channel = &config.channels.discord.default_channel_id;
-            let slack_channel = &config.channels.slack.channel_id;
-            let web_host = &config.channels.web.host;
-            let web_port = config.channels.web.port;
-
-            // Email-specific data attributes
-            let email_imap_host = &config.channels.email.imap_host;
-            let email_imap_port = config.channels.email.imap_port;
-            let email_smtp_host = &config.channels.email.smtp_host;
-            let email_smtp_port = config.channels.email.smtp_port;
-            let email_username = &config.channels.email.username;
-            let email_from = &config.channels.email.from_address;
-
-            // Mode/notify from emails.default (multi-account) if it exists
-            let default_acc = config.channels.emails.get("default");
-            let email_mode = default_acc
-                .map(|a| match a.mode {
-                    crate::config::EmailMode::Assisted => "assisted",
-                    crate::config::EmailMode::Automatic => "automatic",
-                    crate::config::EmailMode::OnDemand => "on_demand",
-                })
-                .unwrap_or("assisted");
-            let email_notify_channel = default_acc
-                .and_then(|a| a.notify_channel.as_deref())
-                .unwrap_or("");
-            let email_notify_chat_id = default_acc
-                .and_then(|a| a.notify_chat_id.as_deref())
-                .unwrap_or("");
-            let email_trigger_word = default_acc
-                .and_then(|a| a.trigger_word.as_deref())
-                .unwrap_or("");
-
-            // Persona & tone per channel (via unified ChannelBehavior)
-            let behavior = config.channels.behavior_for(ch.name);
-            let ch_persona = behavior.map(|b| b.persona()).unwrap_or("bot");
-            let ch_tone = behavior.map(|b| b.tone_of_voice()).unwrap_or("");
 
             format!(
-                r##"<div class="{classes}" data-channel="{name}" data-display="{display}" data-configured="{configured}" data-enabled="{enabled}" data-has-token="{has_token}" data-token-mask="{token_mask}" data-allow-from="{allow_from}" data-phone="{phone}" data-discord-channel="{discord_channel}" data-slack-channel="{slack_channel}" data-web-host="{web_host}" data-web-port="{web_port}" data-is-web="{is_web}" data-email-imap-host="{email_imap_host}" data-email-imap-port="{email_imap_port}" data-email-smtp-host="{email_smtp_host}" data-email-smtp-port="{email_smtp_port}" data-email-username="{email_username}" data-email-from="{email_from}" data-email-mode="{email_mode}" data-email-notify-channel="{email_notify_channel}" data-email-notify-chat-id="{email_notify_chat_id}" data-email-trigger-word="{email_trigger_word}" data-persona="{ch_persona}" data-tone-of-voice="{ch_tone}">
+                r##"<div class="provider-card channel-card{web_class}" data-channel="{name}" data-display="{display}" data-is-web="{is_web}">
                     <div class="provider-card-header">
                         <div class="provider-card-info">
                             <span class="channel-icon">{icon}</span>
@@ -3921,37 +3851,9 @@ fn build_channels_cards_html(config: &crate::config::Config) -> String {
                 display = ch.display,
                 desc = ch.desc,
                 icon = ch.icon,
-                has_token = ch.has_token,
-                slack_channel = slack_channel,
             )
         })
         .collect()
-}
-
-fn mask_token(token: &str) -> String {
-    if token.is_empty() {
-        "Not configured".to_string()
-    } else if token.len() > 8 {
-        format!("{}•••••", &token[..6])
-    } else {
-        "•••••".to_string()
-    }
-}
-
-/// Resolve encrypted token and mask it for display.
-fn resolve_and_mask_token(channel_name: &str, toml_value: &str) -> String {
-    if toml_value == "***ENCRYPTED***" {
-        // Read real token from encrypted storage
-        if let Ok(secrets) = crate::storage::global_secrets() {
-            let key = crate::storage::SecretKey::channel_token(channel_name);
-            if let Ok(Some(real_token)) = secrets.get(&key) {
-                return mask_token(&real_token);
-            }
-        }
-        "Encrypted ••••".to_string()
-    } else {
-        mask_token(toml_value)
-    }
 }
 
 /// Build email account cards for the settings page.
@@ -5018,30 +4920,55 @@ async fn maintenance_page() -> Html<String> {
 
 // ─── Onboarding ─────────────────────────────────────────────────
 
+/// GET /onboarding — full-page setup wizard (no sidebar/topbar).
 async fn onboarding_page() -> Html<String> {
-    let body = r##"<main class="content">
-            <div class="content-inner">
-                <div class="ob-shell">
-                    <nav class="ob-stepper" id="ob-stepper"></nav>
-                    <div class="ob-phase-area" id="ob-phase-area"></div>
-                    <div class="ob-nav" id="ob-nav">
-                        <button class="btn btn-ghost" id="ob-back" style="visibility:hidden">← Back</button>
-                        <div class="ob-nav-right">
-                            <a href="#" class="ob-skip" id="ob-skip">Skip setup</a>
-                            <button class="btn btn-primary" id="ob-next">Get started →</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-            <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
-        </main>"##;
-
-    Html(page_html(
-        "Welcome",
-        "onboarding",
-        body,
-        &["accent-utils.js", "onboarding.js"],
+    Html(format!(
+        r##"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Setup — Homun</title>
+    <link rel="icon" href="/static/img/favicon/favicon.ico" sizes="any">
+    <link rel="icon" href="/static/img/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap">
+    <link rel="stylesheet" href="/static/css/tokens.css">
+    <link rel="stylesheet" href="/static/css/reset.css">
+    <link rel="stylesheet" href="/static/css/primitives.css">
+    <link rel="stylesheet" href="/static/css/onboarding.css">
+    <script>
+    (function() {{
+        var theme = localStorage.getItem('homun-theme') || 'system';
+        if (theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {{
+            document.documentElement.classList.add('dark');
+        }}
+        var accent = localStorage.getItem('homun-accent');
+        if (accent) document.documentElement.style.setProperty('--accent', accent);
+    }})();
+    </script>
+</head>
+<body class="ob-body">
+    <div class="ob-wrapper">
+        <header class="ob-header">
+            <img src="/static/img/icon_braun.png" alt="Homun" class="ob-logo ob-logo-light">
+            <img src="/static/img/icon_white.png" alt="Homun" class="ob-logo ob-logo-dark">
+        </header>
+        <div class="ob-progress" id="ob-progress">
+            <div class="ob-progress-bar" id="ob-progress-bar"></div>
+        </div>
+        <div class="ob-step-label" id="ob-step-label"></div>
+        <main class="ob-main" id="ob-main"></main>
+        <footer class="ob-footer" id="ob-footer">
+            <button class="btn btn-ghost" id="ob-back" style="visibility:hidden">&larr; Back</button>
+            <button class="btn btn-primary" id="ob-next">Get started &rarr;</button>
+        </footer>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
+    <script src="/static/js/accent-utils.js"></script>
+    <script src="/static/js/onboarding.js"></script>
+</body>
+</html>"##
     ))
 }
 

@@ -276,14 +276,18 @@ document.getElementById('link-identity-form')?.addEventListener('submit', (e) =>
             var ch = eaNotifyChannelSelect.value;
             if (eaNotifyHint) eaNotifyHint.textContent = '';
             if (!ch) return;
-            fetch('/api/v1/channels/' + ch)
-                .then(function(r) { return r.ok ? r.json() : null; })
-                .then(function(data) {
-                    if (!data) return;
+            // Look up gateway for that channel type to suggest a chat ID
+            fetch('/api/v1/gateways')
+                .then(function(r) { return r.ok ? r.json() : []; })
+                .then(function(gateways) {
+                    var gw = gateways.find(function(g) { return g.channel_type === ch; });
+                    if (!gw) return;
+                    var cfg = {};
+                    try { cfg = JSON.parse(gw.config_json || '{}'); } catch(e) {}
                     var id = '';
-                    if (ch === 'discord') id = data.default_channel_id || (data.allow_from || [])[0] || '';
-                    else if (ch === 'slack') id = data.channel_id || (data.allow_from || [])[0] || '';
-                    else id = (data.allow_from || [])[0] || '';
+                    if (ch === 'discord') id = cfg.default_channel_id || (cfg.allow_from || [])[0] || '';
+                    else if (ch === 'slack') id = cfg.channel_id || (cfg.allow_from || [])[0] || '';
+                    else id = (cfg.allow_from || [])[0] || '';
                     if (id && eaNotifyChatIdInput && !eaNotifyChatIdInput.value.trim()) {
                         eaNotifyChatIdInput.value = id;
                     }

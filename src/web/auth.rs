@@ -404,12 +404,12 @@ pub async fn auth_middleware(
                     });
 
                     // Redirect to onboarding if not yet completed and no provider set up
-                    // (existing users who already have a provider are auto-skipped)
                     let path = req.uri().path();
                     let config = state.config.read().await;
                     let needs_onboarding = !config.ui.onboarding_completed
                         && config.agent.model.is_empty()
                         && !path.starts_with("/onboarding")
+                        && !path.starts_with("/setup-wizard") // legacy compat
                         && !path.starts_with("/api/")
                         && !path.starts_with("/static/")
                         && !path.starts_with("/ws/");
@@ -492,17 +492,20 @@ pub async fn auth_middleware(
         }
     }
 
-    // 3. First-run: if no user has a password, redirect to setup wizard
+    // 3. First-run: if no user has a password, redirect to onboarding (unified wizard)
     if let Some(db) = &state.db {
         if let Ok(0) = db.count_users_with_password().await {
             let path = req.uri().path();
-            if !path.starts_with("/setup-wizard")
+            if !path.starts_with("/onboarding")
+                && !path.starts_with("/setup-wizard") // legacy compat
                 && !path.starts_with("/api/auth/setup")
+                && !path.starts_with("/api/v1/onboarding")
+                && !path.starts_with("/api/v1/providers")
                 && !path.starts_with("/static/")
             {
-                return Redirect::to("/setup-wizard").into_response();
+                return Redirect::to("/onboarding").into_response();
             }
-            // Allow setup wizard and its API through
+            // Allow onboarding and its APIs through without auth
             return next.run(req).await;
         }
     }

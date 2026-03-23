@@ -1,487 +1,513 @@
 /* ═══════════════════════════════════════════════
-   Onboarding v2 — uses standard page_html() layout
+   Onboarding v3 — Full-page WordPress-style wizard
+   No sidebar, no topbar. Logo + progress + form.
    ═══════════════════════════════════════════════ */
 
-.ob-shell {
-    max-width: 640px;
-    margin: 0 auto;
-    padding: 32px 0 16px;
-}
+/* ─── Full-page shell ─── */
 
-/* ─── Stepper ─── */
-
-.ob-stepper {
+.ob-body {
+    min-height: 100vh;
+    background: var(--bg);
     display: flex;
-    align-items: center;
     justify-content: center;
-    gap: 0;
-    margin-bottom: 40px;
+    padding: 0;
+    margin: 0;
+    font-family: 'Plus Jakarta Sans', var(--font-stack, system-ui, sans-serif);
 }
 
-.ob-step {
+.ob-wrapper {
+    width: 100%;
+    max-width: 640px;
+    padding: 40px 24px;
     display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    border-radius: var(--r-pill);
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--t3);
-    transition: all var(--fast) var(--ease);
+    flex-direction: column;
+    min-height: 100vh;
 }
 
-.ob-step.is-active {
-    color: var(--accent);
-    background: var(--accent-light);
-    font-weight: 600;
-}
-.ob-step.is-done { color: var(--ok); }
-.ob-step-num {
-    width: 24px; height: 24px;
-    display: flex; align-items: center; justify-content: center;
-    border-radius: 50%;
-    font-size: 11px; font-weight: 600;
-    border: 1.5px solid var(--border);
-    flex-shrink: 0;
-}
-.ob-step.is-active .ob-step-num {
-    border-color: var(--accent);
-    background: var(--accent);
-    color: var(--accent-contrast);
-}
-.ob-step.is-done .ob-step-num {
-    border-color: var(--ok);
-    background: var(--ok);
-    color: #fff;
-}
-.ob-step-label { white-space: nowrap; }
-.ob-step-line {
-    width: 24px; height: 1px;
-    background: var(--border);
-    flex-shrink: 0;
-}
+/* ─── Header (logo) ─── */
 
-/* ─── Navigation ─── */
-
-.ob-nav {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-top: 32px;
-    padding-top: 24px;
-    border-top: 1px solid var(--border-subtle);
-}
-.ob-nav-right {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-}
-.ob-skip {
-    font-size: 13px;
-    color: var(--t3);
-    text-decoration: none;
-}
-.ob-skip:hover { color: var(--t1); }
-
-/* ─── Phase content ─── */
-
-.ob-phase { animation: ob-fade 250ms var(--ease) both; }
-@keyframes ob-fade {
-    from { opacity: 0; transform: translateY(6px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-@media (prefers-reduced-motion: reduce) {
-    .ob-phase { animation: none !important; }
-}
-
-.ob-hero {
+.ob-header {
     text-align: center;
     margin-bottom: 32px;
 }
-.ob-hero .logo-icon {
-    width: 56px; height: 56px;
-    margin: 0 auto 16px;
+
+.ob-logo {
+    height: 48px;
+    width: auto;
 }
-.ob-hero h1 {
-    font-size: 28px;
-    font-weight: 300;
-    letter-spacing: -0.02em;
-    margin: 0 0 8px;
+.ob-logo-light { display: inline; }
+.ob-logo-dark { display: none; }
+.dark .ob-logo-light { display: none; }
+.dark .ob-logo-dark { display: inline; }
+
+/* ─── Progress bar ─── */
+
+.ob-progress {
+    width: 100%;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    margin-bottom: 8px;
+    overflow: hidden;
+}
+
+.ob-progress-bar {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.4s ease;
+    width: 0;
+}
+
+/* ─── Step label ─── */
+
+.ob-step-label {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--t3);
+    margin-bottom: 24px;
+    text-align: center;
+}
+
+/* ─── Main content area ─── */
+
+.ob-main {
+    flex: 1;
+}
+
+.ob-main h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
     color: var(--t1);
+    margin: 0 0 8px;
 }
-.ob-hero p {
-    font-size: 15px;
-    color: var(--t2);
-    margin: 0;
+
+.ob-main p.ob-subtitle {
+    color: var(--t3);
+    font-size: 0.875rem;
+    margin: 0 0 24px;
     line-height: 1.5;
 }
 
-.ob-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--r-xl);
-    padding: 24px;
+/* ─── Footer (nav buttons) ─── */
+
+.ob-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 24px;
+    margin-top: auto;
+    border-top: 1px solid var(--border);
+}
+
+/* ─── Form elements ─── */
+
+.ob-form-group {
     margin-bottom: 16px;
 }
 
-.ob-section-label {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--t3);
-    margin-bottom: 16px;
-}
-
-/* ─── Fields ─── */
-
-.ob-field { margin-bottom: 16px; }
-.ob-field:last-child { margin-bottom: 0; }
-.ob-field label {
+.ob-form-group label {
     display: block;
-    font-size: 13px;
+    font-size: 0.8125rem;
     font-weight: 500;
     color: var(--t2);
     margin-bottom: 6px;
 }
-.ob-field-row {
+
+.ob-input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--bg);
+    color: var(--t1);
+    font-size: 0.875rem;
+    font-family: inherit;
+    box-sizing: border-box;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.ob-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-light);
+}
+
+.ob-input::placeholder {
+    color: var(--t4);
+}
+
+textarea.ob-input {
+    min-height: 100px;
+    resize: vertical;
+}
+
+select.ob-input {
+    cursor: pointer;
+}
+
+.ob-form-hint {
+    font-size: 0.75rem;
+    color: var(--t4);
+    margin-top: 4px;
+}
+
+.ob-form-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 16px;
-    margin-bottom: 16px;
-}
-.ob-field-actions {
-    display: flex;
-    align-items: center;
     gap: 12px;
-    margin-top: 16px;
 }
 
-/* ─── Theme picker ─── */
-
-.ob-theme-row {
-    display: flex;
-    gap: 8px;
-}
-.ob-theme-btn {
-    flex: 1;
-    padding: 10px;
-    text-align: center;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
-    font-size: 13px;
-    font-weight: 500;
-    font-family: var(--sans);
-    color: var(--t2);
-    cursor: pointer;
-    transition: all var(--fast) var(--ease);
-}
-.ob-theme-btn:hover { border-color: var(--border-strong); }
-.ob-theme-btn.is-active {
-    border-color: var(--accent);
-    color: var(--accent);
-    background: var(--accent-light);
+.ob-form-error {
+    color: var(--err);
+    font-size: 0.8125rem;
+    min-height: 1.25rem;
+    margin-top: 4px;
 }
 
-/* ─── Accent picker (reuses .accent-swatch from appearance) ─── */
+/* ─── Card grid (providers + channels) ─── */
 
-.ob-accent-row {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-    flex-wrap: wrap;
-}
-.ob-accent-dot {
-    width: 28px; height: 28px;
-    border-radius: 50%;
-    border: 2px solid transparent;
-    cursor: pointer;
-    transition: all var(--fast) var(--ease);
-    position: relative;
-}
-.ob-accent-dot:hover { transform: scale(1.15); }
-.ob-accent-dot.is-active {
-    border-color: var(--t1);
-    box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--t1);
-}
-
-/* ─── Provider grid ─── */
-
-.ob-provider-grid {
+.ob-card-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-    gap: 8px;
-}
-.ob-provider-card {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 12px 16px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
-    cursor: pointer;
-    transition: all var(--fast) var(--ease);
-    font-family: inherit;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--t1);
-}
-.ob-provider-card:hover {
-    border-color: var(--border-strong);
-    background: var(--surface-hover);
-}
-.ob-provider-card.is-configured {
-    border-color: var(--ok);
-    background: var(--ok-bg);
-}
-.ob-provider-dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-}
-.ob-badge-ok {
-    font-size: 12px;
-    color: var(--ok);
-    font-weight: 600;
+    gap: 12px;
+    margin-bottom: 20px;
 }
 
-/* Provider form (expanded) */
-.ob-provider-detail {
-    padding: 20px;
-    background: var(--bg-subtle);
-    border-radius: var(--r-lg);
-    margin-top: 12px;
-}
-.ob-detail-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 16px;
-}
-.ob-test-status { font-size: 13px; color: var(--t3); }
-.ob-test-status.is-ok { color: var(--ok); font-weight: 600; }
-.ob-test-status.is-err { color: var(--err); }
-
-/* ─── Ollama ─── */
-
-.ob-ollama {
-    padding: 16px;
-    border-radius: var(--r-lg);
+.ob-card {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-}
-.ob-ollama.is-detected {
-    background: var(--ok-bg);
-    border: 1px solid var(--ok-border);
-}
-.ob-ollama.is-missing {
-    background: var(--bg-subtle);
-    border: 1px solid var(--border);
-    flex-direction: row;
     align-items: center;
+    justify-content: center;
     gap: 8px;
-}
-.ob-ollama-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-}
-.ob-status-dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-}
-.ob-status-dot.is-ok { background: var(--ok); }
-.ob-status-dot.is-off { background: var(--t4); }
-.ob-muted { font-size: 13px; color: var(--t2); }
-.ob-ollama-models {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-}
-.ob-model-pill {
-    padding: 6px 14px;
+    padding: 16px 12px;
+    border: 1.5px solid var(--border);
+    border-radius: var(--r-xl);
     background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--r-pill);
-    font-size: 13px;
-    font-family: var(--mono);
     cursor: pointer;
-    transition: all var(--fast) var(--ease);
-    color: var(--t1);
+    transition: all 0.15s ease;
+    text-align: center;
+    min-height: 80px;
 }
-.ob-model-pill:hover {
+
+.ob-card:hover {
     border-color: var(--accent);
     background: var(--accent-light);
 }
-.ob-model-pill.is-selected {
+
+.ob-card.is-selected {
+    border-color: var(--accent);
+    background: var(--accent-light);
+    box-shadow: 0 0 0 2px var(--accent-light);
+}
+
+.ob-card.is-configured {
     border-color: var(--ok);
-    background: var(--ok-bg);
+}
+
+.ob-card.is-configured::after {
+    content: '✓';
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    font-size: 0.75rem;
     color: var(--ok);
+    font-weight: 700;
+}
+
+.ob-card {
+    position: relative;
+}
+
+.ob-card-icon {
+    font-size: 1.5rem;
+    line-height: 1;
+}
+
+.ob-card-name {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--t1);
+}
+
+.ob-card-desc {
+    font-size: 0.6875rem;
+    color: var(--t3);
+    line-height: 1.3;
+}
+
+/* Web UI always-active card */
+.ob-card.is-always {
+    opacity: 0.7;
+    cursor: default;
+    border-style: dashed;
+}
+.ob-card.is-always:hover {
+    border-color: var(--border);
+    background: var(--surface);
+}
+
+/* ─── Expandable inline form (for provider/channel details) ─── */
+
+.ob-expand {
+    margin-top: 16px;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-xl);
+    background: var(--surface);
+    animation: ob-slide-down 0.2s ease;
+}
+
+@keyframes ob-slide-down {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.ob-expand-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--t1);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ob-expand-title .ob-card-icon {
+    font-size: 1.125rem;
 }
 
 /* ─── Model list ─── */
 
+.ob-model-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 12px;
+    max-height: 240px;
+    overflow-y: auto;
+}
+
 .ob-model-item {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 10px 16px;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
     border-radius: var(--r-lg);
     cursor: pointer;
-    transition: background var(--fast) var(--ease);
+    transition: all 0.12s;
+    background: var(--bg);
 }
-.ob-model-item:hover { background: var(--surface-hover); }
-.ob-model-item.is-selected { background: var(--accent-light); }
-.ob-model-item input[type="radio"] { display: none; }
-.ob-model-radio {
-    width: 18px; height: 18px;
-    border: 2px solid var(--border-strong);
-    border-radius: 50%;
-    flex-shrink: 0;
-    position: relative;
-    transition: border-color var(--fast) var(--ease);
+
+.ob-model-item:hover {
+    border-color: var(--accent);
 }
-.ob-model-item.is-selected .ob-model-radio { border-color: var(--accent); }
-.ob-model-item.is-selected .ob-model-radio::after {
-    content: '';
-    position: absolute;
-    top: 3px; left: 3px;
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: var(--accent);
+
+.ob-model-item.is-selected {
+    border-color: var(--accent);
+    background: var(--accent-light);
 }
+
+.ob-model-item input[type="radio"] {
+    accent-color: var(--accent);
+}
+
 .ob-model-name {
-    font-size: 14px;
-    font-family: var(--mono);
+    font-size: 0.8125rem;
+    font-weight: 500;
     color: var(--t1);
 }
-.ob-model-more { margin-top: 8px; }
-.ob-model-more summary {
-    font-size: 13px;
+
+.ob-model-desc {
+    font-size: 0.6875rem;
     color: var(--t3);
-    cursor: pointer;
-    padding: 8px 0;
 }
-.ob-model-more summary:hover { color: var(--accent); }
 
-/* ─── Channel grid ─── */
+/* ─── Test / status badges ─── */
 
-.ob-channel-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+.ob-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: var(--r-pill);
+}
+
+.ob-badge-ok {
+    color: var(--ok);
+    background: color-mix(in srgb, var(--ok) 12%, transparent);
+}
+
+.ob-badge-err {
+    color: var(--err);
+    background: color-mix(in srgb, var(--err) 12%, transparent);
+}
+
+.ob-badge-wait {
+    color: var(--t3);
+    background: var(--surface-2);
+}
+
+/* ─── Profile preview ─── */
+
+.ob-profile-preview {
+    margin-top: 16px;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-xl);
+    background: var(--surface);
+}
+
+.ob-profile-header {
+    display: flex;
+    align-items: center;
     gap: 12px;
-    margin-bottom: 16px;
+    margin-bottom: 12px;
 }
-.ob-channel-card {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-    padding: 24px 16px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--r-xl);
-    cursor: pointer;
-    transition: all var(--fast) var(--ease);
-    text-align: center;
-    font-family: inherit;
+
+.ob-profile-avatar {
+    font-size: 2rem;
+    line-height: 1;
+}
+
+.ob-profile-name {
+    font-size: 1rem;
+    font-weight: 600;
     color: var(--t1);
 }
-.ob-channel-card:hover {
-    border-color: var(--accent-border);
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-md);
-}
-.ob-channel-card.is-always {
-    cursor: default;
-    background: var(--ok-bg);
-    border-color: var(--ok-border);
-}
-.ob-channel-card.is-always:hover {
-    transform: none;
-    box-shadow: none;
-}
-.ob-channel-icon { font-size: 24px; }
-.ob-channel-name { font-size: 14px; font-weight: 600; }
-.ob-channel-action { font-size: 12px; color: var(--accent); font-weight: 500; }
 
-.ob-channel-detail {
-    padding: 20px;
-    background: var(--surface);
+.ob-profile-soul {
+    font-size: 0.8125rem;
+    color: var(--t2);
+    line-height: 1.6;
+    white-space: pre-wrap;
+    max-height: 160px;
+    overflow-y: auto;
+    padding: 8px;
+    background: var(--bg);
+    border-radius: var(--r-lg);
     border: 1px solid var(--border);
-    border-radius: var(--r-xl);
+}
+
+/* ─── Theme/accent picker (step 3) ─── */
+
+.ob-theme-row {
+    display: flex;
+    gap: 8px;
     margin-bottom: 16px;
 }
 
-/* ─── Chat widget (Phase 4) ─── */
-
-.ob-chat {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--r-xl);
-    display: flex;
-    flex-direction: column;
-    height: 420px;
-    overflow: hidden;
-}
-.ob-chat-messages {
+.ob-theme-btn {
     flex: 1;
-    overflow-y: auto;
-    padding: 24px;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
+    padding: 10px;
+    border: 1.5px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--surface);
+    cursor: pointer;
+    text-align: center;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--t2);
+    transition: all 0.12s;
 }
-.ob-chat-input {
+
+.ob-theme-btn:hover {
+    border-color: var(--accent);
+}
+
+.ob-theme-btn.is-active {
+    border-color: var(--accent);
+    background: var(--accent-light);
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.ob-accent-row {
     display: flex;
     gap: 8px;
-    padding: 12px 16px;
-    border-top: 1px solid var(--border);
-    align-items: flex-end;
+    align-items: center;
+    flex-wrap: wrap;
 }
-.ob-chat-input textarea {
-    flex: 1;
-    resize: none;
-    min-height: 40px;
-    max-height: 120px;
+
+.ob-accent-dot {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: all 0.12s;
 }
-.ob-chat-connecting {
+
+.ob-accent-dot:hover {
+    transform: scale(1.15);
+}
+
+.ob-accent-dot.is-active {
+    border-color: var(--t1);
+    box-shadow: 0 0 0 2px var(--bg);
+}
+
+/* ─── Summary (step 5) ─── */
+
+.ob-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 16px;
+}
+
+.ob-summary-item {
     display: flex;
     align-items: center;
-    justify-content: center;
-    height: 100%;
-    color: var(--t3);
-    font-size: 14px;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--surface);
 }
 
-/* ─── Misc ─── */
-
-.ob-hint {
-    font-size: 13px;
+.ob-summary-label {
+    font-size: 0.8125rem;
     color: var(--t3);
-    margin: 8px 0;
-    text-align: center;
 }
-.ob-loading {
-    padding: 32px;
-    text-align: center;
-    color: var(--t3);
-    font-size: 14px;
+
+.ob-summary-value {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--t1);
 }
 
 /* ─── Responsive ─── */
 
 @media (max-width: 640px) {
-    .ob-shell { padding: 16px 0; }
-    .ob-step-label { display: none; }
-    .ob-field-row { grid-template-columns: 1fr; }
-    .ob-provider-grid { grid-template-columns: 1fr 1fr; }
-    .ob-channel-grid { grid-template-columns: 1fr 1fr; }
-    .ob-hero h1 { font-size: 24px; }
-    .ob-chat { height: 320px; }
+    .ob-wrapper {
+        padding: 24px 16px;
+    }
+
+    .ob-card-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .ob-form-row {
+        grid-template-columns: 1fr;
+    }
+
+    .ob-main h2 {
+        font-size: 1.25rem;
+    }
+}
+
+@media (max-width: 380px) {
+    .ob-card-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+    }
+
+    .ob-card {
+        padding: 12px 8px;
+        min-height: 64px;
+    }
 }
