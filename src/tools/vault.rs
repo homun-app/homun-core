@@ -226,10 +226,12 @@ impl Tool for VaultTool {
     }
 
     fn description(&self) -> &str {
-        "Encrypted secret vault. Store and retrieve sensitive data (passwords, tokens, API keys). \
+        "Encrypted secret vault. Store and retrieve sensitive data (passwords, tokens, API keys, personal codes). \
          Data is encrypted with AES-256-GCM and protected by the OS keychain. \
-         In memory and context, only vault://key_name references appear — never plaintext values. \
-         Actions: store (save a secret), retrieve (get a secret), list (show stored keys), delete (remove a secret), confirm (verify 2FA code)."
+         In memory and context, secrets appear as vault://key_name references — these are opaque placeholders, NOT the actual values. \
+         When the user asks for a secret and you see vault://key in context, you MUST call this tool with action=retrieve to get the real value. \
+         Actions: store (save a secret), retrieve (decrypt and return a secret value — use when user asks for data behind a vault:// ref), \
+         list (show stored keys), delete (remove a secret), confirm (verify 2FA code)."
     }
 
     fn parameters(&self) -> Value {

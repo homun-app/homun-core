@@ -43,6 +43,7 @@ pub(crate) async fn build_selective_tool_defs(
         "send_message",
         "remember",
         "approval",
+        "vault",
     ];
 
     let selected_names: HashSet<&str> = discovered_tools
