@@ -62,6 +62,16 @@ impl SecretKey {
         Self(format!("channel.{}.token", channel))
     }
 
+    /// Vault key for a gateway's primary token (bot token, API key, password).
+    pub fn gateway_token(gateway_id: i64) -> Self {
+        Self(format!("gateway.{}.token", gateway_id))
+    }
+
+    /// Vault key for a gateway's secondary token (e.g. Slack app_token).
+    pub fn gateway_app_token(gateway_id: i64) -> Self {
+        Self(format!("gateway.{}.app_token", gateway_id))
+    }
+
     pub fn custom(key: &str) -> Self {
         Self(key.to_string())
     }

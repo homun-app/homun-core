@@ -10,6 +10,7 @@ mod connections;
 mod contacts;
 mod devices;
 mod email_accounts;
+mod gateways;
 mod embeddings;
 mod health;
 mod knowledge;
@@ -76,6 +77,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .merge(business::routes())
         .merge(contacts::routes())
         .merge(profiles::routes())
+        .merge(gateways::routes())
         .merge(onboarding::routes())
         .merge(agents::routes())
         .merge(devices::routes())

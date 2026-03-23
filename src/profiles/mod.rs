@@ -24,6 +24,8 @@ pub struct Profile {
     pub slug: String,
     pub display_name: String,
     pub avatar_emoji: String,
+    /// Dot color for the profile (hex, e.g. "#3B82F6").
+    pub color: String,
     pub profile_json: String,
     /// 1 = default profile, 0 = non-default. Exactly one row should be 1.
     pub is_default: i64,
@@ -376,6 +378,7 @@ mod tests {
             slug: "acme-corp".into(),
             display_name: "Acme".into(),
             avatar_emoji: "🏢".into(),
+            color: "#3B82F6".into(),
             profile_json: "{}".into(),
             is_default: 0,
             user_id: None,

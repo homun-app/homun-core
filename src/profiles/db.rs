@@ -16,17 +16,19 @@ pub async fn insert_profile(
     slug: &str,
     display_name: &str,
     avatar_emoji: &str,
+    color: &str,
     profile_json: &str,
     user_id: Option<&str>,
 ) -> Result<i64> {
     let id = sqlx::query_scalar::<_, i64>(
-        "INSERT INTO profiles (slug, display_name, avatar_emoji, profile_json, user_id)
-         VALUES (?, ?, ?, ?, ?)
+        "INSERT INTO profiles (slug, display_name, avatar_emoji, color, profile_json, user_id)
+         VALUES (?, ?, ?, ?, ?, ?)
          RETURNING id",
     )
     .bind(slug)
     .bind(display_name)
     .bind(avatar_emoji)
+    .bind(color)
     .bind(profile_json)
     .bind(user_id)
     .fetch_one(pool)
@@ -81,15 +83,17 @@ pub async fn update_profile(
     id: i64,
     display_name: &str,
     avatar_emoji: &str,
+    color: &str,
     profile_json: &str,
 ) -> Result<()> {
     sqlx::query(
-        "UPDATE profiles SET display_name = ?, avatar_emoji = ?, profile_json = ?,
+        "UPDATE profiles SET display_name = ?, avatar_emoji = ?, color = ?, profile_json = ?,
                 updated_at = datetime('now')
          WHERE id = ?",
     )
     .bind(display_name)
     .bind(avatar_emoji)
+    .bind(color)
     .bind(profile_json)
     .bind(id)
     .execute(pool)
@@ -205,7 +209,7 @@ async fn migrate_simple_persona(
     let profile_id = match existing {
         Some(p) => p.id,
         None => {
-            let id = insert_profile(pool, persona, display_name, emoji, "{}", Some(DEFAULT_ADMIN_USER_ID)).await?;
+            let id = insert_profile(pool, persona, display_name, emoji, "#3B82F6", "{}", Some(DEFAULT_ADMIN_USER_ID)).await?;
             tracing::info!(profile = persona, "Created profile from persona migration");
             id
         }
@@ -257,7 +261,7 @@ async fn migrate_custom_personas(
 
         let display_name = format!("Custom ({contact_name})");
         let profile_id =
-            insert_profile(pool, &slug, &display_name, "✨", "{}", Some(DEFAULT_ADMIN_USER_ID)).await?;
+            insert_profile(pool, &slug, &display_name, "✨", "#8B5CF6", "{}", Some(DEFAULT_ADMIN_USER_ID)).await?;
 
         // Write persona_instructions as SOUL.md for the new profile
         if !instructions.is_empty() {
@@ -305,13 +309,14 @@ mod tests {
             .await
             .expect("in-memory SQLite");
 
-        // Create profiles table (matches migration 034 + 037)
+        // Create profiles table (matches migration 034 + 037 + 038)
         sqlx::query(
             "CREATE TABLE profiles (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 slug TEXT UNIQUE NOT NULL,
                 display_name TEXT NOT NULL,
                 avatar_emoji TEXT NOT NULL DEFAULT '👤',
+                color TEXT NOT NULL DEFAULT '#3B82F6',
                 profile_json TEXT NOT NULL DEFAULT '{}',
                 is_default INTEGER NOT NULL DEFAULT 0,
                 user_id TEXT,
@@ -339,7 +344,7 @@ mod tests {
         let pool = test_pool().await;
 
         // Insert
-        let id = insert_profile(&pool, "acme", "Acme Corp", "🏢", "{}", None)
+        let id = insert_profile(&pool, "acme", "Acme Corp", "🏢", "#3B82F6", "{}", None)
             .await
             .expect("insert");
         assert!(id > 1); // default is id=1
@@ -359,7 +364,7 @@ mod tests {
         assert_eq!(all[0].is_default, 1); // default comes first
 
         // Update
-        update_profile(&pool, id, "Acme Inc", "🏭", r#"{"version":"1.0"}"#)
+        update_profile(&pool, id, "Acme Inc", "🏭", "#EF4444", r#"{"version":"1.0"}"#)
             .await
             .expect("update");
         let updated = load_profile_by_id(&pool, id).await.expect("load").expect("found");
@@ -383,10 +388,10 @@ mod tests {
     #[tokio::test]
     async fn duplicate_slug_rejected() {
         let pool = test_pool().await;
-        insert_profile(&pool, "test", "Test", "🧪", "{}", None)
+        insert_profile(&pool, "test", "Test", "🧪", "#3B82F6", "{}", None)
             .await
             .expect("first insert");
-        let result = insert_profile(&pool, "test", "Test 2", "🧪", "{}", None).await;
+        let result = insert_profile(&pool, "test", "Test 2", "🧪", "#3B82F6", "{}", None).await;
         assert!(result.is_err());
     }
 

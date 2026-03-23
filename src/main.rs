@@ -41,6 +41,7 @@ mod channels;
 mod config;
 mod connections;
 mod contacts;
+mod gateways;
 mod logs;
 mod mcp_setup;
 mod profiles;

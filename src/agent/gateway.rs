@@ -293,166 +293,9 @@ impl Gateway {
         let (channel_cmd_tx, mut channel_cmd_rx) = mpsc::channel::<ChannelCommand>(10);
         let mut channels: Vec<ChannelHandle> = Vec::new();
 
-        // --- Start Telegram channel ---
-        #[cfg(feature = "channel-telegram")]
-        if config.channels.telegram.enabled {
-            let mut tg_config = config.channels.telegram.clone();
-            // Resolve token from encrypted storage if marker is present
-            if tg_config.token == "***ENCRYPTED***" || tg_config.token.is_empty() {
-                if let Ok(secrets) = crate::storage::global_secrets() {
-                    let key = crate::storage::SecretKey::channel_token("telegram");
-                    if let Ok(Some(real_token)) = secrets.get(&key) {
-                        tg_config.token = real_token;
-                    }
-                }
-            }
-
-            // Skip if no valid token
-            if tg_config.token.is_empty() || tg_config.token == "***ENCRYPTED***" {
-                tracing::error!("Telegram enabled but no token found - skipping channel");
-            } else {
-                let ch = spawn_monitored_channel(
-                    "telegram",
-                    &self.channel_health,
-                    inbound_tx.clone(),
-                    move || Box::new(TelegramChannel::new(tg_config.clone())),
-                );
-                channels.push(ch);
-                tracing::info!("Telegram channel started (monitored)");
-            }
-        }
-
-        // --- Start Discord channel ---
-        #[cfg(feature = "channel-discord")]
-        if config.channels.discord.enabled {
-            let mut dc_config = config.channels.discord.clone();
-            // Resolve token from encrypted storage if marker is present
-            if dc_config.token == "***ENCRYPTED***" || dc_config.token.is_empty() {
-                if let Ok(secrets) = crate::storage::global_secrets() {
-                    let key = crate::storage::SecretKey::channel_token("discord");
-                    if let Ok(Some(real_token)) = secrets.get(&key) {
-                        dc_config.token = real_token;
-                    }
-                }
-            }
-
-            // Skip if no valid token
-            if dc_config.token.is_empty() || dc_config.token == "***ENCRYPTED***" {
-                tracing::error!("Discord enabled but no token found - skipping channel");
-            } else {
-                let ch =
-                    spawn_monitored_channel("discord", &self.channel_health, inbound_tx.clone(), {
-                        let health = self.channel_health.clone();
-                        move || {
-                            Box::new(
-                                DiscordChannel::new(dc_config.clone()).with_health(health.clone()),
-                            )
-                        }
-                    });
-                channels.push(ch);
-                tracing::info!("Discord channel started (monitored)");
-            }
-        }
-
-        // --- Start WhatsApp channel ---
-        #[cfg(feature = "channel-whatsapp")]
-        if config.channels.whatsapp.enabled {
-            let wa_config = config.channels.whatsapp.clone();
-            let ch = spawn_monitored_channel(
-                "whatsapp",
-                &self.channel_health,
-                inbound_tx.clone(),
-                move || Box::new(WhatsAppChannel::new(wa_config.clone())),
-            );
-            channels.push(ch);
-            tracing::info!("WhatsApp channel started (monitored)");
-        }
-
-        // --- Start Slack channel ---
-        if config.channels.slack.enabled {
-            let mut slack_config = config.channels.slack.clone();
-
-            // Resolve tokens from encrypted storage if marker is present
-            if slack_config.token == "***ENCRYPTED***" || slack_config.token.is_empty() {
-                if let Ok(secrets) = crate::storage::global_secrets() {
-                    let key = crate::storage::SecretKey::channel_token("slack");
-                    if let Ok(Some(real_token)) = secrets.get(&key) {
-                        slack_config.token = real_token;
-                    }
-                }
-            }
-            if slack_config.app_token == "***ENCRYPTED***" || slack_config.app_token.is_empty() {
-                if let Ok(secrets) = crate::storage::global_secrets() {
-                    let key = crate::storage::SecretKey::channel_token("slack_app");
-                    if let Ok(Some(real_token)) = secrets.get(&key) {
-                        slack_config.app_token = real_token;
-                    }
-                }
-            }
-
-            // Skip if no valid token
-            if slack_config.token.is_empty() || slack_config.token == "***ENCRYPTED***" {
-                tracing::error!("Slack enabled but no token found - skipping channel");
-            } else {
-                let ch = spawn_monitored_channel(
-                    "slack",
-                    &self.channel_health,
-                    inbound_tx.clone(),
-                    move || Box::new(SlackChannel::new(slack_config.clone())),
-                );
-                channels.push(ch);
-                tracing::info!("Slack channel started (monitored)");
-            }
-        }
-
-        // --- Start Email channel (multi-account) ---
-        #[cfg(feature = "channel-email")]
-        {
-            // Migrate legacy [channels.email] → [channels.emails.default]
-            let mut channels_config = config.channels.clone();
-            channels_config.migrate_legacy_email();
-
-            let active_accounts = channels_config.active_email_accounts();
-            if !active_accounts.is_empty() {
-                let accounts: std::collections::HashMap<String, crate::config::EmailAccountConfig> =
-                    active_accounts
-                        .into_iter()
-                        .map(|(k, v)| (k.clone(), v.clone()))
-                        .collect();
-
-                let ch = spawn_monitored_channel(
-                    "email",
-                    &self.channel_health,
-                    inbound_tx.clone(),
-                    move || Box::new(EmailChannel::new(accounts.clone())),
-                );
-                channels.push(ch);
-                tracing::info!("Email channel started (monitored, multi-account)");
-            }
-        }
-
-        // --- Start MCP channels ---
-        for (name, mcp_cfg) in &config.channels.mcp {
-            if !mcp_cfg.enabled {
-                continue;
-            }
-            let channel_name = format!("mcp:{name}");
-            let cfg = mcp_cfg.clone();
-            let ch_name = channel_name.clone();
-            let ch = spawn_monitored_channel(
-                &channel_name,
-                &self.channel_health,
-                inbound_tx.clone(),
-                move || {
-                    Box::new(crate::channels::McpChannel::new(
-                        ch_name.clone(),
-                        cfg.clone(),
-                    ))
-                },
-            );
-            channels.push(ch);
-            tracing::info!(name = %name, "MCP channel registered");
-        }
+        // --- Start channels from gateways DB (with TOML fallback) ---
+        self.start_channels_from_db_or_toml(&config, &inbound_tx, &mut channels)
+            .await;
 
         // --- Start Web UI server ---
         #[cfg(feature = "web-ui")]
@@ -1764,6 +1607,56 @@ impl Gateway {
 
         Ok(())
     }
+
+    /// Start channels from gateways DB table, falling back to TOML config.
+    ///
+    /// 1. Auto-migrate TOML channels to DB (idempotent, only if table is empty)
+    /// 2. Load enabled gateways from DB → spawn channels
+    /// 3. If DB is empty (no gateways), fall back to TOML config
+    async fn start_channels_from_db_or_toml(
+        &self,
+        config: &Config,
+        inbound_tx: &mpsc::Sender<InboundMessage>,
+        channels: &mut Vec<ChannelHandle>,
+    ) {
+        // Auto-migrate TOML → DB (idempotent)
+        if let Err(e) =
+            crate::gateways::migrate::migrate_toml_to_gateways(self.db.pool(), config).await
+        {
+            tracing::error!(error = %e, "Failed to migrate TOML channels to DB");
+        }
+
+        // Load enabled gateways from DB
+        let db_gateways = crate::gateways::db::load_enabled_gateways(self.db.pool())
+            .await
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "Failed to load gateways from DB");
+                Vec::new()
+            });
+
+        if !db_gateways.is_empty() {
+            // DB-driven startup
+            for gw in &db_gateways {
+                if let Some(ch) = start_gateway_from_db(
+                    gw,
+                    &self.channel_health,
+                    inbound_tx.clone(),
+                ) {
+                    channels.push(ch);
+                    tracing::info!(
+                        id = gw.id,
+                        name = %gw.name,
+                        channel_type = %gw.channel_type,
+                        "Gateway started from DB"
+                    );
+                }
+            }
+        } else {
+            // Fallback: TOML-based startup (backward compat)
+            tracing::info!("No gateways in DB, falling back to TOML config");
+            start_channels_from_toml(config, &self.channel_health, inbound_tx, channels);
+        }
+    }
 }
 
 /// Wait for either Ctrl+C (SIGINT) or SIGTERM.
@@ -2180,6 +2073,228 @@ fn start_channel_by_name(
             ))
         }
         _ => None,
+    }
+}
+
+/// Start a channel from a gateway DB row.
+///
+/// Deserializes config_json into the typed channel config, resolves tokens
+/// from the vault using gateway-specific keys, and spawns the channel.
+fn start_gateway_from_db(
+    gw: &crate::gateways::Gateway,
+    health: &Arc<ChannelHealthTracker>,
+    inbound_tx: mpsc::Sender<InboundMessage>,
+) -> Option<ChannelHandle> {
+    /// Resolve a token from the vault using a gateway-specific key.
+    fn resolve_gw_token(gateway_id: i64, raw: &str) -> String {
+        if raw == "***ENCRYPTED***" || raw.is_empty() {
+            if let Ok(secrets) = crate::storage::global_secrets() {
+                let key = crate::storage::SecretKey::gateway_token(gateway_id);
+                if let Ok(Some(real)) = secrets.get(&key) {
+                    return real;
+                }
+            }
+            String::new()
+        } else {
+            raw.to_string()
+        }
+    }
+
+    let channel_type = gw.channel_type.as_str();
+    let gw_id = gw.id;
+
+    match channel_type {
+        #[cfg(feature = "channel-telegram")]
+        "telegram" => {
+            let mut cfg: crate::config::TelegramConfig =
+                serde_json::from_str(&gw.config_json).ok()?;
+            cfg.token = resolve_gw_token(gw_id, &cfg.token);
+            if cfg.token.is_empty() || cfg.token == "***ENCRYPTED***" {
+                tracing::error!(id = gw_id, "Gateway token not found, skipping");
+                return None;
+            }
+            Some(spawn_monitored_channel(
+                "telegram",
+                health,
+                inbound_tx,
+                move || Box::new(TelegramChannel::new(cfg.clone())),
+            ))
+        }
+        #[cfg(feature = "channel-discord")]
+        "discord" => {
+            let mut cfg: crate::config::DiscordConfig =
+                serde_json::from_str(&gw.config_json).ok()?;
+            cfg.token = resolve_gw_token(gw_id, &cfg.token);
+            if cfg.token.is_empty() || cfg.token == "***ENCRYPTED***" {
+                tracing::error!(id = gw_id, "Gateway token not found, skipping");
+                return None;
+            }
+            let health_for_dc = health.clone();
+            Some(spawn_monitored_channel(
+                "discord",
+                health,
+                inbound_tx,
+                move || {
+                    Box::new(DiscordChannel::new(cfg.clone()).with_health(health_for_dc.clone()))
+                },
+            ))
+        }
+        #[cfg(feature = "channel-whatsapp")]
+        "whatsapp" => {
+            let cfg: crate::config::WhatsAppConfig =
+                serde_json::from_str(&gw.config_json).ok()?;
+            Some(spawn_monitored_channel(
+                "whatsapp",
+                health,
+                inbound_tx,
+                move || Box::new(WhatsAppChannel::new(cfg.clone())),
+            ))
+        }
+        "slack" => {
+            let mut cfg: crate::config::SlackConfig =
+                serde_json::from_str(&gw.config_json).ok()?;
+            cfg.token = resolve_gw_token(gw_id, &cfg.token);
+            // Resolve app_token separately
+            if cfg.app_token == "***ENCRYPTED***" || cfg.app_token.is_empty() {
+                if let Ok(secrets) = crate::storage::global_secrets() {
+                    let key = crate::storage::SecretKey::gateway_app_token(gw_id);
+                    if let Ok(Some(real)) = secrets.get(&key) {
+                        cfg.app_token = real;
+                    }
+                }
+            }
+            if cfg.token.is_empty() || cfg.token == "***ENCRYPTED***" {
+                tracing::error!(id = gw_id, "Gateway token not found, skipping");
+                return None;
+            }
+            Some(spawn_monitored_channel(
+                "slack",
+                health,
+                inbound_tx,
+                move || Box::new(SlackChannel::new(cfg.clone())),
+            ))
+        }
+        #[cfg(feature = "channel-email")]
+        "email" => {
+            // Email gateway: config_json contains EmailAccountConfig
+            let cfg: crate::config::EmailAccountConfig =
+                serde_json::from_str(&gw.config_json).ok()?;
+            let mut accounts = std::collections::HashMap::new();
+            accounts.insert(gw.name.clone(), cfg);
+            Some(spawn_monitored_channel(
+                "email",
+                health,
+                inbound_tx,
+                move || Box::new(EmailChannel::new(accounts.clone())),
+            ))
+        }
+        ct if ct.starts_with("mcp:") => {
+            let cfg: crate::config::McpChannelConfig =
+                serde_json::from_str(&gw.config_json).ok()?;
+            let ch_name = ct.to_string();
+            Some(spawn_monitored_channel(
+                ct,
+                health,
+                inbound_tx,
+                move || {
+                    Box::new(crate::channels::McpChannel::new(
+                        ch_name.clone(),
+                        cfg.clone(),
+                    ))
+                },
+            ))
+        }
+        _ => {
+            tracing::warn!(
+                id = gw_id,
+                channel_type,
+                "Unknown gateway channel type, skipping"
+            );
+            None
+        }
+    }
+}
+
+/// Start channels from TOML config (legacy fallback when gateways table is empty).
+fn start_channels_from_toml(
+    config: &Config,
+    health: &Arc<ChannelHealthTracker>,
+    inbound_tx: &mpsc::Sender<InboundMessage>,
+    channels: &mut Vec<ChannelHandle>,
+) {
+    // Telegram
+    #[cfg(feature = "channel-telegram")]
+    if let Some(ch) =
+        start_channel_by_name("telegram", config, health, inbound_tx.clone(), None)
+    {
+        channels.push(ch);
+        tracing::info!("Telegram channel started (TOML fallback)");
+    }
+
+    // Discord
+    #[cfg(feature = "channel-discord")]
+    if let Some(ch) =
+        start_channel_by_name("discord", config, health, inbound_tx.clone(), None)
+    {
+        channels.push(ch);
+        tracing::info!("Discord channel started (TOML fallback)");
+    }
+
+    // WhatsApp
+    #[cfg(feature = "channel-whatsapp")]
+    if let Some(ch) =
+        start_channel_by_name("whatsapp", config, health, inbound_tx.clone(), None)
+    {
+        channels.push(ch);
+        tracing::info!("WhatsApp channel started (TOML fallback)");
+    }
+
+    // Slack
+    if let Some(ch) =
+        start_channel_by_name("slack", config, health, inbound_tx.clone(), None)
+    {
+        channels.push(ch);
+        tracing::info!("Slack channel started (TOML fallback)");
+    }
+
+    // Email
+    #[cfg(feature = "channel-email")]
+    {
+        let mut ch_config = config.channels.clone();
+        ch_config.migrate_legacy_email();
+        let active = ch_config.active_email_accounts();
+        if !active.is_empty() {
+            let accounts: std::collections::HashMap<String, crate::config::EmailAccountConfig> =
+                active.into_iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+            let ch = spawn_monitored_channel(
+                "email",
+                health,
+                inbound_tx.clone(),
+                move || Box::new(EmailChannel::new(accounts.clone())),
+            );
+            channels.push(ch);
+            tracing::info!("Email channel started (TOML fallback)");
+        }
+    }
+
+    // MCP channels
+    for (name, mcp_cfg) in &config.channels.mcp {
+        if !mcp_cfg.enabled {
+            continue;
+        }
+        let channel_name = format!("mcp:{name}");
+        let cfg = mcp_cfg.clone();
+        let ch_name = channel_name.clone();
+        let ch = spawn_monitored_channel(
+            &channel_name,
+            health,
+            inbound_tx.clone(),
+            move || {
+                Box::new(crate::channels::McpChannel::new(ch_name.clone(), cfg.clone()))
+            },
+        );
+        channels.push(ch);
+        tracing::info!(name = %name, "MCP channel started (TOML fallback)");
     }
 }
 

@@ -376,6 +376,20 @@ impl Database {
         // Backfill user_id on all existing records after migration 037.
         Self::backfill_user_ids(pool).await?;
 
+        Self::apply_migration(
+            pool,
+            "038_profile_color",
+            include_str!("../../migrations/038_profile_color.sql"),
+        )
+        .await?;
+
+        Self::apply_migration(
+            pool,
+            "039_gateways",
+            include_str!("../../migrations/039_gateways.sql"),
+        )
+        .await?;
+
         Ok(())
     }
 
