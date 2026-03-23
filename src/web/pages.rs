@@ -155,14 +155,8 @@ fn sidebar(active: &str) -> String {
                 <a href="/skills" class="nav-link{ext_a}" data-label="Extensions">
                     <span class="nav-icon">{ic_ext}</span>
                 </a>
-                <button type="button" class="nav-link nav-estop" id="nav-estop-btn" data-label="Stop" title="Emergency Stop">
-                    <span class="nav-icon">{ic_estop}</span>
-                </button>
             </div>
             <div class="nav-bottom">
-                <a href="/account" class="nav-link{account_a}" data-label="Account">
-                    <span class="nav-icon">{ic_account}</span>
-                </a>
                 <a href="/setup" class="nav-link{settings_a}" data-label="Settings">
                     <span class="nav-icon">{ic_settings}</span>
                 </a>
@@ -181,7 +175,6 @@ fn sidebar(active: &str) -> String {
         // Active states
         chat_a = a("chat"),
         dash_a = a("dashboard"),
-        account_a = a("account"),
         auto_a = group_active(active, AUTOMATION_PAGES),
         brain_a = group_active(active, BRAIN_PAGES),
         ext_a = group_active(active, EXTENSIONS_PAGES),
@@ -194,12 +187,34 @@ fn sidebar(active: &str) -> String {
         ic_auto = ICON_AUTOMATION,
         ic_brain = ICON_BRAIN,
         ic_ext = ICON_EXTENSIONS,
-        ic_estop = ICON_ESTOP,
-        ic_account = ICON_ACCOUNT,
         ic_settings = ICON_SETTINGS,
         ic_security = ICON_SECURITY,
         ic_system = ICON_SYSTEM,
         ic_logout = ICON_LOGOUT,
+    )
+}
+
+/// Global top bar HTML — profile selector, account button, e-stop.
+/// Injected as first child of `<main class="content">` in every page.
+fn content_topbar() -> String {
+    format!(
+        r##"<div class="content-topbar">
+            <div class="topbar-right">
+                <button type="button" class="topbar-profile-pill" id="global-profile-pill" title="Choose profile">
+                    <span class="topbar-profile-dot" id="global-profile-dot" style="background:#3B82F6"></span>
+                    <span id="global-profile-name">Default</span>
+                    <svg class="topbar-profile-pill-arrow" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7l4 4 4-4"/></svg>
+                </button>
+                <a href="/account" class="topbar-btn" title="Account">
+                    <span class="topbar-icon">{ic_account}</span>
+                </a>
+                <button type="button" class="topbar-btn topbar-estop" id="nav-estop-btn" title="Emergency Stop">
+                    <span class="topbar-icon">{ic_estop}</span>
+                </button>
+            </div>
+        </div>"##,
+        ic_account = ICON_ACCOUNT,
+        ic_estop = ICON_ESTOP,
     )
 }
 
@@ -312,16 +327,36 @@ fn page_html(title: &str, active: &str, body: &str, scripts: &[&str]) -> String 
         .map(|s| format!(r#"<script src="/static/js/{s}"></script>"#))
         .collect::<String>();
 
-    // Inject subnav inside <main class="content"> as first child.
-    // Pages with a subnav get a flex wrapper so subnav + page content sit side by side.
-    // The toggle button is placed inside the page content (page-title-group) so it
-    // remains visible when the panel is collapsed.
+    // Inject topbar + optional subnav inside <main class="content">.
+    // For subnav pages: topbar sits above, subnav+content sit in a flex-row below.
+    let topbar_html = content_topbar();
+    // Wrap page body in .content-body (provides bg + border-radius curve).
+    // For subnav pages, .content-row replaces .content-body as the wrapper.
     let body = if subnav_html.is_empty() {
-        body.to_string()
-    } else {
+        // No subnav — topbar + content-body wrapper.
+        // Handle both `class="content">` and `class="content chat-layout">`.
         body.replace(
             r#"<main class="content">"#,
-            &format!(r#"<main class="content has-subnav">{subnav_html}"#),
+            &format!(r#"<main class="content">{topbar_html}<div class="content-body">"#),
+        )
+        .replace(
+            r#"<main class="content chat-layout">"#,
+            &format!(r#"<main class="content chat-layout">{topbar_html}<div class="content-body">"#),
+        )
+        // Close .content-body before </main>
+        .replace(r#"</main>"#, r#"</div></main>"#)
+    } else {
+        // Subnav pages — topbar above, then content-row wraps subnav + page content
+        body.replace(
+            r#"<main class="content">"#,
+            &format!(
+                r#"<main class="content has-subnav">{topbar_html}<div class="content-row">{subnav_html}"#
+            ),
+        )
+        // Close .content-row at the end of main
+        .replace(
+            r#"</main>"#,
+            r#"</div></main>"#,
         )
         .replace(
             r#"<div class="page-title-group">"#,
@@ -441,6 +476,7 @@ fn page_html(title: &str, active: &str, body: &str, scripts: &[&str]) -> String 
     </div>
     <script src="/static/js/csrf.js"></script>
     <script src="/static/js/toast.js"></script>
+    <script src="/static/js/topbar.js"></script>
     <script src="/static/js/command-palette.js"></script>
     {script_tags}
     <script>
@@ -1196,24 +1232,14 @@ async fn channels_page(State(state): State<Arc<AppState>>) -> Html<String> {
                                 <input type="text" id="ch-notify-chatid" name="notify_chat_id" class="input" placeholder="Chat/user ID on notify channel">
                                 <div class="form-hint">Where to send drafts for approval. Use "web" for Web UI.</div>
                             </div>
-                            <div class="modal-section-label" style="margin-top:16px">Persona</div>
-                            <div class="form-row--2">
-                                <div class="form-group">
-                                    <label for="ch-persona">Persona</label>
-                                    <select id="ch-persona" name="persona" class="input">
-                                        <option value="bot">Bot (default)</option>
-                                        <option value="owner">Owner (impersonate you)</option>
-                                        <option value="company">Company</option>
-                                        <option value="custom">Custom</option>
-                                    </select>
-                                    <div class="form-hint">How the agent presents itself on this channel.</div>
-                                </div>
-                                <div class="form-group">
-                                    <label for="ch-tone">Tone of Voice</label>
-                                    <input type="text" id="ch-tone" name="tone_of_voice" class="input" placeholder="e.g. informal, friendly, Italian">
-                                    <div class="form-hint">Default tone for this channel (contacts can override).</div>
-                                </div>
-                            </div>
+                        </div>
+
+                        <!-- Profile — visible for ALL channels -->
+                        <div class="modal-section-label" style="margin-top:16px">Profile</div>
+                        <div class="form-group">
+                            <label for="ch-persona">Profile</label>
+                            <select id="ch-persona" name="persona" class="input"></select>
+                            <div class="form-hint">Which profile the agent uses on this channel.</div>
                         </div>
 
                         <!-- Discord default channel -->
@@ -1575,6 +1601,10 @@ async fn chat_page(
                                 <ol class="chat-plan-tasklist" id="chat-plan-tasklist"></ol>
                             </section>
                             <div class="chat-composer-shell" id="chat-config" data-model="{current_model}" data-vision-model="{current_vision_model}" data-username="{username}">
+                                <div class="chat-composer-toolbar">
+                                    <div class="chat-toolbar-right">
+                                    </div>
+                                </div>
                                 <form class="chat-input" id="chat-form">
                                     <textarea id="chat-text" placeholder="Message Homun…" autocomplete="off" class="input chat-textarea" rows="1" autofocus></textarea>
                                     <div class="chat-attachment-strip" id="chat-attachment-strip" hidden></div>
@@ -1607,11 +1637,6 @@ async fn chat_page(
                                             </button>
                                         </div>
                                         <div class="chat-input-actions-right">
-                                            <button type="button" class="chat-model-pill" id="chat-profile-pill" title="Choose profile" style="margin-right:4px">
-                                                <span id="chat-profile-pill-emoji" style="margin-right:2px">&#128100;</span>
-                                                <span class="chat-model-pill-name" id="chat-profile-pill-name">Default</span>
-                                                <svg class="chat-model-pill-arrow" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7l4 4 4-4"/></svg>
-                                            </button>
                                             <button type="button" class="chat-model-pill" id="chat-model-pill" title="Choose model">
                                                 <span class="chat-model-pill-name" id="chat-model-pill-name">{current_model}</span>
                                                 <svg class="chat-model-pill-arrow" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7l4 4 4-4"/></svg>
@@ -1695,8 +1720,6 @@ async fn automations_page() -> Html<String> {
                                 <span class="badge badge-info" id="automations-count">0</span>
                             </div>
                             <div class="actions" style="display:flex;align-items:center;gap:8px">
-                                <label style="font-size:13px;color:var(--t2)">Profile:</label>
-                                <select id="automations-profile-filter" class="input" style="width:auto;min-width:130px;font-size:13px"></select>
                                 <button class="btn btn-primary btn-sm" id="btn-create-automation">
                                     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;vertical-align:-2px;margin-right:4px"><path d="M8 3v10M3 8h10"/></svg>Create
                                 </button>
@@ -1835,8 +1858,6 @@ async fn workflows_page() -> Html<String> {
                         <span class="badge badge-info" id="workflows-count">0</span>
                     </div>
                     <div class="actions" style="display:flex;align-items:center;gap:8px">
-                        <label style="font-size:13px;color:var(--t2)">Profile:</label>
-                        <select id="workflows-profile-filter" class="input" style="width:auto;min-width:130px;font-size:13px"></select>
                         <button class="btn btn-primary btn-sm" id="wf-create-toggle">
                             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;vertical-align:-2px;margin-right:4px"><path d="M8 3v10M3 8h10"/></svg>Create Workflow
                         </button>
@@ -2501,12 +2522,6 @@ async fn logs_page() -> Html<String> {
                             <option value="error">Error only</option>
                         </select>
                     </label>
-                    <label class="form-group logs-toolbar-item">
-                        <span>Profile</span>
-                        <select id="logs-profile" class="input">
-                            <option value="">All profiles</option>
-                        </select>
-                    </label>
                     <label class="checkbox-label logs-toolbar-item">
                         <input type="checkbox" id="logs-autoscroll" checked>
                         Auto-scroll
@@ -2610,10 +2625,6 @@ async fn memory_page(State(state): State<Arc<AppState>>) -> Html<String> {
                     <div class="page-title-group">
                         <h1 class="page-title">Memory</h1>
                         <span class="badge badge-info">{chunk_count} chunks</span>
-                    </div>
-                    <div style="display:flex;align-items:center;gap:8px">
-                        <label style="font-size:13px;color:var(--t2)">Profile:</label>
-                        <select id="memory-profile-filter" class="input" style="width:auto;min-width:140px;font-size:13px"></select>
                     </div>
                 </div>
 
@@ -2745,12 +2756,6 @@ async fn vault_page() -> Html<String> {
                     <div class="page-title-group">
                         <h1 class="page-title">Vault</h1>
                         <span class="badge badge-neutral" id="vault-count">Loading…</span>
-                    </div>
-                    <div class="page-actions">
-                        <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.875rem;color:var(--muted)">
-                            Profile:
-                            <select id="vault-profile-filter" class="select select-sm" style="min-width:160px"></select>
-                        </label>
                     </div>
                 </div>
 
@@ -4399,10 +4404,6 @@ async fn knowledge_page(State(_state): State<Arc<AppState>>) -> Html<String> {
             <div class="page-header">
                 <div class="page-title-group">
                     <h1 class="page-title">Knowledge Base</h1>
-                </div>
-                <div style="display:flex;align-items:center;gap:8px">
-                    <label style="font-size:13px;color:var(--t2)">Profile:</label>
-                    <select id="knowledge-profile-filter" class="input" style="width:auto;min-width:140px;font-size:13px"></select>
                 </div>
             </div>
             <p class="page-subtitle">Personal document knowledge base — upload files and search across your documents.</p>

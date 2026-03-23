@@ -77,8 +77,10 @@ function renderList(profiles) {
 
         const avatar = document.createElement('div');
         avatar.className = 'contact-avatar';
-        avatar.style.fontSize = '20px';
-        avatar.textContent = p.avatar_emoji || '\u{1F464}';
+        avatar.style.cssText = 'display:flex;align-items:center;justify-content:center';
+        const dot = document.createElement('span');
+        dot.style.cssText = 'width:14px;height:14px;border-radius:50%;background:' + (p.color || '#3B82F6');
+        avatar.appendChild(dot);
         row.appendChild(avatar);
 
         const info = document.createElement('div');
@@ -155,8 +157,10 @@ function showDetail(profile, soulContent) {
 
     const avatarEl = document.createElement('div');
     avatarEl.className = 'contact-avatar lg';
-    avatarEl.style.fontSize = '32px';
-    avatarEl.textContent = profile.avatar_emoji || '\u{1F464}';
+    avatarEl.style.cssText = 'display:flex;align-items:center;justify-content:center';
+    const detailDot = document.createElement('span');
+    detailDot.style.cssText = 'width:22px;height:22px;border-radius:50%;background:' + (profile.color || '#3B82F6');
+    avatarEl.appendChild(detailDot);
     header.appendChild(avatarEl);
 
     const headerInfo = document.createElement('div');
@@ -326,11 +330,27 @@ function showCreateForm() {
     sec.appendChild(makeLabel('Display Name'));
     sec.appendChild(makeInput('new-display-name', 'e.g. Fabio Personale'));
 
-    sec.appendChild(makeLabel('Avatar Emoji'));
-    const emojiInput = makeInput('new-emoji', '');
-    emojiInput.value = '\u{1F464}';
-    emojiInput.style.cssText = 'width:60px;text-align:center;font-size:20px';
-    sec.appendChild(emojiInput);
+    sec.appendChild(makeLabel('Color'));
+    const newColorPalette = document.createElement('div');
+    newColorPalette.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-top:4px';
+    const NEW_COLORS = ['#3B82F6','#EF4444','#10B981','#F59E0B','#8B5CF6','#EC4899','#14B8A6','#6B7280'];
+    NEW_COLORS.forEach((c, i) => {
+        const swatch = document.createElement('button');
+        swatch.type = 'button';
+        swatch.style.cssText = 'width:28px;height:28px;border-radius:50%;border:2px solid ' + (i === 0 ? 'var(--t1)' : 'transparent') + ';cursor:pointer;padding:0;background:' + c;
+        swatch.addEventListener('click', () => {
+            newColorPalette.querySelectorAll('button').forEach(b => b.style.borderColor = 'transparent');
+            swatch.style.borderColor = 'var(--t1)';
+            document.getElementById('new-color').value = c;
+        });
+        newColorPalette.appendChild(swatch);
+    });
+    sec.appendChild(newColorPalette);
+    const newColorHidden = document.createElement('input');
+    newColorHidden.type = 'hidden';
+    newColorHidden.id = 'new-color';
+    newColorHidden.value = '#3B82F6';
+    sec.appendChild(newColorHidden);
 
     const btnRow = document.createElement('div');
     btnRow.style.marginTop = '16px';
@@ -371,7 +391,7 @@ function makeInput(id, placeholder) {
 async function createProfile() {
     const slug = document.getElementById('new-slug').value.trim();
     const display_name = document.getElementById('new-display-name').value.trim();
-    const avatar_emoji = document.getElementById('new-emoji').value.trim() || '\u{1F464}';
+    const color = document.getElementById('new-color').value || '#3B82F6';
 
     if (!slug || !display_name) return alert('Slug and display name are required');
     if (!/^[a-z0-9-]+$/.test(slug)) return alert('Slug must be lowercase letters, numbers, hyphens only');
@@ -380,7 +400,7 @@ async function createProfile() {
         const res = await fetch(API, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ slug, display_name, avatar_emoji }),
+            body: JSON.stringify({ slug, display_name, color }),
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
@@ -433,11 +453,31 @@ function showEditForm(id) {
     const dnInput = makeInput('edit-display-name', '');
     dnInput.value = p.display_name;
     genSec.appendChild(dnInput);
-    genSec.appendChild(makeLabel('Avatar Emoji'));
-    const emInput = makeInput('edit-emoji', '');
-    emInput.value = p.avatar_emoji;
-    emInput.style.cssText = 'width:60px;text-align:center;font-size:20px';
-    genSec.appendChild(emInput);
+    genSec.appendChild(makeLabel('Color'));
+    const colorPalette = document.createElement('div');
+    colorPalette.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-top:4px';
+    const COLORS = ['#3B82F6','#EF4444','#10B981','#F59E0B','#8B5CF6','#EC4899','#14B8A6','#6B7280'];
+    const currentColor = p.color || '#3B82F6';
+    COLORS.forEach(c => {
+        const swatch = document.createElement('button');
+        swatch.type = 'button';
+        swatch.style.cssText = 'width:28px;height:28px;border-radius:50%;border:3px solid transparent;cursor:pointer;padding:0;background:' + c;
+        if (c.toLowerCase() === currentColor.toLowerCase()) swatch.style.borderColor = 'var(--t1)';
+        swatch.dataset.color = c;
+        swatch.addEventListener('click', () => {
+            colorPalette.querySelectorAll('button').forEach(b => b.style.borderColor = 'transparent');
+            swatch.style.borderColor = 'var(--t1)';
+            document.getElementById('edit-color').value = c;
+        });
+        colorPalette.appendChild(swatch);
+    });
+    genSec.appendChild(colorPalette);
+    const colorHidden = document.createElement('input');
+    colorHidden.type = 'hidden';
+    colorHidden.id = 'edit-color';
+    colorHidden.value = currentColor;
+    genSec.appendChild(colorHidden);
+
     form.appendChild(genSec);
 
     // Identity
@@ -554,7 +594,6 @@ async function saveProfile(id) {
             display_name: document.getElementById('edit-display-name').value,
             bio: document.getElementById('edit-id-bio').value,
             role: document.getElementById('edit-id-role').value,
-            avatar_emoji: document.getElementById('edit-emoji').value,
         },
         linguistics: {
             language: document.getElementById('edit-lang').value,
@@ -583,7 +622,7 @@ async function saveProfile(id) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 display_name: document.getElementById('edit-display-name').value,
-                avatar_emoji: document.getElementById('edit-emoji').value,
+                color: document.getElementById('edit-color').value,
                 profile_json,
             }),
         });

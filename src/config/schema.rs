@@ -1098,6 +1098,9 @@ pub struct WebConfig {
     pub require_device_approval: bool,
     /// Tunnel configuration for exposing the web UI to the internet.
     pub tunnel: Option<TunnelConfig>,
+    /// Profile slug for the web channel (default: "default").
+    #[serde(default = "default_persona")]
+    pub persona: String,
 }
 
 /// Tunnel provider configuration for remote access.
@@ -1140,6 +1143,7 @@ impl Default for WebConfig {
             session_ttl_secs: 86400,
             require_device_approval: false,
             tunnel: None,
+            persona: default_persona(),
         }
     }
 }
@@ -1422,6 +1426,9 @@ pub struct EmailConfig {
     pub allow_from: Vec<String>,
     #[serde(default)]
     pub pairing_required: bool,
+    /// Profile slug for the email channel (default: "default").
+    #[serde(default = "default_persona")]
+    pub persona: String,
 }
 
 impl Default for EmailConfig {
@@ -1440,6 +1447,7 @@ impl Default for EmailConfig {
             idle_timeout_secs: 1740,
             allow_from: Vec::new(),
             pairing_required: false,
+            persona: default_persona(),
         }
     }
 }

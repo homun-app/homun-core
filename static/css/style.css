@@ -497,18 +497,8 @@ html, body {
 .nav-logout:hover .nav-icon { color: rgba(255, 100, 100, 0.9); }
 
 /* ─── Sub-navigation panels ─── */
-/* Content with subnav — flex row like .chat-shell */
-.content.has-subnav {
-    display: flex;
-    flex-direction: row;
-}
-.content.has-subnav > .content-inner,
-.content.has-subnav > .auto-list-view,
-.content.has-subnav > div:not(.sidebar-subnav) {
-    flex: 1;
-    min-width: 0;
-    overflow-y: auto;
-}
+/* Content with subnav — layout handled by .content-row in layout.css.
+   .content stays flex-column; .content-row is the flex-row child. */
 
 /* Subnav — flex child inside .content, same pattern as .chat-sidebar */
 .sidebar-subnav {
@@ -595,13 +585,16 @@ html, body {
 
 
 /* ═══ MAIN CONTENT — Editorial Canvas ═══ */
+/* .content layout is defined in layout.css — kept here for legacy compat.
+   background: var(--nav-bg) so topbar blends with sidebar; .content-body
+   provides the light bg + border-radius curve below the topbar. */
 .content {
     flex: 1;
-    overflow-y: auto;
-    overflow-x: hidden;
-    background: var(--bg);
-    border-radius: var(--content-radius) 0 0 var(--content-radius);
-    box-shadow: -10px 0 30px rgba(0, 0, 0, 0.15);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--nav-bg);
+    border-radius: 0;
     position: relative;
     z-index: 20;
 }

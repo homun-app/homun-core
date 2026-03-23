@@ -165,20 +165,30 @@
 
 /* ─── Sub-navigation panels ─── */
 /* Content with subnav — flex row like .chat-shell */
-.content.has-subnav {
+/* .content is always flex-column (topbar on top, body below).
+   has-subnav just adds the .content-row wrapper around subnav + page body. */
+
+/* Content-row — flex-row wrapper for subnav + page content (subnav pages only).
+   Same bg + curve as .content-body but with flex-row for side-by-side layout. */
+.content-row {
     display: flex;
     flex-direction: row;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--bg);
+    border-radius: var(--content-radius) 0 0 0;
 }
-.content.has-subnav > .content-inner,
-.content.has-subnav > .auto-list-view,
-.content.has-subnav > div:not(.sidebar-subnav) {
+.content-row > .content-inner,
+.content-row > .auto-list-view,
+.content-row > div:not(.sidebar-subnav) {
     flex: 1;
     min-width: 0;
     overflow-y: auto;
 }
 /* Subnav pages: drop max-width (panel constrains width), match sidebar
    padding-top (16px) so all three header rows share the same Y origin. */
-.content.has-subnav > .content-inner {
+.content-row > .content-inner {
     max-width: none;
     padding: 18px 40px 48px;
 }
@@ -189,7 +199,7 @@
 }
 /* Content body offset — aligns under page title, leaving gutter below hamburger.
    Applies to standard content-inner pages and the automations master panel. */
-.content.has-subnav > .content-inner > *:not(.page-header),
+.content-row > .content-inner > *:not(.page-header),
 .content.has-subnav .auto-master > *:not(.page-header) {
     margin-left: 44px;
 }
@@ -315,14 +325,189 @@
 /* ═══ MAIN CONTENT — Editorial Canvas ═══ */
 .content {
     flex: 1;
-    overflow-y: auto;
-    overflow-x: hidden;
-    background: var(--bg);
-    border-radius: var(--content-radius) 0 0 0;
-    box-shadow: -10px 0 30px rgba(0, 0, 0, 0.15);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--nav-bg);
+    border-radius: 0;
     position: relative;
     z-index: 20;
 }
+
+/* Content body — full-width wrapper below topbar.
+   Provides the light background + top-left curve over the accent. */
+.content-body {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+    background: var(--bg);
+    border-radius: var(--content-radius) 0 0 0;
+}
+
+/* ═══ TOP BAR ═══
+   Horizontal bar at top of .content — profile selector, account, e-stop.
+   Same accent background as the sidebar, visually continuous. The page
+   content below gets the border-radius curve. */
+.content-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    height: calc(var(--header-row, 44px) + 16px);
+    padding: 0 20px;
+    flex-shrink: 0;
+    background: var(--nav-bg);
+    color: var(--nav-text);
+    z-index: 15;
+}
+
+.topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* Profile pill — clean text-only, no background/border */
+.topbar-profile-pill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: transparent;
+    border: none;
+    border-radius: var(--r-md);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--nav-active-text);
+    cursor: pointer;
+    transition: opacity var(--fast) var(--ease);
+    position: relative;
+    white-space: nowrap;
+}
+.topbar-profile-pill:hover {
+    opacity: 0.75;
+}
+
+/* Colored dot indicator next to profile name */
+.topbar-profile-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.topbar-profile-pill-arrow {
+    width: 12px;
+    height: 12px;
+    opacity: 0.5;
+    flex-shrink: 0;
+}
+
+/* Colored dot in dropdown options */
+.topbar-option-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+/* Profile dropdown — matches Tools popup style (chat-tools-dropdown) */
+.topbar-profile-dropdown {
+    position: fixed;
+    z-index: 9999;
+    min-width: 200px;
+    padding: 6px;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    box-shadow: var(--shadow-lg);
+    animation: chatDropdownIn 0.12s ease-out;
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+.topbar-profile-option {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 9px 12px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--t2);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    text-align: left;
+    transition: background var(--fast) var(--ease);
+}
+.topbar-profile-option:hover {
+    background: var(--surface-hover);
+    color: var(--t1);
+}
+.topbar-profile-option.is-active {
+    color: var(--accent-text);
+    font-weight: 600;
+}
+
+/* Separator + "Go to Profiles" link inside dropdown */
+.topbar-profile-sep {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 8px;
+}
+.topbar-profile-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 9px 12px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--t3);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    text-align: left;
+    text-decoration: none;
+    transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.topbar-profile-link:hover {
+    background: var(--surface-hover);
+    color: var(--t1);
+}
+
+/* Icon buttons (account, e-stop) */
+.topbar-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--r-md);
+    background: none;
+    border: none;
+    color: var(--nav-text);
+    cursor: pointer;
+    text-decoration: none;
+    transition: color var(--fast) var(--ease), background var(--fast) var(--ease);
+}
+.topbar-btn:hover {
+    color: var(--nav-active-text);
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.topbar-icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+}
+
+/* E-stop in top bar — bright red */
+.topbar-estop { color: #EF4444; }
+.topbar-estop:hover { color: #FF3333; background: rgba(255, 50, 50, 0.15); }
+.topbar-estop.is-stopped { pointer-events: none; opacity: 0.3; }
 
 .content-inner {
     max-width: 960px;

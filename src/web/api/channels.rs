@@ -135,6 +135,7 @@ async fn get_channel(
                 "configured": true,
                 "host": config.channels.web.host,
                 "port": config.channels.web.port,
+                "persona": config.channels.web.persona,
             })
         }
         "email" => {
@@ -194,6 +195,7 @@ async fn get_channel(
                 "email_notify_channel": notify_channel,
                 "email_notify_chat_id": notify_chat_id,
                 "email_trigger_word": trigger_word,
+                "persona": config.channels.email.persona,
             })
         }
         _ => return Err(StatusCode::NOT_FOUND),
@@ -388,6 +390,9 @@ async fn configure_channel(
             if let Some(auth_token) = &req.auth_token {
                 config.channels.web.auth_token = auth_token.clone();
             }
+            if let Some(p) = &req.persona {
+                config.channels.web.persona = p.clone();
+            }
             // Web is always enabled
         }
         "email" => {
@@ -440,6 +445,9 @@ async fn configure_channel(
             }
             if let Some(allow_from) = &req.allow_from {
                 config.channels.email.allow_from = allow_from.clone();
+            }
+            if let Some(p) = &req.persona {
+                config.channels.email.persona = p.clone();
             }
             config.channels.email.enabled = true;
 

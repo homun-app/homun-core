@@ -70,6 +70,7 @@ struct CreateProfileRequest {
     slug: String,
     display_name: String,
     avatar_emoji: Option<String>,
+    color: Option<String>,
     profile_json: Option<String>,
 }
 
@@ -77,6 +78,7 @@ struct CreateProfileRequest {
 struct UpdateProfileRequest {
     display_name: Option<String>,
     avatar_emoji: Option<String>,
+    color: Option<String>,
     profile_json: Option<String>,
 }
 
@@ -113,12 +115,13 @@ async fn create_profile(
     let db = require_db(&state)?;
 
     let emoji = body.avatar_emoji.as_deref().unwrap_or("👤");
+    let color = body.color.as_deref().unwrap_or("#3B82F6");
     let pj = body.profile_json.as_deref().unwrap_or("{}");
 
     // In v2 all profiles belong to the default admin user.
     // In v3 this will come from the authenticated session.
     let user_id = Some(crate::user::DEFAULT_ADMIN_USER_ID);
-    let id = profiles::db::insert_profile(db.pool(), &body.slug, &body.display_name, emoji, pj, user_id)
+    let id = profiles::db::insert_profile(db.pool(), &body.slug, &body.display_name, emoji, color, pj, user_id)
         .await
         .map_err(internal)?;
 
@@ -168,9 +171,10 @@ async fn update_profile(
 
     let display_name = body.display_name.as_deref().unwrap_or(&existing.display_name);
     let emoji = body.avatar_emoji.as_deref().unwrap_or(&existing.avatar_emoji);
+    let color = body.color.as_deref().unwrap_or(&existing.color);
     let pj = body.profile_json.as_deref().unwrap_or(&existing.profile_json);
 
-    profiles::db::update_profile(db.pool(), id, display_name, emoji, pj)
+    profiles::db::update_profile(db.pool(), id, display_name, emoji, color, pj)
         .await
         .map_err(internal)?;
 
@@ -352,6 +356,7 @@ Output raw JSON only — no markdown fences, no explanation."#;
         id,
         &profile.display_name,
         &profile.avatar_emoji,
+        &profile.color,
         &profile_json,
     )
     .await

@@ -6,10 +6,9 @@ let selectedWorkflowId = null;
 let stepCounter = 0;
 let deliveryTargets = [];
 
-/** Get the current profile filter slug (empty = all). */
+/** Get the current profile filter slug from global topbar (empty = all). */
 function getWorkflowsProfileFilter() {
-    const el = document.getElementById('workflows-profile-filter');
-    return el ? el.value : '';
+    return window.getActiveProfileSlug ? window.getActiveProfileSlug() : '';
 }
 
 // ─── Helpers ────────────────────────────────────────────────────
@@ -521,24 +520,8 @@ function toggleCreatorPanel(show) {
 }
 
 async function initWorkflowsPage() {
-    // Initialize profile filter dropdown
-    const profileSelect = document.getElementById('workflows-profile-filter');
-    if (profileSelect) {
-        const allOpt = document.createElement('option');
-        allOpt.value = '';
-        allOpt.textContent = 'All profiles';
-        profileSelect.appendChild(allOpt);
-        try {
-            const profiles = await apiRequest('/v1/profiles');
-            profiles.forEach(p => {
-                const opt = document.createElement('option');
-                opt.value = p.slug;
-                opt.textContent = (p.avatar_emoji || '\u{1F464}') + ' ' + p.display_name;
-                profileSelect.appendChild(opt);
-            });
-        } catch (_) {}
-        profileSelect.addEventListener('change', () => loadWorkflows());
-    }
+    // Profile filter managed by global topbar — reload on change
+    document.addEventListener('profile-changed', () => loadWorkflows());
 
     // Creator panel toggle
     var createToggle = document.getElementById('wf-create-toggle');

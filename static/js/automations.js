@@ -3,10 +3,9 @@ let selectedAutomationId = null;
 let openEditorId = null;
 let automationTargets = [];
 
-/** Get the current profile filter slug (empty = all). */
+/** Get the current profile filter slug from global topbar (empty = all). */
 function getAutomationsProfileFilter() {
-    const el = document.getElementById('automations-profile-filter');
-    return el ? el.value : '';
+    return window.getActiveProfileSlug ? window.getActiveProfileSlug() : '';
 }
 
 const WEEKDAY_LABELS = {
@@ -1054,24 +1053,8 @@ async function initializeAutomationsPage() {
 
     if (!listEl) return;
 
-    // Initialize profile filter dropdown
-    const profileSelect = document.getElementById('automations-profile-filter');
-    if (profileSelect) {
-        const allOpt = document.createElement('option');
-        allOpt.value = '';
-        allOpt.textContent = 'All profiles';
-        profileSelect.appendChild(allOpt);
-        try {
-            const profiles = await apiRequest('/v1/profiles');
-            profiles.forEach(p => {
-                const opt = document.createElement('option');
-                opt.value = p.slug;
-                opt.textContent = (p.avatar_emoji || '\u{1F464}') + ' ' + p.display_name;
-                profileSelect.appendChild(opt);
-            });
-        } catch (_) {}
-        profileSelect.addEventListener('change', () => loadAutomations());
-    }
+    // Profile filter managed by global topbar — reload on change
+    document.addEventListener('profile-changed', () => loadAutomations());
 
     await loadAutomationTargets();
 

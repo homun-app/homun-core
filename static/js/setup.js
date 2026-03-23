@@ -1944,7 +1944,7 @@ if (chModal && channelCards.length > 0) {
         if (chEmailTriggerGroup) chEmailTriggerGroup.style.display = 'none';
         if (btnWaPair) btnWaPair.style.display = currentChannel === 'whatsapp' ? 'inline-flex' : 'none';
         if (btnTestCh) btnTestCh.style.display = isWeb ? 'none' : 'inline-flex';
-        if (btnChSave) btnChSave.style.display = isWeb ? 'none' : 'inline-flex';
+        if (btnChSave) btnChSave.style.display = 'inline-flex';
         if (chNotifyHint) chNotifyHint.textContent = '';
 
         // Set hints
@@ -2002,11 +2002,30 @@ if (chModal && channelCards.length > 0) {
             updateEmailModeFields();
         }
 
-        // Persona & tone from card data attributes
+        // Profile — load options from API, then set value from channel data.
+        // Both fetches run in parallel; we apply the value once profiles are loaded.
         var personaEl = document.getElementById('ch-persona');
-        if (personaEl) personaEl.value = card.dataset.persona || 'bot';
-        var toneEl = document.getElementById('ch-tone');
-        if (toneEl) toneEl.value = card.dataset.toneOfVoice || '';
+        if (personaEl) {
+            while (personaEl.firstChild) personaEl.removeChild(personaEl.firstChild);
+            var channelPersona = card.dataset.persona || 'default';
+            // Fetch both profiles list AND channel live data, then apply
+            Promise.all([
+                fetch('/api/v1/profiles').then(function(r) { return r.ok ? r.json() : []; }),
+                fetch('/api/v1/channels/' + currentChannel).then(function(r) { return r.ok ? r.json() : null; })
+            ]).then(function(results) {
+                var profiles = results[0];
+                var chData = results[1];
+                profiles.forEach(function(p) {
+                    var opt = document.createElement('option');
+                    opt.value = p.slug;
+                    opt.textContent = p.display_name + (p.is_default ? ' (default)' : '');
+                    personaEl.appendChild(opt);
+                });
+                // API value takes priority over card data
+                var activePersona = (chData && chData.persona) ? chData.persona : channelPersona;
+                personaEl.value = activePersona;
+            }).catch(function() {});
+        }
 
         // Reset test result
         chTestResult.textContent = '';
@@ -2092,11 +2111,7 @@ if (chModal && channelCards.length > 0) {
                         notifyChannelSelect.dispatchEvent(new Event('change'));
                     }
                 }
-                // Persona & tone from API
-                var pEl = document.getElementById('ch-persona');
-                if (pEl && data.persona) pEl.value = data.persona;
-                var toEl = document.getElementById('ch-tone');
-                if (toEl && data.tone_of_voice !== undefined) toEl.value = data.tone_of_voice;
+                // Profile is set via Promise.all in the profile loader above
             })
             .catch(function() { /* silently use card data fallback */ });
     }
@@ -2203,12 +2218,10 @@ if (chModal && channelCards.length > 0) {
                 if (ncEl && ncEl.value) payload.notify_channel = ncEl.value;
                 var ncidEl = document.getElementById('ch-notify-chatid');
                 if (ncidEl && ncidEl.value) payload.notify_chat_id = ncidEl.value;
-                // Persona & tone
-                var personaEl = document.getElementById('ch-persona');
-                if (personaEl) payload.persona = personaEl.value;
-                var toneEl = document.getElementById('ch-tone');
-                if (toneEl) payload.tone_of_voice = toneEl.value.trim();
             }
+            // Profile — always saved (visible for all channels)
+            var personaEl = document.getElementById('ch-persona');
+            if (personaEl && personaEl.value) payload.persona = personaEl.value;
             // Email mode/notify/trigger
             if (chEmailBehaviorGroup && chEmailBehaviorGroup.style.display !== 'none') {
                 var modeEl = document.getElementById('ch-email-mode');

@@ -1,42 +1,17 @@
 // Homun — Memory page interactivity
 
-// ─── Profile filter ───
-(async function initProfileFilter() {
-    const select = document.getElementById('memory-profile-filter');
-    if (!select) return;
+// ─── Profile filter — delegated to global topbar.js ───
+document.addEventListener('profile-changed', () => {
+    if (typeof historyOffset !== 'undefined') historyOffset = 0;
+    if (typeof loadHistory === 'function') loadHistory();
+    if (typeof loadMemoryFile === 'function') loadMemoryFile();
+    if (typeof loadInstructions === 'function') loadInstructions();
+    reloadMemoryStats();
+});
 
-    // Add "All profiles" option
-    const allOpt = document.createElement('option');
-    allOpt.value = '';
-    allOpt.textContent = 'All profiles';
-    select.appendChild(allOpt);
-
-    try {
-        const res = await fetch('/api/v1/profiles');
-        if (!res.ok) return;
-        const profiles = await res.json();
-        profiles.forEach(p => {
-            const opt = document.createElement('option');
-            opt.value = p.slug;
-            opt.textContent = (p.avatar_emoji || '\u{1F464}') + ' ' + p.display_name;
-            select.appendChild(opt);
-        });
-    } catch (_) {}
-
-    select.addEventListener('change', () => {
-        // Reload all sections with the new profile filter
-        if (typeof historyOffset !== 'undefined') historyOffset = 0;
-        if (typeof loadHistory === 'function') loadHistory();
-        if (typeof loadMemoryFile === 'function') loadMemoryFile();
-        if (typeof loadInstructions === 'function') loadInstructions();
-        reloadMemoryStats();
-    });
-})();
-
-/** Get the current profile filter slug (empty = all). */
+/** Get the current profile filter slug from global topbar (empty = all). */
 function getProfileFilter() {
-    const el = document.getElementById('memory-profile-filter');
-    return el ? el.value : '';
+    return window.getActiveProfileSlug ? window.getActiveProfileSlug() : '';
 }
 
 /** Reload memory stats cards with profile filter. */

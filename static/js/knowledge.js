@@ -1,7 +1,8 @@
 // Knowledge Base page — upload, search, list sources
 
 document.addEventListener('DOMContentLoaded', () => {
-    initKnowledgeProfileFilter();
+    // Profile filter managed by global topbar — reload on change
+    document.addEventListener('profile-changed', () => loadSources());
     loadStats();
     loadSources();
     setupUpload();
@@ -9,37 +10,9 @@ document.addEventListener('DOMContentLoaded', () => {
     setupFolderIndex();
 });
 
-/** Get the current profile filter slug (empty = all). */
+/** Get the current profile filter slug from global topbar (empty = all). */
 function getKnowledgeProfileFilter() {
-    const el = document.getElementById('knowledge-profile-filter');
-    return el ? el.value : '';
-}
-
-/** Initialize the profile filter dropdown. */
-async function initKnowledgeProfileFilter() {
-    const select = document.getElementById('knowledge-profile-filter');
-    if (!select) return;
-
-    const allOpt = document.createElement('option');
-    allOpt.value = '';
-    allOpt.textContent = 'All profiles';
-    select.appendChild(allOpt);
-
-    try {
-        const res = await fetch('/api/v1/profiles');
-        if (!res.ok) return;
-        const profiles = await res.json();
-        profiles.forEach(p => {
-            const opt = document.createElement('option');
-            opt.value = p.slug;
-            opt.textContent = (p.avatar_emoji || '\u{1F464}') + ' ' + p.display_name;
-            select.appendChild(opt);
-        });
-    } catch (_) {}
-
-    select.addEventListener('change', () => {
-        loadSources();
-    });
+    return window.getActiveProfileSlug ? window.getActiveProfileSlug() : '';
 }
 
 // ─── Stats ────────────────────────────────────────────

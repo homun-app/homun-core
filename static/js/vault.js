@@ -1,36 +1,11 @@
 // Homun — Vault page interactivity
 
-// ─── Profile filter ───
-(async function initProfileFilter() {
-    const select = document.getElementById('vault-profile-filter');
-    if (!select) return;
+// ─── Profile filter — delegated to global topbar.js ───
+document.addEventListener('profile-changed', () => loadKeys());
 
-    // Add default option
-    const defOpt = document.createElement('option');
-    defOpt.value = '';
-    defOpt.textContent = '\u{1F464} Default';
-    select.appendChild(defOpt);
-
-    try {
-        const res = await fetch('/api/v1/profiles');
-        if (!res.ok) return;
-        const profiles = await res.json();
-        profiles.forEach(p => {
-            if (p.slug === 'default') return; // already added above
-            const opt = document.createElement('option');
-            opt.value = p.slug;
-            opt.textContent = (p.avatar_emoji || '\u{1F464}') + ' ' + p.display_name;
-            select.appendChild(opt);
-        });
-    } catch (_) {}
-
-    select.addEventListener('change', () => loadKeys());
-})();
-
-/** Get the current vault profile filter slug (empty = default). */
+/** Get the current vault profile filter slug from global topbar (empty = default). */
 function getVaultProfile() {
-    const el = document.getElementById('vault-profile-filter');
-    return el ? el.value : '';
+    return window.getActiveProfileSlug ? window.getActiveProfileSlug() : '';
 }
 
 // ─── State ───

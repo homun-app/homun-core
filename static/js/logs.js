@@ -54,7 +54,6 @@ function statusBadgeClass(status) {
 function initLogsPage() {
     const viewerEl = document.getElementById('log-viewer');
     const levelEl = document.getElementById('logs-level');
-    const profileEl = document.getElementById('logs-profile');
     const autoScrollEl = document.getElementById('logs-autoscroll');
     const clearEl = document.getElementById('logs-clear');
     const countEl = document.getElementById('logs-count');
@@ -62,17 +61,8 @@ function initLogsPage() {
 
     if (!viewerEl || !levelEl || !autoScrollEl || !clearEl || !countEl || !statusEl) return;
 
-    // Load profile dropdown options
-    if (profileEl) {
-        fetch('/api/v1/profiles').then(r => r.ok ? r.json() : []).then(profiles => {
-            profiles.forEach(p => {
-                const opt = document.createElement('option');
-                opt.value = p.id;
-                opt.textContent = (p.avatar_emoji || '\u{1F464}') + ' ' + p.display_name;
-                profileEl.appendChild(opt);
-            });
-        }).catch(() => {});
-    }
+    // Profile filter managed by global topbar — re-render on change
+    document.addEventListener('profile-changed', () => queueRender());
 
     const events = [];
     let source = null;
@@ -90,7 +80,7 @@ function initLogsPage() {
     function render() {
         renderQueued = false;
         const filterLevel = normalizeLevel(levelEl.value);
-        const filterProfile = profileEl ? profileEl.value : '';
+        const filterProfile = window.getActiveProfileId ? (window.getActiveProfileId() || '') : '';
         const visible = events.filter((event) => {
             if (!levelPassesFilter(event.level, filterLevel)) return false;
             if (filterProfile && event.profile_id != filterProfile) return false;
@@ -204,7 +194,6 @@ function initLogsPage() {
     }
 
     levelEl.addEventListener('change', queueRender);
-    if (profileEl) profileEl.addEventListener('change', queueRender);
     clearEl.addEventListener('click', () => {
         events.length = 0;
         queueRender();
