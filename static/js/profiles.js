@@ -225,6 +225,9 @@ function showDetail(profile, soulContent) {
         ['Readable from', (visibility.readable_from || []).join(', ') || 'None (isolated)'],
     ]);
 
+    // "Used by" section — load gateways and contacts that reference this profile
+    loadProfileUsage(profile, inner);
+
     // SOUL.md editor
     const soulSection = document.createElement('div');
     soulSection.className = 'contact-section';
@@ -670,4 +673,55 @@ async function deleteProfile(id) {
     } catch (e) {
         alert('Failed to delete: ' + e.message);
     }
+}
+
+// ── "Used by" — shows gateways and contacts referencing this profile ──
+
+async function loadProfileUsage(profile, container) {
+    const section = document.createElement('div');
+    section.className = 'contact-section';
+    const header = document.createElement('div');
+    header.className = 'contact-section-header';
+    const title = document.createElement('h3');
+    title.textContent = 'Used by';
+    header.appendChild(title);
+    section.appendChild(header);
+
+    const items = [];
+
+    // Gateways using this profile
+    try {
+        const res = await fetch('/api/v1/gateways');
+        if (res.ok) {
+            const gws = await res.json();
+            gws.filter(g => g.default_profile === profile.slug)
+                .forEach(g => items.push('Gateway: ' + g.name + ' (' + g.channel_type + ')'));
+        }
+    } catch (_) {}
+
+    // Contacts with this profile as default
+    try {
+        const res = await fetch('/api/v1/contacts');
+        if (res.ok) {
+            const contacts = await res.json();
+            contacts.filter(c => c.profile_id === profile.id)
+                .forEach(c => items.push('Contact: ' + c.name));
+        }
+    } catch (_) {}
+
+    if (items.length === 0) {
+        const empty = document.createElement('p');
+        empty.className = 'contact-no-data';
+        empty.textContent = 'Not assigned to any gateway or contact';
+        section.appendChild(empty);
+    } else {
+        items.forEach(text => {
+            const row = document.createElement('div');
+            row.style.cssText = 'padding:4px 0;font-size:0.85rem;border-bottom:1px solid var(--border)';
+            row.textContent = text;
+            section.appendChild(row);
+        });
+    }
+
+    container.appendChild(section);
 }

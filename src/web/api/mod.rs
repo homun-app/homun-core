@@ -25,6 +25,7 @@ mod profiles;
 mod providers;
 mod sandbox;
 mod sessions;
+mod sharing;
 mod skills;
 mod status;
 mod usage;
@@ -78,6 +79,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .merge(contacts::routes())
         .merge(profiles::routes())
         .merge(gateways::routes())
+        .merge(sharing::routes())
         .merge(onboarding::routes())
         .merge(agents::routes())
         .merge(devices::routes())

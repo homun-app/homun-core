@@ -411,6 +411,13 @@ impl Database {
         )
         .await?;
 
+        Self::apply_migration(
+            pool,
+            "043_shared_resources",
+            include_str!("../../migrations/043_shared_resources.sql"),
+        )
+        .await?;
+
         Ok(())
     }
 

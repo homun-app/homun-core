@@ -53,6 +53,7 @@ mod scheduler;
 mod security;
 mod service;
 mod session;
+mod sharing;
 mod skills;
 mod storage;
 mod tools;
