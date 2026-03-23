@@ -9,7 +9,7 @@ Homun is a personal AI assistant written in Rust — a digital homunculus that l
 
 **Core philosophy**: single binary, local-first, privacy-focused, skill-powered.
 
-**Scale**: ~87K LOC Rust, ~19K LOC JS, 130+ source files, 18 SQLite migrations, 646+ tests, 11-check CI pipeline.
+**Scale**: ~107K LOC Rust, ~25K LOC JS, 236 source files, 43 SQLite migrations, 807+ tests, 11-check CI pipeline.
 
 ## Architecture Overview
 
@@ -175,7 +175,7 @@ src/
 ```
 static/
 ├── css/style.css                    # Design System "Olive Moss Console"
-└── js/                              # 28 files, ~19K LOC
+└── js/                              # 43 files, ~25K LOC
     ├── chat.js                      # Chat with streaming, markdown, tool timeline
     ├── automations.js               # Visual flow builder (n8n-style SVG canvas)
     ├── auto-validate.js             # Builder real-time validation engine

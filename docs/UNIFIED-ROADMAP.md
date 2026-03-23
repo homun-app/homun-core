@@ -1,6 +1,6 @@
 # Homun — Unified Roadmap
 
-> Last updated: 2026-03-21
+> Last updated: 2026-03-23
 > Consolidamento di: ROADMAP.md, IMPLEMENTATION-GAPS.md, openclaw-connections-vs-homun-detailed.md
 > Obiettivo: piano unico orientato a **prodotto industriale**, sicurezza-first, senza legacy o feature completate.
 
@@ -10,17 +10,21 @@
 
 | Metrica | Valore |
 |---------|--------|
-| LOC Rust | ~87,400 |
-| LOC Frontend | ~19,000 (JS) + ~10,000 (CSS) |
-| Test | 762 passing |
-| Canali | 7 (CLI, Telegram✅, Discord⚠️, WhatsApp⚠️, Slack⚠️, Email✅, Web✅) |
-| Tool built-in | ~20 |
-| Web UI Pages | 21 |
+| LOC Rust | ~107,400 |
+| LOC Frontend | ~25,500 (JS) + ~22,100 (CSS) |
+| Source files | 236 Rust, 43 JS |
+| Test | 807 passing |
+| Clippy warnings | 0 |
+| Canali | 7 (CLI, Telegram✅, Discord✅, WhatsApp✅, Slack✅, Email✅, Web✅) |
+| Tool built-in | 20 |
+| Web UI Pages | 30 |
+| API endpoints | ~113 REST |
+| SQLite migrations | 43 |
 | MCP Recipes bundled | 17 (github, google-workspace, google-maps, notion, slack, gitlab, linear, jira, reddit, brave-search, spotify, stripe, twitter, sentry, todoist, home-assistant, wordpress) |
 | Provider LLM | 14 |
 | Release | Alpha v0.2 (REL-1..12 tutti ✅ DONE) |
 
-*✅ = production-ready, ⚠️ = funzionante ma da hardening*
+*✅ = production-ready (Fase 1 hardening completa)*
 
 ---
 
