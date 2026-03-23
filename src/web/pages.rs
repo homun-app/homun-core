@@ -4080,6 +4080,25 @@ async fn account_page(State(state): State<Arc<AppState>>) -> Html<String> {
                     </div>
                 </section>
 
+                <!-- Your Gateways Section -->
+                <section class="section">
+                    <div class="section-header" style="display:flex;justify-content:space-between;align-items:center;">
+                        <div style="display:flex;align-items:center;gap:8px">
+                            <h2>Your Gateways</h2>
+                            <span class="badge" id="gateways-count">0</span>
+                        </div>
+                        <button class="btn btn-primary btn-sm" id="btn-add-gateway">+ Add Gateway</button>
+                    </div>
+                    <p style="color:var(--muted);margin-bottom:1rem;font-size:0.875rem">
+                        Channel instances (Telegram bots, WhatsApp accounts, etc.) with their assigned profiles.
+                    </p>
+                    <div class="provider-grid" id="gateways-grid">
+                        <div class="empty-state" id="gateways-empty">
+                            <p>No gateways configured. They will be auto-created from your channel settings on next gateway start.</p>
+                        </div>
+                    </div>
+                </section>
+
                 <!-- Channel Identities Section -->
                 <section class="section">
                     <div class="section-header">
@@ -4296,11 +4315,74 @@ async fn account_page(State(state): State<Arc<AppState>>) -> Html<String> {
                     <button type="submit" form="email-account-form" class="btn btn-primary">Save &amp; Enable</button>
                 </div>
             </div>
+        </div>
+
+        <!-- Gateway Modal -->
+        <div id="gateway-modal" class="modal">
+            <div class="modal-backdrop"></div>
+            <div class="modal-content modal-content--channel">
+                <div class="modal-header-group">
+                    <div class="modal-header">
+                        <h3 class="modal-title" id="gw-modal-title">Add Gateway</h3>
+                        <button class="modal-close gw-modal-close" type="button">&times;</button>
+                    </div>
+                    <p class="modal-subtitle" id="gw-modal-subtitle">Configure a channel instance with its own profile and settings.</p>
+                </div>
+                <div class="modal-body">
+                    <form id="gateway-form">
+                        <input type="hidden" id="gw-id" value="">
+                        <div class="form-group">
+                            <label for="gw-name">Gateway Name</label>
+                            <input type="text" id="gw-name" class="input" placeholder="e.g. Telegram Personale" required>
+                            <div class="form-hint">A friendly name to identify this gateway.</div>
+                        </div>
+                        <div class="form-group">
+                            <label for="gw-channel-type">Channel Type</label>
+                            <select id="gw-channel-type" class="input">
+                                <option value="telegram">Telegram</option>
+                                <option value="discord">Discord</option>
+                                <option value="whatsapp">WhatsApp</option>
+                                <option value="slack">Slack</option>
+                                <option value="email">Email</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="gw-token">Token / API Key</label>
+                            <input type="password" id="gw-token" class="input" placeholder="Bot token or API key">
+                            <div class="form-hint">Stored encrypted in vault. Leave empty to keep existing.</div>
+                        </div>
+                        <div class="modal-section-label">Behavior</div>
+                        <div class="form-row--2">
+                            <div class="form-group">
+                                <label for="gw-profile">Profile</label>
+                                <select id="gw-profile" class="input">
+                                    <option value="">Default</option>
+                                </select>
+                                <div class="form-hint">Agent personality for this gateway.</div>
+                            </div>
+                            <div class="form-group">
+                                <label for="gw-response-mode">Response Mode</label>
+                                <select id="gw-response-mode" class="input">
+                                    <option value="automatic">Automatic</option>
+                                    <option value="assisted">Assisted</option>
+                                    <option value="on_demand">On Demand</option>
+                                    <option value="silent">Silent</option>
+                                </select>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary gw-modal-close">Cancel</button>
+                    <button type="button" id="btn-delete-gateway" class="btn btn-danger" style="display:none;">Delete</button>
+                    <button type="submit" form="gateway-form" class="btn btn-primary" id="btn-save-gateway">Save</button>
+                </div>
+            </div>
         </div>"##,
         email_accounts_html = email_accounts_html,
     );
 
-    let html = page_html("Account", "account", &body, &["account.js"]);
+    let html = page_html("Account", "account", &body, &["account.js", "account-gateways.js"]);
     Html(html)
 }
 
