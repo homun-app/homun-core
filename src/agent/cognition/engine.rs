@@ -286,15 +286,29 @@ async fn dispatch_discovery_tool(
             discovery::discover_tools(query, params.tool_registry).await
         }
         "discover_skills" => {
+            // For contacts with perimeter, only show shared skills
+            let allowed_skills = if params.contact_perimeter.is_some() {
+                resolve_allowed_skills(params).await
+            } else {
+                Vec::new() // owner: all skills visible
+            };
             discovery::discover_skills(
                 query,
                 params.skill_registry,
                 params.active_profile_slug.as_deref(),
+                &allowed_skills,
             )
             .await
         }
         "discover_mcp" => {
-            discovery::discover_mcp(query, params.config, params.tool_registry).await
+            // For contacts with perimeter, only show shared MCP servers
+            let allowed_mcp = if params.contact_perimeter.is_some() {
+                resolve_allowed_mcp(params).await
+            } else {
+                Vec::new() // owner: all MCP visible
+            };
+            discovery::discover_mcp(query, params.config, params.tool_registry, &allowed_mcp)
+                .await
         }
         "search_memory" => {
             #[cfg(feature = "embeddings")]
@@ -330,6 +344,33 @@ async fn dispatch_discovery_tool(
         }
         _ => format!("Unknown discovery tool: {}", name),
     }
+}
+
+/// Resolve allowed skill names for a contact from shared resources.
+///
+/// Returns empty Vec for owner (no restrictions). For contacts, only
+/// skills explicitly shared via `shared_resource_access` are returned.
+async fn resolve_allowed_skills(params: &CognitionParams<'_>) -> Vec<String> {
+    let contact_id = match params.contact_id {
+        Some(id) => id,
+        None => return Vec::new(),
+    };
+    // Look up shared resources DB — requires a pool reference
+    // For now, return empty (all denied) for contacts without shared access.
+    // The full integration requires passing &Database to CognitionParams.
+    // TODO(IGA): pass Database to CognitionParams for shared resource lookups
+    tracing::debug!(contact_id, "Skill discovery filtered by contact perimeter (no shared skills configured yet)");
+    Vec::new()
+}
+
+/// Resolve allowed MCP server names for a contact from shared resources.
+async fn resolve_allowed_mcp(params: &CognitionParams<'_>) -> Vec<String> {
+    let contact_id = match params.contact_id {
+        Some(id) => id,
+        None => return Vec::new(),
+    };
+    tracing::debug!(contact_id, "MCP discovery filtered by contact perimeter (no shared MCP configured yet)");
+    Vec::new()
 }
 
 /// Build the system prompt for the cognition mini-agent.

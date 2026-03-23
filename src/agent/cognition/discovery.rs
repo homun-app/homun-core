@@ -132,10 +132,14 @@ pub(super) async fn discover_tools(
 /// When `active_profile_slug` is provided, per-profile skills are filtered:
 /// global skills (profile_slug=None) are always included, per-profile skills
 /// are only included if they belong to the active profile.
+///
+/// When `allowed_skills` is non-empty (contact with shared resources), only
+/// skills in the allow list are visible. Empty = all skills (owner mode).
 pub(super) async fn discover_skills(
     query: &str,
     skill_registry: Option<&RwLock<SkillRegistry>>,
     active_profile_slug: Option<&str>,
+    allowed_skills: &[String],
 ) -> String {
     let Some(registry) = skill_registry else {
         return "[]".to_string();
@@ -152,6 +156,12 @@ pub(super) async fn discover_skills(
     let mut scored: Vec<(i32, SkillEntry)> = all_skills
         .into_iter()
         .filter(|(name, _)| {
+            // Contact perimeter: if allowed_skills is non-empty, only those are visible
+            if !allowed_skills.is_empty()
+                && !allowed_skills.iter().any(|a| a == *name)
+            {
+                return false;
+            }
             let Some(profile) = active_profile_slug else {
                 return true; // no profile filtering
             };
@@ -196,10 +206,14 @@ pub(super) async fn discover_skills(
 // ── discover_mcp ────────────────────────────────────────────────────
 
 /// Search for relevant MCP services — both connected servers and available recipes.
+///
+/// When `allowed_mcp` is non-empty (contact with shared resources), only
+/// MCP servers in the allow list are visible. Empty = all servers (owner mode).
 pub(super) async fn discover_mcp(
     query: &str,
     config: &Config,
     tool_registry: &RwLock<ToolRegistry>,
+    allowed_mcp: &[String],
 ) -> String {
     let query_lower = query.to_lowercase();
     let query_words: Vec<&str> = query_lower.split_whitespace().collect();
@@ -208,6 +222,10 @@ pub(super) async fn discover_mcp(
     // 1. Check connected MCP servers from config
     for (name, server) in &config.mcp.servers {
         if !server.enabled {
+            continue;
+        }
+        // Contact perimeter: if allowed_mcp is non-empty, only those are visible
+        if !allowed_mcp.is_empty() && !allowed_mcp.iter().any(|a| a == name) {
             continue;
         }
         let name_lower = name.to_lowercase();
@@ -244,6 +262,8 @@ pub(super) async fn discover_mcp(
     }
 
     // 2. Check available (not yet connected) MCP recipes
+    // Contacts only see connected servers via shared resources, not installable recipes
+    if allowed_mcp.is_empty() {
     let presets = crate::skills::mcp_registry::all_mcp_presets();
     for preset in presets {
         // Skip if already connected
@@ -281,6 +301,7 @@ pub(super) async fn discover_mcp(
             });
         }
     }
+    } // end if allowed_mcp.is_empty() — contacts don't see installable recipes
 
     results.truncate(5);
     serde_json::to_string_pretty(&results).unwrap_or_else(|_| "[]".to_string())
