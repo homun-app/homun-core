@@ -76,7 +76,7 @@ impl MemorySearcher {
         top_k: usize,
         contact_id: Option<i64>,
     ) -> Result<Vec<SearchResult>> {
-        self.search_scoped_full(query, top_k, contact_id, None, &[])
+        self.search_scoped_full(query, top_k, contact_id, None, &[], &[])
             .await
     }
 
@@ -86,6 +86,10 @@ impl MemorySearcher {
     /// Chunks with `profile_id IS NULL` (global) are always included.
     /// Chunks with a `profile_id` are included only if it's in this list.
     /// Pass empty slice to disable profile filtering.
+    /// Search with full scoping: contact + agent + profile + namespace.
+    ///
+    /// `allowed_namespaces`: if non-empty, only chunks in these namespaces (+ global `_private`
+    /// for owner, `_public` for contacts) are included. Pass empty slice to disable.
     pub async fn search_scoped_full(
         &mut self,
         query: &str,
@@ -93,6 +97,7 @@ impl MemorySearcher {
         contact_id: Option<i64>,
         agent_id: Option<&str>,
         profile_ids: &[i64],
+        allowed_namespaces: &[String],
     ) -> Result<Vec<SearchResult>> {
         // Run vector search (always works)
         let vector_results = self.engine.search(query, CANDIDATES_PER_SOURCE).await?;
@@ -155,6 +160,12 @@ impl MemorySearcher {
                             if !profile_ids.contains(&cpid) {
                                 return None; // belongs to a non-visible profile
                             }
+                        }
+                    }
+                    // Namespace scoping: only include chunks in allowed namespaces
+                    if !allowed_namespaces.is_empty() && !chunk.namespace.is_empty() {
+                        if !allowed_namespaces.iter().any(|ns| ns == &chunk.namespace) {
+                            return None; // namespace not in allowed set
                         }
                     }
                     // Apply temporal decay and importance weighting

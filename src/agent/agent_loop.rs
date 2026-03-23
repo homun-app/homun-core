@@ -380,7 +380,7 @@ impl AgentLoop {
         channel: &str,
         chat_id: &str,
     ) -> Result<String> {
-        self.process_message_inner(content, session_key, channel, chat_id, None, &[], None)
+        self.process_message_inner(content, session_key, channel, chat_id, None, &[], None, None)
             .await
     }
 
@@ -395,13 +395,7 @@ impl AgentLoop {
         blocked_tools: &[&str],
     ) -> Result<String> {
         self.process_message_inner(
-            content,
-            session_key,
-            channel,
-            chat_id,
-            None,
-            blocked_tools,
-            None,
+            content, session_key, channel, chat_id, None, blocked_tools, None, None,
         )
         .await
     }
@@ -417,13 +411,7 @@ impl AgentLoop {
         stream_tx: mpsc::Sender<crate::provider::StreamChunk>,
     ) -> Result<String> {
         self.process_message_inner(
-            content,
-            session_key,
-            channel,
-            chat_id,
-            Some(stream_tx),
-            &[],
-            None,
+            content, session_key, channel, chat_id, Some(stream_tx), &[], None, None,
         )
         .await
     }
@@ -441,17 +429,12 @@ impl AgentLoop {
         thinking_override: Option<bool>,
     ) -> Result<String> {
         self.process_message_inner(
-            content,
-            session_key,
-            channel,
-            chat_id,
-            Some(stream_tx),
-            blocked_tools,
-            thinking_override,
+            content, session_key, channel, chat_id, Some(stream_tx), blocked_tools, thinking_override, None,
         )
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     #[allow(clippy::too_many_arguments)]
     async fn process_message_inner(
         &self,
@@ -462,6 +445,7 @@ impl AgentLoop {
         stream_tx: Option<mpsc::Sender<crate::provider::StreamChunk>>,
         blocked_tools: &[&str],
         thinking_override: Option<bool>,
+        _gateway_id_hint: Option<i64>,
     ) -> Result<String> {
         crate::agent::stop::clear_stop();
 
@@ -621,8 +605,16 @@ impl AgentLoop {
                 .to_string();
             let global_default_profile = config.profiles.default.clone();
             // Resolve active profile (contact > channel > config default)
-            // TODO(IGA-2): extract gateway_id from InboundMessage metadata
-            let gateway_id: Option<i64> = None;
+            // Resolve gateway_id from hint or by looking up channel type in DB
+            let gateway_id: Option<i64> = if _gateway_id_hint.is_some() {
+                _gateway_id_hint
+            } else {
+                // Fallback: find the first enabled gateway for this channel type
+                crate::gateways::db::load_gateways_by_type(self.db.pool(), channel)
+                    .await
+                    .ok()
+                    .and_then(|gws| gws.first().map(|g| g.id))
+            };
             let profile_id = crate::agent::profile_resolver::resolve_profile_id_from_values(
                 contact.as_ref(),
                 &ch_default_profile,
@@ -707,6 +699,20 @@ impl AgentLoop {
         } else {
             None
         };
+
+        // Inject perimeter constraints into system prompt (privacy isolation rules)
+        if let Some(ref perimeter) = contact_perimeter {
+            let mut privacy_constraints: Vec<String> = Vec::new();
+            if perimeter.can_see_contacts == 0 {
+                privacy_constraints.push("[PRIVACY] NEVER mention other contacts, people, or relationships. You only know about the person you are talking to.".into());
+            }
+            if perimeter.can_see_calendar == 0 {
+                privacy_constraints.push("[PRIVACY] NEVER mention calendar events, appointments, or schedules.".into());
+            }
+            if !privacy_constraints.is_empty() {
+                self.context.append_constraints(privacy_constraints).await;
+            }
+        }
 
         let cognition_result: CognitionResult = {
             let params = CognitionParams {
@@ -833,6 +839,20 @@ impl AgentLoop {
                         contact_id = perimeter.contact_id,
                         "Tools filtered by contact perimeter"
                     );
+                }
+            }
+        }
+
+        // Re-add tools granted via shared resources (overrides perimeter denial)
+        if contact_perimeter.is_some() {
+            if let Some(cid) = memory_contact_id {
+                if let Ok(shared) = crate::sharing::db::resolve_contact_access(self.db.pool(), cid).await {
+                    for tool_name in &shared.tools {
+                        if !available_tool_names.contains(tool_name) {
+                            available_tool_names.insert(tool_name.clone());
+                            tracing::debug!(tool = %tool_name, contact_id = cid, "Tool re-added via shared resource");
+                        }
+                    }
                 }
             }
         }

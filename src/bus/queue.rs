@@ -54,6 +54,10 @@ pub struct MessageMetadata {
     /// Used to route replies back to the same thread.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thread_id: Option<String>,
+    /// Gateway database ID that received this message.
+    /// Used for contact gateway override profile resolution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gateway_id: Option<i64>,
 }
 
 /// Message from a channel to the agent

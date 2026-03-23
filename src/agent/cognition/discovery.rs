@@ -321,7 +321,8 @@ pub(super) async fn search_memory(
     profile_ids: &[i64],
 ) -> String {
     let mut guard = searcher.lock().await;
-    match guard.search_scoped_full(query, 3, contact_id, agent_id, profile_ids).await {
+    // TODO(IGA): pass allowed_namespaces from contact perimeter for namespace filtering
+    match guard.search_scoped_full(query, 3, contact_id, agent_id, profile_ids, &[]).await {
         Ok(results) if !results.is_empty() => {
             let entries: Vec<MemoryEntry> = results
                 .iter()

@@ -284,6 +284,11 @@ impl ContextBuilder {
         *self.cognition_constraints.write().await = constraints;
     }
 
+    /// Append additional constraints (e.g. privacy perimeter rules).
+    pub async fn append_constraints(&self, extra: Vec<String>) {
+        self.cognition_constraints.write().await.extend(extra);
+    }
+
     /// Clear cognition context (called when cognition is disabled or fails).
     pub async fn clear_cognition_context(&self) {
         *self.cognition_understanding.write().await = String::new();

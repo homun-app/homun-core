@@ -2014,6 +2014,9 @@ pub struct MemoryChunkRow {
     pub importance: i32,
     /// Profile this chunk belongs to (NULL = global, visible to all profiles).
     pub profile_id: Option<i64>,
+    /// Namespace for access control (default: _private).
+    #[sqlx(default)]
+    pub namespace: String,
 }
 
 /// A hierarchical summary of memory chunks over a time period.
@@ -2065,6 +2068,9 @@ pub struct RagSourceRow {
     pub source_channel: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    /// Namespace for access control (default: _private).
+    #[sqlx(default)]
+    pub namespace: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
