@@ -49,12 +49,22 @@
         root.setProperty('--chart-primary', hex);
         root.setProperty('--nav-bg', hex);
         root.setProperty('--accent-contrast', l > 55 ? '#1a1a1a' : '#ffffff');
+
+        // Accent-tinted background: blend accent hue at ~3% saturation into warm cream/dark base
+        if (isDark) {
+            root.setProperty('--bg', hslToHex(h, 4, 5));
+            root.setProperty('--bg-subtle', hslToHex(h, 4, 8));
+        } else {
+            root.setProperty('--bg', hslToHex(h, 8, 95));
+            root.setProperty('--bg-subtle', hslToHex(h, 7, 92));
+        }
     }
 
     function clearCustomAccent() {
         var props = ['--accent', '--accent-text', '--accent-hover', '--accent-active',
                      '--accent-light', '--accent-border', '--focus-ring', '--selection-bg',
-                     '--chart-primary', '--nav-bg', '--accent-contrast'];
+                     '--chart-primary', '--nav-bg', '--accent-contrast',
+                     '--bg', '--bg-subtle'];
         props.forEach(function(p) { document.documentElement.style.removeProperty(p); });
     }
 
