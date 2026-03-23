@@ -43,6 +43,8 @@ pub struct CognitionParams<'a> {
     pub visible_profile_ids: Vec<i64>,
     /// Active profile slug for skill filtering.
     pub active_profile_slug: Option<String>,
+    /// Contact perimeter for tool/knowledge filtering (None = owner, no restrictions).
+    pub contact_perimeter: Option<crate::contacts::perimeter::ContactPerimeter>,
     pub stream_tx: Option<&'a mpsc::Sender<StreamChunk>>,
     pub cognition_model: Option<&'a str>,
     pub max_iterations: u32,
@@ -313,7 +315,12 @@ async fn dispatch_discovery_tool(
         "search_knowledge" => {
             #[cfg(feature = "embeddings")]
             if let Some(rag) = params.rag_engine {
-                return discovery::search_knowledge(query, rag).await;
+                return discovery::search_knowledge(
+                    query,
+                    rag,
+                    &params.visible_profile_ids,
+                )
+                .await;
             }
             "[]".to_string()
         }

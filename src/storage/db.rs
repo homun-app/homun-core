@@ -404,6 +404,13 @@ impl Database {
         )
         .await?;
 
+        Self::apply_migration(
+            pool,
+            "042_namespaces",
+            include_str!("../../migrations/042_namespaces.sql"),
+        )
+        .await?;
+
         Ok(())
     }
 

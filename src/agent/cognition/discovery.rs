@@ -334,14 +334,16 @@ pub(super) async fn search_memory(
 
 // ── search_knowledge ────────────────────────────────────────────────
 
-/// Search the RAG knowledge base with a targeted query.
+/// Search the RAG knowledge base with a targeted query, scoped by profile.
 #[cfg(feature = "embeddings")]
 pub(super) async fn search_knowledge(
     query: &str,
     rag_engine: &Arc<tokio::sync::Mutex<crate::rag::RagEngine>>,
+    profile_ids: &[i64],
 ) -> String {
+    let pid = profile_ids.first().copied();
     let mut guard = rag_engine.lock().await;
-    match guard.search(query, 3, None).await {
+    match guard.search(query, 3, pid).await {
         Ok(results) if !results.is_empty() => {
             let entries: Vec<KnowledgeEntry> = results
                 .iter()
@@ -363,7 +365,7 @@ pub(super) async fn search_knowledge(
 
 /// Stub for when embeddings feature is disabled.
 #[cfg(not(feature = "embeddings"))]
-pub(super) async fn search_knowledge(_query: &str) -> String {
+pub(super) async fn search_knowledge(_query: &str, _profile_ids: &[i64]) -> String {
     "[]".to_string()
 }
 

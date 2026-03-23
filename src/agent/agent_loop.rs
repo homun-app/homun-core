@@ -694,6 +694,20 @@ impl AgentLoop {
         // tools/memory/RAG before the execution loop. On failure, falls
         // back to a full-context result with all tools available.
         let memory_contact_id = self.resolve_contact_from_session(session_key).await;
+
+        // Load contact perimeter for isolation (None = owner, no restrictions)
+        let contact_perimeter = if let Some(cid) = memory_contact_id {
+            if !self.is_owner_session(session_key).await {
+                crate::contacts::perimeter::load_perimeter(self.db.pool(), cid)
+                    .await
+                    .ok()
+            } else {
+                None // Owner bypasses all perimeters
+            }
+        } else {
+            None
+        };
+
         let cognition_result: CognitionResult = {
             let params = CognitionParams {
                 user_prompt: &prompt_content,
@@ -710,6 +724,7 @@ impl AgentLoop {
                 contact_id: memory_contact_id,
                 visible_profile_ids: active_visible_profile_ids.clone(),
                 active_profile_slug: active_profile_slug.clone(),
+                contact_perimeter: contact_perimeter.clone(),
                 stream_tx: stream_tx.as_ref(),
                 cognition_model: if config.agent.cognition_model.is_empty() {
                     None
@@ -788,10 +803,38 @@ impl AgentLoop {
             xml_mode,
         )
         .await;
-        let tool_defs = tool_set.defs;
+        let mut tool_defs = tool_set.defs;
         let has_tools = tool_set.has_tools;
-        let available_tool_names = tool_set.available_names;
-        let tool_infos = tool_set.tool_infos;
+        let mut available_tool_names = tool_set.available_names;
+        let mut tool_infos = tool_set.tool_infos;
+
+        // Apply contact perimeter tool restrictions (hard enforcement)
+        if let Some(ref perimeter) = contact_perimeter {
+            let denied = perimeter.denied_tools();
+            let allowed = perimeter.allowed_tools();
+            if !denied.is_empty() || !allowed.is_empty() {
+                let before_count = available_tool_names.len();
+                available_tool_names.retain(|name| {
+                    if denied.iter().any(|d| name.contains(d)) {
+                        return false;
+                    }
+                    if !allowed.is_empty() && !allowed.iter().any(|a| name.contains(a)) {
+                        return false;
+                    }
+                    true
+                });
+                tool_defs.retain(|td| available_tool_names.contains(&td.function.name));
+                tool_infos.retain(|ti| available_tool_names.contains(&ti.name));
+                let removed = before_count - available_tool_names.len();
+                if removed > 0 {
+                    tracing::info!(
+                        removed,
+                        contact_id = perimeter.contact_id,
+                        "Tools filtered by contact perimeter"
+                    );
+                }
+            }
+        }
 
         // Resolve effective thinking: when tools are available, disable thinking.
         // Reasoning models (DeepSeek-R1, QwQ) tend to "reason in text" instead
@@ -2143,6 +2186,18 @@ impl AgentLoop {
             .ok()
             .flatten()
             .map(|c| c.id)
+    }
+
+    /// Check if the session belongs to the owner (not an external contact).
+    ///
+    /// Web UI and CLI sessions are always owner. For other channels,
+    /// the session is owner if the sender matches an `allow_from` entry.
+    async fn is_owner_session(&self, session_key: &str) -> bool {
+        let Some((channel, _)) = session_key.split_once(':') else {
+            return true; // Unknown format → treat as owner
+        };
+        // Web and CLI are always the owner (authenticated via login)
+        matches!(channel, "web" | "cli")
     }
 
     /// Try to compact session if message count exceeds memory_window.
