@@ -48,13 +48,25 @@
         root.setProperty('--selection-bg', hslToHex(h, isDark ? 20 : 25, isDark ? 22 : 82));
         root.setProperty('--chart-primary', hex);
         root.setProperty('--nav-bg', hex);
-        root.setProperty('--accent-contrast', l > 55 ? '#1a1a1a' : '#ffffff');
+        // Derive nav text/icon colors based on nav-bg luminance
+        var navLight = l > 55;
+        root.setProperty('--accent-contrast', navLight ? '#1a1a1a' : '#ffffff');
+        root.setProperty('--nav-text', navLight ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.55)');
+        root.setProperty('--nav-text-hover', navLight ? 'rgba(0,0,0,0.85)' : '#FFFFFF');
+        root.setProperty('--nav-active-text', navLight ? '#000000' : '#FFFFFF');
+        root.setProperty('--nav-hover-bg', navLight ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.08)');
+        root.setProperty('--nav-active-bg', navLight ? 'rgba(0,0,0,0.10)' : 'rgba(255,255,255,0.12)');
+        root.setProperty('--nav-icon', navLight
+            ? "url('/static/img/icon_braun.png')"
+            : "url('/static/img/icon_white.png')");
     }
 
     function clearCustomAccent() {
         var props = ['--accent', '--accent-text', '--accent-hover', '--accent-active',
                      '--accent-light', '--accent-border', '--focus-ring', '--selection-bg',
-                     '--chart-primary', '--nav-bg', '--accent-contrast'];
+                     '--chart-primary', '--nav-bg', '--accent-contrast',
+                     '--nav-text', '--nav-text-hover', '--nav-active-text',
+                     '--nav-hover-bg', '--nav-active-bg', '--nav-icon'];
         props.forEach(function(p) { document.documentElement.style.removeProperty(p); });
     }
 

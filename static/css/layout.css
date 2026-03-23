@@ -31,7 +31,32 @@
     justify-content: center;
     padding: 0;
     margin-bottom: 12px;
+    position: relative;
 }
+
+/* Re-open button — overlays logo, visible on hover when subnav collapsed.
+   JS toggles .is-panel-collapsed on .sidebar to activate. */
+.subnav-reopen-btn {
+    display: none;
+    position: absolute;
+    inset: 0;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    color: var(--nav-text);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity var(--fast);
+    z-index: 2;
+}
+.subnav-reopen-btn svg { width: 18px; height: 18px; }
+/* Show reopen button only when sidebar knows subnav is collapsed */
+.sidebar.is-panel-collapsed .subnav-reopen-btn { display: flex; }
+.sidebar.is-panel-collapsed .sidebar-header:hover .subnav-reopen-btn { opacity: 1; }
+.sidebar.is-panel-collapsed .sidebar-header:hover .logo-link { opacity: 0; }
+.subnav-reopen-btn:hover { color: var(--nav-text-hover); }
 
 .logo-link {
     text-decoration: none;
@@ -40,13 +65,16 @@
     justify-content: center;
     transition: opacity var(--fast) var(--ease);
 }
-.logo-link:hover { opacity: 0.8; }
+
+.logo-link:hover {
+    opacity: 0.8;
+}
 
 .logo-icon {
     height: 28px;
     width: 28px;
     flex-shrink: 0;
-    background-image: url('/static/img/icon_white.png');
+    background-image: var(--nav-icon);
     background-size: contain;
     background-repeat: no-repeat;
     background-position: center center;
@@ -60,7 +88,7 @@
     align-items: center;
     gap: 4px;
     width: 100%;
-    padding: 0 8px;
+    padding: 0 6px;
 }
 
 .nav-bottom {
@@ -69,7 +97,7 @@
     align-items: center;
     gap: 4px;
     width: 100%;
-    padding: 0 8px 0;
+    padding: 0 6px 0;
     margin-top: auto;
 }
 
@@ -78,8 +106,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 36px;
-    height: 36px;
+    width: 38px;
+    height: 38px;
     border-radius: var(--r-md);
     color: var(--nav-text);
     text-decoration: none;
@@ -100,8 +128,8 @@
 }
 
 .nav-icon {
-    width: 20px;
-    height: 20px;
+    width: 18px;
+    height: 18px;
     flex-shrink: 0;
     transition: color var(--fast);
 }
@@ -112,10 +140,18 @@
 }
 
 /* Hidden label (icon-only) */
-.nav-label { display: none; }
+.nav-label {
+    display: none;
+}
 
-.sidebar-footer { justify-content: center; padding: 12px 8px; }
-.sidebar-footer .version-badge { display: none; }
+.sidebar-footer {
+    justify-content: center;
+    padding: 12px 8px;
+}
+
+.sidebar-footer .version-badge {
+    display: none;
+}
 
 /* ─── Nav tooltips on hover ─── */
 .nav-link::after {
@@ -138,8 +174,14 @@
     opacity: 0;
     transition: opacity var(--fast) var(--ease);
 }
-.nav-link:hover::after { opacity: 1; }
-.nav-link:not([data-label])::after { display: none; }
+
+.nav-link:hover::after {
+    opacity: 1;
+}
+
+.nav-link:not([data-label])::after {
+    display: none;
+}
 
 /* ─── Emergency Stop nav button ─── */
 .nav-estop {
@@ -148,10 +190,24 @@
     cursor: pointer;
     margin-top: 4px;
 }
-.nav-estop .nav-icon { color: rgba(255, 100, 100, 0.4); opacity: 1; }
-.nav-estop:hover .nav-icon { color: #EF4444; opacity: 1; }
-.nav-estop.is-stopped { pointer-events: none; }
-.nav-estop.is-stopped .nav-icon { opacity: 0.15; }
+
+.nav-estop .nav-icon {
+    color: rgba(255, 100, 100, 0.4);
+    opacity: 1;
+}
+
+.nav-estop:hover .nav-icon {
+    color: #EF4444;
+    opacity: 1;
+}
+
+.nav-estop.is-stopped {
+    pointer-events: none;
+}
+
+.nav-estop.is-stopped .nav-icon {
+    opacity: 0.15;
+}
 
 /* ─── Logout nav button ─── */
 .nav-logout {
@@ -160,8 +216,15 @@
     cursor: pointer;
     padding: 0;
 }
-.nav-logout .nav-icon { color: var(--nav-text); }
-.nav-logout:hover .nav-icon { color: rgba(255, 100, 100, 0.9); opacity: 1; }
+
+.nav-logout .nav-icon {
+    color: var(--nav-text);
+}
+
+.nav-logout:hover .nav-icon {
+    color: rgba(255, 100, 100, 0.9);
+    opacity: 1;
+}
 
 /* ─── Sub-navigation panels ─── */
 /* Content with subnav — flex row like .chat-shell */
@@ -176,48 +239,53 @@
     flex: 1;
     min-height: 0;
     overflow: hidden;
-    background: var(--bg);
-    border-radius: var(--content-radius) 0 0 0;
+    background: transparent;
+    border-radius: 0;
 }
-.content-row > .content-inner,
-.content-row > .auto-list-view,
-.content-row > div:not(.sidebar-subnav) {
+
+.content-row>.content-inner,
+.content-row>.auto-list-view,
+.content-row>div:not(.sidebar-subnav) {
     flex: 1;
     min-width: 0;
     overflow-y: auto;
 }
-/* Subnav pages: drop max-width (panel constrains width), match sidebar
-   padding-top (16px) so all three header rows share the same Y origin. */
-.content-row > .content-inner {
+
+/* Subnav pages: topbar is inside content-inner, so padding-top=0
+   (topbar provides the top spacing). */
+.content-row>.content-inner {
     max-width: none;
-    padding: 18px 40px 48px;
+    padding: 0 40px 48px;
 }
+/* Topbar inside content-inner — align with subnav header height */
+.content-row>.content-inner>.content-topbar {
+    margin: 0 -40px;
+    padding: 0 40px;
+}
+
 /* Page-header in subnav mode: fixed header-row height, content centered. */
 .content.has-subnav .page-header {
     height: var(--header-row);
     margin-bottom: 24px;
 }
-/* Content body offset — aligns under page title, leaving gutter below hamburger.
-   Applies to standard content-inner pages and the automations master panel. */
-.content-row > .content-inner > *:not(.page-header),
-.content.has-subnav .auto-master > *:not(.page-header) {
-    margin-left: 44px;
-}
 
-/* Subnav — flex child inside .content, same pattern as .chat-sidebar.
-   padding-top: 16px matches sidebar so header rows align across columns. */
+/* Subnav — unified with sidebar: same dark background, light text.
+   Forms a single visual block with the nav bar. */
 .sidebar-subnav {
-    width: 220px;
+    width: 244px;
     flex-shrink: 0;
-    background: var(--bg);
-    border-right: 1.5px dashed var(--border);
-    padding: 18px 20px 20px;
+    background: var(--nav-bg);
+    border-left: 1px dashed var(--nav-hover-bg);
+    border-right: none;
+    padding: 16px 16px 20px;
     display: none;
     flex-direction: column;
     gap: 2px;
     overflow-y: auto;
-    transition: width var(--med) var(--ease), padding var(--med) var(--ease);
+    transition: width var(--med) var(--ease), padding var(--med) var(--ease),
+                opacity var(--med) var(--ease);
 }
+
 .sidebar-subnav.is-open {
     display: flex;
 }
@@ -227,10 +295,11 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: var(--t4);
+    color: var(--nav-text);
     padding: 14px 0 4px;
     line-height: 1;
 }
+
 /* First section matches the header-row height so it aligns
    with the sidebar logo and the page title across columns. */
 .subnav-section:first-of-type {
@@ -243,26 +312,31 @@
 .sidebar-subnav-link {
     display: flex;
     align-items: center;
-    padding: 8px 0 8px 8px;
-    border-radius: var(--r-lg);
-    color: var(--t3);
+    padding: 8px 8px;
+    border-radius: var(--r-md);
+    color: var(--nav-text);
     text-decoration: none;
     font-size: 13px;
     font-weight: 500;
     background: transparent;
-    transition: color var(--fast) var(--ease);
-}
-.sidebar-subnav-link:hover {
-    color: var(--accent);
-}
-.sidebar-subnav-link.active {
-    color: var(--accent);
-    font-weight: 600;
+    transition: color var(--fast) var(--ease), background var(--fast) var(--ease);
 }
 
-/* ─── Subnav collapse toggle (inline in page-header) ─── */
+.sidebar-subnav-link:hover {
+    color: var(--nav-text-hover);
+    background: var(--nav-hover-bg);
+}
+
+.sidebar-subnav-link.active {
+    color: var(--nav-active-text);
+    font-weight: 600;
+    background: var(--nav-active-bg);
+}
+
+/* ─── Subnav collapse toggle ─── */
+/* Visible on subnav hover when open; on logo hover when collapsed. */
 .subnav-toggle-btn {
-    display: inline-flex;
+    display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
@@ -272,32 +346,42 @@
     border: 0;
     border-radius: var(--r-md);
     background: transparent;
-    color: var(--t3);
+    color: var(--nav-text);
     cursor: pointer;
-    transition: color var(--fast);
+    transition: color var(--fast), background var(--fast);
 }
-.subnav-toggle-btn:hover { color: var(--t1); }
-.subnav-toggle-btn svg { width: 20px; height: 20px; }
+
+.subnav-toggle-btn:hover {
+    color: var(--nav-text-hover);
+    background: var(--nav-hover-bg);
+}
+
+.subnav-toggle-btn svg {
+    width: 16px;
+    height: 16px;
+}
 
 .sidebar-subnav-header {
     height: var(--header-row, 44px);
     display: flex;
     align-items: center;
+    justify-content: space-between;
     font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.2em;
-    color: var(--t3);
+    color: var(--nav-text);
     padding: 0;
-    margin-bottom: 7px;
+    margin-bottom: 8px;
 }
 
-/* Collapsed state */
+/* Collapsed state — subnav fully hidden */
 .content.has-subnav.is-subnav-collapsed .sidebar-subnav {
     width: 0;
+    min-width: 0;
     padding: 0;
-    border-right: 0;
     overflow: hidden;
+    opacity: 0;
 }
 
 /* ─── Theme toggle (legacy compat) ─── */
@@ -310,16 +394,50 @@
     border-radius: var(--r-md);
     transition: background var(--fast) var(--ease);
 }
-.theme-toggle:hover { background: var(--surface-hover); }
-.theme-toggle-icon { width: 18px; height: 18px; color: var(--t3); transition: color var(--fast), transform var(--fast); }
-.theme-toggle:hover .theme-toggle-icon { color: var(--t1); }
-.theme-toggle-icon svg { width: 100%; height: 100%; }
-.theme-toggle-icon--sun { display: none; }
-.theme-toggle-icon--moon { display: block; }
-[data-theme="dark"] .theme-toggle-icon--sun { display: block; }
-[data-theme="dark"] .theme-toggle-icon--moon { display: none; }
-.theme-toggle:hover .theme-toggle-icon--moon { transform: rotate(-15deg); }
-.theme-toggle:hover .theme-toggle-icon--sun { transform: rotate(15deg); }
+
+.theme-toggle:hover {
+    background: var(--surface-hover);
+}
+
+.theme-toggle-icon {
+    width: 18px;
+    height: 18px;
+    color: var(--t3);
+    transition: color var(--fast), transform var(--fast);
+}
+
+.theme-toggle:hover .theme-toggle-icon {
+    color: var(--t1);
+}
+
+.theme-toggle-icon svg {
+    width: 100%;
+    height: 100%;
+}
+
+.theme-toggle-icon--sun {
+    display: none;
+}
+
+.theme-toggle-icon--moon {
+    display: block;
+}
+
+[data-theme="dark"] .theme-toggle-icon--sun {
+    display: block;
+}
+
+[data-theme="dark"] .theme-toggle-icon--moon {
+    display: none;
+}
+
+.theme-toggle:hover .theme-toggle-icon--moon {
+    transform: rotate(-15deg);
+}
+
+.theme-toggle:hover .theme-toggle-icon--sun {
+    transform: rotate(15deg);
+}
 
 
 /* ═══ MAIN CONTENT — Editorial Canvas ═══ */
@@ -328,26 +446,25 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    background: var(--nav-bg);
+    background: var(--bg);
     border-radius: 0;
     position: relative;
     z-index: 20;
 }
 
 /* Content body — full-width wrapper below topbar.
-   Provides the light background + top-left curve over the accent. */
+   Transparent so texture from .content shows through. */
 .content-body {
     flex: 1;
     overflow-y: auto;
     min-height: 0;
-    background: var(--bg);
-    border-radius: var(--content-radius) 0 0 0;
+    background: transparent;
+    border-radius: 0;
 }
 
 /* ═══ TOP BAR ═══
    Horizontal bar at top of .content — profile selector, account, e-stop.
-   Same accent background as the sidebar, visually continuous. The page
-   content below gets the border-radius curve. */
+   Same background as the page content for a flat, unified look. */
 .content-topbar {
     display: flex;
     align-items: center;
@@ -355,8 +472,8 @@
     height: calc(var(--header-row, 44px) + 16px);
     padding: 0 20px;
     flex-shrink: 0;
-    background: var(--nav-bg);
-    color: var(--nav-text);
+    background: transparent;
+    color: var(--t2);
     z-index: 15;
 }
 
@@ -377,12 +494,13 @@
     border-radius: var(--r-md);
     font-size: 13px;
     font-weight: 500;
-    color: var(--nav-active-text);
+    color: var(--t1);
     cursor: pointer;
     transition: opacity var(--fast) var(--ease);
     position: relative;
     white-space: nowrap;
 }
+
 .topbar-profile-pill:hover {
     opacity: 0.75;
 }
@@ -441,10 +559,12 @@
     text-align: left;
     transition: background var(--fast) var(--ease);
 }
+
 .topbar-profile-option:hover {
     background: var(--surface-hover);
     color: var(--t1);
 }
+
 .topbar-profile-option.is-active {
     color: var(--accent-text);
     font-weight: 600;
@@ -456,6 +576,7 @@
     background: var(--border);
     margin: 4px 8px;
 }
+
 .topbar-profile-link {
     display: flex;
     align-items: center;
@@ -473,6 +594,7 @@
     text-decoration: none;
     transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
 }
+
 .topbar-profile-link:hover {
     background: var(--surface-hover);
     color: var(--t1);
@@ -488,14 +610,15 @@
     border-radius: var(--r-md);
     background: none;
     border: none;
-    color: var(--nav-text);
+    color: var(--t3);
     cursor: pointer;
     text-decoration: none;
     transition: color var(--fast) var(--ease), background var(--fast) var(--ease);
 }
+
 .topbar-btn:hover {
-    color: var(--nav-active-text);
-    background: rgba(255, 255, 255, 0.12);
+    color: var(--t1);
+    background: var(--hover);
 }
 
 .topbar-icon {
@@ -505,9 +628,19 @@
 }
 
 /* E-stop in top bar — bright red */
-.topbar-estop { color: #EF4444; }
-.topbar-estop:hover { color: #FF3333; background: rgba(255, 50, 50, 0.15); }
-.topbar-estop.is-stopped { pointer-events: none; opacity: 0.3; }
+.topbar-estop {
+    color: #EF4444;
+}
+
+.topbar-estop:hover {
+    color: #FF3333;
+    background: rgba(255, 50, 50, 0.15);
+}
+
+.topbar-estop.is-stopped {
+    pointer-events: none;
+    opacity: 0.3;
+}
 
 .content-inner {
     max-width: 960px;
@@ -547,57 +680,84 @@
 }
 
 /* ─── Background Textures ─── */
-.bg-texture-none { /* default, no texture */ }
+.bg-texture-none {
+    /* default, no texture */
+}
 
 .bg-texture-noise {
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.06'/%3E%3C/svg%3E");
 }
 
 /* Emoji outline patterns — WhatsApp-style doodles */
 
 /* Chat — speech bubbles, stars, hearts, lightning */
 .bg-texture-chat {
-    background-image: url("data:image/svg+xml,%3Csvg width='120' height='120' viewBox='0 0 120 120' xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round' stroke-linejoin='round' opacity='0.04'%3E%3Cpath d='M15 8a5 5 0 015-5h12a5 5 0 015 5v8a5 5 0 01-5 5H25l-4 4v-4h-1a5 5 0 01-5-5z'/%3E%3Cpath d='M75 12l2.5 5 5.5.8-4 3.9.9 5.5L75 24.7l-4.9 2.5.9-5.5-4-3.9 5.5-.8z'/%3E%3Cpath d='M100 70c3-6 10-6 13 0s-6.5 12-13 17c-6.5-5-16-11-13-17s10-6 13 0z'/%3E%3Cpath d='M22 65l3-12 9 9z'/%3E%3Cpath d='M60 55a6 6 0 1112 0 6 6 0 01-12 0z'/%3E%3Cpath d='M63 52v2M69 52v2M64 57a4 4 0 004 0'/%3E%3Cpath d='M18 95l2-8 2 5 3-3 2 6'/%3E%3Cpath d='M80 90h12M80 94h8'/%3E%3Cpath d='M50 100l4-10 4 10M52 96h4'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg width='120' height='120' viewBox='0 0 120 120' xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round' stroke-linejoin='round' opacity='0.07'%3E%3Cpath d='M15 8a5 5 0 015-5h12a5 5 0 015 5v8a5 5 0 01-5 5H25l-4 4v-4h-1a5 5 0 01-5-5z'/%3E%3Cpath d='M75 12l2.5 5 5.5.8-4 3.9.9 5.5L75 24.7l-4.9 2.5.9-5.5-4-3.9 5.5-.8z'/%3E%3Cpath d='M100 70c3-6 10-6 13 0s-6.5 12-13 17c-6.5-5-16-11-13-17s10-6 13 0z'/%3E%3Cpath d='M22 65l3-12 9 9z'/%3E%3Cpath d='M60 55a6 6 0 1112 0 6 6 0 01-12 0z'/%3E%3Cpath d='M63 52v2M69 52v2M64 57a4 4 0 004 0'/%3E%3Cpath d='M18 95l2-8 2 5 3-3 2 6'/%3E%3Cpath d='M80 90h12M80 94h8'/%3E%3Cpath d='M50 100l4-10 4 10M52 96h4'/%3E%3C/svg%3E");
 }
 
 /* Vibes — music notes, headphones, waves, vinyl */
 .bg-texture-vibes {
-    background-image: url("data:image/svg+xml,%3Csvg width='120' height='120' viewBox='0 0 120 120' xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round' stroke-linejoin='round' opacity='0.04'%3E%3Cpath d='M20 5v14M20 19a3 3 0 110-1'/%3E%3Cpath d='M33 3v14M33 17a3 3 0 110-1M20 5h13v-2'/%3E%3Ccircle cx='75' cy='15' r='8'/%3E%3Ccircle cx='75' cy='15' r='2'/%3E%3Cpath d='M10 55 Q20 45 30 55 Q40 65 50 55'/%3E%3Cpath d='M65 60a8 8 0 0116 0v3h-3v-3a5 5 0 00-10 0v3h-3z'/%3E%3Cpath d='M62 63h5v6h-5zM77 63h5v6h-5z'/%3E%3Cpath d='M100 50v15M100 65a4 4 0 110-1M100 50l8-3v15'/%3E%3Cpath d='M30 95l3-3 3 3 3-3 3 3'/%3E%3Ccircle cx='90' cy='95' r='7'/%3E%3Ccircle cx='90' cy='95' r='2'/%3E%3Cline x1='93' y1='93' x2='97' y2='89'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg width='120' height='120' viewBox='0 0 120 120' xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round' stroke-linejoin='round' opacity='0.07'%3E%3Cpath d='M20 5v14M20 19a3 3 0 110-1'/%3E%3Cpath d='M33 3v14M33 17a3 3 0 110-1M20 5h13v-2'/%3E%3Ccircle cx='75' cy='15' r='8'/%3E%3Ccircle cx='75' cy='15' r='2'/%3E%3Cpath d='M10 55 Q20 45 30 55 Q40 65 50 55'/%3E%3Cpath d='M65 60a8 8 0 0116 0v3h-3v-3a5 5 0 00-10 0v3h-3z'/%3E%3Cpath d='M62 63h5v6h-5zM77 63h5v6h-5z'/%3E%3Cpath d='M100 50v15M100 65a4 4 0 110-1M100 50l8-3v15'/%3E%3Cpath d='M30 95l3-3 3 3 3-3 3 3'/%3E%3Ccircle cx='90' cy='95' r='7'/%3E%3Ccircle cx='90' cy='95' r='2'/%3E%3Cline x1='93' y1='93' x2='97' y2='89'/%3E%3C/svg%3E");
 }
 
 /* Tech — code brackets, gears, circuit, terminal */
 .bg-texture-tech {
-    background-image: url("data:image/svg+xml,%3Csvg width='120' height='120' viewBox='0 0 120 120' xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round' stroke-linejoin='round' opacity='0.04'%3E%3Cpath d='M18 5l-8 8 8 8M32 5l8 8-8 8'/%3E%3Cpath d='M22 22l6-18'/%3E%3Ccircle cx='80' cy='12' r='8'/%3E%3Cpath d='M80 4v-2M80 20v2M72 12h-2M88 12h2M74 6l-1.4-1.4M86 18l1.4 1.4M74 18l-1.4 1.4M86 6l1.4-1.4'/%3E%3Crect x='10' y='50' width='20' height='14' rx='2'/%3E%3Cpath d='M14 57h5M14 60h8'/%3E%3Cpath d='M65 55h20v14H65zM70 62h10'/%3E%3Cpath d='M75 55v-5h10v5M90 62h5v10M95 67h5'/%3E%3Cpath d='M15 90a5 5 0 0110 0 5 5 0 01-5 5M25 90a5 5 0 01-10 0'/%3E%3Cpath d='M70 90h3v3h3v-3h3v-3h-3v-3h-3v3h-3z'/%3E%3Cpath d='M95 85l8 8M103 85l-8 8'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg width='120' height='120' viewBox='0 0 120 120' xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round' stroke-linejoin='round' opacity='0.07'%3E%3Cpath d='M18 5l-8 8 8 8M32 5l8 8-8 8'/%3E%3Cpath d='M22 22l6-18'/%3E%3Ccircle cx='80' cy='12' r='8'/%3E%3Cpath d='M80 4v-2M80 20v2M72 12h-2M88 12h2M74 6l-1.4-1.4M86 18l1.4 1.4M74 18l-1.4 1.4M86 6l1.4-1.4'/%3E%3Crect x='10' y='50' width='20' height='14' rx='2'/%3E%3Cpath d='M14 57h5M14 60h8'/%3E%3Cpath d='M65 55h20v14H65zM70 62h10'/%3E%3Cpath d='M75 55v-5h10v5M90 62h5v10M95 67h5'/%3E%3Cpath d='M15 90a5 5 0 0110 0 5 5 0 01-5 5M25 90a5 5 0 01-10 0'/%3E%3Cpath d='M70 90h3v3h3v-3h3v-3h-3v-3h-3v3h-3z'/%3E%3Cpath d='M95 85l8 8M103 85l-8 8'/%3E%3C/svg%3E");
 }
 
 /* Nature — leaves, sun, clouds, flowers */
 .bg-texture-nature {
-    background-image: url("data:image/svg+xml,%3Csvg width='120' height='120' viewBox='0 0 120 120' xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round' stroke-linejoin='round' opacity='0.04'%3E%3Cpath d='M20 20C10 10 10 2 20 2s10 8 0 18M20 20v8'/%3E%3Ccircle cx='80' cy='12' r='6'/%3E%3Cpath d='M74 12h-3M86 12h3M80 6v-3M80 18v3M75.8 7.8l-2-2M84.2 16.2l2 2M75.8 16.2l-2 2M84.2 7.8l2-2'/%3E%3Cpath d='M50 55a8 4 0 0116 0c0 4-8 12-8 12s-8-8-8-12z'/%3E%3Cpath d='M55 55a3 3 0 016 0'/%3E%3Cpath d='M10 70Q15 60 25 65Q20 55 30 55Q35 55 35 62Q40 58 40 65Q35 70 10 70z'/%3E%3Cpath d='M75 65c0-6 4-10 8-10s6 4 0 10M83 55c6-4 12-2 10 4s-10 6-10 6'/%3E%3Cpath d='M83 65v10'/%3E%3Ccircle cx='25' cy='100' r='4'/%3E%3Ccircle cx='25' cy='100' r='1'/%3E%3Cpath d='M80 95l2 5 5-1-3 4 4 3-5 1 0 5-3-4-4 3 1-5-5-1 4-3-3-4 5 1z'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg width='120' height='120' viewBox='0 0 120 120' xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round' stroke-linejoin='round' opacity='0.07'%3E%3Cpath d='M20 20C10 10 10 2 20 2s10 8 0 18M20 20v8'/%3E%3Ccircle cx='80' cy='12' r='6'/%3E%3Cpath d='M74 12h-3M86 12h3M80 6v-3M80 18v3M75.8 7.8l-2-2M84.2 16.2l2 2M75.8 16.2l-2 2M84.2 7.8l2-2'/%3E%3Cpath d='M50 55a8 4 0 0116 0c0 4-8 12-8 12s-8-8-8-12z'/%3E%3Cpath d='M55 55a3 3 0 016 0'/%3E%3Cpath d='M10 70Q15 60 25 65Q20 55 30 55Q35 55 35 62Q40 58 40 65Q35 70 10 70z'/%3E%3Cpath d='M75 65c0-6 4-10 8-10s6 4 0 10M83 55c6-4 12-2 10 4s-10 6-10 6'/%3E%3Cpath d='M83 65v10'/%3E%3Ccircle cx='25' cy='100' r='4'/%3E%3Ccircle cx='25' cy='100' r='1'/%3E%3Cpath d='M80 95l2 5 5-1-3 4 4 3-5 1 0 5-3-4-4 3 1-5-5-1 4-3-3-4 5 1z'/%3E%3C/svg%3E");
+}
+
+/* Waves — gentle sine curves */
+.bg-texture-waves {
+    background-image: url("data:image/svg+xml,%3Csvg width='40' height='20' viewBox='0 0 40 20' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 10 C 10 10, 10 0, 20 0 C 30 0, 30 10, 40 10' stroke='%23000000' stroke-opacity='0.07' stroke-width='1' fill='none'/%3E%3C/svg%3E");
+}
+
+/* Graph — carta millimetrata, 20px grid with 4px subdivisions */
+.bg-texture-graph {
+    background-image:
+        url("data:image/svg+xml,%3Csvg width='80' height='80' viewBox='0 0 80 80' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M 80 0 L 0 0 0 80' fill='none' stroke='%23000' stroke-opacity='0.08' stroke-width='0.75'/%3E%3C/svg%3E"),
+        url("data:image/svg+xml,%3Csvg width='16' height='16' viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M 16 0 L 0 0 0 16' fill='none' stroke='%23000' stroke-opacity='0.04' stroke-width='0.5'/%3E%3C/svg%3E");
 }
 
 /* Dots — simple, clean (kept from original) */
 .bg-texture-dots {
-    background-image: url("data:image/svg+xml,%3Csvg width='16' height='16' viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='1' cy='1' r='0.6' fill='%23000000' fill-opacity='0.06'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg width='16' height='16' viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='1' cy='1' r='0.6' fill='%23000000' fill-opacity='0.10'/%3E%3C/svg%3E");
 }
 
 /* Dark mode: invert to white strokes */
 .dark .bg-texture-noise {
     background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
 }
+
 .dark .bg-texture-chat {
     background-image: url("data:image/svg+xml,%3Csvg width='120' height='120' viewBox='0 0 120 120' xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%23fff' stroke-width='1' stroke-linecap='round' stroke-linejoin='round' opacity='0.035'%3E%3Cpath d='M15 8a5 5 0 015-5h12a5 5 0 015 5v8a5 5 0 01-5 5H25l-4 4v-4h-1a5 5 0 01-5-5z'/%3E%3Cpath d='M75 12l2.5 5 5.5.8-4 3.9.9 5.5L75 24.7l-4.9 2.5.9-5.5-4-3.9 5.5-.8z'/%3E%3Cpath d='M100 70c3-6 10-6 13 0s-6.5 12-13 17c-6.5-5-16-11-13-17s10-6 13 0z'/%3E%3Cpath d='M22 65l3-12 9 9z'/%3E%3Cpath d='M60 55a6 6 0 1112 0 6 6 0 01-12 0z'/%3E%3Cpath d='M63 52v2M69 52v2M64 57a4 4 0 004 0'/%3E%3Cpath d='M18 95l2-8 2 5 3-3 2 6'/%3E%3Cpath d='M80 90h12M80 94h8'/%3E%3Cpath d='M50 100l4-10 4 10M52 96h4'/%3E%3C/svg%3E");
 }
+
 .dark .bg-texture-vibes {
     background-image: url("data:image/svg+xml,%3Csvg width='120' height='120' viewBox='0 0 120 120' xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%23fff' stroke-width='1' stroke-linecap='round' stroke-linejoin='round' opacity='0.035'%3E%3Cpath d='M20 5v14M20 19a3 3 0 110-1'/%3E%3Cpath d='M33 3v14M33 17a3 3 0 110-1M20 5h13v-2'/%3E%3Ccircle cx='75' cy='15' r='8'/%3E%3Ccircle cx='75' cy='15' r='2'/%3E%3Cpath d='M10 55 Q20 45 30 55 Q40 65 50 55'/%3E%3Cpath d='M65 60a8 8 0 0116 0v3h-3v-3a5 5 0 00-10 0v3h-3z'/%3E%3Cpath d='M62 63h5v6h-5zM77 63h5v6h-5z'/%3E%3Cpath d='M100 50v15M100 65a4 4 0 110-1M100 50l8-3v15'/%3E%3Cpath d='M30 95l3-3 3 3 3-3 3 3'/%3E%3Ccircle cx='90' cy='95' r='7'/%3E%3Ccircle cx='90' cy='95' r='2'/%3E%3Cline x1='93' y1='93' x2='97' y2='89'/%3E%3C/svg%3E");
 }
+
 .dark .bg-texture-tech {
     background-image: url("data:image/svg+xml,%3Csvg width='120' height='120' viewBox='0 0 120 120' xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%23fff' stroke-width='1' stroke-linecap='round' stroke-linejoin='round' opacity='0.035'%3E%3Cpath d='M18 5l-8 8 8 8M32 5l8 8-8 8'/%3E%3Cpath d='M22 22l6-18'/%3E%3Ccircle cx='80' cy='12' r='8'/%3E%3Cpath d='M80 4v-2M80 20v2M72 12h-2M88 12h2M74 6l-1.4-1.4M86 18l1.4 1.4M74 18l-1.4 1.4M86 6l1.4-1.4'/%3E%3Crect x='10' y='50' width='20' height='14' rx='2'/%3E%3Cpath d='M14 57h5M14 60h8'/%3E%3Cpath d='M65 55h20v14H65zM70 62h10'/%3E%3Cpath d='M75 55v-5h10v5M90 62h5v10M95 67h5'/%3E%3Cpath d='M15 90a5 5 0 0110 0 5 5 0 01-5 5M25 90a5 5 0 01-10 0'/%3E%3Cpath d='M70 90h3v3h3v-3h3v-3h-3v-3h-3v3h-3z'/%3E%3Cpath d='M95 85l8 8M103 85l-8 8'/%3E%3C/svg%3E");
 }
+
 .dark .bg-texture-nature {
     background-image: url("data:image/svg+xml,%3Csvg width='120' height='120' viewBox='0 0 120 120' xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%23fff' stroke-width='1' stroke-linecap='round' stroke-linejoin='round' opacity='0.035'%3E%3Cpath d='M20 20C10 10 10 2 20 2s10 8 0 18M20 20v8'/%3E%3Ccircle cx='80' cy='12' r='6'/%3E%3Cpath d='M74 12h-3M86 12h3M80 6v-3M80 18v3M75.8 7.8l-2-2M84.2 16.2l2 2M75.8 16.2l-2 2M84.2 7.8l2-2'/%3E%3Cpath d='M50 55a8 4 0 0116 0c0 4-8 12-8 12s-8-8-8-12z'/%3E%3Cpath d='M55 55a3 3 0 016 0'/%3E%3Cpath d='M10 70Q15 60 25 65Q20 55 30 55Q35 55 35 62Q40 58 40 65Q35 70 10 70z'/%3E%3Cpath d='M75 65c0-6 4-10 8-10s6 4 0 10M83 55c6-4 12-2 10 4s-10 6-10 6'/%3E%3Cpath d='M83 65v10'/%3E%3Ccircle cx='25' cy='100' r='4'/%3E%3Ccircle cx='25' cy='100' r='1'/%3E%3Cpath d='M80 95l2 5 5-1-3 4 4 3-5 1 0 5-3-4-4 3 1-5-5-1 4-3-3-4 5 1z'/%3E%3C/svg%3E");
 }
+
+.dark .bg-texture-waves {
+    background-image: url("data:image/svg+xml,%3Csvg width='40' height='20' viewBox='0 0 40 20' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 10 C 10 10, 10 0, 20 0 C 30 0, 30 10, 40 10' stroke='%23ffffff' stroke-opacity='0.05' stroke-width='1' fill='none'/%3E%3C/svg%3E");
+}
+
+.dark .bg-texture-graph {
+    background-image:
+        url("data:image/svg+xml,%3Csvg width='80' height='80' viewBox='0 0 80 80' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M 80 0 L 0 0 0 80' fill='none' stroke='%23fff' stroke-opacity='0.06' stroke-width='0.75'/%3E%3C/svg%3E"),
+        url("data:image/svg+xml,%3Csvg width='16' height='16' viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M 16 0 L 0 0 0 16' fill='none' stroke='%23fff' stroke-opacity='0.03' stroke-width='0.5'/%3E%3C/svg%3E");
+}
+
 .dark .bg-texture-dots {
     background-image: url("data:image/svg+xml,%3Csvg width='16' height='16' viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='1' cy='1' r='0.6' fill='%23ffffff' fill-opacity='0.05'/%3E%3C/svg%3E");
 }
-
-

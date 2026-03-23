@@ -11,7 +11,7 @@ const chatPlanSummary = document.getElementById('chat-plan-summary');
 const chatPlanTasklist = document.getElementById('chat-plan-tasklist');
 const btnSend = document.getElementById('btn-send');
 const chatEmptyState = document.getElementById('chat-empty-state');
-const chatShellEl = document.querySelector('.chat-shell');
+const chatShellEl = document.querySelector('.chat-layout .content-body') || document.querySelector('.chat-shell');
 const conversationListEl = document.getElementById('chat-conversation-list');
 const conversationTitleEl = document.getElementById('chat-conversation-title');
 const btnChatSidebar = document.getElementById('btn-chat-sidebar');
@@ -361,7 +361,7 @@ function applySidebarState() {
     if (!chatShellEl) return;
     chatShellEl.classList.toggle('is-sidebar-collapsed', sidebarCollapsed);
     // Expose sidebar width as CSS var so welcome layout can center on viewport
-    chatShellEl.style.setProperty('--sidebar-w', sidebarCollapsed ? '0px' : '272px');
+    chatShellEl.style.setProperty('--sidebar-w', sidebarCollapsed ? '0px' : '244px');
 }
 
 // sidebar menu removed — search modal replaces it
@@ -398,7 +398,7 @@ function openConversationDropdown(conversation, anchorEl) {
         const span = document.createElement('span');
         span.textContent = label;
         btn.appendChild(span);
-        btn.addEventListener('click', function(e) {
+        btn.addEventListener('click', function (e) {
             e.stopPropagation();
             handler();
         });
@@ -546,7 +546,7 @@ function buildConversationItem(conversation) {
     const cb = document.createElement('input');
     cb.type = 'checkbox';
     cb.checked = multiSelectMode && selectedConversations.has(conversation.conversation_id);
-    cb.addEventListener('click', function(e) {
+    cb.addEventListener('click', function (e) {
         e.stopPropagation();
         toggleConversationSelection(conversation.conversation_id);
     });
@@ -557,7 +557,7 @@ function buildConversationItem(conversation) {
     const nameEl = document.createElement('span');
     nameEl.className = 'chat-conversation-name';
     nameEl.textContent = capitalizeFirst(conversation.title) || 'New conversation';
-    nameEl.addEventListener('click', function() {
+    nameEl.addEventListener('click', function () {
         if (multiSelectMode) { toggleConversationSelection(conversation.conversation_id); return; }
         if (conversation.conversation_id !== currentConversationId) selectConversation(conversation.conversation_id);
     });
@@ -580,7 +580,7 @@ function buildConversationItem(conversation) {
     if (openConversationMenuId === conversation.conversation_id) moreBtn.classList.add('is-open');
     moreBtn.title = 'Actions';
     moreBtn.appendChild(parseSvg(icMore));
-    moreBtn.addEventListener('click', function(e) {
+    moreBtn.addEventListener('click', function (e) {
         e.stopPropagation();
         if (openConversationMenuId === conversation.conversation_id) {
             closeConversationMenu();
@@ -1179,8 +1179,8 @@ async function selectConversation(conversationId) {
 // ─── Command palette: chat-specific actions ───
 if (window.homunCommandPalette) {
     homunCommandPalette.register({ id: 'chat-new', label: 'New Conversation', icon: '➕', fn: handleNewChat });
-    homunCommandPalette.register({ id: 'chat-search', label: 'Search Conversations', icon: '🔍', fn: function() { openSearchModal(); } });
-    homunCommandPalette.register({ id: 'chat-focus', label: 'Focus Chat Input', icon: '⌨️', fn: function() { chatText?.focus(); } });
+    homunCommandPalette.register({ id: 'chat-search', label: 'Search Conversations', icon: '🔍', fn: function () { openSearchModal(); } });
+    homunCommandPalette.register({ id: 'chat-focus', label: 'Focus Chat Input', icon: '⌨️', fn: function () { chatText?.focus(); } });
 }
 
 // ─── Search modal ───
@@ -1272,7 +1272,7 @@ function renderSearchResults(results) {
             if (c.archived) {
                 updateConversation(c.conversation_id, { archived: false }).then(() => {
                     refreshConversationList();
-                }).catch(() => {});
+                }).catch(() => { });
             }
             selectConversation(c.conversation_id);
         });
@@ -1348,8 +1348,21 @@ btnBulkArchive?.addEventListener('click', async () => {
 
 btnChatSidebar?.addEventListener('click', () => {
     sidebarCollapsed = !sidebarCollapsed;
-    window.localStorage.setItem('homun.chat.sidebarCollapsed', sidebarCollapsed ? '1' : '0');
     applySidebarState();
+    // Sync main sidebar re-open button visibility
+    const mainSidebar = document.querySelector('.sidebar');
+    if (mainSidebar) mainSidebar.classList.toggle('is-panel-collapsed', sidebarCollapsed);
+});
+
+// Re-open chat sidebar via logo hover button
+document.getElementById('subnav-reopen')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (sidebarCollapsed) {
+        sidebarCollapsed = false;
+        applySidebarState();
+        const mainSidebar = document.querySelector('.sidebar');
+        if (mainSidebar) mainSidebar.classList.remove('is-panel-collapsed');
+    }
 });
 
 document.addEventListener('click', (e) => {
@@ -1428,7 +1441,7 @@ function showCognitionStep(label) {
 
         const header = document.createElement('div');
         header.className = 'chat-cognition-header';
-        header.onclick = function() { toggleCognition(this); };
+        header.onclick = function () { toggleCognition(this); };
 
         const dot = document.createElement('span');
         dot.className = 'chat-cognition-dot';
@@ -1493,7 +1506,7 @@ function compactCognitionLabel(raw) {
 }
 
 /** Toggle cognition detail visibility. */
-window.toggleCognition = function(headerEl) {
+window.toggleCognition = function (headerEl) {
     const section = headerEl.closest('.chat-cognition');
     if (section) section.classList.toggle('collapsed');
 };
@@ -1575,7 +1588,7 @@ function createReasoningSection() {
 }
 
 /** Toggle reasoning section visibility */
-window.toggleReasoning = function(headerEl) {
+window.toggleReasoning = function (headerEl) {
     const section = headerEl.closest('.chat-reasoning');
     if (section) {
         section.classList.toggle('collapsed');
@@ -1946,7 +1959,7 @@ function finalizeThinking() {
 }
 
 /** Toggle thinking block visibility */
-window.toggleThinking = function(headerEl) {
+window.toggleThinking = function (headerEl) {
     const thinkingBlock = headerEl.closest('.chat-thinking');
     if (thinkingBlock) {
         thinkingBlock.classList.toggle('collapsed');
@@ -2756,12 +2769,6 @@ function sendCurrentMessage() {
     chatText.value = '';
     chatText.style.height = 'auto';
     chatText.focus();
-    // Auto-collapse sidebar to maximize reading area
-    if (!sidebarCollapsed) {
-        sidebarCollapsed = true;
-        window.localStorage.setItem('homun.chat.sidebarCollapsed', '1');
-        applySidebarState();
-    }
     pendingAttachments = [];
     pendingMcpServers = [];
     if (activeToolMode) {
@@ -2787,7 +2794,7 @@ function sendCurrentMessage() {
                 localStorage.setItem('homun-wizard-checkpoint', JSON.stringify({ step: 'done', ts: Date.now() }));
             }
         }
-    } catch(_) {}
+    } catch (_) { }
     updateConversationSummary((conversation) => {
         if (!conversation.message_count) {
             conversation.title = truncateConversationText(text)
@@ -3794,7 +3801,7 @@ function stopConversationPolling() {
 async function bootstrapChat() {
     try {
         showArchived = window.localStorage.getItem('homun.chat.showArchived') === '1';
-        sidebarCollapsed = window.localStorage.getItem('homun.chat.sidebarCollapsed') === '1';
+        sidebarCollapsed = false; // always start expanded
         applySidebarState();
         await ensureConversationSelected();
         connect();

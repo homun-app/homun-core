@@ -128,6 +128,8 @@
         var customInput = document.getElementById('accent-custom-input');
         var customLabel = document.querySelector('.accent-custom-label');
         if (customInput) {
+            // Restore last custom color (even if currently on a preset)
+            var lastCustom = localStorage.getItem('homun-accent-custom') || '';
             if (currentAccent.startsWith('#')) {
                 customInput.value = currentAccent;
                 if (customLabel) {
@@ -136,6 +138,11 @@
                     if (preview) preview.style.background = currentAccent;
                 }
                 deriveAccentFamily(currentAccent);
+            } else if (lastCustom) {
+                // Show last custom color in the picker preview (but don't activate)
+                customInput.value = lastCustom;
+                var preview = customLabel ? customLabel.querySelector('.accent-custom-preview') : null;
+                if (preview) preview.style.background = lastCustom;
             }
 
             customInput.addEventListener('input', function() {
@@ -170,7 +177,6 @@
         // Update .content element class
         var content = document.querySelector('.content');
         if (content) {
-            // Remove all texture classes
             var classes = content.className.split(' ').filter(function(c) {
                 return !c.startsWith('bg-texture-');
             });

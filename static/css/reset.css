@@ -4,7 +4,7 @@
 html, body {
     height: 100%;
     font-family: var(--sans);
-    background: var(--nav-bg);
+    background: var(--bg);
     color: var(--t1);
     line-height: 1.55;
     -webkit-font-smoothing: antialiased;

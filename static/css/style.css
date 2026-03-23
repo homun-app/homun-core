@@ -135,10 +135,10 @@
     --overlay-heavy:  rgba(0, 0, 0, 0.35);
 
     /* Layout */
-    --nav-w:          70px;
-    --sidebar-w:      70px;
-    --sidebar-collapsed-w: 70px;
-    --content-radius: 24px;
+    --nav-w:          52px;
+    --sidebar-w:      52px;
+    --sidebar-collapsed-w: 52px;
+    --content-radius: 0px;
 
     /* Nav bar */
     --nav-bg:         #0A0A0A;
@@ -306,7 +306,7 @@
 html, body {
     height: 100%;
     font-family: var(--sans);
-    background: var(--nav-bg);
+    background: var(--bg);
     color: var(--t1);
     line-height: 1.55;
     -webkit-font-smoothing: antialiased;
@@ -346,7 +346,7 @@ html, body {
     align-items: center;
     flex-shrink: 0;
     z-index: 30;
-    padding: 24px 0;
+    padding: 16px 0;
     border: none;
 }
 
@@ -368,8 +368,8 @@ html, body {
 .logo-link:hover { transform: scale(1.05); }
 
 .logo-icon {
-    height: 40px;
-    width: 40px;
+    height: 30px;
+    width: 30px;
     flex-shrink: 0;
     background-image: url('/static/img/icon_white.png');
     background-size: contain;
@@ -383,18 +383,18 @@ html, body {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 8px;
+    gap: 4px;
     width: 100%;
-    padding: 0 14px;
+    padding: 0 6px;
 }
 
 .nav-bottom {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 8px;
+    gap: 4px;
     width: 100%;
-    padding: 0 14px 0;
+    padding: 0 6px 0;
     margin-top: auto;
 }
 
@@ -403,9 +403,9 @@ html, body {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 48px;
-    height: 48px;
-    border-radius: var(--r-xl);
+    width: 38px;
+    height: 38px;
+    border-radius: var(--r-lg);
     color: var(--nav-text);
     text-decoration: none;
     font-size: 13px;
@@ -428,8 +428,8 @@ html, body {
 }
 
 .nav-icon {
-    width: 20px;
-    height: 20px;
+    width: 18px;
+    height: 18px;
     flex-shrink: 0;
     opacity: 1;
     transition: opacity var(--fast);
@@ -584,16 +584,14 @@ html, body {
 .theme-toggle:hover .theme-toggle-icon--sun { transform: rotate(15deg); }
 
 
-/* ═══ MAIN CONTENT — Editorial Canvas ═══ */
-/* .content layout is defined in layout.css — kept here for legacy compat.
-   background: var(--nav-bg) so topbar blends with sidebar; .content-body
-   provides the light bg + border-radius curve below the topbar. */
+/* ═══ MAIN CONTENT ═══ */
+/* .content layout is defined in layout.css — kept here for legacy compat. */
 .content {
     flex: 1;
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    background: var(--nav-bg);
+    background: var(--bg);
     border-radius: 0;
     position: relative;
     z-index: 20;

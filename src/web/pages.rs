@@ -135,8 +135,10 @@ fn sidebar(active: &str) -> String {
     format!(
         r##"<nav class="sidebar">
             <div class="sidebar-header">
-                <a href="/" class="logo-link">{logo}</a>
+                <span class="logo-link">{logo}</span>
+                <button class="subnav-reopen-btn" id="subnav-reopen" title="Open panel" aria-label="Open panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><line x1="9" y1="3" x2="9" y2="21"/></svg></button>
             </div>
+
             <div class="nav">
                 <div class="nav-group nav-group-featured">
                     <a href="/chat" class="nav-link{chat_a}" data-label="Chat">
@@ -218,8 +220,8 @@ fn content_topbar() -> String {
     )
 }
 
-/// Subnav collapse toggle button — hamburger icon, injected into page content header.
-const SUBNAV_TOGGLE: &str = r#"<button class="subnav-toggle-btn" id="subnav-toggle" title="Toggle panel" aria-label="Toggle panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h7"/></svg></button>"#;
+/// Subnav collapse toggle button — sidebar panel icon, injected into subnav header.
+const SUBNAV_TOGGLE: &str = r#"<button class="subnav-toggle-btn" id="subnav-toggle" title="Toggle panel" aria-label="Toggle panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><line x1="9" y1="3" x2="9" y2="21"/></svg></button>"#;
 
 /// Build the content subnav for the active page group.
 /// Returns empty string for pages without a subnav (chat, dashboard, account).
@@ -234,17 +236,18 @@ fn content_subnav(active: &str) -> String {
     if AUTOMATION_PAGES.contains(&active) {
         format!(
             r#"<aside class="sidebar-subnav is-open">
-                <div class="sidebar-subnav-header">AUTOMATION</div>
+                <div class="sidebar-subnav-header">AUTOMATION{toggle}</div>
                 <a href="/automations" class="sidebar-subnav-link{0}">Automations</a>
                 <a href="/workflows" class="sidebar-subnav-link{1}">Workflows</a>
             </aside>"#,
             a("automations"),
             a("workflows"),
+            toggle = SUBNAV_TOGGLE,
         )
     } else if BRAIN_PAGES.contains(&active) {
         format!(
             r#"<aside class="sidebar-subnav is-open">
-                <div class="sidebar-subnav-header">BRAIN</div>
+                <div class="sidebar-subnav-header">BRAIN{toggle}</div>
                 <a href="/memory" class="sidebar-subnav-link{0}">Memory</a>
                 <a href="/knowledge" class="sidebar-subnav-link{1}">Knowledge</a>
                 <a href="/contacts" class="sidebar-subnav-link{2}">Contacts</a>
@@ -254,11 +257,12 @@ fn content_subnav(active: &str) -> String {
             a("knowledge"),
             a("contacts"),
             a("profiles"),
+            toggle = SUBNAV_TOGGLE,
         )
     } else if EXTENSIONS_PAGES.contains(&active) {
         format!(
             r#"<aside class="sidebar-subnav is-open">
-                <div class="sidebar-subnav-header">EXTENSIONS</div>
+                <div class="sidebar-subnav-header">EXTENSIONS{toggle}</div>
                 <a href="/skills" class="sidebar-subnav-link{0}">Skills</a>
                 <a href="/mcp" class="sidebar-subnav-link{1}">MCP Servers</a>
                 <a href="/agents" class="sidebar-subnav-link{2}">Agents</a>
@@ -266,11 +270,12 @@ fn content_subnav(active: &str) -> String {
             a("skills"),
             a("mcp"),
             a("agents"),
+            toggle = SUBNAV_TOGGLE,
         )
     } else if SETTINGS_PAGES.contains(&active) {
         format!(
             r#"<aside class="sidebar-subnav is-open">
-                <div class="sidebar-subnav-header">SETTINGS</div>
+                <div class="sidebar-subnav-header">SETTINGS{toggle}</div>
                 <div class="subnav-section">General</div>
                 <a href="/setup" class="sidebar-subnav-link{0}">Model &amp; Providers</a>
                 <a href="/appearance" class="sidebar-subnav-link{1}">Appearance</a>
@@ -282,11 +287,12 @@ fn content_subnav(active: &str) -> String {
             a("appearance"),
             a("channels"),
             a("browser"),
+            toggle = SUBNAV_TOGGLE,
         )
     } else if SECURITY_PAGES.contains(&active) {
         format!(
             r#"<aside class="sidebar-subnav is-open">
-                <div class="sidebar-subnav-header">SECURITY</div>
+                <div class="sidebar-subnav-header">SECURITY{toggle}</div>
                 <div class="subnav-section">Secrets</div>
                 <a href="/vault" class="sidebar-subnav-link{0}">Vault</a>
                 <a href="/api-keys" class="sidebar-subnav-link{1}">API Keys</a>
@@ -302,16 +308,18 @@ fn content_subnav(active: &str) -> String {
             a("file-access"),
             a("shell"),
             a("sandbox"),
+            toggle = SUBNAV_TOGGLE,
         )
     } else if SYSTEM_PAGES.contains(&active) {
         format!(
             r#"<aside class="sidebar-subnav is-open">
-                <div class="sidebar-subnav-header">SYSTEM</div>
+                <div class="sidebar-subnav-header">SYSTEM{toggle}</div>
                 <a href="/maintenance" class="sidebar-subnav-link{0}">Database</a>
                 <a href="/logs" class="sidebar-subnav-link{1}">Logs</a>
             </aside>"#,
             a("maintenance"),
             a("logs"),
+            toggle = SUBNAV_TOGGLE,
         )
     } else {
         String::new()
@@ -334,23 +342,31 @@ fn page_html(title: &str, active: &str, body: &str, scripts: &[&str]) -> String 
     // For subnav pages, .content-row replaces .content-body as the wrapper.
     let body = if subnav_html.is_empty() {
         // No subnav — topbar + content-body wrapper.
-        // Handle both `class="content">` and `class="content chat-layout">`.
-        body.replace(
+        let b = body.replace(
             r#"<main class="content">"#,
             &format!(r#"<main class="content">{topbar_html}<div class="content-body">"#),
-        )
-        .replace(
-            r#"<main class="content chat-layout">"#,
-            &format!(r#"<main class="content chat-layout">{topbar_html}<div class="content-body">"#),
-        )
+        );
+        // Chat layout: topbar goes inside chat-main (not above sidebar)
+        let b = if b.contains("chat-layout") {
+            b.replace(
+                r#"<main class="content chat-layout">"#,
+                r#"<main class="content chat-layout"><div class="content-body">"#,
+            )
+            .replace(
+                r#"<section class="chat-main">"#,
+                &format!(r#"<section class="chat-main">{topbar_html}"#),
+            )
+        } else {
+            b
+        };
         // Close .content-body before </main>
-        .replace(r#"</main>"#, r#"</div></main>"#)
+        b.replace(r#"</main>"#, r#"</div></main>"#)
     } else {
-        // Subnav pages — topbar above, then content-row wraps subnav + page content
+        // Subnav pages — topbar inside content area (not spanning subnav)
         body.replace(
             r#"<main class="content">"#,
             &format!(
-                r#"<main class="content has-subnav">{topbar_html}<div class="content-row">{subnav_html}"#
+                r#"<main class="content has-subnav"><div class="content-row">{subnav_html}"#
             ),
         )
         // Close .content-row at the end of main
@@ -358,9 +374,10 @@ fn page_html(title: &str, active: &str, body: &str, scripts: &[&str]) -> String 
             r#"</main>"#,
             r#"</div></main>"#,
         )
+        // Inject topbar inside content-inner (not spanning subnav column)
         .replace(
-            r#"<div class="page-title-group">"#,
-            &format!(r#"<div class="page-title-group">{toggle}"#, toggle = SUBNAV_TOGGLE),
+            r#"<div class="content-inner">"#,
+            &format!(r#"<div class="content-inner">{topbar_html}"#),
         )
     };
 
@@ -445,9 +462,10 @@ fn page_html(title: &str, active: &str, body: &str, scripts: &[&str]) -> String 
     <script>
     // Apply texture class to .content after DOM ready
     document.addEventListener('DOMContentLoaded', function() {{
-        var tex = document.documentElement.getAttribute('data-texture') || 'none';
+        var tex = document.documentElement.getAttribute('data-texture') || localStorage.getItem('homun-texture') || 'none';
         var el = document.querySelector('.content');
-        if (el && tex !== 'none') el.classList.add('bg-texture-' + tex);
+        if (!el || tex === 'none') return;
+        el.classList.add('bg-texture-' + tex);
     }});
     </script>
 </head>
@@ -527,21 +545,32 @@ fn page_html(title: &str, active: &str, body: &str, scripts: &[&str]) -> String 
     }})();
     </script>
     <script>
-    // Subnav collapse toggle — applies to all pages with a subnav panel
+    // Subnav collapse/expand — unified sidebar + subnav panel
     (function() {{
-        var btn = document.getElementById('subnav-toggle');
-        if (!btn) return;
-        var content = btn.closest('.content');
+        var collapseBtn = document.getElementById('subnav-toggle');
+        var reopenBtn = document.getElementById('subnav-reopen');
+        var sidebar = document.querySelector('.sidebar');
+        if (!collapseBtn) return;
+        var content = collapseBtn.closest('.content');
         if (!content) return;
-        // Restore collapsed state from session
-        if (sessionStorage.getItem('subnav-collapsed') === '1') {{
-            content.classList.add('is-subnav-collapsed');
+
+        function setCollapsed(collapsed) {{
+            content.classList.toggle('is-subnav-collapsed', collapsed);
+            if (sidebar) sidebar.classList.toggle('is-panel-collapsed', collapsed);
         }}
-        btn.addEventListener('click', function() {{
-            content.classList.toggle('is-subnav-collapsed');
-            sessionStorage.setItem('subnav-collapsed',
-                content.classList.contains('is-subnav-collapsed') ? '1' : '0');
+
+        // Collapse button (inside subnav header)
+        collapseBtn.addEventListener('click', function() {{
+            setCollapsed(!content.classList.contains('is-subnav-collapsed'));
         }});
+
+        // Re-open button (overlays logo in sidebar)
+        if (reopenBtn) {{
+            reopenBtn.addEventListener('click', function(e) {{
+                e.preventDefault();
+                setCollapsed(false);
+            }});
+        }}
     }})();
     </script>
 </body>
@@ -1088,6 +1117,14 @@ async fn appearance_page(State(state): State<Arc<AppState>>) -> Html<String> {
                                     <span class="texture-preview bg-texture-nature"></span>
                                     <span class="texture-name">Nature</span>
                                 </button>
+                                <button type="button" class="texture-swatch" data-texture="waves" title="Waves">
+                                    <span class="texture-preview bg-texture-waves"></span>
+                                    <span class="texture-name">Waves</span>
+                                </button>
+                                <button type="button" class="texture-swatch" data-texture="graph" title="Graph">
+                                    <span class="texture-preview bg-texture-graph"></span>
+                                    <span class="texture-name">Graph</span>
+                                </button>
                             </div>
                             <div class="form-hint">Adds a subtle pattern to the content background.</div>
                         </div>
@@ -1532,8 +1569,6 @@ async fn chat_page(
 
     let body = format!(
         r#"<main class="content chat-layout">
-            <div class="content-inner">
-                <div class="chat-shell">
                     <aside class="chat-sidebar">
                         <div class="chat-sidebar-header">
                             <span class="chat-sidebar-title">Storico</span>
@@ -1543,6 +1578,9 @@ async fn chat_page(
                                 </button>
                                 <button class="btn-icon" id="btn-new-chat" title="New conversation">
                                     <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="9" y1="3" x2="9" y2="15"/><line x1="3" y1="9" x2="15" y2="9"/></svg>
+                                </button>
+                                <button class="btn-icon" id="btn-chat-sidebar" title="Toggle sidebar" aria-label="Toggle sidebar">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
                                 </button>
                             </div>
                         </div>
@@ -1565,9 +1603,6 @@ async fn chat_page(
                     <section class="chat-main">
                         <div class="chat-topbar">
                             <div class="chat-topbar-leading">
-                                <button class="chat-sidebar-toggle-btn" id="btn-chat-sidebar" title="Toggle sidebar" aria-label="Toggle sidebar">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h7"/></svg>
-                                </button>
                             </div>
                             <div class="chat-actions">
                                 <span class="chat-connection" id="ws-status">Connecting…</span>
@@ -1667,8 +1702,6 @@ async fn chat_page(
                             </div>
                         </div>
                     </section>
-                </div>
-            </div>
         </main>
         <!-- Search Modal -->
         <div id="chat-search-modal" class="chat-search-modal" hidden>
@@ -4616,16 +4649,32 @@ fn standalone_page(title: &str, body: &str) -> String {
     <link rel="stylesheet" href="/static/css/workflows.css">
     <link rel="stylesheet" href="/static/css/onboarding.css">
     <link rel="stylesheet" href="/static/css/utilities.css">
+    <script src="/static/js/accent-utils.js"></script>
     <script>
     (function() {{
+        // Theme
         var theme = localStorage.getItem('homun-theme') || 'system';
         if (theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {{
             document.documentElement.classList.add('dark');
         }}
+        // Accent
+        var accent = localStorage.getItem('homun-accent') || '';
+        if (accent.startsWith('#')) {{
+            window.HomunAccent.deriveAccentFamily(accent);
+        }} else if (accent && accent !== 'moss') {{
+            document.documentElement.setAttribute('data-accent', accent);
+        }}
+        // Texture
+        var tex = localStorage.getItem('homun-texture') || 'none';
+        if (tex !== 'none') {{
+            document.addEventListener('DOMContentLoaded', function() {{
+                document.body.classList.add('bg-texture-' + tex);
+            }});
+        }}
     }})();
     </script>
     <style>
-        body {{ display: flex; justify-content: center; align-items: center; min-height: 100vh; background: var(--nav-bg); }}
+        body {{ display: flex; justify-content: center; align-items: center; min-height: 100vh; background-color: var(--bg); }}
         .auth-card {{ background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-2xl); padding: 2.5rem; width: 100%; max-width: 400px; box-shadow: 0 20px 50px rgba(0,0,0,0.3); }}
         .auth-card h1 {{ font-size: 1.5rem; margin: 0 0 0.5rem; text-align: center; color: var(--t1); }}
         .auth-card p {{ color: var(--t3); font-size: 0.875rem; text-align: center; margin: 0 0 1.5rem; }}
