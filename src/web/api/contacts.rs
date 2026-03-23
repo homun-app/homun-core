@@ -68,6 +68,11 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
             "/v1/contacts/{id}/gateway-overrides/{gateway_id}",
             delete(delete_gateway_override),
         )
+        // Contact perimeter: isolation settings
+        .route(
+            "/v1/contacts/{id}/perimeter",
+            get(get_perimeter).put(set_perimeter).delete(delete_perimeter),
+        )
 }
 
 // ── Request / Response types ────────────────────────────────────────
@@ -535,4 +540,77 @@ async fn delete_gateway_override(
         .await
         .map_err(internal)?;
     Ok(Json(json!({"ok": true})))
+}
+
+// ── Contact Perimeter ───────────────────────────────────────────────
+
+/// Get a contact's perimeter (returns defaults if none configured).
+async fn get_perimeter(
+    State(state): State<Arc<AppState>>,
+    Path(contact_id): Path<i64>,
+) -> Result<Json<crate::contacts::perimeter::ContactPerimeter>, ApiErr> {
+    let db = require_db(&state)?;
+    let p = crate::contacts::perimeter::load_perimeter(db.pool(), contact_id)
+        .await
+        .map_err(internal)?;
+    Ok(Json(p))
+}
+
+#[derive(serde::Deserialize)]
+struct PerimeterRequest {
+    knowledge_namespaces: Option<Vec<String>>,
+    memory_scope: Option<String>,
+    tools_allowed: Option<Vec<String>>,
+    tools_denied: Option<Vec<String>>,
+    can_see_contacts: Option<bool>,
+    can_see_calendar: Option<bool>,
+}
+
+/// Set (upsert) a contact's perimeter.
+async fn set_perimeter(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+    Path(contact_id): Path<i64>,
+    Json(body): Json<PerimeterRequest>,
+) -> Result<Json<serde_json::Value>, ApiErr> {
+    require_write(&auth)?;
+    let db = require_db(&state)?;
+    // Load existing to merge partial updates
+    let existing = crate::contacts::perimeter::load_perimeter(db.pool(), contact_id)
+        .await
+        .map_err(internal)?;
+
+    let ns = body.knowledge_namespaces
+        .map(|v| serde_json::to_string(&v).unwrap_or_default())
+        .unwrap_or(existing.knowledge_namespaces);
+    let scope = body.memory_scope.unwrap_or(existing.memory_scope);
+    let allowed = body.tools_allowed
+        .map(|v| serde_json::to_string(&v).unwrap_or_default())
+        .unwrap_or(existing.tools_allowed);
+    let denied = body.tools_denied
+        .map(|v| serde_json::to_string(&v).unwrap_or_default())
+        .unwrap_or(existing.tools_denied);
+    let see_contacts = body.can_see_contacts.unwrap_or(existing.can_see_contacts != 0);
+    let see_calendar = body.can_see_calendar.unwrap_or(existing.can_see_calendar != 0);
+
+    crate::contacts::perimeter::upsert_perimeter(
+        db.pool(), contact_id, &ns, &scope, &allowed, &denied, see_contacts, see_calendar,
+    )
+    .await
+    .map_err(internal)?;
+    Ok(Json(json!({"ok": true})))
+}
+
+/// Delete a contact's perimeter (reverts to safe defaults).
+async fn delete_perimeter(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+    Path(contact_id): Path<i64>,
+) -> Result<Json<serde_json::Value>, ApiErr> {
+    require_write(&auth)?;
+    let db = require_db(&state)?;
+    crate::contacts::perimeter::delete_perimeter(db.pool(), contact_id)
+        .await
+        .map_err(internal)?;
+    Ok(Json(json!({"ok": true, "message": "Perimeter removed, using safe defaults"})))
 }

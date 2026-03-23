@@ -397,6 +397,13 @@ impl Database {
         )
         .await?;
 
+        Self::apply_migration(
+            pool,
+            "041_contact_perimeters",
+            include_str!("../../migrations/041_contact_perimeters.sql"),
+        )
+        .await?;
+
         Ok(())
     }
 

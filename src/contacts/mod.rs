@@ -6,6 +6,7 @@
 pub mod context;
 pub mod db;
 pub mod events;
+pub mod perimeter;
 pub mod resolver;
 
 use serde::{Deserialize, Serialize};
