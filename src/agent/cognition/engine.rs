@@ -45,6 +45,8 @@ pub struct CognitionParams<'a> {
     pub active_profile_slug: Option<String>,
     /// Contact perimeter for tool/knowledge filtering (None = owner, no restrictions).
     pub contact_perimeter: Option<crate::contacts::perimeter::ContactPerimeter>,
+    /// Database pool for shared resource lookups during discovery.
+    pub db: Option<&'a crate::storage::Database>,
     pub stream_tx: Option<&'a mpsc::Sender<StreamChunk>>,
     pub cognition_model: Option<&'a str>,
     pub max_iterations: u32,
@@ -355,12 +357,22 @@ async fn resolve_allowed_skills(params: &CognitionParams<'_>) -> Vec<String> {
         Some(id) => id,
         None => return Vec::new(),
     };
-    // Look up shared resources DB — requires a pool reference
-    // For now, return empty (all denied) for contacts without shared access.
-    // The full integration requires passing &Database to CognitionParams.
-    // TODO(IGA): pass Database to CognitionParams for shared resource lookups
-    tracing::debug!(contact_id, "Skill discovery filtered by contact perimeter (no shared skills configured yet)");
-    Vec::new()
+    let Some(db) = params.db else {
+        return Vec::new();
+    };
+    match crate::sharing::db::resolve_contact_access(db.pool(), contact_id).await {
+        Ok(access) => {
+            let names: Vec<String> = access.skills.into_iter().map(|(name, _)| name).collect();
+            if !names.is_empty() {
+                tracing::debug!(contact_id, skills = ?names, "Contact has shared skill access");
+            }
+            names
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, contact_id, "Failed to resolve shared skills");
+            Vec::new()
+        }
+    }
 }
 
 /// Resolve allowed MCP server names for a contact from shared resources.
@@ -369,8 +381,22 @@ async fn resolve_allowed_mcp(params: &CognitionParams<'_>) -> Vec<String> {
         Some(id) => id,
         None => return Vec::new(),
     };
-    tracing::debug!(contact_id, "MCP discovery filtered by contact perimeter (no shared MCP configured yet)");
-    Vec::new()
+    let Some(db) = params.db else {
+        return Vec::new();
+    };
+    match crate::sharing::db::resolve_contact_access(db.pool(), contact_id).await {
+        Ok(access) => {
+            let names: Vec<String> = access.mcp_servers.into_iter().map(|(name, _, _)| name).collect();
+            if !names.is_empty() {
+                tracing::debug!(contact_id, mcp = ?names, "Contact has shared MCP access");
+            }
+            names
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, contact_id, "Failed to resolve shared MCP");
+            Vec::new()
+        }
+    }
 }
 
 /// Build the system prompt for the cognition mini-agent.

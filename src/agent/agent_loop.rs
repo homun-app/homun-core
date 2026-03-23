@@ -725,6 +725,7 @@ impl AgentLoop {
                 visible_profile_ids: active_visible_profile_ids.clone(),
                 active_profile_slug: active_profile_slug.clone(),
                 contact_perimeter: contact_perimeter.clone(),
+                db: Some(&self.db),
                 stream_tx: stream_tx.as_ref(),
                 cognition_model: if config.agent.cognition_model.is_empty() {
                     None
