@@ -135,6 +135,95 @@ pub async fn delete_gateway(pool: &Pool<Sqlite>, id: i64) -> Result<()> {
     Ok(())
 }
 
+// ── Contact Gateway Overrides ────────────────────────────────────────
+
+/// A contact's profile override for a specific gateway.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
+pub struct ContactGatewayOverride {
+    pub id: i64,
+    pub contact_id: i64,
+    pub gateway_id: i64,
+    pub profile_id: i64,
+    pub created_at: String,
+}
+
+/// Set (upsert) a contact's profile override for a gateway.
+pub async fn upsert_gateway_override(
+    pool: &Pool<Sqlite>,
+    contact_id: i64,
+    gateway_id: i64,
+    profile_id: i64,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO contact_gateway_overrides (contact_id, gateway_id, profile_id)
+         VALUES (?, ?, ?)
+         ON CONFLICT(contact_id, gateway_id) DO UPDATE SET profile_id = excluded.profile_id",
+    )
+    .bind(contact_id)
+    .bind(gateway_id)
+    .bind(profile_id)
+    .execute(pool)
+    .await
+    .with_context(|| {
+        format!("Failed to upsert gateway override (contact={contact_id}, gateway={gateway_id})")
+    })?;
+    Ok(())
+}
+
+/// Load all gateway overrides for a contact.
+pub async fn load_overrides_for_contact(
+    pool: &Pool<Sqlite>,
+    contact_id: i64,
+) -> Result<Vec<ContactGatewayOverride>> {
+    let rows = sqlx::query_as::<_, ContactGatewayOverride>(
+        "SELECT * FROM contact_gateway_overrides WHERE contact_id = ? ORDER BY gateway_id",
+    )
+    .bind(contact_id)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("Failed to load overrides for contact {contact_id}"))?;
+    Ok(rows)
+}
+
+/// Get the profile override for a specific contact + gateway pair.
+pub async fn get_override_profile_id(
+    pool: &Pool<Sqlite>,
+    contact_id: i64,
+    gateway_id: i64,
+) -> Result<Option<i64>> {
+    let row = sqlx::query_scalar::<_, i64>(
+        "SELECT profile_id FROM contact_gateway_overrides
+         WHERE contact_id = ? AND gateway_id = ?",
+    )
+    .bind(contact_id)
+    .bind(gateway_id)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| {
+        format!("Failed to get override (contact={contact_id}, gateway={gateway_id})")
+    })?;
+    Ok(row)
+}
+
+/// Delete a contact's gateway override.
+pub async fn delete_gateway_override(
+    pool: &Pool<Sqlite>,
+    contact_id: i64,
+    gateway_id: i64,
+) -> Result<()> {
+    sqlx::query(
+        "DELETE FROM contact_gateway_overrides WHERE contact_id = ? AND gateway_id = ?",
+    )
+    .bind(contact_id)
+    .bind(gateway_id)
+    .execute(pool)
+    .await
+    .with_context(|| {
+        format!("Failed to delete override (contact={contact_id}, gateway={gateway_id})")
+    })?;
+    Ok(())
+}
+
 // ── Tests ───────────────────────────────────────────────────────────
 
 #[cfg(test)]

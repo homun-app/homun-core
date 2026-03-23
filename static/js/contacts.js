@@ -173,8 +173,8 @@ function showDetail(c, identities, relationships, events) {
     // Resolve profile display name for the detail view
     const profileLabel = c._profile_display || 'channel default';
 
-    // All dynamic content sanitized through esc()
-    el.innerHTML = '<div class="contact-detail-inner">'
+    // All dynamic content sanitized through esc(); c.id is always an integer
+    el.innerHTML = '<div class="contact-detail-inner" data-contact-id="' + parseInt(c.id, 10) + '">'
         // Back button (mobile only)
         + '<button class="btn btn-ghost btn-sm contact-back-btn" onclick="goBackToList()" style="margin-bottom:12px">'
         + '&#8592; Back</button>'
@@ -227,6 +227,11 @@ function showDetail(c, identities, relationships, events) {
         + '</div>';
 
     loadPending();
+
+    // Notify gateway overrides plugin
+    document.dispatchEvent(new CustomEvent('contact-selected', {
+        detail: { contactId: c.id, container: el.querySelector('.contact-detail-inner') }
+    }));
 }
 
 function metaItem(label, value) {

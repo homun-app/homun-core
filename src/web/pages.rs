@@ -2566,7 +2566,7 @@ async fn contacts_page(State(_state): State<Arc<AppState>>) -> Html<String> {
             </div>
         </div>
     </main>"##;
-    Html(page_html("Contacts", "contacts", body, &["contacts.js"]))
+    Html(page_html("Contacts", "contacts", body, &["contacts.js", "contact-gateway-overrides.js"]))
 }
 
 // ─── Profiles ─────────────────────────────────────────────────────

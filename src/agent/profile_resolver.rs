@@ -1,7 +1,11 @@
 //! Profile resolver — determines the active profile for a conversation.
 //!
-//! Priority chain:
-//!   Contact.profile_id > Channel.default_profile > Config.profiles.default > "default"
+//! Priority chain (5 levels):
+//!   1. Contact gateway override (per-contact, per-gateway)
+//!   2. Contact default profile_id
+//!   3. Gateway/Channel default_profile slug
+//!   4. Global profiles.default slug
+//!   5. The "default" profile (always exists)
 
 use crate::contacts::Contact;
 use crate::profiles;
@@ -13,22 +17,33 @@ use crate::storage::Database;
 /// The caller extracts the string values synchronously, then calls this async function.
 ///
 /// Priority chain:
-/// 1. Contact's explicit profile_id (per-contact override)
-/// 2. Channel's default_profile slug
-/// 3. Global profiles.default slug
-/// 4. The "default" profile (always exists)
+/// 1. Contact's gateway override (per-contact, per-gateway profile)
+/// 2. Contact's explicit profile_id (per-contact default)
+/// 3. Channel/gateway default_profile slug
+/// 4. Global profiles.default slug
+/// 5. The "default" profile (always exists)
 pub async fn resolve_profile_id_from_values(
     contact: Option<&Contact>,
     channel_default_profile: &str,
     global_default_profile: &str,
     db: &Database,
+    gateway_id: Option<i64>,
 ) -> i64 {
-    // 1. Contact-level override
+    // 1. Contact gateway override (highest priority)
+    if let (Some(c), Some(gw_id)) = (contact, gateway_id) {
+        if let Ok(Some(pid)) =
+            crate::gateways::db::get_override_profile_id(db.pool(), c.id, gw_id).await
+        {
+            return pid;
+        }
+    }
+
+    // 2. Contact-level default profile
     if let Some(pid) = contact.and_then(|c| c.profile_id) {
         return pid;
     }
 
-    // 2. Channel default_profile slug
+    // 3. Channel/gateway default_profile slug
     if !channel_default_profile.is_empty() {
         if let Ok(Some(profile)) =
             profiles::db::load_profile_by_slug(db.pool(), channel_default_profile).await
@@ -41,7 +56,7 @@ pub async fn resolve_profile_id_from_values(
         );
     }
 
-    // 3. Global config default
+    // 4. Global config default
     if !global_default_profile.is_empty() && global_default_profile != "default" {
         if let Ok(Some(profile)) =
             profiles::db::load_profile_by_slug(db.pool(), global_default_profile).await
@@ -54,7 +69,7 @@ pub async fn resolve_profile_id_from_values(
         );
     }
 
-    // 4. The default profile (always id=1 from migration seed)
+    // 5. The default profile (always id=1 from migration seed)
     match profiles::db::get_default_profile(db.pool()).await {
         Ok(p) => p.id,
         Err(e) => {
@@ -67,9 +82,6 @@ pub async fn resolve_profile_id_from_values(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // Profile resolution is tested via integration with DB.
-    // Unit tests for the priority chain logic:
 
     #[test]
     fn contact_profile_id_takes_priority() {

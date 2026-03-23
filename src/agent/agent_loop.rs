@@ -621,11 +621,14 @@ impl AgentLoop {
                 .to_string();
             let global_default_profile = config.profiles.default.clone();
             // Resolve active profile (contact > channel > config default)
+            // TODO(IGA-2): extract gateway_id from InboundMessage metadata
+            let gateway_id: Option<i64> = None;
             let profile_id = crate::agent::profile_resolver::resolve_profile_id_from_values(
                 contact.as_ref(),
                 &ch_default_profile,
                 &global_default_profile,
                 &self.db,
+                gateway_id,
             )
             .await;
 

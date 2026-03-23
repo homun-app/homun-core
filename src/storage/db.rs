@@ -390,6 +390,13 @@ impl Database {
         )
         .await?;
 
+        Self::apply_migration(
+            pool,
+            "040_contact_gateway_overrides",
+            include_str!("../../migrations/040_contact_gateway_overrides.sql"),
+        )
+        .await?;
+
         Ok(())
     }
 

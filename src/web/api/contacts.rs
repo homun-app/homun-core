@@ -59,6 +59,15 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route("/v1/contacts/pending", get(list_pending))
         .route("/v1/contacts/pending/{id}/approve", post(approve_pending))
         .route("/v1/contacts/pending/{id}/reject", post(reject_pending))
+        // Gateway overrides: per-contact, per-gateway profile
+        .route(
+            "/v1/contacts/{id}/gateway-overrides",
+            get(list_gateway_overrides).post(set_gateway_override),
+        )
+        .route(
+            "/v1/contacts/{id}/gateway-overrides/{gateway_id}",
+            delete(delete_gateway_override),
+        )
 }
 
 // ── Request / Response types ────────────────────────────────────────
@@ -472,4 +481,58 @@ async fn reject_pending(
             Json(json!({"error": "Pending response not found"})),
         ))
     }
+}
+
+// ── Gateway Overrides ───────────────────────────────────────────────
+
+/// List all gateway profile overrides for a contact.
+async fn list_gateway_overrides(
+    State(state): State<Arc<AppState>>,
+    Path(contact_id): Path<i64>,
+) -> Result<Json<Vec<crate::gateways::db::ContactGatewayOverride>>, ApiErr> {
+    let db = require_db(&state)?;
+    let overrides = crate::gateways::db::load_overrides_for_contact(db.pool(), contact_id)
+        .await
+        .map_err(internal)?;
+    Ok(Json(overrides))
+}
+
+#[derive(serde::Deserialize)]
+struct SetOverrideRequest {
+    gateway_id: i64,
+    profile_id: i64,
+}
+
+/// Set (upsert) a gateway profile override for a contact.
+async fn set_gateway_override(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+    Path(contact_id): Path<i64>,
+    Json(body): Json<SetOverrideRequest>,
+) -> Result<Json<serde_json::Value>, ApiErr> {
+    require_write(&auth)?;
+    let db = require_db(&state)?;
+    crate::gateways::db::upsert_gateway_override(
+        db.pool(),
+        contact_id,
+        body.gateway_id,
+        body.profile_id,
+    )
+    .await
+    .map_err(internal)?;
+    Ok(Json(json!({"ok": true})))
+}
+
+/// Delete a gateway profile override for a contact.
+async fn delete_gateway_override(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+    Path((contact_id, gateway_id)): Path<(i64, i64)>,
+) -> Result<Json<serde_json::Value>, ApiErr> {
+    require_write(&auth)?;
+    let db = require_db(&state)?;
+    crate::gateways::db::delete_gateway_override(db.pool(), contact_id, gateway_id)
+        .await
+        .map_err(internal)?;
+    Ok(Json(json!({"ok": true})))
 }
