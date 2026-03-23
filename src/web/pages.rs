@@ -113,17 +113,7 @@ const SECURITY_PAGES: &[&str] = &[
 /// Pages that belong to the "System" sub-navigation group.
 const SYSTEM_PAGES: &[&str] = &["maintenance", "logs"];
 
-/// All pages that open inside the settings modal (not standalone pages).
-const SETTINGS_MODAL_PAGES: &[&str] = &[
-    "settings", "appearance", "channels", "browser", "dashboard",
-    "memory", "knowledge", "contacts", "profiles",
-    "skills", "mcp", "agents",
-    "vault", "api-keys", "approvals", "file-access", "shell", "sandbox",
-    "maintenance", "logs", "account",
-];
-
-/// Build the sidebar navigation HTML.
-/// Manus-inspired: 5 top-level items + settings, collapsible 56px↔280px.
+/// Build the sidebar navigation HTML (icon bar, 56px).
 fn sidebar(active: &str) -> String {
     let a = |page: &str| -> &str {
         if active == page {
@@ -143,63 +133,63 @@ fn sidebar(active: &str) -> String {
     }
 
     format!(
-        r##"<nav class="sidebar" id="sidebar">
+        r##"<nav class="sidebar">
             <div class="sidebar-header">
                 <a href="/" class="logo-link">{logo}</a>
-                <span class="nav-label sidebar-brand">homun</span>
-                <button type="button" class="sidebar-toggle-btn" id="sidebar-toggle" aria-label="Toggle sidebar">
-                    <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="3" width="14" height="12" rx="2"/><line x1="7" y1="3" x2="7" y2="15"/></svg>
-                </button>
             </div>
             <div class="nav">
-                <a href="/chat" class="nav-link{chat_a}" data-label="Chat">
-                    <span class="nav-icon">{ic_chat}</span>
-                    <span class="nav-label">Chat</span>
-                </a>
+                <div class="nav-group nav-group-featured">
+                    <a href="/chat" class="nav-link{chat_a}" data-label="Chat">
+                        <span class="nav-icon">{ic_chat}</span>
+                    </a>
+                </div>
                 <a href="/dashboard" class="nav-link{dash_a}" data-label="Dashboard">
                     <span class="nav-icon">{ic_dash}</span>
-                    <span class="nav-label">Dashboard</span>
                 </a>
-                <a href="/automations" class="nav-link{auto_a}" data-label="Automations">
+                <a href="/automations" class="nav-link{auto_a}" data-label="Automation">
                     <span class="nav-icon">{ic_auto}</span>
-                    <span class="nav-label">Automations</span>
                 </a>
-                <a href="/knowledge" class="nav-link{brain_a}" data-label="Knowledge">
+                <a href="/memory" class="nav-link{brain_a}" data-label="Brain">
                     <span class="nav-icon">{ic_brain}</span>
-                    <span class="nav-label">Knowledge</span>
                 </a>
                 <a href="/skills" class="nav-link{ext_a}" data-label="Extensions">
                     <span class="nav-icon">{ic_ext}</span>
-                    <span class="nav-label">Extensions</span>
                 </a>
-                <div class="nav-separator"></div>
-                <div class="nav-section-label">Recent</div>
-                <div class="nav-recent" id="nav-recent-sessions"></div>
             </div>
             <div class="nav-bottom">
-                <a href="/setup" class="nav-link{settings_a}" id="nav-settings-btn" data-label="Settings">
+                <a href="/setup" class="nav-link{settings_a}" data-label="Settings">
                     <span class="nav-icon">{ic_settings}</span>
-                    <span class="nav-label">Settings</span>
+                </a>
+                <a href="/vault" class="nav-link{security_a}" data-label="Security">
+                    <span class="nav-icon">{ic_security}</span>
+                </a>
+                <a href="/maintenance" class="nav-link{system_a}" data-label="System">
+                    <span class="nav-icon">{ic_system}</span>
                 </a>
                 <button type="button" class="nav-link nav-logout" id="nav-logout-btn" data-label="Logout" title="Sign out" onclick="fetch('/api/auth/logout',{{method:'POST'}}).then(()=>location.href='/login')">
                     <span class="nav-icon">{ic_logout}</span>
-                    <span class="nav-label">Logout</span>
                 </button>
             </div>
         </nav>"##,
         logo = LOGO_ICON,
+        // Active states
         chat_a = a("chat"),
         dash_a = a("dashboard"),
         auto_a = group_active(active, AUTOMATION_PAGES),
         brain_a = group_active(active, BRAIN_PAGES),
         ext_a = group_active(active, EXTENSIONS_PAGES),
-        settings_a = group_active(active, SETTINGS_MODAL_PAGES),
+        settings_a = group_active(active, SETTINGS_PAGES),
+        security_a = group_active(active, SECURITY_PAGES),
+        system_a = group_active(active, SYSTEM_PAGES),
+        // Icons
         ic_chat = ICON_CHAT,
         ic_dash = ICON_DASHBOARD,
         ic_auto = ICON_AUTOMATION,
         ic_brain = ICON_BRAIN,
         ic_ext = ICON_EXTENSIONS,
         ic_settings = ICON_SETTINGS,
+        ic_security = ICON_SECURITY,
+        ic_system = ICON_SYSTEM,
         ic_logout = ICON_LOGOUT,
     )
 }
@@ -233,11 +223,13 @@ const SUBNAV_TOGGLE: &str = r#"<button class="subnav-toggle-btn" id="subnav-togg
 
 /// Build the content subnav for the active page group.
 /// Returns empty string for pages without a subnav (chat, dashboard, account).
-/// Content sub-navigation panels for grouped pages.
-/// Will be replaced by Settings modal in Phase 3.
 fn content_subnav(active: &str) -> String {
     let a = |page: &str| -> &str {
-        if active == page { " active" } else { "" }
+        if active == page {
+            " active"
+        } else {
+            ""
+        }
     };
     if AUTOMATION_PAGES.contains(&active) {
         format!(
@@ -245,7 +237,9 @@ fn content_subnav(active: &str) -> String {
                 <div class="sidebar-subnav-header">AUTOMATION</div>
                 <a href="/automations" class="sidebar-subnav-link{0}">Automations</a>
                 <a href="/workflows" class="sidebar-subnav-link{1}">Workflows</a>
-            </aside>"#, a("automations"), a("workflows"),
+            </aside>"#,
+            a("automations"),
+            a("workflows"),
         )
     } else if BRAIN_PAGES.contains(&active) {
         format!(
@@ -255,7 +249,11 @@ fn content_subnav(active: &str) -> String {
                 <a href="/knowledge" class="sidebar-subnav-link{1}">Knowledge</a>
                 <a href="/contacts" class="sidebar-subnav-link{2}">Contacts</a>
                 <a href="/profiles" class="sidebar-subnav-link{3}">Profiles</a>
-            </aside>"#, a("memory"), a("knowledge"), a("contacts"), a("profiles"),
+            </aside>"#,
+            a("memory"),
+            a("knowledge"),
+            a("contacts"),
+            a("profiles"),
         )
     } else if EXTENSIONS_PAGES.contains(&active) {
         format!(
@@ -264,7 +262,10 @@ fn content_subnav(active: &str) -> String {
                 <a href="/skills" class="sidebar-subnav-link{0}">Skills</a>
                 <a href="/mcp" class="sidebar-subnav-link{1}">MCP Servers</a>
                 <a href="/agents" class="sidebar-subnav-link{2}">Agents</a>
-            </aside>"#, a("skills"), a("mcp"), a("agents"),
+            </aside>"#,
+            a("skills"),
+            a("mcp"),
+            a("agents"),
         )
     } else if SETTINGS_PAGES.contains(&active) {
         format!(
@@ -276,7 +277,11 @@ fn content_subnav(active: &str) -> String {
                 <div class="subnav-section">Channels</div>
                 <a href="/channels" class="sidebar-subnav-link{2}">Channels</a>
                 <a href="/browser" class="sidebar-subnav-link{3}">Browser</a>
-            </aside>"#, a("settings"), a("appearance"), a("channels"), a("browser"),
+            </aside>"#,
+            a("settings"),
+            a("appearance"),
+            a("channels"),
+            a("browser"),
         )
     } else if SECURITY_PAGES.contains(&active) {
         format!(
@@ -290,7 +295,13 @@ fn content_subnav(active: &str) -> String {
                 <a href="/file-access" class="sidebar-subnav-link{3}">File Access</a>
                 <a href="/shell" class="sidebar-subnav-link{4}">Shell</a>
                 <a href="/sandbox" class="sidebar-subnav-link{5}">Sandbox</a>
-            </aside>"#, a("vault"), a("api-keys"), a("approvals"), a("file-access"), a("shell"), a("sandbox"),
+            </aside>"#,
+            a("vault"),
+            a("api-keys"),
+            a("approvals"),
+            a("file-access"),
+            a("shell"),
+            a("sandbox"),
         )
     } else if SYSTEM_PAGES.contains(&active) {
         format!(
@@ -298,7 +309,9 @@ fn content_subnav(active: &str) -> String {
                 <div class="sidebar-subnav-header">SYSTEM</div>
                 <a href="/maintenance" class="sidebar-subnav-link{0}">Database</a>
                 <a href="/logs" class="sidebar-subnav-link{1}">Logs</a>
-            </aside>"#, a("maintenance"), a("logs"),
+            </aside>"#,
+            a("maintenance"),
+            a("logs"),
         )
     } else {
         String::new()
@@ -464,7 +477,6 @@ fn page_html(title: &str, active: &str, body: &str, scripts: &[&str]) -> String 
     <script src="/static/js/csrf.js"></script>
     <script src="/static/js/toast.js"></script>
     <script src="/static/js/topbar.js"></script>
-    <script src="/static/js/sidebar.js"></script>
     <script src="/static/js/command-palette.js"></script>
     {script_tags}
     <script>

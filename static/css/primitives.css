@@ -53,13 +53,14 @@
 .stat-card {
     background: var(--surface);
     border: 1px solid var(--border-subtle);
-    border-radius: var(--r-card, 16px);
+    border-radius: var(--r-2xl);
     padding: 24px;
     transition: all var(--med) var(--ease);
 }
 
 .stat-card:hover {
     border-color: var(--border);
+    box-shadow: var(--shadow-md);
 }
 
 .stat-card-link {
@@ -137,8 +138,8 @@
 
 /* Old card aliases */
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 48px; }
-.card { background: var(--surface); border: 1px solid var(--border-subtle); border-radius: var(--r-card, 16px); padding: 24px; transition: all var(--med) var(--ease); }
-.card:hover { border-color: var(--border); }
+.card { background: var(--surface); border: 1px solid var(--border-subtle); border-radius: var(--r-2xl); padding: 24px; transition: all var(--med) var(--ease); }
+.card:hover { box-shadow: var(--shadow-md); border-color: var(--border); }
 .card-label { font-size: 11px; font-weight: 500; color: var(--t3); text-transform: uppercase; letter-spacing: 0.04em; font-family: var(--sans); margin-bottom: 12px; }
 .card-value { font-size: 28px; font-weight: 700; letter-spacing: -0.03em; line-height: 1; word-break: break-all; }
 .card-sub { font-size: 11px; color: var(--t3); margin-top: 8px; }
