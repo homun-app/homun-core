@@ -1488,9 +1488,9 @@ async fn main() -> Result<()> {
                                     // Track which profiles are active
                                     for name in &active {
                                         // If a session has active tabs, update last seen
-                                        if monitor_session.has_any_active().await {
-                                            last_active.insert(name.clone(), now);
-                                        } else if !last_active.contains_key(name) {
+                                        if monitor_session.has_any_active().await
+                                            || !last_active.contains_key(name)
+                                        {
                                             last_active.insert(name.clone(), now);
                                         }
                                     }

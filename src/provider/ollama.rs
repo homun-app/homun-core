@@ -406,7 +406,7 @@ impl OllamaProvider {
             resp.message
                 .thinking
                 .as_deref()
-                .map(|t| Self::strip_think_tags(t))
+                .map(Self::strip_think_tags)
                 .filter(|t| !t.is_empty())
         } else {
             Some(raw_content)

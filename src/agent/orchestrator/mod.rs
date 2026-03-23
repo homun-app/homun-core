@@ -240,11 +240,8 @@ fn plan_to_step_snapshots(
         .map(|(i, subtask)| {
             let status = match results {
                 Some(res) if i < res.len() => {
-                    if res[i].success {
-                        "completed"
-                    } else {
-                        "completed" // failed subtasks still count as "done" in the UI
-                    }
+                    // Both success and failure count as "done" in the UI
+                    "completed"
                 }
                 None if i == 0 => "in_progress",
                 _ => "pending",

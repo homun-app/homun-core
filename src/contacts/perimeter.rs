@@ -91,6 +91,7 @@ pub async fn load_perimeter_optional(
 }
 
 /// Upsert a contact's perimeter.
+#[allow(clippy::too_many_arguments)] // SQL binding — each param maps 1:1 to a DB column
 pub async fn upsert_perimeter(
     pool: &Pool<Sqlite>,
     contact_id: i64,

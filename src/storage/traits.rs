@@ -166,9 +166,11 @@ pub trait MemoryStore: Send + Sync {
 /// RAG knowledge base source and chunk storage operations.
 ///
 /// Used by: `RagEngine`, web API.
+#[allow(clippy::too_many_arguments)] // insert_rag_source has 1:1 DB column mapping
 #[async_trait]
 pub trait RagStore: Send + Sync {
     /// Insert a new document source. Returns the source ID.
+    #[allow(clippy::too_many_arguments)] // SQL binding — each param maps 1:1 to a DB column
     async fn insert_rag_source(
         &self,
         file_path: &str,

@@ -188,6 +188,7 @@ impl Database {
     // --- Memory summary operations (hierarchical summarization) ---
 
     /// Insert a hierarchical memory summary (weekly/monthly digest).
+    #[allow(clippy::too_many_arguments)] // SQL binding — each param maps 1:1 to a DB column
     pub async fn insert_memory_summary(
         &self,
         period: &str,

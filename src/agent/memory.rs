@@ -169,6 +169,7 @@ impl MemoryConsolidator {
     /// 4. Store secrets in vault (encrypted), save instructions to INSTRUCTIONS.md
     /// 5. Append to HISTORY.md + daily file, update MEMORY.md + DB
     /// 6. Update last_consolidated pointer
+    #[allow(clippy::too_many_arguments)] // consolidation needs session, provider, model, and multi-tenant context
     pub async fn consolidate(
         &self,
         session_key: &str,
@@ -767,7 +768,7 @@ impl MemoryConsolidator {
         }
 
         let path = brain_dir.join("INSTRUCTIONS.md");
-        std::fs::create_dir_all(&brain_dir).context("Failed to create brain directory")?;
+        std::fs::create_dir_all(brain_dir).context("Failed to create brain directory")?;
 
         use std::fs::OpenOptions;
         use std::io::Write;

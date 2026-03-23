@@ -4922,8 +4922,7 @@ async fn maintenance_page() -> Html<String> {
 
 /// GET /onboarding — full-page setup wizard (no sidebar/topbar).
 async fn onboarding_page() -> Html<String> {
-    Html(format!(
-        r##"<!DOCTYPE html>
+    Html(r##"<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8">
@@ -4968,8 +4967,7 @@ async fn onboarding_page() -> Html<String> {
     <script src="/static/js/accent-utils.js"></script>
     <script src="/static/js/onboarding.js"></script>
 </body>
-</html>"##
-    ))
+</html>"##.to_string())
 }
 
 /// Multi-agent management page.

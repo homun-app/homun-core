@@ -10,6 +10,7 @@ use super::Gateway;
 // ── CRUD ────────────────────────────────────────────────────────────
 
 /// Insert a new gateway and return its id.
+#[allow(clippy::too_many_arguments)] // SQL binding — each param maps 1:1 to a DB column
 pub async fn insert_gateway(
     pool: &Pool<Sqlite>,
     name: &str,
@@ -96,6 +97,7 @@ pub async fn count_gateways(pool: &Pool<Sqlite>) -> Result<i64> {
 }
 
 /// Update a gateway's mutable fields.
+#[allow(clippy::too_many_arguments)] // SQL binding — each param maps 1:1 to a DB column
 pub async fn update_gateway(
     pool: &Pool<Sqlite>,
     id: i64,

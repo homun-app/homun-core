@@ -1927,7 +1927,7 @@ async fn dispatch_to_agent(
             crate::scheduler::automations::evaluate_and_complete_automation_run(
                 &task_db,
                 automation_id,
-                &run_id,
+                run_id,
                 output,
                 is_error,
             )
