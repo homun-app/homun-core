@@ -24,7 +24,7 @@ env:
   # E2E credentials for the self-hosted server
   HOMUN_E2E_USERNAME: ci-admin
   HOMUN_E2E_PASSWORD: ci-test-password-42
-  HOMUN_E2E_BASE_URL: https://localhost:18443
+  HOMUN_E2E_BASE_URL: http://localhost:18080
   HOMUN_E2E_WAIT_MS: "20000"
 
 jobs:
@@ -65,20 +65,6 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -yqq google-chrome-stable
 
-      - name: Configure Playwright for self-signed TLS
-        run: |
-          mkdir -p .playwright
-          cat > .playwright/cli.config.json << 'JSON'
-          {
-            "browser": "chrome",
-            "ignoreHTTPSErrors": true,
-            "launchOptions": {
-              "args": ["--ignore-certificate-errors"]
-            }
-          }
-          JSON
-          echo "PLAYWRIGHT_CLI_CONFIG=$(pwd)/.playwright/cli.config.json" >> "$GITHUB_ENV"
-
       - name: Start Homun server
         shell: bash
         run: |
@@ -88,8 +74,8 @@ jobs:
           [channels.web]
           enabled = true
           host = "127.0.0.1"
-          port = 18443
-          auto_tls = true
+          port = 18080
+          auto_tls = false
           TOML
 
           # Start server in background
@@ -99,7 +85,7 @@ jobs:
 
           # Wait for server to be ready (up to 30s)
           for i in $(seq 1 30); do
-            if curl -sk https://localhost:18443/api/health 2>/dev/null | grep -q ok; then
+            if curl -s http://localhost:18080/api/health 2>/dev/null | grep -q ok; then
               echo "Server ready after ${i}s"
               break
             fi
@@ -111,7 +97,7 @@ jobs:
           done
 
           # Final check
-          curl -sk https://localhost:18443/api/health || { echo "Server failed to start"; exit 1; }
+          curl -s http://localhost:18080/api/health || { echo "Server failed to start"; exit 1; }
 
       - name: Run E2E CI suite
         shell: bash
