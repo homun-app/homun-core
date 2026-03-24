@@ -66,30 +66,48 @@ function setupVisibilityPicker() {
     });
 }
 
-/** Open a searchable picker popover anchored to the trigger button. */
+/** Open the visibility picker modal (same pattern as model picker). */
 function openVisibilityPicker(anchor, onSelect) {
-    // Close any existing picker
     closeVisibilityPicker();
 
-    var popover = document.createElement('div');
-    popover.className = 'knowledge-vis-picker';
-    popover.id = 'knowledge-vis-picker';
+    // Backdrop
+    var backdrop = document.createElement('div');
+    backdrop.className = 'knowledge-vis-backdrop';
+    backdrop.id = 'knowledge-vis-picker';
 
-    // Search input
+    // Modal
+    var modal = document.createElement('div');
+    modal.className = 'knowledge-vis-modal';
+
+    // Header
+    var header = document.createElement('div');
+    header.className = 'knowledge-vis-header';
+    var title = document.createElement('h3');
+    title.textContent = 'Visible to';
+    header.appendChild(title);
+    var closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'knowledge-vis-close';
+    closeBtn.textContent = '\u00d7';
+    closeBtn.addEventListener('click', closeVisibilityPicker);
+    header.appendChild(closeBtn);
+    modal.appendChild(header);
+
+    // Search
     var searchInput = document.createElement('input');
     searchInput.type = 'text';
-    searchInput.className = 'input knowledge-vis-search';
+    searchInput.className = 'knowledge-vis-search';
     searchInput.placeholder = 'Search contacts\u2026';
     searchInput.autocomplete = 'off';
-    popover.appendChild(searchInput);
+    modal.appendChild(searchInput);
 
-    // Options list
-    var list = document.createElement('div');
-    list.className = 'knowledge-vis-list';
-    popover.appendChild(list);
+    // Body (scrollable list)
+    var body = document.createElement('div');
+    body.className = 'knowledge-vis-body';
+    modal.appendChild(body);
 
     function renderOptions(filter) {
-        list.textContent = '';
+        body.textContent = '';
         var q = (filter || '').toLowerCase();
 
         // Fixed options
@@ -99,7 +117,7 @@ function openVisibilityPicker(anchor, onSelect) {
         ];
         fixed.forEach(function (opt) {
             if (q && opt.label.toLowerCase().indexOf(q) === -1) return;
-            list.appendChild(makePickerItem(opt.ns, opt.label, opt.desc, onSelect));
+            body.appendChild(makePickerItem(opt.ns, opt.label, opt.desc, onSelect));
         });
 
         // Contact options
@@ -108,21 +126,20 @@ function openVisibilityPicker(anchor, onSelect) {
                 return !q || c.name.toLowerCase().indexOf(q) !== -1;
             });
             if (filtered.length > 0) {
-                var divider = document.createElement('div');
-                divider.className = 'knowledge-vis-divider';
-                divider.textContent = 'Contacts';
-                list.appendChild(divider);
+                var groupLabel = document.createElement('div');
+                groupLabel.className = 'knowledge-vis-group';
+                groupLabel.textContent = 'Contacts';
+                body.appendChild(groupLabel);
             }
             filtered.forEach(function (c) {
-                var ns = 'contact_' + c.id;
-                list.appendChild(makePickerItem(ns, c.name, null, onSelect));
+                body.appendChild(makePickerItem('contact_' + c.id, c.name, null, onSelect));
             });
 
             if (filtered.length === 0 && q) {
                 var empty = document.createElement('div');
                 empty.className = 'knowledge-vis-empty';
                 empty.textContent = 'No contacts matching \u201c' + filter + '\u201d';
-                list.appendChild(empty);
+                body.appendChild(empty);
             }
         }
     }
@@ -132,45 +149,41 @@ function openVisibilityPicker(anchor, onSelect) {
     });
 
     renderOptions('');
-
-    // Insert as sibling of anchor for correct scroll-aware positioning
-    var wrapper = anchor.parentElement;
-    if (wrapper) {
-        wrapper.style.position = 'relative';
-        popover.style.position = 'absolute';
-        popover.style.top = (anchor.offsetTop + anchor.offsetHeight + 4) + 'px';
-        popover.style.left = '0';
-        popover.style.minWidth = Math.max(anchor.offsetWidth, 260) + 'px';
-        wrapper.appendChild(popover);
-    } else {
-        document.body.appendChild(popover);
-    }
-
-    // Focus search
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
     searchInput.focus();
 
-    // Close on outside click
-    setTimeout(function () {
-        document.addEventListener('click', onPickerOutsideClick);
-        document.addEventListener('keydown', onPickerEscape);
-    }, 0);
+    // Close on backdrop click
+    backdrop.addEventListener('click', function (e) {
+        if (e.target === backdrop) closeVisibilityPicker();
+    });
+
+    // Close on Escape
+    document.addEventListener('keydown', onPickerEscape);
 }
 
 function makePickerItem(ns, label, desc, onSelect) {
     var item = document.createElement('button');
     item.type = 'button';
-    item.className = 'knowledge-vis-item' + (_selectedNamespace === ns ? ' is-active' : '');
+    item.className = 'knowledge-vis-option' + (_selectedNamespace === ns ? ' is-current' : '');
 
     var nameEl = document.createElement('span');
-    nameEl.className = 'knowledge-vis-item-name';
+    nameEl.className = 'knowledge-vis-option-name';
     nameEl.textContent = label;
     item.appendChild(nameEl);
 
     if (desc) {
         var descEl = document.createElement('span');
-        descEl.className = 'knowledge-vis-item-desc';
+        descEl.className = 'knowledge-vis-option-desc';
         descEl.textContent = desc;
         item.appendChild(descEl);
+    }
+
+    if (_selectedNamespace === ns) {
+        var check = document.createElement('span');
+        check.className = 'knowledge-vis-option-check';
+        check.textContent = '\u2713';
+        item.appendChild(check);
     }
 
     item.addEventListener('click', function () {
@@ -183,17 +196,7 @@ function makePickerItem(ns, label, desc, onSelect) {
 function closeVisibilityPicker() {
     var el = document.getElementById('knowledge-vis-picker');
     if (el) el.remove();
-    document.removeEventListener('click', onPickerOutsideClick);
     document.removeEventListener('keydown', onPickerEscape);
-}
-
-function onPickerOutsideClick(e) {
-    var picker = document.getElementById('knowledge-vis-picker');
-    if (picker && !picker.contains(e.target)) {
-        var btn = document.getElementById('upload-namespace-btn');
-        if (btn && btn.contains(e.target)) return;
-        closeVisibilityPicker();
-    }
 }
 
 function onPickerEscape(e) {

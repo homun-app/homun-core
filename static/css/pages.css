@@ -3013,6 +3013,187 @@
     color: var(--accent-hover);
 }
 
+/* ─── Visibility Picker trigger + modal ─── */
+.knowledge-vis-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: var(--r-full, 999px);
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    cursor: pointer;
+    font: var(--f-sm);
+    color: var(--t1);
+    transition: border-color var(--fast), box-shadow var(--fast);
+}
+.knowledge-vis-trigger:hover {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(var(--accent-rgb, 0,0,0), 0.08);
+}
+.knowledge-vis-trigger::after {
+    content: '\25BE';
+    font-size: 10px;
+    opacity: 0.5;
+}
+.knowledge-vis-inline-btn {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: var(--r-sm, 4px);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    cursor: pointer;
+    font-size: 0.75rem;
+    color: var(--t2);
+    transition: border-color var(--fast);
+}
+.knowledge-vis-inline-btn:hover {
+    border-color: var(--accent);
+    color: var(--t1);
+}
+.knowledge-vis-inline-btn::after {
+    content: '\25BE';
+    font-size: 9px;
+    margin-left: 4px;
+    opacity: 0.4;
+}
+.knowledge-vis-backdrop {
+    position: fixed;
+    inset: 0;
+    background: var(--overlay-scrim);
+    z-index: 9999;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+}
+.knowledge-vis-modal {
+    width: min(100%, 480px);
+    max-height: min(70vh, 520px);
+    border-radius: 22px;
+    background: rgba(255, 255, 255, 0.97);
+    border: 1px solid var(--border);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.12);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: chatDropdownIn 0.15s ease-out;
+}
+.dark .knowledge-vis-modal {
+    background: rgba(30, 30, 30, 0.97);
+    border-color: var(--border-strong);
+}
+.knowledge-vis-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 20px 0;
+}
+.knowledge-vis-header h3 {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--t1);
+}
+.knowledge-vis-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--t3);
+    font-size: 18px;
+    cursor: pointer;
+}
+.knowledge-vis-close:hover {
+    background: var(--surface-hover);
+    color: var(--t1);
+}
+.knowledge-vis-search {
+    margin: 12px 20px 0;
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--surface);
+    color: var(--t1);
+    font-size: 14px;
+    font-family: var(--sans);
+    outline: none;
+    width: calc(100% - 40px);
+    transition: border-color var(--fast);
+}
+.knowledge-vis-search:focus {
+    border-color: var(--accent);
+}
+.knowledge-vis-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 20px 20px;
+}
+.knowledge-vis-group {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--t4);
+    padding: 14px 0 6px;
+    line-height: 1;
+}
+.knowledge-vis-group:first-child {
+    padding-top: 4px;
+}
+.knowledge-vis-option {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 9px 12px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--t2);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    text-align: left;
+    transition: background var(--fast);
+}
+.knowledge-vis-option:hover {
+    background: var(--surface-hover);
+    color: var(--t1);
+}
+.knowledge-vis-option.is-current {
+    background: rgba(var(--accent-rgb, 99, 102, 241), 0.08);
+    color: var(--accent);
+    font-weight: 600;
+}
+.knowledge-vis-option-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.knowledge-vis-option-desc {
+    font-size: 11px;
+    color: var(--t4);
+    flex-shrink: 0;
+}
+.knowledge-vis-option-check {
+    flex-shrink: 0;
+    color: var(--accent);
+    font-weight: 700;
+}
+.knowledge-vis-empty {
+    padding: 24px 0;
+    text-align: center;
+    color: var(--t3);
+    font-size: 13px;
+}
+
 .upload-hint {
     font-size: 11px !important;
     color: var(--t4) !important;
