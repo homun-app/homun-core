@@ -1214,7 +1214,7 @@ async fn main() -> Result<()> {
                 {
                     let web_config = config.clone();
                     let web_port = config.channels.web.port;
-                    let web_server = crate::web::server::WebServer::setup_only(web_config);
+                    let web_server = crate::web::server::WebServer::setup_only(web_config).await;
                     tokio::spawn(async move {
                         if let Err(e) = web_server.start().await {
                             tracing::error!(error = %e, "Web UI server failed");

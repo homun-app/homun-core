@@ -193,13 +193,25 @@ impl WebServer {
 
     /// Create a setup-only server (no agent, just config UI).
     /// Wraps config in its own Arc — not shared with any agent.
-    pub fn setup_only(config: Config) -> Self {
+    /// The database is initialized so that the setup wizard can create admin accounts.
+    pub async fn setup_only(config: Config) -> Self {
+        // Open DB so auth/setup endpoints work even in setup-only mode
+        let db = match crate::storage::Database::open(&config.storage.resolved_path()).await {
+            Ok(db) => {
+                tracing::info!("Database initialized for setup-only mode");
+                Some(db)
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to open database in setup-only mode");
+                None
+            }
+        };
         Self {
             config: Arc::new(tokio::sync::RwLock::new(config)),
             inbound_tx: None,
             outbound_rx: None,
             stream_rx: None,
-            db: None,
+            db,
             #[cfg(feature = "embeddings")]
             memory_searcher: None,
             #[cfg(feature = "embeddings")]
