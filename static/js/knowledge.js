@@ -1,8 +1,10 @@
 // Knowledge Base page — upload, search, list sources
-// KIX-2: contact-based namespace assignment (dropdown shows contacts)
+// KIX-2: contact-based namespace assignment with searchable contact picker
 
 /** Cached contacts list for namespace selectors. */
 var _cachedContacts = null;
+/** Current selected namespace for upload. */
+var _selectedNamespace = '_private';
 
 document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('profile-changed', () => { loadStats(); loadSources(); });
@@ -11,6 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupUpload();
     setupSearch();
     setupFolderIndex();
+    setupVisibilityPicker();
 });
 
 /** Get the current profile filter slug from global topbar (empty = all). */
@@ -18,11 +21,9 @@ function getKnowledgeProfileFilter() {
     return window.getActiveProfileSlug ? window.getActiveProfileSlug() : '';
 }
 
-/** Get the selected namespace from the upload namespace selector. */
+/** Get the selected namespace for upload. */
 function getSelectedNamespace() {
-    var sel = document.getElementById('upload-namespace');
-    if (!sel) return '_private';
-    return sel.value;
+    return _selectedNamespace;
 }
 
 // ─── Contacts Cache ──────────────────────────────────
@@ -34,36 +35,8 @@ async function loadContacts() {
         if (!resp.ok) return;
         var data = await resp.json();
         _cachedContacts = data.contacts || data || [];
-        populateNamespaceSelect();
     } catch (_) {
         _cachedContacts = [];
-    }
-}
-
-/** Populate the upload namespace select with contacts. */
-function populateNamespaceSelect() {
-    var sel = document.getElementById('upload-namespace');
-    if (!sel || !_cachedContacts) return;
-
-    // Remove old contact options (keep _private and _public)
-    var toRemove = [];
-    for (var i = 0; i < sel.options.length; i++) {
-        var v = sel.options[i].value;
-        if (v !== '_private' && v !== '_public') toRemove.push(sel.options[i]);
-    }
-    toRemove.forEach(function (o) { o.remove(); });
-
-    // Add contact options
-    if (_cachedContacts.length > 0) {
-        var group = document.createElement('optgroup');
-        group.label = 'Contacts';
-        _cachedContacts.forEach(function (c) {
-            var opt = document.createElement('option');
-            opt.value = 'contact_' + c.id;
-            opt.textContent = c.name;
-            group.appendChild(opt);
-        });
-        sel.appendChild(group);
     }
 }
 
@@ -77,6 +50,149 @@ function namespaceLabel(ns) {
         if (c) return c.name;
     }
     return ns;
+}
+
+// ─── Visibility Picker (searchable contact picker) ───
+
+function setupVisibilityPicker() {
+    var btn = document.getElementById('upload-namespace-btn');
+    if (!btn) return;
+    btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        openVisibilityPicker(btn, function (ns) {
+            _selectedNamespace = ns;
+            btn.textContent = namespaceLabel(ns);
+        });
+    });
+}
+
+/** Open a searchable picker popover anchored to the trigger button. */
+function openVisibilityPicker(anchor, onSelect) {
+    // Close any existing picker
+    closeVisibilityPicker();
+
+    var popover = document.createElement('div');
+    popover.className = 'knowledge-vis-picker';
+    popover.id = 'knowledge-vis-picker';
+
+    // Search input
+    var searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.className = 'input knowledge-vis-search';
+    searchInput.placeholder = 'Search contacts\u2026';
+    searchInput.autocomplete = 'off';
+    popover.appendChild(searchInput);
+
+    // Options list
+    var list = document.createElement('div');
+    list.className = 'knowledge-vis-list';
+    popover.appendChild(list);
+
+    function renderOptions(filter) {
+        list.textContent = '';
+        var q = (filter || '').toLowerCase();
+
+        // Fixed options
+        var fixed = [
+            { ns: '_private', label: 'Only me', desc: 'Only you can see these documents' },
+            { ns: '_public', label: 'All contacts', desc: 'Visible to every contact' },
+        ];
+        fixed.forEach(function (opt) {
+            if (q && opt.label.toLowerCase().indexOf(q) === -1) return;
+            list.appendChild(makePickerItem(opt.ns, opt.label, opt.desc, onSelect));
+        });
+
+        // Contact options
+        if (_cachedContacts && _cachedContacts.length > 0) {
+            var filtered = _cachedContacts.filter(function (c) {
+                return !q || c.name.toLowerCase().indexOf(q) !== -1;
+            });
+            if (filtered.length > 0) {
+                var divider = document.createElement('div');
+                divider.className = 'knowledge-vis-divider';
+                divider.textContent = 'Contacts';
+                list.appendChild(divider);
+            }
+            filtered.forEach(function (c) {
+                var ns = 'contact_' + c.id;
+                list.appendChild(makePickerItem(ns, c.name, null, onSelect));
+            });
+
+            if (filtered.length === 0 && q) {
+                var empty = document.createElement('div');
+                empty.className = 'knowledge-vis-empty';
+                empty.textContent = 'No contacts matching \u201c' + filter + '\u201d';
+                list.appendChild(empty);
+            }
+        }
+    }
+
+    searchInput.addEventListener('input', function () {
+        renderOptions(this.value);
+    });
+
+    renderOptions('');
+
+    // Position below anchor
+    var rect = anchor.getBoundingClientRect();
+    popover.style.top = (rect.bottom + 4) + 'px';
+    popover.style.left = rect.left + 'px';
+    popover.style.minWidth = Math.max(rect.width, 260) + 'px';
+
+    document.body.appendChild(popover);
+
+    // Focus search
+    searchInput.focus();
+
+    // Close on outside click
+    setTimeout(function () {
+        document.addEventListener('click', onPickerOutsideClick);
+        document.addEventListener('keydown', onPickerEscape);
+    }, 0);
+}
+
+function makePickerItem(ns, label, desc, onSelect) {
+    var item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'knowledge-vis-item' + (_selectedNamespace === ns ? ' is-active' : '');
+
+    var nameEl = document.createElement('span');
+    nameEl.className = 'knowledge-vis-item-name';
+    nameEl.textContent = label;
+    item.appendChild(nameEl);
+
+    if (desc) {
+        var descEl = document.createElement('span');
+        descEl.className = 'knowledge-vis-item-desc';
+        descEl.textContent = desc;
+        item.appendChild(descEl);
+    }
+
+    item.addEventListener('click', function () {
+        onSelect(ns);
+        closeVisibilityPicker();
+    });
+    return item;
+}
+
+function closeVisibilityPicker() {
+    var el = document.getElementById('knowledge-vis-picker');
+    if (el) el.remove();
+    document.removeEventListener('click', onPickerOutsideClick);
+    document.removeEventListener('keydown', onPickerEscape);
+}
+
+function onPickerOutsideClick(e) {
+    var picker = document.getElementById('knowledge-vis-picker');
+    if (picker && !picker.contains(e.target)) {
+        var btn = document.getElementById('upload-namespace-btn');
+        if (btn && btn.contains(e.target)) return;
+        closeVisibilityPicker();
+    }
+}
+
+function onPickerEscape(e) {
+    if (e.key === 'Escape') closeVisibilityPicker();
 }
 
 // ─── Stats ────────────────────────────────────────────
@@ -129,20 +245,6 @@ async function loadSources() {
         thead.appendChild(headerRow);
         table.appendChild(thead);
 
-        // Collect unique namespaces for inline select options
-        var knownNamespaces = ['_private', '_public'];
-        sources.forEach(function (s) {
-            var ns = s.namespace || '_private';
-            if (knownNamespaces.indexOf(ns) === -1) knownNamespaces.push(ns);
-        });
-        // Add contact namespaces
-        if (_cachedContacts) {
-            _cachedContacts.forEach(function (c) {
-                var ns = 'contact_' + c.id;
-                if (knownNamespaces.indexOf(ns) === -1) knownNamespaces.push(ns);
-            });
-        }
-
         const tbody = document.createElement('tbody');
         sources.forEach(s => {
             const tr = document.createElement('tr');
@@ -159,22 +261,20 @@ async function loadSources() {
             tdType.appendChild(badge);
             tr.appendChild(tdType);
 
-            // Visible to — inline editable select with human-readable labels
+            // Visible to — clickable pill that opens the same picker
             const tdNs = document.createElement('td');
-            const nsSelect = document.createElement('select');
-            nsSelect.className = 'input';
-            nsSelect.style.cssText = 'font-size:0.75rem;padding:2px 4px;min-width:100px;border:1px solid var(--border);border-radius:var(--r-sm,4px);background:var(--surface)';
-            knownNamespaces.forEach(function (ns) {
-                var opt = document.createElement('option');
-                opt.value = ns;
-                opt.textContent = namespaceLabel(ns);
-                if (ns === (s.namespace || '_private')) opt.selected = true;
-                nsSelect.appendChild(opt);
+            const nsBtn = document.createElement('button');
+            nsBtn.type = 'button';
+            nsBtn.className = 'knowledge-vis-inline-btn';
+            nsBtn.textContent = namespaceLabel(s.namespace || '_private');
+            nsBtn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                openVisibilityPicker(nsBtn, function (ns) {
+                    updateSourceNamespace(s.id, ns);
+                    nsBtn.textContent = namespaceLabel(ns);
+                });
             });
-            nsSelect.addEventListener('change', function () {
-                updateSourceNamespace(s.id, this.value);
-            });
-            tdNs.appendChild(nsSelect);
+            tdNs.appendChild(nsBtn);
             tr.appendChild(tdNs);
 
             const tdChunks = document.createElement('td');

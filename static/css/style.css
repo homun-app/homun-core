@@ -9067,6 +9067,127 @@ html, body {
     color: var(--accent-hover);
 }
 
+/* ─── Visibility picker (contact-based namespace selector) ─── */
+.knowledge-vis-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: var(--r-full, 999px);
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    cursor: pointer;
+    font: var(--f-sm);
+    color: var(--t1);
+    transition: border-color var(--fast), box-shadow var(--fast);
+}
+.knowledge-vis-trigger:hover {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(var(--accent-rgb, 0,0,0), 0.08);
+}
+.knowledge-vis-trigger::after {
+    content: '\25BE';
+    font-size: 10px;
+    opacity: 0.5;
+}
+
+.knowledge-vis-inline-btn {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: var(--r-sm, 4px);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    cursor: pointer;
+    font-size: 0.75rem;
+    color: var(--t2);
+    transition: border-color var(--fast);
+}
+.knowledge-vis-inline-btn:hover {
+    border-color: var(--accent);
+    color: var(--t1);
+}
+.knowledge-vis-inline-btn::after {
+    content: '\25BE';
+    font-size: 9px;
+    margin-left: 4px;
+    opacity: 0.4;
+}
+
+.knowledge-vis-picker {
+    position: fixed;
+    z-index: 9999;
+    min-width: 260px;
+    max-width: 340px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg, 12px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+    padding: 8px;
+    animation: avatarDropIn 0.15s ease-out;
+}
+
+.knowledge-vis-search {
+    width: 100%;
+    margin-bottom: 6px;
+    font-size: 0.8rem !important;
+    padding: 6px 10px !important;
+    border-radius: var(--r-md, 8px) !important;
+}
+
+.knowledge-vis-list {
+    max-height: 280px;
+    overflow-y: auto;
+}
+
+.knowledge-vis-item {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: var(--r-md, 8px);
+    background: transparent;
+    color: var(--t1);
+    cursor: pointer;
+    text-align: left;
+    transition: background var(--fast);
+}
+.knowledge-vis-item:hover {
+    background: var(--surface-hover, rgba(0,0,0,0.04));
+}
+.dark .knowledge-vis-item:hover {
+    background: var(--surface-hover, rgba(255,255,255,0.06));
+}
+.knowledge-vis-item.is-active {
+    background: rgba(var(--accent-rgb, 0,0,0), 0.08);
+}
+.knowledge-vis-item-name {
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+.knowledge-vis-item-desc {
+    font-size: 0.72rem;
+    color: var(--t3);
+    margin-top: 1px;
+}
+
+.knowledge-vis-divider {
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--t4);
+    padding: 8px 10px 4px;
+}
+
+.knowledge-vis-empty {
+    font-size: 0.8rem;
+    color: var(--t3);
+    padding: 12px 10px;
+    text-align: center;
+}
+
 .upload-hint {
     font-size: 11px !important;
     color: var(--t4) !important;
