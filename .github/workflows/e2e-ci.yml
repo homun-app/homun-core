@@ -71,7 +71,10 @@ jobs:
           cat > .playwright/cli.config.json << 'JSON'
           {
             "browser": "chrome",
-            "ignoreHTTPSErrors": true
+            "ignoreHTTPSErrors": true,
+            "launchOptions": {
+              "args": ["--ignore-certificate-errors"]
+            }
           }
           JSON
           echo "PLAYWRIGHT_CLI_CONFIG=$(pwd)/.playwright/cli.config.json" >> "$GITHUB_ENV"

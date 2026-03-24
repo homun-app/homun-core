@@ -396,11 +396,14 @@ mod tests {
     use crate::workflows::{StepDefinition, WorkflowCreateRequest, WorkflowStatus};
 
     /// Helper to create a test DB with migrations applied.
-    async fn test_db() -> Database {
+    /// Returns both the Database and the TempDir — the TempDir must be kept alive
+    /// for the duration of the test, otherwise the SQLite file is deleted.
+    async fn test_db() -> (Database, tempfile::TempDir) {
         let dir = tempfile::tempdir().expect("tempdir");
-        Database::open(&dir.path().join("test.db"))
+        let db = Database::open(&dir.path().join("test.db"))
             .await
-            .expect("open test db")
+            .expect("open test db");
+        (db, dir)
     }
 
     fn sample_request() -> WorkflowCreateRequest {
@@ -422,7 +425,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_load_resumable_includes_paused() {
-        let db = test_db().await;
+        let (db, _dir) = test_db().await;
 
         // Create and insert 3 workflows with different statuses
         let req = sample_request();
@@ -466,7 +469,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_workflow_insert_and_load_roundtrip() {
-        let db = test_db().await;
+        let (db, _dir) = test_db().await;
         let req = sample_request();
         db.insert_workflow("wf-rt", &req, Some("web:test"), None, None)
             .await
@@ -484,7 +487,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_workflow_automation_link_roundtrip() {
-        let db = test_db().await;
+        let (db, _dir) = test_db().await;
 
         // Create a parent automation first (FK constraint)
         db.insert_automation(
@@ -518,7 +521,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_workflow_without_automation_link() {
-        let db = test_db().await;
+        let (db, _dir) = test_db().await;
         let req = sample_request();
         db.insert_workflow("wf-solo", &req, None, None, None)
             .await
