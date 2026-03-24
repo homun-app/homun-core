@@ -23,34 +23,34 @@
 
     function renderPerimeterSection(contactId, container, perimeter) {
         const section = document.createElement('div');
-        section.className = 'detail-section';
+        section.className = 'contact-section';
         section.id = 'perimeter-section';
 
         // Header
         const header = document.createElement('div');
-        header.className = 'detail-section-header';
+        header.className = 'contact-section-header';
         const title = document.createElement('h3');
         title.textContent = 'Access Perimeter';
         header.appendChild(title);
         const editBtn = document.createElement('button');
-        editBtn.className = 'btn btn-secondary btn-xs';
+        editBtn.className = 'btn btn-ghost btn-sm';
         editBtn.textContent = 'Edit';
         header.appendChild(editBtn);
         section.appendChild(header);
 
-        // Summary view
+        // Summary view — uses meta grid like Details section
         const summary = document.createElement('div');
-        summary.style.cssText = 'font-size:0.85rem;color:var(--t2)';
+        summary.className = 'contact-meta-grid';
 
         const namespaces = JSON.parse(perimeter.knowledge_namespaces || '["_public"]');
         const denied = JSON.parse(perimeter.tools_denied || '["vault"]');
         const scopeLabel = MEMORY_SCOPES.find(s => s.value === perimeter.memory_scope);
 
-        addSummaryRow(summary, 'Memory scope', scopeLabel ? scopeLabel.label : perimeter.memory_scope);
-        addSummaryRow(summary, 'Namespaces', namespaces.join(', ') || '_public');
-        addSummaryRow(summary, 'Denied tools', denied.join(', ') || 'none');
-        addSummaryRow(summary, 'See contacts', perimeter.can_see_contacts ? 'Yes' : 'No');
-        addSummaryRow(summary, 'See calendar', perimeter.can_see_calendar ? 'Yes' : 'No');
+        addMetaItem(summary, 'Memory scope', scopeLabel ? scopeLabel.label : perimeter.memory_scope);
+        addMetaItem(summary, 'Namespaces', namespaces.join(', ') || '_public');
+        addMetaItem(summary, 'Denied tools', denied.join(', ') || 'none');
+        addMetaItem(summary, 'See contacts', perimeter.can_see_contacts ? 'Yes' : 'No');
+        addMetaItem(summary, 'See calendar', perimeter.can_see_calendar ? 'Yes' : 'No');
         section.appendChild(summary);
 
         // Edit form (hidden)
@@ -168,24 +168,25 @@
         else container.appendChild(section);
     }
 
-    function addSummaryRow(container, label, value) {
-        const row = document.createElement('div');
-        row.style.cssText = 'display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border)';
+    function addMetaItem(container, label, value) {
+        const item = document.createElement('div');
+        item.className = 'contact-meta-item';
         const lbl = document.createElement('span');
-        lbl.style.color = 'var(--muted)';
+        lbl.className = 'contact-meta-label';
         lbl.textContent = label;
+        item.appendChild(lbl);
         const val = document.createElement('span');
-        val.textContent = value;
-        row.appendChild(lbl);
-        row.appendChild(val);
-        container.appendChild(row);
+        val.className = 'contact-meta-value';
+        val.textContent = value || '\u2014';
+        item.appendChild(val);
+        container.appendChild(item);
     }
 
     function createFormGroup(labelText) {
         const group = document.createElement('div');
         group.style.marginTop = '8px';
         const label = document.createElement('label');
-        label.style.cssText = 'font-size:0.75rem;color:var(--muted);display:block;margin-bottom:2px';
+        label.className = 'form-label';
         label.textContent = labelText;
         group.appendChild(label);
         return group;

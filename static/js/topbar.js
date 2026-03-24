@@ -13,6 +13,7 @@
     var activeProfile = null;
     var cachedProfiles = null;
     var dropdown = null;
+    var lastAvatarBtn = null; // tracks which avatar button was clicked
 
     // ─── Public API ──────────────────────────────────────
 
@@ -38,10 +39,10 @@
     }
 
     async function init() {
-        var btn = document.getElementById('topbar-avatar-btn');
-        if (!btn) return;
-
-        btn.addEventListener('click', toggleDropdown);
+        // Bind all avatar buttons (main topbar + builder overlay)
+        document.querySelectorAll('.topbar-avatar-btn').forEach(function (btn) {
+            btn.addEventListener('click', toggleDropdown);
+        });
 
         // Load profiles + restore last selection
         try {
@@ -79,6 +80,7 @@
     function toggleDropdown(e) {
         e.stopPropagation();
         if (dropdown) { closeDropdown(); return; }
+        lastAvatarBtn = e.currentTarget;
         openDropdown();
     }
 
@@ -207,7 +209,7 @@
         menu.appendChild(logoutItem);
 
         // ── Position below avatar button ──
-        var btn = document.getElementById('topbar-avatar-btn');
+        var btn = lastAvatarBtn || document.querySelector('.topbar-avatar-btn');
         if (!btn) return;
         var rect = btn.getBoundingClientRect();
         menu.style.top = (rect.bottom + 8) + 'px';

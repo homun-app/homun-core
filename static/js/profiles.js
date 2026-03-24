@@ -75,13 +75,10 @@ function renderList(profiles) {
         row.dataset.id = p.id;
         row.addEventListener('click', () => selectProfile(p.id));
 
-        const avatar = document.createElement('div');
-        avatar.className = 'contact-avatar';
-        avatar.style.cssText = 'display:flex;align-items:center;justify-content:center';
         const dot = document.createElement('span');
-        dot.style.cssText = 'width:14px;height:14px;border-radius:50%;background:' + (p.color || '#3B82F6');
-        avatar.appendChild(dot);
-        row.appendChild(avatar);
+        dot.className = 'profile-dot';
+        dot.style.background = p.color || '#3B82F6';
+        row.appendChild(dot);
 
         const info = document.createElement('div');
         info.className = 'contact-row-info';
@@ -89,13 +86,6 @@ function renderList(profiles) {
         const nameEl = document.createElement('div');
         nameEl.className = 'contact-row-name';
         nameEl.textContent = p.display_name;
-        if (p.is_default) {
-            const badge = document.createElement('span');
-            badge.className = 'badge badge-accent';
-            badge.style.cssText = 'margin-left:6px;font-size:10px';
-            badge.textContent = 'Default';
-            nameEl.appendChild(badge);
-        }
         info.appendChild(nameEl);
 
         const sub = document.createElement('div');
@@ -155,32 +145,21 @@ function showDetail(profile, soulContent) {
     const header = document.createElement('div');
     header.className = 'contact-detail-header';
 
-    const avatarEl = document.createElement('div');
-    avatarEl.className = 'contact-avatar lg';
-    avatarEl.style.cssText = 'display:flex;align-items:center;justify-content:center';
     const detailDot = document.createElement('span');
-    detailDot.style.cssText = 'width:22px;height:22px;border-radius:50%;background:' + (profile.color || '#3B82F6');
-    avatarEl.appendChild(detailDot);
-    header.appendChild(avatarEl);
+    detailDot.className = 'profile-dot lg';
+    detailDot.style.background = profile.color || '#3B82F6';
+    header.appendChild(detailDot);
 
     const headerInfo = document.createElement('div');
     headerInfo.className = 'contact-detail-header-info';
     const h2 = document.createElement('h2');
     h2.textContent = profile.display_name;
     headerInfo.appendChild(h2);
-    const subDiv = document.createElement('div');
-    subDiv.className = 'contact-header-sub';
-    const slugBadge = document.createElement('span');
-    slugBadge.className = 'badge';
-    slugBadge.textContent = profile.slug;
-    subDiv.appendChild(slugBadge);
-    if (profile.is_default) {
-        const defBadge = document.createElement('span');
-        defBadge.className = 'badge badge-accent';
-        defBadge.textContent = 'Default';
-        subDiv.appendChild(defBadge);
-    }
-    headerInfo.appendChild(subDiv);
+    const slugEl = document.createElement('div');
+    slugEl.className = 'contact-header-sub';
+    slugEl.style.cssText = 'color:var(--t3);font-size:13px';
+    slugEl.textContent = profile.slug;
+    headerInfo.appendChild(slugEl);
     header.appendChild(headerInfo);
 
     const actions = document.createElement('div');
@@ -687,41 +666,194 @@ async function loadProfileUsage(profile, container) {
     header.appendChild(title);
     section.appendChild(header);
 
-    const items = [];
+    let gateways = [];
+    let contacts = [];
+    let allContacts = [];
 
-    // Gateways using this profile
+    // Load gateways and contacts using this profile
     try {
         const res = await fetch('/api/v1/gateways');
         if (res.ok) {
             const gws = await res.json();
-            gws.filter(g => g.default_profile === profile.slug)
-                .forEach(g => items.push('Gateway: ' + g.name + ' (' + g.channel_type + ')'));
+            gateways = gws.filter(g => g.default_profile === profile.slug);
         }
     } catch (_) {}
 
-    // Contacts with this profile as default
     try {
         const res = await fetch('/api/v1/contacts');
         if (res.ok) {
-            const contacts = await res.json();
-            contacts.filter(c => c.profile_id === profile.id)
-                .forEach(c => items.push('Contact: ' + c.name));
+            allContacts = await res.json();
+            contacts = allContacts.filter(c => c.profile_id === profile.id);
         }
     } catch (_) {}
 
-    if (items.length === 0) {
-        const empty = document.createElement('p');
-        empty.className = 'contact-no-data';
-        empty.textContent = 'Not assigned to any gateway or contact';
-        section.appendChild(empty);
-    } else {
-        items.forEach(text => {
+    // Gateways sub-section
+    if (gateways.length) {
+        const gwLabel = document.createElement('div');
+        gwLabel.className = 'profile-usage-label';
+        gwLabel.textContent = 'Channels';
+        section.appendChild(gwLabel);
+        gateways.forEach(g => {
             const row = document.createElement('div');
-            row.style.cssText = 'padding:4px 0;font-size:0.85rem;border-bottom:1px solid var(--border)';
-            row.textContent = text;
+            row.className = 'profile-usage-row';
+            row.textContent = g.name;
+            const badge = document.createElement('span');
+            badge.className = 'badge';
+            badge.style.marginLeft = '6px';
+            badge.textContent = g.channel_type;
+            row.appendChild(badge);
             section.appendChild(row);
         });
     }
 
+    // Contacts sub-section
+    const contactLabel = document.createElement('div');
+    contactLabel.className = 'profile-usage-label';
+    contactLabel.textContent = 'Contacts';
+    section.appendChild(contactLabel);
+
+    if (contacts.length) {
+        contacts.forEach(c => {
+            const row = document.createElement('div');
+            row.className = 'profile-usage-row';
+            const name = document.createElement('span');
+            name.textContent = c.name;
+            row.appendChild(name);
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'btn-icon profile-usage-remove';
+            removeBtn.title = 'Remove';
+            removeBtn.textContent = '×';
+            removeBtn.onclick = async () => {
+                try {
+                    await fetch('/api/v1/contacts/' + c.id, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ profile_id: null }),
+                    });
+                    selectProfile(profile.id);
+                } catch (_) {}
+            };
+            row.appendChild(removeBtn);
+            section.appendChild(row);
+        });
+    } else if (!gateways.length) {
+        const empty = document.createElement('p');
+        empty.className = 'contact-no-data';
+        empty.textContent = 'Not assigned to any channel or contact';
+        section.appendChild(empty);
+    }
+
+    // "Add contact" button — opens modal
+    const addBtn = document.createElement('button');
+    addBtn.className = 'btn btn-sm';
+    addBtn.style.marginTop = '8px';
+    addBtn.textContent = '+ Add contact';
+    const unassigned = allContacts.filter(c => c.profile_id !== profile.id);
+    if (!unassigned.length) addBtn.disabled = true;
+    addBtn.onclick = () => showAddContactModal(profile, unassigned);
+    section.appendChild(addBtn);
+
     container.appendChild(section);
+}
+
+/** Modal to search and assign a contact to this profile. */
+function showAddContactModal(profile, unassigned) {
+    // Reuse skill-modal overlay pattern
+    const overlay = document.createElement('div');
+    overlay.className = 'skill-modal-overlay';
+    overlay.addEventListener('click', e => { if (e.target === overlay) closeModal(); });
+
+    const modal = document.createElement('div');
+    modal.className = 'skill-modal';
+    modal.style.width = '400px';
+
+    // Header
+    const hdr = document.createElement('div');
+    hdr.className = 'skill-modal-header';
+    const titleEl = document.createElement('h2');
+    titleEl.className = 'skill-modal-title';
+    titleEl.textContent = 'Add Contact';
+    hdr.appendChild(titleEl);
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'skill-modal-close';
+    closeBtn.textContent = '×';
+    closeBtn.onclick = closeModal;
+    hdr.appendChild(closeBtn);
+    modal.appendChild(hdr);
+
+    // Body: search + list
+    const body = document.createElement('div');
+    body.style.cssText = 'padding:16px;display:flex;flex-direction:column;gap:12px';
+
+    const searchInput = document.createElement('input');
+    searchInput.className = 'input';
+    searchInput.placeholder = 'Search contacts...';
+    searchInput.style.fontSize = '13px';
+    body.appendChild(searchInput);
+
+    const listEl = document.createElement('div');
+    listEl.style.cssText = 'max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:2px';
+    body.appendChild(listEl);
+
+    function renderItems(filter) {
+        listEl.textContent = '';
+        const filtered = filter
+            ? unassigned.filter(c => c.name.toLowerCase().includes(filter.toLowerCase()))
+            : unassigned;
+        if (!filtered.length) {
+            const empty = document.createElement('div');
+            empty.style.cssText = 'padding:16px;text-align:center;color:var(--t4);font-size:13px';
+            empty.textContent = filter ? 'No matches' : 'No contacts available';
+            listEl.appendChild(empty);
+            return;
+        }
+        filtered.forEach(c => {
+            const item = document.createElement('div');
+            item.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-radius:var(--r-sm);cursor:pointer;font-size:14px;color:var(--t2)';
+            item.onmouseenter = () => { item.style.background = 'var(--surface-hover)'; };
+            item.onmouseleave = () => { item.style.background = ''; };
+            const name = document.createElement('span');
+            name.textContent = c.name;
+            item.appendChild(name);
+            const addLabel = document.createElement('span');
+            addLabel.style.cssText = 'font-size:12px;color:var(--accent);font-weight:500';
+            addLabel.textContent = 'Add';
+            item.appendChild(addLabel);
+            item.onclick = async () => {
+                try {
+                    await fetch('/api/v1/contacts/' + c.id, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ profile_id: profile.id }),
+                    });
+                    closeModal();
+                    selectProfile(profile.id);
+                } catch (_) {}
+            };
+            listEl.appendChild(item);
+        });
+    }
+
+    searchInput.addEventListener('input', e => renderItems(e.target.value));
+    renderItems('');
+
+    modal.appendChild(body);
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    // Animate in
+    requestAnimationFrame(() => {
+        overlay.classList.add('active');
+        searchInput.focus();
+    });
+
+    // Escape key
+    function onKey(e) { if (e.key === 'Escape') closeModal(); }
+    document.addEventListener('keydown', onKey);
+
+    function closeModal() {
+        overlay.classList.remove('active');
+        document.removeEventListener('keydown', onKey);
+        setTimeout(() => overlay.remove(), 200);
+    }
 }

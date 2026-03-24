@@ -9614,47 +9614,7 @@ html, body {
     cursor: pointer;
 }
 
-/* Palette items (JS-generated) */
-.builder-palette-group-label {
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--t4);
-    padding: 8px 4px 4px;
-    margin-top: 4px;
-}
-.builder-palette-group-label:first-child { margin-top: 0; }
-
-.builder-node-drag {
-    padding: 8px 10px;
-    background: var(--surface-hover);
-    border: 1px solid var(--border);
-    border-radius: var(--r-md);
-    cursor: grab;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    transition: border-color 0.15s, background 0.15s;
-}
-.builder-node-drag:hover {
-    border-color: var(--border-strong);
-    background: var(--surface-raised);
-}
-.builder-palette-icon {
-    width: 24px;
-    height: 24px;
-    border-radius: 6px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: white;
-    flex-shrink: 0;
-}
-.builder-palette-label {
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--t1);
-}
+/* Builder palette/layout styles moved to workflows.css */
 
 /* Diamond shape nodes (condition/parallel) */
 .builder-node--diamond {
@@ -9695,14 +9655,7 @@ html, body {
     min-height: 16px;
 }
 
-/* ── Palette Tooltip ──────────────────────────────── */
-.palette-tooltip {
-    font-size: 11px;
-    color: var(--t3);
-    line-height: 1.4;
-    padding: 6px 0 2px 28px; /* align with label after icon */
-    margin-top: -2px;
-}
+/* palette-tooltip removed — using native title attribute */
 
 /* ── Trigger: Weekday Buttons ─────────────────────── */
 .weekday-row {

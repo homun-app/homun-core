@@ -1566,64 +1566,35 @@ const Builder = {
             const kinds = Object.entries(NODE_KINDS).filter(([, cfg]) => cfg.group === group.key);
             if (kinds.length === 0) return;
 
-            // Group header
+            // Section header — minimal uppercase label
             const header = document.createElement('div');
-            header.className = 'builder-palette-group-label';
+            header.className = 'builder-palette-section';
             header.textContent = group.label;
             container.appendChild(header);
 
-            // Items — built with safe DOM methods, no innerHTML with user data
+            // Items — clean flat links with color dot
             kinds.forEach(([kind, cfg]) => {
                 const el = document.createElement('div');
-                el.className = 'builder-node-drag';
+                el.className = 'builder-palette-item';
                 el.draggable = true;
                 el.dataset.kind = kind;
+                el.title = cfg.description || '';
 
-                const iconWrap = document.createElement('div');
-                iconWrap.className = 'builder-palette-icon';
-                iconWrap.style.background = cfg.accent;
-                // SVG icon path is a static constant from NODE_KINDS, safe for innerHTML
-                const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-                svg.setAttribute('viewBox', '0 0 24 24');
-                svg.setAttribute('width', '14');
-                svg.setAttribute('height', '14');
-                svg.setAttribute('fill', 'currentColor');
-                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-                path.setAttribute('d', cfg.icon);
-                svg.appendChild(path);
-                iconWrap.appendChild(svg);
+                const dot = document.createElement('span');
+                dot.className = 'builder-palette-dot';
+                dot.style.background = cfg.accent;
 
                 const label = document.createElement('span');
                 label.className = 'builder-palette-label';
                 label.textContent = cfg.label;
 
-                el.appendChild(iconWrap);
+                el.appendChild(dot);
                 el.appendChild(label);
-
-                // Tooltip description (shown on click, hidden on drag/second-click)
-                if (cfg.description) {
-                    const tip = document.createElement('div');
-                    tip.className = 'palette-tooltip';
-                    tip.textContent = cfg.description;
-                    tip.style.display = 'none';
-                    el.appendChild(tip);
-
-                    el.addEventListener('click', () => {
-                        // Toggle tooltip; close any other open tooltips first
-                        container.querySelectorAll('.palette-tooltip').forEach(t => {
-                            if (t !== tip) t.style.display = 'none';
-                        });
-                        tip.style.display = tip.style.display === 'none' ? 'block' : 'none';
-                    });
-                }
 
                 el.addEventListener('dragstart', e => {
                     this.draggedKind = kind;
                     e.dataTransfer.setData('text/plain', kind);
                     e.dataTransfer.effectAllowed = 'copy';
-                    // Hide tooltip when dragging
-                    const tip = el.querySelector('.palette-tooltip');
-                    if (tip) tip.style.display = 'none';
                 });
                 container.appendChild(el);
             });

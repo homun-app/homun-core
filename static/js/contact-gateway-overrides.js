@@ -36,7 +36,12 @@
 
     function profileName(profiles, profileId) {
         const p = profiles.find(pr => pr.id === profileId);
-        return p ? (p.avatar_emoji || '\uD83D\uDC64') + ' ' + p.display_name : 'ID ' + profileId;
+        return p ? p.display_name : 'ID ' + profileId;
+    }
+
+    function profileColor(profiles, profileId) {
+        const p = profiles.find(pr => pr.id === profileId);
+        return p ? (p.color || '#3B82F6') : null;
     }
 
     function gatewayName(gateways, gatewayId) {
@@ -56,44 +61,53 @@
         if (gateways.length === 0) return;
 
         const section = document.createElement('div');
-        section.className = 'detail-section';
+        section.className = 'contact-section';
         section.id = 'gateway-overrides-section';
 
         // Header
         const header = document.createElement('div');
-        header.className = 'detail-section-header';
+        header.className = 'contact-section-header';
         const title = document.createElement('h3');
-        title.textContent = 'Gateway Profile Overrides';
+        title.textContent = 'Gateway Overrides';
         header.appendChild(title);
         const addBtn = document.createElement('button');
-        addBtn.className = 'btn btn-secondary btn-xs';
+        addBtn.className = 'btn btn-ghost btn-sm';
         addBtn.textContent = '+ Add';
         header.appendChild(addBtn);
         section.appendChild(header);
 
         // Existing overrides
         if (overrides.length > 0) {
-            const list = document.createElement('div');
-            list.className = 'item-list';
             overrides.forEach(ov => {
                 const row = document.createElement('div');
-                row.className = 'item-row';
-                row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)';
+                row.className = 'contact-entity-row';
 
-                const info = document.createElement('div');
-                info.style.fontSize = '0.875rem';
-                const gwLabel = document.createElement('strong');
-                gwLabel.textContent = gatewayName(gateways, ov.gateway_id);
-                info.appendChild(gwLabel);
-                const arrow = document.createTextNode(' \u2192 ');
-                info.appendChild(arrow);
+                const gwPill = document.createElement('span');
+                gwPill.className = 'pill';
+                gwPill.textContent = gatewayName(gateways, ov.gateway_id);
+                row.appendChild(gwPill);
+
+                const arrow = document.createElement('span');
+                arrow.style.cssText = 'color:var(--t4);margin:0 4px';
+                arrow.textContent = '\u2192';
+                row.appendChild(arrow);
+
+                const color = profileColor(profiles, ov.profile_id);
+                if (color) {
+                    const dot = document.createElement('span');
+                    dot.className = 'profile-dot';
+                    dot.style.cssText = 'background:' + color + ';display:inline-block;vertical-align:middle;margin-right:4px';
+                    row.appendChild(dot);
+                }
+
                 const profLabel = document.createElement('span');
+                profLabel.className = 'contact-entity-name';
                 profLabel.textContent = profileName(profiles, ov.profile_id);
-                info.appendChild(profLabel);
-                row.appendChild(info);
+                row.appendChild(profLabel);
 
                 const removeBtn = document.createElement('button');
-                removeBtn.className = 'btn btn-danger btn-xs';
+                removeBtn.className = 'btn btn-ghost btn-sm';
+                removeBtn.style.marginLeft = 'auto';
                 removeBtn.textContent = '\u00D7';
                 removeBtn.addEventListener('click', async () => {
                     await fetch(`/api/v1/contacts/${contactId}/gateway-overrides/${ov.gateway_id}`, {
@@ -103,13 +117,12 @@
                 });
                 row.appendChild(removeBtn);
 
-                list.appendChild(row);
+                section.appendChild(row);
             });
-            section.appendChild(list);
         } else {
             const empty = document.createElement('p');
-            empty.style.cssText = 'color:var(--muted);font-size:0.8rem;margin:8px 0';
-            empty.textContent = 'No overrides — uses contact default profile on all gateways.';
+            empty.className = 'contact-no-data';
+            empty.textContent = 'No overrides — uses default profile on all gateways.';
             section.appendChild(empty);
         }
 
@@ -124,8 +137,8 @@
         const gwGroup = document.createElement('div');
         gwGroup.style.flex = '1';
         const gwLabel = document.createElement('label');
+        gwLabel.className = 'form-label';
         gwLabel.textContent = 'Gateway';
-        gwLabel.style.cssText = 'font-size:0.75rem;color:var(--muted);display:block;margin-bottom:2px';
         const gwSelect = document.createElement('select');
         gwSelect.className = 'input';
         // Only show gateways that don't already have an override
@@ -144,14 +157,14 @@
         const profGroup = document.createElement('div');
         profGroup.style.flex = '1';
         const profSelectLabel = document.createElement('label');
+        profSelectLabel.className = 'form-label';
         profSelectLabel.textContent = 'Profile';
-        profSelectLabel.style.cssText = 'font-size:0.75rem;color:var(--muted);display:block;margin-bottom:2px';
         const profSelect = document.createElement('select');
         profSelect.className = 'input';
         profiles.forEach(p => {
             const opt = document.createElement('option');
             opt.value = p.id;
-            opt.textContent = (p.avatar_emoji || '\uD83D\uDC64') + ' ' + p.display_name;
+            opt.textContent = p.display_name;
             profSelect.appendChild(opt);
         });
         profGroup.appendChild(profSelectLabel);

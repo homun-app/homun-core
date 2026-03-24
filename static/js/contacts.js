@@ -111,11 +111,16 @@ async function selectContact(id) {
         }
         if (_cachedProfiles && c.profile_id) {
             const prof = _cachedProfiles.find(p => p.id === c.profile_id);
-            c._profile_display = prof
-                ? (prof.avatar_emoji || '\u{1F464}') + ' ' + prof.display_name
-                : 'ID ' + c.profile_id;
+            if (prof) {
+                c._profile_display = prof.display_name;
+                c._profile_color = prof.color || '#3B82F6';
+            } else {
+                c._profile_display = 'ID ' + c.profile_id;
+                c._profile_color = null;
+            }
         } else {
             c._profile_display = 'channel default';
+            c._profile_color = null;
         }
         const [ids, rels, events] = await Promise.all([
             fetch(API + '/' + id + '/identities').then(r => r.json()),
@@ -173,35 +178,41 @@ function showDetail(c, identities, relationships, events) {
     // Resolve profile display name for the detail view
     const profileLabel = c._profile_display || 'channel default';
 
-    // All dynamic content sanitized through esc(); c.id is always an integer
+    // Security: all innerHTML usage sanitized through esc() (textContent-based).
+    // c.id is always an integer (parseInt). No raw user data in innerHTML.
     el.innerHTML = '<div class="contact-detail-inner" data-contact-id="' + parseInt(c.id, 10) + '">'
         // Back button (mobile only)
         + '<button class="btn btn-ghost btn-sm contact-back-btn" onclick="goBackToList()" style="margin-bottom:12px">'
         + '&#8592; Back</button>'
-        // Header
+        // Header — compact: initials + name row with inline actions
         + '<div class="contact-detail-header">'
-        + '<div class="contact-avatar lg">' + esc(initials(c.name)) + '</div>'
+        + '<div class="contact-avatar-sm">' + esc(initials(c.name)) + '</div>'
         + '<div class="contact-detail-header-info">'
+        + '<div class="contact-detail-name-row">'
         + '<h2>' + esc(c.name) + '</h2>'
-        + '<div class="contact-header-sub">'
-        + (c.nickname ? '<span class="badge">' + esc(c.nickname) + '</span>' : '')
-        + (c.preferred_channel ? '<span class="pill">' + esc(c.preferred_channel) + '</span>' : '')
-        + '</div>'
-        + bioHtml
-        + '</div>'
         + '<div class="contact-detail-actions">'
         + '<button class="btn btn-ghost btn-sm" onclick="showEditForm(' + c.id + ')">Edit</button>'
         + '<button class="btn btn-danger btn-sm" onclick="deleteContact(' + c.id + ')">Delete</button>'
-        + '</div></div>'
+        + '</div>'
+        + '</div>'
+        + '<div class="contact-header-sub">'
+        + (c.nickname ? '<span style="color:var(--t3)">' + esc(c.nickname) + '</span>' : '')
+        + (c.preferred_channel ? '<span class="pill" style="font-size:11px">' + esc(c.preferred_channel) + '</span>' : '')
+        + '</div>'
+        + bioHtml
+        + '</div>'
+        + '</div>'
         // Details section
-        + '<div class="contact-section" style="border-top:none;padding-top:0;margin-top:0">'
+        + '<div class="contact-section" style="margin-top:0">'
         + '<div class="contact-section-header"><h3>Details</h3></div>'
         + '<div class="contact-meta-grid">'
         + metaItem('Channel', c.preferred_channel)
         + metaItem('Mode', c.response_mode)
         + metaItem('Tone', c.tone_of_voice)
         + metaItem('Birthday', c.birthday)
-        + metaItem('Profile', profileLabel)
+        + metaItemHtml('Profile', c._profile_color
+            ? '<span class="profile-dot" style="background:' + esc(c._profile_color) + ';display:inline-block;vertical-align:middle;margin-right:6px"></span>' + esc(profileLabel)
+            : esc(profileLabel))
         + metaItem('Agent', c.agent_override)
         + '</div></div>'
         // Identities
@@ -238,6 +249,14 @@ function metaItem(label, value) {
     return '<div class="contact-meta-item">'
         + '<span class="contact-meta-label">' + esc(label) + '</span>'
         + '<span class="contact-meta-value">' + esc(value || '\u2014') + '</span>'
+        + '</div>';
+}
+
+/** Like metaItem but value is pre-sanitized HTML (for colored dots, badges etc). */
+function metaItemHtml(label, htmlValue) {
+    return '<div class="contact-meta-item">'
+        + '<span class="contact-meta-label">' + esc(label) + '</span>'
+        + '<span class="contact-meta-value">' + (htmlValue || '\u2014') + '</span>'
         + '</div>';
 }
 
