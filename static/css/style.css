@@ -9115,7 +9115,7 @@ html, body {
 }
 
 .knowledge-vis-picker {
-    position: fixed;
+    position: absolute;
     z-index: 9999;
     min-width: 260px;
     max-width: 340px;

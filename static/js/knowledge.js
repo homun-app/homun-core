@@ -133,13 +133,18 @@ function openVisibilityPicker(anchor, onSelect) {
 
     renderOptions('');
 
-    // Position below anchor
-    var rect = anchor.getBoundingClientRect();
-    popover.style.top = (rect.bottom + 4) + 'px';
-    popover.style.left = rect.left + 'px';
-    popover.style.minWidth = Math.max(rect.width, 260) + 'px';
-
-    document.body.appendChild(popover);
+    // Insert as sibling of anchor for correct scroll-aware positioning
+    var wrapper = anchor.parentElement;
+    if (wrapper) {
+        wrapper.style.position = 'relative';
+        popover.style.position = 'absolute';
+        popover.style.top = (anchor.offsetTop + anchor.offsetHeight + 4) + 'px';
+        popover.style.left = '0';
+        popover.style.minWidth = Math.max(anchor.offsetWidth, 260) + 'px';
+        wrapper.appendChild(popover);
+    } else {
+        document.body.appendChild(popover);
+    }
 
     // Focus search
     searchInput.focus();
