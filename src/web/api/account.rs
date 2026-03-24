@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
-use axum::http::StatusCode;
-use axum::response::Json;
+use axum::extract::{Multipart, Path, State};
+use axum::http::{header, StatusCode};
+use axum::response::{IntoResponse, Json};
 use axum::routing::get;
 use axum::Router;
 use serde::{Deserialize, Serialize};
@@ -26,6 +26,78 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
             "/v1/account/tokens/{token_id}",
             axum::routing::delete(delete_token).post(toggle_token),
         )
+        .route(
+            "/v1/account/avatar",
+            get(get_avatar).post(upload_avatar),
+        )
+}
+
+// ─── Avatar ─────────────────────────────────────────────────────
+
+/// Serve the user's avatar image, or 404 if none uploaded.
+async fn get_avatar(State(_state): State<Arc<AppState>>) -> axum::response::Response {
+    let data_dir = crate::config::Config::data_dir();
+    // Try common extensions
+    for ext in &["png", "jpg", "jpeg", "webp"] {
+        let path = data_dir.join(format!("avatar.{ext}"));
+        if path.exists() {
+            match tokio::fs::read(&path).await {
+                Ok(bytes) => {
+                    let ct = match *ext {
+                        "png" => "image/png",
+                        "jpg" | "jpeg" => "image/jpeg",
+                        "webp" => "image/webp",
+                        _ => "application/octet-stream",
+                    };
+                    return (
+                        StatusCode::OK,
+                        [(header::CONTENT_TYPE, ct), (header::CACHE_CONTROL, "max-age=3600")],
+                        bytes,
+                    )
+                        .into_response();
+                }
+                Err(_) => continue,
+            }
+        }
+    }
+    StatusCode::NOT_FOUND.into_response()
+}
+
+/// Upload a new avatar image (multipart form).
+async fn upload_avatar(State(_state): State<Arc<AppState>>, mut multipart: Multipart) -> axum::response::Response {
+    let data_dir = crate::config::Config::data_dir();
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let content_type = field.content_type().unwrap_or("").to_string();
+        let ext = match content_type.as_str() {
+            "image/png" => "png",
+            "image/jpeg" => "jpg",
+            "image/webp" => "webp",
+            _ => continue,
+        };
+
+        match field.bytes().await {
+            Ok(bytes) => {
+                if bytes.len() > 2 * 1024 * 1024 {
+                    return (StatusCode::BAD_REQUEST, "Image too large (max 2MB)").into_response();
+                }
+                // Remove old avatars
+                for old_ext in &["png", "jpg", "jpeg", "webp"] {
+                    let _ = tokio::fs::remove_file(data_dir.join(format!("avatar.{old_ext}"))).await;
+                }
+                // Save new
+                let path = data_dir.join(format!("avatar.{ext}"));
+                if let Err(e) = tokio::fs::write(&path, &bytes).await {
+                    tracing::error!("Failed to save avatar: {e}");
+                    return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to save").into_response();
+                }
+                return (StatusCode::OK, Json(serde_json::json!({"ok": true}))).into_response();
+            }
+            Err(_) => continue,
+        }
+    }
+
+    (StatusCode::BAD_REQUEST, "No image field found").into_response()
 }
 
 #[derive(Debug, Serialize)]

@@ -1,237 +1,290 @@
 // Homun — API Keys management page
 // All dynamic content inserted via innerHTML uses esc() to prevent XSS.
-// This follows the same pattern used across all Homun pages (vault.js, account.js, etc.).
+// Supports both standalone page and settings modal contexts.
 
-// ─── DOM refs ───
-const keysList = document.getElementById('keys-list');
-const keysEmpty = document.getElementById('keys-empty');
-const keysCount = document.getElementById('keys-count');
-const createSection = document.getElementById('create-form-section');
-const revealSection = document.getElementById('token-reveal-section');
-const revealedToken = document.getElementById('revealed-token');
-const createForm = document.getElementById('create-key-form');
+(function () {
+    'use strict';
 
-// ─── State ───
-let keys = [];
+    function initApiKeys() {
+        // ─── DOM refs ───
+        var keysList = document.getElementById('keys-list');
+        var keysEmpty = document.getElementById('keys-empty');
+        var keysCount = document.getElementById('keys-count');
+        var createSection = document.getElementById('create-form-section');
+        var revealSection = document.getElementById('token-reveal-section');
+        var revealedToken = document.getElementById('revealed-token');
+        var createForm = document.getElementById('create-key-form');
+        var createBtn = document.getElementById('create-key-btn');
+        var cancelCreateBtn = document.getElementById('cancel-create-btn');
+        var copyTokenBtn = document.getElementById('copy-token-btn');
+        var dismissRevealBtn = document.getElementById('dismiss-reveal-btn');
 
-// ─── Load keys from API ───
-async function loadKeys() {
-    try {
-        const resp = await fetch('/api/v1/account/tokens');
-        if (!resp.ok) throw new Error('Failed to load keys');
-        keys = await resp.json();
-        renderKeys();
-    } catch (e) {
-        console.error('[api-keys] loadKeys error:', e);
-        keysEmpty.textContent = 'Failed to load API keys.';
-        keysEmpty.style.display = '';
-    }
-}
+        // Guard: skip init if DOM elements are missing (wrong context)
+        if (!keysList || !createForm) return;
 
-// ─── Render key list ───
-function renderKeys() {
-    keysCount.textContent = keys.length;
+        // ─── State ───
+        var keys = [];
 
-    // Clear old rows
-    keysList.querySelectorAll('.key-row').forEach(el => el.remove());
+        // ─── Load keys from API ───
+        async function loadKeys() {
+            try {
+                var resp = await fetch('/api/v1/account/tokens');
+                if (!resp.ok) throw new Error('Failed to load keys');
+                keys = await resp.json();
+                renderKeys();
+            } catch (e) {
+                console.error('[api-keys] loadKeys error:', e);
+                if (keysEmpty) {
+                    keysEmpty.textContent = 'Failed to load API keys.';
+                    keysEmpty.style.display = '';
+                }
+            }
+        }
 
-    if (keys.length === 0) {
-        keysEmpty.style.display = '';
-        return;
-    }
-    keysEmpty.style.display = 'none';
+        // ─── Render key list ───
+        // Uses esc() to sanitize all API values before DOM insertion.
+        function renderKeys() {
+            if (keysCount) keysCount.textContent = keys.length;
 
-    keys.forEach(k => {
-        const row = document.createElement('div');
-        row.className = 'key-row item-row';
-        row.dataset.tokenId = k.token_id;
+            // Clear old rows
+            keysList.querySelectorAll('.key-row').forEach(function (el) { el.remove(); });
 
-        const scopeClass = k.scope === 'admin' ? 'badge-info'
-            : k.scope === 'write' ? 'badge-warning'
-            : 'badge-neutral';
+            if (keys.length === 0) {
+                if (keysEmpty) keysEmpty.style.display = '';
+                return;
+            }
+            if (keysEmpty) keysEmpty.style.display = 'none';
 
-        const enabledLabel = k.enabled ? 'Enabled' : 'Disabled';
-        const enabledClass = k.enabled ? 'badge-success' : 'badge-danger';
-        const toggleLabel = k.enabled ? 'Disable' : 'Enable';
-        const lastUsed = k.last_used ? timeAgo(k.last_used) : 'Never';
+            keys.forEach(function (k) {
+                var row = document.createElement('div');
+                row.className = 'key-row item-row';
+                row.dataset.tokenId = k.token_id;
 
-        // Build row with safe DOM — esc() sanitizes all API values
-        // eslint-disable-next-line no-unsanitized/property -- esc() escapes all dynamic values
-        row.innerHTML = [
-            '<div style="flex:1;min-width:0">',
-            '  <div style="display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap">',
-            '    <strong>' + esc(k.name) + '</strong>',
-            '    <span class="badge ' + scopeClass + '">' + esc(k.scope) + '</span>',
-            '    <span class="badge ' + enabledClass + '">' + enabledLabel + '</span>',
-            '    ' + formatExpiry(k.expires_at),
-            '  </div>',
-            '  <div style="margin-top:var(--space-1);color:var(--muted);font-size:0.8125rem">',
-            '    <code style="font-family:var(--font-mono)">' + esc(k.display_token) + '</code>',
-            '    · Last used: ' + esc(lastUsed),
-            '  </div>',
-            '</div>',
-            '<div style="display:flex;gap:var(--space-1);align-items:center;flex-shrink:0">',
-            '  <button class="btn btn-secondary btn-sm btn-toggle" data-id="' + esc(k.token_id) + '">' + toggleLabel + '</button>',
-            '  <button class="btn btn-danger btn-sm btn-delete" data-id="' + esc(k.token_id) + '">Delete</button>',
-            '</div>',
-        ].join('\n');
+                var scopeClass = k.scope === 'admin' ? 'badge-info'
+                    : k.scope === 'write' ? 'badge-warning'
+                    : 'badge-neutral';
 
-        keysList.appendChild(row);
-    });
-}
+                var enabledLabel = k.enabled ? 'Enabled' : 'Disabled';
+                var enabledClass = k.enabled ? 'badge-success' : 'badge-danger';
+                var toggleLabel = k.enabled ? 'Disable' : 'Enable';
+                var lastUsed = k.last_used ? timeAgo(k.last_used) : 'Never';
 
-// ─── Create key ───
-createForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const name = document.getElementById('key-name').value.trim();
-    if (!name) return;
+                // Build row — esc() sanitizes all dynamic API values to prevent XSS
+                var info = document.createElement('div');
+                info.style.cssText = 'flex:1;min-width:0';
 
-    const scope = document.getElementById('key-scope').value;
-    const expiresIn = document.getElementById('key-expiry').value || undefined;
+                var nameRow = document.createElement('div');
+                nameRow.style.cssText = 'display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap';
+                var strong = document.createElement('strong');
+                strong.textContent = k.name;
+                nameRow.appendChild(strong);
+                nameRow.appendChild(makeBadge(k.scope, scopeClass));
+                nameRow.appendChild(makeBadge(enabledLabel, enabledClass));
+                nameRow.appendChild(makeExpiryBadge(k.expires_at));
+                info.appendChild(nameRow);
 
-    try {
-        const resp = await fetch('/api/v1/account/tokens', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, scope, expires_in: expiresIn }),
+                var metaRow = document.createElement('div');
+                metaRow.style.cssText = 'margin-top:var(--space-1);color:var(--muted);font-size:0.8125rem';
+                var code = document.createElement('code');
+                code.style.fontFamily = 'var(--font-mono)';
+                code.textContent = k.display_token;
+                metaRow.appendChild(code);
+                metaRow.appendChild(document.createTextNode(' · Last used: ' + lastUsed));
+                info.appendChild(metaRow);
+
+                var actions = document.createElement('div');
+                actions.style.cssText = 'display:flex;gap:var(--space-1);align-items:center;flex-shrink:0';
+                var toggleBtn2 = document.createElement('button');
+                toggleBtn2.className = 'btn btn-secondary btn-sm btn-toggle';
+                toggleBtn2.dataset.id = k.token_id;
+                toggleBtn2.textContent = toggleLabel;
+                var deleteBtn2 = document.createElement('button');
+                deleteBtn2.className = 'btn btn-danger btn-sm btn-delete';
+                deleteBtn2.dataset.id = k.token_id;
+                deleteBtn2.textContent = 'Delete';
+                actions.appendChild(toggleBtn2);
+                actions.appendChild(deleteBtn2);
+
+                row.appendChild(info);
+                row.appendChild(actions);
+                keysList.appendChild(row);
+            });
+        }
+
+        function makeBadge(text, cls) {
+            var span = document.createElement('span');
+            span.className = 'badge ' + cls;
+            span.textContent = text;
+            return span;
+        }
+
+        function makeExpiryBadge(expiresAt) {
+            if (!expiresAt) return makeBadge('No expiry', 'badge-neutral');
+            var exp = new Date(expiresAt);
+            var now = new Date();
+            if (exp <= now) return makeBadge('Expired', 'badge-danger');
+            var days = Math.ceil((exp - now) / (1000 * 60 * 60 * 24));
+            if (days <= 7) return makeBadge('Expires in ' + days + 'd', 'badge-warning');
+            return makeBadge('Expires in ' + days + 'd', 'badge-neutral');
+        }
+
+        // ─── Create key ───
+        createForm.addEventListener('submit', async function (e) {
+            e.preventDefault();
+            var name = document.getElementById('key-name').value.trim();
+            if (!name) return;
+
+            var scope = document.getElementById('key-scope').value;
+            var expiresIn = document.getElementById('key-expiry').value || undefined;
+
+            try {
+                var resp = await fetch('/api/v1/account/tokens', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: name, scope: scope, expires_in: expiresIn }),
+                });
+
+                if (!resp.ok) {
+                    var err = await resp.json().catch(function () { return {}; });
+                    showToast(err.error || 'Failed to create key', 'error');
+                    return;
+                }
+
+                var data = await resp.json();
+
+                // Show the full token once
+                if (revealedToken) revealedToken.textContent = data.token;
+                if (revealSection) revealSection.style.display = '';
+                if (createSection) createSection.style.display = 'none';
+                createForm.reset();
+
+                showToast('API key created', 'success');
+                loadKeys();
+            } catch (err) {
+                console.error('[api-keys] create error:', err);
+                showToast('Network error', 'error');
+            }
         });
 
-        if (!resp.ok) {
-            const err = await resp.json().catch(() => ({}));
-            showToast(err.error || 'Failed to create key', 'error');
-            return;
+        // ─── Copy token ───
+        if (copyTokenBtn) {
+            copyTokenBtn.addEventListener('click', function () {
+                var token = revealedToken.textContent;
+                navigator.clipboard.writeText(token).then(function () {
+                    showToast('Copied to clipboard', 'success');
+                }).catch(function () {
+                    var range = document.createRange();
+                    range.selectNodeContents(revealedToken);
+                    window.getSelection().removeAllRanges();
+                    window.getSelection().addRange(range);
+                    showToast('Select All applied — press Ctrl+C', 'info');
+                });
+            });
         }
 
-        const data = await resp.json();
+        // ─── Dismiss reveal ───
+        if (dismissRevealBtn) {
+            dismissRevealBtn.addEventListener('click', function () {
+                if (revealSection) revealSection.style.display = 'none';
+                if (revealedToken) revealedToken.textContent = '';
+            });
+        }
 
-        // Show the full token once
-        revealedToken.textContent = data.token;
-        revealSection.style.display = '';
-        createSection.style.display = 'none';
-        createForm.reset();
+        // ─── Toggle create form ───
+        if (createBtn) {
+            createBtn.addEventListener('click', function () {
+                var visible = createSection.style.display !== 'none';
+                createSection.style.display = visible ? 'none' : '';
+                if (!visible) {
+                    var nameInput = document.getElementById('key-name');
+                    if (nameInput) nameInput.focus();
+                }
+            });
+        }
 
-        showToast('API key created', 'success');
+        if (cancelCreateBtn) {
+            cancelCreateBtn.addEventListener('click', function () {
+                if (createSection) createSection.style.display = 'none';
+                createForm.reset();
+            });
+        }
+
+        // ─── Delegate toggle/delete clicks ───
+        keysList.addEventListener('click', async function (e) {
+            var toggleBtn = e.target.closest('.btn-toggle');
+            var deleteBtn = e.target.closest('.btn-delete');
+
+            if (toggleBtn) {
+                var id = toggleBtn.dataset.id;
+                try {
+                    var resp = await fetch('/api/v1/account/tokens/' + encodeURIComponent(id), {
+                        method: 'POST',
+                    });
+                    if (!resp.ok) {
+                        var err = await resp.json().catch(function () { return {}; });
+                        showToast(err.error || 'Failed to toggle', 'error');
+                        return;
+                    }
+                    showToast('Key toggled', 'success');
+                    loadKeys();
+                } catch (err) {
+                    showToast('Network error', 'error');
+                }
+            }
+
+            if (deleteBtn) {
+                var did = deleteBtn.dataset.id;
+                var row = deleteBtn.closest('.key-row');
+                var dname = row ? (row.querySelector('strong')?.textContent || did) : did;
+                if (!confirm('Delete API key "' + dname + '"?')) return;
+
+                try {
+                    var resp2 = await fetch('/api/v1/account/tokens/' + encodeURIComponent(did), {
+                        method: 'DELETE',
+                    });
+                    if (!resp2.ok) {
+                        var err2 = await resp2.json().catch(function () { return {}; });
+                        showToast(err2.error || 'Failed to delete', 'error');
+                        return;
+                    }
+                    showToast('Key deleted', 'success');
+                    loadKeys();
+                } catch (err) {
+                    showToast('Network error', 'error');
+                }
+            }
+        });
+
+        // ─── Init ───
         loadKeys();
-    } catch (err) {
-        console.error('[api-keys] create error:', err);
-        showToast('Network error', 'error');
-    }
-});
-
-// ─── Copy token ───
-document.getElementById('copy-token-btn').addEventListener('click', () => {
-    const token = revealedToken.textContent;
-    navigator.clipboard.writeText(token).then(() => {
-        showToast('Copied to clipboard', 'success');
-    }).catch(() => {
-        // Fallback: select all for manual copy
-        const range = document.createRange();
-        range.selectNodeContents(revealedToken);
-        window.getSelection().removeAllRanges();
-        window.getSelection().addRange(range);
-        showToast('Select All applied — press Ctrl+C', 'info');
-    });
-});
-
-// ─── Dismiss reveal ───
-document.getElementById('dismiss-reveal-btn').addEventListener('click', () => {
-    revealSection.style.display = 'none';
-    revealedToken.textContent = '';
-});
-
-// ─── Toggle create form ───
-document.getElementById('create-key-btn').addEventListener('click', () => {
-    const visible = createSection.style.display !== 'none';
-    createSection.style.display = visible ? 'none' : '';
-    if (!visible) document.getElementById('key-name').focus();
-});
-
-document.getElementById('cancel-create-btn').addEventListener('click', () => {
-    createSection.style.display = 'none';
-    createForm.reset();
-});
-
-// ─── Delegate toggle/delete clicks ───
-keysList.addEventListener('click', async (e) => {
-    const toggleBtn = e.target.closest('.btn-toggle');
-    const deleteBtn = e.target.closest('.btn-delete');
-
-    if (toggleBtn) {
-        const id = toggleBtn.dataset.id;
-        try {
-            const resp = await fetch('/api/v1/account/tokens/' + encodeURIComponent(id), {
-                method: 'POST',
-            });
-            if (!resp.ok) {
-                const err = await resp.json().catch(() => ({}));
-                showToast(err.error || 'Failed to toggle', 'error');
-                return;
-            }
-            showToast('Key toggled', 'success');
-            loadKeys();
-        } catch (err) {
-            showToast('Network error', 'error');
-        }
     }
 
-    if (deleteBtn) {
-        const id = deleteBtn.dataset.id;
-        const row = deleteBtn.closest('.key-row');
-        const name = row ? (row.querySelector('strong')?.textContent || id) : id;
-        if (!confirm('Delete API key "' + name + '"?')) return;
+    // ─── Helpers ───
 
-        try {
-            const resp = await fetch('/api/v1/account/tokens/' + encodeURIComponent(id), {
-                method: 'DELETE',
-            });
-            if (!resp.ok) {
-                const err = await resp.json().catch(() => ({}));
-                showToast(err.error || 'Failed to delete', 'error');
-                return;
-            }
-            showToast('Key deleted', 'success');
-            loadKeys();
-        } catch (err) {
-            showToast('Network error', 'error');
-        }
+    function timeAgo(dateStr) {
+        var d = new Date(dateStr);
+        var now = new Date();
+        var secs = Math.floor((now - d) / 1000);
+        if (secs < 60) return 'just now';
+        var mins = Math.floor(secs / 60);
+        if (mins < 60) return mins + 'm ago';
+        var hrs = Math.floor(mins / 60);
+        if (hrs < 24) return hrs + 'h ago';
+        var days = Math.floor(hrs / 24);
+        return days + 'd ago';
     }
-});
 
-// ─── Helpers ───
-
-function formatExpiry(expiresAt) {
-    if (!expiresAt) return '<span class="badge badge-neutral">No expiry</span>';
-    var exp = new Date(expiresAt);
-    var now = new Date();
-    if (exp <= now) {
-        return '<span class="badge badge-danger">Expired</span>';
+    /** Escape HTML to prevent XSS — all API values pass through this. */
+    function esc(s) {
+        var el = document.createElement('span');
+        el.textContent = s || '';
+        return el.innerHTML;
     }
-    var days = Math.ceil((exp - now) / (1000 * 60 * 60 * 24));
-    if (days <= 7) {
-        return '<span class="badge badge-warning">Expires in ' + days + 'd</span>';
-    }
-    return '<span class="badge badge-neutral">Expires in ' + days + 'd</span>';
-}
 
-function timeAgo(dateStr) {
-    var d = new Date(dateStr);
-    var now = new Date();
-    var secs = Math.floor((now - d) / 1000);
-    if (secs < 60) return 'just now';
-    var mins = Math.floor(secs / 60);
-    if (mins < 60) return mins + 'm ago';
-    var hrs = Math.floor(mins / 60);
-    if (hrs < 24) return hrs + 'h ago';
-    var days = Math.floor(hrs / 24);
-    return days + 'd ago';
-}
+    // ─── Auto-init: standalone page or settings modal ───
+    // Run immediately if DOM elements exist (standalone page)
+    initApiKeys();
 
-/** Escape HTML to prevent XSS — all API values pass through this. */
-function esc(s) {
-    var el = document.createElement('span');
-    el.textContent = s || '';
-    return el.innerHTML;
-}
-
-// ─── Init ───
-loadKeys();
+    // Re-init when loaded inside settings modal
+    document.addEventListener('settings-section-loaded', initApiKeys);
+})();

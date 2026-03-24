@@ -460,40 +460,32 @@ function renderAutomations() {
             return `
                 <div class="automation-block" data-id="${escapeHtml(item.id)}">
                     <div class="item-row automation-row${selectedClass}">
-                        <div class="item-info">
-                            <div class="item-icon">A</div>
-                            <div class="automation-main">
-                                <div class="automation-top">
-                                    <span class="automation-name">${escapeHtml(item.name)}</span>
-                                    <span class="badge ${statusBadgeClass(item.status)}">${escapeHtml(item.status || 'unknown')}</span>
+                        <div class="automation-main" style="flex:1;min-width:0">
+                            <div class="automation-top" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                                <span class="automation-name" style="font-size:16px;font-weight:700">${escapeHtml(item.name)}</span>
+                                <span class="badge ${statusBadgeClass(item.status)}">${escapeHtml(item.status || 'unknown')}</span>
+                            </div>
+                            ${item.prompt ? `<div class="automation-prompt-preview" style="margin-bottom:8px">${escapeHtml(shorten(item.prompt, 140))}</div>` : ''}
+                            <div class="automation-meta" style="margin-bottom:8px">
+                                <span class="automation-chip">${escapeHtml(formatSchedule(item.schedule))}</span>
+                                <span class="automation-chip">next: ${escapeHtml(formatTimestamp(item.next_run))}</span>
+                                <span class="automation-chip">trigger: ${escapeHtml(formatTrigger(item.trigger_kind, item.trigger_value))}</span>
+                                <span class="automation-chip">deliver: ${escapeHtml(getTargetLabel(item.deliver_to || 'cli:default'))}</span>
+                                <span class="automation-chip">last run: ${escapeHtml(formatTimestamp(item.last_run))}</span>
+                                ${dependencies.length ? `<span class="automation-chip">deps: ${escapeHtml(String(dependencies.length))}</span>` : ''}
+                            </div>
+                            ${validationText ? `<div class="automation-detail-line automation-detail-line--error">${escapeHtml(shorten(validationText, 260))}</div>` : ''}
+                            <div class="automation-bottom-row" style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+                                <div class="automation-flow-mini" data-flow-mini-id="${escapeHtml(item.id)}"></div>
+                                <div class="item-actions automation-actions" style="display:flex;gap:6px">
+                                <button class="btn btn-secondary btn-sm" data-action="history" data-id="${escapeHtml(item.id)}">History</button>
+                                <button class="btn btn-secondary btn-sm" data-action="run" data-id="${escapeHtml(item.id)}" ${runDisabledAttr}>Run now</button>
+                                <button class="btn btn-secondary btn-sm" data-action="toggle" data-id="${escapeHtml(item.id)}" data-enabled="${item.enabled ? '1' : '0'}" data-status="${escapeHtml(nextToggleStatus)}">${nextToggleLabel}</button>
+                                <button class="btn btn-secondary btn-sm" data-action="edit" data-id="${escapeHtml(item.id)}">Edit</button>
+                                <button class="btn btn-danger btn-sm" data-action="delete" data-id="${escapeHtml(item.id)}">Delete</button>
                                 </div>
-                                <div class="automation-meta">
-                                    <span class="automation-chip">${escapeHtml(formatSchedule(item.schedule))}</span>
-                                    <span class="automation-chip">next: ${escapeHtml(formatTimestamp(item.next_run))}</span>
-                                    <span class="automation-chip">trigger: ${escapeHtml(formatTrigger(item.trigger_kind, item.trigger_value))}</span>
-                                    <span class="automation-chip">deliver: ${escapeHtml(getTargetLabel(item.deliver_to || 'cli:default'))}</span>
-                                    <span class="automation-chip">last run: ${escapeHtml(formatTimestamp(item.last_run))}</span>
-                                    ${dependencies.length ? `<span class="automation-chip">deps: ${escapeHtml(String(dependencies.length))}</span>` : ''}
-                                </div>
-                                ${item.prompt ? `<div class="automation-prompt-preview">${escapeHtml(shorten(item.prompt, 140))}</div>` : ''}
-                                <div class="item-detail">${escapeHtml(resultText)}</div>
-                                ${dependenciesText ? `<div class="automation-detail-line">${escapeHtml(shorten(dependenciesText, 240))}</div>` : ''}
-                                ${validationText ? `<div class="automation-detail-line automation-detail-line--error">${escapeHtml(shorten(validationText, 260))}</div>` : ''}
                             </div>
                         </div>
-                        <div class="item-actions automation-actions">
-                            <button class="btn btn-secondary btn-sm" data-action="history" data-id="${escapeHtml(item.id)}">History</button>
-                            <button class="btn btn-secondary btn-sm" data-action="run" data-id="${escapeHtml(item.id)}" ${runDisabledAttr}>Run now</button>
-                            <button class="btn btn-secondary btn-sm" data-action="toggle" data-id="${escapeHtml(item.id)}" data-enabled="${item.enabled ? '1' : '0'}" data-status="${escapeHtml(nextToggleStatus)}">${nextToggleLabel}</button>
-                            <button class="btn btn-secondary btn-sm" data-action="edit" data-id="${escapeHtml(item.id)}">Edit</button>
-                            <button class="btn btn-danger btn-sm" data-action="delete" data-id="${escapeHtml(item.id)}">Delete</button>
-                        </div>
-                    </div>
-                    <div class="automation-flow-strip">
-                        <div class="automation-flow-mini" data-flow-mini-id="${escapeHtml(item.id)}"></div>
-                        <button class="automation-flow-expand-btn" data-action="expand-flow" data-id="${escapeHtml(item.id)}" title="Show flow diagram">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                        </button>
                     </div>
                     <div class="automation-flow-canvas" data-flow-canvas-id="${escapeHtml(item.id)}" style="display:none;"></div>
                     ${rowEditorHtml(item)}

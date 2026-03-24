@@ -1,0 +1,576 @@
+/* ═══ SETTINGS MODAL ═══
+   Manus-style overlay modal with 2-column layout:
+   left sidebar nav + right content area. */
+
+/* ─── Overlay ─── */
+.settings-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.35);
+    backdrop-filter: blur(4px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--med) var(--ease);
+}
+
+.settings-modal-overlay.is-open {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* ─── Modal container ─── */
+.settings-modal {
+    display: flex;
+    width: 90vw;
+    max-width: 920px;
+    height: 80vh;
+    max-height: 720px;
+    background: var(--surface);
+    border-radius: var(--r-xl, 16px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+    overflow: hidden;
+    transform: translateY(-32px);
+    opacity: 0;
+    transition: transform var(--med) var(--ease), opacity var(--med) var(--ease);
+}
+
+.settings-modal-overlay.is-open .settings-modal {
+    transform: translateY(0);
+    opacity: 1;
+}
+
+/* ─── Nav sidebar (left column) ─── */
+.settings-modal-nav {
+    width: 220px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 0 12px 16px;
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    background: var(--surface);
+}
+
+/* Thin, subtle scrollbar for nav */
+.settings-modal-nav::-webkit-scrollbar { width: 4px; }
+.settings-modal-nav::-webkit-scrollbar-track { background: transparent; }
+.settings-modal-nav::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* Logo header — sticky at top */
+.settings-modal-nav-header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--surface);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 24px 8px 16px;
+    margin-bottom: 4px;
+}
+
+.settings-modal-nav-logo {
+    height: 22px;
+    width: auto;
+    opacity: 0.7;
+}
+
+/* ─── Nav groups ─── */
+.settings-modal-nav-group {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--t4);
+    padding: 16px 8px 4px;
+    line-height: 1;
+}
+
+.settings-modal-nav-group:first-of-type {
+    padding-top: 0;
+}
+
+/* ─── Nav items ─── */
+.settings-modal-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: var(--r-md);
+    background: transparent;
+    color: var(--t2);
+    font-size: 13px;
+    font-weight: 500;
+    font-family: var(--sans);
+    cursor: pointer;
+    text-align: left;
+    transition: background var(--fast), color var(--fast);
+    text-decoration: none;
+}
+
+.settings-modal-nav-item:hover {
+    background: var(--hover, rgba(0, 0, 0, 0.04));
+    color: var(--t1);
+}
+
+.settings-modal-nav-item.is-active {
+    background: var(--hover, rgba(0, 0, 0, 0.06));
+    color: var(--t1);
+    font-weight: 600;
+}
+
+.settings-modal-nav-item svg,
+.settings-modal-nav-item img {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    opacity: 0.6;
+}
+
+.settings-modal-nav-item.is-active svg,
+.settings-modal-nav-item.is-active img {
+    opacity: 1;
+}
+
+/* ─── Content area (right column) ─── */
+.settings-modal-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.settings-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 24px 0;
+    flex-shrink: 0;
+}
+
+.settings-modal-title {
+    font-size: var(--fs-lg, 20px);
+    font-weight: 600;
+    color: var(--t1);
+    margin: 0;
+}
+
+.settings-modal-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: 0;
+    border-radius: var(--r-md);
+    background: transparent;
+    color: var(--t3);
+    cursor: pointer;
+    transition: background var(--fast), color var(--fast);
+}
+
+.settings-modal-close:hover {
+    background: var(--hover, rgba(0, 0, 0, 0.04));
+    color: var(--t1);
+}
+
+.settings-modal-close svg {
+    width: 18px;
+    height: 18px;
+}
+
+/* ─── Content body (scrollable) ─── */
+.settings-modal-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 24px 32px;
+    min-height: 0;
+}
+
+/* Thin, subtle scrollbar for content */
+.settings-modal-body::-webkit-scrollbar { width: 4px; }
+.settings-modal-body::-webkit-scrollbar-track { background: transparent; }
+.settings-modal-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* Reset page-specific styles when rendered inside the modal */
+.settings-modal-body .page-header {
+    padding: 0;
+    border: 0;
+    margin-bottom: 16px;
+}
+
+.settings-modal-body .page-title {
+    font-size: var(--fs-lg, 20px);
+    display: none; /* Title shown in modal header instead */
+}
+
+.settings-modal-body .page-title-group {
+    display: none; /* Hide page title group, modal has its own header */
+}
+
+/* ─── Global compact overrides for all sections inside modal ─── */
+
+/* Sections — generous vertical spacing for natural separation */
+.settings-modal-body .section {
+    margin-bottom: 32px;
+}
+.settings-modal-body .section h2 {
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    font-size: 13px;
+}
+
+/* Forms — compact spacing */
+.settings-modal-body .form-group {
+    margin-bottom: 12px;
+}
+.settings-modal-body .form-row,
+.settings-modal-body .form-row--2 {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+}
+.settings-modal-body .input,
+.settings-modal-body .select,
+.settings-modal-body select.input {
+    padding: 8px 12px;
+    font-size: 13px;
+    border-radius: var(--r-md, 8px);
+}
+
+/* Textareas — same subtle radius */
+.settings-modal-body textarea.input {
+    border-radius: var(--r-md, 8px);
+}
+
+/* Cards — no heavy borders, compact padding */
+.settings-modal-body .card {
+    padding: 16px;
+    border-radius: var(--r-lg, 12px);
+    border: none;
+    background: var(--hover, rgba(0, 0, 0, 0.03));
+}
+
+/* Provider/channel cards — fit in 600px, 2 columns */
+.settings-modal-body .provider-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+}
+.settings-modal-body .provider-card {
+    padding: 14px;
+    border-radius: var(--r-lg, 12px);
+}
+
+/* Channel cards — compact row layout: [icon Name] [ACTIVE toggle] / desc below */
+.settings-modal-body .channel-card {
+    padding: 12px 14px;
+}
+.settings-modal-body .channel-card .provider-card-header {
+    padding: 0;
+}
+.settings-modal-body .channel-card .provider-card-info {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+}
+.settings-modal-body .channel-card .channel-icon {
+    width: 16px;
+    height: 16px;
+    margin-right: 0;
+}
+.settings-modal-body .channel-card .provider-card-desc {
+    margin-top: 6px;
+    text-align: left;
+}
+
+/* Content grid (used in approvals, etc.) */
+.settings-modal-body .content-grid {
+    gap: 16px;
+}
+
+/* Permission mode cards (file access) */
+.settings-modal-body .permission-mode-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+}
+.settings-modal-body .permission-mode-card {
+    padding: 12px 16px;
+    border-radius: var(--r-lg, 12px);
+}
+
+/* Item lists — no outer border in modal */
+.settings-modal-body .item-list {
+    border: none;
+    border-radius: var(--r-md, 8px);
+}
+
+/* All rounded containers — subtle radius */
+.settings-modal-body .provider-card,
+.settings-modal-body .channel-card,
+.settings-modal-body .permission-mode-card,
+.settings-modal-body .card {
+    border-radius: var(--r-md, 8px);
+}
+
+/* Notices/alerts — subtle */
+.settings-modal-body .vault-notice,
+.settings-modal-body .permissions-notice {
+    padding: 12px 16px;
+    border-radius: var(--r-md, 8px);
+    font-size: 13px;
+}
+
+/* Buttons — slightly smaller in modal */
+.settings-modal-body .btn {
+    font-size: 13px;
+    padding: 8px 16px;
+}
+.settings-modal-body .btn-sm {
+    font-size: 12px;
+    padding: 6px 12px;
+}
+
+/* ─── Setup / Model & Providers compact overrides ─── */
+
+/* Active model banner — subtle, no heavy border */
+.settings-modal-body .active-model-banner {
+    border: none;
+    border-radius: var(--r-md, 8px);
+    padding: 10px 14px;
+    margin-bottom: 16px;
+}
+
+/* Provider cards — compact rows */
+.settings-modal-body .provider-card {
+    border-radius: var(--r-md, 8px);
+    margin-bottom: 8px;
+}
+.settings-modal-body .provider-card .provider-card-header {
+    padding: 10px 14px;
+}
+.settings-modal-body .provider-card .provider-card-body {
+    padding: 0 14px 14px;
+}
+
+/* Details/summary (Advanced Agent Settings) — lighter */
+.settings-modal-body details {
+    border: 1px solid var(--border-subtle, var(--border));
+    border-radius: var(--r-md, 8px);
+    margin-bottom: 16px;
+}
+.settings-modal-body details > summary {
+    padding: 10px 14px;
+    font-size: 13px;
+}
+.settings-modal-body details[open] > summary {
+    margin-bottom: 8px;
+}
+.settings-modal-body details > :not(summary) {
+    padding: 0 14px 14px;
+}
+
+/* Button rows — flex instead of grid so buttons don't stretch full-width */
+.settings-modal-body .form-row:has(.btn) {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+/* ─── Dashboard-specific compact overrides ─── */
+
+/* Stats grid — 2 columns max, tighter spacing */
+.settings-modal-body .stats-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 24px;
+}
+
+/* Stat cards — no border, minimal padding, smaller text */
+.settings-modal-body .stat-card {
+    border: none;
+    border-radius: var(--r-md, 8px);
+    padding: 12px 16px;
+    background: var(--hover, rgba(0, 0, 0, 0.03));
+    box-shadow: none;
+}
+.settings-modal-body .stat-card:hover {
+    box-shadow: none;
+    border-color: transparent;
+}
+.settings-modal-body .stat-value {
+    font-size: 16px;
+    word-break: normal;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.settings-modal-body .stat-label {
+    font-size: 10px;
+    margin-bottom: 6px;
+}
+.settings-modal-body .stat-sub {
+    font-size: 11px;
+    margin-top: 4px;
+}
+
+/* Health grid — compact rows */
+.settings-modal-body .dash-health-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+}
+.settings-modal-body .dash-health-card {
+    border: none;
+    padding: 12px;
+    border-radius: var(--r-md, 8px);
+    background: var(--hover, rgba(0, 0, 0, 0.03));
+}
+
+/* Usage panels — no heavy borders */
+.settings-modal-body .usage-section {
+    margin: 0;
+}
+.settings-modal-body .usage-panels {
+    gap: 12px;
+}
+.settings-modal-body .usage-panel {
+    border: none;
+    border-radius: var(--r-md, 8px);
+    background: var(--hover, rgba(0, 0, 0, 0.03));
+    padding: 16px;
+}
+.settings-modal-body .usage-controls {
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+/* Activity list — compact */
+.settings-modal-body .item-row,
+.settings-modal-body .dash-activity-item {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+}
+.settings-modal-body .item-row:last-child,
+.settings-modal-body .dash-activity-item:last-child {
+    border-bottom: none;
+}
+
+/* Identity / item rows — icon without background, left-aligned text */
+.settings-modal-body .item-icon {
+    background: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 0;
+}
+.settings-modal-body .item-icon svg {
+    width: 18px;
+    height: 18px;
+}
+.settings-modal-body .item-row {
+    justify-content: flex-start;
+    gap: 12px;
+}
+.settings-modal-body .item-info {
+    flex: 1;
+    min-width: 0;
+}
+
+/* Loading state */
+.settings-modal-body .dash-loading {
+    padding: 24px;
+    text-align: center;
+    color: var(--t4);
+    font-size: 13px;
+}
+
+/* ─── Loading state ─── */
+.settings-modal-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    color: var(--t4);
+    font-size: 13px;
+    gap: 8px;
+}
+
+.settings-modal-loading::before {
+    content: '';
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: settings-spin 0.6s linear infinite;
+}
+
+@keyframes settings-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* ─── Body scroll lock ─── */
+body.settings-modal-open {
+    overflow: hidden;
+}
+
+/* ─── Mobile responsive ─── */
+@media (max-width: 768px) {
+    .settings-modal {
+        width: 100vw;
+        height: 100vh;
+        max-width: none;
+        max-height: none;
+        border-radius: 0;
+    }
+
+    .settings-modal-nav {
+        width: 180px;
+        padding: 16px 8px;
+    }
+
+    .settings-modal-nav-item {
+        font-size: 12px;
+        padding: 7px 8px;
+    }
+}
+
+@media (max-width: 480px) {
+    .settings-modal {
+        flex-direction: column;
+    }
+
+    .settings-modal-nav {
+        width: 100%;
+        flex-direction: row;
+        overflow-x: auto;
+        overflow-y: hidden;
+        border-right: 0;
+        border-bottom: 1px solid var(--border);
+        padding: 8px;
+        gap: 4px;
+    }
+
+    .settings-modal-nav-group {
+        display: none;
+    }
+
+    .settings-modal-nav-header {
+        display: none;
+    }
+
+    .settings-modal-nav-item {
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+
+    .settings-modal-body {
+        padding: 16px 16px 24px;
+    }
+}

@@ -4,12 +4,16 @@
 (function () {
     'use strict';
 
-    const CHANNEL_ICONS = {
-        telegram: '\u2708\uFE0F',
-        discord: '\uD83C\uDFAE',
-        whatsapp: '\uD83D\uDCF1',
-        slack: '\uD83D\uDCAC',
-        email: '\u2709\uFE0F',
+    function initGateways() {
+
+    // SVG icons matching the Channels section for visual consistency
+    var CHANNEL_SVGS = {
+        telegram: '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15.5 2.5L1.5 8l5 2m9-7.5L6.5 10m9-7.5l-3 13-5.5-5.5"/><path d="M6.5 10v4.5l2.5-2.5"/></svg>',
+        discord: '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 3C5 3 3 3.5 2 5c-1.5 3-.5 7.5 1 9.5.5.5 1.5 1.5 3 1.5s2-1 3-1 1.5 1 3 1 2.5-1 3-1.5c1.5-2 2.5-6.5 1-9.5-1-1.5-3-2-4.5-2"/><circle cx="6.5" cy="10" r="1"/><circle cx="11.5" cy="10" r="1"/></svg>',
+        whatsapp: '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="1" width="10" height="16" rx="2"/><line x1="9" y1="14" x2="9" y2="14"/></svg>',
+        slack: '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/><path d="M9 6a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/><path d="M15 9a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/><path d="M9 15a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/></svg>',
+        email: '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="16" height="12" rx="2"/><path d="M1 5l8 5 8-5"/></svg>',
+        web: '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="7.5"/><path d="M1.5 9h15"/></svg>',
     };
 
     const grid = document.getElementById('gateways-grid');
@@ -49,47 +53,55 @@
     // ─── Render ───
 
     function createCard(gw) {
-        const icon = CHANNEL_ICONS[gw.channel_type] || '\uD83D\uDD0C';
-        const profileName = gw.default_profile || 'Default';
+        var svgIcon = CHANNEL_SVGS[gw.channel_type] || CHANNEL_SVGS.web;
+        var profileName = gw.default_profile || 'Default';
 
-        const card = document.createElement('div');
-        card.className = 'provider-card';
+        var card = document.createElement('div');
+        card.className = 'provider-card channel-card';
         card.dataset.id = gw.id;
         card.style.cursor = 'pointer';
 
-        // Header row
-        const header = document.createElement('div');
+        // Header row — same structure as channel cards
+        var header = document.createElement('div');
         header.className = 'provider-card-header';
 
-        const titleWrap = document.createElement('div');
-        titleWrap.className = 'provider-card-title';
+        var info = document.createElement('div');
+        info.className = 'provider-card-info';
 
-        const iconSpan = document.createElement('span');
-        iconSpan.style.fontSize = '1.25rem';
-        iconSpan.textContent = icon;
-        titleWrap.appendChild(iconSpan);
+        // Parse SVG with proper namespace so it renders in HTML context
+        var iconWrap = document.createElement('span');
+        iconWrap.className = 'channel-icon';
+        var svgWithNs = svgIcon.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ');
+        var parser = new DOMParser();
+        var svgDoc = parser.parseFromString(svgWithNs, 'image/svg+xml');
+        var svgEl = svgDoc.documentElement;
+        iconWrap.appendChild(document.adoptNode(svgEl));
+        info.appendChild(iconWrap);
 
-        const nameSpan = document.createElement('span');
+        var nameSpan = document.createElement('span');
+        nameSpan.className = 'provider-card-name';
         nameSpan.textContent = gw.name;
-        titleWrap.appendChild(nameSpan);
+        info.appendChild(nameSpan);
 
-        header.appendChild(titleWrap);
+        header.appendChild(info);
 
-        const badge = document.createElement('span');
+        var actions = document.createElement('div');
+        actions.className = 'provider-card-actions';
+        var badge = document.createElement('span');
         badge.className = gw.enabled ? 'badge badge-success' : 'badge badge-neutral';
-        badge.style.fontSize = '0.7rem';
         badge.textContent = gw.enabled ? 'Active' : 'Disabled';
-        header.appendChild(badge);
+        actions.appendChild(badge);
+        header.appendChild(actions);
 
         card.appendChild(header);
 
-        // Details row
-        const details = document.createElement('div');
-        details.style.cssText = 'color:var(--muted);font-size:0.8rem;margin-top:4px';
-        details.textContent = `${gw.channel_type} \u00B7 Profile: ${profileName} \u00B7 ${gw.response_mode}`;
-        card.appendChild(details);
+        // Description row
+        var desc = document.createElement('div');
+        desc.className = 'provider-card-desc';
+        desc.textContent = gw.channel_type + ' \u00B7 Profile: ' + profileName + ' \u00B7 ' + gw.response_mode;
+        card.appendChild(desc);
 
-        card.addEventListener('click', () => openModal(gw));
+        card.addEventListener('click', function () { openModal(gw); });
         return card;
     }
 
@@ -141,6 +153,10 @@
         deleteBtn.style.display = isEdit ? '' : 'none';
 
         populateProfileSelect(isEdit ? gw.default_profile : '');
+        // Move modal to body to escape settings modal stacking context
+        if (modal.parentElement !== document.body) {
+            document.body.appendChild(modal);
+        }
         modal.classList.add('open');
     }
 
@@ -223,4 +239,9 @@
     // ─── Init ───
 
     loadProfiles().then(() => loadGateways());
+
+    } // end initGateways
+
+    initGateways();
+    document.addEventListener('settings-section-loaded', initGateways);
 })();

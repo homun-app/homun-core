@@ -5,6 +5,11 @@
 (function () {
     'use strict';
 
+    function initChannels() {
+
+    // Guard: skip init if channels DOM not present
+    if (!document.querySelector('.channel-card') && !document.getElementById('channel-modal')) return;
+
     // ─── Constants ───────────────────────────────────────────────────
 
     const SUBTITLES = {
@@ -285,6 +290,10 @@
         // Load profile select + gateway data
         loadModalData();
 
+        // Move modal to body so it escapes the settings modal stacking context
+        if (chModal.parentElement !== document.body) {
+            document.body.appendChild(chModal);
+        }
         chModal.classList.add('open');
         document.body.style.overflow = 'hidden';
     }
@@ -710,4 +719,8 @@
 
     loadGateways();
 
+    } // end initChannels
+
+    initChannels();
+    document.addEventListener('settings-section-loaded', initChannels);
 })();

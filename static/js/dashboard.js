@@ -420,4 +420,12 @@ function buildStatusRow(dotType, label, meta) {
 }
 
 // ─── Init ───
-loadDashboardData();
+function initDashboard() {
+    // Guard: at least one dashboard element must exist
+    if (!document.getElementById('dash-health-grid') &&
+        !document.getElementById('dash-activity-list')) return;
+    loadDashboardData();
+}
+
+initDashboard();
+document.addEventListener('settings-section-loaded', initDashboard);

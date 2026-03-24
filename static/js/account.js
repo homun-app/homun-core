@@ -33,26 +33,26 @@ async function loadOwner() {
         const resp = await fetch('/api/v1/account');
         const data = await resp.json();
 
-        const statusBadge = document.getElementById('account-status');
-        const ownerCard = document.getElementById('owner-card');
-        const noOwnerWarning = document.getElementById('no-owner-warning');
+        var statusBadge = document.getElementById('account-status');
+        var ownerCard = document.getElementById('owner-card');
+        var noOwnerWarning = document.getElementById('no-owner-warning');
 
         if (!data) {
-            statusBadge.textContent = 'Not configured';
-            statusBadge.className = 'badge badge-warning';
-            ownerCard.style.display = 'none';
-            noOwnerWarning.style.display = 'block';
+            if (statusBadge) { statusBadge.textContent = 'Not configured'; statusBadge.className = 'badge badge-warning'; }
+            if (ownerCard) ownerCard.style.display = 'none';
+            if (noOwnerWarning) noOwnerWarning.style.display = 'block';
             return;
         }
 
         owner = data;
-        statusBadge.textContent = 'Active';
-        statusBadge.className = 'badge badge-success';
-        ownerCard.style.display = 'flex';
-        noOwnerWarning.style.display = 'none';
+        if (statusBadge) { statusBadge.textContent = 'Active'; statusBadge.className = 'badge badge-success'; }
+        if (ownerCard) ownerCard.style.display = 'flex';
+        if (noOwnerWarning) noOwnerWarning.style.display = 'none';
 
-        document.getElementById('owner-username').textContent = data.username;
-        document.getElementById('owner-role').textContent = data.role;
+        var usernameEl = document.getElementById('owner-username');
+        var roleEl = document.getElementById('owner-role');
+        if (usernameEl) usernameEl.textContent = data.username;
+        if (roleEl) roleEl.textContent = data.role;
 
     } catch (e) {
         console.error('Failed to load owner:', e);
@@ -244,6 +244,10 @@ document.getElementById('link-identity-form')?.addEventListener('submit', (e) =>
         updateModeVisibility();
         if (eaNotifyHint) eaNotifyHint.textContent = '';
         testResult.textContent = '';
+        // Move modal to body to escape settings modal stacking context
+        if (modal.parentElement !== document.body) {
+            document.body.appendChild(modal);
+        }
         modal.classList.add('open');
         // Auto-suggest chat ID if notify channel is set but chat ID is empty
         if (eaNotifyChannelSelect && eaNotifyChannelSelect.value &&
@@ -473,8 +477,17 @@ async function revokeDevice(id) {
 }
 
 // ─── Init ───
-document.addEventListener('DOMContentLoaded', () => {
+function initAccount() {
+    // Guard: skip if account DOM not present
+    if (!document.getElementById('owner-card')) return;
     loadOwner();
     loadIdentities();
     loadDevices();
-});
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initAccount);
+} else {
+    initAccount();
+}
+document.addEventListener('settings-section-loaded', initAccount);

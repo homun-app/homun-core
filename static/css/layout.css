@@ -463,8 +463,8 @@
 }
 
 /* ═══ TOP BAR ═══
-   Horizontal bar at top of .content — profile selector, account, e-stop.
-   Same background as the page content for a flat, unified look. */
+   Horizontal bar at top of .content — single avatar button on the right.
+   Clicking the avatar opens a dropdown with profile switcher, settings, e-stop, logout. */
 .content-topbar {
     display: flex;
     align-items: center;
@@ -483,163 +483,171 @@
     gap: 4px;
 }
 
-/* Profile pill — clean text-only, no background/border */
-.topbar-profile-pill {
+/* WS status badge — hidden on non-chat pages, visible on chat layout */
+.content-topbar #ws-status { display: none; }
+.chat-layout .content-topbar #ws-status { display: inline-flex; }
+
+/* ─── Avatar button ─── */
+.topbar-avatar-btn {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 10px;
-    background: transparent;
-    border: none;
-    border-radius: var(--r-md);
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--t1);
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1.5px solid var(--border);
+    background: var(--surface);
     cursor: pointer;
-    transition: opacity var(--fast) var(--ease);
-    position: relative;
-    white-space: nowrap;
+    overflow: hidden;
+    padding: 0;
+    transition: border-color var(--fast), box-shadow var(--fast);
+}
+.topbar-avatar-btn:hover {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(var(--accent-rgb, 0,0,0), 0.12);
+}
+.topbar-avatar-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.topbar-avatar-fallback {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    color: var(--t3);
+}
+.topbar-avatar-fallback svg {
+    width: 20px;
+    height: 20px;
 }
 
-.topbar-profile-pill:hover {
-    opacity: 0.75;
+/* ─── Avatar dropdown menu ─── */
+.topbar-avatar-dropdown {
+    position: fixed;
+    z-index: 9999;
+    min-width: 240px;
+    max-width: 300px;
+    padding: 8px;
+    border-radius: var(--r-lg, 12px);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+    animation: avatarDropIn 0.15s ease-out;
+    max-height: 420px;
+    overflow-y: auto;
 }
 
-/* Colored dot indicator next to profile name */
-.topbar-profile-dot {
-    width: 10px;
-    height: 10px;
+@keyframes avatarDropIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Header row — avatar + app name */
+.topbar-avatar-dropdown-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 10px 12px;
+}
+.topbar-avatar-dropdown-header img,
+.topbar-avatar-dropdown-header .topbar-dd-avatar-fallback {
+    width: 40px;
+    height: 40px;
     border-radius: 50%;
     flex-shrink: 0;
+    object-fit: cover;
+    border: 1px solid var(--border);
+}
+.topbar-dd-avatar-fallback {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--hover);
+    color: var(--t3);
+}
+.topbar-dd-avatar-fallback svg {
+    width: 22px;
+    height: 22px;
+}
+.topbar-avatar-dropdown-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--t1);
+    line-height: 1.2;
+}
+.topbar-avatar-dropdown-sub {
+    font-size: 12px;
+    color: var(--t4);
+    margin-top: 2px;
 }
 
-.topbar-profile-pill-arrow {
-    width: 12px;
-    height: 12px;
-    opacity: 0.5;
+/* Divider */
+.topbar-avatar-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 8px;
+}
+
+/* Menu items */
+.topbar-avatar-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: var(--r-md, 8px);
+    background: transparent;
+    color: var(--t2);
+    font-size: 13px;
+    font-weight: 500;
+    font-family: var(--sans);
+    cursor: pointer;
+    text-align: left;
+    text-decoration: none;
+    transition: background var(--fast), color var(--fast);
+}
+.topbar-avatar-item:hover {
+    background: var(--hover);
+    color: var(--t1);
+}
+.topbar-avatar-item svg {
+    width: 16px;
+    height: 16px;
     flex-shrink: 0;
+    opacity: 0.6;
+}
+.topbar-avatar-item.is-active {
+    color: var(--accent-text, var(--accent));
+    font-weight: 600;
+}
+.topbar-avatar-item.is-danger {
+    color: var(--err, #EF4444);
+}
+.topbar-avatar-item.is-danger:hover {
+    background: rgba(239, 68, 68, 0.08);
 }
 
-/* Colored dot in dropdown options */
-.topbar-option-dot {
+/* Profile dot in dropdown */
+.topbar-dd-profile-dot {
     width: 8px;
     height: 8px;
     border-radius: 50%;
     flex-shrink: 0;
 }
 
-/* Profile dropdown — matches Tools popup style (chat-tools-dropdown) */
-.topbar-profile-dropdown {
-    position: fixed;
-    z-index: 9999;
-    min-width: 200px;
-    padding: 6px;
-    border-radius: 14px;
-    border: 1px solid var(--border);
-    background: var(--surface);
-    box-shadow: var(--shadow-lg);
-    animation: chatDropdownIn 0.12s ease-out;
-    max-height: 320px;
-    overflow-y: auto;
-}
-
-.topbar-profile-option {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-    padding: 9px 12px;
-    border: 0;
-    border-radius: 10px;
-    background: transparent;
-    color: var(--t2);
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    text-align: left;
-    transition: background var(--fast) var(--ease);
-}
-
-.topbar-profile-option:hover {
-    background: var(--surface-hover);
-    color: var(--t1);
-}
-
-.topbar-profile-option.is-active {
-    color: var(--accent-text);
-    font-weight: 600;
-}
-
-/* Separator + "Go to Profiles" link inside dropdown */
-.topbar-profile-sep {
-    height: 1px;
-    background: var(--border);
-    margin: 4px 8px;
-}
-
-.topbar-profile-link {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-    padding: 9px 12px;
-    border: 0;
-    border-radius: 10px;
-    background: transparent;
-    color: var(--t3);
-    font-size: 12px;
-    font-weight: 500;
-    cursor: pointer;
-    text-align: left;
-    text-decoration: none;
-    transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
-}
-
-.topbar-profile-link:hover {
-    background: var(--surface-hover);
-    color: var(--t1);
-}
-
-/* Icon buttons (account, e-stop) */
-.topbar-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    border-radius: var(--r-md);
-    background: none;
-    border: none;
-    color: var(--t3);
-    cursor: pointer;
-    text-decoration: none;
-    transition: color var(--fast) var(--ease), background var(--fast) var(--ease);
-}
-
-.topbar-btn:hover {
-    color: var(--t1);
-    background: var(--hover);
-}
-
-.topbar-icon {
-    width: 18px;
-    height: 18px;
-    flex-shrink: 0;
-}
-
-/* E-stop in top bar — bright red */
-.topbar-estop {
-    color: #EF4444;
-}
-
-.topbar-estop:hover {
-    color: #FF3333;
-    background: rgba(255, 50, 50, 0.15);
-}
-
-.topbar-estop.is-stopped {
-    pointer-events: none;
-    opacity: 0.3;
+/* Section label in dropdown */
+.topbar-avatar-section {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--t4);
+    padding: 8px 10px 4px;
 }
 
 .content-inner {

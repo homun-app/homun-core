@@ -51,6 +51,10 @@ function statusBadgeClass(status) {
     return 'badge-neutral';
 }
 
+// Shared state across re-inits (SSE must persist across calls)
+let _logsSource = null;
+let _logsInitialized = false;
+
 function initLogsPage() {
     const viewerEl = document.getElementById('log-viewer');
     const levelEl = document.getElementById('logs-level');
@@ -59,7 +63,10 @@ function initLogsPage() {
     const countEl = document.getElementById('logs-count');
     const statusEl = document.getElementById('logs-status');
 
-    if (!viewerEl || !levelEl || !autoScrollEl || !clearEl || !countEl || !statusEl) return;
+    if (!viewerEl || !levelEl || !autoScrollEl || !clearEl || !countEl) return;
+
+    // Close previous SSE if re-initializing (e.g. settings modal re-open)
+    if (_logsSource) { _logsSource.close(); _logsSource = null; }
 
     // Profile filter managed by global topbar — re-render on change
     document.addEventListener('profile-changed', () => queueRender());
@@ -69,6 +76,7 @@ function initLogsPage() {
     let renderQueued = false;
 
     function setStatus(mode, label) {
+        if (!statusEl) return;
         statusEl.className = `badge ${statusBadgeClass(mode)}`;
         statusEl.textContent = label;
     }
@@ -80,10 +88,12 @@ function initLogsPage() {
     function render() {
         renderQueued = false;
         const filterLevel = normalizeLevel(levelEl.value);
-        const filterProfile = window.getActiveProfileId ? (window.getActiveProfileId() || '') : '';
+        // Profile filter: empty string or falsy = show all; profile_id=null logs always pass
+        const rawProfile = window.getActiveProfileId ? window.getActiveProfileId() : '';
+        const filterProfile = rawProfile || '';
         const visible = events.filter((event) => {
             if (!levelPassesFilter(event.level, filterLevel)) return false;
-            if (filterProfile && event.profile_id != filterProfile) return false;
+            if (filterProfile && event.profile_id && event.profile_id != filterProfile) return false;
             return true;
         });
 
@@ -164,8 +174,8 @@ function initLogsPage() {
             if (Array.isArray(recent)) {
                 recent.forEach(pushEvent);
             }
-        } catch (_error) {
-            // Keep the live stream working even if backlog loading fails.
+        } catch (err) {
+            console.error('[logs] loadRecent error:', err);
         }
     }
 
@@ -174,6 +184,7 @@ function initLogsPage() {
 
         setStatus('retry', 'Connecting...');
         source = new EventSource('/api/v1/logs/stream');
+        _logsSource = source; // track for cleanup on re-init
 
         source.onopen = () => {
             setStatus('live', 'Live');
@@ -201,6 +212,11 @@ function initLogsPage() {
 
     window.addEventListener('beforeunload', () => {
         if (source) source.close();
+    });
+
+    // Close SSE when leaving settings section
+    document.addEventListener('settings-section-unload', () => {
+        if (source) { source.close(); source = null; }
     });
 
     loadRecent().finally(() => {
@@ -241,4 +257,8 @@ function renderMessageCell(event) {
     return `${main}${source}${fields}`;
 }
 
+// Support both standalone page and settings modal
+// On standalone pages, DOM is ready at script load; in modal, settings-section-loaded fires after.
+// Both paths call initLogsPage — the second call closes the first SSE and restarts cleanly.
 initLogsPage();
+document.addEventListener('settings-section-loaded', initLogsPage);

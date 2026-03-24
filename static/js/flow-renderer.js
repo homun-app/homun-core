@@ -688,6 +688,7 @@
             // Store tooltip data as attributes for CSS/JS tooltip
             nodeG.setAttribute('data-tip-title', tipTitle);
             if (tipDesc) nodeG.setAttribute('data-tip-desc', tipDesc);
+            nodeG.setAttribute('data-tip-color', accent);
             nodeG.style.cursor = 'pointer';
 
             svg.appendChild(nodeG);
@@ -718,8 +719,18 @@
             var title = dot.getAttribute('data-tip-title');
             if (!title) return;
             var desc = dot.getAttribute('data-tip-desc') || '';
+            var tipColor = dot.getAttribute('data-tip-color') || '';
             var tip = getTooltip();
             tip.textContent = '';
+            if (tipColor) {
+                tip.style.background = tipColor;
+                tip.style.borderColor = tipColor;
+                tip.style.color = '#fff';
+            } else {
+                tip.style.background = '';
+                tip.style.borderColor = '';
+                tip.style.color = '';
+            }
             var titleEl = document.createElement('div');
             titleEl.className = 'flow-mini-tooltip-title';
             titleEl.textContent = title;

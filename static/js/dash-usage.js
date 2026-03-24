@@ -192,7 +192,22 @@ async function loadUsage() {
     }
 }
 
-if (usageEls.refresh && usageEls.since && usageEls.until) {
+function initUsage() {
+    // Re-grab DOM refs (supports settings modal re-load)
+    usageEls = {
+        since: document.getElementById('usage-since'),
+        until: document.getElementById('usage-until'),
+        refresh: document.getElementById('usage-refresh'),
+        rangeButtons: Array.from(document.querySelectorAll('.usage-range-btn')),
+        estimatedCost: document.getElementById('usage-estimated-cost'),
+        totalCalls: document.getElementById('usage-total-calls'),
+        chart: document.getElementById('usage-chart'),
+        chartEmpty: document.getElementById('usage-chart-empty'),
+        split: document.getElementById('usage-split'),
+    };
+
+    if (!usageEls.refresh || !usageEls.since || !usageEls.until) return;
+
     setPreset('7');
     usageEls.rangeButtons.forEach(function (btn) {
         btn.addEventListener('click', async function () {
@@ -205,3 +220,6 @@ if (usageEls.refresh && usageEls.since && usageEls.until) {
     usageEls.refresh.addEventListener('click', loadUsage);
     loadUsage();
 }
+
+initUsage();
+document.addEventListener('settings-section-loaded', initUsage);

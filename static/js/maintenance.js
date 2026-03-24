@@ -198,4 +198,16 @@ async function doPurge(domainId) {
 }
 
 // ─── Init ───
-document.addEventListener('DOMContentLoaded', loadStats);
+// Support both standalone page and settings modal
+function initMaintenance() {
+    var container = document.getElementById('maintenance-content');
+    if (!container) return;
+    loadStats();
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initMaintenance);
+} else {
+    initMaintenance();
+}
+document.addEventListener('settings-section-loaded', initMaintenance);

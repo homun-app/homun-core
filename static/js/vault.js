@@ -9,20 +9,26 @@ function getVaultProfile() {
 }
 
 // ─── State ───
-const vaultList = document.getElementById('vault-list');
-const vaultCount = document.getElementById('vault-count');
-const vaultForm = document.getElementById('vault-form');
-const keyInput = document.getElementById('vault-key');
-const valueInput = document.getElementById('vault-value');
-
-// Reveal modal elements
-const revealModal = document.getElementById('reveal-modal');
-const revealKeyLabel = document.getElementById('reveal-key-label');
-const revealValue = document.getElementById('reveal-value');
-const revealTimer = document.getElementById('reveal-timer');
-const btnCopy = document.getElementById('btn-copy-secret');
-const btnCloseReveal = document.getElementById('btn-close-reveal');
+// DOM refs are grabbed fresh on each init to support settings modal re-loading
+let vaultList, vaultCount, vaultForm, keyInput, valueInput;
+let revealModal, revealKeyLabel, revealValue, revealTimer, btnCopy, btnCloseReveal;
 let revealCountdown = null;
+
+/** Refresh DOM refs — called on init and re-init (settings modal). */
+function grabVaultDom() {
+    vaultList = document.getElementById('vault-list');
+    vaultCount = document.getElementById('vault-count');
+    vaultForm = document.getElementById('vault-form');
+    keyInput = document.getElementById('vault-key');
+    valueInput = document.getElementById('vault-value');
+    revealModal = document.getElementById('reveal-modal');
+    revealKeyLabel = document.getElementById('reveal-key-label');
+    revealValue = document.getElementById('reveal-value');
+    revealTimer = document.getElementById('reveal-timer');
+    btnCopy = document.getElementById('btn-copy-secret');
+    btnCloseReveal = document.getElementById('btn-close-reveal');
+}
+grabVaultDom();
 
 // 2FA state
 let twoFaEnabled = false;
@@ -323,7 +329,7 @@ async function loadKeys() {
         const data = await resp.json();
         const keys = data.keys || [];
 
-        vaultCount.textContent = `${keys.length} secret${keys.length !== 1 ? 's' : ''}`;
+        if (vaultCount) vaultCount.textContent = `${keys.length} secret${keys.length !== 1 ? 's' : ''}`;
         vaultList.textContent = '';
 
         if (keys.length === 0) {
@@ -550,7 +556,15 @@ async function deleteSecret(key) {
 }
 
 // ─── Init ───
-console.log('[vault.js] Initializing...');
-loadKeys();
-load2FaStatus();
-console.log('[vault.js] Init complete');
+function initVault() {
+    grabVaultDom();
+    // Guard: skip if vault DOM not present
+    if (!vaultList) return;
+    console.log('[vault.js] Initializing...');
+    loadKeys();
+    load2FaStatus();
+    console.log('[vault.js] Init complete');
+}
+
+initVault();
+document.addEventListener('settings-section-loaded', initVault);

@@ -6,14 +6,23 @@ let currentSandboxStatus = null;
 let currentSandboxPresets = {};
 let currentSandboxImage = null;
 
-// Initialize
-document.addEventListener('DOMContentLoaded', async () => {
+// Initialize — supports both standalone page and settings modal
+async function initSandbox() {
+    // Guard: skip if sandbox DOM not present
+    if (!document.getElementById('sandbox-docker-status')) return;
     await loadSandbox();
     await loadSandboxStatus();
     await loadSandboxImage();
     await loadSandboxPresets();
     setupSandboxControls();
-});
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initSandbox);
+} else {
+    initSandbox();
+}
+document.addEventListener('settings-section-loaded', initSandbox);
 
 // ─── API: Load ───
 

@@ -12,7 +12,6 @@ use super::server::AppState;
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/", get(chat_page))
-        .route("/dashboard", get(dashboard))
         .route("/setup", get(setup_page))
         .route("/appearance", get(appearance_page))
         .route("/channels", get(channels_page))
@@ -58,7 +57,6 @@ pub fn router() -> Router<Arc<AppState>> {
 // ─── Shared layout pieces ───────────────────────────────────────
 
 /// SVG icons used in the sidebar nav
-const ICON_DASHBOARD: &str = r#"<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="1" width="7" height="7" rx="1.5"/><rect x="10" y="1" width="7" height="4" rx="1.5"/><rect x="1" y="10" width="7" height="4" rx="1.5" transform="translate(0,3)"/><rect x="10" y="7" width="7" height="7" rx="1.5" transform="translate(0,3)"/></svg>"#;
 const ICON_CHAT: &str = r#"<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12.5V3.5A1.5 1.5 0 0 1 3.5 2h11A1.5 1.5 0 0 1 16 3.5v7a1.5 1.5 0 0 1-1.5 1.5H6L2 16V12.5z"/><line x1="6" y1="6" x2="12" y2="6"/><line x1="6" y1="9" x2="10" y2="9"/></svg>"#;
 const ICON_SETTINGS: &str = r#"<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="2.5"/><path d="M14.7 11.1a1.2 1.2 0 0 0 .24 1.32l.04.04a1.44 1.44 0 1 1-2.04 2.04l-.04-.04a1.2 1.2 0 0 0-1.32-.24 1.2 1.2 0 0 0-.72 1.08v.12a1.44 1.44 0 0 1-2.88 0v-.06a1.2 1.2 0 0 0-.78-1.08 1.2 1.2 0 0 0-1.32.24l-.04.04a1.44 1.44 0 1 1-2.04-2.04l.04-.04a1.2 1.2 0 0 0 .24-1.32 1.2 1.2 0 0 0-1.08-.72h-.12a1.44 1.44 0 0 1 0-2.88h.06a1.2 1.2 0 0 0 1.08-.78 1.2 1.2 0 0 0-.24-1.32l-.04-.04a1.44 1.44 0 1 1 2.04-2.04l.04.04a1.2 1.2 0 0 0 1.32.24h.06a1.2 1.2 0 0 0 .72-1.08V2.88a1.44 1.44 0 0 1 2.88 0v.06a1.2 1.2 0 0 0 .72 1.08 1.2 1.2 0 0 0 1.32-.24l.04-.04a1.44 1.44 0 1 1 2.04 2.04l-.04.04a1.2 1.2 0 0 0-.24 1.32v.06a1.2 1.2 0 0 0 1.08.72h.12a1.44 1.44 0 0 1 0 2.88h-.06a1.2 1.2 0 0 0-1.08.72z"/></svg>"#;
 const ICON_ACCOUNT: &str = r#"<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="6" r="3.5"/><path d="M3 17c0-3.5 2.5-6 6-6s6 2.5 6 6"/></svg>"#;
@@ -145,9 +143,6 @@ fn sidebar(active: &str) -> String {
                         <span class="nav-icon">{ic_chat}</span>
                     </a>
                 </div>
-                <a href="/dashboard" class="nav-link{dash_a}" data-label="Dashboard">
-                    <span class="nav-icon">{ic_dash}</span>
-                </a>
                 <a href="/automations" class="nav-link{auto_a}" data-label="Automation">
                     <span class="nav-icon">{ic_auto}</span>
                 </a>
@@ -159,15 +154,9 @@ fn sidebar(active: &str) -> String {
                 </a>
             </div>
             <div class="nav-bottom">
-                <a href="/setup" class="nav-link{settings_a}" data-label="Settings">
+                <button type="button" class="nav-link" data-label="Settings" title="Settings" onclick="openSettingsModal()">
                     <span class="nav-icon">{ic_settings}</span>
-                </a>
-                <a href="/vault" class="nav-link{security_a}" data-label="Security">
-                    <span class="nav-icon">{ic_security}</span>
-                </a>
-                <a href="/maintenance" class="nav-link{system_a}" data-label="System">
-                    <span class="nav-icon">{ic_system}</span>
-                </a>
+                </button>
                 <button type="button" class="nav-link nav-logout" id="nav-logout-btn" data-label="Logout" title="Sign out" onclick="fetch('/api/auth/logout',{{method:'POST'}}).then(()=>location.href='/login')">
                     <span class="nav-icon">{ic_logout}</span>
                 </button>
@@ -176,48 +165,35 @@ fn sidebar(active: &str) -> String {
         logo = LOGO_ICON,
         // Active states
         chat_a = a("chat"),
-        dash_a = a("dashboard"),
         auto_a = group_active(active, AUTOMATION_PAGES),
         brain_a = group_active(active, BRAIN_PAGES),
         ext_a = group_active(active, EXTENSIONS_PAGES),
-        settings_a = group_active(active, SETTINGS_PAGES),
-        security_a = group_active(active, SECURITY_PAGES),
-        system_a = group_active(active, SYSTEM_PAGES),
         // Icons
         ic_chat = ICON_CHAT,
-        ic_dash = ICON_DASHBOARD,
         ic_auto = ICON_AUTOMATION,
         ic_brain = ICON_BRAIN,
         ic_ext = ICON_EXTENSIONS,
         ic_settings = ICON_SETTINGS,
-        ic_security = ICON_SECURITY,
-        ic_system = ICON_SYSTEM,
         ic_logout = ICON_LOGOUT,
     )
 }
 
-/// Global top bar HTML — profile selector, account button, e-stop.
+/// Global top bar HTML — connection status (chat only) + avatar button.
 /// Injected as first child of `<main class="content">` in every page.
 fn content_topbar() -> String {
-    format!(
-        r##"<div class="content-topbar">
+    r#"<div class="content-topbar">
             <div class="topbar-right">
-                <button type="button" class="topbar-profile-pill" id="global-profile-pill" title="Choose profile">
-                    <span class="topbar-profile-dot" id="global-profile-dot" style="background:#3B82F6"></span>
-                    <span id="global-profile-name">Default</span>
-                    <svg class="topbar-profile-pill-arrow" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7l4 4 4-4"/></svg>
-                </button>
-                <a href="/account" class="topbar-btn" title="Account">
-                    <span class="topbar-icon">{ic_account}</span>
-                </a>
-                <button type="button" class="topbar-btn topbar-estop" id="nav-estop-btn" title="Emergency Stop">
-                    <span class="topbar-icon">{ic_estop}</span>
+                <span class="chat-connection" id="ws-status">Connecting…</span>
+                <button type="button" class="topbar-avatar-btn" id="topbar-avatar-btn" title="Menu">
+                    <img id="topbar-avatar-img" class="topbar-avatar-img" src="/api/v1/account/avatar" alt=""
+                         onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                    <span class="topbar-avatar-fallback">
+                        <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="6" r="3.5"/><path d="M3 17c0-3.5 2.5-6 6-6s6 2.5 6 6"/></svg>
+                    </span>
                 </button>
             </div>
-        </div>"##,
-        ic_account = ICON_ACCOUNT,
-        ic_estop = ICON_ESTOP,
-    )
+        </div>"#
+        .to_string()
 }
 
 /// Subnav collapse toggle button — sidebar panel icon, injected into subnav header.
@@ -374,7 +350,8 @@ fn page_html(title: &str, active: &str, body: &str, scripts: &[&str]) -> String 
             r#"</main>"#,
             r#"</div></main>"#,
         )
-        // Inject topbar inside content-inner (not spanning subnav column)
+        // Inject topbar inside content-inner (not spanning subnav column).
+        // Match both exact class and class with extra classes (e.g. auto-list-view).
         .replace(
             r#"<div class="content-inner">"#,
             &format!(r#"<div class="content-inner">{topbar_html}"#),
@@ -402,6 +379,7 @@ fn page_html(title: &str, active: &str, body: &str, scripts: &[&str]) -> String 
     <link rel="stylesheet" href="/static/css/workflows.css">
     <link rel="stylesheet" href="/static/css/onboarding.css">
     <link rel="stylesheet" href="/static/css/utilities.css">
+    <link rel="stylesheet" href="/static/css/settings-modal.css">
     <script>
     (function() {{
         var theme = localStorage.getItem('homun-theme') || 'system';
@@ -496,6 +474,7 @@ fn page_html(title: &str, active: &str, body: &str, scripts: &[&str]) -> String 
     <script src="/static/js/toast.js"></script>
     <script src="/static/js/topbar.js"></script>
     <script src="/static/js/command-palette.js"></script>
+    <script src="/static/js/settings-modal.js"></script>
     {script_tags}
     <script>
     (function() {{
@@ -726,305 +705,18 @@ async fn dashboard(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 // ─── Settings ───────────────────────────────────────────────────
 
 async fn setup_page(State(state): State<Arc<AppState>>) -> Html<String> {
-    let config = state.config.read().await;
-    let providers_output = build_providers_html::build(&config);
-    let providers_html = &providers_output.cards_html;
-    let catalog_modal_html = &providers_output.catalog_modal_html;
-
-    // Resolve active provider for the banner
-    let active_provider_name = config
-        .resolve_provider(&config.agent.model)
-        .map(|(name, _)| name.to_string())
-        .unwrap_or_default();
-    let active_model_display = if config.agent.model.is_empty() {
-        String::new()
-    } else {
-        // Strip provider prefix for display
-        config
-            .agent
-            .model
-            .split_once('/')
-            .map(|(_, m)| m.to_string())
-            .unwrap_or_else(|| config.agent.model.clone())
-    };
-    let active_provider_display =
-        build_providers_html::get_provider_display_name(&active_provider_name);
-
+    let section = section_setup(&state).await;
     let body = format!(
-        r##"<main class="content">
+        r#"<main class="content">
             <div class="content-inner">
                 <div class="page-header">
                     <div class="page-title-group">
                         <h1 class="page-title">Model &amp; Providers</h1>
                     </div>
                 </div>
-
-                <section class="section setup-wizard-section" id="setup-wizard-section">
-                    <h2>Guided Setup</h2>
-                    <div class="setup-wizard" id="setup-wizard">
-                        <div class="ollama-local-banner" id="ollama-local-banner" style="display:none">
-                            <div class="form-hint" style="margin-bottom: var(--space-sm)">
-                                <strong>No API key?</strong> Ollama detected on your machine — use local AI for free.
-                            </div>
-                            <div style="display:flex;gap:var(--space-sm);align-items:center;flex-wrap:wrap">
-                                <select id="ollama-model-select" class="input" style="min-width:200px">
-                                    <option value="">Loading models…</option>
-                                </select>
-                                <button type="button" class="btn btn-primary btn-sm" id="ollama-quick-setup">Use this model</button>
-                            </div>
-                            <div class="form-hint" id="ollama-banner-status"></div>
-                        </div>
-                        <div class="setup-wizard-steps">
-                            <div class="setup-step" id="wizard-step-provider">
-                                <span class="setup-step-dot"></span>
-                                <div class="setup-step-content">
-                                    <div class="setup-step-title">1. Configure a provider</div>
-                                    <div class="setup-step-desc">Add API key or base URL for at least one provider.</div>
-                                </div>
-                            </div>
-                            <div class="setup-step" id="wizard-step-model">
-                                <span class="setup-step-dot"></span>
-                                <div class="setup-step-content">
-                                    <div class="setup-step-title">2. Select your active model</div>
-                                    <div class="setup-step-desc">Choose a model from the provider card or enter a custom one.</div>
-                                </div>
-                            </div>
-                            <div class="setup-step" id="wizard-step-test">
-                                <span class="setup-step-dot"></span>
-                                <div class="setup-step-content">
-                                    <div class="setup-step-title">3. Run a connection test</div>
-                                    <div class="setup-step-desc">Validate that provider credentials and endpoint work.</div>
-                                </div>
-                            </div>
-                            <div class="setup-step" id="wizard-step-chat">
-                                <span class="setup-step-dot"></span>
-                                <div class="setup-step-content">
-                                    <div class="setup-step-title">4. Send your first message</div>
-                                    <div class="setup-step-desc">Try a quick chat to verify everything works end-to-end.</div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="setup-wizard-actions">
-                            <button type="button" class="btn btn-primary btn-sm" id="wizard-next-step">Next step</button>
-                            <button type="button" class="btn btn-secondary btn-sm" id="wizard-test-active-provider">Test active provider</button>
-                            <button type="button" class="btn btn-ghost btn-sm" id="wizard-hide">Hide</button>
-                        </div>
-                        <div class="form-hint" id="wizard-status">Wizard ready.</div>
-                    </div>
-                </section>
-
-                <section class="section" id="section-providers">
-                    <div class="active-model-banner" id="active-model-banner" {active_banner_hidden}>
-                        <div class="active-model-info">
-                            <span class="active-model-label">Active Model</span>
-                            <span class="active-model-name" id="active-model-name">{active_model_display}</span>
-                            <span class="active-model-provider" id="active-model-provider">via {active_provider_display}</span>
-                        </div>
-                    </div>
-
-                    <div id="no-model-banner" class="no-model-warning" {no_model_hidden}>
-                        <span class="no-model-warning-icon">!</span>
-                        <div class="no-model-warning-text">
-                            <strong>No model configured</strong>
-                            <p>Configure a provider below, then select a model to get started.</p>
-                        </div>
-                    </div>
-
-                    <div class="configured-providers-grid" id="provider-grid">
-                        {providers_html}
-                    </div>
-                    <button type="button" class="btn btn-secondary" id="btn-add-provider" style="margin-top:12px;">+ Add Provider</button>
-
-                    {catalog_modal_html}
-
-                    <details class="section-advanced" id="advanced-agent">
-                        <summary>Advanced Agent Settings</summary>
-                        <form class="form form--full" id="agent-form" style="margin-top:12px;">
-                            <div class="form-group model-selector-section">
-                                <label class="model-selector-label">Vision Model</label>
-                                <select id="vision-model-select" class="input">
-                                    <option value="">Loading models…</option>
-                                </select>
-                                <input type="hidden" name="vision_model" id="vision-model-value" value="{vision_model}">
-                                <div class="form-hint">Model for image analysis. Falls back to Chat Model if empty.</div>
-                            </div>
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label>Max Tokens</label>
-                                    <input type="number" name="max_tokens" value="{max_tokens}" class="input">
-                                </div>
-                                <div class="form-group">
-                                    <label>Temperature</label>
-                                    <input type="number" name="temperature" value="{temperature}" step="0.1" min="0" max="2" class="input">
-                                </div>
-                                <div class="form-group">
-                                    <label>Max Iterations</label>
-                                    <input type="number" name="max_iterations" value="{max_iterations}" class="input">
-                                </div>
-                                <div class="form-group">
-                                    <label>XML Fallback Delay (ms)</label>
-                                    <input type="number" name="xml_fallback_delay_ms" value="{xml_fallback_delay_ms}" min="0" step="100" class="input">
-                                    <div class="form-hint">Delay before retrying when switching to XML tool dispatch. Prevents rate-limit errors on free models.</div>
-                                </div>
-                            </div>
-                            <div class="form-group">
-                                <label>Fallback Models</label>
-                                <div class="form-hint" style="margin-bottom:8px;">If the primary model fails (rate limit, outage), these models are tried in order.</div>
-                                <div id="fallback-models-list" class="tag-list" data-models='{fallback_models_json}'></div>
-                                <div class="fallback-add-row">
-                                    <select id="fallback-model-select" class="input input--inline">
-                                        <option value="">Add fallback model…</option>
-                                    </select>
-                                    <button type="button" id="btn-add-fallback" class="btn btn-secondary btn--sm">Add</button>
-                                </div>
-                            </div>
-                            <button type="submit" class="btn btn-primary">Save Advanced Settings</button>
-                        </form>
-                    </details>
-                </section>
-
-                <section class="section" id="section-memory">
-                    <h2>Memory</h2>
-                    <form class="form" id="memory-form">
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label>Conversation Retention (days)</label>
-                                <input type="number" name="conversation_retention_days" value="{conversation_retention_days}" min="1" max="365" class="input">
-                                <div class="form-hint">Delete chat messages older than this many days.</div>
-                            </div>
-                            <div class="form-group">
-                                <label>History Retention (days)</label>
-                                <input type="number" name="history_retention_days" value="{history_retention_days}" min="1" max="3650" class="input">
-                                <div class="form-hint">Delete memory chunks older than this many days.</div>
-                            </div>
-                            <div class="form-group">
-                                <label>Daily Archive Months</label>
-                                <input type="number" name="daily_archive_months" value="{daily_archive_months}" min="1" max="24" class="input">
-                                <div class="form-hint">Group daily logs by month in the UI.</div>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label class="toggle-label-inline">
-                                <input type="checkbox" name="auto_cleanup" class="toggle-input" {auto_cleanup_checked}>
-                                <span>Auto-cleanup on startup</span>
-                            </label>
-                            <div class="form-hint">Automatically run memory cleanup when gateway starts.</div>
-                        </div>
-                        <div class="form-row">
-                            <button type="submit" class="btn btn-primary">Save Memory Config</button>
-                            <button type="button" class="btn btn-secondary" id="btn-run-cleanup">Run Cleanup Now</button>
-                        </div>
-                        <div id="memory-result" class="form-hint" style="margin-top:10px;"></div>
-                    </form>
-                </section>
-
-                <section class="section" id="section-embeddings">
-                    <h2>Embeddings</h2>
-                    <form class="form" id="embeddings-form">
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label>Provider</label>
-                                <select name="embedding_provider" class="input" id="embedding-provider-select">
-                                    <option value="">Loading providers...</option>
-                                </select>
-                                <div class="form-hint">Only configured providers with embedding support are shown.</div>
-                            </div>
-                            <div class="form-group">
-                                <label>Model</label>
-                                <select name="embedding_model" class="input" id="embedding-model-select">
-                                    <option value="">Loading models...</option>
-                                </select>
-                                <div class="form-hint" id="embedding-model-hint">Select a model or choose "Custom..."</div>
-                            </div>
-                        </div>
-                        <div class="form-row" id="embedding-custom-model-row" style="display:none;">
-                            <div class="form-group">
-                                <label>Custom Model Name</label>
-                                <input type="text" name="embedding_custom_model" class="input" id="embedding-custom-model" placeholder="e.g. my-custom-embed-model">
-                                <div class="form-hint" id="embedding-custom-hint"></div>
-                            </div>
-                        </div>
-                        <details class="form-details">
-                            <summary>Advanced</summary>
-                            <div class="form-row" style="margin-top:12px;">
-                                <div class="form-group">
-                                    <label>API Base URL</label>
-                                    <input type="text" name="embedding_api_base" class="input" id="embedding-api-base" placeholder="(provider default)">
-                                    <div class="form-hint">Override the default API endpoint.</div>
-                                </div>
-                                <div class="form-group">
-                                    <label>API Key</label>
-                                    <input type="password" name="embedding_api_key" class="input" id="embedding-api-key" placeholder="(auto from LLM provider)">
-                                    <div class="form-hint">Leave empty to use the LLM provider's key.</div>
-                                </div>
-                            </div>
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label>Dimensions</label>
-                                    <input type="number" name="embedding_dimensions" value="{embedding_dimensions}" min="64" max="4096" class="input">
-                                    <div class="form-hint">Default 384. Changing requires re-indexing all vectors.</div>
-                                </div>
-                            </div>
-                        </details>
-                        <div class="form-row" style="margin-top:12px;">
-                            <button type="submit" class="btn btn-primary">Save Embeddings</button>
-                        </div>
-                        <div id="embeddings-result" class="form-hint" style="margin-top:10px;"></div>
-                    </form>
-
-                    <!-- Index status: mismatch warning + rebuild button -->
-                    <div id="embedding-index-status" style="margin-top:16px;">
-                        <div id="embedding-index-warning" class="form-hint pairing-status error" style="display:none;">
-                            <strong>⚠ Mismatch:</strong> Current indices were built with a different embedding model.
-                            Search results may be inaccurate. Rebuild to fix.
-                        </div>
-                        <div id="embedding-index-unknown" class="form-hint pairing-status" style="display:none;">
-                            Index metadata not found. If you changed embedding settings, consider rebuilding indices.
-                        </div>
-                        <div id="embedding-reindex-row" style="display:none; margin-top:12px;">
-                            <button type="button" id="btn-reindex" class="btn btn-secondary">Rebuild Vector Indices</button>
-                            <span id="reindex-result" class="form-hint" style="margin-left:8px;"></span>
-                        </div>
-                        <div id="embedding-index-ok" class="form-hint pairing-status success" style="display:none;">
-                            ✓ Vector indices are up to date.
-                        </div>
-                    </div>
-                </section>
-
+                {section}
             </div>
-        </main>
-
-        "##,
-        active_model_display = active_model_display,
-        active_provider_display = active_provider_display,
-        active_banner_hidden = if config.agent.model.is_empty() {
-            "style=\"display:none\""
-        } else {
-            ""
-        },
-        no_model_hidden = if config.agent.model.is_empty() {
-            ""
-        } else {
-            "style=\"display:none\""
-        },
-        vision_model = config.agent.vision_model,
-        max_tokens = config.agent.max_tokens,
-        temperature = config.agent.temperature,
-        max_iterations = config.agent.max_iterations,
-        xml_fallback_delay_ms = config.agent.xml_fallback_delay_ms,
-        fallback_models_json = serde_json::to_string(&config.agent.fallback_models)
-            .unwrap_or_else(|_| "[]".to_string()),
-        conversation_retention_days = config.memory.conversation_retention_days,
-        history_retention_days = config.memory.history_retention_days,
-        daily_archive_months = config.memory.daily_archive_months,
-        auto_cleanup_checked = if config.memory.auto_cleanup {
-            "checked"
-        } else {
-            ""
-        },
-        embedding_dimensions = config.memory.embedding_dimensions,
-        providers_html = providers_html,
-        catalog_modal_html = catalog_modal_html,
+        </main>"#
     );
 
     Html(page_html(
@@ -1038,18 +730,32 @@ async fn setup_page(State(state): State<Arc<AppState>>) -> Html<String> {
 // ─── Appearance ────────────────────────────────────────────────
 
 async fn appearance_page(State(state): State<Arc<AppState>>) -> Html<String> {
-    let config = state.config.read().await;
-
+    let section = section_appearance(&state).await;
     let body = format!(
-        r##"<main class="content">
+        r#"<main class="content">
             <div class="content-inner">
                 <div class="page-header">
                     <div class="page-title-group">
                         <h1 class="page-title">Appearance</h1>
                     </div>
                 </div>
+                {section}
+            </div>
+        </main>"#
+    );
+    Html(page_html(
+        "Appearance",
+        "appearance",
+        &body,
+        &["accent-utils.js", "appearance.js"],
+    ))
+}
 
-                <section class="section" id="section-theme">
+/// Section HTML fragment for the settings modal.
+pub(crate) async fn section_appearance(state: &AppState) -> String {
+    let config = state.config.read().await;
+    format!(
+        r##"<section class="section" id="section-theme">
                     <form class="form" id="appearance-form">
                         <div class="form-row--2">
                             <div class="form-group">
@@ -1133,270 +839,31 @@ async fn appearance_page(State(state): State<Arc<AppState>>) -> Html<String> {
                 </section>
 
                 <div id="appearance-toast"></div>
-            </div>
-        </main>"##,
-        theme_system = if config.ui.theme == "system" {
-            "selected"
-        } else {
-            ""
-        },
-        theme_light = if config.ui.theme == "light" {
-            "selected"
-        } else {
-            ""
-        },
-        theme_dark = if config.ui.theme == "dark" {
-            "selected"
-        } else {
-            ""
-        },
-        language_system = if config.ui.language == "system" {
-            "selected"
-        } else {
-            ""
-        },
-        language_it = if config.ui.language == "it" {
-            "selected"
-        } else {
-            ""
-        },
-        language_en = if config.ui.language == "en" {
-            "selected"
-        } else {
-            ""
-        },
-    );
-
-    Html(page_html(
-        "Appearance",
-        "appearance",
-        &body,
-        &["accent-utils.js", "appearance.js"],
-    ))
+                </section>"##,
+        theme_system = if config.ui.theme == "system" { "selected" } else { "" },
+        theme_light = if config.ui.theme == "light" { "selected" } else { "" },
+        theme_dark = if config.ui.theme == "dark" { "selected" } else { "" },
+        language_system = if config.ui.language == "system" { "selected" } else { "" },
+        language_it = if config.ui.language == "it" { "selected" } else { "" },
+        language_en = if config.ui.language == "en" { "selected" } else { "" },
+    )
 }
 
 // ─── Channels ──────────────────────────────────────────────────
 
-async fn channels_page(State(_state): State<Arc<AppState>>) -> Html<String> {
-    let channels_html = build_channels_cards_static();
-
+async fn channels_page(State(state): State<Arc<AppState>>) -> Html<String> {
+    let section = section_channels(&state).await;
     let body = format!(
-        r##"<main class="content">
+        r#"<main class="content">
             <div class="content-inner">
                 <div class="page-header">
                     <div class="page-title-group">
                         <h1 class="page-title">Channels</h1>
                     </div>
                 </div>
-
-                <section class="section" id="section-channels">
-                    <div class="provider-grid" id="channel-grid">
-                        {channels_html}
-                    </div>
-                </section>
+                {section}
             </div>
-        </main>
-
-        <!-- Channel Configuration Modal -->
-        <div id="channel-modal" class="modal">
-            <div class="modal-backdrop"></div>
-            <div class="modal-content modal-content--channel">
-                <div class="modal-header-group">
-                    <div class="modal-header">
-                        <h3 class="modal-title" id="modal-channel-name">Channel</h3>
-                        <button class="modal-close ch-modal-close" type="button">&times;</button>
-                    </div>
-                    <p class="modal-subtitle" id="channel-subtitle"></p>
-                </div>
-                <div class="modal-body">
-                    <form id="channel-config-form">
-                        <input type="hidden" id="modal-channel-id" name="channel">
-
-                        <!-- Token (Telegram/Discord/Slack) -->
-                        <div class="form-group" id="ch-token-group" style="display:none;">
-                            <label for="ch-token">Bot Token</label>
-                            <input type="password" id="ch-token" name="token" class="input">
-                            <div class="form-hint" id="ch-token-hint">Stored encrypted locally.</div>
-                        </div>
-
-                        <!-- WhatsApp phone + pairing -->
-                        <div class="form-group" id="ch-phone-group" style="display:none;">
-                            <label for="ch-phone">Phone Number</label>
-                            <input type="tel" id="ch-phone" name="phone_number" class="input" placeholder="393331234567">
-                            <div class="form-hint">International format without + (e.g. 393331234567)</div>
-                        </div>
-                        <div id="ch-wa-pairing" style="display:none;">
-                            <div id="ch-wa-pairing-status" class="pairing-status"></div>
-                            <div id="ch-wa-pairing-code" class="pairing-code" style="display:none;"></div>
-                        </div>
-
-                        <!-- Allowed Users -->
-                        <div class="form-group" id="ch-allow-from-group" style="display:none;">
-                            <label>Allowed Users</label>
-                            <input type="text" id="ch-allow-from" name="allow_from" class="input" placeholder="User IDs, comma-separated">
-                            <div class="form-hint" id="ch-allow-from-hint">Only these users can interact with the bot.</div>
-                        </div>
-
-                        <!-- Behavior (response mode + notify) — all chat channels -->
-                        <div id="ch-behavior-group" style="display:none;">
-                            <div class="modal-section-label">Behavior</div>
-                            <div class="form-row--2">
-                                <div class="form-group">
-                                    <label for="ch-response-mode">Response Mode</label>
-                                    <select id="ch-response-mode" name="response_mode" class="input">
-                                        <option value="">Automatic (default)</option>
-                                        <option value="assisted">Assisted (draft + approval)</option>
-                                        <option value="on_demand">On-Demand (save, no response)</option>
-                                        <option value="silent">Silent (drop messages)</option>
-                                    </select>
-                                    <div class="form-hint">How Homun responds on this channel.</div>
-                                </div>
-                                <div class="form-group" id="ch-notify-channel-group" style="display:none;">
-                                    <label for="ch-notify-channel">Notify Channel</label>
-                                    <select id="ch-notify-channel" name="notify_channel" class="input">
-                                        <option value="">None</option>
-                                        <option value="web">Web UI</option>
-                                        <option value="telegram">Telegram</option>
-                                        <option value="discord">Discord</option>
-                                        <option value="slack">Slack</option>
-                                        <option value="whatsapp">WhatsApp</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="form-group" id="ch-notify-chatid-group" style="display:none;">
-                                <label for="ch-notify-chatid">Notify Chat ID</label>
-                                <input type="text" id="ch-notify-chatid" name="notify_chat_id" class="input" placeholder="Chat/user ID on notify channel">
-                                <div class="form-hint">Where to send drafts for approval. Use "web" for Web UI.</div>
-                            </div>
-                        </div>
-
-                        <!-- Profile — visible for ALL channels -->
-                        <div class="modal-section-label" style="margin-top:16px">Profile</div>
-                        <div class="form-group">
-                            <label for="ch-persona">Profile</label>
-                            <select id="ch-persona" name="persona" class="input"></select>
-                            <div class="form-hint">Which profile the agent uses on this channel.</div>
-                        </div>
-
-                        <!-- Discord default channel -->
-                        <div class="form-group" id="ch-discord-channel-group" style="display:none;">
-                            <label for="ch-discord-channel">Default Channel ID</label>
-                            <input type="text" id="ch-discord-channel" name="default_channel_id" class="input">
-                            <div class="form-hint">For proactive messages (optional)</div>
-                        </div>
-
-                        <!-- Slack channel -->
-                        <div class="form-group" id="ch-slack-channel-group" style="display:none;">
-                            <label for="ch-slack-channel">Channel ID</label>
-                            <input type="text" id="ch-slack-channel" name="slack_channel_id" class="input">
-                            <div class="form-hint">Specific channel to monitor (e.g., C1234567890). Leave empty for auto-discovery.</div>
-                        </div>
-
-                        <!-- Email: Mail Servers (2 columns) -->
-                        <div id="ch-email-servers-group" style="display:none;">
-                            <div class="modal-section-label">Mail Servers</div>
-                            <div class="form-row--2">
-                                <div class="form-group">
-                                    <label for="ch-email-imap-host">IMAP Server</label>
-                                    <input type="text" id="ch-email-imap-host" name="imap_host" class="input" placeholder="imap.gmail.com">
-                                </div>
-                                <div class="form-group">
-                                    <label for="ch-email-imap-port">IMAP Port</label>
-                                    <input type="number" id="ch-email-imap-port" name="imap_port" class="input" placeholder="993">
-                                </div>
-                            </div>
-                            <div class="form-row--2">
-                                <div class="form-group">
-                                    <label for="ch-email-smtp-host">SMTP Server</label>
-                                    <input type="text" id="ch-email-smtp-host" name="smtp_host" class="input" placeholder="smtp.gmail.com">
-                                </div>
-                                <div class="form-group">
-                                    <label for="ch-email-smtp-port">SMTP Port</label>
-                                    <input type="number" id="ch-email-smtp-port" name="smtp_port" class="input" placeholder="465">
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Email: Credentials (2 columns) -->
-                        <div id="ch-email-credentials-group" style="display:none;">
-                            <div class="modal-section-label">Credentials</div>
-                            <div class="form-row--2">
-                                <div class="form-group">
-                                    <label for="ch-email-username">Username</label>
-                                    <input type="text" id="ch-email-username" name="email_username" class="input" placeholder="bot@example.com">
-                                </div>
-                                <div class="form-group">
-                                    <label for="ch-email-password">Password</label>
-                                    <input type="password" id="ch-email-password" name="email_password" class="input" placeholder="App password (stored encrypted)">
-                                </div>
-                            </div>
-                            <div class="form-group">
-                                <label for="ch-email-from">From Address</label>
-                                <input type="text" id="ch-email-from" name="from_address" class="input" placeholder="bot@example.com">
-                            </div>
-                        </div>
-
-                        <!-- Email: Behavior (mode + notify) -->
-                        <div id="ch-email-behavior-group" style="display:none;">
-                            <div class="modal-section-label">Behavior</div>
-                            <div class="form-row--2">
-                                <div class="form-group" id="ch-email-mode-group">
-                                    <label for="ch-email-mode">Response Mode</label>
-                                    <select id="ch-email-mode" name="email_mode" class="input">
-                                        <option value="assisted">Assisted (summary + approval)</option>
-                                        <option value="automatic">Automatic (direct response)</option>
-                                        <option value="on_demand">On-Demand (trigger word only)</option>
-                                    </select>
-                                    <div class="form-hint" id="ch-email-mode-hint">Generates summary and draft, sends to notification channel for approval.</div>
-                                </div>
-                                <div class="form-group" id="ch-email-trigger-group" style="display:none;">
-                                    <label for="ch-email-trigger-word">Trigger Word</label>
-                                    <input type="text" id="ch-email-trigger-word" name="email_trigger_word" class="input" placeholder="Auto-generated if empty">
-                                    <div class="form-hint">Include in subject/body to activate the bot.</div>
-                                </div>
-                            </div>
-                            <div id="ch-email-notify-group" style="display:none;">
-                                <div class="form-row--2">
-                                    <div class="form-group">
-                                        <label for="ch-email-notify-channel">Notify Channel</label>
-                                        <select id="ch-email-notify-channel" name="email_notify_channel" class="input">
-                                            <option value="">None</option>
-                                            <option value="telegram">Telegram</option>
-                                            <option value="discord">Discord</option>
-                                            <option value="slack">Slack</option>
-                                            <option value="whatsapp">WhatsApp</option>
-                                        </select>
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="ch-email-notify-chat-id">Notify Chat ID</label>
-                                        <input type="text" id="ch-email-notify-chat-id" name="email_notify_chat_id" class="input" placeholder="User/Channel ID">
-                                        <div class="form-hint form-hint--suggest" id="ch-notify-hint"></div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Web channel fields -->
-                        <div class="form-group" id="ch-web-host-group" style="display:none;">
-                            <label for="ch-web-host">Host</label>
-                            <input type="text" id="ch-web-host" name="host" class="input">
-                        </div>
-                        <div class="form-group" id="ch-web-port-group" style="display:none;">
-                            <label for="ch-web-port">Port</label>
-                            <input type="number" id="ch-web-port" name="port" class="input">
-                        </div>
-                    </form>
-                    <div id="ch-test-result" class="form-hint" style="margin-top:10px;"></div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary ch-modal-cancel">Cancel</button>
-                    <button type="submit" form="channel-config-form" class="btn btn-primary" id="btn-ch-save">Save &amp; Enable</button>
-                    <button type="button" id="btn-test-channel" class="btn btn-secondary">Test Connection</button>
-                    <button type="button" id="btn-wa-pair" class="btn btn-success" style="display:none;">Start Pairing</button>
-                </div>
-            </div>
-        </div>"##,
-        channels_html = channels_html,
+        </main>"#
     );
 
     Html(page_html("Channels", "channels", &body, &["channels.js"]))
@@ -1405,147 +872,18 @@ async fn channels_page(State(_state): State<Arc<AppState>>) -> Html<String> {
 // ─── Browser ──────────────────────────────────────────────────
 
 async fn browser_page(State(state): State<Arc<AppState>>) -> Html<String> {
-    let config = state.config.read().await;
-
+    let section = section_browser(&state).await;
     let body = format!(
-        r##"<main class="content">
+        r#"<main class="content">
             <div class="content-inner">
                 <div class="page-header">
                     <div class="page-title-group">
                         <h1 class="page-title">Browser Automation</h1>
                     </div>
                 </div>
-
-                <section class="section" id="section-browser">
-                    <div class="form-hint" style="margin-bottom:12px;">{browser_status}</div>
-                    <form class="form" id="browser-form">
-                        <div class="setting-toggle-row">
-                            <div class="setting-toggle-info">
-                                <span class="setting-toggle-name">Enable Browser</span>
-                                <span class="setting-toggle-desc">Register the browser tool and use it for dynamic web tasks</span>
-                            </div>
-                            <div class="toggle-wrap">
-                                <input type="checkbox" id="browser-enabled" name="enabled" class="toggle-input" {browser_enabled_checked}>
-                                <label class="toggle-label" for="browser-enabled"></label>
-                            </div>
-                        </div>
-                        <div class="setting-toggle-row">
-                            <div class="setting-toggle-info">
-                                <span class="setting-toggle-name">Headless Mode</span>
-                                <span class="setting-toggle-desc">Run browser without visible window</span>
-                            </div>
-                            <div class="toggle-wrap">
-                                <input type="checkbox" id="browser-headless" name="headless" class="toggle-input" {browser_headless_checked}>
-                                <label class="toggle-label" for="browser-headless"></label>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label>Chrome Executable Path</label>
-                            <input type="text" id="browser-executable" name="executable_path" value="{executable_path}" class="input" placeholder="Auto-detect (leave empty)">
-                            <div class="form-hint">Leave empty to auto-detect. Override if Chrome is in a custom location.</div>
-                        </div>
-                        <div class="form-group">
-                            <label for="browser-vision-model">Vision Model</label>
-                            <select id="browser-vision-model" class="input"></select>
-                            <input type="hidden" name="vision_model" id="browser-vision-value" value="{vision_model}">
-                            <div class="form-hint">Model for screenshot/image analysis. Empty = same as chat model.</div>
-                        </div>
-                        <div class="form-hint" style="margin-top:10px;">Timeouts and snapshot settings are managed by the Playwright MCP server.</div>
-                        <div class="form-actions">
-                            <button type="submit" class="btn btn-primary">Save Browser Config</button>
-                            <button type="button" class="btn btn-secondary" id="btn-test-browser">Test Connection</button>
-                        </div>
-                        <div id="browser-result" class="form-hint" style="margin-top:10px;"></div>
-                    </form>
-                </section>
-
-                <section class="section" id="section-profiles">
-                    <h2>Browser Profiles</h2>
-                    <div class="form-hint" style="margin-bottom:12px;">Manage browser profiles — each profile has its own cookies, sessions, and cache.</div>
-                    <div id="profiles-list" class="form-hint">Loading profiles…</div>
-                </section>
-
-                <section class="section" id="section-web-search">
-                    <h2>Web Search</h2>
-                    <form class="form" id="web-search-form">
-                        <div class="form-row--2">
-                            <div class="form-group">
-                                <label>Search Provider</label>
-                                <select id="search-provider" name="provider" class="input">
-                                    <option value="brave" {search_brave}>Brave Search</option>
-                                    <option value="tavily" {search_tavily}>Tavily</option>
-                                </select>
-                                <div class="form-hint">Search engine used by the web_search tool.</div>
-                            </div>
-                            <div class="form-group">
-                                <label>Max Results</label>
-                                <input type="number" id="search-max-results" name="max_results" value="{search_max_results}" min="1" max="20" class="input">
-                                <div class="form-hint">Number of search results returned per query.</div>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label>API Key</label>
-                            <input type="password" id="search-api-key" name="api_key" value="{search_api_key}" class="input" placeholder="Enter your search API key">
-                            <div class="form-hint">Brave: <a href="https://api-dashboard.search.brave.com/app/keys" target="_blank">api-dashboard.search.brave.com</a> · Tavily: <a href="https://tavily.com" target="_blank">tavily.com</a></div>
-                        </div>
-                        <div class="form-actions">
-                            <button type="submit" class="btn btn-primary">Save Search Config</button>
-                        </div>
-                    </form>
-                </section>
+                {section}
             </div>
-        </main>"##,
-        browser_enabled_checked = if config.browser.enabled {
-            "checked"
-        } else {
-            ""
-        },
-        browser_headless_checked = if config.browser.headless {
-            "checked"
-        } else {
-            ""
-        },
-        executable_path = config.browser.executable_path,
-        vision_model = config.agent.vision_model,
-        search_brave = if config.tools.web_search.provider == "brave" {
-            "selected"
-        } else {
-            ""
-        },
-        search_tavily = if config.tools.web_search.provider == "tavily" {
-            "selected"
-        } else {
-            ""
-        },
-        search_api_key = config.tools.web_search.api_key,
-        search_max_results = config.tools.web_search.max_results,
-        browser_status = {
-            let status = config.browser.runtime_status();
-            let enabled = if status.enabled {
-                "Enabled"
-            } else {
-                "Disabled"
-            };
-            let availability = if status.available {
-                "available"
-            } else {
-                "unavailable"
-            };
-            let executable = status
-                .executable_path
-                .map(|path| format!("Chrome: {}", path))
-                .unwrap_or_else(|| "Chrome: not detected".to_string());
-            match status.reason {
-                Some(reason) => format!(
-                    "{} • MCP (Playwright) • {}. {} {}",
-                    enabled, availability, executable, reason
-                ),
-                None => format!(
-                    "{} • MCP (Playwright) • {}. {}",
-                    enabled, availability, executable
-                ),
-            }
-        },
+        </main>"#
     );
 
     Html(page_html("Browser", "browser", &body, &["setup.js"]))
@@ -1605,7 +943,6 @@ async fn chat_page(
                             <div class="chat-topbar-leading">
                             </div>
                             <div class="chat-actions">
-                                <span class="chat-connection" id="ws-status">Connecting…</span>
                             </div>
                             <span id="chat-conversation-title" hidden>New conversation</span>
                         </div>
@@ -1742,7 +1079,8 @@ async fn chat_page(
 
 async fn automations_page() -> Html<String> {
     let body = r#"<main class="content">
-            <div class="content-inner auto-list-view" id="automations-list-view" style="max-width:none;padding:0;display:flex;flex-direction:column;height:100%;">
+            <div class="content-inner">
+              <div class="auto-list-view" id="automations-list-view" style="max-width:none;padding:0;display:flex;flex-direction:column;height:100%;">
                 <div class="auto-master-detail" style="display:flex;flex:1;min-height:0;overflow:hidden;">
                     <!-- Master: list + prompt bar -->
                     <div class="auto-master" id="auto-master" style="flex:1;min-width:0;display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;padding:18px 40px 0;">
@@ -1862,6 +1200,7 @@ async fn automations_page() -> Html<String> {
                     </div>
                 </div>
             </div>
+          </div>
         </main>"#;
 
     Html(page_html(
@@ -2534,8 +1873,10 @@ fn render_mcp_oauth_callback_page(
 
 // ─── Logs ───────────────────────────────────────────────────────
 
-async fn logs_page() -> Html<String> {
-    let body = r#"<main class="content">
+async fn logs_page(State(state): State<Arc<AppState>>) -> Html<String> {
+    let inner = section_logs(&state).await;
+    let body = format!(
+        r#"<main class="content">
             <div class="content-inner">
                 <div class="page-header">
                     <div class="page-title-group">
@@ -2543,33 +1884,11 @@ async fn logs_page() -> Html<String> {
                         <span id="logs-status" class="badge badge-warning">Connecting...</span>
                     </div>
                 </div>
-                <div class="logs-toolbar">
-                    <label class="form-group logs-toolbar-item">
-                        <span>Level</span>
-                        <select id="logs-level" class="input">
-                            <option value="trace">Trace+</option>
-                            <option value="debug" selected>Debug+</option>
-                            <option value="info">Info+</option>
-                            <option value="warn">Warn+</option>
-                            <option value="error">Error only</option>
-                        </select>
-                    </label>
-                    <label class="checkbox-label logs-toolbar-item">
-                        <input type="checkbox" id="logs-autoscroll" checked>
-                        Auto-scroll
-                    </label>
-                    <button class="btn btn-secondary btn-sm logs-toolbar-item" id="logs-clear">Clear</button>
-                    <span class="logs-count" id="logs-count">0 events</span>
-                </div>
-                <div class="log-viewer" id="log-viewer">
-                    <div class="empty-state log-empty">
-                        <p>Waiting for log events...</p>
-                    </div>
-                </div>
+                {inner}
             </div>
-        </main>"#;
-
-    Html(page_html("Logs", "logs", body, &["logs.js"]))
+        </main>"#
+    );
+    Html(page_html("Logs", "logs", &body, &["logs.js"]))
 }
 
 // ─── Contacts ─────────────────────────────────────────────────────
@@ -2781,8 +2100,10 @@ async fn memory_page(State(state): State<Arc<AppState>>) -> Html<String> {
 
 // ─── Vault ───────────────────────────────────────────────────────
 
-async fn vault_page() -> Html<String> {
-    let body = r#"<main class="content">
+async fn vault_page(State(state): State<Arc<AppState>>) -> Html<String> {
+    let section = section_vault(&state).await;
+    let body = format!(
+        r#"<main class="content">
             <div class="content-inner">
                 <div class="page-header">
                     <div class="page-title-group">
@@ -2791,186 +2112,23 @@ async fn vault_page() -> Html<String> {
                     </div>
                 </div>
 
-                <div class="vault-notice">
-                    <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;flex-shrink:0">
-                        <rect x="2" y="5" width="14" height="11" rx="1.5"/>
-                        <path d="M5 5V4a4 4 0 0 1 8 0v1"/>
-                        <circle cx="9" cy="11" r="1.5"/>
-                        <path d="M9 12.5V14"/>
-                    </svg>
-                    <div>
-                        <strong>Encrypted Storage</strong><br>
-                        Secrets are encrypted with AES-256-GCM using a master key stored in your OS keychain.
-                        Values are never included in server-rendered pages — they are decrypted on-demand via POST requests.
-                    </div>
-                </div>
-
-                <!-- 2FA Section -->
-                <section class="section">
-                    <div class="section-header">
-                        <h2>Two-Factor Authentication</h2>
-                        <span class="badge" id="twofa-status-badge">Checking…</span>
-                    </div>
-                    <div id="twofa-disabled-view">
-                        <p style="color:var(--muted);margin-bottom:1rem">Require authenticator code to reveal secrets. Recommended for enhanced security.</p>
-                        <button class="btn btn-primary btn-sm" id="btn-enable-2fa">Enable 2FA</button>
-                    </div>
-                    <div id="twofa-enabled-view" style="display:none">
-                        <p style="margin-bottom:0.5rem">2FA is <strong>enabled</strong>. You'll need your authenticator app to reveal secrets.</p>
-                        <p style="color:var(--muted);font-size:0.875rem;margin-bottom:1rem">
-                            Session timeout: <span id="twofa-timeout">5 minutes</span> ·
-                            Recovery codes: <span id="twofa-recovery-count">0</span> remaining
-                        </p>
-                        <div class="actions">
-                            <button class="btn btn-secondary btn-sm" id="btn-view-recovery">View Recovery Codes</button>
-                            <button class="btn btn-danger btn-sm" id="btn-disable-2fa">Disable 2FA</button>
-                        </div>
-                    </div>
-                </section>
-
-                <section class="section">
-                    <h2>Store Secret</h2>
-                    <form id="vault-form" class="form">
-                        <div class="form-row form-row--2">
-                            <div class="form-group">
-                                <label>Key</label>
-                                <input type="text" id="vault-key" class="input" placeholder="my_api_key" pattern="[a-z0-9_]+">
-                                <div class="form-hint">Lowercase letters, numbers, underscores only</div>
-                            </div>
-                            <div class="form-group">
-                                <label>Value</label>
-                                <input type="password" id="vault-value" class="input" placeholder="secret value…">
-                            </div>
-                        </div>
-                        <button type="submit" class="btn btn-primary btn-sm">Store Secret</button>
-                    </form>
-                </section>
-
-                <section class="section">
-                    <h2>Stored Secrets</h2>
-                    <div class="item-list" id="vault-list">
-                        <div class="empty-state" id="vault-empty">
-                            <p>Loading secrets…</p>
-                        </div>
-                    </div>
-                </section>
-
-                <!-- 2FA Setup Modal -->
-                <div id="twofa-setup-modal" class="modal">
-                    <div class="modal-backdrop"></div>
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h3 class="modal-title">Setup Authenticator</h3>
-                            <button class="modal-close" type="button">&times;</button>
-                        </div>
-                        <div class="modal-body">
-                            <p style="margin-bottom:1rem">Scan this QR code with your authenticator app (Google Authenticator, Authy, 1Password, etc.)</p>
-                            <div style="text-align:center;margin-bottom:1rem">
-                                <img id="twofa-qr-image" src="" alt="QR Code" style="max-width:200px;border-radius:8px">
-                            </div>
-                            <div class="form-group">
-                                <label>Or enter this code manually:</label>
-                                <code id="twofa-secret" style="display:block;padding:0.5rem;background:var(--surface);border-radius:4px;font-size:0.875rem;word-break:break-all"></code>
-                            </div>
-                            <div class="form-group">
-                                <label>Enter the 6-digit code from your app:</label>
-                                <input type="text" id="twofa-setup-code" class="input" placeholder="000000" maxlength="6" pattern="[0-9]{6}" style="text-align:center;font-size:1.25rem;letter-spacing:0.5em">
-                            </div>
-                            <div class="modal-actions">
-                                <button class="btn btn-secondary" id="btn-cancel-twofa-setup">Cancel</button>
-                                <button class="btn btn-primary" id="btn-confirm-twofa-setup">Verify & Enable</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 2FA Code Modal (for reveal) -->
-                <div id="twofa-code-modal" class="modal">
-                    <div class="modal-backdrop"></div>
-                    <div class="modal-content" style="max-width:360px">
-                        <div class="modal-header">
-                            <h3 class="modal-title">Authentication Required</h3>
-                            <button class="modal-close" type="button">&times;</button>
-                        </div>
-                        <div class="modal-body">
-                            <p style="margin-bottom:1rem;color:var(--muted)">Enter the code from your authenticator app to reveal this secret.</p>
-                            <div class="form-group">
-                                <input type="text" id="twofa-verify-code" class="input" placeholder="000000" maxlength="6" pattern="[0-9]{6}" style="text-align:center;font-size:1.25rem;letter-spacing:0.5em" autofocus>
-                            </div>
-                            <div class="modal-actions">
-                                <button class="btn btn-secondary" id="btn-cancel-twofa-verify">Cancel</button>
-                                <button class="btn btn-primary" id="btn-submit-twofa-verify">Verify</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Recovery Codes Modal -->
-                <div id="recovery-modal" class="modal">
-                    <div class="modal-backdrop"></div>
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h3 class="modal-title">Recovery Codes</h3>
-                            <button class="modal-close" type="button">&times;</button>
-                        </div>
-                        <div class="modal-body">
-                            <p style="margin-bottom:1rem;color:var(--muted)">Enter your authenticator code to view recovery codes.</p>
-                            <div id="recovery-codes-list" style="display:none">
-                                <p style="margin-bottom:0.5rem"><strong>Store these codes securely. Each can only be used once.</strong></p>
-                                <div id="recovery-codes-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;font-family:monospace"></div>
-                            </div>
-                            <div id="recovery-auth-section">
-                                <div class="form-group">
-                                    <input type="text" id="recovery-auth-code" class="input" placeholder="000000" maxlength="6" pattern="[0-9]{6}" style="text-align:center;font-size:1.25rem;letter-spacing:0.5em">
-                                </div>
-                            </div>
-                            <div class="modal-actions">
-                                <button class="btn btn-secondary" id="btn-close-recovery">Close</button>
-                                <button class="btn btn-primary" id="btn-show-recovery" style="display:none">Copy All</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Reveal Modal -->
-                <div id="reveal-modal" class="modal">
-                    <div class="modal-backdrop"></div>
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h3 class="modal-title">Reveal Secret</h3>
-                            <button class="modal-close" type="button">&times;</button>
-                        </div>
-                        <div class="modal-body">
-                            <div class="form-group">
-                                <label id="reveal-key-label">Key</label>
-                                <div class="vault-reveal-value" id="reveal-value">Decrypting…</div>
-                            </div>
-                            <div class="vault-reveal-timer" id="reveal-timer">Auto-hide in 10s</div>
-                            <div class="modal-actions">
-                                <button class="btn btn-secondary" id="btn-copy-secret">Copy</button>
-                                <button class="btn btn-primary" id="btn-close-reveal">Close</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                {section}
 
             </div>
-        </main>"#;
+        </main>"#
+    );
 
-    Html(page_html("Vault", "vault", body, &["vault.js"]))
+    Html(page_html("Vault", "vault", &body, &["vault.js"]))
 }
 
 // ─── File Access ─────────────────────────────────────────────────
 
 async fn file_access_page(State(state): State<Arc<AppState>>) -> Html<String> {
     let config = state.config.read().await;
-    let mode = match config.permissions.mode {
-        crate::config::PermissionMode::Open => "open",
-        crate::config::PermissionMode::Workspace => "workspace",
-        crate::config::PermissionMode::Acl => "acl",
-    };
     let acl_count = config.permissions.acl.len();
+    drop(config);
 
+    let section = section_file_access(&state).await;
     let body = format!(
         r#"<main class="content">
             <div class="content-inner">
@@ -2981,219 +2139,10 @@ async fn file_access_page(State(state): State<Arc<AppState>>) -> Html<String> {
                     </div>
                 </div>
 
-                <div class="permissions-notice">
-                    <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;flex-shrink:0">
-                        <rect x="1" y="4" width="16" height="12" rx="1.5"/>
-                        <circle cx="9" cy="10" r="2"/>
-                        <path d="M5 4V3a4 4 0 0 1 8 0v1"/>
-                    </svg>
-                    <div>
-                        <strong>Permission Mode</strong><br>
-                        Control what files and directories the agent can access. Changes take effect immediately.
-                    </div>
-                </div>
-
-                <section class="section">
-                    <h2>Permission Mode</h2>
-                    <div class="permission-mode-grid">
-                        <div class="permission-mode-card" data-mode="open">
-                            <div class="permission-mode-header">
-                                <span class="permission-mode-name">Open</span>
-                                <span class="badge badge-neutral">Not Recommended</span>
-                            </div>
-                            <div class="permission-mode-desc">Agent can access any file (except hardcoded blocks like ~/.ssh)</div>
-                        </div>
-                        <div class="permission-mode-card" data-mode="workspace">
-                            <div class="permission-mode-header">
-                                <span class="permission-mode-name">Workspace</span>
-                                <span class="badge badge-success">Default</span>
-                            </div>
-                            <div class="permission-mode-desc">Agent can access workspace + brain + memory directories</div>
-                        </div>
-                        <div class="permission-mode-card" data-mode="acl">
-                            <div class="permission-mode-header">
-                                <span class="permission-mode-name">ACL</span>
-                                <span class="badge badge-info">Advanced</span>
-                            </div>
-                            <div class="permission-mode-desc">Full ACL-based control with per-path permissions</div>
-                        </div>
-                    </div>
-                    <input type="hidden" id="current-mode" value="{mode}">
-                </section>
-
-                <section class="section">
-                    <h2>Default Permissions</h2>
-                    <p class="form-hint">These apply when no ACL rule matches a path.</p>
-                    <div class="permission-defaults" id="permission-defaults">
-                        <div class="perm-checkbox-group">
-                            <label class="checkbox-label">
-                                <input type="checkbox" id="default-read" {default_read_checked}>
-                                <span>Read</span>
-                            </label>
-                            <label class="checkbox-label">
-                                <input type="checkbox" id="default-write" {default_write_checked}>
-                                <span>Write</span>
-                            </label>
-                            <label class="checkbox-label">
-                                <input type="checkbox" id="default-delete" {default_delete_checked}>
-                                <span>Delete</span>
-                            </label>
-                        </div>
-                    </div>
-                </section>
-
-                <section class="section">
-                    <h2>ACL Rules</h2>
-                    <p class="form-hint">Rules are evaluated in order. First match wins. Built-in rules protect sensitive paths.</p>
-
-                    <div class="acl-actions">
-                        <button class="btn btn-primary btn-sm" id="btn-add-acl">Add Rule</button>
-                    </div>
-
-                    <div class="acl-list" id="acl-list">
-                        <div class="acl-loading">Loading ACL rules...</div>
-                    </div>
-                </section>
-
-                <section class="section">
-                    <h2>Quick Presets</h2>
-                    <div class="preset-buttons">
-                        <button class="btn btn-secondary" data-preset="developer">Developer</button>
-                        <button class="btn btn-secondary" data-preset="restricted">Restricted</button>
-                        <button class="btn btn-danger" data-preset="paranoid">Paranoid</button>
-                    </div>
-                </section>
-
-                <section class="section">
-                    <h2>Test Path</h2>
-                    <p class="form-hint">Check if a path would be allowed for a specific operation.</p>
-                    <div class="test-path-form">
-                        <input type="text" id="test-path" class="input" placeholder="~/Projects/myfile.txt">
-                        <select id="test-operation" class="input">
-                            <option value="read">Read</option>
-                            <option value="write">Write</option>
-                            <option value="delete">Delete</option>
-                        </select>
-                        <button class="btn btn-primary" id="btn-test-path">Test</button>
-                    </div>
-                    <div id="test-result" class="test-result" style="display:none"></div>
-                </section>
+                {section}
 
             </div>
-        </main>
-
-        <!-- ACL Edit Modal -->
-        <div id="acl-modal" class="modal">
-            <div class="modal-backdrop"></div>
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h3 class="modal-title" id="acl-modal-title">Add ACL Rule</h3>
-                    <button class="modal-close acl-modal-close" type="button">&times;</button>
-                </div>
-                <div class="modal-body">
-                    <form id="acl-form">
-                        <div class="form-group">
-                            <label>Path Pattern</label>
-                            <div class="path-input-group">
-                                <input type="text" id="acl-path" class="input" placeholder="~/Projects/**">
-                                <button type="button" class="btn btn-secondary btn-sm" id="btn-browse-path">Browse</button>
-                            </div>
-                            <div class="form-hint">Glob patterns supported: ** (any depth), * (single segment), ? (single char)</div>
-                        </div>
-                        <div class="form-group">
-                            <label>Type</label>
-                            <select id="acl-type" class="input">
-                                <option value="allow">Allow</option>
-                                <option value="deny">Deny</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>Permissions</label>
-                            <div class="perm-checkbox-group">
-                                <label class="checkbox-label">
-                                    <input type="checkbox" id="acl-read" checked>
-                                    <span>Read</span>
-                                </label>
-                                <label class="checkbox-label">
-                                    <input type="checkbox" id="acl-write">
-                                    <span>Write</span>
-                                </label>
-                                <label class="checkbox-label">
-                                    <input type="checkbox" id="acl-delete">
-                                    <span>Delete</span>
-                                </label>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label>Confirmation Required</label>
-                            <select id="acl-confirm" class="input">
-                                <option value="none">None</option>
-                                <option value="read">On Read</option>
-                                <option value="write">On Write</option>
-                                <option value="delete">On Delete</option>
-                            </select>
-                            <div class="form-hint">Agent will ask for confirmation before the operation.</div>
-                        </div>
-                        <div class="modal-actions">
-                            <button type="button" class="btn btn-secondary acl-modal-cancel">Cancel</button>
-                            <button type="submit" class="btn btn-primary">Save Rule</button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-        </div>
-
-        <!-- Path Browser Modal -->
-        <div id="path-browser-modal" class="modal">
-            <div class="modal-backdrop"></div>
-            <div class="modal-content modal-content--wide">
-                <div class="modal-header">
-                    <h3 class="modal-title">Browse Folders</h3>
-                    <button class="modal-close path-browser-close" type="button">&times;</button>
-                </div>
-                <div class="modal-body">
-                    <div class="path-browser-current">
-                        <span id="browser-current-path">~</span>
-                    </div>
-                    <div class="path-browser-nav">
-                        <button class="btn btn-sm btn-secondary" id="btn-browser-up">↑ Up</button>
-                        <button class="btn btn-sm btn-secondary" id="btn-browser-home">🏠 Home</button>
-                    </div>
-                    <div class="path-browser-list" id="browser-list">
-                        <div class="browser-loading">Loading...</div>
-                    </div>
-                    <div class="path-browser-selected">
-                        <label>Selected Path:</label>
-                        <input type="text" id="browser-selected-path" class="input" readonly>
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="browser-recursive" checked>
-                            <span>Include subdirectories (**)</span>
-                        </label>
-                    </div>
-                </div>
-                <div class="modal-actions">
-                    <button type="button" class="btn btn-secondary path-browser-cancel">Cancel</button>
-                    <button type="button" class="btn btn-primary" id="btn-select-path">Select Folder</button>
-                </div>
-            </div>
-        </div>"#,
-        mode = mode,
-        acl_count = acl_count,
-        default_read_checked = if config.permissions.default.read {
-            "checked"
-        } else {
-            ""
-        },
-        default_write_checked = if config.permissions.default.write {
-            "checked"
-        } else {
-            ""
-        },
-        default_delete_checked = if config.permissions.default.delete {
-            "checked"
-        } else {
-            ""
-        },
+        </main>"#
     );
 
     Html(page_html(
@@ -3206,76 +2155,40 @@ async fn file_access_page(State(state): State<Arc<AppState>>) -> Html<String> {
 
 // ─── Shell ───────────────────────────────────────────────────────
 
-async fn shell_page(State(_state): State<Arc<AppState>>) -> Html<String> {
-    let body = r#"<main class="content">
+async fn shell_page(State(state): State<Arc<AppState>>) -> Html<String> {
+    let inner = section_shell(&state).await;
+    let body = format!(
+        r#"<main class="content">
             <div class="content-inner">
                 <div class="page-header">
                     <div class="page-title-group">
                         <h1 class="page-title">Shell</h1>
                     </div>
                 </div>
-
-                <div class="permissions-notice">
-                    <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;flex-shrink:0">
-                        <path d="M3 15V3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v12"/>
-                        <line x1="6" y1="6" x2="12" y2="6"/>
-                        <line x1="6" y1="9" x2="12" y2="9"/>
-                        <line x1="6" y1="12" x2="9" y2="12"/>
-                    </svg>
-                    <div>
-                        <strong>Shell Permissions</strong><br>
-                        OS-specific command restrictions for the shell tool. Changes take effect immediately.
-                    </div>
-                </div>
-
-                <section class="section">
-                    <div class="shell-tabs">
-                        <button class="shell-tab active" data-os="macos">macOS</button>
-                        <button class="shell-tab" data-os="linux">Linux</button>
-                        <button class="shell-tab" data-os="windows">Windows</button>
-                    </div>
-
-                    <div class="shell-profile-content" id="shell-profile-content">
-                        <div class="form-group">
-                            <label>Shell</label>
-                            <select id="shell-select" class="input">
-                                <option value="">Default (sh)</option>
-                                <option value="bash">bash</option>
-                                <option value="zsh">zsh</option>
-                                <option value="powershell">PowerShell</option>
-                                <option value="cmd">cmd</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label class="checkbox-label">
-                                <input type="checkbox" id="allow-risky">
-                                <span>Allow Risky Commands</span>
-                            </label>
-                            <div class="form-hint">Package removal, process killing, etc.</div>
-                        </div>
-                        <div class="form-group">
-                            <label>Blocked Commands (one per line)</label>
-                            <textarea id="blocked-commands" class="input" rows="3" placeholder="launchctl load&#10;defaults delete"></textarea>
-                        </div>
-                        <div class="form-group">
-                            <label>Allowed Commands Whitelist (optional, one per line)</label>
-                            <textarea id="allowed-commands" class="input" rows="3" placeholder="git&#10;npm&#10;cargo"></textarea>
-                            <div class="form-hint">If non-empty, only these commands are allowed.</div>
-                        </div>
-                    </div>
-                </section>
-
+                {inner}
             </div>
-        </main>"#;
-
-    Html(page_html("Shell", "shell", body, &["shell.js"]))
+        </main>"#
+    );
+    Html(page_html("Shell", "shell", &body, &["shell.js"]))
 }
 
 // ─── Sandbox ─────────────────────────────────────────────────────
 
 async fn sandbox_page(State(state): State<Arc<AppState>>) -> Html<String> {
     let config = state.config.read().await;
+    let sandbox_badge_class = if config.security.execution_sandbox.enabled {
+        "badge-success"
+    } else {
+        "badge-neutral"
+    };
+    let sandbox_badge_text = if config.security.execution_sandbox.enabled {
+        "Enabled"
+    } else {
+        "Disabled"
+    };
+    drop(config);
 
+    let section = section_sandbox(&state).await;
     let body = format!(
         r#"<main class="content">
             <div class="content-inner">
@@ -3286,172 +2199,10 @@ async fn sandbox_page(State(state): State<Arc<AppState>>) -> Html<String> {
                     </div>
                 </div>
 
-                <section class="section" id="sandbox-docker-status-section">
-                    <h2>Backend Status</h2>
-                    <div class="sandbox-docker-status" id="sandbox-docker-status">
-                        <div class="sandbox-docker-status-icon" id="sandbox-docker-status-icon">⏳</div>
-                        <div class="sandbox-docker-status-info">
-                            <div class="sandbox-docker-status-text" id="sandbox-docker-status-text">Detecting available backends...</div>
-                            <div class="sandbox-docker-status-detail" id="sandbox-docker-status-detail"></div>
-                        </div>
-                        <button type="button" class="btn btn-secondary btn-sm" id="btn-refresh-docker-status">Refresh</button>
-                    </div>
-                </section>
-
-                <section class="section" id="sandbox-recommendation-section" style="display:none">
-                    <div class="sandbox-recommendation" id="sandbox-recommendation">
-                        <div class="sandbox-recommendation-text" id="sandbox-recommendation-text"></div>
-                        <button type="button" class="btn btn-primary btn-sm" id="btn-apply-sandbox-recommended">Apply Recommended</button>
-                    </div>
-                </section>
-
-                <section class="section">
-                    <h2>Profile</h2>
-                    <div class="sandbox-profile-grid">
-                        <button type="button" class="sandbox-profile-card" data-sandbox-profile="safe">
-                            <div class="sandbox-profile-header">
-                                <span class="sandbox-profile-title">Safe</span>
-                                <span class="badge badge-neutral" id="sandbox-profile-safe-badge">Fallback allowed</span>
-                            </div>
-                            <p class="sandbox-profile-desc" id="sandbox-profile-safe-desc">Sandbox active with auto-detected backend. Falls back to native if unavailable.</p>
-                        </button>
-                        <button type="button" class="sandbox-profile-card" data-sandbox-profile="strict">
-                            <div class="sandbox-profile-header">
-                                <span class="sandbox-profile-title">Strict</span>
-                                <span class="badge badge-warning" id="sandbox-profile-strict-badge">Blocks on failure</span>
-                            </div>
-                            <p class="sandbox-profile-desc" id="sandbox-profile-strict-desc">Requires an isolation backend. Blocks execution if no backend is available.</p>
-                        </button>
-                        <button type="button" class="sandbox-profile-card" data-sandbox-profile="disabled">
-                            <div class="sandbox-profile-header">
-                                <span class="sandbox-profile-title">Disabled</span>
-                                <span class="badge badge-neutral">Native execution</span>
-                            </div>
-                            <p class="sandbox-profile-desc">No sandbox wrapper. Processes run natively on the host.</p>
-                        </button>
-                    </div>
-                </section>
-
-                <section class="section" id="sandbox-image-section">
-                    <h2>Runtime Image</h2>
-                    <div class="sandbox-image-status" id="sandbox-image-status">
-                        <div class="sandbox-image-info">
-                            <code id="sandbox-image-name">{sandbox_docker_image}</code>
-                            <span class="badge badge-neutral" id="sandbox-image-status-badge">checking...</span>
-                        </div>
-                        <div class="form-actions">
-                            <button type="button" class="btn btn-primary btn-sm" id="btn-pull-sandbox-image">Pull Image</button>
-                        </div>
-                    </div>
-                </section>
-
-                <section class="section">
-                    <details class="sandbox-advanced" id="sandbox-advanced">
-                        <summary>Advanced Settings</summary>
-                        <div class="shell-profile-content">
-                            <div class="form-group">
-                                <label class="checkbox-label">
-                                    <input type="checkbox" id="sandbox-enabled" {sandbox_enabled_checked}>
-                                    <span>Enable sandbox wrapper</span>
-                                </label>
-                                <div class="form-hint">When enabled, process execution is wrapped by the selected backend.</div>
-                            </div>
-                            <div class="form-group">
-                                <label>Backend</label>
-                                <select id="sandbox-backend" class="input">
-                                    <option value="auto">auto</option>
-                                    <option value="docker">docker</option>
-                                    <option value="linux_native">linux_native</option>
-                                    <option value="windows_native">windows_native</option>
-                                    <option value="macos_seatbelt">macos_seatbelt</option>
-                                    <option value="none">none</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label class="checkbox-label">
-                                    <input type="checkbox" id="sandbox-strict" {sandbox_strict_checked}>
-                                    <span>Strict mode</span>
-                                </label>
-                                <div class="form-hint">Fail execution if backend is unavailable instead of falling back.</div>
-                            </div>
-                            <div id="sandbox-docker-fields">
-                                <div class="form-group">
-                                    <label>Docker image</label>
-                                    <input type="text" id="sandbox-docker-image" class="input" value="{sandbox_docker_image}">
-                                </div>
-                                <div class="form-group">
-                                    <label>Docker network</label>
-                                    <select id="sandbox-docker-network" class="input">
-                                        <option value="none">none</option>
-                                        <option value="bridge">bridge</option>
-                                        <option value="host">host</option>
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <label>Memory limit (MB)</label>
-                                    <input type="number" min="0" step="64" id="sandbox-docker-memory" class="input" value="{sandbox_docker_memory}">
-                                </div>
-                                <div class="form-group">
-                                    <label>CPU limit</label>
-                                    <input type="number" min="0" step="0.1" id="sandbox-docker-cpus" class="input" value="{sandbox_docker_cpus}">
-                                </div>
-                                <div class="form-group">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" id="sandbox-docker-readonly" {sandbox_docker_readonly_checked}>
-                                        <span>Read-only root filesystem</span>
-                                    </label>
-                                </div>
-                                <div class="form-group">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" id="sandbox-docker-mount-workspace" {sandbox_docker_mount_workspace_checked}>
-                                        <span>Mount workspace to /workspace</span>
-                                    </label>
-                                </div>
-                            </div>
-                            <div class="form-group">
-                                <button class="btn btn-primary btn-sm" id="btn-save-sandbox">Save Settings</button>
-                            </div>
-                        </div>
-                    </details>
-                </section>
+                {section}
 
             </div>
-        </main>"#,
-        sandbox_badge_class = if config.security.execution_sandbox.enabled {
-            "badge-success"
-        } else {
-            "badge-neutral"
-        },
-        sandbox_badge_text = if config.security.execution_sandbox.enabled {
-            "Enabled"
-        } else {
-            "Disabled"
-        },
-        sandbox_enabled_checked = if config.security.execution_sandbox.enabled {
-            "checked"
-        } else {
-            ""
-        },
-        sandbox_strict_checked = if config.security.execution_sandbox.strict {
-            "checked"
-        } else {
-            ""
-        },
-        sandbox_docker_image = config.security.execution_sandbox.docker_image,
-        sandbox_docker_memory = config.security.execution_sandbox.docker_memory_mb,
-        sandbox_docker_cpus = config.security.execution_sandbox.docker_cpus,
-        sandbox_docker_readonly_checked =
-            if config.security.execution_sandbox.docker_read_only_rootfs {
-                "checked"
-            } else {
-                ""
-            },
-        sandbox_docker_mount_workspace_checked =
-            if config.security.execution_sandbox.docker_mount_workspace {
-                "checked"
-            } else {
-                ""
-            },
+        </main>"#
     );
 
     Html(page_html("Sandbox", "sandbox", &body, &["sandbox.js"]))
@@ -3979,12 +2730,9 @@ fn format_uptime(secs: u64) -> String {
 // ─── Account Page ─────────────────────────────────────────────────
 
 async fn account_page(State(state): State<Arc<AppState>>) -> Html<String> {
-    let config = state.config.read().await;
-    let email_accounts_html = build_email_accounts_html(&config);
-    drop(config);
-
+    let section = section_account(&state).await;
     let body = format!(
-        r##"<main class="content">
+        r#"<main class="content">
             <div class="content-inner">
                 <div class="page-header">
                     <div class="page-title-group">
@@ -3992,329 +2740,9 @@ async fn account_page(State(state): State<Arc<AppState>>) -> Html<String> {
                         <span class="badge badge-neutral" id="account-status">Loading…</span>
                     </div>
                 </div>
-
-                <!-- Owner Info Section -->
-                <section class="section">
-                    <div class="section-header">
-                        <h2>Owner</h2>
-                    </div>
-                    <div class="account-owner-card" id="owner-card">
-                        <div class="owner-avatar">
-                            <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" style="width:32px;height:32px">
-                                <circle cx="9" cy="6" r="3.5"/>
-                                <path d="M3 17c0-3.5 2.5-6 6-6s6 2.5 6 6"/>
-                            </svg>
-                        </div>
-                        <div class="owner-info">
-                            <div class="owner-username" id="owner-username">—</div>
-                            <div class="owner-role" id="owner-role">—</div>
-                        </div>
-                    </div>
-                    <div id="no-owner-warning" style="display:none" class="empty-state">
-                        <p>No owner configured. Create one with: <code>homun users add &lt;username&gt; --admin</code></p>
-                    </div>
-                </section>
-
-                <!-- Your Gateways Section -->
-                <section class="section">
-                    <div class="section-header" style="display:flex;justify-content:space-between;align-items:center;">
-                        <div style="display:flex;align-items:center;gap:8px">
-                            <h2>Your Gateways</h2>
-                            <span class="badge" id="gateways-count">0</span>
-                        </div>
-                        <button class="btn btn-primary btn-sm" id="btn-add-gateway">+ Add Gateway</button>
-                    </div>
-                    <p style="color:var(--muted);margin-bottom:1rem;font-size:0.875rem">
-                        Channel instances (Telegram bots, WhatsApp accounts, etc.) with their assigned profiles.
-                    </p>
-                    <div class="provider-grid" id="gateways-grid">
-                        <div class="empty-state" id="gateways-empty">
-                            <p>No gateways configured. They will be auto-created from your channel settings on next gateway start.</p>
-                        </div>
-                    </div>
-                </section>
-
-                <!-- Channel Identities Section -->
-                <section class="section">
-                    <div class="section-header">
-                        <h2>Channel Identities</h2>
-                        <span class="badge" id="identities-count">0</span>
-                    </div>
-                    <p style="color:var(--muted);margin-bottom:1rem;font-size:0.875rem">
-                        Link your Telegram, Discord, or WhatsApp account to identify yourself as the owner.
-                    </p>
-                    <div class="item-list" id="identities-list">
-                        <div class="empty-state" id="identities-empty">
-                            <p>No identities linked</p>
-                        </div>
-                    </div>
-
-                    <!-- Add Identity Form -->
-                    <details class="details-collapse" style="margin-top:1rem">
-                        <summary class="btn btn-secondary btn-sm">+ Link Identity</summary>
-                        <form id="link-identity-form" class="form" style="margin-top:1rem">
-                            <div class="form-row form-row--3">
-                                <div class="form-group">
-                                    <label>Channel</label>
-                                    <select id="identity-channel" class="input">
-                                        <option value="telegram">Telegram</option>
-                                        <option value="discord">Discord</option>
-                                        <option value="whatsapp">WhatsApp</option>
-                                        <option value="web">Web</option>
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <label>Platform ID</label>
-                                    <input type="text" id="identity-platform-id" class="input" placeholder="e.g., 123456789">
-                                </div>
-                                <div class="form-group">
-                                    <label>Display Name (optional)</label>
-                                    <input type="text" id="identity-display-name" class="input" placeholder="My Account">
-                                </div>
-                            </div>
-                            <button type="submit" class="btn btn-primary btn-sm">Link</button>
-                        </form>
-                    </details>
-                </section>
-
-                <!-- API Keys — managed on dedicated page -->
-                <section class="section">
-                    <div class="section-header">
-                        <h2>API Keys</h2>
-                    </div>
-                    <p style="color:var(--muted);margin-bottom:1rem;font-size:0.875rem">
-                        <a href="/api-keys" style="color:var(--accent)">Manage API keys →</a>
-                    </p>
-                </section>
-
-                <!-- Trusted Devices (REM-3) -->
-                <section class="section">
-                    <div class="section-header">
-                        <h2>Trusted Devices</h2>
-                        <span class="badge" id="devices-count">0</span>
-                    </div>
-                    <p style="color:var(--muted);margin-bottom:1rem;font-size:0.875rem">
-                        Browsers approved for login. Revoke a device to require re-approval on next login.
-                    </p>
-                    <div class="item-list" id="devices-list">
-                        <div class="empty-state" id="devices-empty">
-                            <p>No trusted devices (device approval is off by default)</p>
-                        </div>
-                    </div>
-                </section>
-
-                <!-- Additional Email Accounts -->
-                <section class="section" id="section-email-accounts">
-                    <div class="section-header" style="display:flex;justify-content:space-between;align-items:center;">
-                        <h2>Additional Email Accounts</h2>
-                        <button class="btn btn-primary btn-sm" id="btn-add-email-account">+ Add Account</button>
-                    </div>
-                    <div class="form-hint" style="margin-bottom:12px;">Add extra email accounts beyond the primary one configured in Settings &rarr; Channels.</div>
-                    <div class="provider-grid" id="email-accounts-grid">
-                        {email_accounts_html}
-                    </div>
-                </section>
-
+                {section}
             </div>
-        </main>
-
-        <!-- Email Account Modal -->
-        <div id="email-account-modal" class="modal">
-            <div class="modal-backdrop"></div>
-            <div class="modal-content modal-content--channel">
-                <div class="modal-header-group">
-                    <div class="modal-header">
-                        <h3 class="modal-title" id="email-modal-title">Configure Email Account</h3>
-                        <button class="modal-close ea-modal-close" type="button">&times;</button>
-                    </div>
-                    <p class="modal-subtitle">IMAP/SMTP account for receiving and responding to emails.</p>
-                </div>
-                <div class="modal-body">
-                    <form id="email-account-form">
-                        <div class="form-group">
-                            <label for="ea-name">Account Name</label>
-                            <input type="text" id="ea-name" name="name" class="input" placeholder="e.g. lavoro, personal" required>
-                            <div class="form-hint">Unique identifier. Used in channel routing (email:name).</div>
-                        </div>
-
-                        <div class="modal-section-label">Mail Servers</div>
-                        <div class="form-row--2">
-                            <div class="form-group">
-                                <label for="ea-imap-host">IMAP Server</label>
-                                <input type="text" id="ea-imap-host" name="imap_host" class="input" placeholder="imap.gmail.com">
-                            </div>
-                            <div class="form-group">
-                                <label for="ea-imap-port">IMAP Port</label>
-                                <input type="number" id="ea-imap-port" name="imap_port" class="input" value="993">
-                            </div>
-                        </div>
-                        <div class="form-row--2">
-                            <div class="form-group">
-                                <label for="ea-smtp-host">SMTP Server</label>
-                                <input type="text" id="ea-smtp-host" name="smtp_host" class="input" placeholder="smtp.gmail.com">
-                            </div>
-                            <div class="form-group">
-                                <label for="ea-smtp-port">SMTP Port</label>
-                                <input type="number" id="ea-smtp-port" name="smtp_port" class="input" value="465">
-                            </div>
-                        </div>
-
-                        <div class="modal-section-label">Credentials</div>
-                        <div class="form-row--2">
-                            <div class="form-group">
-                                <label for="ea-username">Username</label>
-                                <input type="text" id="ea-username" name="username" class="input" placeholder="bot@example.com">
-                            </div>
-                            <div class="form-group">
-                                <label for="ea-password">Password</label>
-                                <input type="password" id="ea-password" name="password" class="input" placeholder="App password (stored encrypted)">
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label for="ea-from">From Address</label>
-                            <input type="text" id="ea-from" name="from_address" class="input" placeholder="bot@example.com">
-                        </div>
-
-                        <div class="modal-section-label">Behavior</div>
-                        <div class="form-row--2">
-                            <div class="form-group">
-                                <label for="ea-mode">Response Mode</label>
-                                <select id="ea-mode" name="mode" class="input">
-                                    <option value="assisted">Assisted (summary + approval)</option>
-                                    <option value="automatic">Automatic (direct response)</option>
-                                    <option value="on_demand">On-Demand (trigger word only)</option>
-                                </select>
-                                <div class="form-hint" id="ea-mode-hint">Generates summary and draft, sends to notification channel for approval.</div>
-                            </div>
-                            <div class="form-group" id="ea-trigger-field" style="display:none;">
-                                <label for="ea-trigger-word">Trigger Word</label>
-                                <input type="text" id="ea-trigger-word" name="trigger_word" class="input" placeholder="Auto-generated if empty">
-                                <div class="form-hint">Include in subject/body to activate the bot.</div>
-                            </div>
-                        </div>
-
-                        <div id="ea-notify-fields">
-                            <div class="form-row--2">
-                                <div class="form-group">
-                                    <label for="ea-notify-channel">Notify Channel</label>
-                                    <select id="ea-notify-channel" name="notify_channel" class="input">
-                                        <option value="">None</option>
-                                        <option value="telegram">Telegram</option>
-                                        <option value="discord">Discord</option>
-                                        <option value="slack">Slack</option>
-                                        <option value="whatsapp">WhatsApp</option>
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <label for="ea-notify-chat-id">Notify Chat ID</label>
-                                    <input type="text" id="ea-notify-chat-id" name="notify_chat_id" class="input" placeholder="User/Channel ID">
-                                    <div class="form-hint form-hint--suggest" id="ea-notify-hint"></div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <details style="margin-top:12px;">
-                            <summary style="cursor:pointer;font-weight:500;color:var(--text-secondary);">Advanced (Batching &amp; Allow List)</summary>
-                            <div style="padding-top:12px;">
-                                <div class="form-group">
-                                    <label for="ea-allow-from">Allow From</label>
-                                    <input type="text" id="ea-allow-from" name="allow_from" class="input" placeholder="user@example.com, * for all">
-                                    <div class="form-hint">Comma-separated. Empty = deny all, * = allow all.</div>
-                                </div>
-                                <div class="form-row--2">
-                                    <div class="form-group">
-                                        <label for="ea-batch-threshold">Batch Threshold</label>
-                                        <input type="number" id="ea-batch-threshold" name="batch_threshold" class="input" value="3" min="1" max="50">
-                                        <div class="form-hint">Emails before sending digest</div>
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="ea-batch-window">Batch Window (s)</label>
-                                        <input type="number" id="ea-batch-window" name="batch_window_secs" class="input" value="120" min="10" max="3600">
-                                        <div class="form-hint">Seconds to accumulate</div>
-                                    </div>
-                                </div>
-                                <div class="form-group">
-                                    <label for="ea-send-delay">Send Delay (s)</label>
-                                    <input type="number" id="ea-send-delay" name="send_delay_secs" class="input" value="30" min="0" max="300">
-                                    <div class="form-hint">Delay between successive responses</div>
-                                </div>
-                            </div>
-                        </details>
-                        <div id="ea-test-result" class="form-hint" style="margin-top:8px;"></div>
-                    </form>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary ea-modal-cancel">Cancel</button>
-                    <button type="button" id="btn-delete-email-account" class="btn btn-danger" style="display:none;">Delete</button>
-                    <button type="button" id="btn-test-email-account" class="btn btn-secondary">Test IMAP</button>
-                    <button type="submit" form="email-account-form" class="btn btn-primary">Save &amp; Enable</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Gateway Modal -->
-        <div id="gateway-modal" class="modal">
-            <div class="modal-backdrop"></div>
-            <div class="modal-content modal-content--channel">
-                <div class="modal-header-group">
-                    <div class="modal-header">
-                        <h3 class="modal-title" id="gw-modal-title">Add Gateway</h3>
-                        <button class="modal-close gw-modal-close" type="button">&times;</button>
-                    </div>
-                    <p class="modal-subtitle" id="gw-modal-subtitle">Configure a channel instance with its own profile and settings.</p>
-                </div>
-                <div class="modal-body">
-                    <form id="gateway-form">
-                        <input type="hidden" id="gw-id" value="">
-                        <div class="form-group">
-                            <label for="gw-name">Gateway Name</label>
-                            <input type="text" id="gw-name" class="input" placeholder="e.g. Telegram Personale" required>
-                            <div class="form-hint">A friendly name to identify this gateway.</div>
-                        </div>
-                        <div class="form-group">
-                            <label for="gw-channel-type">Channel Type</label>
-                            <select id="gw-channel-type" class="input">
-                                <option value="telegram">Telegram</option>
-                                <option value="discord">Discord</option>
-                                <option value="whatsapp">WhatsApp</option>
-                                <option value="slack">Slack</option>
-                                <option value="email">Email</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="gw-token">Token / API Key</label>
-                            <input type="password" id="gw-token" class="input" placeholder="Bot token or API key">
-                            <div class="form-hint">Stored encrypted in vault. Leave empty to keep existing.</div>
-                        </div>
-                        <div class="modal-section-label">Behavior</div>
-                        <div class="form-row--2">
-                            <div class="form-group">
-                                <label for="gw-profile">Profile</label>
-                                <select id="gw-profile" class="input">
-                                    <option value="">Default</option>
-                                </select>
-                                <div class="form-hint">Agent personality for this gateway.</div>
-                            </div>
-                            <div class="form-group">
-                                <label for="gw-response-mode">Response Mode</label>
-                                <select id="gw-response-mode" class="input">
-                                    <option value="automatic">Automatic</option>
-                                    <option value="assisted">Assisted</option>
-                                    <option value="on_demand">On Demand</option>
-                                    <option value="silent">Silent</option>
-                                </select>
-                            </div>
-                        </div>
-                    </form>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary gw-modal-close">Cancel</button>
-                    <button type="button" id="btn-delete-gateway" class="btn btn-danger" style="display:none;">Delete</button>
-                    <button type="submit" form="gateway-form" class="btn btn-primary" id="btn-save-gateway">Save</button>
-                </div>
-            </div>
-        </div>"##,
-        email_accounts_html = email_accounts_html,
+        </main>"#
     );
 
     let html = page_html("Account", "account", &body, &["account.js", "account-gateways.js"]);
@@ -4326,10 +2754,7 @@ async fn account_page(State(state): State<Arc<AppState>>) -> Html<String> {
 // ═══════════════════════════════════════════════════════════════
 
 async fn approvals_page(State(state): State<Arc<AppState>>) -> Html<String> {
-    let config = state.config.read().await;
-    let level = format!("{:?}", config.permissions.approval.level).to_lowercase();
-    drop(config);
-
+    let section = section_approvals(&state).await;
     let body = format!(
         r#"
         <main class="content">
@@ -4342,71 +2767,9 @@ async fn approvals_page(State(state): State<Arc<AppState>>) -> Html<String> {
                     <p class="page-desc">Manage command approval workflow for shell commands</p>
                 </div>
 
-                <div class="content-grid">
-                    <!-- Approval Configuration -->
-                    <section class="card">
-                        <div class="card-header">
-                        <h2>Configuration</h2>
-                        </div>
-                        <div class="card-body">
-                        <div class="form-group">
-                            <label>Autonomy Level</label>
-                            <select id="approval-level" class="input">
-                                <option value="full" {full_selected}>Full - No approval required</option>
-                                <option value="supervised" {supervised_selected}>Supervised - Ask for unknown commands</option>
-                                <option value="readonly" {readonly_selected}>ReadOnly - Ask for all commands</option>
-                            </select>
-                        </div>
-                        <div class="form-group" style="margin-top:1rem">
-                            <label>Auto-approve commands (comma-separated)</label>
-                            <input type="text" id="auto-approve-list" class="input" placeholder="ls, cat, pwd">
-                        </div>
-                        <div class="form-group" style="margin-top:1rem">
-                            <label>Always ask for (comma-separated)</label>
-                            <input type="text" id="always-ask-list" class="input" placeholder="rm, sudo, chmod">
-                        </div>
-                        <button id="save-approval-config" class="btn btn-primary btn-sm" style="margin-top:1rem">Save Configuration</button>
-                    </div>
-                </section>
-
-                    <!-- Pending Approvals -->
-                    <section class="card">
-                        <div class="card-header">
-                            <h2>Pending Approvals</h2>
-                        </div>
-                        <div class="card-body">
-                            <div id="pending-approvals-list" class="scrollable-list">
-                                <div class="empty-state">
-                                    <p>No pending approvals</p>
-                                    <p class="muted">Commands requiring approval will appear here</p>
-                                </div>
-                            </div>
-                        </div>
-                    </section>
-
-                    <!-- Audit Log -->
-                    <section class="card">
-                        <div class="card-header">
-                            <h2>Recent Activity</h2>
-                        </div>
-                        <div class="card-body">
-                            <div id="approval-audit-log" class="scrollable-list">
-                                <div class="empty-state">
-                                    <p>No activity yet</p>
-                                </div>
-                            </div>
-                        </div>
-                    </section>
-                </div>
+                {section}
             </div>
-        </main>"#,
-        full_selected = if level == "full" { "selected" } else { "" },
-        supervised_selected = if level == "supervised" {
-            "selected"
-        } else {
-            ""
-        },
-        readonly_selected = if level == "readonly" { "selected" } else { "" },
+        </main>"#
     );
 
     let html = page_html("Approvals", "approvals", &body, &["approvals.js"]);
@@ -4867,8 +3230,10 @@ pub async fn setup_wizard_page() -> Html<String> {
 
 // ─── API Keys ────────────────────────────────────────────────────
 
-async fn api_keys_page() -> Html<String> {
-    let body = r#"<main class="content">
+async fn api_keys_page(State(state): State<Arc<AppState>>) -> Html<String> {
+    let inner = section_api_keys(&state).await;
+    let body = format!(
+        r#"<main class="content">
             <div class="content-inner">
                 <div class="page-header">
                     <div class="page-title-group">
@@ -4877,73 +3242,19 @@ async fn api_keys_page() -> Html<String> {
                     </div>
                     <button class="btn btn-primary btn-sm" id="create-key-btn">+ Create Key</button>
                 </div>
-
-                <!-- Create form (hidden by default) -->
-                <section class="section" id="create-form-section" style="display:none">
-                    <div class="section-header"><h2>New API Key</h2></div>
-                    <form id="create-key-form" class="form">
-                        <div class="form-row--2">
-                            <div class="form-group">
-                                <label for="key-name">Name</label>
-                                <input type="text" id="key-name" class="input" placeholder="My Integration" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="key-scope">Scope</label>
-                                <select id="key-scope" class="input">
-                                    <option value="admin">Admin — full access</option>
-                                    <option value="write">Write — read + write</option>
-                                    <option value="read">Read — read-only</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="form-row--2">
-                            <div class="form-group">
-                                <label for="key-expiry">Expires</label>
-                                <select id="key-expiry" class="input">
-                                    <option value="">Never</option>
-                                    <option value="7d">7 days</option>
-                                    <option value="30d" selected>30 days</option>
-                                    <option value="90d">90 days</option>
-                                </select>
-                            </div>
-                            <div class="form-group" style="display:flex;align-items:flex-end">
-                                <button type="submit" class="btn btn-primary btn-sm">Generate Key</button>
-                                <button type="button" class="btn btn-ghost btn-sm" id="cancel-create-btn" style="margin-left:var(--space-2)">Cancel</button>
-                            </div>
-                        </div>
-                    </form>
-                </section>
-
-                <!-- One-time token reveal -->
-                <section class="section" id="token-reveal-section" style="display:none">
-                    <div class="section-header"><h2>Your New API Key</h2></div>
-                    <p class="form-hint" style="margin-bottom:var(--space-3)">Copy this key now — you won't be able to see it again.</p>
-                    <div style="display:flex;gap:var(--space-2);align-items:center">
-                        <code class="input" id="revealed-token" style="flex:1;font-family:var(--font-mono);user-select:all"></code>
-                        <button class="btn btn-secondary btn-sm" id="copy-token-btn">Copy</button>
-                        <button class="btn btn-ghost btn-sm" id="dismiss-reveal-btn">Done</button>
-                    </div>
-                </section>
-
-                <!-- Keys list -->
-                <section class="section">
-                    <div class="section-header"><h2>Active Keys</h2></div>
-                    <div class="item-list" id="keys-list">
-                        <div class="empty-state" id="keys-empty">
-                            <p>No API keys yet. Create one to access the API programmatically.</p>
-                        </div>
-                    </div>
-                </section>
+                {inner}
             </div>
-        </main>"#;
-
-    Html(page_html("API Keys", "api-keys", body, &["api-keys.js"]))
+        </main>"#
+    );
+    Html(page_html("API Keys", "api-keys", &body, &["api-keys.js"]))
 }
 
 // ─── Maintenance ─────────────────────────────────────────────────
 
-async fn maintenance_page() -> Html<String> {
-    let body = r#"<main class="content">
+async fn maintenance_page(State(state): State<Arc<AppState>>) -> Html<String> {
+    let inner = section_maintenance(&state).await;
+    let body = format!(
+        r#"<main class="content">
             <div class="content-inner">
                 <div class="page-header">
                     <div class="page-title-group">
@@ -4951,18 +3262,14 @@ async fn maintenance_page() -> Html<String> {
                         <p class="page-subtitle">View storage usage and purge data by domain</p>
                     </div>
                 </div>
-                <div id="maintenance-content">
-                    <div class="empty-state">
-                        <p>Loading database stats...</p>
-                    </div>
-                </div>
+                {inner}
             </div>
-        </main>"#;
-
+        </main>"#
+    );
     Html(page_html(
         "Database",
         "maintenance",
-        body,
+        &body,
         &["maintenance.js"],
     ))
 }
@@ -5120,4 +3427,1532 @@ async fn agents_page(State(_state): State<Arc<AppState>>) -> Html<String> {
         body,
         &["model-loader.js", "agents.js"],
     ))
+}
+
+// ═══ Settings Modal Section Extractors ═══
+// These return HTML fragments for the settings modal API endpoint.
+// Each extracts the inner content from its corresponding page handler.
+
+/// Account section — owner info, gateways, identities, API keys, devices, email accounts.
+pub(crate) async fn section_account(state: &AppState) -> String {
+    let config = state.config.read().await;
+    let email_accounts_html = build_email_accounts_html(&config);
+    drop(config);
+
+    format!(
+        r##"<!-- Owner Info -->
+                <section class="section">
+                    <div class="section-header"><h2>Owner</h2></div>
+                    <div class="account-owner-card" id="owner-card">
+                        <div class="owner-avatar">
+                            <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" style="width:32px;height:32px">
+                                <circle cx="9" cy="6" r="3.5"/><path d="M3 17c0-3.5 2.5-6 6-6s6 2.5 6 6"/>
+                            </svg>
+                        </div>
+                        <div class="owner-info">
+                            <div class="owner-username" id="owner-username">—</div>
+                            <div class="owner-role" id="owner-role">—</div>
+                        </div>
+                    </div>
+                    <div id="no-owner-warning" style="display:none" class="empty-state">
+                        <p>No owner configured. Create one with: <code>homun users add &lt;username&gt; --admin</code></p>
+                    </div>
+                </section>
+
+                <section class="section">
+                    <div class="section-header" style="display:flex;justify-content:space-between;align-items:center;">
+                        <div style="display:flex;align-items:center;gap:8px">
+                            <h2 style="margin:0;padding:0;border:0">Your Gateways</h2>
+                            <span class="badge" id="gateways-count">0</span>
+                        </div>
+                        <button class="btn btn-primary btn-sm" id="btn-add-gateway">+ Add Gateway</button>
+                    </div>
+                    <p style="color:var(--muted);margin-bottom:1rem;font-size:0.875rem">
+                        Channel instances (Telegram bots, WhatsApp accounts, etc.) with their assigned profiles.
+                    </p>
+                    <div class="provider-grid" id="gateways-grid">
+                        <div class="empty-state" id="gateways-empty">
+                            <p>No gateways configured. They will be auto-created from your channel settings on next gateway start.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="section">
+                    <div class="section-header" style="display:flex;align-items:center;gap:8px">
+                        <h2 style="margin:0;padding:0;border:0">Channel Identities</h2>
+                        <span class="badge" id="identities-count">0</span>
+                    </div>
+                    <p style="color:var(--muted);margin-bottom:1rem;font-size:0.875rem">
+                        Link your Telegram, Discord, or WhatsApp account to identify yourself as the owner.
+                    </p>
+                    <div class="item-list" id="identities-list">
+                        <div class="empty-state" id="identities-empty"><p>No identities linked</p></div>
+                    </div>
+                    <details class="details-collapse" style="margin-top:1rem">
+                        <summary class="btn btn-secondary btn-sm">+ Link Identity</summary>
+                        <form id="link-identity-form" class="form" style="margin-top:1rem">
+                            <div class="form-row form-row--3">
+                                <div class="form-group">
+                                    <label>Channel</label>
+                                    <select id="identity-channel" class="input">
+                                        <option value="telegram">Telegram</option>
+                                        <option value="discord">Discord</option>
+                                        <option value="whatsapp">WhatsApp</option>
+                                        <option value="web">Web</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Platform ID</label>
+                                    <input type="text" id="identity-platform-id" class="input" placeholder="e.g., 123456789">
+                                </div>
+                                <div class="form-group">
+                                    <label>Display Name (optional)</label>
+                                    <input type="text" id="identity-display-name" class="input" placeholder="My Account">
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-sm">Link</button>
+                        </form>
+                    </details>
+                </section>
+
+                <section class="section">
+                    <div class="section-header"><h2>API Keys</h2></div>
+                    <p style="color:var(--muted);margin-bottom:1rem;font-size:0.875rem">
+                        <a href="/api-keys" style="color:var(--accent)">Manage API keys →</a>
+                    </p>
+                </section>
+
+                <section class="section">
+                    <div class="section-header" style="display:flex;align-items:center;gap:8px">
+                        <h2 style="margin:0;padding:0;border:0">Trusted Devices</h2>
+                        <span class="badge" id="devices-count">0</span>
+                    </div>
+                    <p style="color:var(--muted);margin-bottom:1rem;font-size:0.875rem">
+                        Browsers approved for login. Revoke a device to require re-approval on next login.
+                    </p>
+                    <div class="item-list" id="devices-list">
+                        <div class="empty-state" id="devices-empty"><p>No trusted devices (device approval is off by default)</p></div>
+                    </div>
+                </section>
+
+                <section class="section" id="section-email-accounts">
+                    <div class="section-header" style="display:flex;justify-content:space-between;align-items:center;">
+                        <h2>Additional Email Accounts</h2>
+                        <button class="btn btn-primary btn-sm" id="btn-add-email-account">+ Add Account</button>
+                    </div>
+                    <div class="form-hint" style="margin-bottom:12px;">Add extra email accounts beyond the primary one configured in Settings &rarr; Channels.</div>
+                    <div class="provider-grid" id="email-accounts-grid">{email_accounts_html}</div>
+                </section>
+
+        <div id="email-account-modal" class="modal">
+            <div class="modal-backdrop"></div>
+            <div class="modal-content modal-content--channel">
+                <div class="modal-header-group">
+                    <div class="modal-header">
+                        <h3 class="modal-title" id="email-modal-title">Configure Email Account</h3>
+                        <button class="modal-close ea-modal-close" type="button">&times;</button>
+                    </div>
+                    <p class="modal-subtitle">IMAP/SMTP account for receiving and responding to emails.</p>
+                </div>
+                <div class="modal-body">
+                    <form id="email-account-form">
+                        <div class="form-group">
+                            <label for="ea-name">Account Name</label>
+                            <input type="text" id="ea-name" name="name" class="input" placeholder="e.g. lavoro, personal" required>
+                            <div class="form-hint">Unique identifier. Used in channel routing (email:name).</div>
+                        </div>
+                        <div class="modal-section-label">Mail Servers</div>
+                        <div class="form-row--2">
+                            <div class="form-group"><label for="ea-imap-host">IMAP Server</label><input type="text" id="ea-imap-host" name="imap_host" class="input" placeholder="imap.gmail.com"></div>
+                            <div class="form-group"><label for="ea-imap-port">IMAP Port</label><input type="number" id="ea-imap-port" name="imap_port" class="input" value="993"></div>
+                        </div>
+                        <div class="form-row--2">
+                            <div class="form-group"><label for="ea-smtp-host">SMTP Server</label><input type="text" id="ea-smtp-host" name="smtp_host" class="input" placeholder="smtp.gmail.com"></div>
+                            <div class="form-group"><label for="ea-smtp-port">SMTP Port</label><input type="number" id="ea-smtp-port" name="smtp_port" class="input" value="465"></div>
+                        </div>
+                        <div class="modal-section-label">Credentials</div>
+                        <div class="form-row--2">
+                            <div class="form-group"><label for="ea-username">Username</label><input type="text" id="ea-username" name="username" class="input" placeholder="bot@example.com"></div>
+                            <div class="form-group"><label for="ea-password">Password</label><input type="password" id="ea-password" name="password" class="input" placeholder="App password (stored encrypted)"></div>
+                        </div>
+                        <div class="form-group"><label for="ea-from">From Address</label><input type="text" id="ea-from" name="from_address" class="input" placeholder="bot@example.com"></div>
+                        <div class="modal-section-label">Behavior</div>
+                        <div class="form-row--2">
+                            <div class="form-group">
+                                <label for="ea-mode">Response Mode</label>
+                                <select id="ea-mode" name="mode" class="input">
+                                    <option value="assisted">Assisted (summary + approval)</option>
+                                    <option value="automatic">Automatic (direct response)</option>
+                                    <option value="on_demand">On-Demand (trigger word only)</option>
+                                </select>
+                                <div class="form-hint" id="ea-mode-hint">Generates summary and draft, sends to notification channel for approval.</div>
+                            </div>
+                            <div class="form-group" id="ea-trigger-field" style="display:none;">
+                                <label for="ea-trigger-word">Trigger Word</label>
+                                <input type="text" id="ea-trigger-word" name="trigger_word" class="input" placeholder="Auto-generated if empty">
+                                <div class="form-hint">Include in subject/body to activate the bot.</div>
+                            </div>
+                        </div>
+                        <div id="ea-notify-fields">
+                            <div class="form-row--2">
+                                <div class="form-group">
+                                    <label for="ea-notify-channel">Notify Channel</label>
+                                    <select id="ea-notify-channel" name="notify_channel" class="input">
+                                        <option value="">None</option><option value="telegram">Telegram</option><option value="discord">Discord</option><option value="slack">Slack</option><option value="whatsapp">WhatsApp</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="ea-notify-chat-id">Notify Chat ID</label>
+                                    <input type="text" id="ea-notify-chat-id" name="notify_chat_id" class="input" placeholder="User/Channel ID">
+                                    <div class="form-hint form-hint--suggest" id="ea-notify-hint"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <details style="margin-top:12px;">
+                            <summary style="cursor:pointer;font-weight:500;color:var(--text-secondary);">Advanced (Batching &amp; Allow List)</summary>
+                            <div style="padding-top:12px;">
+                                <div class="form-group"><label for="ea-allow-from">Allow From</label><input type="text" id="ea-allow-from" name="allow_from" class="input" placeholder="user@example.com, * for all"><div class="form-hint">Comma-separated. Empty = deny all, * = allow all.</div></div>
+                                <div class="form-row--2">
+                                    <div class="form-group"><label for="ea-batch-threshold">Batch Threshold</label><input type="number" id="ea-batch-threshold" name="batch_threshold" class="input" value="3" min="1" max="50"><div class="form-hint">Emails before sending digest</div></div>
+                                    <div class="form-group"><label for="ea-batch-window">Batch Window (s)</label><input type="number" id="ea-batch-window" name="batch_window_secs" class="input" value="120" min="10" max="3600"><div class="form-hint">Seconds to accumulate</div></div>
+                                </div>
+                                <div class="form-group"><label for="ea-send-delay">Send Delay (s)</label><input type="number" id="ea-send-delay" name="send_delay_secs" class="input" value="30" min="0" max="300"><div class="form-hint">Delay between successive responses</div></div>
+                            </div>
+                        </details>
+                        <div id="ea-test-result" class="form-hint" style="margin-top:8px;"></div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary ea-modal-cancel">Cancel</button>
+                    <button type="button" id="btn-delete-email-account" class="btn btn-danger" style="display:none;">Delete</button>
+                    <button type="button" id="btn-test-email-account" class="btn btn-secondary">Test IMAP</button>
+                    <button type="submit" form="email-account-form" class="btn btn-primary">Save &amp; Enable</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="gateway-modal" class="modal">
+            <div class="modal-backdrop"></div>
+            <div class="modal-content modal-content--channel">
+                <div class="modal-header-group">
+                    <div class="modal-header">
+                        <h3 class="modal-title" id="gw-modal-title">Add Gateway</h3>
+                        <button class="modal-close gw-modal-close" type="button">&times;</button>
+                    </div>
+                    <p class="modal-subtitle" id="gw-modal-subtitle">Configure a channel instance with its own profile and settings.</p>
+                </div>
+                <div class="modal-body">
+                    <form id="gateway-form">
+                        <input type="hidden" id="gw-id" value="">
+                        <div class="form-group"><label for="gw-name">Gateway Name</label><input type="text" id="gw-name" class="input" placeholder="e.g. Telegram Personale" required><div class="form-hint">A friendly name to identify this gateway.</div></div>
+                        <div class="form-group">
+                            <label for="gw-channel-type">Channel Type</label>
+                            <select id="gw-channel-type" class="input"><option value="telegram">Telegram</option><option value="discord">Discord</option><option value="whatsapp">WhatsApp</option><option value="slack">Slack</option><option value="email">Email</option></select>
+                        </div>
+                        <div class="form-group"><label for="gw-token">Token / API Key</label><input type="password" id="gw-token" class="input" placeholder="Bot token or API key"><div class="form-hint">Stored encrypted in vault. Leave empty to keep existing.</div></div>
+                        <div class="modal-section-label">Behavior</div>
+                        <div class="form-row--2">
+                            <div class="form-group"><label for="gw-profile">Profile</label><select id="gw-profile" class="input"><option value="">Default</option></select><div class="form-hint">Agent personality for this gateway.</div></div>
+                            <div class="form-group">
+                                <label for="gw-response-mode">Response Mode</label>
+                                <select id="gw-response-mode" class="input"><option value="automatic">Automatic</option><option value="assisted">Assisted</option><option value="on_demand">On Demand</option><option value="silent">Silent</option></select>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary gw-modal-close">Cancel</button>
+                    <button type="button" id="btn-delete-gateway" class="btn btn-danger" style="display:none;">Delete</button>
+                    <button type="submit" form="gateway-form" class="btn btn-primary" id="btn-save-gateway">Save</button>
+                </div>
+            </div>
+        </div>"##,
+        email_accounts_html = email_accounts_html,
+    )
+}
+
+/// Setup (Model & Providers) section — providers, active model, memory, and embeddings config.
+pub(crate) async fn section_setup(state: &AppState) -> String {
+    let config = state.config.read().await;
+    let providers_output = build_providers_html::build(&config);
+    let providers_html = &providers_output.cards_html;
+    let catalog_modal_html = &providers_output.catalog_modal_html;
+
+    let active_provider_name = config
+        .resolve_provider(&config.agent.model)
+        .map(|(name, _)| name.to_string())
+        .unwrap_or_default();
+    let active_model_display = if config.agent.model.is_empty() {
+        String::new()
+    } else {
+        config
+            .agent
+            .model
+            .split_once('/')
+            .map(|(_, m)| m.to_string())
+            .unwrap_or_else(|| config.agent.model.clone())
+    };
+    let active_provider_display =
+        build_providers_html::get_provider_display_name(&active_provider_name);
+
+    let html = format!(
+        r##"<section class="section" id="section-providers">
+                    <div class="active-model-banner" id="active-model-banner" {active_banner_hidden}>
+                        <div class="active-model-info">
+                            <span class="active-model-label">Active Model</span>
+                            <span class="active-model-name" id="active-model-name">{active_model_display}</span>
+                            <span class="active-model-provider" id="active-model-provider">via {active_provider_display}</span>
+                        </div>
+                    </div>
+                    <div id="no-model-banner" class="no-model-warning" {no_model_hidden}>
+                        <span class="no-model-warning-icon">!</span>
+                        <div class="no-model-warning-text">
+                            <strong>No model configured</strong>
+                            <p>Configure a provider below, then select a model to get started.</p>
+                        </div>
+                    </div>
+                    <div class="configured-providers-grid" id="provider-grid">{providers_html}</div>
+                    <button type="button" class="btn btn-secondary" id="btn-add-provider" style="margin-top:12px;">+ Add Provider</button>
+                    {catalog_modal_html}
+                    <details class="section-advanced" id="advanced-agent">
+                        <summary>Advanced Agent Settings</summary>
+                        <form class="form form--full" id="agent-form" style="margin-top:12px;">
+                            <div class="form-group model-selector-section">
+                                <label class="model-selector-label">Vision Model</label>
+                                <select id="vision-model-select" class="input"><option value="">Loading models…</option></select>
+                                <input type="hidden" name="vision_model" id="vision-model-value" value="{vision_model}">
+                                <div class="form-hint">Model for image analysis. Falls back to Chat Model if empty.</div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group"><label>Max Tokens</label><input type="number" name="max_tokens" value="{max_tokens}" class="input"></div>
+                                <div class="form-group"><label>Temperature</label><input type="number" name="temperature" value="{temperature}" step="0.1" min="0" max="2" class="input"></div>
+                                <div class="form-group"><label>Max Iterations</label><input type="number" name="max_iterations" value="{max_iterations}" class="input"></div>
+                                <div class="form-group"><label>XML Fallback Delay (ms)</label><input type="number" name="xml_fallback_delay_ms" value="{xml_fallback_delay_ms}" min="0" step="100" class="input"><div class="form-hint">Delay before retrying when switching to XML tool dispatch. Prevents rate-limit errors on free models.</div></div>
+                            </div>
+                            <div class="form-group">
+                                <label>Fallback Models</label>
+                                <div class="form-hint" style="margin-bottom:8px;">If the primary model fails (rate limit, outage), these models are tried in order.</div>
+                                <div id="fallback-models-list" class="tag-list" data-models='{fallback_models_json}'></div>
+                                <div class="fallback-add-row">
+                                    <select id="fallback-model-select" class="input input--inline"><option value="">Add fallback model…</option></select>
+                                    <button type="button" id="btn-add-fallback" class="btn btn-secondary btn--sm">Add</button>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Save Advanced Settings</button>
+                        </form>
+                    </details>
+                </section>
+
+                <section class="section" id="section-memory">
+                    <h2>Memory</h2>
+                    <form class="form" id="memory-form">
+                        <div class="form-row">
+                            <div class="form-group"><label>Conversation Retention (days)</label><input type="number" name="conversation_retention_days" value="{conversation_retention_days}" min="1" max="365" class="input"><div class="form-hint">Delete chat messages older than this many days.</div></div>
+                            <div class="form-group"><label>History Retention (days)</label><input type="number" name="history_retention_days" value="{history_retention_days}" min="1" max="3650" class="input"><div class="form-hint">Delete memory chunks older than this many days.</div></div>
+                            <div class="form-group"><label>Daily Archive Months</label><input type="number" name="daily_archive_months" value="{daily_archive_months}" min="1" max="24" class="input"><div class="form-hint">Group daily logs by month in the UI.</div></div>
+                        </div>
+                        <div class="form-group">
+                            <label class="toggle-label-inline"><input type="checkbox" name="auto_cleanup" class="toggle-input" {auto_cleanup_checked}><span>Auto-cleanup on startup</span></label>
+                            <div class="form-hint">Automatically run memory cleanup when gateway starts.</div>
+                        </div>
+                        <div class="form-row">
+                            <button type="submit" class="btn btn-primary">Save Memory Config</button>
+                            <button type="button" class="btn btn-secondary" id="btn-run-cleanup">Run Cleanup Now</button>
+                        </div>
+                        <div id="memory-result" class="form-hint" style="margin-top:10px;"></div>
+                    </form>
+                </section>
+
+                <section class="section" id="section-embeddings">
+                    <h2>Embeddings</h2>
+                    <form class="form" id="embeddings-form">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Provider</label>
+                                <select name="embedding_provider" class="input" id="embedding-provider-select"><option value="">Loading providers...</option></select>
+                                <div class="form-hint">Only configured providers with embedding support are shown.</div>
+                            </div>
+                            <div class="form-group">
+                                <label>Model</label>
+                                <select name="embedding_model" class="input" id="embedding-model-select"><option value="">Loading models...</option></select>
+                                <div class="form-hint" id="embedding-model-hint">Select a model or choose "Custom..."</div>
+                            </div>
+                        </div>
+                        <div class="form-row" id="embedding-custom-model-row" style="display:none;">
+                            <div class="form-group"><label>Custom Model Name</label><input type="text" name="embedding_custom_model" class="input" id="embedding-custom-model" placeholder="e.g. my-custom-embed-model"><div class="form-hint" id="embedding-custom-hint"></div></div>
+                        </div>
+                        <details class="form-details">
+                            <summary>Advanced</summary>
+                            <div class="form-row" style="margin-top:12px;">
+                                <div class="form-group"><label>API Base URL</label><input type="text" name="embedding_api_base" class="input" id="embedding-api-base" placeholder="(provider default)"><div class="form-hint">Override the default API endpoint.</div></div>
+                                <div class="form-group"><label>API Key</label><input type="password" name="embedding_api_key" class="input" id="embedding-api-key" placeholder="(auto from LLM provider)"><div class="form-hint">Leave empty to use the LLM provider's key.</div></div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group"><label>Dimensions</label><input type="number" name="embedding_dimensions" value="{embedding_dimensions}" min="64" max="4096" class="input"><div class="form-hint">Default 384. Changing requires re-indexing all vectors.</div></div>
+                            </div>
+                        </details>
+                        <div class="form-row" style="margin-top:12px;"><button type="submit" class="btn btn-primary">Save Embeddings</button></div>
+                        <div id="embeddings-result" class="form-hint" style="margin-top:10px;"></div>
+                    </form>
+                    <div id="embedding-index-status" style="margin-top:16px;">
+                        <div id="embedding-index-warning" class="form-hint pairing-status error" style="display:none;"><strong>⚠ Mismatch:</strong> Current indices were built with a different embedding model. Search results may be inaccurate. Rebuild to fix.</div>
+                        <div id="embedding-index-unknown" class="form-hint pairing-status" style="display:none;">Index metadata not found. If you changed embedding settings, consider rebuilding indices.</div>
+                        <div id="embedding-reindex-row" style="display:none; margin-top:12px;">
+                            <button type="button" id="btn-reindex" class="btn btn-secondary">Rebuild Vector Indices</button>
+                            <span id="reindex-result" class="form-hint" style="margin-left:8px;"></span>
+                        </div>
+                        <div id="embedding-index-ok" class="form-hint pairing-status success" style="display:none;">✓ Vector indices are up to date.</div>
+                    </div>
+                </section>"##,
+        active_model_display = active_model_display,
+        active_provider_display = active_provider_display,
+        active_banner_hidden = if config.agent.model.is_empty() { "style=\"display:none\"" } else { "" },
+        no_model_hidden = if config.agent.model.is_empty() { "" } else { "style=\"display:none\"" },
+        vision_model = config.agent.vision_model,
+        max_tokens = config.agent.max_tokens,
+        temperature = config.agent.temperature,
+        max_iterations = config.agent.max_iterations,
+        xml_fallback_delay_ms = config.agent.xml_fallback_delay_ms,
+        fallback_models_json = serde_json::to_string(&config.agent.fallback_models).unwrap_or_else(|_| "[]".to_string()),
+        conversation_retention_days = config.memory.conversation_retention_days,
+        history_retention_days = config.memory.history_retention_days,
+        daily_archive_months = config.memory.daily_archive_months,
+        auto_cleanup_checked = if config.memory.auto_cleanup { "checked" } else { "" },
+        embedding_dimensions = config.memory.embedding_dimensions,
+        providers_html = providers_html,
+        catalog_modal_html = catalog_modal_html,
+    );
+    drop(config);
+    html
+}
+
+// section_appearance is defined inline near appearance_page above.
+
+/// Channels section — channel grid + configuration modal.
+pub(crate) async fn section_channels(_state: &AppState) -> String {
+    let channels_html = build_channels_cards_static();
+
+    format!(
+        r##"<section class="section" id="section-channels">
+                    <div class="provider-grid" id="channel-grid">{channels_html}</div>
+                </section>
+
+        <div id="channel-modal" class="modal">
+            <div class="modal-backdrop"></div>
+            <div class="modal-content modal-content--channel">
+                <div class="modal-header-group">
+                    <div class="modal-header">
+                        <h3 class="modal-title" id="modal-channel-name">Channel</h3>
+                        <button class="modal-close ch-modal-close" type="button">&times;</button>
+                    </div>
+                    <p class="modal-subtitle" id="channel-subtitle"></p>
+                </div>
+                <div class="modal-body">
+                    <form id="channel-config-form">
+                        <input type="hidden" id="modal-channel-id" name="channel">
+                        <div class="form-group" id="ch-token-group" style="display:none;">
+                            <label for="ch-token">Bot Token</label>
+                            <input type="password" id="ch-token" name="token" class="input">
+                            <div class="form-hint" id="ch-token-hint">Stored encrypted locally.</div>
+                        </div>
+                        <div class="form-group" id="ch-phone-group" style="display:none;">
+                            <label for="ch-phone">Phone Number</label>
+                            <input type="tel" id="ch-phone" name="phone_number" class="input" placeholder="393331234567">
+                            <div class="form-hint">International format without + (e.g. 393331234567)</div>
+                        </div>
+                        <div id="ch-wa-pairing" style="display:none;">
+                            <div id="ch-wa-pairing-status" class="pairing-status"></div>
+                            <div id="ch-wa-pairing-code" class="pairing-code" style="display:none;"></div>
+                        </div>
+                        <div class="form-group" id="ch-allow-from-group" style="display:none;">
+                            <label>Allowed Users</label>
+                            <input type="text" id="ch-allow-from" name="allow_from" class="input" placeholder="User IDs, comma-separated">
+                            <div class="form-hint" id="ch-allow-from-hint">Only these users can interact with the bot.</div>
+                        </div>
+                        <div id="ch-behavior-group" style="display:none;">
+                            <div class="modal-section-label">Behavior</div>
+                            <div class="form-row--2">
+                                <div class="form-group">
+                                    <label for="ch-response-mode">Response Mode</label>
+                                    <select id="ch-response-mode" name="response_mode" class="input">
+                                        <option value="">Automatic (default)</option>
+                                        <option value="assisted">Assisted (draft + approval)</option>
+                                        <option value="on_demand">On-Demand (save, no response)</option>
+                                        <option value="silent">Silent (drop messages)</option>
+                                    </select>
+                                    <div class="form-hint">How Homun responds on this channel.</div>
+                                </div>
+                                <div class="form-group" id="ch-notify-channel-group" style="display:none;">
+                                    <label for="ch-notify-channel">Notify Channel</label>
+                                    <select id="ch-notify-channel" name="notify_channel" class="input">
+                                        <option value="">None</option><option value="web">Web UI</option><option value="telegram">Telegram</option><option value="discord">Discord</option><option value="slack">Slack</option><option value="whatsapp">WhatsApp</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="form-group" id="ch-notify-chatid-group" style="display:none;">
+                                <label for="ch-notify-chatid">Notify Chat ID</label>
+                                <input type="text" id="ch-notify-chatid" name="notify_chat_id" class="input" placeholder="Chat/user ID on notify channel">
+                                <div class="form-hint">Where to send drafts for approval. Use "web" for Web UI.</div>
+                            </div>
+                        </div>
+                        <div class="modal-section-label" style="margin-top:16px">Profile</div>
+                        <div class="form-group">
+                            <label for="ch-persona">Profile</label>
+                            <select id="ch-persona" name="persona" class="input"></select>
+                            <div class="form-hint">Which profile the agent uses on this channel.</div>
+                        </div>
+                        <div class="form-group" id="ch-discord-channel-group" style="display:none;">
+                            <label for="ch-discord-channel">Default Channel ID</label>
+                            <input type="text" id="ch-discord-channel" name="default_channel_id" class="input">
+                            <div class="form-hint">For proactive messages (optional)</div>
+                        </div>
+                        <div class="form-group" id="ch-slack-channel-group" style="display:none;">
+                            <label for="ch-slack-channel">Channel ID</label>
+                            <input type="text" id="ch-slack-channel" name="slack_channel_id" class="input">
+                            <div class="form-hint">Specific channel to monitor (e.g., C1234567890). Leave empty for auto-discovery.</div>
+                        </div>
+                        <div id="ch-email-servers-group" style="display:none;">
+                            <div class="modal-section-label">Mail Servers</div>
+                            <div class="form-row--2">
+                                <div class="form-group"><label for="ch-email-imap-host">IMAP Server</label><input type="text" id="ch-email-imap-host" name="imap_host" class="input" placeholder="imap.gmail.com"></div>
+                                <div class="form-group"><label for="ch-email-imap-port">IMAP Port</label><input type="number" id="ch-email-imap-port" name="imap_port" class="input" placeholder="993"></div>
+                            </div>
+                            <div class="form-row--2">
+                                <div class="form-group"><label for="ch-email-smtp-host">SMTP Server</label><input type="text" id="ch-email-smtp-host" name="smtp_host" class="input" placeholder="smtp.gmail.com"></div>
+                                <div class="form-group"><label for="ch-email-smtp-port">SMTP Port</label><input type="number" id="ch-email-smtp-port" name="smtp_port" class="input" placeholder="465"></div>
+                            </div>
+                        </div>
+                        <div id="ch-email-credentials-group" style="display:none;">
+                            <div class="modal-section-label">Credentials</div>
+                            <div class="form-row--2">
+                                <div class="form-group"><label for="ch-email-username">Username</label><input type="text" id="ch-email-username" name="email_username" class="input" placeholder="bot@example.com"></div>
+                                <div class="form-group"><label for="ch-email-password">Password</label><input type="password" id="ch-email-password" name="email_password" class="input" placeholder="App password (stored encrypted)"></div>
+                            </div>
+                            <div class="form-group"><label for="ch-email-from">From Address</label><input type="text" id="ch-email-from" name="from_address" class="input" placeholder="bot@example.com"></div>
+                        </div>
+                        <div id="ch-email-behavior-group" style="display:none;">
+                            <div class="modal-section-label">Behavior</div>
+                            <div class="form-row--2">
+                                <div class="form-group" id="ch-email-mode-group">
+                                    <label for="ch-email-mode">Response Mode</label>
+                                    <select id="ch-email-mode" name="email_mode" class="input">
+                                        <option value="assisted">Assisted (summary + approval)</option>
+                                        <option value="automatic">Automatic (direct response)</option>
+                                        <option value="on_demand">On-Demand (trigger word only)</option>
+                                    </select>
+                                    <div class="form-hint" id="ch-email-mode-hint">Generates summary and draft, sends to notification channel for approval.</div>
+                                </div>
+                                <div class="form-group" id="ch-email-trigger-group" style="display:none;">
+                                    <label for="ch-email-trigger-word">Trigger Word</label>
+                                    <input type="text" id="ch-email-trigger-word" name="email_trigger_word" class="input" placeholder="Auto-generated if empty">
+                                    <div class="form-hint">Include in subject/body to activate the bot.</div>
+                                </div>
+                            </div>
+                            <div id="ch-email-notify-group" style="display:none;">
+                                <div class="form-row--2">
+                                    <div class="form-group">
+                                        <label for="ch-email-notify-channel">Notify Channel</label>
+                                        <select id="ch-email-notify-channel" name="email_notify_channel" class="input">
+                                            <option value="">None</option><option value="telegram">Telegram</option><option value="discord">Discord</option><option value="slack">Slack</option><option value="whatsapp">WhatsApp</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="ch-email-notify-chat-id">Notify Chat ID</label>
+                                        <input type="text" id="ch-email-notify-chat-id" name="email_notify_chat_id" class="input" placeholder="User/Channel ID">
+                                        <div class="form-hint form-hint--suggest" id="ch-notify-hint"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-group" id="ch-web-host-group" style="display:none;"><label for="ch-web-host">Host</label><input type="text" id="ch-web-host" name="host" class="input"></div>
+                        <div class="form-group" id="ch-web-port-group" style="display:none;"><label for="ch-web-port">Port</label><input type="number" id="ch-web-port" name="port" class="input"></div>
+                    </form>
+                    <div id="ch-test-result" class="form-hint" style="margin-top:10px;"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary ch-modal-cancel">Cancel</button>
+                    <button type="submit" form="channel-config-form" class="btn btn-primary" id="btn-ch-save">Save &amp; Enable</button>
+                    <button type="button" id="btn-test-channel" class="btn btn-secondary">Test Connection</button>
+                    <button type="button" id="btn-wa-pair" class="btn btn-success" style="display:none;">Start Pairing</button>
+                </div>
+            </div>
+        </div>"##,
+        channels_html = channels_html,
+    )
+}
+
+/// Browser section — browser config, profiles, and web search settings.
+pub(crate) async fn section_browser(state: &AppState) -> String {
+    let config = state.config.read().await;
+
+    let browser_status = {
+        let status = config.browser.runtime_status();
+        let enabled = if status.enabled { "Enabled" } else { "Disabled" };
+        let availability = if status.available { "available" } else { "unavailable" };
+        let executable = status
+            .executable_path
+            .map(|path| format!("Chrome: {}", path))
+            .unwrap_or_else(|| "Chrome: not detected".to_string());
+        match status.reason {
+            Some(reason) => format!("{} • MCP (Playwright) • {}. {} {}", enabled, availability, executable, reason),
+            None => format!("{} • MCP (Playwright) • {}. {}", enabled, availability, executable),
+        }
+    };
+
+    let html = format!(
+        r##"<section class="section" id="section-browser">
+                    <div class="form-hint" style="margin-bottom:12px;">{browser_status}</div>
+                    <form class="form" id="browser-form">
+                        <div class="setting-toggle-row">
+                            <div class="setting-toggle-info">
+                                <span class="setting-toggle-name">Enable Browser</span>
+                                <span class="setting-toggle-desc">Register the browser tool and use it for dynamic web tasks</span>
+                            </div>
+                            <div class="toggle-wrap">
+                                <input type="checkbox" id="browser-enabled" name="enabled" class="toggle-input" {browser_enabled_checked}>
+                                <label class="toggle-label" for="browser-enabled"></label>
+                            </div>
+                        </div>
+                        <div class="setting-toggle-row">
+                            <div class="setting-toggle-info">
+                                <span class="setting-toggle-name">Headless Mode</span>
+                                <span class="setting-toggle-desc">Run browser without visible window</span>
+                            </div>
+                            <div class="toggle-wrap">
+                                <input type="checkbox" id="browser-headless" name="headless" class="toggle-input" {browser_headless_checked}>
+                                <label class="toggle-label" for="browser-headless"></label>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Chrome Executable Path</label>
+                            <input type="text" id="browser-executable" name="executable_path" value="{executable_path}" class="input" placeholder="Auto-detect (leave empty)">
+                            <div class="form-hint">Leave empty to auto-detect. Override if Chrome is in a custom location.</div>
+                        </div>
+                        <div class="form-group">
+                            <label for="browser-vision-model">Vision Model</label>
+                            <select id="browser-vision-model" class="input"></select>
+                            <input type="hidden" name="vision_model" id="browser-vision-value" value="{vision_model}">
+                            <div class="form-hint">Model for screenshot/image analysis. Empty = same as chat model.</div>
+                        </div>
+                        <div class="form-hint" style="margin-top:10px;">Timeouts and snapshot settings are managed by the Playwright MCP server.</div>
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-primary">Save Browser Config</button>
+                            <button type="button" class="btn btn-secondary" id="btn-test-browser">Test Connection</button>
+                        </div>
+                        <div id="browser-result" class="form-hint" style="margin-top:10px;"></div>
+                    </form>
+                </section>
+
+                <section class="section" id="section-profiles">
+                    <h2>Browser Profiles</h2>
+                    <div class="form-hint" style="margin-bottom:12px;">Manage browser profiles — each profile has its own cookies, sessions, and cache.</div>
+                    <div id="profiles-list" class="form-hint">Loading profiles…</div>
+                </section>
+
+                <section class="section" id="section-web-search">
+                    <h2>Web Search</h2>
+                    <form class="form" id="web-search-form">
+                        <div class="form-row--2">
+                            <div class="form-group">
+                                <label>Search Provider</label>
+                                <select id="search-provider" name="provider" class="input">
+                                    <option value="brave" {search_brave}>Brave Search</option>
+                                    <option value="tavily" {search_tavily}>Tavily</option>
+                                </select>
+                                <div class="form-hint">Search engine used by the web_search tool.</div>
+                            </div>
+                            <div class="form-group">
+                                <label>Max Results</label>
+                                <input type="number" id="search-max-results" name="max_results" value="{search_max_results}" min="1" max="20" class="input">
+                                <div class="form-hint">Number of search results returned per query.</div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>API Key</label>
+                            <input type="password" id="search-api-key" name="api_key" value="{search_api_key}" class="input" placeholder="Enter your search API key">
+                            <div class="form-hint">Brave: <a href="https://api-dashboard.search.brave.com/app/keys" target="_blank">api-dashboard.search.brave.com</a> · Tavily: <a href="https://tavily.com" target="_blank">tavily.com</a></div>
+                        </div>
+                        <div class="form-actions"><button type="submit" class="btn btn-primary">Save Search Config</button></div>
+                    </form>
+                </section>"##,
+        browser_status = browser_status,
+        browser_enabled_checked = if config.browser.enabled { "checked" } else { "" },
+        browser_headless_checked = if config.browser.headless { "checked" } else { "" },
+        executable_path = config.browser.executable_path,
+        vision_model = config.agent.vision_model,
+        search_brave = if config.tools.web_search.provider == "brave" { "selected" } else { "" },
+        search_tavily = if config.tools.web_search.provider == "tavily" { "selected" } else { "" },
+        search_api_key = config.tools.web_search.api_key,
+        search_max_results = config.tools.web_search.max_results,
+    );
+    drop(config);
+    html
+}
+
+/// Vault section — encrypted secrets management, 2FA, and reveal modals.
+pub(crate) async fn section_vault(_state: &AppState) -> String {
+    r#"<div class="vault-notice">
+                    <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;flex-shrink:0">
+                        <rect x="2" y="5" width="14" height="11" rx="1.5"/>
+                        <path d="M5 5V4a4 4 0 0 1 8 0v1"/>
+                        <circle cx="9" cy="11" r="1.5"/>
+                        <path d="M9 12.5V14"/>
+                    </svg>
+                    <div>
+                        <strong>Encrypted Storage</strong><br>
+                        Secrets are encrypted with AES-256-GCM using a master key stored in your OS keychain.
+                        Values are never included in server-rendered pages — they are decrypted on-demand via POST requests.
+                    </div>
+                </div>
+
+                <!-- 2FA Section -->
+                <section class="section">
+                    <div class="section-header" style="display:flex;align-items:center;gap:8px">
+                        <h2 style="margin:0;padding:0;border:0">Two-Factor Authentication</h2>
+                        <span class="badge" id="twofa-status-badge">Checking…</span>
+                    </div>
+                    <div id="twofa-disabled-view">
+                        <p style="color:var(--muted);margin-bottom:1rem">Require authenticator code to reveal secrets. Recommended for enhanced security.</p>
+                        <button class="btn btn-primary btn-sm" id="btn-enable-2fa">Enable 2FA</button>
+                    </div>
+                    <div id="twofa-enabled-view" style="display:none">
+                        <p style="margin-bottom:0.5rem">2FA is <strong>enabled</strong>. You'll need your authenticator app to reveal secrets.</p>
+                        <p style="color:var(--muted);font-size:0.875rem;margin-bottom:1rem">
+                            Session timeout: <span id="twofa-timeout">5 minutes</span> ·
+                            Recovery codes: <span id="twofa-recovery-count">0</span> remaining
+                        </p>
+                        <div class="actions">
+                            <button class="btn btn-secondary btn-sm" id="btn-view-recovery">View Recovery Codes</button>
+                            <button class="btn btn-danger btn-sm" id="btn-disable-2fa">Disable 2FA</button>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="section">
+                    <h2>Store Secret</h2>
+                    <form id="vault-form" class="form">
+                        <div class="form-row form-row--2">
+                            <div class="form-group">
+                                <label>Key</label>
+                                <input type="text" id="vault-key" class="input" placeholder="my_api_key" pattern="[a-z0-9_]+">
+                                <div class="form-hint">Lowercase letters, numbers, underscores only</div>
+                            </div>
+                            <div class="form-group">
+                                <label>Value</label>
+                                <input type="password" id="vault-value" class="input" placeholder="secret value…">
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-sm">Store Secret</button>
+                    </form>
+                </section>
+
+                <section class="section">
+                    <h2>Stored Secrets</h2>
+                    <div class="item-list" id="vault-list">
+                        <div class="empty-state" id="vault-empty">
+                            <p>Loading secrets…</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 2FA Setup Modal -->
+                <div id="twofa-setup-modal" class="modal">
+                    <div class="modal-backdrop"></div>
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h3 class="modal-title">Setup Authenticator</h3>
+                            <button class="modal-close" type="button">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <p style="margin-bottom:1rem">Scan this QR code with your authenticator app (Google Authenticator, Authy, 1Password, etc.)</p>
+                            <div style="text-align:center;margin-bottom:1rem">
+                                <img id="twofa-qr-image" src="" alt="QR Code" style="max-width:200px;border-radius:8px">
+                            </div>
+                            <div class="form-group">
+                                <label>Or enter this code manually:</label>
+                                <code id="twofa-secret" style="display:block;padding:0.5rem;background:var(--surface);border-radius:4px;font-size:0.875rem;word-break:break-all"></code>
+                            </div>
+                            <div class="form-group">
+                                <label>Enter the 6-digit code from your app:</label>
+                                <input type="text" id="twofa-setup-code" class="input" placeholder="000000" maxlength="6" pattern="[0-9]{6}" style="text-align:center;font-size:1.25rem;letter-spacing:0.5em">
+                            </div>
+                            <div class="modal-actions">
+                                <button class="btn btn-secondary" id="btn-cancel-twofa-setup">Cancel</button>
+                                <button class="btn btn-primary" id="btn-confirm-twofa-setup">Verify & Enable</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2FA Code Modal (for reveal) -->
+                <div id="twofa-code-modal" class="modal">
+                    <div class="modal-backdrop"></div>
+                    <div class="modal-content" style="max-width:360px">
+                        <div class="modal-header">
+                            <h3 class="modal-title">Authentication Required</h3>
+                            <button class="modal-close" type="button">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <p style="margin-bottom:1rem;color:var(--muted)">Enter the code from your authenticator app to reveal this secret.</p>
+                            <div class="form-group">
+                                <input type="text" id="twofa-verify-code" class="input" placeholder="000000" maxlength="6" pattern="[0-9]{6}" style="text-align:center;font-size:1.25rem;letter-spacing:0.5em" autofocus>
+                            </div>
+                            <div class="modal-actions">
+                                <button class="btn btn-secondary" id="btn-cancel-twofa-verify">Cancel</button>
+                                <button class="btn btn-primary" id="btn-submit-twofa-verify">Verify</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recovery Codes Modal -->
+                <div id="recovery-modal" class="modal">
+                    <div class="modal-backdrop"></div>
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h3 class="modal-title">Recovery Codes</h3>
+                            <button class="modal-close" type="button">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <p style="margin-bottom:1rem;color:var(--muted)">Enter your authenticator code to view recovery codes.</p>
+                            <div id="recovery-codes-list" style="display:none">
+                                <p style="margin-bottom:0.5rem"><strong>Store these codes securely. Each can only be used once.</strong></p>
+                                <div id="recovery-codes-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;font-family:monospace"></div>
+                            </div>
+                            <div id="recovery-auth-section">
+                                <div class="form-group">
+                                    <input type="text" id="recovery-auth-code" class="input" placeholder="000000" maxlength="6" pattern="[0-9]{6}" style="text-align:center;font-size:1.25rem;letter-spacing:0.5em">
+                                </div>
+                            </div>
+                            <div class="modal-actions">
+                                <button class="btn btn-secondary" id="btn-close-recovery">Close</button>
+                                <button class="btn btn-primary" id="btn-show-recovery" style="display:none">Copy All</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Reveal Modal -->
+                <div id="reveal-modal" class="modal">
+                    <div class="modal-backdrop"></div>
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h3 class="modal-title">Reveal Secret</h3>
+                            <button class="modal-close" type="button">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="form-group">
+                                <label id="reveal-key-label">Key</label>
+                                <div class="vault-reveal-value" id="reveal-value">Decrypting…</div>
+                            </div>
+                            <div class="vault-reveal-timer" id="reveal-timer">Auto-hide in 10s</div>
+                            <div class="modal-actions">
+                                <button class="btn btn-secondary" id="btn-copy-secret">Copy</button>
+                                <button class="btn btn-primary" id="btn-close-reveal">Close</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>"#.to_string()
+}
+
+/// API Keys section — create, list, revoke API keys.
+pub(crate) async fn section_api_keys(state: &AppState) -> String {
+    let _ = state;
+    r#"<!-- Create form (hidden by default) -->
+                <section class="section" id="create-form-section" style="display:none">
+                    <div class="section-header"><h2>New API Key</h2></div>
+                    <form id="create-key-form" class="form">
+                        <div class="form-row--2">
+                            <div class="form-group">
+                                <label for="key-name">Name</label>
+                                <input type="text" id="key-name" class="input" placeholder="My Integration" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="key-scope">Scope</label>
+                                <select id="key-scope" class="input">
+                                    <option value="admin">Admin — full access</option>
+                                    <option value="write">Write — read + write</option>
+                                    <option value="read">Read — read-only</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-row--2">
+                            <div class="form-group">
+                                <label for="key-expiry">Expires</label>
+                                <select id="key-expiry" class="input">
+                                    <option value="">Never</option>
+                                    <option value="7d">7 days</option>
+                                    <option value="30d" selected>30 days</option>
+                                    <option value="90d">90 days</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="display:flex;align-items:flex-end">
+                                <button type="submit" class="btn btn-primary btn-sm">Generate Key</button>
+                                <button type="button" class="btn btn-ghost btn-sm" id="cancel-create-btn" style="margin-left:var(--space-2)">Cancel</button>
+                            </div>
+                        </div>
+                    </form>
+                </section>
+
+                <!-- One-time token reveal -->
+                <section class="section" id="token-reveal-section" style="display:none">
+                    <div class="section-header"><h2>Your New API Key</h2></div>
+                    <p class="form-hint" style="margin-bottom:var(--space-3)">Copy this key now — you won't be able to see it again.</p>
+                    <div style="display:flex;gap:var(--space-2);align-items:center">
+                        <code class="input" id="revealed-token" style="flex:1;font-family:var(--font-mono);user-select:all"></code>
+                        <button class="btn btn-secondary btn-sm" id="copy-token-btn">Copy</button>
+                        <button class="btn btn-ghost btn-sm" id="dismiss-reveal-btn">Done</button>
+                    </div>
+                </section>
+
+                <!-- Keys list -->
+                <section class="section">
+                    <div class="section-header"><h2>Active Keys</h2></div>
+                    <div class="item-list" id="keys-list">
+                        <div class="empty-state" id="keys-empty">
+                            <p>No API keys yet. Create one to access the API programmatically.</p>
+                        </div>
+                    </div>
+                </section>"#.to_string()
+}
+
+/// Approvals section — approval config, pending queue, and audit log.
+pub(crate) async fn section_approvals(state: &AppState) -> String {
+    let config = state.config.read().await;
+    let level = format!("{:?}", config.permissions.approval.level).to_lowercase();
+    drop(config);
+
+    format!(
+        r#"<div class="content-grid">
+                    <!-- Approval Configuration -->
+                    <section class="card">
+                        <div class="card-header">
+                        <h2>Configuration</h2>
+                        </div>
+                        <div class="card-body">
+                        <div class="form-group">
+                            <label>Autonomy Level</label>
+                            <select id="approval-level" class="input">
+                                <option value="full" {full_selected}>Full - No approval required</option>
+                                <option value="supervised" {supervised_selected}>Supervised - Ask for unknown commands</option>
+                                <option value="readonly" {readonly_selected}>ReadOnly - Ask for all commands</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-top:1rem">
+                            <label>Auto-approve commands (comma-separated)</label>
+                            <input type="text" id="auto-approve-list" class="input" placeholder="ls, cat, pwd">
+                        </div>
+                        <div class="form-group" style="margin-top:1rem">
+                            <label>Always ask for (comma-separated)</label>
+                            <input type="text" id="always-ask-list" class="input" placeholder="rm, sudo, chmod">
+                        </div>
+                        <button id="save-approval-config" class="btn btn-primary btn-sm" style="margin-top:1rem">Save Configuration</button>
+                    </div>
+                </section>
+
+                    <!-- Pending Approvals -->
+                    <section class="card">
+                        <div class="card-header">
+                            <h2>Pending Approvals</h2>
+                        </div>
+                        <div class="card-body">
+                            <div id="pending-approvals-list" class="scrollable-list">
+                                <div class="empty-state">
+                                    <p>No pending approvals</p>
+                                    <p class="muted">Commands requiring approval will appear here</p>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Audit Log -->
+                    <section class="card">
+                        <div class="card-header">
+                            <h2>Recent Activity</h2>
+                        </div>
+                        <div class="card-body">
+                            <div id="approval-audit-log" class="scrollable-list">
+                                <div class="empty-state">
+                                    <p>No activity yet</p>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                </div>"#,
+        full_selected = if level == "full" { "selected" } else { "" },
+        supervised_selected = if level == "supervised" {
+            "selected"
+        } else {
+            ""
+        },
+        readonly_selected = if level == "readonly" { "selected" } else { "" },
+    )
+}
+
+/// File Access section — permission mode, ACL rules, presets, test path, and modals.
+pub(crate) async fn section_file_access(state: &AppState) -> String {
+    let config = state.config.read().await;
+    let mode = match config.permissions.mode {
+        crate::config::PermissionMode::Open => "open",
+        crate::config::PermissionMode::Workspace => "workspace",
+        crate::config::PermissionMode::Acl => "acl",
+    };
+    let default_read_checked = if config.permissions.default.read {
+        "checked"
+    } else {
+        ""
+    };
+    let default_write_checked = if config.permissions.default.write {
+        "checked"
+    } else {
+        ""
+    };
+    let default_delete_checked = if config.permissions.default.delete {
+        "checked"
+    } else {
+        ""
+    };
+    drop(config);
+
+    format!(
+        r#"<div class="permissions-notice">
+                    <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;flex-shrink:0">
+                        <rect x="1" y="4" width="16" height="12" rx="1.5"/>
+                        <circle cx="9" cy="10" r="2"/>
+                        <path d="M5 4V3a4 4 0 0 1 8 0v1"/>
+                    </svg>
+                    <div>
+                        <strong>Permission Mode</strong><br>
+                        Control what files and directories the agent can access. Changes take effect immediately.
+                    </div>
+                </div>
+
+                <section class="section">
+                    <h2>Permission Mode</h2>
+                    <div class="permission-mode-grid">
+                        <div class="permission-mode-card" data-mode="open">
+                            <div class="permission-mode-header">
+                                <span class="permission-mode-name">Open</span>
+                                <span class="badge badge-neutral">Not Recommended</span>
+                            </div>
+                            <div class="permission-mode-desc">Agent can access any file (except hardcoded blocks like ~/.ssh)</div>
+                        </div>
+                        <div class="permission-mode-card" data-mode="workspace">
+                            <div class="permission-mode-header">
+                                <span class="permission-mode-name">Workspace</span>
+                                <span class="badge badge-success">Default</span>
+                            </div>
+                            <div class="permission-mode-desc">Agent can access workspace + brain + memory directories</div>
+                        </div>
+                        <div class="permission-mode-card" data-mode="acl">
+                            <div class="permission-mode-header">
+                                <span class="permission-mode-name">ACL</span>
+                                <span class="badge badge-info">Advanced</span>
+                            </div>
+                            <div class="permission-mode-desc">Full ACL-based control with per-path permissions</div>
+                        </div>
+                    </div>
+                    <input type="hidden" id="current-mode" value="{mode}">
+                </section>
+
+                <section class="section">
+                    <h2>Default Permissions</h2>
+                    <p class="form-hint">These apply when no ACL rule matches a path.</p>
+                    <div class="permission-defaults" id="permission-defaults">
+                        <div class="perm-checkbox-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="default-read" {default_read_checked}>
+                                <span>Read</span>
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="default-write" {default_write_checked}>
+                                <span>Write</span>
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="default-delete" {default_delete_checked}>
+                                <span>Delete</span>
+                            </label>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="section">
+                    <h2>ACL Rules</h2>
+                    <p class="form-hint">Rules are evaluated in order. First match wins. Built-in rules protect sensitive paths.</p>
+
+                    <div class="acl-actions">
+                        <button class="btn btn-primary btn-sm" id="btn-add-acl">Add Rule</button>
+                    </div>
+
+                    <div class="acl-list" id="acl-list">
+                        <div class="acl-loading">Loading ACL rules...</div>
+                    </div>
+                </section>
+
+                <section class="section">
+                    <h2>Quick Presets</h2>
+                    <div class="preset-buttons">
+                        <button class="btn btn-secondary" data-preset="developer">Developer</button>
+                        <button class="btn btn-secondary" data-preset="restricted">Restricted</button>
+                        <button class="btn btn-danger" data-preset="paranoid">Paranoid</button>
+                    </div>
+                </section>
+
+                <section class="section">
+                    <h2>Test Path</h2>
+                    <p class="form-hint">Check if a path would be allowed for a specific operation.</p>
+                    <div class="test-path-form">
+                        <input type="text" id="test-path" class="input" placeholder="~/Projects/myfile.txt">
+                        <select id="test-operation" class="input">
+                            <option value="read">Read</option>
+                            <option value="write">Write</option>
+                            <option value="delete">Delete</option>
+                        </select>
+                        <button class="btn btn-primary" id="btn-test-path">Test</button>
+                    </div>
+                    <div id="test-result" class="test-result" style="display:none"></div>
+                </section>
+
+        <!-- ACL Edit Modal -->
+        <div id="acl-modal" class="modal">
+            <div class="modal-backdrop"></div>
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 class="modal-title" id="acl-modal-title">Add ACL Rule</h3>
+                    <button class="modal-close acl-modal-close" type="button">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <form id="acl-form">
+                        <div class="form-group">
+                            <label>Path Pattern</label>
+                            <div class="path-input-group">
+                                <input type="text" id="acl-path" class="input" placeholder="~/Projects/**">
+                                <button type="button" class="btn btn-secondary btn-sm" id="btn-browse-path">Browse</button>
+                            </div>
+                            <div class="form-hint">Glob patterns supported: ** (any depth), * (single segment), ? (single char)</div>
+                        </div>
+                        <div class="form-group">
+                            <label>Type</label>
+                            <select id="acl-type" class="input">
+                                <option value="allow">Allow</option>
+                                <option value="deny">Deny</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Permissions</label>
+                            <div class="perm-checkbox-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="acl-read" checked>
+                                    <span>Read</span>
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="acl-write">
+                                    <span>Write</span>
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="acl-delete">
+                                    <span>Delete</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Confirmation Required</label>
+                            <select id="acl-confirm" class="input">
+                                <option value="none">None</option>
+                                <option value="read">On Read</option>
+                                <option value="write">On Write</option>
+                                <option value="delete">On Delete</option>
+                            </select>
+                            <div class="form-hint">Agent will ask for confirmation before the operation.</div>
+                        </div>
+                        <div class="modal-actions">
+                            <button type="button" class="btn btn-secondary acl-modal-cancel">Cancel</button>
+                            <button type="submit" class="btn btn-primary">Save Rule</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Path Browser Modal -->
+        <div id="path-browser-modal" class="modal">
+            <div class="modal-backdrop"></div>
+            <div class="modal-content modal-content--wide">
+                <div class="modal-header">
+                    <h3 class="modal-title">Browse Folders</h3>
+                    <button class="modal-close path-browser-close" type="button">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="path-browser-current">
+                        <span id="browser-current-path">~</span>
+                    </div>
+                    <div class="path-browser-nav">
+                        <button class="btn btn-sm btn-secondary" id="btn-browser-up">↑ Up</button>
+                        <button class="btn btn-sm btn-secondary" id="btn-browser-home">🏠 Home</button>
+                    </div>
+                    <div class="path-browser-list" id="browser-list">
+                        <div class="browser-loading">Loading...</div>
+                    </div>
+                    <div class="path-browser-selected">
+                        <label>Selected Path:</label>
+                        <input type="text" id="browser-selected-path" class="input" readonly>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="browser-recursive" checked>
+                            <span>Include subdirectories (**)</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary path-browser-cancel">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="btn-select-path">Select Folder</button>
+                </div>
+            </div>
+        </div>"#,
+        mode = mode,
+        default_read_checked = default_read_checked,
+        default_write_checked = default_write_checked,
+        default_delete_checked = default_delete_checked,
+    )
+}
+
+/// Shell section — OS-specific command permissions UI.
+pub(crate) async fn section_shell(state: &AppState) -> String {
+    let _ = state;
+    r#"<div class="permissions-notice">
+                    <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;flex-shrink:0">
+                        <path d="M3 15V3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v12"/>
+                        <line x1="6" y1="6" x2="12" y2="6"/>
+                        <line x1="6" y1="9" x2="12" y2="9"/>
+                        <line x1="6" y1="12" x2="9" y2="12"/>
+                    </svg>
+                    <div>
+                        <strong>Shell Permissions</strong><br>
+                        OS-specific command restrictions for the shell tool. Changes take effect immediately.
+                    </div>
+                </div>
+
+                <section class="section">
+                    <div class="shell-tabs">
+                        <button class="shell-tab active" data-os="macos">macOS</button>
+                        <button class="shell-tab" data-os="linux">Linux</button>
+                        <button class="shell-tab" data-os="windows">Windows</button>
+                    </div>
+
+                    <div class="shell-profile-content" id="shell-profile-content">
+                        <div class="form-group">
+                            <label>Shell</label>
+                            <select id="shell-select" class="input">
+                                <option value="">Default (sh)</option>
+                                <option value="bash">bash</option>
+                                <option value="zsh">zsh</option>
+                                <option value="powershell">PowerShell</option>
+                                <option value="cmd">cmd</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="allow-risky">
+                                <span>Allow Risky Commands</span>
+                            </label>
+                            <div class="form-hint">Package removal, process killing, etc.</div>
+                        </div>
+                        <div class="form-group">
+                            <label>Blocked Commands (one per line)</label>
+                            <textarea id="blocked-commands" class="input" rows="3" placeholder="launchctl load&#10;defaults delete"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Allowed Commands Whitelist (optional, one per line)</label>
+                            <textarea id="allowed-commands" class="input" rows="3" placeholder="git&#10;npm&#10;cargo"></textarea>
+                            <div class="form-hint">If non-empty, only these commands are allowed.</div>
+                        </div>
+                    </div>
+                </section>"#.to_string()
+}
+
+/// Sandbox section — profile selection, backend status, runtime image, and advanced settings.
+pub(crate) async fn section_sandbox(state: &AppState) -> String {
+    let config = state.config.read().await;
+    let sandbox_enabled_checked = if config.security.execution_sandbox.enabled {
+        "checked"
+    } else {
+        ""
+    };
+    let sandbox_strict_checked = if config.security.execution_sandbox.strict {
+        "checked"
+    } else {
+        ""
+    };
+    let sandbox_docker_image = &config.security.execution_sandbox.docker_image;
+    let sandbox_docker_memory = config.security.execution_sandbox.docker_memory_mb;
+    let sandbox_docker_cpus = config.security.execution_sandbox.docker_cpus;
+    let sandbox_docker_readonly_checked =
+        if config.security.execution_sandbox.docker_read_only_rootfs {
+            "checked"
+        } else {
+            ""
+        };
+    let sandbox_docker_mount_workspace_checked =
+        if config.security.execution_sandbox.docker_mount_workspace {
+            "checked"
+        } else {
+            ""
+        };
+
+    let html = format!(
+        r#"<section class="section" id="sandbox-docker-status-section">
+                    <h2>Backend Status</h2>
+                    <div class="sandbox-docker-status" id="sandbox-docker-status">
+                        <div class="sandbox-docker-status-icon" id="sandbox-docker-status-icon">⏳</div>
+                        <div class="sandbox-docker-status-info">
+                            <div class="sandbox-docker-status-text" id="sandbox-docker-status-text">Detecting available backends...</div>
+                            <div class="sandbox-docker-status-detail" id="sandbox-docker-status-detail"></div>
+                        </div>
+                        <button type="button" class="btn btn-secondary btn-sm" id="btn-refresh-docker-status">Refresh</button>
+                    </div>
+                </section>
+
+                <section class="section" id="sandbox-recommendation-section" style="display:none">
+                    <div class="sandbox-recommendation" id="sandbox-recommendation">
+                        <div class="sandbox-recommendation-text" id="sandbox-recommendation-text"></div>
+                        <button type="button" class="btn btn-primary btn-sm" id="btn-apply-sandbox-recommended">Apply Recommended</button>
+                    </div>
+                </section>
+
+                <section class="section">
+                    <h2>Profile</h2>
+                    <div class="sandbox-profile-grid">
+                        <button type="button" class="sandbox-profile-card" data-sandbox-profile="safe">
+                            <div class="sandbox-profile-header">
+                                <span class="sandbox-profile-title">Safe</span>
+                                <span class="badge badge-neutral" id="sandbox-profile-safe-badge">Fallback allowed</span>
+                            </div>
+                            <p class="sandbox-profile-desc" id="sandbox-profile-safe-desc">Sandbox active with auto-detected backend. Falls back to native if unavailable.</p>
+                        </button>
+                        <button type="button" class="sandbox-profile-card" data-sandbox-profile="strict">
+                            <div class="sandbox-profile-header">
+                                <span class="sandbox-profile-title">Strict</span>
+                                <span class="badge badge-warning" id="sandbox-profile-strict-badge">Blocks on failure</span>
+                            </div>
+                            <p class="sandbox-profile-desc" id="sandbox-profile-strict-desc">Requires an isolation backend. Blocks execution if no backend is available.</p>
+                        </button>
+                        <button type="button" class="sandbox-profile-card" data-sandbox-profile="disabled">
+                            <div class="sandbox-profile-header">
+                                <span class="sandbox-profile-title">Disabled</span>
+                                <span class="badge badge-neutral">Native execution</span>
+                            </div>
+                            <p class="sandbox-profile-desc">No sandbox wrapper. Processes run natively on the host.</p>
+                        </button>
+                    </div>
+                </section>
+
+                <section class="section" id="sandbox-image-section">
+                    <h2>Runtime Image</h2>
+                    <div class="sandbox-image-status" id="sandbox-image-status">
+                        <div class="sandbox-image-info">
+                            <code id="sandbox-image-name">{sandbox_docker_image}</code>
+                            <span class="badge badge-neutral" id="sandbox-image-status-badge">checking...</span>
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" class="btn btn-primary btn-sm" id="btn-pull-sandbox-image">Pull Image</button>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="section">
+                    <details class="sandbox-advanced" id="sandbox-advanced">
+                        <summary>Advanced Settings</summary>
+                        <div class="shell-profile-content">
+                            <div class="form-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="sandbox-enabled" {sandbox_enabled_checked}>
+                                    <span>Enable sandbox wrapper</span>
+                                </label>
+                                <div class="form-hint">When enabled, process execution is wrapped by the selected backend.</div>
+                            </div>
+                            <div class="form-group">
+                                <label>Backend</label>
+                                <select id="sandbox-backend" class="input">
+                                    <option value="auto">auto</option>
+                                    <option value="docker">docker</option>
+                                    <option value="linux_native">linux_native</option>
+                                    <option value="windows_native">windows_native</option>
+                                    <option value="macos_seatbelt">macos_seatbelt</option>
+                                    <option value="none">none</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="sandbox-strict" {sandbox_strict_checked}>
+                                    <span>Strict mode</span>
+                                </label>
+                                <div class="form-hint">Fail execution if backend is unavailable instead of falling back.</div>
+                            </div>
+                            <div id="sandbox-docker-fields">
+                                <div class="form-group">
+                                    <label>Docker image</label>
+                                    <input type="text" id="sandbox-docker-image" class="input" value="{sandbox_docker_image}">
+                                </div>
+                                <div class="form-group">
+                                    <label>Docker network</label>
+                                    <select id="sandbox-docker-network" class="input">
+                                        <option value="none">none</option>
+                                        <option value="bridge">bridge</option>
+                                        <option value="host">host</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Memory limit (MB)</label>
+                                    <input type="number" min="0" step="64" id="sandbox-docker-memory" class="input" value="{sandbox_docker_memory}">
+                                </div>
+                                <div class="form-group">
+                                    <label>CPU limit</label>
+                                    <input type="number" min="0" step="0.1" id="sandbox-docker-cpus" class="input" value="{sandbox_docker_cpus}">
+                                </div>
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="sandbox-docker-readonly" {sandbox_docker_readonly_checked}>
+                                        <span>Read-only root filesystem</span>
+                                    </label>
+                                </div>
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="sandbox-docker-mount-workspace" {sandbox_docker_mount_workspace_checked}>
+                                        <span>Mount workspace to /workspace</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <button class="btn btn-primary btn-sm" id="btn-save-sandbox">Save Settings</button>
+                            </div>
+                        </div>
+                    </details>
+                </section>"#,
+        sandbox_enabled_checked = sandbox_enabled_checked,
+        sandbox_strict_checked = sandbox_strict_checked,
+        sandbox_docker_image = sandbox_docker_image,
+        sandbox_docker_memory = sandbox_docker_memory,
+        sandbox_docker_cpus = sandbox_docker_cpus,
+        sandbox_docker_readonly_checked = sandbox_docker_readonly_checked,
+        sandbox_docker_mount_workspace_checked = sandbox_docker_mount_workspace_checked,
+    );
+    drop(config);
+    html
+}
+
+/// Maintenance (Database) section — storage usage and purge UI.
+pub(crate) async fn section_maintenance(state: &AppState) -> String {
+    let _ = state;
+    r#"<div id="maintenance-content">
+                    <div class="empty-state">
+                        <p>Loading database stats...</p>
+                    </div>
+                </div>"#.to_string()
+}
+
+/// Logs section — real-time log streaming with level filter.
+pub(crate) async fn section_logs(state: &AppState) -> String {
+    let _ = state;
+    r#"<div class="logs-toolbar">
+                    <label class="form-group logs-toolbar-item">
+                        <span>Level</span>
+                        <select id="logs-level" class="input">
+                            <option value="trace">Trace+</option>
+                            <option value="debug" selected>Debug+</option>
+                            <option value="info">Info+</option>
+                            <option value="warn">Warn+</option>
+                            <option value="error">Error only</option>
+                        </select>
+                    </label>
+                    <label class="checkbox-label logs-toolbar-item">
+                        <input type="checkbox" id="logs-autoscroll" checked>
+                        Auto-scroll
+                    </label>
+                    <button class="btn btn-secondary btn-sm logs-toolbar-item" id="logs-clear">Clear</button>
+                    <span class="logs-count" id="logs-count">0 events</span>
+                </div>
+                <div class="log-viewer" id="log-viewer">
+                    <div class="empty-state log-empty">
+                        <p>Waiting for log events...</p>
+                    </div>
+                </div>"#.to_string()
+}
+
+// ─── Dashboard sections (moved to settings modal) ────────────
+
+/// Token usage section — daily trend chart + cost estimate.
+pub(crate) async fn section_usage(_state: &AppState) -> String {
+    r#"<section class="section usage-section">
+                    <div class="usage-controls">
+                        <div class="usage-presets">
+                            <button class="btn btn-secondary btn-sm usage-range-btn is-active" type="button" data-days="7">7d</button>
+                            <button class="btn btn-secondary btn-sm usage-range-btn" type="button" data-days="30">30d</button>
+                            <button class="btn btn-secondary btn-sm usage-range-btn" type="button" data-days="90">90d</button>
+                            <button class="btn btn-secondary btn-sm usage-range-btn" type="button" data-days="all">All</button>
+                        </div>
+                        <div class="usage-date-range">
+                            <label class="usage-filter">
+                                <span>From</span>
+                                <input type="date" class="input usage-date-input" id="usage-since">
+                            </label>
+                            <label class="usage-filter">
+                                <span>To</span>
+                                <input type="date" class="input usage-date-input" id="usage-until">
+                            </label>
+                        </div>
+                        <button class="btn btn-secondary btn-sm" type="button" id="usage-refresh">Refresh</button>
+                    </div>
+                    <div class="usage-panels">
+                        <div class="usage-panel">
+                            <div class="usage-panel-title">Daily Token Trend</div>
+                            <svg id="usage-chart" viewBox="0 0 720 220" preserveAspectRatio="none"></svg>
+                            <div class="usage-chart-empty" id="usage-chart-empty" hidden>No usage data in selected range.</div>
+                        </div>
+                        <div class="usage-panel">
+                            <div class="usage-panel-title">Estimated Cost</div>
+                            <div class="stat-value" id="usage-estimated-cost" style="margin-bottom:4px">$0.00</div>
+                            <div class="stat-sub" id="usage-total-calls">— calls</div>
+                            <div class="usage-split" id="usage-split" style="margin-top:12px"></div>
+                        </div>
+                    </div>
+                </section>"#.to_string()
+}
+
+/// System health section — model info, uptime, provider status.
+pub(crate) async fn section_health(state: &AppState) -> String {
+    let config = state.config.read().await;
+    let uptime = state.started_at.elapsed().as_secs();
+    let provider = config
+        .resolve_provider(&config.agent.model)
+        .map(|(n, _)| n)
+        .unwrap_or("none");
+    let uptime_display = format_uptime(uptime);
+
+    format!(
+        r#"<div class="stats-grid" style="margin-bottom:24px">
+                    <div class="stat-card">
+                        <div class="stat-label">Model</div>
+                        <div class="stat-value">{model}</div>
+                        <div class="stat-sub">via {provider}</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Uptime</div>
+                        <div class="stat-value" data-live-uptime="{uptime_secs}">{uptime_display}</div>
+                        <div class="stat-sub">since start</div>
+                    </div>
+                </div>
+                <div class="dash-health-grid" id="dash-health-grid">
+                    <div class="dash-loading">Loading health status...</div>
+                </div>"#,
+        model = config.agent.model,
+        provider = provider,
+        uptime_secs = uptime,
+        uptime_display = uptime_display,
+    )
+}
+
+/// Recent activity / history section.
+pub(crate) async fn section_history(_state: &AppState) -> String {
+    r#"<div class="item-list" id="dash-activity-list">
+                    <div class="dash-loading">Loading activity...</div>
+                </div>"#.to_string()
 }
