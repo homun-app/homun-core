@@ -247,6 +247,14 @@ impl ContactsTool {
                 args["tone_of_voice"].as_str(),
             )
             .await?;
+
+        // Auto-create perimeter with contact namespace (KIX-1)
+        if let Err(e) =
+            crate::contacts::perimeter::create_perimeter_for_contact(self.db.pool(), id).await
+        {
+            tracing::warn!(contact_id = id, error = %e, "Failed to auto-create perimeter");
+        }
+
         Ok(ToolResult {
             output: format!("Created contact #{id}: {name}"),
             is_error: false,

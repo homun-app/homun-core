@@ -59,6 +59,9 @@ pub struct ToolContext {
     pub profile_slug: Option<String>,
     /// Allowed knowledge namespaces from contact perimeter (None = owner, all visible).
     pub allowed_namespaces: Option<Vec<String>>,
+    /// Contact ID for the current conversation (None = owner/CLI).
+    /// Used by knowledge tool to auto-assign contact namespace on ingest (KIX-4).
+    pub contact_id: Option<i64>,
 }
 
 /// Tool trait — every built-in tool and skill implements this.
@@ -258,6 +261,7 @@ mod tests {
             profile_brain_dir: None,
             profile_slug: None,
             allowed_namespaces: None,
+            contact_id: None,
         }
     }
 

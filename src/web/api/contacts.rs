@@ -173,6 +173,13 @@ async fn create_contact(
         .await
         .map_err(internal)?;
 
+    // Auto-create perimeter with contact namespace (KIX-1)
+    if let Err(e) =
+        crate::contacts::perimeter::create_perimeter_for_contact(db.pool(), id).await
+    {
+        tracing::warn!(contact_id = id, error = %e, "Failed to auto-create perimeter");
+    }
+
     let contact = db
         .load_contact(id)
         .await

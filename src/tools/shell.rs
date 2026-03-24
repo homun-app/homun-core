@@ -575,6 +575,7 @@ mod tests {
             profile_brain_dir: None,
             profile_slug: None,
             allowed_namespaces: None,
+            contact_id: None,
         }
     }
 

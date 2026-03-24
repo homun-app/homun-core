@@ -47,7 +47,12 @@
         const scopeLabel = MEMORY_SCOPES.find(s => s.value === perimeter.memory_scope);
 
         addMetaItem(summary, 'Memory scope', scopeLabel ? scopeLabel.label : perimeter.memory_scope);
-        addMetaItem(summary, 'Namespaces', namespaces.join(', ') || '_public');
+        const nsLabels = namespaces.map(ns => {
+            if (ns === '_public') return '_public';
+            if (ns === 'contact_' + contactId) return 'own';
+            return ns;
+        });
+        addMetaItem(summary, 'Namespaces', nsLabels.join(', ') || '_public');
         addMetaItem(summary, 'Denied tools', denied.join(', ') || 'none');
         addMetaItem(summary, 'See contacts', perimeter.can_see_contacts ? 'Yes' : 'No');
         addMetaItem(summary, 'See calendar', perimeter.can_see_calendar ? 'Yes' : 'No');
@@ -72,17 +77,68 @@
         scopeGroup.appendChild(scopeSelect);
         form.appendChild(scopeGroup);
 
-        // Namespaces
+        // Namespaces — tag-style UI with contact auto-namespace + custom
         const nsGroup = createFormGroup('Knowledge Namespaces');
-        const nsInput = document.createElement('input');
-        nsInput.className = 'input';
-        nsInput.type = 'text';
-        nsInput.placeholder = '_public, acme, shared';
-        nsInput.value = namespaces.join(', ');
-        nsGroup.appendChild(nsInput);
+        const nsTagContainer = document.createElement('div');
+        nsTagContainer.className = 'perm-ns-tags';
+        nsTagContainer.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin-top:4px';
+
+        // Auto-namespace for this contact (always present, not removable)
+        const ownNs = 'contact_' + contactId;
+        const autoTag = document.createElement('span');
+        autoTag.className = 'badge';
+        autoTag.textContent = 'Own (' + ownNs + ')';
+        autoTag.title = 'Auto-generated, always included';
+        autoTag.style.opacity = '0.6';
+        nsTagContainer.appendChild(autoTag);
+
+        // _public always present
+        const pubTag = document.createElement('span');
+        pubTag.className = 'badge';
+        pubTag.textContent = '_public';
+        pubTag.title = 'Always included';
+        pubTag.style.opacity = '0.6';
+        nsTagContainer.appendChild(pubTag);
+
+        // Editable custom namespaces (exclude auto ones)
+        const customNs = namespaces.filter(ns => ns !== '_public' && ns !== ownNs);
+        customNs.forEach(ns => {
+            nsTagContainer.appendChild(createNsTag(ns, nsTagContainer));
+        });
+
+        // Add button + input for new custom namespace
+        const addRow = document.createElement('div');
+        addRow.style.cssText = 'display:flex;gap:4px;align-items:center;margin-top:6px';
+        const nsAddInput = document.createElement('input');
+        nsAddInput.className = 'input';
+        nsAddInput.type = 'text';
+        nsAddInput.placeholder = 'custom namespace';
+        nsAddInput.style.cssText = 'font-size:0.8rem;max-width:160px';
+        addRow.appendChild(nsAddInput);
+        const nsAddBtn = document.createElement('button');
+        nsAddBtn.className = 'btn btn-sm';
+        nsAddBtn.type = 'button';
+        nsAddBtn.textContent = 'Add';
+        nsAddBtn.addEventListener('click', () => {
+            const val = nsAddInput.value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+            if (val && val !== '_public' && val !== '_private' && val !== ownNs) {
+                // Check not already added
+                const existing = nsTagContainer.querySelectorAll('.perm-ns-tag');
+                let found = false;
+                existing.forEach(t => { if (t.dataset.ns === val) found = true; });
+                if (!found) {
+                    nsTagContainer.appendChild(createNsTag(val, nsTagContainer));
+                }
+            }
+            nsAddInput.value = '';
+        });
+        addRow.appendChild(nsAddBtn);
+        nsGroup.appendChild(nsTagContainer);
+        nsGroup.appendChild(addRow);
+
         const nsHint = document.createElement('div');
         nsHint.className = 'form-hint';
-        nsHint.textContent = 'Comma-separated. _public is always included.';
+        nsHint.textContent = 'Own namespace and _public are always included. Add custom namespaces for shared documents.';
         nsGroup.appendChild(nsHint);
         form.appendChild(nsGroup);
 
@@ -118,8 +174,12 @@
         saveBtn.className = 'btn btn-primary btn-sm';
         saveBtn.textContent = 'Save';
         saveBtn.addEventListener('click', async () => {
-            const nsVal = nsInput.value.split(',').map(s => s.trim()).filter(Boolean);
-            if (!nsVal.includes('_public')) nsVal.unshift('_public');
+            // Collect namespaces: own + _public (always) + custom tags
+            const ownNs = 'contact_' + contactId;
+            const nsVal = ['_public', ownNs];
+            nsTagContainer.querySelectorAll('.perm-ns-tag').forEach(t => {
+                if (t.dataset.ns && !nsVal.includes(t.dataset.ns)) nsVal.push(t.dataset.ns);
+            });
 
             const deniedVal = [];
             toolsContainer.querySelectorAll('input:checked').forEach(cb => deniedVal.push(cb.value));
@@ -202,6 +262,22 @@
         label.appendChild(cb);
         label.appendChild(document.createTextNode(labelText));
         return label;
+    }
+
+    /** Create a removable namespace tag element. */
+    function createNsTag(ns, container) {
+        const tag = document.createElement('span');
+        tag.className = 'badge perm-ns-tag';
+        tag.dataset.ns = ns;
+        tag.style.cssText = 'cursor:pointer;display:inline-flex;align-items:center;gap:4px';
+        tag.textContent = ns;
+        const x = document.createElement('span');
+        x.textContent = '\u00d7';
+        x.style.cssText = 'font-weight:bold;opacity:0.6';
+        tag.appendChild(x);
+        tag.title = 'Click to remove';
+        tag.addEventListener('click', () => tag.remove());
+        return tag;
     }
 
     // Listen for contact selection

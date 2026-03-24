@@ -1,14 +1,16 @@
 // Knowledge Base page — upload, search, list sources
+// KIX-2: contact-based namespace assignment (dropdown shows contacts)
+
+/** Cached contacts list for namespace selectors. */
+var _cachedContacts = null;
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Profile filter managed by global topbar — reload on change
     document.addEventListener('profile-changed', () => { loadStats(); loadSources(); });
     loadStats();
-    loadSources();
+    loadContacts().then(() => loadSources());
     setupUpload();
     setupSearch();
     setupFolderIndex();
-    setupNamespaceControls();
 });
 
 /** Get the current profile filter slug from global topbar (empty = all). */
@@ -20,48 +22,61 @@ function getKnowledgeProfileFilter() {
 function getSelectedNamespace() {
     var sel = document.getElementById('upload-namespace');
     if (!sel) return '_private';
-    var val = sel.value;
-    if (val === '_custom') {
-        var custom = document.getElementById('upload-namespace-custom');
-        return custom && custom.value.trim() ? custom.value.trim() : '_private';
-    }
-    return val;
+    return sel.value;
 }
 
-// ─── Namespace Controls ──────────────────────────────
+// ─── Contacts Cache ──────────────────────────────────
 
-function setupNamespaceControls() {
-    var addBtn = document.getElementById('upload-namespace-add');
+/** Load contacts list for namespace selectors. */
+async function loadContacts() {
+    try {
+        var resp = await fetch('/api/v1/contacts');
+        if (!resp.ok) return;
+        var data = await resp.json();
+        _cachedContacts = data.contacts || data || [];
+        populateNamespaceSelect();
+    } catch (_) {
+        _cachedContacts = [];
+    }
+}
+
+/** Populate the upload namespace select with contacts. */
+function populateNamespaceSelect() {
     var sel = document.getElementById('upload-namespace');
-    var customInput = document.getElementById('upload-namespace-custom');
-    if (!addBtn || !sel || !customInput) return;
+    if (!sel || !_cachedContacts) return;
 
-    addBtn.addEventListener('click', function () {
-        if (customInput.style.display === 'none') {
-            customInput.style.display = '';
-            customInput.focus();
-            addBtn.textContent = 'Add';
-        } else {
-            var ns = customInput.value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
-            if (ns && ns !== '_private' && ns !== '_public') {
-                // Check if option already exists
-                var exists = false;
-                for (var i = 0; i < sel.options.length; i++) {
-                    if (sel.options[i].value === ns) { exists = true; break; }
-                }
-                if (!exists) {
-                    var opt = document.createElement('option');
-                    opt.value = ns;
-                    opt.textContent = ns;
-                    sel.appendChild(opt);
-                }
-                sel.value = ns;
-            }
-            customInput.value = '';
-            customInput.style.display = 'none';
-            addBtn.textContent = '+ Custom';
-        }
-    });
+    // Remove old contact options (keep _private and _public)
+    var toRemove = [];
+    for (var i = 0; i < sel.options.length; i++) {
+        var v = sel.options[i].value;
+        if (v !== '_private' && v !== '_public') toRemove.push(sel.options[i]);
+    }
+    toRemove.forEach(function (o) { o.remove(); });
+
+    // Add contact options
+    if (_cachedContacts.length > 0) {
+        var group = document.createElement('optgroup');
+        group.label = 'Contacts';
+        _cachedContacts.forEach(function (c) {
+            var opt = document.createElement('option');
+            opt.value = 'contact_' + c.id;
+            opt.textContent = c.name;
+            group.appendChild(opt);
+        });
+        sel.appendChild(group);
+    }
+}
+
+/** Resolve a namespace string to a human-readable label. */
+function namespaceLabel(ns) {
+    if (!ns || ns === '_private') return 'Only me';
+    if (ns === '_public') return 'All contacts';
+    if (ns.startsWith('contact_') && _cachedContacts) {
+        var cid = parseInt(ns.replace('contact_', ''), 10);
+        var c = _cachedContacts.find(function (x) { return x.id === cid; });
+        if (c) return c.name;
+    }
+    return ns;
 }
 
 // ─── Stats ────────────────────────────────────────────
@@ -106,7 +121,7 @@ async function loadSources() {
 
         const thead = document.createElement('thead');
         const headerRow = document.createElement('tr');
-        ['File', 'Type', 'Namespace', 'Chunks', 'Size', 'Status', 'Date', ''].forEach(text => {
+        ['File', 'Type', 'Visible to', 'Chunks', 'Size', 'Status', 'Date', ''].forEach(text => {
             const th = document.createElement('th');
             th.textContent = text;
             headerRow.appendChild(th);
@@ -114,12 +129,19 @@ async function loadSources() {
         thead.appendChild(headerRow);
         table.appendChild(thead);
 
-        // Collect unique namespaces for the select options
+        // Collect unique namespaces for inline select options
         var knownNamespaces = ['_private', '_public'];
         sources.forEach(function (s) {
             var ns = s.namespace || '_private';
             if (knownNamespaces.indexOf(ns) === -1) knownNamespaces.push(ns);
         });
+        // Add contact namespaces
+        if (_cachedContacts) {
+            _cachedContacts.forEach(function (c) {
+                var ns = 'contact_' + c.id;
+                if (knownNamespaces.indexOf(ns) === -1) knownNamespaces.push(ns);
+            });
+        }
 
         const tbody = document.createElement('tbody');
         sources.forEach(s => {
@@ -137,15 +159,15 @@ async function loadSources() {
             tdType.appendChild(badge);
             tr.appendChild(tdType);
 
-            // Namespace — inline editable select
+            // Visible to — inline editable select with human-readable labels
             const tdNs = document.createElement('td');
             const nsSelect = document.createElement('select');
             nsSelect.className = 'input';
-            nsSelect.style.cssText = 'font-size:0.75rem;padding:2px 4px;min-width:90px;border:1px solid var(--border);border-radius:var(--r-sm,4px);background:var(--surface)';
+            nsSelect.style.cssText = 'font-size:0.75rem;padding:2px 4px;min-width:100px;border:1px solid var(--border);border-radius:var(--r-sm,4px);background:var(--surface)';
             knownNamespaces.forEach(function (ns) {
                 var opt = document.createElement('option');
                 opt.value = ns;
-                opt.textContent = ns;
+                opt.textContent = namespaceLabel(ns);
                 if (ns === (s.namespace || '_private')) opt.selected = true;
                 nsSelect.appendChild(opt);
             });
@@ -186,35 +208,10 @@ async function loadSources() {
         });
         table.appendChild(tbody);
         container.appendChild(table);
-
-        // Sync known namespaces to upload selector
-        syncUploadNamespaceOptions(knownNamespaces);
     } catch (e) {
         container.textContent = '';
         showErrorState('sources-list', 'Could not load knowledge sources.', loadSources);
     }
-}
-
-/** Keep the upload namespace select in sync with namespaces seen in sources. */
-function syncUploadNamespaceOptions(knownNamespaces) {
-    var sel = document.getElementById('upload-namespace');
-    if (!sel) return;
-    var current = sel.value;
-    // Add any new namespaces not already in the select
-    knownNamespaces.forEach(function (ns) {
-        var exists = false;
-        for (var i = 0; i < sel.options.length; i++) {
-            if (sel.options[i].value === ns) { exists = true; break; }
-        }
-        if (!exists) {
-            var opt = document.createElement('option');
-            opt.value = ns;
-            opt.textContent = ns;
-            sel.appendChild(opt);
-        }
-    });
-    // Restore selection
-    sel.value = current;
 }
 
 async function updateSourceNamespace(id, namespace) {
@@ -466,7 +463,6 @@ async function revealChunk(chunkId, contentDiv, btn) {
     let code = '';
     const body = { chunk_id: chunkId };
 
-    // First try without code; if 2FA required, prompt
     try {
         let resp = await fetch('/api/v1/knowledge/reveal', {
             method: 'POST',

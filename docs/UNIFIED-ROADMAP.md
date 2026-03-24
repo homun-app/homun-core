@@ -322,10 +322,10 @@ Target: **17 verified recipes bundled** — all done. Google services consolidat
 
 | # | Task | Note |
 |---|------|------|
-| KIX-1 | **Auto-namespace per contatto** | Alla creazione contatto, genera namespace `contact_{id}`. Perimeter auto-include il proprio namespace. Nessuna configurazione manuale |
-| KIX-2 | **Contact-based knowledge assignment** | Upload: dropdown "Associa a contatto" cerca contatti, assegna `contact_{id}` come namespace. Tabella sources: stessa logica inline. L'utente non vede namespace raw |
-| KIX-3 | **Namespace custom + associazione da contatto** | UI per creare namespace liberi (es. `progetto-alpha`). Dal contatto (sezione perimeter) si sceglie quali namespace custom il contatto può vedere |
-| KIX-4 | **Chat-based knowledge assignment** | Documento passato in chat → tool `knowledge ingest` auto-assegna `contact_{id}` del contatto nella conversazione |
+| KIX-1 | **Auto-namespace per contatto** | ✅ DONE (2026-03-24) — `contact_namespace()` genera `contact_{id}`. `create_perimeter_for_contact()` auto-crea perimeter con `["_public", "contact_{id}"]` su creazione contatto (API + tool). `default_perimeter()` include anche il namespace contatto come fallback |
+| KIX-2 | **Contact-based knowledge assignment** | ✅ DONE (2026-03-24) — Upload "Visible to" dropdown mostra contatti (caricati da API) con namespace auto `contact_{id}`. Tabella sources: inline select con nomi contatto. `namespaceLabel()` risolve `contact_{id}` → nome contatto |
+| KIX-3 | **Namespace custom + associazione da contatto** | ✅ DONE (2026-03-24) — Perimeter UI: tag-style namespace editor. Own namespace + `_public` always included. Custom namespace addable/removable. Summary mostra label human-readable |
+| KIX-4 | **Chat-based knowledge assignment** | ✅ DONE (2026-03-24) — `ToolContext.contact_id` passato dall'agent loop. Knowledge tool `ingest` auto-assegna `contact_{id}` come namespace quando il contatto è noto |
 
 #### 4D-bis. Monitored Folders (Knowledge Watch)
 

@@ -183,6 +183,11 @@ impl Tool for KnowledgeTool {
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
 
+                // KIX-4: auto-assign contact namespace when ingesting via chat
+                let namespace = ctx.contact_id.map(|cid| {
+                    crate::contacts::perimeter::contact_namespace(cid)
+                });
+
                 let mut engine = self.engine.lock().await;
 
                 if path.is_dir() {
@@ -193,7 +198,7 @@ impl Tool for KnowledgeTool {
                             "tool",
                             ctx.profile_id,
                             ctx.user_id.as_deref(),
-                            None,
+                            namespace.as_deref(),
                         )
                         .await?;
                     Ok(ToolResult {
@@ -202,7 +207,7 @@ impl Tool for KnowledgeTool {
                     })
                 } else if path.is_file() {
                     match engine
-                        .ingest_file(&path, "tool", ctx.profile_id, ctx.user_id.as_deref(), None)
+                        .ingest_file(&path, "tool", ctx.profile_id, ctx.user_id.as_deref(), namespace.as_deref())
                         .await?
                     {
                         Some(id) => Ok(ToolResult {

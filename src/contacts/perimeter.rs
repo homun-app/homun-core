@@ -46,11 +46,15 @@ impl ContactPerimeter {
 }
 
 /// Safe defaults for contacts without an explicit perimeter row.
+///
+/// Includes the auto-generated `contact_{id}` namespace so the contact
+/// can always see documents assigned to it, even without an explicit row.
 pub fn default_perimeter(contact_id: i64) -> ContactPerimeter {
+    let ns = contact_namespace(contact_id);
     ContactPerimeter {
         id: 0,
         contact_id,
-        knowledge_namespaces: r#"["_public"]"#.into(),
+        knowledge_namespaces: serde_json::json!(["_public", ns]).to_string(),
         memory_scope: "contact_only".into(),
         tools_allowed: "[]".into(),
         tools_denied: r#"["vault"]"#.into(),
@@ -127,6 +131,31 @@ pub async fn upsert_perimeter(
     Ok(())
 }
 
+/// Generate the auto-namespace for a contact: `contact_{id}`.
+pub fn contact_namespace(contact_id: i64) -> String {
+    format!("contact_{contact_id}")
+}
+
+/// Create a perimeter for a newly created contact.
+///
+/// Sets `knowledge_namespaces` to `["_public", "contact_{id}"]` so the contact
+/// can see public documents and its own private namespace.
+pub async fn create_perimeter_for_contact(pool: &Pool<Sqlite>, contact_id: i64) -> Result<()> {
+    let ns = contact_namespace(contact_id);
+    let namespaces = serde_json::json!(["_public", ns]).to_string();
+    upsert_perimeter(
+        pool,
+        contact_id,
+        &namespaces,
+        "contact_only",
+        "[]",
+        r#"["vault"]"#,
+        false,
+        false,
+    )
+    .await
+}
+
 /// Delete a contact's perimeter (reverts to safe defaults).
 pub async fn delete_perimeter(pool: &Pool<Sqlite>, contact_id: i64) -> Result<()> {
     sqlx::query("DELETE FROM contact_perimeters WHERE contact_id = ?")
@@ -147,7 +176,7 @@ mod tests {
     fn default_perimeter_values() {
         let p = default_perimeter(42);
         assert_eq!(p.contact_id, 42);
-        assert_eq!(p.namespaces(), vec!["_public"]);
+        assert_eq!(p.namespaces(), vec!["_public", "contact_42"]);
         assert_eq!(p.memory_scope, "contact_only");
         assert!(p.allowed_tools().is_empty());
         assert_eq!(p.denied_tools(), vec!["vault"]);
@@ -167,5 +196,11 @@ mod tests {
         let mut p = default_perimeter(1);
         p.tools_denied = r#"["vault", "file_read", "shell"]"#.into();
         assert_eq!(p.denied_tools(), vec!["vault", "file_read", "shell"]);
+    }
+
+    #[test]
+    fn contact_namespace_format() {
+        assert_eq!(contact_namespace(42), "contact_42");
+        assert_eq!(contact_namespace(1), "contact_1");
     }
 }

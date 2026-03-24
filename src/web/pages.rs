@@ -2866,13 +2866,11 @@ async fn knowledge_page(State(_state): State<Arc<AppState>>) -> Html<String> {
                             accept=".md,.markdown,.txt,.log,.rs,.py,.js,.ts,.go,.java,.c,.cpp,.h,.hpp,.toml,.yaml,.yml,.json,.html,.htm,.css,.sh,.bash,.zsh,.sql,.xml,.csv,.ini,.cfg,.conf,.env,.pdf,.docx,.xlsx,.xls,.xlsm,.odt">
                     </div>
                     <div class="knowledge-namespace-row" style="display:flex;align-items:center;gap:0.5rem;margin-top:0.75rem">
-                        <label for="upload-namespace" style="font-size:0.8rem;font-weight:600;white-space:nowrap;opacity:0.7">Namespace</label>
-                        <select id="upload-namespace" class="input" style="max-width:200px;font-size:0.8rem">
-                            <option value="_private">_private (owner only)</option>
-                            <option value="_public">_public (all contacts)</option>
+                        <label for="upload-namespace" style="font-size:0.8rem;font-weight:600;white-space:nowrap;opacity:0.7">Visible to</label>
+                        <select id="upload-namespace" class="input" style="max-width:240px;font-size:0.8rem">
+                            <option value="_private">Only me</option>
+                            <option value="_public">All contacts</option>
                         </select>
-                        <input type="text" id="upload-namespace-custom" class="input" placeholder="custom namespace" style="max-width:160px;font-size:0.8rem;display:none">
-                        <button type="button" id="upload-namespace-add" class="btn btn-sm" style="font-size:0.75rem;white-space:nowrap">+ Custom</button>
                     </div>
                     <div id="upload-progress" class="upload-progress" style="display:none"></div>
 

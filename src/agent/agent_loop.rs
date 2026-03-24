@@ -980,6 +980,7 @@ impl AgentLoop {
             profile_brain_dir: active_profile_brain_dir.clone(),
             profile_slug: active_profile_slug.clone(),
             allowed_namespaces: contact_perimeter.as_ref().map(|p| p.namespaces()),
+            contact_id: memory_contact_id,
         };
 
         // Browser session: idle cleanup and per-conversation continuation hint
