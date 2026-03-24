@@ -21,9 +21,25 @@ function getKnowledgeProfileFilter() {
     return window.getActiveProfileSlug ? window.getActiveProfileSlug() : '';
 }
 
-/** Get the selected namespace for upload. */
+/** Get the selected namespace for upload (first one if multi). */
 function getSelectedNamespace() {
+    if (Array.isArray(_selectedNamespace)) return _selectedNamespace[0] || '_private';
     return _selectedNamespace;
+}
+
+/** Get all selected namespaces as array. */
+function getSelectedNamespaces() {
+    if (Array.isArray(_selectedNamespace)) return _selectedNamespace;
+    return [_selectedNamespace];
+}
+
+/** Format a selection (string or array) for display on the trigger button. */
+function selectionLabel(sel) {
+    if (!sel) return 'Only me';
+    if (!Array.isArray(sel)) return namespaceLabel(sel);
+    if (sel.length === 1) return namespaceLabel(sel[0]);
+    // Multi: show first name + count
+    return namespaceLabel(sel[0]) + ' +' + (sel.length - 1);
 }
 
 // ─── Contacts Cache ──────────────────────────────────
@@ -59,23 +75,29 @@ function setupVisibilityPicker() {
     if (!btn) return;
     btn.addEventListener('click', function (e) {
         e.stopPropagation();
-        openVisibilityPicker(btn, function (ns) {
-            _selectedNamespace = ns;
-            btn.textContent = namespaceLabel(ns);
+        openVisibilityPicker(btn, function (sel) {
+            _selectedNamespace = sel;
+            btn.textContent = selectionLabel(sel);
         });
     });
 }
 
-/** Open the visibility picker modal (same pattern as model picker). */
+/** Open the visibility picker modal with multi-select for contacts. */
 function openVisibilityPicker(anchor, onSelect) {
     closeVisibilityPicker();
 
-    // Backdrop
+    // Parse current selection into a set
+    var selected = new Set();
+    if (Array.isArray(_selectedNamespace)) {
+        _selectedNamespace.forEach(function (ns) { selected.add(ns); });
+    } else {
+        selected.add(_selectedNamespace);
+    }
+
     var backdrop = document.createElement('div');
     backdrop.className = 'knowledge-vis-backdrop';
     backdrop.id = 'knowledge-vis-picker';
 
-    // Modal
     var modal = document.createElement('div');
     modal.className = 'knowledge-vis-modal';
 
@@ -101,26 +123,89 @@ function openVisibilityPicker(anchor, onSelect) {
     searchInput.autocomplete = 'off';
     modal.appendChild(searchInput);
 
-    // Body (scrollable list)
+    // Body
     var body = document.createElement('div');
     body.className = 'knowledge-vis-body';
     modal.appendChild(body);
+
+    // Footer with Done button + selection summary
+    var footer = document.createElement('div');
+    footer.className = 'knowledge-vis-footer';
+    var summary = document.createElement('span');
+    summary.className = 'knowledge-vis-summary';
+    footer.appendChild(summary);
+    var doneBtn = document.createElement('button');
+    doneBtn.type = 'button';
+    doneBtn.className = 'btn btn-primary btn-sm';
+    doneBtn.textContent = 'Done';
+    footer.appendChild(doneBtn);
+    modal.appendChild(footer);
+
+    function updateSummary() {
+        if (selected.has('_private')) {
+            summary.textContent = 'Only you';
+        } else if (selected.has('_public')) {
+            summary.textContent = 'All contacts';
+        } else {
+            var count = selected.size;
+            summary.textContent = count === 0 ? 'No one selected' : count + ' contact' + (count > 1 ? 's' : '') + ' selected';
+        }
+    }
+
+    /** Select a fixed option (exclusive — clears contacts). */
+    function selectFixed(ns) {
+        selected.clear();
+        selected.add(ns);
+        renderOptions(searchInput.value);
+        updateSummary();
+    }
+
+    /** Toggle a contact (clears fixed options). */
+    function toggleContact(ns) {
+        selected.delete('_private');
+        selected.delete('_public');
+        if (selected.has(ns)) {
+            selected.delete(ns);
+            if (selected.size === 0) selected.add('_private'); // fallback
+        } else {
+            selected.add(ns);
+        }
+        renderOptions(searchInput.value);
+        updateSummary();
+    }
 
     function renderOptions(filter) {
         body.textContent = '';
         var q = (filter || '').toLowerCase();
 
-        // Fixed options
-        var fixed = [
+        // Fixed options (radio-style)
+        [
             { ns: '_private', label: 'Only me', desc: 'Only you can see these documents' },
             { ns: '_public', label: 'All contacts', desc: 'Visible to every contact' },
-        ];
-        fixed.forEach(function (opt) {
+        ].forEach(function (opt) {
             if (q && opt.label.toLowerCase().indexOf(q) === -1) return;
-            body.appendChild(makePickerItem(opt.ns, opt.label, opt.desc, onSelect));
+            var item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'knowledge-vis-option' + (selected.has(opt.ns) ? ' is-current' : '');
+            var nameEl = document.createElement('span');
+            nameEl.className = 'knowledge-vis-option-name';
+            nameEl.textContent = opt.label;
+            item.appendChild(nameEl);
+            var descEl = document.createElement('span');
+            descEl.className = 'knowledge-vis-option-desc';
+            descEl.textContent = opt.desc;
+            item.appendChild(descEl);
+            if (selected.has(opt.ns)) {
+                var check = document.createElement('span');
+                check.className = 'knowledge-vis-option-check';
+                check.textContent = '\u2713';
+                item.appendChild(check);
+            }
+            item.addEventListener('click', function () { selectFixed(opt.ns); });
+            body.appendChild(item);
         });
 
-        // Contact options
+        // Contact options (multi-select with checkboxes)
         if (_cachedContacts && _cachedContacts.length > 0) {
             var filtered = _cachedContacts.filter(function (c) {
                 return !q || c.name.toLowerCase().indexOf(q) !== -1;
@@ -132,7 +217,24 @@ function openVisibilityPicker(anchor, onSelect) {
                 body.appendChild(groupLabel);
             }
             filtered.forEach(function (c) {
-                body.appendChild(makePickerItem('contact_' + c.id, c.name, null, onSelect));
+                var ns = 'contact_' + c.id;
+                var item = document.createElement('button');
+                item.type = 'button';
+                item.className = 'knowledge-vis-option' + (selected.has(ns) ? ' is-current' : '');
+
+                var cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.checked = selected.has(ns);
+                cb.style.cssText = 'pointer-events:none;margin:0';
+                item.appendChild(cb);
+
+                var nameEl = document.createElement('span');
+                nameEl.className = 'knowledge-vis-option-name';
+                nameEl.textContent = c.name;
+                item.appendChild(nameEl);
+
+                item.addEventListener('click', function () { toggleContact(ns); });
+                body.appendChild(item);
             });
 
             if (filtered.length === 0 && q) {
@@ -148,49 +250,27 @@ function openVisibilityPicker(anchor, onSelect) {
         renderOptions(this.value);
     });
 
+    doneBtn.addEventListener('click', function () {
+        // Convert selection to namespace(s)
+        var arr = Array.from(selected);
+        if (arr.length === 1) {
+            onSelect(arr[0]);
+        } else {
+            onSelect(arr);
+        }
+        closeVisibilityPicker();
+    });
+
     renderOptions('');
+    updateSummary();
     backdrop.appendChild(modal);
     document.body.appendChild(backdrop);
     searchInput.focus();
 
-    // Close on backdrop click
     backdrop.addEventListener('click', function (e) {
         if (e.target === backdrop) closeVisibilityPicker();
     });
-
-    // Close on Escape
     document.addEventListener('keydown', onPickerEscape);
-}
-
-function makePickerItem(ns, label, desc, onSelect) {
-    var item = document.createElement('button');
-    item.type = 'button';
-    item.className = 'knowledge-vis-option' + (_selectedNamespace === ns ? ' is-current' : '');
-
-    var nameEl = document.createElement('span');
-    nameEl.className = 'knowledge-vis-option-name';
-    nameEl.textContent = label;
-    item.appendChild(nameEl);
-
-    if (desc) {
-        var descEl = document.createElement('span');
-        descEl.className = 'knowledge-vis-option-desc';
-        descEl.textContent = desc;
-        item.appendChild(descEl);
-    }
-
-    if (_selectedNamespace === ns) {
-        var check = document.createElement('span');
-        check.className = 'knowledge-vis-option-check';
-        check.textContent = '\u2713';
-        item.appendChild(check);
-    }
-
-    item.addEventListener('click', function () {
-        onSelect(ns);
-        closeVisibilityPicker();
-    });
-    return item;
 }
 
 function closeVisibilityPicker() {
@@ -201,6 +281,39 @@ function closeVisibilityPicker() {
 
 function onPickerEscape(e) {
     if (e.key === 'Escape') closeVisibilityPicker();
+}
+
+/**
+ * When a document is shared with multiple contacts, the source gets the
+ * first contact's namespace. For each additional contact, we add that
+ * namespace to their perimeter so they can see the document too.
+ */
+async function ensureSharedPerimeters(namespaces) {
+    if (!Array.isArray(namespaces) || namespaces.length <= 1) return;
+    var primaryNs = namespaces[0]; // the source's namespace
+    // For each additional contact, add primaryNs to their perimeter
+    for (var i = 1; i < namespaces.length; i++) {
+        var ns = namespaces[i];
+        if (!ns.startsWith('contact_')) continue;
+        var cid = parseInt(ns.replace('contact_', ''), 10);
+        if (isNaN(cid)) continue;
+        try {
+            // Load current perimeter
+            var res = await fetch('/api/v1/contacts/' + cid + '/perimeter');
+            if (!res.ok) continue;
+            var perimeter = await res.json();
+            var current = JSON.parse(perimeter.knowledge_namespaces || '["_public"]');
+            // Add the primary namespace if not already present
+            if (!current.includes(primaryNs)) {
+                current.push(primaryNs);
+                await fetch('/api/v1/contacts/' + cid + '/perimeter', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ knowledge_namespaces: current }),
+                });
+            }
+        } catch (_) { /* best effort */ }
+    }
 }
 
 // ─── Stats ────────────────────────────────────────────
@@ -277,9 +390,13 @@ async function loadSources() {
             nsBtn.textContent = namespaceLabel(s.namespace || '_private');
             nsBtn.addEventListener('click', function (e) {
                 e.stopPropagation();
-                openVisibilityPicker(nsBtn, function (ns) {
+                openVisibilityPicker(nsBtn, function (sel) {
+                    // Source has one namespace; use first from selection
+                    var ns = Array.isArray(sel) ? sel[0] : sel;
                     updateSourceNamespace(s.id, ns);
                     nsBtn.textContent = namespaceLabel(ns);
+                    // If multi-contact, update perimeters
+                    if (Array.isArray(sel)) ensureSharedPerimeters(sel);
                 });
             });
             tdNs.appendChild(nsBtn);
@@ -420,6 +537,9 @@ async function uploadFiles(files) {
             });
             progress.appendChild(ul);
         }
+
+        // Multi-contact: update perimeters so all selected contacts see the doc
+        await ensureSharedPerimeters(getSelectedNamespaces());
 
         loadSources();
         loadStats();
