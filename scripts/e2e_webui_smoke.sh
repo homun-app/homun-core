@@ -12,6 +12,11 @@ ARTIFACT_PREFIX="${HOMUN_E2E_ARTIFACT_DIR}/webui-chat-smoke"
 
 require_playwright_cli
 
+# On a fresh instance, create the admin account via setup wizard first
+open_relative "/setup-wizard"
+setup_or_login_if_needed
+
+# If setup redirected us, we may still need to login
 open_relative "/login"
 setup_or_login_if_needed
 
