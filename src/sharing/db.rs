@@ -209,7 +209,9 @@ mod tests {
             .expect("create");
 
         // Grant access to Felicia
-        grant_access(&pool, rid, 2, "write", "{}").await.expect("grant");
+        grant_access(&pool, rid, 2, "write", "{}")
+            .await
+            .expect("grant");
 
         // Check access
         let access = resolve_contact_access(&pool, 2).await.expect("resolve");
@@ -231,13 +233,25 @@ mod tests {
     async fn multi_type_sharing() {
         let pool = test_pool().await;
 
-        let r1 = create_resource(&pool, "skill", "lista-spesa", 1, "").await.expect("create");
-        let r2 = create_resource(&pool, "mcp", "notion", 1, "").await.expect("create");
-        let r3 = create_resource(&pool, "knowledge_namespace", "famiglia", 1, "").await.expect("create");
+        let r1 = create_resource(&pool, "skill", "lista-spesa", 1, "")
+            .await
+            .expect("create");
+        let r2 = create_resource(&pool, "mcp", "notion", 1, "")
+            .await
+            .expect("create");
+        let r3 = create_resource(&pool, "knowledge_namespace", "famiglia", 1, "")
+            .await
+            .expect("create");
 
-        grant_access(&pool, r1, 2, "write", "{}").await.expect("grant");
-        grant_access(&pool, r2, 2, "read", r#"{"pages":["abc"]}"#).await.expect("grant");
-        grant_access(&pool, r3, 2, "read", "{}").await.expect("grant");
+        grant_access(&pool, r1, 2, "write", "{}")
+            .await
+            .expect("grant");
+        grant_access(&pool, r2, 2, "read", r#"{"pages":["abc"]}"#)
+            .await
+            .expect("grant");
+        grant_access(&pool, r3, 2, "read", "{}")
+            .await
+            .expect("grant");
 
         let access = resolve_contact_access(&pool, 2).await.expect("resolve");
         assert_eq!(access.skills.len(), 1);

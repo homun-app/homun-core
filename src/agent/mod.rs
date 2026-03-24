@@ -1,10 +1,10 @@
 mod agent_loop;
 mod attachment_router;
 pub mod auth;
-pub mod cognition;
 pub mod bootstrap_watcher;
 mod browser_context;
 mod browser_task_plan;
+pub mod cognition;
 mod context;
 mod context_compactor;
 pub mod debounce;
@@ -12,12 +12,12 @@ pub mod definition;
 pub mod email_approval;
 mod execution_plan;
 pub mod gateway;
+pub mod heartbeat;
 mod iteration_budget;
 mod llm_caller;
+pub mod memory;
 mod memory_db;
 pub mod orchestrator;
-pub mod heartbeat;
-pub mod memory;
 pub(crate) mod profile_resolver;
 pub mod prompt; // New modular prompt system
 pub mod registry;
@@ -37,9 +37,9 @@ pub mod index_meta;
 #[cfg(feature = "embeddings")]
 pub mod memory_search;
 
+pub use crate::utils::watcher::WatcherHandle as BootstrapWatcherHandle;
 pub use agent_loop::AgentLoop;
 pub use bootstrap_watcher::{BootstrapContent, BootstrapFiles, BootstrapWatcher};
-pub use crate::utils::watcher::WatcherHandle as BootstrapWatcherHandle;
 pub use browser_task_plan::BrowserTaskPlanState;
 pub use context::ContextBuilder;
 pub use definition::AgentDefinition;

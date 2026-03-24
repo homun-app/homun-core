@@ -295,7 +295,12 @@ mod inner {
         Json(req): Json<CreateProfileRequest>,
     ) -> Result<Json<ProfileActionResponse>, StatusCode> {
         // Validate key: kebab-case, non-empty
-        if req.key.is_empty() || !req.key.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        if req.key.is_empty()
+            || !req
+                .key
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-')
+        {
             return Ok(Json(ProfileActionResponse {
                 success: false,
                 message: "Key must be non-empty kebab-case (a-z, 0-9, hyphens)".to_string(),
@@ -475,10 +480,7 @@ mod inner {
                 "/v1/browser/profiles/{name}/set-default",
                 post(set_default_profile),
             )
-            .route(
-                "/v1/browser/profiles/{name}/delete",
-                post(delete_profile),
-            )
+            .route("/v1/browser/profiles/{name}/delete", post(delete_profile))
     }
 }
 

@@ -52,12 +52,11 @@ pub async fn load_gateway_by_id(pool: &Pool<Sqlite>, id: i64) -> Result<Option<G
 
 /// Load all gateways, ordered by channel_type then name.
 pub async fn load_all_gateways(pool: &Pool<Sqlite>) -> Result<Vec<Gateway>> {
-    let rows = sqlx::query_as::<_, Gateway>(
-        "SELECT * FROM gateways ORDER BY channel_type ASC, name ASC",
-    )
-    .fetch_all(pool)
-    .await
-    .context("Failed to load gateways")?;
+    let rows =
+        sqlx::query_as::<_, Gateway>("SELECT * FROM gateways ORDER BY channel_type ASC, name ASC")
+            .fetch_all(pool)
+            .await
+            .context("Failed to load gateways")?;
     Ok(rows)
 }
 
@@ -213,16 +212,14 @@ pub async fn delete_gateway_override(
     contact_id: i64,
     gateway_id: i64,
 ) -> Result<()> {
-    sqlx::query(
-        "DELETE FROM contact_gateway_overrides WHERE contact_id = ? AND gateway_id = ?",
-    )
-    .bind(contact_id)
-    .bind(gateway_id)
-    .execute(pool)
-    .await
-    .with_context(|| {
-        format!("Failed to delete override (contact={contact_id}, gateway={gateway_id})")
-    })?;
+    sqlx::query("DELETE FROM contact_gateway_overrides WHERE contact_id = ? AND gateway_id = ?")
+        .bind(contact_id)
+        .bind(gateway_id)
+        .execute(pool)
+        .await
+        .with_context(|| {
+            format!("Failed to delete override (contact={contact_id}, gateway={gateway_id})")
+        })?;
     Ok(())
 }
 
@@ -329,9 +326,18 @@ mod tests {
         let id1 = insert_gateway(&pool, "Active", "telegram", "{}", "", "", "automatic", None)
             .await
             .expect("insert 1");
-        let id2 = insert_gateway(&pool, "Disabled", "discord", "{}", "", "", "automatic", None)
-            .await
-            .expect("insert 2");
+        let id2 = insert_gateway(
+            &pool,
+            "Disabled",
+            "discord",
+            "{}",
+            "",
+            "",
+            "automatic",
+            None,
+        )
+        .await
+        .expect("insert 2");
 
         // Disable the second one
         update_gateway(&pool, id2, "Disabled", false, "{}", "", "", "automatic")
@@ -362,9 +368,7 @@ mod tests {
             .expect("load");
         assert_eq!(tg.len(), 2);
 
-        let dc = load_gateways_by_type(&pool, "discord")
-            .await
-            .expect("load");
+        let dc = load_gateways_by_type(&pool, "discord").await.expect("load");
         assert_eq!(dc.len(), 1);
     }
 

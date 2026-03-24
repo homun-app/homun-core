@@ -6,8 +6,8 @@ use axum::response::Json;
 use axum::Router;
 use serde::{Deserialize, Serialize};
 
-use crate::config::Config;
 use super::super::server::AppState;
+use crate::config::Config;
 
 /// Routes registered inside the authenticated API router.
 /// Note: `health` and `webhook_ingress` are NOT here — they are public routes

@@ -49,9 +49,7 @@ impl super::Tunnel for NgrokTunnel {
             .stderr(std::process::Stdio::null())
             .kill_on_drop(true)
             .spawn()
-            .context(
-                "Failed to start ngrok. Install it: https://ngrok.com/download",
-            )?;
+            .context("Failed to start ngrok. Install it: https://ngrok.com/download")?;
 
         let stdout = child.stdout.take().context("Cannot read ngrok stdout")?;
         let mut reader = BufReader::new(stdout).lines();

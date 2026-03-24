@@ -22,7 +22,9 @@ use crate::skills::loader::SkillRegistry;
 use crate::tools::ToolRegistry;
 
 pub use engine::{run_cognition, CognitionParams};
-pub use types::{Autonomy, Complexity, CognitionResult, DiscoveredMcp, DiscoveredSkill, DiscoveredTool};
+pub use types::{
+    Autonomy, CognitionResult, Complexity, DiscoveredMcp, DiscoveredSkill, DiscoveredTool,
+};
 
 use super::tool_builder::ToolDefinitionSet;
 use super::ToolInfo;
@@ -39,12 +41,7 @@ pub(crate) async fn build_selective_tool_defs(
     blocked_tools: &HashSet<&str>,
     xml_mode: bool,
 ) -> ToolDefinitionSet {
-    let always_available = [
-        "send_message",
-        "remember",
-        "approval",
-        "vault",
-    ];
+    let always_available = ["send_message", "remember", "approval", "vault"];
 
     let selected_names: HashSet<&str> = discovered_tools
         .iter()
@@ -125,9 +122,7 @@ pub(crate) async fn build_selective_tool_defs(
 ///
 /// Returns a result listing ALL tools from the registry so the execution
 /// loop has maximum capabilities — degraded but functional.
-pub(crate) async fn fallback_full_context(
-    tool_registry: &RwLock<ToolRegistry>,
-) -> CognitionResult {
+pub(crate) async fn fallback_full_context(tool_registry: &RwLock<ToolRegistry>) -> CognitionResult {
     let names: Vec<String> = tool_registry
         .read()
         .await

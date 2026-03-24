@@ -450,10 +450,7 @@ pub async fn auth_middleware(
                         {
                             return (
                                 StatusCode::TOO_MANY_REQUESTS,
-                                [(
-                                    "Retry-After",
-                                    retry_after.as_secs().max(1).to_string(),
-                                )],
+                                [("Retry-After", retry_after.as_secs().max(1).to_string())],
                                 Json(serde_json::json!({
                                     "error": "rate_limited",
                                     "message": "Too many requests for this token.",
@@ -463,9 +460,7 @@ pub async fn auth_middleware(
                                 .into_response();
                         }
 
-                        if let Ok(Some(user_row)) =
-                            db.lookup_user_by_webhook_token(&token).await
-                        {
+                        if let Ok(Some(user_row)) = db.lookup_user_by_webhook_token(&token).await {
                             // Update last_used (fire and forget)
                             let db_clone = db.clone();
                             let token_clone = token.clone();

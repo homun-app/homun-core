@@ -750,9 +750,7 @@ async fn try_refresh_and_retry(
 
     let refresh = super::mcp_token_refresh::try_refresh_for_server(server_name, server_config)
         .await
-        .with_context(|| {
-            format!("OAuth token refresh failed for MCP server '{server_name}'")
-        })?;
+        .with_context(|| format!("OAuth token refresh failed for MCP server '{server_name}'"))?;
 
     // Persist refreshed tokens to vault
     persist_refreshed_tokens(server_name, server_config, &refresh);

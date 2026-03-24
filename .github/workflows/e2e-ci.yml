@@ -65,6 +65,17 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -yqq google-chrome-stable
 
+      - name: Configure Playwright for self-signed TLS
+        run: |
+          mkdir -p .playwright
+          cat > .playwright/cli.config.json << 'JSON'
+          {
+            "browser": "chrome",
+            "ignoreHTTPSErrors": true
+          }
+          JSON
+          echo "PLAYWRIGHT_CLI_CONFIG=$(pwd)/.playwright/cli.config.json" >> "$GITHUB_ENV"
+
       - name: Start Homun server
         shell: bash
         run: |

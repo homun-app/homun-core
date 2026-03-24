@@ -9,7 +9,7 @@ use axum::http::StatusCode;
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 
-use crate::web::auth::{AuthUser, require_admin};
+use crate::web::auth::{require_admin, AuthUser};
 use crate::web::server::AppState;
 
 /// Register device management routes under `/v1/devices`.

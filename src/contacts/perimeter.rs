@@ -81,13 +81,11 @@ pub async fn load_perimeter_optional(
     pool: &Pool<Sqlite>,
     contact_id: i64,
 ) -> Result<Option<ContactPerimeter>> {
-    sqlx::query_as::<_, ContactPerimeter>(
-        "SELECT * FROM contact_perimeters WHERE contact_id = ?",
-    )
-    .bind(contact_id)
-    .fetch_optional(pool)
-    .await
-    .with_context(|| format!("Failed to load perimeter for contact {contact_id}"))
+    sqlx::query_as::<_, ContactPerimeter>("SELECT * FROM contact_perimeters WHERE contact_id = ?")
+        .bind(contact_id)
+        .fetch_optional(pool)
+        .await
+        .with_context(|| format!("Failed to load perimeter for contact {contact_id}"))
 }
 
 /// Upsert a contact's perimeter.

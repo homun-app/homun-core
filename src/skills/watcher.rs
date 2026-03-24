@@ -32,10 +32,7 @@ impl SkillWatcher {
     /// Start watching the skills directory. Returns a handle that stops on drop.
     /// Runs until cancelled (e.g. when the handle is dropped).
     pub fn start(self) -> WatcherHandle {
-        spawn_watched(
-            move |stop_rx| self.watch_loop(stop_rx),
-            "skill-watcher",
-        )
+        spawn_watched(move |stop_rx| self.watch_loop(stop_rx), "skill-watcher")
     }
 
     async fn watch_loop(self, mut stop_rx: tokio::sync::oneshot::Receiver<()>) -> Result<()> {

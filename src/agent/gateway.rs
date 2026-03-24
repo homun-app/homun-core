@@ -677,7 +677,13 @@ impl Gateway {
                                 let config_snapshot = cfg.clone();
                                 drop(cfg);
                                 dispatch_to_agent(
-                                    prepared, agent, senders, stream_tx, db, locks, known,
+                                    prepared,
+                                    agent,
+                                    senders,
+                                    stream_tx,
+                                    db,
+                                    locks,
+                                    known,
                                     config_snapshot,
                                 )
                                 .await;
@@ -758,12 +764,8 @@ impl Gateway {
                     || content_trimmed == "!profile"
                     || content_trimmed.starts_with("!profile ");
                 if is_profile_cmd {
-                    let response = handle_profile_command(
-                        content_trimmed,
-                        &session_key,
-                        &routing_db,
-                    )
-                    .await;
+                    let response =
+                        handle_profile_command(content_trimmed, &session_key, &routing_db).await;
                     let outbound = OutboundMessage {
                         channel: channel_name.clone(),
                         chat_id: chat_id.clone(),
@@ -1637,11 +1639,9 @@ impl Gateway {
         if !db_gateways.is_empty() {
             // DB-driven startup
             for gw in &db_gateways {
-                if let Some(ch) = start_gateway_from_db(
-                    gw,
-                    &self.channel_health,
-                    inbound_tx.clone(),
-                ) {
+                if let Some(ch) =
+                    start_gateway_from_db(gw, &self.channel_health, inbound_tx.clone())
+                {
                     channels.push(ch);
                     tracing::info!(
                         id = gw.id,
@@ -1954,7 +1954,6 @@ fn should_suppress_system_outbound(metadata: Option<&MessageMetadata>, channel: 
     meta.is_system && meta.scheduler_kind.as_deref() == Some("cron")
 }
 
-
 // evaluate_automation_trigger and normalize_for_compare moved to
 // crate::scheduler::automations — shared with WorkflowEngine completion path.
 
@@ -2141,8 +2140,7 @@ fn start_gateway_from_db(
         }
         #[cfg(feature = "channel-whatsapp")]
         "whatsapp" => {
-            let cfg: crate::config::WhatsAppConfig =
-                serde_json::from_str(&gw.config_json).ok()?;
+            let cfg: crate::config::WhatsAppConfig = serde_json::from_str(&gw.config_json).ok()?;
             Some(spawn_monitored_channel(
                 "whatsapp",
                 health,
@@ -2151,8 +2149,7 @@ fn start_gateway_from_db(
             ))
         }
         "slack" => {
-            let mut cfg: crate::config::SlackConfig =
-                serde_json::from_str(&gw.config_json).ok()?;
+            let mut cfg: crate::config::SlackConfig = serde_json::from_str(&gw.config_json).ok()?;
             cfg.token = resolve_gw_token(gw_id, &cfg.token);
             // Resolve app_token separately
             if cfg.app_token == "***ENCRYPTED***" || cfg.app_token.is_empty() {
@@ -2192,17 +2189,12 @@ fn start_gateway_from_db(
             let cfg: crate::config::McpChannelConfig =
                 serde_json::from_str(&gw.config_json).ok()?;
             let ch_name = ct.to_string();
-            Some(spawn_monitored_channel(
-                ct,
-                health,
-                inbound_tx,
-                move || {
-                    Box::new(crate::channels::McpChannel::new(
-                        ch_name.clone(),
-                        cfg.clone(),
-                    ))
-                },
-            ))
+            Some(spawn_monitored_channel(ct, health, inbound_tx, move || {
+                Box::new(crate::channels::McpChannel::new(
+                    ch_name.clone(),
+                    cfg.clone(),
+                ))
+            }))
         }
         _ => {
             tracing::warn!(
@@ -2224,35 +2216,27 @@ fn start_channels_from_toml(
 ) {
     // Telegram
     #[cfg(feature = "channel-telegram")]
-    if let Some(ch) =
-        start_channel_by_name("telegram", config, health, inbound_tx.clone(), None)
-    {
+    if let Some(ch) = start_channel_by_name("telegram", config, health, inbound_tx.clone(), None) {
         channels.push(ch);
         tracing::info!("Telegram channel started (TOML fallback)");
     }
 
     // Discord
     #[cfg(feature = "channel-discord")]
-    if let Some(ch) =
-        start_channel_by_name("discord", config, health, inbound_tx.clone(), None)
-    {
+    if let Some(ch) = start_channel_by_name("discord", config, health, inbound_tx.clone(), None) {
         channels.push(ch);
         tracing::info!("Discord channel started (TOML fallback)");
     }
 
     // WhatsApp
     #[cfg(feature = "channel-whatsapp")]
-    if let Some(ch) =
-        start_channel_by_name("whatsapp", config, health, inbound_tx.clone(), None)
-    {
+    if let Some(ch) = start_channel_by_name("whatsapp", config, health, inbound_tx.clone(), None) {
         channels.push(ch);
         tracing::info!("WhatsApp channel started (TOML fallback)");
     }
 
     // Slack
-    if let Some(ch) =
-        start_channel_by_name("slack", config, health, inbound_tx.clone(), None)
-    {
+    if let Some(ch) = start_channel_by_name("slack", config, health, inbound_tx.clone(), None) {
         channels.push(ch);
         tracing::info!("Slack channel started (TOML fallback)");
     }
@@ -2265,13 +2249,13 @@ fn start_channels_from_toml(
         let active = ch_config.active_email_accounts();
         if !active.is_empty() {
             let accounts: std::collections::HashMap<String, crate::config::EmailAccountConfig> =
-                active.into_iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-            let ch = spawn_monitored_channel(
-                "email",
-                health,
-                inbound_tx.clone(),
-                move || Box::new(EmailChannel::new(accounts.clone())),
-            );
+                active
+                    .into_iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect();
+            let ch = spawn_monitored_channel("email", health, inbound_tx.clone(), move || {
+                Box::new(EmailChannel::new(accounts.clone()))
+            });
             channels.push(ch);
             tracing::info!("Email channel started (TOML fallback)");
         }
@@ -2285,14 +2269,12 @@ fn start_channels_from_toml(
         let channel_name = format!("mcp:{name}");
         let cfg = mcp_cfg.clone();
         let ch_name = channel_name.clone();
-        let ch = spawn_monitored_channel(
-            &channel_name,
-            health,
-            inbound_tx.clone(),
-            move || {
-                Box::new(crate::channels::McpChannel::new(ch_name.clone(), cfg.clone()))
-            },
-        );
+        let ch = spawn_monitored_channel(&channel_name, health, inbound_tx.clone(), move || {
+            Box::new(crate::channels::McpChannel::new(
+                ch_name.clone(),
+                cfg.clone(),
+            ))
+        });
         channels.push(ch);
         tracing::info!(name = %name, "MCP channel started (TOML fallback)");
     }
@@ -2430,11 +2412,7 @@ async fn route_outbound(
 ///
 /// - `/profile` — show the active profile for the current session
 /// - `/profile <slug>` — switch the session to a different profile
-async fn handle_profile_command(
-    content: &str,
-    session_key: &str,
-    db: &Database,
-) -> String {
+async fn handle_profile_command(content: &str, session_key: &str, db: &Database) -> String {
     // Parse slug argument (strip prefix: /profile or !profile)
     let slug_arg = content
         .strip_prefix("/profile")
@@ -2445,12 +2423,10 @@ async fn handle_profile_command(
     if slug_arg.is_empty() {
         // Show current profile
         let current = match db.get_session_profile_id(session_key).await {
-            Some(pid) => {
-                match crate::profiles::db::load_profile_by_id(db.pool(), pid).await {
-                    Ok(Some(p)) => format!("{} {} ({})", p.avatar_emoji, p.display_name, p.slug),
-                    _ => "default".to_string(),
-                }
-            }
+            Some(pid) => match crate::profiles::db::load_profile_by_id(db.pool(), pid).await {
+                Ok(Some(p)) => format!("{} {} ({})", p.avatar_emoji, p.display_name, p.slug),
+                _ => "default".to_string(),
+            },
             None => "default".to_string(),
         };
         return format!("Active profile: {current}\n\nUse /profile <slug> to switch.");

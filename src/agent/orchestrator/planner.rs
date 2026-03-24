@@ -51,11 +51,7 @@ Rules:
 ///
 /// Uses `llm_one_shot` with the primary model. Falls back to a single-subtask
 /// plan on parse errors (effectively a passthrough with enriched instructions).
-pub async fn plan(
-    config: &Config,
-    user_prompt: &str,
-    intent: &IntentAnalysis,
-) -> Result<TaskPlan> {
+pub async fn plan(config: &Config, user_prompt: &str, intent: &IntentAnalysis) -> Result<TaskPlan> {
     let user_message = format!(
         "Intent analysis:\n{}\n\nUser request:\n{}",
         serde_json::to_string_pretty(intent).unwrap_or_default(),

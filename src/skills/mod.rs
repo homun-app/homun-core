@@ -10,6 +10,7 @@ pub mod search;
 pub mod security;
 pub mod watcher;
 
+pub use crate::utils::watcher::WatcherHandle as SkillWatcherHandle;
 pub use adapter::{
     adapt_legacy_skill_dir, parse_legacy_manifest, AdaptedSkill, LegacySkillManifest,
 };
@@ -31,5 +32,4 @@ pub use openskills::OpenSkillsSource;
 pub use security::{
     scan_skill_content, scan_skill_package, InstallSecurityOptions, SecurityReport, SecurityWarning,
 };
-pub use crate::utils::watcher::WatcherHandle as SkillWatcherHandle;
 pub use watcher::SkillWatcher;

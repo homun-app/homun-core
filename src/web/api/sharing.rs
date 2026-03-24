@@ -21,18 +21,30 @@ type ApiErr = (StatusCode, Json<Value>);
 
 fn require_db(state: &AppState) -> Result<&Database, ApiErr> {
     state.db.as_ref().ok_or_else(|| {
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Database not available"})))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Database not available"})),
+        )
     })
 }
 
 fn internal(e: anyhow::Error) -> ApiErr {
-    (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()})))
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({"error": e.to_string()})),
+    )
 }
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/v1/sharing/resources", get(list_resources).post(create_resource))
-        .route("/v1/sharing/resources/{id}", get(get_resource_access).delete(delete_resource))
+        .route(
+            "/v1/sharing/resources",
+            get(list_resources).post(create_resource),
+        )
+        .route(
+            "/v1/sharing/resources/{id}",
+            get(get_resource_access).delete(delete_resource),
+        )
         .route("/v1/sharing/resources/{id}/access", post(grant_access))
         .route(
             "/v1/sharing/resources/{id}/access/{contact_id}",
@@ -65,7 +77,9 @@ async fn list_resources(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<sharing::SharedResource>>, ApiErr> {
     let db = require_db(&state)?;
-    let list = sharing::db::list_all_resources(db.pool()).await.map_err(internal)?;
+    let list = sharing::db::list_all_resources(db.pool())
+        .await
+        .map_err(internal)?;
     Ok(Json(list))
 }
 
@@ -109,7 +123,9 @@ async fn delete_resource(
 ) -> Result<Json<Value>, ApiErr> {
     require_write(&auth)?;
     let db = require_db(&state)?;
-    sharing::db::delete_resource(db.pool(), id).await.map_err(internal)?;
+    sharing::db::delete_resource(db.pool(), id)
+        .await
+        .map_err(internal)?;
     Ok(Json(json!({"ok": true})))
 }
 

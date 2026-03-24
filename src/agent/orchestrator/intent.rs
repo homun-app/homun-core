@@ -180,7 +180,10 @@ fn parse_from_text(raw: &str) -> Option<IntentAnalysis> {
             needs_browser,
             multi_source,
             entities: Vec::new(),
-            reasoning: format!("text-parsed from: {}", crate::utils::text::truncate_str(raw, 100, "...")),
+            reasoning: format!(
+                "text-parsed from: {}",
+                crate::utils::text::truncate_str(raw, 100, "...")
+            ),
         })
     } else if lower.contains("simple") || lower.len() < 30 {
         // Short or explicitly simple responses.
@@ -282,7 +285,8 @@ mod tests {
         let short = "ciao come stai";
         assert!(short.split_whitespace().count() < MIN_WORDS_FOR_LLM);
 
-        let long = "trovami delle moto guzzi v7 special usate in buone condizioni con prezzo ragionevole";
+        let long =
+            "trovami delle moto guzzi v7 special usate in buone condizioni con prezzo ragionevole";
         assert!(long.split_whitespace().count() >= MIN_WORDS_FOR_LLM);
     }
 }

@@ -11,8 +11,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::{bail, Result};
 use crate::utils::text::truncate_str;
+use anyhow::{bail, Result};
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 
@@ -123,10 +123,15 @@ impl WorkflowEngine {
                     if let (Some(auto_id), Some(run_id)) =
                         (&wf.automation_id, &wf.automation_run_id)
                     {
-                        let _ = crate::scheduler::automations::evaluate_and_complete_automation_run(
-                            &db, auto_id, run_id, &e.to_string(), true,
-                        )
-                        .await;
+                        let _ =
+                            crate::scheduler::automations::evaluate_and_complete_automation_run(
+                                &db,
+                                auto_id,
+                                run_id,
+                                &e.to_string(),
+                                true,
+                            )
+                            .await;
                     }
 
                     let total = wf.steps.len();
@@ -571,9 +576,7 @@ async fn complete_workflow(
 
     // Complete the parent automation run (if this workflow was spawned by one).
     // Uses the shared trigger evaluation so on_change/contains work for workflow automations.
-    if let (Some(auto_id), Some(run_id)) =
-        (&workflow.automation_id, &workflow.automation_run_id)
-    {
+    if let (Some(auto_id), Some(run_id)) = (&workflow.automation_id, &workflow.automation_run_id) {
         let _ = crate::scheduler::automations::evaluate_and_complete_automation_run(
             db, auto_id, run_id, &summary, false,
         )
@@ -598,4 +601,3 @@ async fn complete_workflow(
 
     Ok(())
 }
-

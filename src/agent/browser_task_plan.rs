@@ -465,7 +465,10 @@ mod tests {
         let mut result = make_browser_cognition("Compare train prices");
         result.constraints = vec!["confronta prezzi".to_string()];
         let plan = BrowserTaskPlanState::from_cognition(&result, "confronta treni");
-        assert_eq!(plan.routing.task_class, BrowserTaskClass::MultiSourceCompare);
+        assert_eq!(
+            plan.routing.task_class,
+            BrowserTaskClass::MultiSourceCompare
+        );
         assert!(plan.compare_mode);
     }
 
@@ -527,9 +530,15 @@ mod tests {
         let result = make_browser_cognition("Book a train on trenitalia");
         let mut plan = BrowserTaskPlanState::from_cognition(&result, "book a train");
         // Navigate via Google first
-        plan.note_browser_result(Some("navigate"), "Page URL: https://www.google.com/search?q=trenitalia");
+        plan.note_browser_result(
+            Some("navigate"),
+            "Page URL: https://www.google.com/search?q=trenitalia",
+        );
         plan.note_browser_result(Some("click"), "Page URL: https://www.trenitalia.com/");
-        plan.note_browser_result(Some("snapshot"), "Page URL: https://www.trenitalia.com/\n- textbox");
+        plan.note_browser_result(
+            Some("snapshot"),
+            "Page URL: https://www.trenitalia.com/\n- textbox",
+        );
         // Try to re-navigate to same site
         let veto = plan.veto_browser_action(&serde_json::json!({
             "action": "navigate",

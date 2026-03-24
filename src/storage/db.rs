@@ -619,15 +619,13 @@ impl Database {
 
     /// Get the profile_id for a session (returns None if unset).
     pub async fn get_session_profile_id(&self, key: &str) -> Option<i64> {
-        sqlx::query_scalar::<_, Option<i64>>(
-            "SELECT profile_id FROM sessions WHERE key = ?",
-        )
-        .bind(key)
-        .fetch_optional(&self.pool)
-        .await
-        .ok()
-        .flatten()
-        .flatten()
+        sqlx::query_scalar::<_, Option<i64>>("SELECT profile_id FROM sessions WHERE key = ?")
+            .bind(key)
+            .fetch_optional(&self.pool)
+            .await
+            .ok()
+            .flatten()
+            .flatten()
     }
 
     /// Set the profile_id for a session.
@@ -835,11 +833,10 @@ impl Database {
 
     /// Count distinct sessions (by session_key in messages table).
     pub async fn count_sessions(&self) -> Result<i64> {
-        let count: i64 =
-            sqlx::query_scalar("SELECT COUNT(DISTINCT session_key) FROM messages")
-                .fetch_one(&self.pool)
-                .await
-                .context("Failed to count sessions")?;
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(DISTINCT session_key) FROM messages")
+            .fetch_one(&self.pool)
+            .await
+            .context("Failed to count sessions")?;
         Ok(count)
     }
 
@@ -1043,7 +1040,6 @@ impl Database {
     }
 
     // --- Automation operations ---
-
 
     // ═══════════════════════════════════════════════════════════════
     // MEMORY RETENTION - Prune old data based on retention policies
@@ -2304,13 +2300,23 @@ impl super::traits::SessionStore for Database {
     async fn delete_session(&self, key: &str) -> Result<bool> {
         Database::delete_session(self, key).await
     }
-    async fn list_sessions_by_prefix(&self, prefix_like: &str, limit: u32) -> Result<Vec<SessionListRow>> {
+    async fn list_sessions_by_prefix(
+        &self,
+        prefix_like: &str,
+        limit: u32,
+    ) -> Result<Vec<SessionListRow>> {
         Database::list_sessions_by_prefix(self, prefix_like, limit).await
     }
     async fn set_session_metadata(&self, key: &str, metadata: &str) -> Result<()> {
         Database::set_session_metadata(self, key, metadata).await
     }
-    async fn insert_message(&self, session_key: &str, role: &str, content: &str, tools_used: &[String]) -> Result<()> {
+    async fn insert_message(
+        &self,
+        session_key: &str,
+        role: &str,
+        content: &str,
+        tools_used: &[String],
+    ) -> Result<()> {
         Database::insert_message(self, session_key, role, content, tools_used).await
     }
     async fn load_messages(&self, session_key: &str, limit: u32) -> Result<Vec<MessageRow>> {
@@ -2322,7 +2328,11 @@ impl super::traits::SessionStore for Database {
     async fn clear_messages(&self, session_key: &str) -> Result<()> {
         Database::clear_messages(self, session_key).await
     }
-    async fn load_old_messages(&self, session_key: &str, keep_count: u32) -> Result<Vec<MessageRow>> {
+    async fn load_old_messages(
+        &self,
+        session_key: &str,
+        keep_count: u32,
+    ) -> Result<Vec<MessageRow>> {
         Database::load_old_messages(self, session_key, keep_count).await
     }
     async fn delete_old_messages(&self, session_key: &str, keep_count: u32) -> Result<u64> {
@@ -2332,7 +2342,12 @@ impl super::traits::SessionStore for Database {
 
 #[async_trait::async_trait]
 impl super::traits::MemoryStore for Database {
-    async fn insert_memory(&self, session_key: Option<&str>, content: &str, memory_type: &str) -> Result<()> {
+    async fn insert_memory(
+        &self,
+        session_key: Option<&str>,
+        content: &str,
+        memory_type: &str,
+    ) -> Result<()> {
         Database::insert_memory(self, session_key, content, memory_type).await
     }
     async fn load_memories(&self, session_key: &str) -> Result<Vec<MemoryRow>> {
@@ -2344,8 +2359,31 @@ impl super::traits::MemoryStore for Database {
     async fn upsert_long_term_memory(&self, content: &str) -> Result<()> {
         Database::upsert_long_term_memory(self, content).await
     }
-    async fn insert_memory_chunk(&self, date: &str, source: &str, heading: &str, content: &str, memory_type: &str, contact_id: Option<i64>, agent_id: Option<&str>, importance: i32, profile_id: Option<i64>) -> Result<i64> {
-        Database::insert_memory_chunk(self, date, source, heading, content, memory_type, contact_id, agent_id, importance, profile_id).await
+    async fn insert_memory_chunk(
+        &self,
+        date: &str,
+        source: &str,
+        heading: &str,
+        content: &str,
+        memory_type: &str,
+        contact_id: Option<i64>,
+        agent_id: Option<&str>,
+        importance: i32,
+        profile_id: Option<i64>,
+    ) -> Result<i64> {
+        Database::insert_memory_chunk(
+            self,
+            date,
+            source,
+            heading,
+            content,
+            memory_type,
+            contact_id,
+            agent_id,
+            importance,
+            profile_id,
+        )
+        .await
     }
     async fn load_chunks_by_ids(&self, ids: &[i64]) -> Result<Vec<MemoryChunkRow>> {
         Database::load_chunks_by_ids(self, ids).await
@@ -2365,27 +2403,69 @@ impl super::traits::MemoryStore for Database {
     async fn prune_memory_chunks_to_budget(&self, keep_count: u32) -> Result<Vec<i64>> {
         Database::prune_memory_chunks_to_budget(self, keep_count).await
     }
-    async fn load_chunks_in_range(&self, start_date: &str, end_date: &str) -> Result<Vec<MemoryChunkRow>> {
+    async fn load_chunks_in_range(
+        &self,
+        start_date: &str,
+        end_date: &str,
+    ) -> Result<Vec<MemoryChunkRow>> {
         Database::load_chunks_in_range(self, start_date, end_date).await
     }
     async fn reset_all_memory(&self) -> Result<()> {
         Database::reset_all_memory(self).await
     }
-    async fn insert_memory_summary(&self, period: &str, start_date: &str, end_date: &str, content: &str, contact_id: Option<i64>, agent_id: Option<&str>, profile_id: Option<i64>, user_id: Option<&str>) -> Result<i64> {
-        Database::insert_memory_summary(self, period, start_date, end_date, content, contact_id, agent_id, profile_id, user_id).await
+    async fn insert_memory_summary(
+        &self,
+        period: &str,
+        start_date: &str,
+        end_date: &str,
+        content: &str,
+        contact_id: Option<i64>,
+        agent_id: Option<&str>,
+        profile_id: Option<i64>,
+        user_id: Option<&str>,
+    ) -> Result<i64> {
+        Database::insert_memory_summary(
+            self, period, start_date, end_date, content, contact_id, agent_id, profile_id, user_id,
+        )
+        .await
     }
     async fn has_memory_summary(&self, period: &str, start_date: &str) -> Result<bool> {
         Database::has_memory_summary(self, period, start_date).await
     }
-    async fn load_summaries_in_range(&self, start_date: &str, end_date: &str) -> Result<Vec<MemorySummaryRow>> {
+    async fn load_summaries_in_range(
+        &self,
+        start_date: &str,
+        end_date: &str,
+    ) -> Result<Vec<MemorySummaryRow>> {
         Database::load_summaries_in_range(self, start_date, end_date).await
     }
 }
 
 #[async_trait::async_trait]
 impl super::traits::RagStore for Database {
-    async fn insert_rag_source(&self, file_path: &str, file_name: &str, file_hash: &str, doc_type: &str, file_size: i64, source_channel: Option<&str>, profile_id: Option<i64>, user_id: Option<&str>) -> Result<i64> {
-        Database::insert_rag_source(self, file_path, file_name, file_hash, doc_type, file_size, source_channel, profile_id, user_id).await
+    async fn insert_rag_source(
+        &self,
+        file_path: &str,
+        file_name: &str,
+        file_hash: &str,
+        doc_type: &str,
+        file_size: i64,
+        source_channel: Option<&str>,
+        profile_id: Option<i64>,
+        user_id: Option<&str>,
+    ) -> Result<i64> {
+        Database::insert_rag_source(
+            self,
+            file_path,
+            file_name,
+            file_hash,
+            doc_type,
+            file_size,
+            source_channel,
+            profile_id,
+            user_id,
+        )
+        .await
     }
     async fn find_rag_source_by_hash(&self, file_hash: &str) -> Result<Option<RagSourceRow>> {
         Database::find_rag_source_by_hash(self, file_hash).await
@@ -2393,7 +2473,13 @@ impl super::traits::RagStore for Database {
     async fn find_rag_source_by_path(&self, file_path: &str) -> Result<Option<RagSourceRow>> {
         Database::find_rag_source_by_path(self, file_path).await
     }
-    async fn update_rag_source_status(&self, id: i64, status: &str, error_message: Option<&str>, chunk_count: i64) -> Result<()> {
+    async fn update_rag_source_status(
+        &self,
+        id: i64,
+        status: &str,
+        error_message: Option<&str>,
+        chunk_count: i64,
+    ) -> Result<()> {
         Database::update_rag_source_status(self, id, status, error_message, chunk_count).await
     }
     async fn delete_rag_source(&self, id: i64) -> Result<bool> {
@@ -2405,8 +2491,29 @@ impl super::traits::RagStore for Database {
     async fn count_rag_sources(&self) -> Result<i64> {
         Database::count_rag_sources(self).await
     }
-    async fn insert_rag_chunk(&self, source_id: i64, chunk_index: i64, heading: &str, content: &str, token_count: i64, sensitive: bool, profile_id: Option<i64>, user_id: Option<&str>) -> Result<i64> {
-        Database::insert_rag_chunk(self, source_id, chunk_index, heading, content, token_count, sensitive, profile_id, user_id).await
+    async fn insert_rag_chunk(
+        &self,
+        source_id: i64,
+        chunk_index: i64,
+        heading: &str,
+        content: &str,
+        token_count: i64,
+        sensitive: bool,
+        profile_id: Option<i64>,
+        user_id: Option<&str>,
+    ) -> Result<i64> {
+        Database::insert_rag_chunk(
+            self,
+            source_id,
+            chunk_index,
+            heading,
+            content,
+            token_count,
+            sensitive,
+            profile_id,
+            user_id,
+        )
+        .await
     }
     async fn update_rag_chunk_heading(&self, chunk_id: i64, heading: &str) -> Result<()> {
         Database::update_rag_chunk_heading(self, chunk_id, heading).await

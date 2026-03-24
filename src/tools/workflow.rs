@@ -182,7 +182,13 @@ impl WorkflowTool {
         };
 
         match engine
-            .create_and_start(req, &ctx.channel, &ctx.chat_id, ctx.profile_id, ctx.user_id.as_deref())
+            .create_and_start(
+                req,
+                &ctx.channel,
+                &ctx.chat_id,
+                ctx.profile_id,
+                ctx.user_id.as_deref(),
+            )
             .await
         {
             Ok(id) => Ok(ToolResult::success(format!(
@@ -194,10 +200,7 @@ impl WorkflowTool {
     }
 
     async fn handle_list(&self, engine: &WorkflowEngine, args: &Value) -> Result<ToolResult> {
-        let filter = args
-            .get("filter")
-            .and_then(|v| v.as_str())
-            .unwrap_or("all");
+        let filter = args.get("filter").and_then(|v| v.as_str()).unwrap_or("all");
 
         let status_filter = match filter {
             "active" => Some("running"),
@@ -230,7 +233,11 @@ impl WorkflowTool {
             let total = wf.steps.len();
             lines.push(format!(
                 "- {} ({}) — {}/{} steps, status: {}",
-                wf.name, wf.id, completed, total, wf.status.as_str()
+                wf.name,
+                wf.id,
+                completed,
+                total,
+                wf.status.as_str()
             ));
         }
 
@@ -343,9 +350,7 @@ impl WorkflowTool {
 
         match engine.delete(id).await {
             Ok(msg) => Ok(ToolResult::success(msg)),
-            Err(e) => Ok(ToolResult::error(format!(
-                "Failed to delete workflow: {e}"
-            ))),
+            Err(e) => Ok(ToolResult::error(format!("Failed to delete workflow: {e}"))),
         }
     }
 }

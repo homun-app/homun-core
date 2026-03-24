@@ -171,8 +171,7 @@ mod tests {
             tools_used: &[String],
         ) -> Result<()> {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-            let tools_json =
-                serde_json::to_string(tools_used).unwrap_or_else(|_| "[]".to_string());
+            let tools_json = serde_json::to_string(tools_used).unwrap_or_else(|_| "[]".to_string());
             self.messages
                 .write()
                 .await
@@ -274,11 +273,7 @@ mod tests {
         let history = mgr.get_history("s1", 3).await.unwrap();
         assert_eq!(history.len(), 3);
         // Should be the LAST 3 messages
-        assert!(history[0]
-            .content
-            .as_deref()
-            .unwrap()
-            .contains("msg 7"));
+        assert!(history[0].content.as_deref().unwrap().contains("msg 7"));
     }
 
     #[tokio::test]

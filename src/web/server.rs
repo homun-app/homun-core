@@ -525,9 +525,7 @@ impl WebServer {
             if !is_local {
                 // Custom domain: set up /etc/hosts + cert trust, proxy port 443
                 let cert_path = if auto_tls && tls_cert.is_empty() {
-                    Some(
-                        Config::tls_dir().join("cert.pem"),
-                    )
+                    Some(Config::tls_dir().join("cert.pem"))
                 } else {
                     None
                 };

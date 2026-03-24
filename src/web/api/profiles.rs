@@ -48,19 +48,10 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
             "/v1/profiles/{id}",
             get(get_profile).put(update_profile).delete(delete_profile),
         )
-        .route(
-            "/v1/profiles/{id}/soul",
-            get(read_soul).put(write_soul),
-        )
-        .route(
-            "/v1/profiles/{id}/instructions",
-            get(read_instructions),
-        )
+        .route("/v1/profiles/{id}/soul", get(read_soul).put(write_soul))
+        .route("/v1/profiles/{id}/instructions", get(read_instructions))
         .route("/v1/profiles/{id}/user", get(read_user_md))
-        .route(
-            "/v1/profiles/{id}/generate",
-            post(generate_profile_json),
-        )
+        .route("/v1/profiles/{id}/generate", post(generate_profile_json))
 }
 
 // ── Request types ───────────────────────────────────────────────────
@@ -121,16 +112,21 @@ async fn create_profile(
     // In v2 all profiles belong to the default admin user.
     // In v3 this will come from the authenticated session.
     let user_id = Some(crate::user::DEFAULT_ADMIN_USER_ID);
-    let id = profiles::db::insert_profile(db.pool(), &body.slug, &body.display_name, emoji, color, pj, user_id)
-        .await
-        .map_err(internal)?;
+    let id = profiles::db::insert_profile(
+        db.pool(),
+        &body.slug,
+        &body.display_name,
+        emoji,
+        color,
+        pj,
+        user_id,
+    )
+    .await
+    .map_err(internal)?;
 
     // Create brain directory for the new profile
     let data_dir = Config::data_dir();
-    let dir = data_dir
-        .join("brain")
-        .join("profiles")
-        .join(&body.slug);
+    let dir = data_dir.join("brain").join("profiles").join(&body.slug);
     std::fs::create_dir_all(&dir).ok();
 
     let profile = profiles::db::load_profile_by_id(db.pool(), id)
@@ -169,10 +165,19 @@ async fn update_profile(
         .map_err(internal)?
         .ok_or_else(|| not_found("Profile not found"))?;
 
-    let display_name = body.display_name.as_deref().unwrap_or(&existing.display_name);
-    let emoji = body.avatar_emoji.as_deref().unwrap_or(&existing.avatar_emoji);
+    let display_name = body
+        .display_name
+        .as_deref()
+        .unwrap_or(&existing.display_name);
+    let emoji = body
+        .avatar_emoji
+        .as_deref()
+        .unwrap_or(&existing.avatar_emoji);
     let color = body.color.as_deref().unwrap_or(&existing.color);
-    let pj = body.profile_json.as_deref().unwrap_or(&existing.profile_json);
+    let pj = body
+        .profile_json
+        .as_deref()
+        .unwrap_or(&existing.profile_json);
 
     profiles::db::update_profile(db.pool(), id, display_name, emoji, color, pj)
         .await
@@ -348,8 +353,7 @@ Output raw JSON only — no markdown fences, no explanation."#;
     let generated: serde_json::Value = serde_json::from_str(response.content.trim())
         .map_err(|e| internal(anyhow::anyhow!("LLM returned invalid JSON: {e}")))?;
 
-    let profile_json = serde_json::to_string(&generated)
-        .map_err(|e| internal(e.into()))?;
+    let profile_json = serde_json::to_string(&generated).map_err(|e| internal(e.into()))?;
 
     profiles::db::update_profile(
         db.pool(),

@@ -25,10 +25,10 @@ use super::cognition::{self, CognitionParams, CognitionResult};
 use super::context::ContextBuilder;
 use super::context_compactor;
 use super::execution_plan::{ExecutionPlanSnapshot, ExecutionPlanState};
-use super::llm_caller;
 use super::iteration_budget::{
     maybe_extend_iteration_budget, tool_call_signature, IterationBudgetState, ToolExecutionSummary,
 };
+use super::llm_caller;
 use super::memory::MemoryConsolidator;
 use super::skill_activator;
 use super::tool_veto;
@@ -380,8 +380,17 @@ impl AgentLoop {
         channel: &str,
         chat_id: &str,
     ) -> Result<String> {
-        self.process_message_inner(content, session_key, channel, chat_id, None, &[], None, None)
-            .await
+        self.process_message_inner(
+            content,
+            session_key,
+            channel,
+            chat_id,
+            None,
+            &[],
+            None,
+            None,
+        )
+        .await
     }
 
     /// Process a message while disabling a subset of tools for this request.
@@ -395,7 +404,14 @@ impl AgentLoop {
         blocked_tools: &[&str],
     ) -> Result<String> {
         self.process_message_inner(
-            content, session_key, channel, chat_id, None, blocked_tools, None, None,
+            content,
+            session_key,
+            channel,
+            chat_id,
+            None,
+            blocked_tools,
+            None,
+            None,
         )
         .await
     }
@@ -411,7 +427,14 @@ impl AgentLoop {
         stream_tx: mpsc::Sender<crate::provider::StreamChunk>,
     ) -> Result<String> {
         self.process_message_inner(
-            content, session_key, channel, chat_id, Some(stream_tx), &[], None, None,
+            content,
+            session_key,
+            channel,
+            chat_id,
+            Some(stream_tx),
+            &[],
+            None,
+            None,
         )
         .await
     }
@@ -429,7 +452,14 @@ impl AgentLoop {
         thinking_override: Option<bool>,
     ) -> Result<String> {
         self.process_message_inner(
-            content, session_key, channel, chat_id, Some(stream_tx), blocked_tools, thinking_override, None,
+            content,
+            session_key,
+            channel,
+            chat_id,
+            Some(stream_tx),
+            blocked_tools,
+            thinking_override,
+            None,
         )
         .await
     }
@@ -626,20 +656,21 @@ impl AgentLoop {
 
             // Build profile brain dir path + inject profile context
             let data_dir = Config::data_dir();
-            let (profile_brain_dir, active_profile_slug) =
-                if let Ok(Some(profile)) = crate::profiles::db::load_profile_by_id(self.db.pool(), profile_id).await {
-                    let dir = profile.brain_dir(&data_dir);
-                    let slug = profile.slug.clone();
-                    // Reload bootstrap files from profile dir
-                    self.context.reload_bootstrap_for_profile(&dir).await;
-                    // Set structured profile context from PROFILE.json
-                    let profile_ctx = crate::profiles::build_profile_context(&profile);
-                    self.context.set_profile_context(profile_ctx).await;
-                    (Some(dir), Some(slug))
-                } else {
-                    self.context.set_profile_context(String::new()).await;
-                    (None, None)
-                };
+            let (profile_brain_dir, active_profile_slug) = if let Ok(Some(profile)) =
+                crate::profiles::db::load_profile_by_id(self.db.pool(), profile_id).await
+            {
+                let dir = profile.brain_dir(&data_dir);
+                let slug = profile.slug.clone();
+                // Reload bootstrap files from profile dir
+                self.context.reload_bootstrap_for_profile(&dir).await;
+                // Set structured profile context from PROFILE.json
+                let profile_ctx = crate::profiles::build_profile_context(&profile);
+                self.context.set_profile_context(profile_ctx).await;
+                (Some(dir), Some(slug))
+            } else {
+                self.context.set_profile_context(String::new()).await;
+                (None, None)
+            };
 
             // Persona context is now handled by the Profile System:
             // - ProfileSection injects linguistics/personality/tone from PROFILE.json
@@ -1961,7 +1992,10 @@ impl AgentLoop {
                         .iter()
                         .map(|p| {
                             let badge = if p.is_default != 0 { " (default)" } else { "" };
-                            format!("{} **{}**{} — {}", p.avatar_emoji, p.slug, badge, p.display_name)
+                            format!(
+                                "{} **{}**{} — {}",
+                                p.avatar_emoji, p.slug, badge, p.display_name
+                            )
                         })
                         .collect();
                     return Some(format!("Available profiles:\n{}", lines.join("\n")));
@@ -1980,13 +2014,14 @@ impl AgentLoop {
         // "/profile <slug>" — switch profile
         let slug = rest;
         match crate::profiles::db::load_profile_by_slug(self.db.pool(), slug).await {
-            Ok(Some(profile)) => {
-                Some(format!(
-                    "{} Switched to profile **{}** ({})",
-                    profile.avatar_emoji, profile.slug, profile.display_name
-                ))
-            }
-            Ok(None) => Some(format!("Profile '{}' not found. Use `/profile list` to see available profiles.", slug)),
+            Ok(Some(profile)) => Some(format!(
+                "{} Switched to profile **{}** ({})",
+                profile.avatar_emoji, profile.slug, profile.display_name
+            )),
+            Ok(None) => Some(format!(
+                "Profile '{}' not found. Use `/profile list` to see available profiles.",
+                slug
+            )),
             Err(e) => Some(format!("Failed to load profile: {e}")),
         }
     }
@@ -2274,10 +2309,8 @@ impl AgentLoop {
 //
 // See those modules for the implementations.
 
-
 #[cfg(test)]
 mod tests {
-    use crate::agent::tool_veto::veto_tool_call;
     use crate::agent::browser_context::{
         browser_follow_up_instruction, build_browser_screenshot_context_message,
         extract_browser_screenshot_paths, is_temporary_browser_screenshot_message,
@@ -2289,9 +2322,10 @@ mod tests {
     use crate::agent::iteration_budget::{
         maybe_extend_iteration_budget, IterationBudgetState, ToolExecutionSummary,
     };
+    use crate::agent::tool_veto::veto_tool_call;
+    use crate::config::ModelCapabilities;
     #[cfg(feature = "browser")]
     use crate::tools::browser::{compact_browser_snapshot, extract_autocomplete_suggestions};
-    use crate::config::ModelCapabilities;
     use std::collections::HashSet;
 
     fn tools(names: &[&str]) -> HashSet<String> {
@@ -2631,7 +2665,9 @@ mod tests {
 
     #[test]
     fn removes_stale_follow_up_policy_messages() {
-        use crate::agent::browser_context::{is_browser_follow_up_policy, supersede_stale_browser_context};
+        use crate::agent::browser_context::{
+            is_browser_follow_up_policy, supersede_stale_browser_context,
+        };
         use crate::provider::ChatMessage;
 
         let mut messages = vec![

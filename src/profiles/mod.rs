@@ -39,8 +39,7 @@ pub struct Profile {
 impl Profile {
     /// Parse the cached `profile_json` into structured form.
     pub fn parsed_json(&self) -> Result<ProfileJson> {
-        serde_json::from_str(&self.profile_json)
-            .context("Failed to parse profile_json")
+        serde_json::from_str(&self.profile_json).context("Failed to parse profile_json")
     }
 
     /// Directory path for this profile's brain files.
@@ -288,9 +287,8 @@ impl ProfileRegistry {
         for profile in profiles.values() {
             let dir = profile.brain_dir(&self.data_dir);
             if !dir.exists() {
-                std::fs::create_dir_all(&dir).with_context(|| {
-                    format!("Failed to create brain dir {}", dir.display())
-                })?;
+                std::fs::create_dir_all(&dir)
+                    .with_context(|| format!("Failed to create brain dir {}", dir.display()))?;
                 tracing::info!(profile = %profile.slug, path = %dir.display(), "Created profile brain directory");
             }
         }
@@ -317,11 +315,7 @@ impl ProfileRegistry {
 
             if legacy.exists() && !target.exists() {
                 std::fs::copy(&legacy, &target).with_context(|| {
-                    format!(
-                        "Failed to copy {} → {}",
-                        legacy.display(),
-                        target.display()
-                    )
+                    format!("Failed to copy {} → {}", legacy.display(), target.display())
                 })?;
                 tracing::info!(
                     file = %filename,

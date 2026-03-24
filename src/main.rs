@@ -74,9 +74,9 @@ use crate::storage::Database;
 #[cfg(feature = "channel-email")]
 use crate::tools::ReadEmailInboxTool;
 use crate::tools::{
-    AutomationTool, BusinessTool, ContactsTool, EditFileTool, ListDirTool,
-    MessageTool, ReadFileTool, ShellTool, SpawnTool, ToolRegistry, VaultTool, WebFetchTool,
-    WebSearchTool, WorkflowTool, WriteFileTool,
+    AutomationTool, BusinessTool, ContactsTool, EditFileTool, ListDirTool, MessageTool,
+    ReadFileTool, ShellTool, SpawnTool, ToolRegistry, VaultTool, WebFetchTool, WebSearchTool,
+    WorkflowTool, WriteFileTool,
 };
 
 #[cfg(feature = "mcp")]
@@ -1464,11 +1464,16 @@ async fn main() -> Result<()> {
                             tokio::spawn(async move {
                                 const CHECK_INTERVAL_SECS: u64 = 60;
                                 const POOL_IDLE_TIMEOUT_SECS: u64 = 600; // 10 min
-                                let mut last_active: std::collections::HashMap<String, std::time::Instant> =
-                                    std::collections::HashMap::new();
+                                let mut last_active: std::collections::HashMap<
+                                    String,
+                                    std::time::Instant,
+                                > = std::collections::HashMap::new();
 
                                 loop {
-                                    tokio::time::sleep(std::time::Duration::from_secs(CHECK_INTERVAL_SECS)).await;
+                                    tokio::time::sleep(std::time::Duration::from_secs(
+                                        CHECK_INTERVAL_SECS,
+                                    ))
+                                    .await;
 
                                     // 1. Close idle browser tabs (same logic as agent loop start)
                                     monitor_session
@@ -2564,7 +2569,10 @@ async fn main() -> Result<()> {
 
                     let mut engine = rag_handle.lock().await;
                     if target.is_dir() {
-                        match engine.ingest_directory(&target, recursive, "cli", None, None).await {
+                        match engine
+                            .ingest_directory(&target, recursive, "cli", None, None)
+                            .await
+                        {
                             Ok(ids) => println!("Indexed {} file(s)", ids.len()),
                             Err(e) => eprintln!("Error: {e}"),
                         }
@@ -2620,7 +2628,8 @@ async fn main() -> Result<()> {
                                     println!("   {}", r.chunk.heading);
                                 }
                                 // Show first 200 chars of content
-                                let preview = crate::utils::text::truncate_str(&r.chunk.content, 200, "...");
+                                let preview =
+                                    crate::utils::text::truncate_str(&r.chunk.content, 200, "...");
                                 println!("   {}", preview);
                             }
                         }
@@ -2817,8 +2826,9 @@ async fn main() -> Result<()> {
 
                     match info {
                         Some(u) => {
-                            let token =
-                                user_mgr.create_webhook_token(&u.id, &name, "admin", None).await?;
+                            let token = user_mgr
+                                .create_webhook_token(&u.id, &name, "admin", None)
+                                .await?;
                             println!("✅ Created webhook token for user '{}':", u.username);
                             println!("   Token: {}", token);
                             println!("\n   Usage: POST /api/webhook/{}", token);

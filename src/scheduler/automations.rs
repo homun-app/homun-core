@@ -1,10 +1,10 @@
+use crate::config::Config;
+use crate::utils::text::truncate_str;
 use anyhow::{bail, Result};
 use chrono::{DateTime, Duration, NaiveDateTime, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashSet};
-use crate::config::Config;
-use crate::utils::text::truncate_str;
 
 /// Stored schedule format for automations.
 ///
@@ -589,7 +589,11 @@ pub fn derive_flow(row: &crate::storage::AutomationRow) -> FlowGraph {
                     last_id = gate_id.clone();
                 }
 
-                nodes.push(flow_node(&step_id, "llm", truncate_str(step.name.trim(), 28, "\u{2026}")));
+                nodes.push(flow_node(
+                    &step_id,
+                    "llm",
+                    truncate_str(step.name.trim(), 28, "\u{2026}"),
+                ));
                 edges.push(edge(&last_id, &step_id));
                 last_id = step_id;
             }
@@ -639,7 +643,11 @@ pub fn derive_flow(row: &crate::storage::AutomationRow) -> FlowGraph {
         }
 
         let task_id = "task".to_string();
-        nodes.push(flow_node(&task_id, "llm", truncate_str(row.prompt.trim(), 28, "\u{2026}")));
+        nodes.push(flow_node(
+            &task_id,
+            "llm",
+            truncate_str(row.prompt.trim(), 28, "\u{2026}"),
+        ));
         edges.push(edge(&last_id, &task_id));
         last_id = task_id;
     }
@@ -705,7 +713,6 @@ fn deliver_channel_label(channel: &str) -> String {
         other => other.to_string(),
     }
 }
-
 
 fn load_installed_skill_names() -> HashSet<String> {
     let skills_dir = Config::skills_dir();

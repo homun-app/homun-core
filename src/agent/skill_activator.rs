@@ -165,8 +165,7 @@ pub(crate) async fn try_resolve_slash_command(
     let scripts = crate::skills::list_skill_scripts(&skill_dir);
     let references = crate::skills::list_skill_references(&skill_dir);
 
-    let substituted =
-        crate::skills::substitute_skill_variables(&body, arguments, &skill_dir, None);
+    let substituted = crate::skills::substitute_skill_variables(&body, arguments, &skill_dir, None);
 
     let header = crate::skills::build_skill_activation_header(
         skill_name,

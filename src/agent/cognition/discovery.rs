@@ -60,10 +60,7 @@ pub(super) struct KnowledgeEntry {
 ///
 /// Uses the tool registry's names + descriptions and performs simple
 /// substring matching on the query. Returns top matches.
-pub(super) async fn discover_tools(
-    query: &str,
-    tool_registry: &RwLock<ToolRegistry>,
-) -> String {
+pub(super) async fn discover_tools(query: &str, tool_registry: &RwLock<ToolRegistry>) -> String {
     let registry = tool_registry.read().await;
     let all_tools = registry.names_with_descriptions();
     let query_lower = query.to_lowercase();
@@ -93,10 +90,13 @@ pub(super) async fn discover_tools(
             }
 
             if score > 0 {
-                Some((score, ToolEntry {
-                    name: name.to_string(),
-                    description: desc.to_string(),
-                }))
+                Some((
+                    score,
+                    ToolEntry {
+                        name: name.to_string(),
+                        description: desc.to_string(),
+                    },
+                ))
             } else {
                 None
             }
@@ -157,16 +157,14 @@ pub(super) async fn discover_skills(
         .into_iter()
         .filter(|(name, _)| {
             // Contact perimeter: if allowed_skills is non-empty, only those are visible
-            if !allowed_skills.is_empty()
-                && !allowed_skills.iter().any(|a| a == *name)
-            {
+            if !allowed_skills.is_empty() && !allowed_skills.iter().any(|a| a == *name) {
                 return false;
             }
             let Some(profile) = active_profile_slug else {
                 return true; // no profile filtering
             };
             match profile_map.get(*name) {
-                None => true,                  // global skill — always visible
+                None => true,                   // global skill — always visible
                 Some(slug) => *slug == profile, // per-profile — visible only if match
             }
         })
@@ -186,10 +184,13 @@ pub(super) async fn discover_skills(
             }
 
             if score > 0 {
-                Some((score, SkillEntry {
-                    name: name.to_string(),
-                    description: desc.to_string(),
-                }))
+                Some((
+                    score,
+                    SkillEntry {
+                        name: name.to_string(),
+                        description: desc.to_string(),
+                    },
+                ))
             } else {
                 None
             }
@@ -264,43 +265,43 @@ pub(super) async fn discover_mcp(
     // 2. Check available (not yet connected) MCP recipes
     // Contacts only see connected servers via shared resources, not installable recipes
     if allowed_mcp.is_empty() {
-    let presets = crate::skills::mcp_registry::all_mcp_presets();
-    for preset in presets {
-        // Skip if already connected
-        if results.iter().any(|r| r.name == preset.id) {
-            continue;
-        }
-        if config.mcp.servers.contains_key(&preset.id) {
-            continue;
-        }
+        let presets = crate::skills::mcp_registry::all_mcp_presets();
+        for preset in presets {
+            // Skip if already connected
+            if results.iter().any(|r| r.name == preset.id) {
+                continue;
+            }
+            if config.mcp.servers.contains_key(&preset.id) {
+                continue;
+            }
 
-        let searchable = format!(
-            "{} {} {} {}",
-            preset.id,
-            preset.display_name,
-            preset.description,
-            preset.keywords.join(" ")
-        )
-        .to_lowercase();
+            let searchable = format!(
+                "{} {} {} {}",
+                preset.id,
+                preset.display_name,
+                preset.description,
+                preset.keywords.join(" ")
+            )
+            .to_lowercase();
 
-        let matches = searchable.contains(&query_lower)
-            || preset
-                .aliases
-                .iter()
-                .any(|a| query_lower.contains(&a.to_lowercase()))
-            || query_words
-                .iter()
-                .any(|w| w.len() >= 3 && searchable.contains(w));
+            let matches = searchable.contains(&query_lower)
+                || preset
+                    .aliases
+                    .iter()
+                    .any(|a| query_lower.contains(&a.to_lowercase()))
+                || query_words
+                    .iter()
+                    .any(|w| w.len() >= 3 && searchable.contains(w));
 
-        if matches {
-            results.push(McpEntry {
-                name: preset.id.clone(),
-                connected: false,
-                tools: Vec::new(),
-                description: preset.description.clone(),
-            });
+            if matches {
+                results.push(McpEntry {
+                    name: preset.id.clone(),
+                    connected: false,
+                    tools: Vec::new(),
+                    description: preset.description.clone(),
+                });
+            }
         }
-    }
     } // end if allowed_mcp.is_empty() — contacts don't see installable recipes
 
     results.truncate(5);
@@ -322,7 +323,10 @@ pub(super) async fn search_memory(
 ) -> String {
     let mut guard = searcher.lock().await;
     // TODO(IGA): pass allowed_namespaces from contact perimeter for namespace filtering
-    match guard.search_scoped_full(query, 3, contact_id, agent_id, profile_ids, &[]).await {
+    match guard
+        .search_scoped_full(query, 3, contact_id, agent_id, profile_ids, &[])
+        .await
+    {
         Ok(results) if !results.is_empty() => {
             let entries: Vec<MemoryEntry> = results
                 .iter()
@@ -514,7 +518,9 @@ mod tests {
     fn test_cognition_tool_definitions_have_required_query() {
         let defs = cognition_tool_definitions();
         for def in &defs[..5] {
-            let required = def.function.parameters
+            let required = def
+                .function
+                .parameters
                 .get("required")
                 .and_then(|r| r.as_array())
                 .expect("Should have required array");

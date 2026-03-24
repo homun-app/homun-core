@@ -60,12 +60,11 @@ pub async fn load_profile_by_slug(pool: &Pool<Sqlite>, slug: &str) -> Result<Opt
 
 /// Load all profiles, ordered by is_default DESC then slug ASC.
 pub async fn load_all_profiles(pool: &Pool<Sqlite>) -> Result<Vec<Profile>> {
-    let rows = sqlx::query_as::<_, Profile>(
-        "SELECT * FROM profiles ORDER BY is_default DESC, slug ASC",
-    )
-    .fetch_all(pool)
-    .await
-    .context("Failed to load profiles")?;
+    let rows =
+        sqlx::query_as::<_, Profile>("SELECT * FROM profiles ORDER BY is_default DESC, slug ASC")
+            .fetch_all(pool)
+            .await
+            .context("Failed to load profiles")?;
     Ok(rows)
 }
 
@@ -107,13 +106,12 @@ pub async fn update_profile(
 /// Cascades deletion to: memory_chunks, rag_chunks, rag_sources, contacts,
 /// sessions, automations, workflows, memory_summaries, businesses, email_pending.
 pub async fn delete_profile(pool: &Pool<Sqlite>, id: i64) -> Result<()> {
-    let is_default: i64 =
-        sqlx::query_scalar("SELECT is_default FROM profiles WHERE id = ?")
-            .bind(id)
-            .fetch_optional(pool)
-            .await
-            .context("Failed to check profile")?
-            .unwrap_or(0);
+    let is_default: i64 = sqlx::query_scalar("SELECT is_default FROM profiles WHERE id = ?")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .context("Failed to check profile")?
+        .unwrap_or(0);
 
     if is_default != 0 {
         bail!("Cannot delete the default profile");
@@ -209,7 +207,16 @@ async fn migrate_simple_persona(
     let profile_id = match existing {
         Some(p) => p.id,
         None => {
-            let id = insert_profile(pool, persona, display_name, emoji, "#3B82F6", "{}", Some(DEFAULT_ADMIN_USER_ID)).await?;
+            let id = insert_profile(
+                pool,
+                persona,
+                display_name,
+                emoji,
+                "#3B82F6",
+                "{}",
+                Some(DEFAULT_ADMIN_USER_ID),
+            )
+            .await?;
             tracing::info!(profile = persona, "Created profile from persona migration");
             id
         }
@@ -238,10 +245,7 @@ async fn migrate_simple_persona(
 }
 
 /// Migrate "custom" persona contacts into per-contact profiles.
-async fn migrate_custom_personas(
-    pool: &Pool<Sqlite>,
-    data_dir: &std::path::Path,
-) -> Result<()> {
+async fn migrate_custom_personas(pool: &Pool<Sqlite>, data_dir: &std::path::Path) -> Result<()> {
     // Find contacts with custom persona that haven't been migrated yet
     let rows: Vec<(i64, String, String)> = sqlx::query_as(
         "SELECT id, name, persona_instructions FROM contacts
@@ -260,21 +264,25 @@ async fn migrate_custom_personas(
         }
 
         let display_name = format!("Custom ({contact_name})");
-        let profile_id =
-            insert_profile(pool, &slug, &display_name, "✨", "#8B5CF6", "{}", Some(DEFAULT_ADMIN_USER_ID)).await?;
+        let profile_id = insert_profile(
+            pool,
+            &slug,
+            &display_name,
+            "✨",
+            "#8B5CF6",
+            "{}",
+            Some(DEFAULT_ADMIN_USER_ID),
+        )
+        .await?;
 
         // Write persona_instructions as SOUL.md for the new profile
         if !instructions.is_empty() {
-            let profile_dir = data_dir
-                .join("brain")
-                .join("profiles")
-                .join(&slug);
+            let profile_dir = data_dir.join("brain").join("profiles").join(&slug);
             std::fs::create_dir_all(&profile_dir).ok();
             let soul_path = profile_dir.join("SOUL.md");
             if !soul_path.exists() {
-                std::fs::write(&soul_path, &instructions).with_context(|| {
-                    format!("Failed to write SOUL.md for profile '{slug}'")
-                })?;
+                std::fs::write(&soul_path, &instructions)
+                    .with_context(|| format!("Failed to write SOUL.md for profile '{slug}'"))?;
             }
         }
 
@@ -350,12 +358,18 @@ mod tests {
         assert!(id > 1); // default is id=1
 
         // Load by id
-        let p = load_profile_by_id(&pool, id).await.expect("load").expect("found");
+        let p = load_profile_by_id(&pool, id)
+            .await
+            .expect("load")
+            .expect("found");
         assert_eq!(p.slug, "acme");
         assert_eq!(p.avatar_emoji, "🏢");
 
         // Load by slug
-        let p2 = load_profile_by_slug(&pool, "acme").await.expect("load").expect("found");
+        let p2 = load_profile_by_slug(&pool, "acme")
+            .await
+            .expect("load")
+            .expect("found");
         assert_eq!(p2.id, id);
 
         // List
@@ -364,10 +378,20 @@ mod tests {
         assert_eq!(all[0].is_default, 1); // default comes first
 
         // Update
-        update_profile(&pool, id, "Acme Inc", "🏭", "#EF4444", r#"{"version":"1.0"}"#)
+        update_profile(
+            &pool,
+            id,
+            "Acme Inc",
+            "🏭",
+            "#EF4444",
+            r#"{"version":"1.0"}"#,
+        )
+        .await
+        .expect("update");
+        let updated = load_profile_by_id(&pool, id)
             .await
-            .expect("update");
-        let updated = load_profile_by_id(&pool, id).await.expect("load").expect("found");
+            .expect("load")
+            .expect("found");
         assert_eq!(updated.display_name, "Acme Inc");
         assert_eq!(updated.avatar_emoji, "🏭");
 

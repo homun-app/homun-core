@@ -71,7 +71,9 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         // Contact perimeter: isolation settings
         .route(
             "/v1/contacts/{id}/perimeter",
-            get(get_perimeter).put(set_perimeter).delete(delete_perimeter),
+            get(get_perimeter)
+                .put(set_perimeter)
+                .delete(delete_perimeter),
         )
 }
 
@@ -580,21 +582,35 @@ async fn set_perimeter(
         .await
         .map_err(internal)?;
 
-    let ns = body.knowledge_namespaces
+    let ns = body
+        .knowledge_namespaces
         .map(|v| serde_json::to_string(&v).unwrap_or_default())
         .unwrap_or(existing.knowledge_namespaces);
     let scope = body.memory_scope.unwrap_or(existing.memory_scope);
-    let allowed = body.tools_allowed
+    let allowed = body
+        .tools_allowed
         .map(|v| serde_json::to_string(&v).unwrap_or_default())
         .unwrap_or(existing.tools_allowed);
-    let denied = body.tools_denied
+    let denied = body
+        .tools_denied
         .map(|v| serde_json::to_string(&v).unwrap_or_default())
         .unwrap_or(existing.tools_denied);
-    let see_contacts = body.can_see_contacts.unwrap_or(existing.can_see_contacts != 0);
-    let see_calendar = body.can_see_calendar.unwrap_or(existing.can_see_calendar != 0);
+    let see_contacts = body
+        .can_see_contacts
+        .unwrap_or(existing.can_see_contacts != 0);
+    let see_calendar = body
+        .can_see_calendar
+        .unwrap_or(existing.can_see_calendar != 0);
 
     crate::contacts::perimeter::upsert_perimeter(
-        db.pool(), contact_id, &ns, &scope, &allowed, &denied, see_contacts, see_calendar,
+        db.pool(),
+        contact_id,
+        &ns,
+        &scope,
+        &allowed,
+        &denied,
+        see_contacts,
+        see_calendar,
     )
     .await
     .map_err(internal)?;
@@ -612,5 +628,7 @@ async fn delete_perimeter(
     crate::contacts::perimeter::delete_perimeter(db.pool(), contact_id)
         .await
         .map_err(internal)?;
-    Ok(Json(json!({"ok": true, "message": "Perimeter removed, using safe defaults"})))
+    Ok(Json(
+        json!({"ok": true, "message": "Perimeter removed, using safe defaults"}),
+    ))
 }

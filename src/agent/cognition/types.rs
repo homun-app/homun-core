@@ -294,7 +294,11 @@ pub fn validate_cognition_result(
         if !known_tools.iter().any(|t| t == &tool.name) {
             issues.push(ValidationIssue {
                 field: "tools".to_string(),
-                message: format!("Tool '{}' does not exist. Available: {}", tool.name, known_tools.join(", ")),
+                message: format!(
+                    "Tool '{}' does not exist. Available: {}",
+                    tool.name,
+                    known_tools.join(", ")
+                ),
             });
         }
     }
@@ -353,7 +357,10 @@ mod tests {
             mcp_tools: Vec::new(),
             memory_context: Some("User prefers Frecciarossa".to_string()),
             rag_context: None,
-            plan: vec!["Search Trenitalia".to_string(), "Compare prices".to_string()],
+            plan: vec![
+                "Search Trenitalia".to_string(),
+                "Compare prices".to_string(),
+            ],
             constraints: vec!["Tomorrow morning".to_string()],
             autonomy_override: None,
         };

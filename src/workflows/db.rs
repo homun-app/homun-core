@@ -426,22 +426,30 @@ mod tests {
 
         // Create and insert 3 workflows with different statuses
         let req = sample_request();
-        db.insert_workflow("wf-running", &req, None, None, None).await.unwrap();
+        db.insert_workflow("wf-running", &req, None, None, None)
+            .await
+            .unwrap();
         db.update_workflow_status("wf-running", WorkflowStatus::Running, None)
             .await
             .unwrap();
 
-        db.insert_workflow("wf-paused", &req, None, None, None).await.unwrap();
+        db.insert_workflow("wf-paused", &req, None, None, None)
+            .await
+            .unwrap();
         db.update_workflow_status("wf-paused", WorkflowStatus::Paused, None)
             .await
             .unwrap();
 
-        db.insert_workflow("wf-completed", &req, None, None, None).await.unwrap();
+        db.insert_workflow("wf-completed", &req, None, None, None)
+            .await
+            .unwrap();
         db.update_workflow_status("wf-completed", WorkflowStatus::Completed, None)
             .await
             .unwrap();
 
-        db.insert_workflow("wf-pending", &req, None, None, None).await.unwrap();
+        db.insert_workflow("wf-pending", &req, None, None, None)
+            .await
+            .unwrap();
         // pending is the default status — no update needed
 
         let resumable = db.load_resumable_workflows().await.unwrap();
@@ -499,7 +507,9 @@ mod tests {
         req.automation_id = Some("auto-123".to_string());
         req.automation_run_id = Some("run-456".to_string());
 
-        db.insert_workflow("wf-linked", &req, None, None, None).await.unwrap();
+        db.insert_workflow("wf-linked", &req, None, None, None)
+            .await
+            .unwrap();
 
         let wf = db.load_workflow("wf-linked").await.unwrap().unwrap();
         assert_eq!(wf.automation_id.as_deref(), Some("auto-123"));
@@ -510,7 +520,9 @@ mod tests {
     async fn test_workflow_without_automation_link() {
         let db = test_db().await;
         let req = sample_request();
-        db.insert_workflow("wf-solo", &req, None, None, None).await.unwrap();
+        db.insert_workflow("wf-solo", &req, None, None, None)
+            .await
+            .unwrap();
 
         let wf = db.load_workflow("wf-solo").await.unwrap().unwrap();
         assert!(wf.automation_id.is_none());

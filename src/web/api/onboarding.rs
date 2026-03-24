@@ -55,11 +55,12 @@ async fn onboarding_status(State(state): State<Arc<AppState>>) -> Json<Onboardin
 
     // Check if a profile with content exists (non-default or has profile_json)
     let has_profile = if let Some(db) = &state.db {
-        let count: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM profiles WHERE slug != 'default' OR profile_json != '{}'")
-                .fetch_one(db.pool())
-                .await
-                .unwrap_or(0);
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM profiles WHERE slug != 'default' OR profile_json != '{}'",
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap_or(0);
         count > 0
     } else {
         false

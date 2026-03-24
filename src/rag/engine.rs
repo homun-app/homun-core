@@ -40,7 +40,11 @@ pub struct RagEngine {
 
 impl RagEngine {
     /// Create from a concrete Database (backwards-compatible convenience).
-    pub fn new(db: crate::storage::Database, engine: EmbeddingEngine, chunk_opts: ChunkOptions) -> Self {
+    pub fn new(
+        db: crate::storage::Database,
+        engine: EmbeddingEngine,
+        chunk_opts: ChunkOptions,
+    ) -> Self {
         Self {
             store: Arc::new(db),
             engine,
@@ -49,7 +53,11 @@ impl RagEngine {
     }
 
     /// Create from any RagStore implementation.
-    pub fn from_store(store: Arc<dyn RagStore>, engine: EmbeddingEngine, chunk_opts: ChunkOptions) -> Self {
+    pub fn from_store(
+        store: Arc<dyn RagStore>,
+        engine: EmbeddingEngine,
+        chunk_opts: ChunkOptions,
+    ) -> Self {
         Self {
             store,
             engine,
@@ -201,7 +209,10 @@ impl RagEngine {
             if !path.is_file() || !is_supported(&path) {
                 continue;
             }
-            match self.ingest_file(&path, source_channel, profile_id, user_id).await {
+            match self
+                .ingest_file(&path, source_channel, profile_id, user_id)
+                .await
+            {
                 Ok(Some(id)) => indexed.push(id),
                 Ok(None) => {} // already indexed
                 Err(e) => {
@@ -322,7 +333,8 @@ impl RagEngine {
             self.remove_source(existing.id).await?;
         }
 
-        self.ingest_file(path, source_channel, profile_id, user_id).await
+        self.ingest_file(path, source_channel, profile_id, user_id)
+            .await
     }
 
     /// Remove a source and its chunks.
@@ -367,7 +379,10 @@ impl RagEngine {
 
                 // Fix empty headings by prepending filename (for FTS5 matching)
                 if chunk.heading.is_empty() && !file_name.is_empty() {
-                    let _ = self.store.update_rag_chunk_heading(chunk.id, &file_name).await;
+                    let _ = self
+                        .store
+                        .update_rag_chunk_heading(chunk.id, &file_name)
+                        .await;
                 }
 
                 let embed_text = format!("{}\n{}", file_name, chunk.content);
@@ -659,7 +674,11 @@ mod tests {
             "# Remove\n\nThis will be removed.",
         );
 
-        let source_id = rag.ingest_file(&md, "test", None, None).await.unwrap().unwrap();
+        let source_id = rag
+            .ingest_file(&md, "test", None, None)
+            .await
+            .unwrap()
+            .unwrap();
 
         let removed = rag.remove_source(source_id).await.unwrap();
         assert!(removed, "Should return true for existing source");

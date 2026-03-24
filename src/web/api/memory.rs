@@ -113,8 +113,7 @@ async fn memory_stats(
     Json(MemoryStatsResponse {
         chunk_count,
         daily_count,
-        has_memory_md: brain_dir.join("MEMORY.md").exists()
-            || data_dir.join("MEMORY.md").exists(),
+        has_memory_md: brain_dir.join("MEMORY.md").exists() || data_dir.join("MEMORY.md").exists(),
         has_history_md: data_dir.join("HISTORY.md").exists(),
         has_instructions_md: brain_dir.join("INSTRUCTIONS.md").exists()
             || data_dir.join("INSTRUCTIONS.md").exists(),
@@ -447,9 +446,7 @@ struct InstructionsQuery {
     profile: Option<String>,
 }
 
-async fn get_instructions(
-    Query(q): Query<InstructionsQuery>,
-) -> Json<InstructionsResponse> {
+async fn get_instructions(Query(q): Query<InstructionsQuery>) -> Json<InstructionsResponse> {
     let data_dir = crate::config::Config::data_dir();
     let brain_dir = resolve_brain_dir(&data_dir, q.profile.as_deref());
     let brain_path = brain_dir.join("INSTRUCTIONS.md");
@@ -529,9 +526,7 @@ struct DailyListResponse {
     dates: Vec<String>,
 }
 
-async fn list_daily_files(
-    Query(q): Query<StatsQuery>,
-) -> Json<DailyListResponse> {
+async fn list_daily_files(Query(q): Query<StatsQuery>) -> Json<DailyListResponse> {
     let data_dir = crate::config::Config::data_dir();
     let memory_dir = crate::agent::memory::daily_log_dir(&data_dir, q.profile.as_deref());
 

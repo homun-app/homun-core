@@ -267,8 +267,8 @@ impl SkillRegistry {
         Ok(Skill {
             meta,
             path: skill_dir.to_path_buf(),
-            body: None,     // Loaded on demand (progressive disclosure)
-            eligible: true, // Checked later by check_all_eligibility()
+            body: None,         // Loaded on demand (progressive disclosure)
+            eligible: true,     // Checked later by check_all_eligibility()
             profile_slug: None, // Set by scan_directory_with_profile
         })
     }

@@ -219,10 +219,7 @@ impl AutomationTool {
     }
 
     async fn handle_list(&self, args: &Value) -> Result<ToolResult> {
-        let filter = args
-            .get("filter")
-            .and_then(|v| v.as_str())
-            .unwrap_or("all");
+        let filter = args.get("filter").and_then(|v| v.as_str()).unwrap_or("all");
 
         let automations = match self.db.load_automations().await {
             Ok(a) => a,
@@ -280,13 +277,19 @@ impl AutomationTool {
         };
 
         let mut lines = Vec::new();
-        lines.push(format!("Automation: {} ({})", automation.name, automation.id));
+        lines.push(format!(
+            "Automation: {} ({})",
+            automation.name, automation.id
+        ));
         lines.push(format!(
             "Status: {} | Enabled: {}",
             automation.status, automation.enabled
         ));
         lines.push(format!("Schedule: {}", automation.schedule));
-        lines.push(format!("Prompt: {}", truncate_str(&automation.prompt, 200, "...")));
+        lines.push(format!(
+            "Prompt: {}",
+            truncate_str(&automation.prompt, 200, "...")
+        ));
         lines.push(format!(
             "Trigger: {}{}",
             automation.trigger_kind,
@@ -428,11 +431,10 @@ impl AutomationTool {
         }
         if let Some(trigger) = get_optional_string(args, "trigger") {
             let trigger_value = get_optional_string(args, "trigger_value");
-            let (kind, value) =
-                match normalize_trigger(Some(&trigger), trigger_value.as_deref()) {
-                    Ok(v) => v,
-                    Err(e) => return Ok(ToolResult::error(e)),
-                };
+            let (kind, value) = match normalize_trigger(Some(&trigger), trigger_value.as_deref()) {
+                Ok(v) => v,
+                Err(e) => return Ok(ToolResult::error(e)),
+            };
             update.trigger_kind = Some(kind.clone());
             update.trigger_value = Some(value.clone());
             changed.push(format!("trigger={kind}"));

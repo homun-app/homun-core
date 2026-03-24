@@ -427,9 +427,7 @@ impl MemoryConsolidator {
             let texts: Vec<String> = new_instructions.iter().map(|i| i.text.clone()).collect();
             // Write to profile-scoped brain dir if available, else global
             let global_brain = self.data_dir.join("brain");
-            let target_brain_dir = profile_brain_dir
-                .as_deref()
-                .unwrap_or(&global_brain);
+            let target_brain_dir = profile_brain_dir.as_deref().unwrap_or(&global_brain);
             self.append_instructions_to(target_brain_dir, &texts)?;
         }
 
@@ -592,8 +590,11 @@ impl MemoryConsolidator {
             let end = last_sunday.format("%Y-%m-%d").to_string();
 
             if !self.store.has_memory_summary("week", &start).await? {
-                self.summarize_range("week", &start, &end, provider, model, contact_id, agent_id, profile_id, user_id)
-                    .await?;
+                self.summarize_range(
+                    "week", &start, &end, provider, model, contact_id, agent_id, profile_id,
+                    user_id,
+                )
+                .await?;
             }
         }
 
@@ -616,7 +617,8 @@ impl MemoryConsolidator {
                     let end = month_end.format("%Y-%m-%d").to_string();
                     if !self.store.has_memory_summary("month", &start).await? {
                         self.summarize_range(
-                            "month", &start, &end, provider, model, contact_id, agent_id, profile_id, user_id,
+                            "month", &start, &end, provider, model, contact_id, agent_id,
+                            profile_id, user_id,
                         )
                         .await?;
                     }
@@ -641,7 +643,10 @@ impl MemoryConsolidator {
         profile_id: Option<i64>,
         user_id: Option<&str>,
     ) -> Result<()> {
-        let chunks = self.store.load_chunks_in_range(start_date, end_date).await?;
+        let chunks = self
+            .store
+            .load_chunks_in_range(start_date, end_date)
+            .await?;
         if chunks.is_empty() {
             return Ok(());
         }
@@ -684,7 +689,10 @@ impl MemoryConsolidator {
 
         if let Some(summary) = response.content.filter(|s| !s.trim().is_empty()) {
             self.store
-                .insert_memory_summary(period, start_date, end_date, &summary, contact_id, agent_id, profile_id, user_id)
+                .insert_memory_summary(
+                    period, start_date, end_date, &summary, contact_id, agent_id, profile_id,
+                    user_id,
+                )
                 .await?;
             tracing::info!(
                 period,
@@ -842,7 +850,10 @@ impl MemoryConsolidator {
             });
         }
 
-        let old_messages = self.store.load_old_messages(session_key, keep_count).await?;
+        let old_messages = self
+            .store
+            .load_old_messages(session_key, keep_count)
+            .await?;
         if old_messages.is_empty() {
             return Ok(CompactionResult {
                 messages_removed: 0,
@@ -887,7 +898,10 @@ impl MemoryConsolidator {
         };
 
         // Delete old messages
-        let deleted = self.store.delete_old_messages(session_key, keep_count).await?;
+        let deleted = self
+            .store
+            .delete_old_messages(session_key, keep_count)
+            .await?;
 
         // Insert summary as system message
         self.store

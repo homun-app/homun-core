@@ -9,8 +9,8 @@
 pub mod db;
 pub mod engine;
 
-use serde::{Deserialize, Serialize};
 use crate::utils::text::truncate_str;
+use serde::{Deserialize, Serialize};
 
 // ── Status enums ─────────────────────────────────────────────────────
 
@@ -369,7 +369,6 @@ impl WorkflowEvent {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {

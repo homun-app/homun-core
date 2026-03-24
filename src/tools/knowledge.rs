@@ -200,7 +200,10 @@ impl Tool for KnowledgeTool {
                         is_error: false,
                     })
                 } else if path.is_file() {
-                    match engine.ingest_file(&path, "tool", ctx.profile_id, ctx.user_id.as_deref()).await? {
+                    match engine
+                        .ingest_file(&path, "tool", ctx.profile_id, ctx.user_id.as_deref())
+                        .await?
+                    {
                         Some(id) => Ok(ToolResult {
                             output: format!("File {} indexed (source_id={})", path.display(), id),
                             is_error: false,

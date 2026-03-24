@@ -545,10 +545,7 @@ impl PromptSection for ProfileSection {
         if ctx.profile_context.is_empty() {
             return Ok(String::new());
         }
-        Ok(format!(
-            "## Active Profile\n\n{}\n",
-            ctx.profile_context,
-        ))
+        Ok(format!("## Active Profile\n\n{}\n", ctx.profile_context,))
     }
 }
 
@@ -803,12 +800,12 @@ mod tests {
     #[test]
     fn test_tools_section_with_cognition_injects_understanding() {
         let section = ToolsSection;
-        let plan = vec!["Search for trains".to_string(), "Compare prices".to_string()];
-        let constraints = vec!["Tomorrow morning".to_string()];
-        let tool_names = vec![
-            "browser".to_string(),
-            "web_search".to_string(),
+        let plan = vec![
+            "Search for trains".to_string(),
+            "Compare prices".to_string(),
         ];
+        let constraints = vec!["Tomorrow morning".to_string()];
+        let tool_names = vec!["browser".to_string(), "web_search".to_string()];
         let ctx = PromptContext {
             registered_tool_names: &tool_names,
             cognition_understanding: "User wants to find train tickets from Rome to Milan",
@@ -817,20 +814,29 @@ mod tests {
             ..make_ctx()
         };
         let result = section.build(&ctx).unwrap();
-        assert!(result.contains("Task Analysis"), "Should have Task Analysis section");
-        assert!(result.contains("find train tickets"), "Should inject understanding");
+        assert!(
+            result.contains("Task Analysis"),
+            "Should have Task Analysis section"
+        );
+        assert!(
+            result.contains("find train tickets"),
+            "Should inject understanding"
+        );
         assert!(result.contains("Search for trains"), "Should inject plan");
-        assert!(result.contains("Tomorrow morning"), "Should inject constraints");
-        assert!(result.contains("Browser Essentials"), "Should have browser essentials");
+        assert!(
+            result.contains("Tomorrow morning"),
+            "Should inject constraints"
+        );
+        assert!(
+            result.contains("Browser Essentials"),
+            "Should have browser essentials"
+        );
     }
 
     #[test]
     fn test_tools_section_without_cognition_still_shows_browser_essentials() {
         let section = ToolsSection;
-        let tool_names = vec![
-            "browser".to_string(),
-            "web_search".to_string(),
-        ];
+        let tool_names = vec!["browser".to_string(), "web_search".to_string()];
         let ctx = PromptContext {
             registered_tool_names: &tool_names,
             cognition_understanding: "", // fallback scenario
@@ -838,7 +844,13 @@ mod tests {
         };
         let result = section.build(&ctx).unwrap();
         // Browser essentials always appear when browser tools are available
-        assert!(result.contains("Browser Essentials"), "Should have browser essentials");
-        assert!(!result.contains("Task Analysis"), "Should NOT have Task Analysis without cognition");
+        assert!(
+            result.contains("Browser Essentials"),
+            "Should have browser essentials"
+        );
+        assert!(
+            !result.contains("Task Analysis"),
+            "Should NOT have Task Analysis without cognition"
+        );
     }
 }

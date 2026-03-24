@@ -26,10 +26,7 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
             "/v1/account/tokens/{token_id}",
             axum::routing::delete(delete_token).post(toggle_token),
         )
-        .route(
-            "/v1/account/avatar",
-            get(get_avatar).post(upload_avatar),
-        )
+        .route("/v1/account/avatar", get(get_avatar).post(upload_avatar))
 }
 
 // ─── Avatar ─────────────────────────────────────────────────────
@@ -51,7 +48,10 @@ async fn get_avatar(State(_state): State<Arc<AppState>>) -> axum::response::Resp
                     };
                     return (
                         StatusCode::OK,
-                        [(header::CONTENT_TYPE, ct), (header::CACHE_CONTROL, "max-age=3600")],
+                        [
+                            (header::CONTENT_TYPE, ct),
+                            (header::CACHE_CONTROL, "max-age=3600"),
+                        ],
                         bytes,
                     )
                         .into_response();
@@ -64,7 +64,10 @@ async fn get_avatar(State(_state): State<Arc<AppState>>) -> axum::response::Resp
 }
 
 /// Upload a new avatar image (multipart form).
-async fn upload_avatar(State(_state): State<Arc<AppState>>, mut multipart: Multipart) -> axum::response::Response {
+async fn upload_avatar(
+    State(_state): State<Arc<AppState>>,
+    mut multipart: Multipart,
+) -> axum::response::Response {
     let data_dir = crate::config::Config::data_dir();
 
     while let Ok(Some(field)) = multipart.next_field().await {
@@ -83,7 +86,8 @@ async fn upload_avatar(State(_state): State<Arc<AppState>>, mut multipart: Multi
                 }
                 // Remove old avatars
                 for old_ext in &["png", "jpg", "jpeg", "webp"] {
-                    let _ = tokio::fs::remove_file(data_dir.join(format!("avatar.{old_ext}"))).await;
+                    let _ =
+                        tokio::fs::remove_file(data_dir.join(format!("avatar.{old_ext}"))).await;
                 }
                 // Save new
                 let path = data_dir.join(format!("avatar.{ext}"));
@@ -459,14 +463,20 @@ async fn create_token(
     let token_id = token.chars().take(16).collect::<String>();
 
     let scope = body.scope.as_deref().unwrap_or("admin");
-    db.create_webhook_token(&token, &owner.id, &body.name, scope, expires_at_str.as_deref())
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": e.to_string()})),
-            )
-        })?;
+    db.create_webhook_token(
+        &token,
+        &owner.id,
+        &body.name,
+        scope,
+        expires_at_str.as_deref(),
+    )
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+    })?;
 
     Ok(Json(CreateTokenResponse {
         token,

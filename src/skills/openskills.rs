@@ -7,8 +7,8 @@
 /// instead of `git clone` to avoid adding git2 as a dependency.
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
 use crate::config::Config;
+use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 

@@ -26,7 +26,6 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
 
 // ── Test / Start / Pairing ────────────────────────────────────────
 
-
 #[derive(Deserialize)]
 struct ChannelTestRequest {
     name: String,

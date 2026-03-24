@@ -4,12 +4,12 @@ use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
-use crate::config::Config;
 use super::installer::InstallResult;
 use super::loader::parse_skill_md_public;
 use super::{
     adapt_legacy_skill_dir, parse_legacy_manifest, scan_skill_package, InstallSecurityOptions,
 };
+use crate::config::Config;
 
 /// ClawHub skill installer — fetches skills from the OpenClaw skills registry on GitHub.
 ///

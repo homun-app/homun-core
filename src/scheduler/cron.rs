@@ -54,7 +54,13 @@ impl CronScheduler {
 
     /// Start the scheduler loop.
     pub async fn start(self: Arc<Self>) -> Result<tokio::task::JoinHandle<()>> {
-        let count = self.db.load_automations().await?.iter().filter(|a| a.enabled).count();
+        let count = self
+            .db
+            .load_automations()
+            .await?
+            .iter()
+            .filter(|a| a.enabled)
+            .count();
         tracing::info!(active_automations = count, "Automation scheduler started");
 
         let scheduler = self.clone();
@@ -208,7 +214,16 @@ impl CronScheduler {
                             };
                             let channel = automation.deliver_to.as_deref().unwrap_or("automation");
                             // Cron: use automation's profile_id, no user context
-                            match engine.create_and_start(req, channel, channel, automation.profile_id, None).await {
+                            match engine
+                                .create_and_start(
+                                    req,
+                                    channel,
+                                    channel,
+                                    automation.profile_id,
+                                    None,
+                                )
+                                .await
+                            {
                                 Ok(wf_id) => {
                                     // Mark as "running" — will be completed by
                                     // WorkflowEngine when the workflow finishes.
@@ -307,7 +322,6 @@ impl CronScheduler {
 
         Ok(())
     }
-
 }
 
 /// Check if a schedule is overdue — server was down when it should have fired.
@@ -341,9 +355,7 @@ fn is_schedule_overdue(
 
 /// Parse a last_run timestamp (SQLite format or RFC3339).
 fn parse_last_run_timestamp(raw: &str) -> Option<chrono::DateTime<chrono::Utc>> {
-    if let Ok(naive) =
-        chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S")
-    {
+    if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S") {
         return Some(naive.and_utc());
     }
     chrono::DateTime::parse_from_rfc3339(raw)

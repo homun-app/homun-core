@@ -44,7 +44,10 @@ pub fn browser_mcp_server_config_for_profile(
 
     // Verify the profile exists
     if !browser.profiles.contains_key(profile_name) {
-        tracing::warn!(profile = profile_name, "Browser profile not found in config");
+        tracing::warn!(
+            profile = profile_name,
+            "Browser profile not found in config"
+        );
         return None;
     }
 
@@ -130,7 +133,10 @@ impl BrowserPool {
     pub async fn set_default_peer(&self, profile_name: &str, peer: Arc<McpPeer>) {
         let mut peers = self.peers.write().await;
         peers.insert(profile_name.to_string(), peer);
-        tracing::info!(profile = profile_name, "Default browser peer registered in pool");
+        tracing::info!(
+            profile = profile_name,
+            "Default browser peer registered in pool"
+        );
     }
 
     /// Get the MCP peer for a profile, starting a new process if needed.
@@ -149,8 +155,9 @@ impl BrowserPool {
         // Slow path: start a new MCP process for this profile
         let mcp_config = {
             let config = self.config.read().await;
-            browser_mcp_server_config_for_profile(&config.browser, profile_name)
-                .with_context(|| format!("Profile '{profile_name}' not found or browser disabled"))?
+            browser_mcp_server_config_for_profile(&config.browser, profile_name).with_context(
+                || format!("Profile '{profile_name}' not found or browser disabled"),
+            )?
         };
 
         let sandbox_config = {
@@ -159,14 +166,15 @@ impl BrowserPool {
         };
 
         let server_name = format!("playwright-{profile_name}");
-        tracing::info!(profile = profile_name, "Starting browser MCP peer for profile");
+        tracing::info!(
+            profile = profile_name,
+            "Starting browser MCP peer for profile"
+        );
 
         let peer =
             crate::tools::McpManager::connect_peer(&server_name, &mcp_config, &sandbox_config)
                 .await
-                .with_context(|| {
-                    format!("Failed to start browser for profile '{profile_name}'")
-                })?;
+                .with_context(|| format!("Failed to start browser for profile '{profile_name}'"))?;
 
         // Store and return
         let mut peers = self.peers.write().await;
@@ -288,8 +296,7 @@ mod tests {
         assert!(!default_mcp.args.iter().any(|a| a.contains("firefox")));
 
         // Social profile should use its overrides
-        let social_mcp =
-            browser_mcp_server_config_for_profile(&config, "social").unwrap();
+        let social_mcp = browser_mcp_server_config_for_profile(&config, "social").unwrap();
         assert!(!social_mcp.args.contains(&"--headless".to_string()));
         assert!(social_mcp.args.contains(&"--browser=firefox".to_string()));
         assert!(social_mcp

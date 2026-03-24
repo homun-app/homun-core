@@ -7,9 +7,9 @@ use axum::routing::get;
 use axum::Router;
 use serde::{Deserialize, Serialize};
 
-use crate::config::Config;
 use super::super::auth::{check_write, AuthUser};
 use super::super::server::AppState;
+use crate::config::Config;
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new()

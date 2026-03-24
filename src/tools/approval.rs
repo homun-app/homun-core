@@ -267,7 +267,6 @@ fn summarize_args(args: &serde_json::Value) -> String {
     }
 }
 
-
 // Global instance
 static GLOBAL_APPROVAL_MANAGER: OnceLock<Arc<ApprovalManager>> = OnceLock::new();
 

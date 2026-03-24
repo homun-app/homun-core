@@ -32,7 +32,8 @@ pub struct CognitionParams<'a> {
     pub tool_registry: &'a RwLock<ToolRegistry>,
     pub skill_registry: Option<&'a RwLock<SkillRegistry>>,
     #[cfg(feature = "embeddings")]
-    pub memory_searcher: Option<&'a Arc<tokio::sync::Mutex<crate::agent::memory_search::MemorySearcher>>>,
+    pub memory_searcher:
+        Option<&'a Arc<tokio::sync::Mutex<crate::agent::memory_search::MemorySearcher>>>,
     #[cfg(feature = "embeddings")]
     pub rag_engine: Option<&'a Arc<tokio::sync::Mutex<crate::rag::RagEngine>>>,
     pub contact_summary: &'a str,
@@ -147,12 +148,8 @@ pub async fn run_cognition(params: CognitionParams<'_>) -> Option<CognitionResul
         // Process tool calls
         let mut found_plan = false;
         for tool_call in &response.tool_calls {
-            let result_text = dispatch_discovery_tool(
-                &tool_call.name,
-                &tool_call.arguments,
-                &params,
-            )
-            .await;
+            let result_text =
+                dispatch_discovery_tool(&tool_call.name, &tool_call.arguments, &params).await;
 
             if tool_call.name == "plan_execution" {
                 // This is the output — parse as CognitionResult
@@ -233,8 +230,12 @@ pub async fn run_cognition(params: CognitionParams<'_>) -> Option<CognitionResul
                     "Cognition result has validation issues"
                 );
                 // Remove invalid tools/skills instead of failing entirely
-                result.tools.retain(|t| known_tools.iter().any(|kt| kt == &t.name));
-                result.skills.retain(|s| known_skills.iter().any(|ks| ks == &s.name));
+                result
+                    .tools
+                    .retain(|t| known_tools.iter().any(|kt| kt == &t.name));
+                result
+                    .skills
+                    .retain(|s| known_skills.iter().any(|ks| ks == &s.name));
             }
 
             // Emit result summary
@@ -284,9 +285,7 @@ async fn dispatch_discovery_tool(
         .unwrap_or("");
 
     match name {
-        "discover_tools" => {
-            discovery::discover_tools(query, params.tool_registry).await
-        }
+        "discover_tools" => discovery::discover_tools(query, params.tool_registry).await,
         "discover_skills" => {
             // For contacts with perimeter, only show shared skills
             let allowed_skills = if params.contact_perimeter.is_some() {
@@ -309,8 +308,7 @@ async fn dispatch_discovery_tool(
             } else {
                 Vec::new() // owner: all MCP visible
             };
-            discovery::discover_mcp(query, params.config, params.tool_registry, &allowed_mcp)
-                .await
+            discovery::discover_mcp(query, params.config, params.tool_registry, &allowed_mcp).await
         }
         "search_memory" => {
             #[cfg(feature = "embeddings")]
@@ -331,12 +329,7 @@ async fn dispatch_discovery_tool(
         "search_knowledge" => {
             #[cfg(feature = "embeddings")]
             if let Some(rag) = params.rag_engine {
-                return discovery::search_knowledge(
-                    query,
-                    rag,
-                    &params.visible_profile_ids,
-                )
-                .await;
+                return discovery::search_knowledge(query, rag, &params.visible_profile_ids).await;
             }
             "[]".to_string()
         }
@@ -386,7 +379,11 @@ async fn resolve_allowed_mcp(params: &CognitionParams<'_>) -> Vec<String> {
     };
     match crate::sharing::db::resolve_contact_access(db.pool(), contact_id).await {
         Ok(access) => {
-            let names: Vec<String> = access.mcp_servers.into_iter().map(|(name, _, _)| name).collect();
+            let names: Vec<String> = access
+                .mcp_servers
+                .into_iter()
+                .map(|(name, _, _)| name)
+                .collect();
             if !names.is_empty() {
                 tracing::debug!(contact_id, mcp = ?names, "Contact has shared MCP access");
             }
@@ -425,7 +422,7 @@ fn build_cognition_prompt(contact_summary: &str, channel: &str) -> String {
          - **discover_skills(query)**: Find installed skills (specialized capabilities)\n\
          - **discover_mcp(query)**: Find external services (calendar, email, GitHub, etc.)\n\
          - **search_memory(query)**: Search user's long-term memory for relevant context\n\
-         - **search_knowledge(query)**: Search user's knowledge base (documents, notes)\n\n"
+         - **search_knowledge(query)**: Search user's knowledge base (documents, notes)\n\n",
     );
 
     prompt.push_str(
@@ -448,7 +445,7 @@ fn build_cognition_prompt(contact_summary: &str, channel: &str) -> String {
          - Preferences (e.g. \"1st class\", \"vegetarian\")\n\n\
          Write the `plan` as specific, actionable steps — especially for browser tasks.\n\
          BAD: \"Search for restaurants\" → GOOD: \"Navigate to thefork.it, set location to Novara, \
-         set date to 22 March 2026, set time to 20:00, set 4 guests, search\"\n"
+         set date to 22 March 2026, set time to 20:00, set 4 guests, search\"\n",
     );
 
     prompt

@@ -55,10 +55,17 @@ pub async fn migrate_toml_to_gateways(pool: &Pool<Sqlite>, config: &Config) -> R
 
     // Email legacy single account (EmailConfig does not implement ChannelBehavior)
     if ch.email.enabled && ch.emails.is_empty() {
-        let config_json = serde_json::to_string(&ch.email)
-            .context("Failed to serialize legacy email config")?;
+        let config_json =
+            serde_json::to_string(&ch.email).context("Failed to serialize legacy email config")?;
         let id = db::insert_gateway(
-            pool, "Email", "email", &config_json, "", "", "automatic", None,
+            pool,
+            "Email",
+            "email",
+            &config_json,
+            "",
+            "",
+            "automatic",
+            None,
         )
         .await?;
         copy_vault_token("email", id).await;
@@ -68,7 +75,14 @@ pub async fn migrate_toml_to_gateways(pool: &Pool<Sqlite>, config: &Config) -> R
     // MCP channels
     for (name, mcp_cfg) in &ch.mcp {
         if mcp_cfg.enabled {
-            migrate_channel(pool, &format!("MCP: {name}"), &format!("mcp:{name}"), mcp_cfg, config).await?;
+            migrate_channel(
+                pool,
+                &format!("MCP: {name}"),
+                &format!("mcp:{name}"),
+                mcp_cfg,
+                config,
+            )
+            .await?;
         }
     }
 

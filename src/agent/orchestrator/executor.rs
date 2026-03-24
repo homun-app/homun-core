@@ -42,9 +42,7 @@ pub async fn execute(
             .enumerate()
             .filter(|(_, t)| {
                 t.status == SubtaskStatus::Pending
-                    && t.depends_on
-                        .iter()
-                        .all(|dep| results.contains_key(dep))
+                    && t.depends_on.iter().all(|dep| results.contains_key(dep))
             })
             .map(|(i, _)| i)
             .collect();
@@ -282,10 +280,7 @@ fn build_subtask_prompt(
 }
 
 /// Emit current step progress to the streaming UI.
-async fn emit_step_progress(
-    stream_tx: Option<&mpsc::Sender<StreamChunk>>,
-    plan: &TaskPlan,
-) {
+async fn emit_step_progress(stream_tx: Option<&mpsc::Sender<StreamChunk>>, plan: &TaskPlan) {
     let Some(tx) = stream_tx else {
         return;
     };

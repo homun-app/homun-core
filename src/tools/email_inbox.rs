@@ -219,7 +219,6 @@ fn strip_html(html: &str) -> String {
     result.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-
 #[cfg(feature = "channel-email")]
 async fn open_imap_session(config: &EmailAccountConfig, password: &str) -> Result<ImapSession> {
     let addr = format!("{}:{}", config.imap_host, config.imap_port);

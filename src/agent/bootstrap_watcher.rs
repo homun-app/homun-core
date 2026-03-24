@@ -66,10 +66,7 @@ impl BootstrapWatcher {
 
     /// Start watching the bootstrap directories. Returns a handle that stops on drop.
     pub fn start(self) -> WatcherHandle {
-        spawn_watched(
-            move |stop_rx| self.watch_loop(stop_rx),
-            "bootstrap-watcher",
-        )
+        spawn_watched(move |stop_rx| self.watch_loop(stop_rx), "bootstrap-watcher")
     }
 
     async fn watch_loop(self, mut stop_rx: tokio::sync::oneshot::Receiver<()>) -> Result<()> {

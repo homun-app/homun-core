@@ -4,10 +4,10 @@ use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::Deserialize;
 
-use crate::config::Config;
 use super::loader::parse_skill_md_public;
 use super::{adapt_legacy_skill_dir, parse_legacy_manifest};
 use super::{scan_skill_package, InstallSecurityOptions, SecurityReport};
+use crate::config::Config;
 
 /// Skill installer — fetches skills from GitHub and installs them locally.
 ///

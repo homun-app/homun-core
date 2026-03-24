@@ -1375,14 +1375,13 @@ impl BrowserTool {
             }
             "fill" => {
                 let ref_val = args.get("ref").and_then(|v| v.as_str()).unwrap_or("");
-                let value = args.get("value").and_then(|v| v.as_str())
+                let value = args
+                    .get("value")
+                    .and_then(|v| v.as_str())
                     .or_else(|| args.get("text").and_then(|v| v.as_str()))
                     .unwrap_or("");
-                peer.call_tool(
-                    "browser_type",
-                    json!({"ref": ref_val, "text": value}),
-                )
-                .await?;
+                peer.call_tool("browser_type", json!({"ref": ref_val, "text": value}))
+                    .await?;
                 let snap = peer.call_tool("browser_snapshot", json!({})).await?;
                 compact_browser_snapshot(&snap)
             }
@@ -1415,11 +1414,17 @@ impl BrowserTool {
                     .and_then(|v| v.as_str())
                     .unwrap_or("down");
                 let amount = if direction == "up" { -3 } else { 3 };
-                peer.call_tool("browser_press_key", json!({"key": if amount < 0 { "PageUp" } else { "PageDown" }}))
-                    .await?
+                peer.call_tool(
+                    "browser_press_key",
+                    json!({"key": if amount < 0 { "PageUp" } else { "PageDown" }}),
+                )
+                .await?
             }
             "evaluate" => {
-                let expr = args.get("expression").and_then(|v| v.as_str()).unwrap_or("");
+                let expr = args
+                    .get("expression")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 peer.call_tool("browser_evaluate", json!({"function": expr}))
                     .await?
             }
@@ -1436,14 +1441,8 @@ impl BrowserTool {
                 peer.call_tool("browser_close", json!({})).await?;
                 "Browser closed".to_string()
             }
-            "" => {
-                return Ok(ToolResult::error(
-                    "Missing 'action' parameter".to_string(),
-                ))
-            }
-            unknown => {
-                return Ok(ToolResult::error(format!("Unknown action: {unknown}")))
-            }
+            "" => return Ok(ToolResult::error("Missing 'action' parameter".to_string())),
+            unknown => return Ok(ToolResult::error(format!("Unknown action: {unknown}"))),
         };
 
         Ok(ToolResult::success(mcp_result))
@@ -1752,7 +1751,6 @@ fn is_form_field_role(trimmed: &str) -> bool {
         || trimmed.starts_with("slider ")
         || trimmed.starts_with("spinbutton ")
 }
-
 
 /// Extract the `action` field from browser tool arguments.
 ///

@@ -337,15 +337,10 @@ fn page_html(title: &str, active: &str, body: &str, scripts: &[&str]) -> String 
         // Subnav pages — topbar inside content area (not spanning subnav)
         body.replace(
             r#"<main class="content">"#,
-            &format!(
-                r#"<main class="content has-subnav"><div class="content-row">{subnav_html}"#
-            ),
+            &format!(r#"<main class="content has-subnav"><div class="content-row">{subnav_html}"#),
         )
         // Close .content-row at the end of main
-        .replace(
-            r#"</main>"#,
-            r#"</div></main>"#,
-        )
+        .replace(r#"</main>"#, r#"</div></main>"#)
         // Inject topbar inside content-inner (not spanning subnav column).
         .replace(
             r#"<div class="content-inner">"#,
@@ -835,12 +830,36 @@ pub(crate) async fn section_appearance(state: &AppState) -> String {
 
                 <div id="appearance-toast"></div>
                 </section>"##,
-        theme_system = if config.ui.theme == "system" { "selected" } else { "" },
-        theme_light = if config.ui.theme == "light" { "selected" } else { "" },
-        theme_dark = if config.ui.theme == "dark" { "selected" } else { "" },
-        language_system = if config.ui.language == "system" { "selected" } else { "" },
-        language_it = if config.ui.language == "it" { "selected" } else { "" },
-        language_en = if config.ui.language == "en" { "selected" } else { "" },
+        theme_system = if config.ui.theme == "system" {
+            "selected"
+        } else {
+            ""
+        },
+        theme_light = if config.ui.theme == "light" {
+            "selected"
+        } else {
+            ""
+        },
+        theme_dark = if config.ui.theme == "dark" {
+            "selected"
+        } else {
+            ""
+        },
+        language_system = if config.ui.language == "system" {
+            "selected"
+        } else {
+            ""
+        },
+        language_it = if config.ui.language == "it" {
+            "selected"
+        } else {
+            ""
+        },
+        language_en = if config.ui.language == "en" {
+            "selected"
+        } else {
+            ""
+        },
     )
 }
 
@@ -1894,7 +1913,8 @@ async fn logs_page(State(state): State<Arc<AppState>>) -> Html<String> {
 
 async fn contacts_page(State(_state): State<Arc<AppState>>) -> Html<String> {
     let topbar = content_topbar();
-    let body = format!(r##"<main class="content">
+    let body = format!(
+        r##"<main class="content">
         <div class="contacts-layout" id="contacts-layout">
             <div class="contacts-sidebar">
                 <div class="contacts-sidebar-header">
@@ -1917,15 +1937,26 @@ async fn contacts_page(State(_state): State<Arc<AppState>>) -> Html<String> {
                 <div id="contact-detail" style="display:none"></div>
             </div>
         </div>
-    </main>"##);
-    Html(page_html("Contacts", "contacts", &body, &["contacts.js", "contact-gateway-overrides.js", "contact-perimeter.js"]))
+    </main>"##
+    );
+    Html(page_html(
+        "Contacts",
+        "contacts",
+        &body,
+        &[
+            "contacts.js",
+            "contact-gateway-overrides.js",
+            "contact-perimeter.js",
+        ],
+    ))
 }
 
 // ─── Profiles ─────────────────────────────────────────────────────
 
 async fn profiles_page(State(_state): State<Arc<AppState>>) -> Html<String> {
     let topbar = content_topbar();
-    let body = format!(r##"<main class="content">
+    let body = format!(
+        r##"<main class="content">
         <div class="contacts-layout" id="profiles-layout">
             <div class="contacts-sidebar">
                 <div class="contacts-sidebar-header">
@@ -1948,7 +1979,8 @@ async fn profiles_page(State(_state): State<Arc<AppState>>) -> Html<String> {
                 <div id="profile-detail" style="display:none"></div>
             </div>
         </div>
-    </main>"##);
+    </main>"##
+    );
     Html(page_html("Profiles", "profiles", &body, &["profiles.js"]))
 }
 
@@ -2748,7 +2780,12 @@ async fn account_page(State(state): State<Arc<AppState>>) -> Html<String> {
         </main>"#
     );
 
-    let html = page_html("Account", "account", &body, &["account.js", "account-gateways.js"]);
+    let html = page_html(
+        "Account",
+        "account",
+        &body,
+        &["account.js", "account-gateways.js"],
+    );
     Html(html)
 }
 
@@ -3809,18 +3846,31 @@ pub(crate) async fn section_setup(state: &AppState) -> String {
                 </section>"##,
         active_model_display = active_model_display,
         active_provider_display = active_provider_display,
-        active_banner_hidden = if config.agent.model.is_empty() { "style=\"display:none\"" } else { "" },
-        no_model_hidden = if config.agent.model.is_empty() { "" } else { "style=\"display:none\"" },
+        active_banner_hidden = if config.agent.model.is_empty() {
+            "style=\"display:none\""
+        } else {
+            ""
+        },
+        no_model_hidden = if config.agent.model.is_empty() {
+            ""
+        } else {
+            "style=\"display:none\""
+        },
         vision_model = config.agent.vision_model,
         max_tokens = config.agent.max_tokens,
         temperature = config.agent.temperature,
         max_iterations = config.agent.max_iterations,
         xml_fallback_delay_ms = config.agent.xml_fallback_delay_ms,
-        fallback_models_json = serde_json::to_string(&config.agent.fallback_models).unwrap_or_else(|_| "[]".to_string()),
+        fallback_models_json = serde_json::to_string(&config.agent.fallback_models)
+            .unwrap_or_else(|_| "[]".to_string()),
         conversation_retention_days = config.memory.conversation_retention_days,
         history_retention_days = config.memory.history_retention_days,
         daily_archive_months = config.memory.daily_archive_months,
-        auto_cleanup_checked = if config.memory.auto_cleanup { "checked" } else { "" },
+        auto_cleanup_checked = if config.memory.auto_cleanup {
+            "checked"
+        } else {
+            ""
+        },
         embedding_dimensions = config.memory.embedding_dimensions,
         providers_html = providers_html,
         catalog_modal_html = catalog_modal_html,
@@ -3990,15 +4040,29 @@ pub(crate) async fn section_browser(state: &AppState) -> String {
 
     let browser_status = {
         let status = config.browser.runtime_status();
-        let enabled = if status.enabled { "Enabled" } else { "Disabled" };
-        let availability = if status.available { "available" } else { "unavailable" };
+        let enabled = if status.enabled {
+            "Enabled"
+        } else {
+            "Disabled"
+        };
+        let availability = if status.available {
+            "available"
+        } else {
+            "unavailable"
+        };
         let executable = status
             .executable_path
             .map(|path| format!("Chrome: {}", path))
             .unwrap_or_else(|| "Chrome: not detected".to_string());
         match status.reason {
-            Some(reason) => format!("{} • MCP (Playwright) • {}. {} {}", enabled, availability, executable, reason),
-            None => format!("{} • MCP (Playwright) • {}. {}", enabled, availability, executable),
+            Some(reason) => format!(
+                "{} • MCP (Playwright) • {}. {} {}",
+                enabled, availability, executable, reason
+            ),
+            None => format!(
+                "{} • MCP (Playwright) • {}. {}",
+                enabled, availability, executable
+            ),
         }
     };
 
@@ -4079,12 +4143,28 @@ pub(crate) async fn section_browser(state: &AppState) -> String {
                     </form>
                 </section>"##,
         browser_status = browser_status,
-        browser_enabled_checked = if config.browser.enabled { "checked" } else { "" },
-        browser_headless_checked = if config.browser.headless { "checked" } else { "" },
+        browser_enabled_checked = if config.browser.enabled {
+            "checked"
+        } else {
+            ""
+        },
+        browser_headless_checked = if config.browser.headless {
+            "checked"
+        } else {
+            ""
+        },
         executable_path = config.browser.executable_path,
         vision_model = config.agent.vision_model,
-        search_brave = if config.tools.web_search.provider == "brave" { "selected" } else { "" },
-        search_tavily = if config.tools.web_search.provider == "tavily" { "selected" } else { "" },
+        search_brave = if config.tools.web_search.provider == "brave" {
+            "selected"
+        } else {
+            ""
+        },
+        search_tavily = if config.tools.web_search.provider == "tavily" {
+            "selected"
+        } else {
+            ""
+        },
         search_api_key = config.tools.web_search.api_key,
         search_max_results = config.tools.web_search.max_results,
     );
@@ -4849,7 +4929,8 @@ pub(crate) async fn section_maintenance(state: &AppState) -> String {
                     <div class="empty-state">
                         <p>Loading database stats...</p>
                     </div>
-                </div>"#.to_string()
+                </div>"#
+        .to_string()
 }
 
 /// Logs section — real-time log streaming with level filter.
@@ -4957,5 +5038,6 @@ pub(crate) async fn section_health(state: &AppState) -> String {
 pub(crate) async fn section_history(_state: &AppState) -> String {
     r#"<div class="item-list" id="dash-activity-list">
                     <div class="dash-loading">Loading activity...</div>
-                </div>"#.to_string()
+                </div>"#
+        .to_string()
 }

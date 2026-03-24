@@ -6,9 +6,9 @@
 
 pub mod types;
 
+mod executor;
 mod intent;
 mod planner;
-mod executor;
 mod synthesizer;
 
 pub use types::{IntentAnalysis, Subtask, SubtaskResult, SubtaskStatus, TaskComplexity, TaskPlan};

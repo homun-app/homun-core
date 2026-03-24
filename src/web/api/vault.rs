@@ -257,7 +257,10 @@ async fn reveal_vault_secret(
     do_reveal_secret(&key, req.profile.as_deref()).await
 }
 
-async fn do_reveal_secret(key: &str, profile: Option<&str>) -> Result<Json<RevealResponse>, StatusCode> {
+async fn do_reveal_secret(
+    key: &str,
+    profile: Option<&str>,
+) -> Result<Json<RevealResponse>, StatusCode> {
     let secrets =
         crate::storage::global_secrets().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let prefix = vault_prefix(profile);
