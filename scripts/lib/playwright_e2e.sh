@@ -342,6 +342,21 @@ setup_or_login_if_needed() {
         fill_selector '#password' "$password"
         fill_selector '#confirm' "$password"
         click_selector '#setup-btn'
+        # Give the setup API call time to complete
+        sleep 3
+        # Debug: show any error message on the page
+        local setup_err
+        setup_err="$(eval_js_value "document.getElementById('error-msg')?.textContent || ''" 2>/dev/null || true)"
+        if [[ -n "$setup_err" ]]; then
+            echo "[e2e][debug] Setup error message: $setup_err" >&2
+        fi
+        local current_path
+        current_path="$(eval_js_value "window.location.pathname" 2>/dev/null || true)"
+        echo "[e2e][debug] Current path after setup: $current_path" >&2
+        if [[ "$current_path" == "/setup-wizard" ]]; then
+            echo "[e2e][debug] Setup may have failed. Taking debug screenshot..." >&2
+            save_screenshot "${HOMUN_E2E_ARTIFACT_DIR}/debug-setup-failed.png" 2>/dev/null || true
+        fi
         wait_for_path_not '/setup-wizard' 20000
     fi
 
