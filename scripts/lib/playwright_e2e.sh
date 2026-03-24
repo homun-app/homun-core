@@ -214,7 +214,11 @@ wait_for_selector() {
 wait_for_function() {
     local body="$1"
     local timeout_ms="${2:-$HOMUN_E2E_WAIT_MS}"
-    run_code "await page.waitForFunction(${body}, { timeout: ${timeout_ms} })"
+    # Evaluate the function body as a JS expression via shell-side polling.
+    # playwright-cli run-code has a hard 5s timeout, so we poll from shell instead.
+    local expr
+    expr="(${body})()"
+    wait_until_eval_true "$expr" "$timeout_ms"
 }
 
 wait_until_eval_true() {
@@ -294,9 +298,9 @@ reload_page() {
 wait_for_path_not() {
     local path="$1"
     local timeout_ms="${2:-$HOMUN_E2E_WAIT_MS}"
-    local path_json
-    path_json="$(json_quote "$path")"
-    wait_for_function "() => window.location.pathname !== ${path_json}" "$timeout_ms"
+    # Use shell-side polling instead of page.waitForFunction because
+    # playwright-cli run-code has a hard 5s timeout that cannot be overridden.
+    wait_until_eval_true "window.location.pathname !== '${path}'" "$timeout_ms"
 }
 
 save_screenshot() {
@@ -332,6 +336,8 @@ setup_or_login_if_needed() {
             exit 2
         fi
         log_step "Create admin account through setup wizard"
+        wait_for_selector '#setup-form' 10000
+        wait_for_selector '#username' 10000
         fill_selector '#username' "$username"
         fill_selector '#password' "$password"
         fill_selector '#confirm' "$password"
@@ -345,6 +351,8 @@ setup_or_login_if_needed() {
             exit 2
         fi
         log_step "Authenticate through login page"
+        wait_for_selector '#login-form' 10000
+        wait_for_selector '#username' 10000
         fill_selector '#username' "$username"
         fill_selector '#password' "$password"
         click_selector '#login-btn'
