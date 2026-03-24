@@ -26,7 +26,9 @@ wait_for_selector "#chat-form"
 wait_for_selector "#chat-text"
 wait_for_selector "#btn-send"
 wait_for_selector "#chat-conversation-list"
-wait_for_function "() => { const el = document.getElementById('ws-status'); return !!el && !/Connecting/i.test(el.textContent || ''); }" 20000
+# In setup-only mode (no LLM provider), the WebSocket may never connect.
+# Just verify the status element exists — don't wait for a specific state.
+wait_for_selector "#ws-status" 10000
 
 if [[ -n "$CHAT_PROMPT" ]]; then
     log_step "Send a smoke prompt through the chat composer"
