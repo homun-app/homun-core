@@ -57,6 +57,8 @@ pub struct ToolContext {
     /// Active profile slug (e.g. "default", "fabio-personale").
     /// Used by vault tool for profile-scoped secret namespacing.
     pub profile_slug: Option<String>,
+    /// Allowed knowledge namespaces from contact perimeter (None = owner, all visible).
+    pub allowed_namespaces: Option<Vec<String>>,
 }
 
 /// Tool trait — every built-in tool and skill implements this.
@@ -255,6 +257,7 @@ mod tests {
             profile_id: None,
             profile_brain_dir: None,
             profile_slug: None,
+            allowed_namespaces: None,
         }
     }
 

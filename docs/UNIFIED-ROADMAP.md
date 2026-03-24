@@ -318,7 +318,28 @@ Target: **17 verified recipes bundled** — all done. Google services consolidat
 | ING-2 | Event source framework | `source → event type → normalized payload → routing` |
 | ING-3 | Poll/button callbacks cross-channel | Interazione strutturata |
 
-#### 4D. UI Redesign
+#### 4D. Knowledge Isolation UX
+
+| # | Task | Note |
+|---|------|------|
+| KIX-1 | **Auto-namespace per contatto** | Alla creazione contatto, genera namespace `contact_{id}`. Perimeter auto-include il proprio namespace. Nessuna configurazione manuale |
+| KIX-2 | **Contact-based knowledge assignment** | Upload: dropdown "Associa a contatto" cerca contatti, assegna `contact_{id}` come namespace. Tabella sources: stessa logica inline. L'utente non vede namespace raw |
+| KIX-3 | **Namespace custom + associazione da contatto** | UI per creare namespace liberi (es. `progetto-alpha`). Dal contatto (sezione perimeter) si sceglie quali namespace custom il contatto può vedere |
+| KIX-4 | **Chat-based knowledge assignment** | Documento passato in chat → tool `knowledge ingest` auto-assegna `contact_{id}` del contatto nella conversazione |
+
+#### 4D-bis. Monitored Folders (Knowledge Watch)
+
+> Cartelle monitorate con auto-indicizzazione. Ogni cartella ha scope (profilo, contatto, namespace).
+> Modello: `knowledge_watches` table con path, recursive, profile_id, namespace, contact_ids, enabled.
+
+| # | Task | Note |
+|---|------|------|
+| KWA-1 | **Migration + modello `knowledge_watches`** | Tabella: `id, path, recursive, profile_id, namespace, contact_ids (JSON), enabled, created_at, updated_at`. CRUD API `/v1/knowledge/watches` |
+| KWA-2 | **Watcher refactor** | Estendere `rag/watcher.rs` per leggere `knowledge_watches` da DB. Ogni watch ha il suo notify handler con profile_id + namespace auto-iniettati. Hot-reload watches senza restart |
+| KWA-3 | **UI Monitored Folders** | Sezione in Knowledge page (o tab dedicato). Lista cartelle con: path, stato (active/paused), profilo, namespace/contatto associato, n. documenti indicizzati. Form per aggiungere/modificare/rimuovere |
+| KWA-4 | **Scope multi-contatto/profilo** | Una cartella può essere associata a più contatti (JSON array) o a più profili. UI con multi-select contatti e profili. Documenti indicizzati ereditano il namespace configurato |
+
+#### 4E. UI Redesign
 
 | # | Task | Note |
 |---|------|------|

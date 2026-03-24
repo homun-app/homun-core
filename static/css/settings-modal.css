@@ -162,6 +162,87 @@
     margin: 0;
 }
 
+/* ─── Header right group (profile pill + close) ─── */
+.settings-modal-header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.settings-profile-wrap {
+    position: relative;
+}
+
+.settings-profile-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px 4px 8px;
+    border-radius: var(--r-full, 999px);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    cursor: pointer;
+    font: var(--f-xs);
+    color: var(--t2);
+    transition: border-color var(--fast), box-shadow var(--fast);
+    white-space: nowrap;
+}
+.settings-profile-pill:hover {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(var(--accent-rgb, 0,0,0), 0.08);
+}
+.settings-profile-pill svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    opacity: 0.5;
+}
+.settings-profile-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.settings-profile-dropdown {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg, 12px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    z-index: 10;
+    min-width: 180px;
+    padding: 4px;
+}
+.settings-profile-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 12px;
+    border: 0;
+    border-radius: var(--r-md, 8px);
+    background: transparent;
+    color: var(--t1);
+    cursor: pointer;
+    font: var(--f-sm);
+    text-align: left;
+    transition: background var(--fast);
+}
+.settings-profile-dropdown-item:hover {
+    background: var(--surface-hover, rgba(0,0,0,0.04));
+}
+.dark .settings-profile-dropdown-item:hover {
+    background: var(--surface-hover, rgba(255,255,255,0.06));
+}
+.settings-profile-dropdown-item.is-active {
+    background: rgba(var(--accent-rgb, 0,0,0), 0.08);
+    font-weight: 500;
+}
+
 .settings-modal-close {
     display: flex;
     align-items: center;

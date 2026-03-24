@@ -22,10 +22,12 @@ impl Database {
         source_channel: Option<&str>,
         profile_id: Option<i64>,
         user_id: Option<&str>,
+        namespace: Option<&str>,
     ) -> Result<i64> {
+        let ns = namespace.unwrap_or("_private");
         let result = sqlx::query(
-            "INSERT INTO rag_sources (file_path, file_name, file_hash, doc_type, file_size, source_channel, profile_id, user_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO rag_sources (file_path, file_name, file_hash, doc_type, file_size, source_channel, profile_id, user_id, namespace)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(file_path)
         .bind(file_name)
@@ -35,6 +37,7 @@ impl Database {
         .bind(source_channel)
         .bind(profile_id)
         .bind(user_id)
+        .bind(ns)
         .execute(self.pool())
         .await
         .context("Failed to insert RAG source")?;
@@ -42,11 +45,22 @@ impl Database {
         Ok(result.last_insert_rowid())
     }
 
+    /// Update the namespace of an existing source.
+    pub async fn update_rag_source_namespace(&self, id: i64, namespace: &str) -> Result<()> {
+        sqlx::query("UPDATE rag_sources SET namespace = ?, updated_at = datetime('now') WHERE id = ?")
+            .bind(namespace)
+            .bind(id)
+            .execute(self.pool())
+            .await
+            .context("Failed to update RAG source namespace")?;
+        Ok(())
+    }
+
     /// Find a source by its content hash (deduplication).
     pub async fn find_rag_source_by_hash(&self, file_hash: &str) -> Result<Option<RagSourceRow>> {
         let row = sqlx::query_as::<_, RagSourceRow>(
             "SELECT id, file_path, file_name, file_hash, doc_type, file_size,
-                    chunk_count, status, error_message, source_channel, created_at, updated_at
+                    chunk_count, status, error_message, source_channel, created_at, updated_at, profile_id
              FROM rag_sources WHERE file_hash = ?",
         )
         .bind(file_hash)
@@ -61,7 +75,7 @@ impl Database {
     pub async fn find_rag_source_by_path(&self, file_path: &str) -> Result<Option<RagSourceRow>> {
         let row = sqlx::query_as::<_, RagSourceRow>(
             "SELECT id, file_path, file_name, file_hash, doc_type, file_size,
-                    chunk_count, status, error_message, source_channel, created_at, updated_at
+                    chunk_count, status, error_message, source_channel, created_at, updated_at, profile_id
              FROM rag_sources WHERE file_path = ?",
         )
         .bind(file_path)
@@ -110,12 +124,34 @@ impl Database {
     pub async fn list_rag_sources(&self) -> Result<Vec<RagSourceRow>> {
         let rows = sqlx::query_as::<_, RagSourceRow>(
             "SELECT id, file_path, file_name, file_hash, doc_type, file_size,
-                    chunk_count, status, error_message, source_channel, created_at, updated_at
+                    chunk_count, status, error_message, source_channel, created_at, updated_at, profile_id
              FROM rag_sources ORDER BY created_at DESC",
         )
         .fetch_all(self.pool())
         .await
         .context("Failed to list RAG sources")?;
+
+        Ok(rows)
+    }
+
+    /// List document sources filtered by profile.
+    ///
+    /// Returns sources matching the given profile plus global sources (profile_id IS NULL).
+    pub async fn list_rag_sources_for_profile(
+        &self,
+        profile_id: i64,
+    ) -> Result<Vec<RagSourceRow>> {
+        let rows = sqlx::query_as::<_, RagSourceRow>(
+            "SELECT id, file_path, file_name, file_hash, doc_type, file_size,
+                    chunk_count, status, error_message, source_channel, created_at, updated_at, profile_id
+             FROM rag_sources
+             WHERE profile_id = ? OR profile_id IS NULL
+             ORDER BY created_at DESC",
+        )
+        .bind(profile_id)
+        .fetch_all(self.pool())
+        .await
+        .context("Failed to list RAG sources for profile")?;
 
         Ok(rows)
     }

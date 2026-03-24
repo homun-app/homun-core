@@ -75,6 +75,7 @@ impl RagEngine {
         source_channel: &str,
         profile_id: Option<i64>,
         user_id: Option<&str>,
+        namespace: Option<&str>,
     ) -> Result<Option<i64>> {
         if !is_supported(path) {
             anyhow::bail!(
@@ -114,6 +115,7 @@ impl RagEngine {
                 Some(source_channel),
                 profile_id,
                 user_id,
+                namespace,
             )
             .await?;
 
@@ -192,6 +194,7 @@ impl RagEngine {
         source_channel: &str,
         profile_id: Option<i64>,
         user_id: Option<&str>,
+        namespace: Option<&str>,
     ) -> Result<Vec<i64>> {
         let mut indexed = Vec::new();
 
@@ -210,7 +213,7 @@ impl RagEngine {
                 continue;
             }
             match self
-                .ingest_file(&path, source_channel, profile_id, user_id)
+                .ingest_file(&path, source_channel, profile_id, user_id, namespace)
                 .await
             {
                 Ok(Some(id)) => indexed.push(id),
@@ -228,11 +231,16 @@ impl RagEngine {
     ///
     /// When `profile_id` is provided, results are filtered to include both
     /// profile-scoped chunks (matching the profile) and global chunks (profile_id IS NULL).
+    ///
+    /// When `allowed_namespaces` is provided (contact perimeter), results are filtered
+    /// to only include chunks from sources whose namespace matches the allowed list.
+    /// `None` means no namespace restriction (owner sees everything).
     pub async fn search(
         &mut self,
         query: &str,
         top_k: usize,
         profile_id: Option<i64>,
+        allowed_namespaces: Option<&[String]>,
     ) -> Result<Vec<RagSearchResult>> {
         let vector_results = self
             .engine
@@ -269,9 +277,15 @@ impl RagEngine {
             .collect();
         let sources = self.store.list_rag_sources().await.unwrap_or_default();
         let source_map: HashMap<i64, String> = sources
-            .into_iter()
+            .iter()
             .filter(|s| source_ids.contains(&s.id))
-            .map(|s| (s.id, s.file_name))
+            .map(|s| (s.id, s.file_name.clone()))
+            .collect();
+        // Namespace map for perimeter-based filtering
+        let source_ns_map: HashMap<i64, String> = sources
+            .iter()
+            .filter(|s| source_ids.contains(&s.id))
+            .map(|s| (s.id, if s.namespace.is_empty() { "_private".to_string() } else { s.namespace.clone() }))
             .collect();
 
         let results = merged
@@ -282,6 +296,17 @@ impl RagEngine {
                     if let Some(pid) = profile_id {
                         if chunk.profile_id.is_some() && chunk.profile_id != Some(pid) {
                             return None; // belongs to a different profile
+                        }
+                    }
+                    // Namespace scoping: if allowed_namespaces is set (contact perimeter),
+                    // only include chunks from sources with a matching namespace
+                    if let Some(namespaces) = allowed_namespaces {
+                        let source_ns = source_ns_map
+                            .get(&chunk.source_id)
+                            .map(|s| s.as_str())
+                            .unwrap_or("_private");
+                        if !namespaces.iter().any(|ns| ns == source_ns) {
+                            return None; // source namespace not in allowed list
                         }
                     }
                     let mut chunk = chunk.clone();
@@ -333,7 +358,7 @@ impl RagEngine {
             self.remove_source(existing.id).await?;
         }
 
-        self.ingest_file(path, source_channel, profile_id, user_id)
+        self.ingest_file(path, source_channel, profile_id, user_id, None)
             .await
     }
 
@@ -342,9 +367,16 @@ impl RagEngine {
         self.store.delete_rag_source(source_id).await
     }
 
-    /// List all indexed sources.
-    pub async fn list_sources(&self) -> Result<Vec<RagSourceRow>> {
-        self.store.list_rag_sources().await
+    /// List indexed sources, optionally filtered by profile.
+    ///
+    /// When `profile_id` is `Some`, returns sources belonging to that profile
+    /// plus global (unscoped) sources. When `None`, returns all sources.
+    pub async fn list_sources(&self, profile_id: Option<i64>) -> Result<Vec<RagSourceRow>> {
+        if let Some(pid) = profile_id {
+            self.store.list_rag_sources_for_profile(pid).await
+        } else {
+            self.store.list_rag_sources().await
+        }
     }
 
     /// Get knowledge base stats.
@@ -595,10 +627,10 @@ mod tests {
             "# Heading One\n\nSome content about Rust.\n\n# Heading Two\n\nMore about async.",
         );
 
-        let result = rag.ingest_file(&md, "test", None, None).await.unwrap();
+        let result = rag.ingest_file(&md, "test", None, None, None).await.unwrap();
         assert!(result.is_some(), "Should return source_id");
 
-        let sources = rag.list_sources().await.unwrap();
+        let sources = rag.list_sources(None).await.unwrap();
         assert_eq!(sources.len(), 1);
         assert_eq!(sources[0].file_name, "test.md");
         assert_eq!(sources[0].status, "indexed");
@@ -611,13 +643,13 @@ mod tests {
 
         let md = write_test_md(dir.path(), "dedup.md", "# Test\n\nContent.");
 
-        let first = rag.ingest_file(&md, "test", None, None).await.unwrap();
+        let first = rag.ingest_file(&md, "test", None, None, None).await.unwrap();
         assert!(first.is_some());
 
-        let second = rag.ingest_file(&md, "test", None, None).await.unwrap();
+        let second = rag.ingest_file(&md, "test", None, None, None).await.unwrap();
         assert!(second.is_none(), "Same file should be deduplicated");
 
-        let sources = rag.list_sources().await.unwrap();
+        let sources = rag.list_sources(None).await.unwrap();
         assert_eq!(sources.len(), 1, "Should still have exactly one source");
     }
 
@@ -632,9 +664,9 @@ mod tests {
              # Databases\n\nSQLite is a lightweight embedded database engine.",
         );
 
-        rag.ingest_file(&md, "test", None, None).await.unwrap();
+        rag.ingest_file(&md, "test", None, None, None).await.unwrap();
 
-        let results = rag.search("neural networks", 5, None).await.unwrap();
+        let results = rag.search("neural networks", 5, None, None).await.unwrap();
         assert!(!results.is_empty(), "Search should return results");
         assert!(results[0].score > 0.0, "Score should be positive");
         assert_eq!(results[0].source_file, "searchable.md");
@@ -651,9 +683,9 @@ mod tests {
             "# Config\n\napi_key: sk-abc123456789012345678901234567890123456789\n\nDon't share this.",
         );
 
-        rag.ingest_file(&md, "test", None, None).await.unwrap();
+        rag.ingest_file(&md, "test", None, None, None).await.unwrap();
 
-        let results = rag.search("api key config", 5, None).await.unwrap();
+        let results = rag.search("api key config", 5, None, None).await.unwrap();
         // Find the sensitive chunk — it should be redacted
         let has_redacted = results
             .iter()
@@ -683,7 +715,7 @@ mod tests {
         let removed = rag.remove_source(source_id).await.unwrap();
         assert!(removed, "Should return true for existing source");
 
-        let sources = rag.list_sources().await.unwrap();
+        let sources = rag.list_sources(None).await.unwrap();
         assert!(sources.is_empty(), "Sources should be empty after removal");
     }
 
@@ -700,7 +732,7 @@ mod tests {
             "stats.md",
             "# Section A\n\nContent A.\n\n# Section B\n\nContent B.",
         );
-        rag.ingest_file(&md, "test", None, None).await.unwrap();
+        rag.ingest_file(&md, "test", None, None, None).await.unwrap();
 
         let stats_after = rag.stats().await.unwrap();
         assert_eq!(stats_after.source_count, 1);
@@ -716,7 +748,7 @@ mod tests {
             "reindex.md",
             "# Topic A\n\nInformation about topic A.\n\n# Topic B\n\nDetails on topic B.",
         );
-        rag.ingest_file(&md, "test", None, None).await.unwrap();
+        rag.ingest_file(&md, "test", None, None, None).await.unwrap();
 
         let stats = rag.stats().await.unwrap();
         let chunk_count_before = stats.chunk_count;

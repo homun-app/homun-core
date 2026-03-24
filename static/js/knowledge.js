@@ -2,17 +2,66 @@
 
 document.addEventListener('DOMContentLoaded', () => {
     // Profile filter managed by global topbar — reload on change
-    document.addEventListener('profile-changed', () => loadSources());
+    document.addEventListener('profile-changed', () => { loadStats(); loadSources(); });
     loadStats();
     loadSources();
     setupUpload();
     setupSearch();
     setupFolderIndex();
+    setupNamespaceControls();
 });
 
 /** Get the current profile filter slug from global topbar (empty = all). */
 function getKnowledgeProfileFilter() {
     return window.getActiveProfileSlug ? window.getActiveProfileSlug() : '';
+}
+
+/** Get the selected namespace from the upload namespace selector. */
+function getSelectedNamespace() {
+    var sel = document.getElementById('upload-namespace');
+    if (!sel) return '_private';
+    var val = sel.value;
+    if (val === '_custom') {
+        var custom = document.getElementById('upload-namespace-custom');
+        return custom && custom.value.trim() ? custom.value.trim() : '_private';
+    }
+    return val;
+}
+
+// ─── Namespace Controls ──────────────────────────────
+
+function setupNamespaceControls() {
+    var addBtn = document.getElementById('upload-namespace-add');
+    var sel = document.getElementById('upload-namespace');
+    var customInput = document.getElementById('upload-namespace-custom');
+    if (!addBtn || !sel || !customInput) return;
+
+    addBtn.addEventListener('click', function () {
+        if (customInput.style.display === 'none') {
+            customInput.style.display = '';
+            customInput.focus();
+            addBtn.textContent = 'Add';
+        } else {
+            var ns = customInput.value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+            if (ns && ns !== '_private' && ns !== '_public') {
+                // Check if option already exists
+                var exists = false;
+                for (var i = 0; i < sel.options.length; i++) {
+                    if (sel.options[i].value === ns) { exists = true; break; }
+                }
+                if (!exists) {
+                    var opt = document.createElement('option');
+                    opt.value = ns;
+                    opt.textContent = ns;
+                    sel.appendChild(opt);
+                }
+                sel.value = ns;
+            }
+            customInput.value = '';
+            customInput.style.display = 'none';
+            addBtn.textContent = '+ Custom';
+        }
+    });
 }
 
 // ─── Stats ────────────────────────────────────────────
@@ -35,7 +84,9 @@ async function loadStats() {
 async function loadSources() {
     const container = document.getElementById('sources-list');
     try {
-        const resp = await fetch('/api/v1/knowledge/sources');
+        const pf = getKnowledgeProfileFilter();
+        const profileParam = pf ? '?profile=' + encodeURIComponent(pf) : '';
+        const resp = await fetch('/api/v1/knowledge/sources' + profileParam);
         if (!resp.ok) throw new Error('Failed to load sources');
         const data = await resp.json();
         const sources = data.sources || [];
@@ -55,13 +106,20 @@ async function loadSources() {
 
         const thead = document.createElement('thead');
         const headerRow = document.createElement('tr');
-        ['File', 'Type', 'Chunks', 'Size', 'Status', 'Date', ''].forEach(text => {
+        ['File', 'Type', 'Namespace', 'Chunks', 'Size', 'Status', 'Date', ''].forEach(text => {
             const th = document.createElement('th');
             th.textContent = text;
             headerRow.appendChild(th);
         });
         thead.appendChild(headerRow);
         table.appendChild(thead);
+
+        // Collect unique namespaces for the select options
+        var knownNamespaces = ['_private', '_public'];
+        sources.forEach(function (s) {
+            var ns = s.namespace || '_private';
+            if (knownNamespaces.indexOf(ns) === -1) knownNamespaces.push(ns);
+        });
 
         const tbody = document.createElement('tbody');
         sources.forEach(s => {
@@ -78,6 +136,24 @@ async function loadSources() {
             badge.textContent = s.doc_type;
             tdType.appendChild(badge);
             tr.appendChild(tdType);
+
+            // Namespace — inline editable select
+            const tdNs = document.createElement('td');
+            const nsSelect = document.createElement('select');
+            nsSelect.className = 'input';
+            nsSelect.style.cssText = 'font-size:0.75rem;padding:2px 4px;min-width:90px;border:1px solid var(--border);border-radius:var(--r-sm,4px);background:var(--surface)';
+            knownNamespaces.forEach(function (ns) {
+                var opt = document.createElement('option');
+                opt.value = ns;
+                opt.textContent = ns;
+                if (ns === (s.namespace || '_private')) opt.selected = true;
+                nsSelect.appendChild(opt);
+            });
+            nsSelect.addEventListener('change', function () {
+                updateSourceNamespace(s.id, this.value);
+            });
+            tdNs.appendChild(nsSelect);
+            tr.appendChild(tdNs);
 
             const tdChunks = document.createElement('td');
             tdChunks.textContent = s.chunk_count;
@@ -110,9 +186,47 @@ async function loadSources() {
         });
         table.appendChild(tbody);
         container.appendChild(table);
+
+        // Sync known namespaces to upload selector
+        syncUploadNamespaceOptions(knownNamespaces);
     } catch (e) {
         container.textContent = '';
         showErrorState('sources-list', 'Could not load knowledge sources.', loadSources);
+    }
+}
+
+/** Keep the upload namespace select in sync with namespaces seen in sources. */
+function syncUploadNamespaceOptions(knownNamespaces) {
+    var sel = document.getElementById('upload-namespace');
+    if (!sel) return;
+    var current = sel.value;
+    // Add any new namespaces not already in the select
+    knownNamespaces.forEach(function (ns) {
+        var exists = false;
+        for (var i = 0; i < sel.options.length; i++) {
+            if (sel.options[i].value === ns) { exists = true; break; }
+        }
+        if (!exists) {
+            var opt = document.createElement('option');
+            opt.value = ns;
+            opt.textContent = ns;
+            sel.appendChild(opt);
+        }
+    });
+    // Restore selection
+    sel.value = current;
+}
+
+async function updateSourceNamespace(id, namespace) {
+    try {
+        await fetch('/api/v1/knowledge/sources/namespace', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: id, namespace: namespace }),
+        });
+    } catch (e) {
+        alert('Failed to update namespace: ' + e.message);
+        loadSources();
     }
 }
 
@@ -158,7 +272,13 @@ async function uploadFiles(files) {
     }
 
     try {
-        const resp = await fetch('/api/v1/knowledge/ingest', {
+        const pf = getKnowledgeProfileFilter();
+        const ns = getSelectedNamespace();
+        var params = [];
+        if (pf) params.push('profile=' + encodeURIComponent(pf));
+        if (ns && ns !== '_private') params.push('namespace=' + encodeURIComponent(ns));
+        var qs = params.length ? '?' + params.join('&') : '';
+        const resp = await fetch('/api/v1/knowledge/ingest' + qs, {
             method: 'POST',
             body: formData,
         });
@@ -304,13 +424,19 @@ function setupFolderIndex() {
         const path = document.getElementById('folder-path').value.trim();
         if (!path) { alert('Enter a folder path'); return; }
         const recursive = document.getElementById('folder-recursive').checked;
+        const ns = getSelectedNamespace();
         btn.disabled = true;
         showProgress('folder-progress', 'Indexing \u201c' + path + '\u201d\u2026');
         try {
             const resp = await fetch('/api/v1/knowledge/ingest-directory', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ path, recursive }),
+                body: JSON.stringify({
+                    path,
+                    recursive,
+                    profile: getKnowledgeProfileFilter(),
+                    namespace: ns !== '_private' ? ns : undefined,
+                }),
             });
             const data = await resp.json();
             hideProgress('folder-progress');

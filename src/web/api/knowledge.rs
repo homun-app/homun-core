@@ -12,6 +12,23 @@ mod inner {
     use crate::web::auth::{check_write, AuthUser};
     use crate::web::server::AppState;
 
+    /// Resolve a profile slug from query params into a profile_id.
+    async fn resolve_profile_id(
+        state: &Arc<AppState>,
+        params: &HashMap<String, String>,
+    ) -> Option<i64> {
+        let slug = params.get("profile")?;
+        if slug.is_empty() {
+            return None;
+        }
+        let db = state.db.as_ref()?;
+        crate::profiles::db::load_profile_by_slug(db.pool(), slug)
+            .await
+            .ok()
+            .flatten()
+            .map(|p| p.id)
+    }
+
     pub(crate) fn routes() -> Router<Arc<AppState>> {
         Router::new()
             .route("/v1/knowledge/stats", get(knowledge_stats))
@@ -32,6 +49,10 @@ mod inner {
                 "/v1/knowledge/reveal",
                 axum::routing::post(reveal_knowledge_chunk),
             )
+            .route(
+                "/v1/knowledge/sources/namespace",
+                axum::routing::patch(update_source_namespace),
+            )
     }
 
     /// GET /api/v1/knowledge/stats
@@ -51,14 +72,21 @@ mod inner {
         }
     }
 
-    /// GET /api/v1/knowledge/sources
-    async fn list_knowledge_sources(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    /// GET /api/v1/knowledge/sources?profile=slug
+    async fn list_knowledge_sources(
+        State(state): State<Arc<AppState>>,
+        Query(params): Query<HashMap<String, String>>,
+    ) -> impl IntoResponse {
         let Some(ref rag) = state.rag_engine else {
             return Json(serde_json::json!({"error": "Knowledge base not initialized"}))
                 .into_response();
         };
+
+        // Resolve profile filter
+        let profile_id = resolve_profile_id(&state, &params).await;
+
         let engine = rag.lock().await;
-        match engine.list_sources().await {
+        match engine.list_sources(profile_id).await {
             Ok(sources) => Json(serde_json::json!({"sources": sources})).into_response(),
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -139,26 +167,10 @@ mod inner {
             .unwrap_or(5);
 
         // Resolve profile filter
-        let profile_id = if let Some(slug) = params.get("profile") {
-            if !slug.is_empty() {
-                if let Some(ref db) = state.db {
-                    crate::profiles::db::load_profile_by_slug(db.pool(), slug)
-                        .await
-                        .ok()
-                        .flatten()
-                        .map(|p| p.id)
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        let profile_id = resolve_profile_id(&state, &params).await;
 
         let mut engine = rag.lock().await;
-        match engine.search(query, limit, profile_id).await {
+        match engine.search(query, limit, profile_id, None).await {
             Ok(results) => {
                 let items: Vec<serde_json::Value> = results
                     .iter()
@@ -184,10 +196,11 @@ mod inner {
         }
     }
 
-    /// POST /api/v1/knowledge/ingest -- multipart file upload
+    /// POST /api/v1/knowledge/ingest?profile=slug -- multipart file upload
     async fn ingest_knowledge(
         State(state): State<Arc<AppState>>,
         axum::Extension(auth): axum::Extension<AuthUser>,
+        Query(params): Query<HashMap<String, String>>,
         mut multipart: Multipart,
     ) -> impl IntoResponse {
         if let Err(status) = check_write(&auth) {
@@ -224,10 +237,10 @@ mod inner {
                 continue;
             }
 
+            let profile_id = resolve_profile_id(&state, &params).await;
             let mut engine = rag.lock().await;
-            // TODO: accept profile_id from request query/body when UI supports it
             match engine
-                .ingest_file(&tmp_path, "web", None, Some(&auth.user_id))
+                .ingest_file(&tmp_path, "web", profile_id, Some(&auth.user_id), params.get("namespace").map(|s| s.as_str()))
                 .await
             {
                 Ok(Some(id)) => {
@@ -296,10 +309,28 @@ mod inner {
                 .into_response();
         }
 
+        // Resolve profile from request body
+        let profile_id = if let Some(slug) = req["profile"].as_str() {
+            if !slug.is_empty() {
+                if let Some(ref db) = state.db {
+                    crate::profiles::db::load_profile_by_slug(db.pool(), slug)
+                        .await
+                        .ok()
+                        .flatten()
+                        .map(|p| p.id)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let mut engine = rag.lock().await;
-        // TODO: accept profile_id from request when UI supports it
         match engine
-            .ingest_directory(&path, recursive, "web", None, Some(&auth.user_id))
+            .ingest_directory(&path, recursive, "web", profile_id, Some(&auth.user_id), req["namespace"].as_str())
             .await
         {
             Ok(ids) => Json(serde_json::json!({
@@ -401,6 +432,50 @@ mod inner {
                 Json(serde_json::json!({"error": "Chunk not found"})),
             )
                 .into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+                .into_response(),
+        }
+    }
+
+    /// PATCH /api/v1/knowledge/sources/namespace — update source namespace
+    async fn update_source_namespace(
+        State(state): State<Arc<AppState>>,
+        axum::Extension(auth): axum::Extension<AuthUser>,
+        Json(req): Json<serde_json::Value>,
+    ) -> impl IntoResponse {
+        if let Err(status) = check_write(&auth) {
+            return status.into_response();
+        }
+
+        let Some(source_id) = req["id"].as_i64() else {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Missing 'id'"})),
+            )
+                .into_response();
+        };
+
+        let Some(namespace) = req["namespace"].as_str() else {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Missing 'namespace'"})),
+            )
+                .into_response();
+        };
+
+        let Some(ref db) = state.db else {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"error": "Database not available"})),
+            )
+                .into_response();
+        };
+
+        match db.update_rag_source_namespace(source_id, namespace).await {
+            Ok(()) => Json(serde_json::json!({"ok": true})).into_response(),
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({"error": e.to_string()})),

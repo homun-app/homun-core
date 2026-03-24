@@ -180,6 +180,10 @@ fn content_topbar() -> String {
     r#"<div class="content-topbar">
             <div class="topbar-right">
                 <span class="chat-connection" id="ws-status">Connecting…</span>
+                <button type="button" class="topbar-profile-badge" id="topbar-profile-badge" title="Switch profile" hidden>
+                    <span class="topbar-profile-dot" id="topbar-profile-dot"></span>
+                    <span class="topbar-profile-name" id="topbar-profile-name"></span>
+                </button>
                 <button type="button" class="topbar-avatar-btn" id="topbar-avatar-btn" title="Menu">
                     <img id="topbar-avatar-img" class="topbar-avatar-img" src="/api/v1/account/avatar" alt=""
                          onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
@@ -2860,6 +2864,15 @@ async fn knowledge_page(State(_state): State<Arc<AppState>>) -> Html<String> {
                         <p class="upload-hint">Supports: .md, .txt, .pdf, .docx, .xlsx, .rs, .py, .js, .ts, .go, .java, .toml, .yaml, .json, .html, .css, .sh, .sql</p>
                         <input type="file" id="file-input" multiple style="display:none"
                             accept=".md,.markdown,.txt,.log,.rs,.py,.js,.ts,.go,.java,.c,.cpp,.h,.hpp,.toml,.yaml,.yml,.json,.html,.htm,.css,.sh,.bash,.zsh,.sql,.xml,.csv,.ini,.cfg,.conf,.env,.pdf,.docx,.xlsx,.xls,.xlsm,.odt">
+                    </div>
+                    <div class="knowledge-namespace-row" style="display:flex;align-items:center;gap:0.5rem;margin-top:0.75rem">
+                        <label for="upload-namespace" style="font-size:0.8rem;font-weight:600;white-space:nowrap;opacity:0.7">Namespace</label>
+                        <select id="upload-namespace" class="input" style="max-width:200px;font-size:0.8rem">
+                            <option value="_private">_private (owner only)</option>
+                            <option value="_public">_public (all contacts)</option>
+                        </select>
+                        <input type="text" id="upload-namespace-custom" class="input" placeholder="custom namespace" style="max-width:160px;font-size:0.8rem;display:none">
+                        <button type="button" id="upload-namespace-add" class="btn btn-sm" style="font-size:0.75rem;white-space:nowrap">+ Custom</button>
                     </div>
                     <div id="upload-progress" class="upload-progress" style="display:none"></div>
 

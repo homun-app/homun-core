@@ -501,6 +501,7 @@ mod tests {
             profile_id: None,
             profile_brain_dir: None,
             profile_slug: None,
+            allowed_namespaces: None,
         }
     }
 

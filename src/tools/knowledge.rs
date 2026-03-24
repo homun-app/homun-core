@@ -142,7 +142,7 @@ impl Tool for KnowledgeTool {
             "search" => {
                 let query = get_string_param(&args, "query")?;
                 let mut engine = self.engine.lock().await;
-                let results = engine.search(&query, 5, None).await?;
+                let results = engine.search(&query, 5, ctx.profile_id, ctx.allowed_namespaces.as_deref()).await?;
 
                 if results.is_empty() {
                     return Ok(ToolResult {
@@ -193,6 +193,7 @@ impl Tool for KnowledgeTool {
                             "tool",
                             ctx.profile_id,
                             ctx.user_id.as_deref(),
+                            None,
                         )
                         .await?;
                     Ok(ToolResult {
@@ -201,7 +202,7 @@ impl Tool for KnowledgeTool {
                     })
                 } else if path.is_file() {
                     match engine
-                        .ingest_file(&path, "tool", ctx.profile_id, ctx.user_id.as_deref())
+                        .ingest_file(&path, "tool", ctx.profile_id, ctx.user_id.as_deref(), None)
                         .await?
                     {
                         Some(id) => Ok(ToolResult {
@@ -223,7 +224,7 @@ impl Tool for KnowledgeTool {
 
             "list" => {
                 let engine = self.engine.lock().await;
-                let sources = engine.list_sources().await?;
+                let sources = engine.list_sources(None).await?;
 
                 if sources.is_empty() {
                     return Ok(ToolResult {

@@ -3,6 +3,7 @@
    - Profile switcher (radio-style with colored dots)
    - Settings links (Appearance, Settings)
    - Emergency Stop + Logout
+   Profile badge in topbar shows active profile at a glance.
    Profile persisted in localStorage. All pages subscribe to
    'profile-changed' CustomEvent. */
 
@@ -30,6 +31,16 @@
         return activeProfile;
     };
 
+    /** Returns cached profiles list (loaded at init). */
+    window.getCachedProfiles = function () {
+        return cachedProfiles;
+    };
+
+    /** Programmatic profile switch (used by settings modal pill). */
+    window.switchProfile = function (profile) {
+        setActiveProfile(profile, true);
+    };
+
     // ─── Init ────────────────────────────────────────────
 
     if (document.readyState === 'loading') {
@@ -43,6 +54,12 @@
         document.querySelectorAll('.topbar-avatar-btn').forEach(function (btn) {
             btn.addEventListener('click', toggleDropdown);
         });
+
+        // Bind profile badge click → same dropdown
+        var badge = document.getElementById('topbar-profile-badge');
+        if (badge) {
+            badge.addEventListener('click', toggleDropdown);
+        }
 
         // Load profiles + restore last selection
         try {
@@ -68,11 +85,31 @@
     function setActiveProfile(profile, emit) {
         activeProfile = profile;
         localStorage.setItem(STORAGE_KEY, profile.slug);
+        updateBadge(profile);
         if (emit) {
             document.dispatchEvent(new CustomEvent('profile-changed', {
                 detail: { profile: profile },
             }));
         }
+    }
+
+    /** Update the topbar profile badge with current profile info. */
+    function updateBadge(profile) {
+        var badge = document.getElementById('topbar-profile-badge');
+        if (!badge) return;
+
+        // Hide badge when only one default profile (no point switching)
+        var shouldShow = cachedProfiles && cachedProfiles.length > 1;
+        if (!shouldShow) {
+            badge.hidden = true;
+            return;
+        }
+
+        var dot = document.getElementById('topbar-profile-dot');
+        var name = document.getElementById('topbar-profile-name');
+        if (dot) dot.style.background = profile.color || '#3B82F6';
+        if (name) name.textContent = profile.display_name;
+        badge.hidden = false;
     }
 
     // ─── Dropdown ────────────────────────────────────────
@@ -208,7 +245,7 @@
         });
         menu.appendChild(logoutItem);
 
-        // ── Position below avatar button ──
+        // ── Position below trigger button ──
         var btn = lastAvatarBtn || document.querySelector('.topbar-avatar-btn');
         if (!btn) return;
         var rect = btn.getBoundingClientRect();

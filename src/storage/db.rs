@@ -2067,6 +2067,9 @@ pub struct RagSourceRow {
     /// Namespace for access control (default: _private).
     #[sqlx(default)]
     pub namespace: String,
+    /// Profile that owns this source (NULL = global).
+    #[sqlx(default)]
+    pub profile_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
@@ -2453,6 +2456,7 @@ impl super::traits::RagStore for Database {
         source_channel: Option<&str>,
         profile_id: Option<i64>,
         user_id: Option<&str>,
+        namespace: Option<&str>,
     ) -> Result<i64> {
         Database::insert_rag_source(
             self,
@@ -2464,6 +2468,7 @@ impl super::traits::RagStore for Database {
             source_channel,
             profile_id,
             user_id,
+            namespace,
         )
         .await
     }
@@ -2487,6 +2492,9 @@ impl super::traits::RagStore for Database {
     }
     async fn list_rag_sources(&self) -> Result<Vec<RagSourceRow>> {
         Database::list_rag_sources(self).await
+    }
+    async fn list_rag_sources_for_profile(&self, profile_id: i64) -> Result<Vec<RagSourceRow>> {
+        Database::list_rag_sources_for_profile(self, profile_id).await
     }
     async fn count_rag_sources(&self) -> Result<i64> {
         Database::count_rag_sources(self).await

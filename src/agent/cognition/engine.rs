@@ -46,6 +46,8 @@ pub struct CognitionParams<'a> {
     pub active_profile_slug: Option<String>,
     /// Contact perimeter for tool/knowledge filtering (None = owner, no restrictions).
     pub contact_perimeter: Option<crate::contacts::perimeter::ContactPerimeter>,
+    /// Allowed knowledge namespaces from contact perimeter (None = owner, all visible).
+    pub allowed_namespaces: Option<Vec<String>>,
     /// Database pool for shared resource lookups during discovery.
     pub db: Option<&'a crate::storage::Database>,
     pub stream_tx: Option<&'a mpsc::Sender<StreamChunk>>,
@@ -329,7 +331,7 @@ async fn dispatch_discovery_tool(
         "search_knowledge" => {
             #[cfg(feature = "embeddings")]
             if let Some(rag) = params.rag_engine {
-                return discovery::search_knowledge(query, rag, &params.visible_profile_ids).await;
+                return discovery::search_knowledge(query, rag, &params.visible_profile_ids, params.allowed_namespaces.as_deref()).await;
             }
             "[]".to_string()
         }

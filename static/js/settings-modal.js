@@ -64,9 +64,18 @@
             '<div class="settings-modal-content">' +
                 '<div class="settings-modal-header">' +
                     '<h2 class="settings-modal-title"></h2>' +
-                    '<button type="button" class="settings-modal-close" title="Close">' +
-                        '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="5" x2="13" y2="13"/><line x1="13" y1="5" x2="5" y2="13"/></svg>' +
-                    '</button>' +
+                    '<div class="settings-modal-header-right">' +
+                        '<div class="settings-profile-wrap" id="settings-profile-wrap" hidden>' +
+                            '<button type="button" class="settings-profile-pill" id="settings-profile-pill">' +
+                                '<span class="settings-profile-dot" id="settings-profile-dot"></span>' +
+                                '<span class="settings-profile-name" id="settings-profile-name"></span>' +
+                                '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7l4 4 4-4"/></svg>' +
+                            '</button>' +
+                        '</div>' +
+                        '<button type="button" class="settings-modal-close" title="Close">' +
+                            '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="5" x2="13" y2="13"/><line x1="13" y1="5" x2="5" y2="13"/></svg>' +
+                        '</button>' +
+                    '</div>' +
                 '</div>' +
                 '<div class="settings-modal-body">' +
                     '<div class="settings-modal-loading">Loading\u2026</div>' +
@@ -100,6 +109,118 @@
                 closeSettings();
             }
         });
+
+        // Profile pill click → inline dropdown
+        var pillBtn = overlayEl.querySelector('#settings-profile-pill');
+        if (pillBtn) {
+            pillBtn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                toggleProfileDropdown();
+            });
+        }
+
+        // Sync when profile changes externally (topbar badge)
+        document.addEventListener('profile-changed', function () {
+            updateSettingsProfilePill();
+        });
+    }
+
+    // ─── Settings profile pill ────────────────────────────
+
+    var settingsProfileDropdown = null;
+
+    /** Update the pill in the modal header with current active profile. */
+    function updateSettingsProfilePill() {
+        if (!overlayEl) return;
+        var wrap = overlayEl.querySelector('#settings-profile-wrap');
+        if (!wrap) return;
+
+        var profiles = window.getCachedProfiles ? window.getCachedProfiles() : null;
+        if (!profiles || profiles.length <= 1) {
+            wrap.hidden = true;
+            return;
+        }
+
+        var profile = window.getActiveProfile ? window.getActiveProfile() : null;
+        if (!profile) {
+            wrap.hidden = true;
+            return;
+        }
+
+        var dot = overlayEl.querySelector('#settings-profile-dot');
+        var name = overlayEl.querySelector('#settings-profile-name');
+        if (dot) dot.style.background = profile.color || '#3B82F6';
+        if (name) name.textContent = profile.display_name;
+        wrap.hidden = false;
+    }
+
+    /** Toggle the inline profile dropdown below the pill. */
+    function toggleProfileDropdown() {
+        if (settingsProfileDropdown) {
+            closeProfileDropdown();
+            return;
+        }
+
+        var profiles = window.getCachedProfiles ? window.getCachedProfiles() : null;
+        if (!profiles || !profiles.length) return;
+        var active = window.getActiveProfile ? window.getActiveProfile() : null;
+
+        var dd = document.createElement('div');
+        dd.className = 'settings-profile-dropdown';
+
+        profiles.forEach(function (p) {
+            var item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'settings-profile-dropdown-item'
+                + (active && p.id === active.id ? ' is-active' : '');
+
+            var dot = document.createElement('span');
+            dot.className = 'settings-profile-dot';
+            dot.style.background = p.color || '#3B82F6';
+            item.appendChild(dot);
+
+            item.appendChild(document.createTextNode(
+                p.display_name + (p.is_default ? ' (default)' : '')
+            ));
+
+            item.addEventListener('click', function () {
+                if (window.switchProfile) window.switchProfile(p);
+                closeProfileDropdown();
+                // Reload current section to reflect new profile data
+                if (currentSection) {
+                    var tmp = currentSection;
+                    currentSection = null; // force reload
+                    loadSection(tmp);
+                }
+            });
+            dd.appendChild(item);
+        });
+
+        // Position below pill
+        var wrap = overlayEl.querySelector('#settings-profile-wrap');
+        wrap.appendChild(dd);
+        settingsProfileDropdown = dd;
+
+        // Close on outside click (delayed to avoid immediate close)
+        setTimeout(function () {
+            document.addEventListener('click', onProfileDropdownOutside);
+        }, 0);
+    }
+
+    function closeProfileDropdown() {
+        if (settingsProfileDropdown) {
+            settingsProfileDropdown.remove();
+            settingsProfileDropdown = null;
+        }
+        document.removeEventListener('click', onProfileDropdownOutside);
+    }
+
+    function onProfileDropdownOutside(e) {
+        if (settingsProfileDropdown && !settingsProfileDropdown.contains(e.target)) {
+            var pill = overlayEl ? overlayEl.querySelector('#settings-profile-pill') : null;
+            if (pill && pill.contains(e.target)) return;
+            closeProfileDropdown();
+        }
     }
 
     /** Minimal HTML escaping for label text. */
@@ -122,6 +243,7 @@
 
         overlayEl.classList.add('is-open');
         document.body.classList.add('settings-modal-open');
+        updateSettingsProfilePill();
         loadSection(sectionId || 'account');
 
         // Update URL hash

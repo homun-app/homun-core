@@ -1132,7 +1132,7 @@ impl Gateway {
                                 .unwrap_or_else(|| path.clone());
                             let mut rag = rag_mutex.lock().await;
                             // Channel ingest: no profile/user context available yet
-                            match rag.ingest_file(&file_path, "telegram", None, None).await {
+                            match rag.ingest_file(&file_path, "telegram", None, None, None).await {
                                 Ok(Some(source_id)) => {
                                     tracing::info!(source_id, file = %file_name, "RAG ingested Telegram file");
                                     let confirm = OutboundMessage {

@@ -529,6 +529,42 @@
     height: 20px;
 }
 
+/* ─── Profile badge (topbar) ─── */
+.topbar-profile-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px 4px 8px;
+    border-radius: var(--r-full, 999px);
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    cursor: pointer;
+    font: var(--f-sm);
+    color: var(--t1);
+    transition: border-color var(--fast), box-shadow var(--fast);
+    white-space: nowrap;
+    max-width: 160px;
+    overflow: hidden;
+}
+.topbar-profile-badge:hover {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(var(--accent-rgb, 0,0,0), 0.12);
+}
+.topbar-profile-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.topbar-profile-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+@media (max-width: 480px) {
+    .topbar-profile-badge .topbar-profile-name { display: none; }
+    .topbar-profile-badge { padding: 6px; }
+}
+
 /* ─── Avatar dropdown menu ─── */
 .topbar-avatar-dropdown {
     position: fixed;

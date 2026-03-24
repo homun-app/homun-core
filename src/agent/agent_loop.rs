@@ -762,6 +762,7 @@ impl AgentLoop {
                 visible_profile_ids: active_visible_profile_ids.clone(),
                 active_profile_slug: active_profile_slug.clone(),
                 contact_perimeter: contact_perimeter.clone(),
+                allowed_namespaces: contact_perimeter.as_ref().map(|p| p.namespaces()),
                 db: Some(&self.db),
                 stream_tx: stream_tx.as_ref(),
                 cognition_model: if config.agent.cognition_model.is_empty() {
@@ -978,6 +979,7 @@ impl AgentLoop {
             profile_id: Some(active_profile_id),
             profile_brain_dir: active_profile_brain_dir.clone(),
             profile_slug: active_profile_slug.clone(),
+            allowed_namespaces: contact_perimeter.as_ref().map(|p| p.namespaces()),
         };
 
         // Browser session: idle cleanup and per-conversation continuation hint

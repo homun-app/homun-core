@@ -2570,14 +2570,14 @@ async fn main() -> Result<()> {
                     let mut engine = rag_handle.lock().await;
                     if target.is_dir() {
                         match engine
-                            .ingest_directory(&target, recursive, "cli", None, None)
+                            .ingest_directory(&target, recursive, "cli", None, None, None)
                             .await
                         {
                             Ok(ids) => println!("Indexed {} file(s)", ids.len()),
                             Err(e) => eprintln!("Error: {e}"),
                         }
                     } else if target.is_file() {
-                        match engine.ingest_file(&target, "cli", None, None).await {
+                        match engine.ingest_file(&target, "cli", None, None, None).await {
                             Ok(Some(id)) => println!("Indexed (source_id={id})"),
                             Ok(None) => println!("Already indexed (duplicate)"),
                             Err(e) => eprintln!("Error: {e}"),
@@ -2588,7 +2588,7 @@ async fn main() -> Result<()> {
                 }
                 KnowledgeCommands::List => {
                     let engine = rag_handle.lock().await;
-                    match engine.list_sources().await {
+                    match engine.list_sources(None).await {
                         Ok(sources) if sources.is_empty() => {
                             println!("No sources indexed.");
                         }
@@ -2611,7 +2611,7 @@ async fn main() -> Result<()> {
                 }
                 KnowledgeCommands::Search { query, limit } => {
                     let mut engine = rag_handle.lock().await;
-                    match engine.search(&query, limit, None).await {
+                    match engine.search(&query, limit, None, None).await {
                         Ok(results) if results.is_empty() => {
                             println!("No results found.");
                         }

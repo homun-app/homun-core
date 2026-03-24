@@ -181,6 +181,7 @@ pub trait RagStore: Send + Sync {
         source_channel: Option<&str>,
         profile_id: Option<i64>,
         user_id: Option<&str>,
+        namespace: Option<&str>,
     ) -> Result<i64>;
 
     /// Find a source by its content hash (deduplication).
@@ -203,6 +204,9 @@ pub trait RagStore: Send + Sync {
 
     /// List all document sources.
     async fn list_rag_sources(&self) -> Result<Vec<RagSourceRow>>;
+
+    /// List document sources filtered by profile (includes global sources).
+    async fn list_rag_sources_for_profile(&self, profile_id: i64) -> Result<Vec<RagSourceRow>>;
 
     /// Count total document sources.
     async fn count_rag_sources(&self) -> Result<i64>;
