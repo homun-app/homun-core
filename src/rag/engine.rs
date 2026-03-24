@@ -506,6 +506,7 @@ fn walk_recursive(dir: &Path, paths: &mut Vec<std::path::PathBuf>) -> Result<()>
 mod tests {
     use super::*;
     use crate::agent::embeddings::{EmbeddingEngine, EmbeddingProvider};
+    use crate::storage::Database;
     use async_trait::async_trait;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -618,7 +619,7 @@ mod tests {
 
         rag.ingest_file(&md, "test", None, None).await.unwrap();
 
-        let results = rag.search("neural networks", 5).await.unwrap();
+        let results = rag.search("neural networks", 5, None).await.unwrap();
         assert!(!results.is_empty(), "Search should return results");
         assert!(results[0].score > 0.0, "Score should be positive");
         assert_eq!(results[0].source_file, "searchable.md");
@@ -637,7 +638,7 @@ mod tests {
 
         rag.ingest_file(&md, "test", None, None).await.unwrap();
 
-        let results = rag.search("api key config", 5).await.unwrap();
+        let results = rag.search("api key config", 5, None).await.unwrap();
         // Find the sensitive chunk — it should be redacted
         let has_redacted = results
             .iter()

@@ -987,6 +987,7 @@ mod tests {
             persona: "bot".to_string(),
             tone_of_voice: String::new(),
             default_agent: String::new(),
+            default_profile: String::new(),
         }
     }
 

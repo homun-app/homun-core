@@ -11,6 +11,7 @@ impl Database {
     // ─── RAG Knowledge Base ──────────────────────────────────────
 
     /// Insert a new document source. Returns the source ID.
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_rag_source(
         &self,
         file_path: &str,

@@ -163,10 +163,11 @@ impl MemorySearcher {
                         }
                     }
                     // Namespace scoping: only include chunks in allowed namespaces
-                    if !allowed_namespaces.is_empty() && !chunk.namespace.is_empty() {
-                        if !allowed_namespaces.iter().any(|ns| ns == &chunk.namespace) {
-                            return None; // namespace not in allowed set
-                        }
+                    if !allowed_namespaces.is_empty()
+                        && !chunk.namespace.is_empty()
+                        && !allowed_namespaces.iter().any(|ns| ns == &chunk.namespace)
+                    {
+                        return None; // namespace not in allowed set
                     }
                     // Apply temporal decay and importance weighting
                     let decayed_score =
