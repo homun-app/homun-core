@@ -1547,7 +1547,7 @@ async fn skills_page() -> Html<String> {
         source_chips_html = source_chips_html,
     );
 
-    Html(page_html("Skills", "skills", &body, &["skills.js"]))
+    Html(page_html("Skills", "skills", &body, &["sharing-picker.js", "skills.js"]))
 }
 
 // ─── MCP ────────────────────────────────────────────────────────
@@ -1725,7 +1725,7 @@ async fn mcp_page(State(state): State<Arc<AppState>>) -> Html<String> {
         "MCP",
         "mcp",
         &body,
-        &["connections.js", "mcp-loader.js", "mcp.js"],
+        &["connections.js", "mcp-loader.js", "sharing-picker.js", "mcp.js"],
     ))
 }
 

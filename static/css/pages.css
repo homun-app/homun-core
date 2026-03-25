@@ -3206,6 +3206,59 @@
     color: var(--t3);
 }
 
+/* ─── Sharing Picker: tool sub-panel + badges ─── */
+.sharing-tools-panel {
+    margin: 0 0 4px 0;
+    padding: 8px 12px 8px 28px;
+    background: var(--surface-sunken, var(--surface));
+    border-left: 3px solid var(--accent);
+    border-radius: 0 0 var(--r-sm, 4px) var(--r-sm, 4px);
+}
+.sharing-tool-item {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 0.8rem;
+    color: var(--t1);
+    cursor: pointer;
+}
+.sharing-tool-item input[type="checkbox"] { margin: 0; flex-shrink: 0; }
+.sharing-tool-name { font-weight: 500; white-space: nowrap; }
+.sharing-tool-desc {
+    font-size: 0.7rem;
+    color: var(--t3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.sharing-tool-toggle {
+    font-size: 0.7rem;
+    color: var(--accent);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px 0;
+    text-decoration: underline;
+}
+.sharing-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: var(--r-full, 999px);
+    font-size: 0.65rem;
+    font-weight: 500;
+    color: var(--t3);
+    border: 1px solid var(--border);
+    background: var(--surface);
+}
+.sharing-badge.is-shared {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: rgba(var(--accent-rgb, 0,0,0), 0.06);
+}
+
 .upload-hint {
     font-size: 11px !important;
     color: var(--t4) !important;

@@ -209,12 +209,13 @@ pub(super) async fn discover_skills(
 /// Search for relevant MCP services — both connected servers and available recipes.
 ///
 /// When `allowed_mcp` is non-empty (contact with shared resources), only
-/// MCP servers in the allow list are visible. Empty = all servers (owner mode).
+/// MCP servers in the allow list are visible. Each entry is
+/// `(server_name, allowed_tools)` — empty `allowed_tools` means all tools.
 pub(super) async fn discover_mcp(
     query: &str,
     config: &Config,
     tool_registry: &RwLock<ToolRegistry>,
-    allowed_mcp: &[String],
+    allowed_mcp: &[(String, Vec<String>)],
 ) -> String {
     let query_lower = query.to_lowercase();
     let query_words: Vec<&str> = query_lower.split_whitespace().collect();
@@ -226,9 +227,14 @@ pub(super) async fn discover_mcp(
             continue;
         }
         // Contact perimeter: if allowed_mcp is non-empty, only those are visible
-        if !allowed_mcp.is_empty() && !allowed_mcp.iter().any(|a| a == name) {
-            continue;
-        }
+        let tool_restriction = if !allowed_mcp.is_empty() {
+            match allowed_mcp.iter().find(|(n, _)| n == name) {
+                Some((_, allowed)) => Some(allowed),
+                None => continue, // server not in allow list
+            }
+        } else {
+            None // owner: no restrictions
+        };
         let name_lower = name.to_lowercase();
         let searchable = format!(
             "{} {} {}",
@@ -246,12 +252,20 @@ pub(super) async fn discover_mcp(
         if matches {
             // Find MCP tool names that belong to this server
             let registry = tool_registry.read().await;
-            let mcp_tools: Vec<String> = registry
+            let mut mcp_tools: Vec<String> = registry
                 .names()
                 .into_iter()
                 .filter(|t| t.starts_with(&format!("mcp_{}_", name)) || t.contains(name))
                 .map(|s| s.to_string())
                 .collect();
+
+            // Apply per-tool filtering from scope_json.allowed_tools
+            // Tool names in registry are "mcp_{server}_{tool}", allowed_tools are bare names
+            if let Some(allowed) = tool_restriction {
+                if !allowed.is_empty() {
+                    mcp_tools.retain(|t| allowed.iter().any(|a| t.ends_with(a)));
+                }
+            }
 
             results.push(McpEntry {
                 name: name.clone(),

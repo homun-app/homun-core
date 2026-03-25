@@ -1076,11 +1076,16 @@
                 ? '<span class="badge badge-success">Enabled</span>'
                 : '<span class="badge badge-warning">Disabled</span>';
 
+            var sharingInfo = state.sharingMap && state.sharingMap[server.name];
+            var sharingBadge = sharingInfo && sharingInfo.grantCount > 0
+                ? '<span class="sharing-badge is-shared">Shared with ' + sharingInfo.grantCount + '</span>'
+                : '<span class="sharing-badge">Private</span>';
+
             return '' +
                 '<div class="skill-card mcp-server-card">' +
                     '<div class="skill-card-header">' +
                         '<div class="skill-name">' + escapeHtml(server.name) + '</div>' +
-                        statusBadge +
+                        statusBadge + sharingBadge +
                     '</div>' +
                     '<div class="skill-desc">' + escapeHtml(detail) + '</div>' +
                     '<div class="mcp-card-tags">' +
@@ -1093,6 +1098,7 @@
                         '<span class="skill-path">' + escapeHtml(server.enabled ? 'active' : 'disabled') + '</span>' +
                         '<div class="mcp-card-actions">' +
                             '<button type="button" class="btn btn-secondary btn-sm mcp-test-btn" data-name="' + escapeHtml(server.name) + '">Test</button>' +
+                            '<button type="button" class="btn btn-secondary btn-sm mcp-access-btn" data-name="' + escapeHtml(server.name) + '">Access</button>' +
                             '<button type="button" class="btn btn-secondary btn-sm mcp-toggle-btn" data-name="' + escapeHtml(server.name) + '" data-enabled="' + (server.enabled ? '1' : '0') + '">' + (server.enabled ? 'Disable' : 'Enable') + '</button>' +
                             '<button type="button" class="btn btn-ghost btn-sm mcp-remove-btn" data-name="' + escapeHtml(server.name) + '">Remove</button>' +
                         '</div>' +
@@ -1133,7 +1139,7 @@
     }
 
     async function refreshAll(query) {
-        await Promise.all([loadCatalog(query), loadServers(), loadSandboxStatus()]);
+        await Promise.all([loadCatalog(query), loadServers(), loadSandboxStatus(), loadSharingState()]);
     }
 
     async function connectPreset(serviceId, forceOverwrite) {
@@ -1526,11 +1532,45 @@
                 toggleServer(name, enabled);
                 return;
             }
+            var accessBtn = e.target.closest('.mcp-access-btn');
+            if (accessBtn) {
+                openMcpAccessPicker(accessBtn.dataset.name);
+                return;
+            }
             var removeBtn = e.target.closest('.mcp-remove-btn');
             if (removeBtn) {
                 removeServer(removeBtn.dataset.name);
             }
         });
+    }
+
+    function openMcpAccessPicker(serverName) {
+        if (!window.SharingPicker) return;
+        SharingPicker.open({
+            title: 'Share \u201c' + serverName + '\u201d',
+            resourceType: 'mcp',
+            resourceId: serverName,
+            showToolPicker: true,
+            onSave: function () { loadSharingState().then(function () { renderServers(state.servers); }); }
+        });
+    }
+
+    async function loadSharingState() {
+        try {
+            var r = await fetch('/api/v1/sharing/resources');
+            if (!r.ok) { state.sharingMap = {}; return; }
+            var data = await r.json();
+            var resources = (data.resources || data || []).filter(function (x) { return x.resource_type === 'mcp'; });
+            var map = {};
+            for (var i = 0; i < resources.length; i++) {
+                var res = resources[i];
+                var r2 = await fetch('/api/v1/sharing/resources/' + res.id);
+                var grants = r2.ok ? await r2.json() : {};
+                var accessList = grants.access || grants || [];
+                map[res.resource_id] = { id: res.id, grantCount: accessList.length };
+            }
+            state.sharingMap = map;
+        } catch (_) { state.sharingMap = {}; }
     }
 
     function bindSearchControls() {

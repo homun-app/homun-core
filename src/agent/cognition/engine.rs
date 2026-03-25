@@ -386,8 +386,11 @@ async fn resolve_allowed_skills(params: &CognitionParams<'_>) -> Vec<String> {
     }
 }
 
-/// Resolve allowed MCP server names for a contact from shared resources.
-async fn resolve_allowed_mcp(params: &CognitionParams<'_>) -> Vec<String> {
+/// Resolve allowed MCP servers for a contact, including per-tool restrictions.
+///
+/// Returns `(server_name, allowed_tools)` pairs. If `allowed_tools` is empty,
+/// the contact can access all tools from that server (backward compatible).
+async fn resolve_allowed_mcp(params: &CognitionParams<'_>) -> Vec<(String, Vec<String>)> {
     let contact_id = match params.contact_id {
         Some(id) => id,
         None => return Vec::new(),
@@ -397,15 +400,31 @@ async fn resolve_allowed_mcp(params: &CognitionParams<'_>) -> Vec<String> {
     };
     match crate::sharing::db::resolve_contact_access(db.pool(), contact_id).await {
         Ok(access) => {
-            let names: Vec<String> = access
+            let entries: Vec<(String, Vec<String>)> = access
                 .mcp_servers
                 .into_iter()
-                .map(|(name, _, _)| name)
+                .map(|(name, _perm, scope)| {
+                    // Parse scope_json for allowed_tools list
+                    let allowed = serde_json::from_str::<serde_json::Value>(&scope)
+                        .ok()
+                        .and_then(|v| v.get("allowed_tools")?.as_array().cloned())
+                        .map(|arr| {
+                            arr.into_iter()
+                                .filter_map(|v| v.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    (name, allowed)
+                })
                 .collect();
-            if !names.is_empty() {
-                tracing::debug!(contact_id, mcp = ?names, "Contact has shared MCP access");
+            if !entries.is_empty() {
+                tracing::debug!(
+                    contact_id,
+                    mcp = ?entries,
+                    "Contact has shared MCP access with tool restrictions"
+                );
             }
-            names
+            entries
         }
         Err(e) => {
             tracing::warn!(error = %e, contact_id, "Failed to resolve shared MCP");

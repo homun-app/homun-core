@@ -33,6 +33,7 @@
 
     // Track installed skill names for cross-referencing search results
     var installedNames = new Set();
+    var _sharingMap = {}; // {skillName: {id, grantCount}}
     document.querySelectorAll('#installed-grid .skill-card').forEach(function(card) {
         var name = card.getAttribute('data-skill-name');
         if (name) installedNames.add(name);
@@ -553,8 +554,39 @@
         }
     }
 
+    // --- Sharing state ---
+    async function loadSkillSharingState() {
+        try {
+            var r = await fetch('/api/v1/sharing/resources');
+            if (!r.ok) { _sharingMap = {}; return; }
+            var data = await r.json();
+            var resources = (data.resources || data || []).filter(function (x) { return x.resource_type === 'skill'; });
+            var map = {};
+            for (var i = 0; i < resources.length; i++) {
+                var res = resources[i];
+                var r2 = await fetch('/api/v1/sharing/resources/' + res.id);
+                var grants = r2.ok ? await r2.json() : {};
+                var accessList = grants.access || grants || [];
+                map[res.resource_id] = { id: res.id, grantCount: accessList.length };
+            }
+            _sharingMap = map;
+        } catch (_) { _sharingMap = {}; }
+    }
+
+    function openSkillAccessPicker(skillName) {
+        if (!window.SharingPicker) return;
+        SharingPicker.open({
+            title: 'Share \u201c' + skillName + '\u201d',
+            resourceType: 'skill',
+            resourceId: skillName,
+            showToolPicker: false,
+            onSave: function () { loadSkillSharingState().then(function () { refreshInstalled(); }); }
+        });
+    }
+
     // --- Refresh installed section ---
     async function refreshInstalled() {
+        await loadSkillSharingState();
         try {
             var res = await fetch('/api/v1/skills');
             var skills = await res.json();
@@ -602,6 +634,13 @@
         var header = el('div', 'skill-card-header');
         header.appendChild(el('div', 'skill-name', s.name));
         header.appendChild(el('span', 'skill-source-badge skill-source-badge--' + s.source, sourceLabel(s.source)));
+        // Sharing badge
+        var sharingInfo = _sharingMap && _sharingMap[s.name];
+        var badge = el('span', 'sharing-badge' + (sharingInfo && sharingInfo.grantCount > 0 ? ' is-shared' : ''));
+        badge.textContent = sharingInfo && sharingInfo.grantCount > 0
+            ? 'Shared with ' + sharingInfo.grantCount
+            : 'Private';
+        header.appendChild(badge);
         card.appendChild(header);
 
         // Description
@@ -610,6 +649,13 @@
         // Footer
         var footer = el('div', 'skill-card-footer');
         footer.appendChild(el('span', 'skill-path', s.path));
+        var accessBtn = el('button', 'btn btn-sm btn-secondary skill-access-btn', 'Access');
+        accessBtn.setAttribute('data-skill', s.name);
+        accessBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            openSkillAccessPicker(s.name);
+        });
+        footer.appendChild(accessBtn);
         var removeBtn = el('button', 'btn btn-sm btn-danger skill-remove-btn', 'Remove');
         removeBtn.setAttribute('data-skill', s.name);
         removeBtn.addEventListener('click', function(e) {
