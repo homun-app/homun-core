@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use super::super::server::AppState;
 use crate::config::Config;
+use crate::web::auth::{require_emergency_stop, AuthUser};
 
 /// Routes registered inside the authenticated API router.
 /// Note: `health` and `webhook_ingress` are NOT here — they are public routes
@@ -299,14 +300,22 @@ fn check_data_dir() -> ComponentHealth {
 
 async fn emergency_stop_handler(
     State(state): State<Arc<AppState>>,
-) -> Json<crate::security::EStopReport> {
+    axum::Extension(auth): axum::Extension<AuthUser>,
+) -> Result<Json<crate::security::EStopReport>, (StatusCode, Json<serde_json::Value>)> {
+    require_emergency_stop(&auth)?;
     let report = crate::security::emergency_stop(&state.estop_handles).await;
-    Json(report)
+    Ok(Json(report))
 }
 
-async fn resume_handler(State(_state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+async fn resume_handler(
+    State(_state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    require_emergency_stop(&auth)?;
     crate::security::resume();
-    Json(serde_json::json!({ "status": "resumed", "network": "online" }))
+    Ok(Json(
+        serde_json::json!({ "status": "resumed", "network": "online" }),
+    ))
 }
 
 // --- Webhook Ingress (public) ---

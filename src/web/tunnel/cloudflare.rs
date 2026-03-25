@@ -24,11 +24,9 @@ impl super::Tunnel for CloudflareTunnel {
         "cloudflare"
     }
 
-    async fn start(&mut self, local_port: u16) -> Result<String> {
-        let target = format!("http://localhost:{local_port}");
-
+    async fn start(&mut self, _local_port: u16, local_target: &str) -> Result<String> {
         let mut child = Command::new("cloudflared")
-            .args(["tunnel", "--url", &target])
+            .args(["tunnel", "--url", local_target])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true)
@@ -64,6 +62,10 @@ impl super::Tunnel for CloudflareTunnel {
         })
         .await
         .context("Timed out waiting for cloudflared URL (30s)")??;
+
+        tokio::spawn(async move {
+            while let Ok(Some(_line)) = reader.next_line().await {}
+        });
 
         self.child = Some(child);
         Ok(url)

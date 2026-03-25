@@ -1991,6 +1991,7 @@ dependencies = [
  "pdf-extract",
  "pin-project-lite",
  "pulldown-cmark",
+ "qrcodegen",
  "quick-xml 0.37.5",
  "rand 0.8.5",
  "ratatui",

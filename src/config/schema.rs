@@ -1116,6 +1116,9 @@ pub struct TunnelConfig {
     /// Auth token for the tunnel provider (e.g. ngrok auth token). Optional.
     #[serde(default)]
     pub auth_token: String,
+    /// Reserved/stable public URL for providers that support it (e.g. ngrok --url).
+    #[serde(default)]
+    pub reserved_url: String,
     /// Custom command to run (when provider = "custom").
     /// The command receives the local port as the last argument.
     /// First line of stdout is parsed as the public URL.

@@ -259,6 +259,10 @@ pub enum AuthMethod {
 #[derive(Debug, Clone)]
 pub struct CsrfToken(pub String);
 
+/// Raw bearer token value for handlers that need token-bound lookups.
+#[derive(Debug, Clone)]
+pub struct BearerTokenValue(pub String);
+
 impl AuthUser {
     /// Check if this auth context allows write operations.
     pub fn can_write(&self) -> bool {
@@ -275,6 +279,16 @@ impl AuthUser {
         match &self.auth_method {
             AuthMethod::Session => true,
             AuthMethod::BearerToken { scope } => scope == "admin",
+        }
+    }
+
+    /// Check whether this auth context may trigger a global emergency stop.
+    pub fn can_emergency_stop(&self) -> bool {
+        match &self.auth_method {
+            AuthMethod::Session => true,
+            AuthMethod::BearerToken { scope } => {
+                matches!(scope.as_str(), "admin" | "mobile_stop")
+            }
         }
     }
 }
@@ -318,6 +332,20 @@ pub fn check_admin(auth: &AuthUser) -> Result<(), StatusCode> {
         Ok(())
     } else {
         Err(StatusCode::FORBIDDEN)
+    }
+}
+
+/// Like [`require_admin`] but scoped to emergency-stop capability.
+pub fn require_emergency_stop(
+    auth: &AuthUser,
+) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+    if auth.can_emergency_stop() {
+        Ok(())
+    } else {
+        Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"error": "Emergency stop scope required"})),
+        ))
     }
 }
 
@@ -426,7 +454,7 @@ pub async fn auth_middleware(
 
     // 2. Try Bearer token (SEC-4)
     if let Some(token) = extract_bearer_token(&req) {
-        if token.starts_with("wh_") {
+        if token.starts_with("wh_") || token.starts_with("hm_mobile_") {
             if let Some(db) = &state.db {
                 if let Ok(Some(token_row)) = db.load_webhook_token(&token).await {
                     if token_row.enabled {
@@ -479,6 +507,16 @@ pub async fn auth_middleware(
                                     scope: token_row.scope,
                                 },
                             });
+                            req.extensions_mut()
+                                .insert(BearerTokenValue(token.clone()));
+
+                            if token.starts_with("hm_mobile_") {
+                                let db_clone = db.clone();
+                                let token_clone = token.clone();
+                                tokio::spawn(async move {
+                                    let _ = db_clone.touch_mobile_device_by_token(&token_clone).await;
+                                });
+                            }
                             return next.run(req).await;
                         }
                     }

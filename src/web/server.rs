@@ -30,6 +30,7 @@ use super::ws;
 pub struct AppState {
     pub config: Arc<tokio::sync::RwLock<Config>>,
     pub started_at: Instant,
+    pub public_base_url: Option<String>,
     pub inbound_tx: Option<mpsc::Sender<InboundMessage>>,
     pub web_runs: Arc<WebRunStore>,
     /// Active WebSocket sessions: chat_id → sender for outbound messages
@@ -81,6 +82,24 @@ impl AppState {
         config.save()?;
         *self.config.write().await = config;
         Ok(())
+    }
+}
+
+fn mobile_reachable_base_url(domain: &str, tunnel_url: Option<&String>) -> Option<String> {
+    if let Some(url) = tunnel_url {
+        return Some(url.clone());
+    }
+
+    let normalized = domain.trim().to_ascii_lowercase();
+    if normalized.is_empty()
+        || normalized == "localhost"
+        || normalized == "127.0.0.1"
+        || normalized == "::1"
+        || normalized == "[::1]"
+    {
+        None
+    } else {
+        Some(format!("https://{domain}"))
     }
 }
 
@@ -255,11 +274,18 @@ impl WebServer {
             )
         };
 
+        let tls_config = build_tls_config(&tls_cert, &tls_key, auto_tls, &domain).await;
+        let local_tunnel_target = if tls_config.is_some() {
+            format!("https://localhost:{port}")
+        } else {
+            format!("http://localhost:{port}")
+        };
+
         // Start tunnel if configured (before building the router so CORS can use the URL)
         let tunnel_url: Option<String> = if let Some(ref tc) = tunnel_config {
             if tc.enabled {
                 match super::tunnel::create_tunnel(tc) {
-                    Ok(mut tunnel) => match tunnel.start(port).await {
+                    Ok(mut tunnel) => match tunnel.start(port, &local_tunnel_target).await {
                         Ok(url) => {
                             tracing::info!(
                                 provider = tunnel.name(),
@@ -321,6 +347,7 @@ impl WebServer {
         let state = Arc::new(AppState {
             config: self.config,
             started_at: Instant::now(),
+            public_base_url: mobile_reachable_base_url(&domain, tunnel_url.as_ref()),
             inbound_tx: self.inbound_tx,
             web_runs: Arc::new(WebRunStore::default()),
             ws_sessions: tokio::sync::RwLock::new(std::collections::HashMap::new()),
@@ -459,6 +486,7 @@ impl WebServer {
                 "/api/v1/webhook/{token}",
                 axum::routing::post(api::webhook_ingress),
             )
+            .merge(api::public_router())
             .merge(static_assets())
             .merge(auth_routes);
 
@@ -524,9 +552,6 @@ impl WebServer {
         let addr: SocketAddr = format!("{host}:{port}")
             .parse()
             .unwrap_or_else(|_| SocketAddr::from(([127, 0, 0, 1], 18443)));
-
-        // Try to set up TLS (SEC-2)
-        let tls_config = build_tls_config(&tls_cert, &tls_key, auto_tls, &domain).await;
 
         let listener = tokio::net::TcpListener::bind(addr).await?;
 

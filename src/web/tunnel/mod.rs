@@ -19,11 +19,11 @@ pub trait Tunnel: Send + Sync {
     /// Provider name (for logging).
     fn name(&self) -> &str;
 
-    /// Start the tunnel targeting a local port. Returns the public URL.
+    /// Start the tunnel targeting a local endpoint. Returns the public URL.
     ///
     /// Spawns an external process and parses its output to extract the URL.
     /// The process is kept running until `stop()` is called.
-    async fn start(&mut self, local_port: u16) -> Result<String>;
+    async fn start(&mut self, local_port: u16, local_target: &str) -> Result<String>;
 
     /// Gracefully stop the tunnel process.
     async fn stop(&mut self) -> Result<()>;
@@ -35,7 +35,10 @@ pub trait Tunnel: Send + Sync {
 pub fn create_tunnel(config: &TunnelConfig) -> Result<Box<dyn Tunnel>> {
     match config.provider.as_str() {
         "cloudflare" => Ok(Box::new(cloudflare::CloudflareTunnel::new())),
-        "ngrok" => Ok(Box::new(ngrok::NgrokTunnel::new(config.auth_token.clone()))),
+        "ngrok" => Ok(Box::new(ngrok::NgrokTunnel::new(
+            config.auth_token.clone(),
+            config.reserved_url.clone(),
+        ))),
         "custom" => {
             if config.custom_command.is_empty() {
                 bail!("Tunnel provider 'custom' requires a custom_command");

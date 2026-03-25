@@ -2788,7 +2788,7 @@ async fn account_page(State(state): State<Arc<AppState>>) -> Html<String> {
         "Account",
         "account",
         &body,
-        &["account.js", "account-gateways.js"],
+        &["account.js", "account-gateways.js", "account-mobile.js"],
     );
     Html(html)
 }
@@ -3583,6 +3583,76 @@ pub(crate) async fn section_account(state: &AppState) -> String {
                     </div>
                 </section>
 
+                <section class="section">
+                    <div class="section-header" style="display:flex;justify-content:space-between;align-items:center;">
+                        <div style="display:flex;align-items:center;gap:8px">
+                            <h2 style="margin:0;padding:0;border:0">Mobile App</h2>
+                            <span class="badge" id="mobile-devices-count">0</span>
+                        </div>
+                        <button class="btn btn-primary btn-sm" id="btn-mobile-pairing">+ Connect App</button>
+                    </div>
+                    <p style="color:var(--muted);margin-bottom:1rem;font-size:0.875rem">
+                        Pair the Homun mobile app with this server using a QR code, then manage connected phones here.
+                    </p>
+                    <details class="details-collapse" style="margin-bottom:1rem">
+                        <summary class="btn btn-secondary btn-sm">Remote Access / Tunnel</summary>
+                        <form id="mobile-tunnel-form" class="form" style="margin-top:1rem">
+                            <div class="form-row form-row--3">
+                                <div class="form-group">
+                                    <label for="mobile-tunnel-enabled">Tunnel</label>
+                                    <select id="mobile-tunnel-enabled" class="input">
+                                        <option value="false">Disabled</option>
+                                        <option value="true">Enabled</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="mobile-tunnel-provider">Provider</label>
+                                    <select id="mobile-tunnel-provider" class="input">
+                                        <option value="cloudflare">Cloudflare</option>
+                                        <option value="ngrok">ngrok</option>
+                                        <option value="custom">Custom</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="mobile-tunnel-auth-token">Auth Token (optional)</label>
+                                    <input type="password" id="mobile-tunnel-auth-token" class="input" placeholder="ngrok auth token">
+                                    <div class="form-hint" id="mobile-tunnel-token-hint"></div>
+                                </div>
+                            </div>
+                            <div id="mobile-tunnel-ngrok-fields" style="display:none;">
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="mobile-tunnel-reserved-url">Reserved URL</label>
+                                        <input type="text" id="mobile-tunnel-reserved-url" class="input" placeholder="https://your-stable-subdomain.ngrok-free.dev">
+                                        <div class="form-hint">Optional but recommended for ngrok. Keeps the mobile base URL stable across restarts.</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="mobile-tunnel-custom-fields" style="display:none;">
+                                <div class="form-row form-row--2">
+                                    <div class="form-group">
+                                        <label for="mobile-tunnel-command">Custom Command</label>
+                                        <input type="text" id="mobile-tunnel-command" class="input" placeholder="my-tunnel-command">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="mobile-tunnel-args">Custom Args</label>
+                                        <input type="text" id="mobile-tunnel-args" class="input" placeholder="--flag value">
+                                        <div class="form-hint">Space-separated. The local port is appended automatically.</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="mobile-tunnel-status" class="form-hint pairing-status" style="text-align:left;margin-top:8px;"></div>
+                            <div class="form-actions" style="margin-top:12px;">
+                                <button type="submit" class="btn btn-primary btn-sm">Save Tunnel Config</button>
+                            </div>
+                        </form>
+                    </details>
+                    <div id="mobile-pairing-inline-status" class="pairing-status" style="text-align:left;margin:0 0 12px 0;"></div>
+                    <div class="item-list" id="mobile-devices-list">
+                        <div class="empty-state" id="mobile-devices-empty"><p>No mobile devices paired yet.</p></div>
+                    </div>
+                </section>
+
                 <section class="section" id="section-email-accounts">
                     <div class="section-header" style="display:flex;justify-content:space-between;align-items:center;">
                         <h2>Additional Email Accounts</h2>
@@ -3712,6 +3782,46 @@ pub(crate) async fn section_account(state: &AppState) -> String {
                     <button type="button" class="btn btn-secondary gw-modal-close">Cancel</button>
                     <button type="button" id="btn-delete-gateway" class="btn btn-danger" style="display:none;">Delete</button>
                     <button type="submit" form="gateway-form" class="btn btn-primary" id="btn-save-gateway">Save</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="mobile-pairing-modal" class="modal">
+            <div class="modal-backdrop"></div>
+            <div class="modal-content modal-content--channel">
+                <div class="modal-header-group">
+                    <div class="modal-header">
+                        <h3 class="modal-title">Connect Mobile App</h3>
+                        <button class="modal-close mobile-pairing-close" type="button">&times;</button>
+                    </div>
+                    <p class="modal-subtitle">Scan the QR from the Android or iOS app, then approve the device when it claims this pairing session.</p>
+                </div>
+                <div class="modal-body">
+                    <div id="mobile-pairing-status" class="pairing-status" style="margin-top:0;"></div>
+                    <div style="display:flex;justify-content:center;margin:12px 0 18px 0;">
+                        <div id="mobile-pairing-qr" style="width:240px;height:240px;display:flex;align-items:center;justify-content:center;background:var(--surface-inset);border-radius:20px;padding:12px;"></div>
+                    </div>
+                    <div id="mobile-pairing-meta" class="form-hint" style="text-align:center;margin-bottom:12px;"></div>
+                    <div id="mobile-claimed-device" class="item-row" style="display:none;border:1px solid var(--border);border-radius:16px;padding:14px 16px;margin-top:8px;">
+                        <div class="item-info">
+                            <div class="item-name" id="mobile-claimed-device-name">—</div>
+                            <div class="item-meta" id="mobile-claimed-device-meta">—</div>
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-top:16px;">
+                        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;">
+                            <input type="checkbox" id="mobile-allow-estop" style="margin-top:4px;">
+                            <span>
+                                <strong>Allow emergency stop</strong><br>
+                                <span class="form-hint">Give this mobile device access to the global stop/resume controls.</span>
+                            </span>
+                        </label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary mobile-pairing-close">Close</button>
+                    <button type="button" id="btn-mobile-refresh-pairing" class="btn btn-secondary">Refresh Status</button>
+                    <button type="button" id="btn-mobile-approve" class="btn btn-primary" disabled>Approve Device</button>
                 </div>
             </div>
         </div>"##,

@@ -418,6 +418,13 @@ impl Database {
         )
         .await?;
 
+        Self::apply_migration(
+            pool,
+            "044_mobile_pairing",
+            include_str!("../../migrations/044_mobile_pairing.sql"),
+        )
+        .await?;
+
         Ok(())
     }
 
@@ -1453,6 +1460,293 @@ impl Database {
         Ok(row)
     }
 
+    // --- Mobile pairing ---
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_mobile_pairing_session(
+        &self,
+        id: &str,
+        user_id: &str,
+        status: &str,
+        nonce_hash: &str,
+        base_url: &str,
+        server_fingerprint: &str,
+        expires_at: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO mobile_pairing_sessions
+             (id, user_id, status, nonce_hash, base_url, server_fingerprint, expires_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(id)
+        .bind(user_id)
+        .bind(status)
+        .bind(nonce_hash)
+        .bind(base_url)
+        .bind(server_fingerprint)
+        .bind(expires_at)
+        .execute(&self.pool)
+        .await
+        .context("Failed to insert mobile pairing session")?;
+
+        Ok(())
+    }
+
+    pub async fn load_mobile_pairing_session(
+        &self,
+        id: &str,
+    ) -> Result<Option<MobilePairingSessionRow>> {
+        let row = sqlx::query_as::<_, MobilePairingSessionRow>(
+            "SELECT id, user_id, status, nonce_hash, base_url, server_fingerprint,
+                    device_name, platform, app_version, device_public_key, device_push_token,
+                    device_id, created_at, claimed_at, approved_at, completed_at, expires_at
+             FROM mobile_pairing_sessions
+             WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .context("Failed to load mobile pairing session")?;
+
+        Ok(row)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn claim_mobile_pairing_session(
+        &self,
+        id: &str,
+        device_name: &str,
+        platform: &str,
+        app_version: Option<&str>,
+        device_public_key: Option<&str>,
+        device_push_token: Option<&str>,
+    ) -> Result<bool> {
+        let result = sqlx::query(
+            "UPDATE mobile_pairing_sessions
+             SET status = 'claimed',
+                 device_name = ?,
+                 platform = ?,
+                 app_version = ?,
+                 device_public_key = ?,
+                 device_push_token = ?,
+                 claimed_at = ?
+             WHERE id = ? AND status = 'created'",
+        )
+        .bind(device_name)
+        .bind(platform)
+        .bind(app_version)
+        .bind(device_public_key)
+        .bind(device_push_token)
+        .bind(chrono::Utc::now().to_rfc3339())
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .context("Failed to claim mobile pairing session")?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn approve_mobile_pairing_session(
+        &self,
+        pairing_id: &str,
+        device_id: &str,
+        user_id: &str,
+        device_name: &str,
+        platform: &str,
+        app_version: Option<&str>,
+        public_key: Option<&str>,
+        push_token: Option<&str>,
+        token: &str,
+        token_name: &str,
+        token_scope: &str,
+        server_fingerprint: &str,
+        can_emergency_stop: bool,
+    ) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("Failed to start mobile pairing approval transaction")?;
+
+        sqlx::query(
+            "INSERT INTO webhook_tokens (token, user_id, name, scope, expires_at)
+             VALUES (?, ?, ?, ?, NULL)",
+        )
+        .bind(token)
+        .bind(user_id)
+        .bind(token_name)
+        .bind(token_scope)
+        .execute(&mut *tx)
+        .await
+        .context("Failed to create mobile bearer token")?;
+
+        sqlx::query(
+            "INSERT INTO mobile_devices
+             (id, user_id, name, platform, app_version, public_key, push_token, token,
+              can_emergency_stop, server_fingerprint_at_pair, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(device_id)
+        .bind(user_id)
+        .bind(device_name)
+        .bind(platform)
+        .bind(app_version)
+        .bind(public_key)
+        .bind(push_token)
+        .bind(token)
+        .bind(can_emergency_stop)
+        .bind(server_fingerprint)
+        .bind(&now)
+        .execute(&mut *tx)
+        .await
+        .context("Failed to create mobile device")?;
+
+        sqlx::query(
+            "UPDATE mobile_pairing_sessions
+             SET status = 'approved', approved_at = ?, device_id = ?
+             WHERE id = ?",
+        )
+        .bind(&now)
+        .bind(device_id)
+        .bind(pairing_id)
+        .execute(&mut *tx)
+        .await
+        .context("Failed to mark mobile pairing session approved")?;
+
+        tx.commit()
+            .await
+            .context("Failed to commit mobile pairing approval transaction")?;
+
+        Ok(())
+    }
+
+    pub async fn complete_mobile_pairing_session(&self, id: &str) -> Result<bool> {
+        let result = sqlx::query(
+            "UPDATE mobile_pairing_sessions
+             SET status = 'completed', completed_at = ?
+             WHERE id = ? AND status = 'approved'",
+        )
+        .bind(chrono::Utc::now().to_rfc3339())
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .context("Failed to complete mobile pairing session")?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn load_mobile_devices(&self, user_id: &str) -> Result<Vec<MobileDeviceRow>> {
+        let rows = sqlx::query_as::<_, MobileDeviceRow>(
+            "SELECT id, user_id, name, platform, app_version, public_key, push_token, token,
+                    can_emergency_stop, server_fingerprint_at_pair, last_seen_at, created_at,
+                    revoked_at
+             FROM mobile_devices
+             WHERE user_id = ?
+             ORDER BY created_at DESC",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await
+        .context("Failed to load mobile devices")?;
+
+        Ok(rows)
+    }
+
+    pub async fn load_mobile_device(&self, id: &str) -> Result<Option<MobileDeviceRow>> {
+        let row = sqlx::query_as::<_, MobileDeviceRow>(
+            "SELECT id, user_id, name, platform, app_version, public_key, push_token, token,
+                    can_emergency_stop, server_fingerprint_at_pair, last_seen_at, created_at,
+                    revoked_at
+             FROM mobile_devices
+             WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .context("Failed to load mobile device")?;
+
+        Ok(row)
+    }
+
+    pub async fn load_mobile_device_by_token(
+        &self,
+        token: &str,
+    ) -> Result<Option<MobileDeviceRow>> {
+        let row = sqlx::query_as::<_, MobileDeviceRow>(
+            "SELECT id, user_id, name, platform, app_version, public_key, push_token,
+                    token, can_emergency_stop, server_fingerprint_at_pair, last_seen_at,
+                    created_at, revoked_at
+             FROM mobile_devices
+             WHERE token = ? AND revoked_at IS NULL",
+        )
+        .bind(token)
+        .fetch_optional(&self.pool)
+        .await
+        .context("Failed to load mobile device by token")?;
+
+        Ok(row)
+    }
+
+    pub async fn touch_mobile_device_by_token(&self, token: &str) -> Result<()> {
+        sqlx::query(
+            "UPDATE mobile_devices
+             SET last_seen_at = ?
+             WHERE token = ? AND revoked_at IS NULL",
+        )
+        .bind(chrono::Utc::now().to_rfc3339())
+        .bind(token)
+        .execute(&self.pool)
+        .await
+        .context("Failed to update mobile device last_seen_at")?;
+
+        Ok(())
+    }
+
+    pub async fn revoke_mobile_device(&self, id: &str) -> Result<bool> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("Failed to start mobile device revoke transaction")?;
+
+        let result = sqlx::query(
+            "UPDATE mobile_devices
+             SET revoked_at = COALESCE(revoked_at, ?)
+             WHERE id = ? AND revoked_at IS NULL",
+        )
+        .bind(&now)
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .context("Failed to revoke mobile device")?;
+
+        if result.rows_affected() == 0 {
+            tx.rollback()
+                .await
+                .context("Failed to roll back mobile device revoke transaction")?;
+            return Ok(false);
+        }
+
+        sqlx::query(
+            "UPDATE webhook_tokens
+             SET enabled = 0
+             WHERE token = (SELECT token FROM mobile_devices WHERE id = ?)",
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .context("Failed to disable mobile device token")?;
+
+        tx.commit()
+            .await
+            .context("Failed to commit mobile device revoke transaction")?;
+
+        Ok(true)
+    }
+
     // --- User password ---
 
     /// Set the password hash for a user.
@@ -2046,6 +2340,48 @@ pub struct TrustedDeviceRow {
     /// 6-digit approval code (cleared after approval).
     #[serde(skip_serializing)]
     pub approval_code: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
+pub struct MobilePairingSessionRow {
+    pub id: String,
+    pub user_id: String,
+    pub status: String,
+    #[serde(skip_serializing)]
+    pub nonce_hash: String,
+    pub base_url: String,
+    pub server_fingerprint: String,
+    pub device_name: Option<String>,
+    pub platform: Option<String>,
+    pub app_version: Option<String>,
+    pub device_public_key: Option<String>,
+    pub device_push_token: Option<String>,
+    pub device_id: Option<String>,
+    pub created_at: String,
+    pub claimed_at: Option<String>,
+    pub approved_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub expires_at: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
+pub struct MobileDeviceRow {
+    pub id: String,
+    pub user_id: String,
+    pub name: String,
+    pub platform: String,
+    pub app_version: Option<String>,
+    #[serde(skip_serializing)]
+    pub public_key: Option<String>,
+    #[serde(skip_serializing)]
+    pub push_token: Option<String>,
+    #[serde(skip_serializing)]
+    pub token: String,
+    pub can_emergency_stop: bool,
+    pub server_fingerprint_at_pair: String,
+    pub last_seen_at: Option<String>,
+    pub created_at: String,
+    pub revoked_at: Option<String>,
 }
 
 // ─── RAG Knowledge Base Row Types ────────────────────────────────

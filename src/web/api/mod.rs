@@ -18,6 +18,7 @@ mod logs;
 mod maintenance;
 mod mcp;
 mod memory;
+mod mobile;
 mod onboarding;
 mod openai;
 mod permissions;
@@ -84,6 +85,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .merge(onboarding::routes())
         .merge(agents::routes())
         .merge(devices::routes())
+        .merge(mobile::routes())
         // --- OpenAI-compatible API ---
         .merge(openai::routes())
         .merge(sessions::routes())
@@ -102,6 +104,10 @@ pub fn router() -> Router<Arc<AppState>> {
     let api_router = api_router.merge(browser::routes());
 
     api_router.merge(health::routes())
+}
+
+pub fn public_router() -> Router<Arc<AppState>> {
+    mobile::public_routes()
 }
 
 #[derive(Serialize)]

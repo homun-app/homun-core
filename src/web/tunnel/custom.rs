@@ -30,7 +30,7 @@ impl super::Tunnel for CustomTunnel {
         "custom"
     }
 
-    async fn start(&mut self, local_port: u16) -> Result<String> {
+    async fn start(&mut self, local_port: u16, _local_target: &str) -> Result<String> {
         let mut cmd_args = self.args.clone();
         cmd_args.push(local_port.to_string());
 
@@ -63,6 +63,10 @@ impl super::Tunnel for CustomTunnel {
         })
         .await
         .context("Timed out waiting for custom tunnel URL (30s)")??;
+
+        tokio::spawn(async move {
+            while let Ok(Some(_line)) = reader.next_line().await {}
+        });
 
         self.child = Some(child);
         Ok(url)

@@ -10,13 +10,15 @@ use tokio::process::{Child, Command};
 /// ngrok tunnel provider.
 pub struct NgrokTunnel {
     auth_token: String,
+    reserved_url: String,
     child: Option<Child>,
 }
 
 impl NgrokTunnel {
-    pub fn new(auth_token: String) -> Self {
+    pub fn new(auth_token: String, reserved_url: String) -> Self {
         Self {
             auth_token,
+            reserved_url,
             child: None,
         }
     }
@@ -28,10 +30,10 @@ impl super::Tunnel for NgrokTunnel {
         "ngrok"
     }
 
-    async fn start(&mut self, local_port: u16) -> Result<String> {
+    async fn start(&mut self, _local_port: u16, local_target: &str) -> Result<String> {
         let mut args = vec![
             "http".to_string(),
-            local_port.to_string(),
+            local_target.to_string(),
             "--log".to_string(),
             "stdout".to_string(),
             "--log-format".to_string(),
@@ -41,6 +43,11 @@ impl super::Tunnel for NgrokTunnel {
         if !self.auth_token.is_empty() {
             args.push("--authtoken".to_string());
             args.push(self.auth_token.clone());
+        }
+
+        if !self.reserved_url.trim().is_empty() {
+            args.push("--url".to_string());
+            args.push(self.reserved_url.trim().to_string());
         }
 
         let mut child = Command::new("ngrok")
@@ -77,6 +84,10 @@ impl super::Tunnel for NgrokTunnel {
         })
         .await
         .context("Timed out waiting for ngrok URL (15s)")??;
+
+        tokio::spawn(async move {
+            while let Ok(Some(_line)) = reader.next_line().await {}
+        });
 
         self.child = Some(child);
         Ok(url)
