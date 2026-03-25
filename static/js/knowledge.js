@@ -7,11 +7,12 @@ var _cachedContacts = null;
 var _selectedNamespace = '_private';
 
 document.addEventListener('DOMContentLoaded', () => {
-    document.addEventListener('profile-changed', () => { loadStats(); loadSources(); });
+    document.addEventListener('profile-changed', () => { loadStats(); loadSources(); loadWatches(); });
     loadStats();
-    loadContacts().then(() => loadSources());
+    loadContacts().then(() => { loadSources(); loadWatches(); });
     setupUpload();
     setupSearch();
+    setupWatches();
     setupFolderIndex();
     setupVisibilityPicker();
 });
@@ -741,4 +742,293 @@ function formatDate(dateStr) {
     } catch {
         return dateStr;
     }
+}
+
+// ─── Monitored Folders (KWA-3) ──────────────────────────
+// Note: innerHTML usage below is safe — all dynamic values are escaped
+// via escapeHtml() and namespaceLabel() which sanitize user input.
+
+function setupWatches() {
+    var addBtn = document.getElementById('btn-add-watch');
+    if (addBtn) addBtn.addEventListener('click', showAddWatchForm);
+}
+
+async function loadWatches() {
+    var list = document.getElementById('watches-list');
+    if (!list) return;
+    try {
+        var res = await api('/api/v1/knowledge/watches');
+        if (!res.ok) throw new Error(res.body?.error || 'Failed to load');
+        var watches = res.body.watches || [];
+        renderWatches(watches, list);
+    } catch (e) {
+        list.textContent = '';
+        var p = document.createElement('p');
+        p.className = 'empty-state';
+        p.textContent = 'Failed to load watches.';
+        list.appendChild(p);
+    }
+}
+
+function renderWatches(watches, container) {
+    if (!watches.length) {
+        container.textContent = '';
+        var p = document.createElement('p');
+        p.className = 'empty-state';
+        p.textContent = 'No monitored folders configured.';
+        container.appendChild(p);
+        return;
+    }
+    // Build table using safe DOM construction for data cells
+    var table = document.createElement('table');
+    table.className = 'sources-table';
+    var thead = document.createElement('thead');
+    var headRow = document.createElement('tr');
+    ['Path', 'Status', 'Namespace', 'Contacts', 'Docs', ''].forEach(function(h) {
+        var th = document.createElement('th');
+        th.textContent = h;
+        headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    var tbody = document.createElement('tbody');
+    for (var i = 0; i < watches.length; i++) {
+        var w = watches[i];
+        var tr = document.createElement('tr');
+        tr.dataset.watchId = w.id;
+
+        // Path cell
+        var tdPath = document.createElement('td');
+        tdPath.title = w.path;
+        tdPath.textContent = shortenPath(w.path);
+        tr.appendChild(tdPath);
+
+        // Status cell (safe: only our own badge markup)
+        var tdStatus = document.createElement('td');
+        var statusSpan = document.createElement('span');
+        statusSpan.className = w.enabled ? 'badge badge-success' : 'badge badge-neutral';
+        statusSpan.textContent = w.enabled ? 'Active' : 'Paused';
+        tdStatus.appendChild(statusSpan);
+        if (w.recursive) {
+            var recSpan = document.createElement('span');
+            recSpan.className = 'badge badge-neutral';
+            recSpan.textContent = 'recursive';
+            recSpan.style.marginLeft = '4px';
+            tdStatus.appendChild(recSpan);
+        }
+        tr.appendChild(tdStatus);
+
+        // Namespace cell
+        var tdNs = document.createElement('td');
+        tdNs.textContent = namespaceLabel(w.namespace);
+        tr.appendChild(tdNs);
+
+        // Contacts cell
+        var tdContacts = document.createElement('td');
+        var contactCount = (w.contact_ids || []).length;
+        tdContacts.textContent = contactCount > 0 ? contactCount + ' contact' + (contactCount > 1 ? 's' : '') : '\u2014';
+        tr.appendChild(tdContacts);
+
+        // Docs cell
+        var tdDocs = document.createElement('td');
+        tdDocs.textContent = w.doc_count;
+        tr.appendChild(tdDocs);
+
+        // Actions cell
+        var tdActions = document.createElement('td');
+        tdActions.className = 'actions-cell';
+        var toggle = document.createElement('label');
+        toggle.className = 'toggle-switch toggle-sm';
+        var checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = w.enabled;
+        checkbox.dataset.watchToggle = w.id;
+        var slider = document.createElement('span');
+        slider.className = 'toggle-slider';
+        toggle.appendChild(checkbox);
+        toggle.appendChild(slider);
+        tdActions.appendChild(toggle);
+
+        var delBtn = document.createElement('button');
+        delBtn.className = 'btn btn-sm btn-danger';
+        delBtn.textContent = 'Delete';
+        delBtn.dataset.watchDelete = w.id;
+        delBtn.style.marginLeft = '8px';
+        tdActions.appendChild(delBtn);
+        tr.appendChild(tdActions);
+
+        tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    container.textContent = '';
+    container.appendChild(table);
+
+    // Bind toggle events
+    container.querySelectorAll('[data-watch-toggle]').forEach(function(input) {
+        input.addEventListener('change', function() {
+            toggleWatchEnabled(parseInt(input.dataset.watchToggle), input.checked);
+        });
+    });
+
+    // Bind delete events
+    container.querySelectorAll('[data-watch-delete]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            deleteWatch(parseInt(btn.dataset.watchDelete));
+        });
+    });
+}
+
+function showAddWatchForm() {
+    if (document.getElementById('watch-add-form')) return;
+    var list = document.getElementById('watches-list');
+    if (!list) return;
+
+    var form = document.createElement('div');
+    form.id = 'watch-add-form';
+    form.className = 'inline-form';
+    form.style.cssText = 'margin-bottom:1rem;padding:1rem;border:1px solid var(--border);border-radius:var(--radius)';
+
+    // Path input
+    var pathGroup = document.createElement('div');
+    pathGroup.className = 'form-group';
+    var pathLabel = document.createElement('label');
+    pathLabel.textContent = 'Path';
+    var pathInput = document.createElement('input');
+    pathInput.id = 'watch-path';
+    pathInput.className = 'input';
+    pathInput.type = 'text';
+    pathInput.placeholder = '~/Documents/knowledge';
+    pathGroup.appendChild(pathLabel);
+    pathGroup.appendChild(pathInput);
+    form.appendChild(pathGroup);
+
+    // Options row
+    var optRow = document.createElement('div');
+    optRow.style.cssText = 'display:flex;gap:1rem;flex-wrap:wrap';
+
+    // Recursive checkbox
+    var recGroup = document.createElement('div');
+    recGroup.className = 'form-group';
+    var recLabel = document.createElement('label');
+    var recCheck = document.createElement('input');
+    recCheck.id = 'watch-recursive';
+    recCheck.type = 'checkbox';
+    recCheck.checked = true;
+    recLabel.appendChild(recCheck);
+    recLabel.appendChild(document.createTextNode(' Recursive'));
+    recGroup.appendChild(recLabel);
+    optRow.appendChild(recGroup);
+
+    // Namespace select
+    var nsGroup = document.createElement('div');
+    nsGroup.className = 'form-group';
+    var nsLabel = document.createElement('label');
+    nsLabel.textContent = 'Namespace';
+    var nsSel = document.createElement('select');
+    nsSel.id = 'watch-namespace';
+    nsSel.className = 'input';
+    nsSel.style.minWidth = '140px';
+    var optPrivate = document.createElement('option');
+    optPrivate.value = '_private'; optPrivate.textContent = 'Private';
+    var optPublic = document.createElement('option');
+    optPublic.value = '_public'; optPublic.textContent = 'Public';
+    nsSel.appendChild(optPrivate);
+    nsSel.appendChild(optPublic);
+    if (_cachedContacts) {
+        _cachedContacts.forEach(function(c) {
+            var opt = document.createElement('option');
+            opt.value = 'contact_' + c.id;
+            opt.textContent = c.display_name || c.name;
+            nsSel.appendChild(opt);
+        });
+    }
+    nsGroup.appendChild(nsLabel);
+    nsGroup.appendChild(nsSel);
+    optRow.appendChild(nsGroup);
+    form.appendChild(optRow);
+
+    // Buttons
+    var btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:0.5rem;margin-top:0.5rem';
+    var saveBtn = document.createElement('button');
+    saveBtn.className = 'btn btn-primary btn-sm';
+    saveBtn.textContent = 'Save';
+    saveBtn.addEventListener('click', saveNewWatch);
+    var cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn btn-secondary btn-sm';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', function() { form.remove(); });
+    btnRow.appendChild(saveBtn);
+    btnRow.appendChild(cancelBtn);
+    form.appendChild(btnRow);
+
+    list.parentNode.insertBefore(form, list);
+}
+
+async function saveNewWatch() {
+    var path = document.getElementById('watch-path')?.value?.trim();
+    if (!path) { alert('Path is required'); return; }
+
+    var data = {
+        path: path,
+        recursive: document.getElementById('watch-recursive')?.checked ?? true,
+        namespace: document.getElementById('watch-namespace')?.value || '_private',
+        contact_ids: '[]',
+    };
+
+    var res = await api('/api/v1/knowledge/watches', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+
+    if (res.ok) {
+        var form = document.getElementById('watch-add-form');
+        if (form) form.remove();
+        loadWatches();
+        showToast('Folder added', 'success');
+    } else {
+        alert(res.body?.error || 'Failed to create watch');
+    }
+}
+
+async function toggleWatchEnabled(id, enabled) {
+    var res = await api('/api/v1/knowledge/watches');
+    if (!res.ok) return;
+    var watch = (res.body.watches || []).find(function(w) { return w.id === id; });
+    if (!watch) return;
+
+    await api('/api/v1/knowledge/watches/' + id, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            path: watch.path,
+            recursive: watch.recursive,
+            enabled: enabled,
+            namespace: watch.namespace,
+            contact_ids: JSON.stringify(watch.contact_ids || []),
+        }),
+    });
+    loadWatches();
+}
+
+async function deleteWatch(id) {
+    if (!confirm('Remove this monitored folder?')) return;
+    var res = await api('/api/v1/knowledge/watches/' + id, { method: 'DELETE' });
+    if (res.ok) {
+        loadWatches();
+        showToast('Folder removed', 'success');
+    } else {
+        alert(res.body?.error || 'Failed to delete');
+    }
+}
+
+function shortenPath(p) {
+    if (!p) return '';
+    if (p.startsWith('/Users/')) {
+        var parts = p.split('/');
+        if (parts.length > 2) return '~/' + parts.slice(3).join('/');
+    }
+    return p;
 }

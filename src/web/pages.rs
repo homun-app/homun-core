@@ -2892,6 +2892,16 @@ async fn knowledge_page(State(_state): State<Arc<AppState>>) -> Html<String> {
                 </div>
             </div>
 
+            <div class="knowledge-panel" id="watches-panel">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem">
+                    <h2 style="margin:0">Monitored Folders</h2>
+                    <button class="btn btn-primary btn-sm" id="btn-add-watch">+ Add Folder</button>
+                </div>
+                <div id="watches-list" class="sources-list">
+                    <p class="empty-state">No monitored folders configured.</p>
+                </div>
+            </div>
+
             <div class="knowledge-panel">
                 <h2>Indexed Sources</h2>
                 <div id="sources-list" class="sources-list">
