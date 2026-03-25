@@ -1,6 +1,6 @@
 # Homun — Unified Roadmap
 
-> Last updated: 2026-03-23
+> Last updated: 2026-03-25
 > Consolidamento di: ROADMAP.md, IMPLEMENTATION-GAPS.md, openclaw-connections-vs-homun-detailed.md
 > Obiettivo: piano unico orientato a **prodotto industriale**, sicurezza-first, senza legacy o feature completate.
 
@@ -19,7 +19,7 @@
 | Tool built-in | 20 |
 | Web UI Pages | 30 |
 | API endpoints | ~113 REST |
-| SQLite migrations | 43 |
+| SQLite migrations | 45 |
 | MCP Recipes bundled | 17 (github, google-workspace, google-maps, notion, slack, gitlab, linear, jira, reddit, brave-search, spotify, stripe, twitter, sentry, todoist, home-assistant, wordpress) |
 | Provider LLM | 14 |
 | Release | Alpha v0.2 (REL-1..12 tutti ✅ DONE) |
@@ -334,10 +334,10 @@ Target: **17 verified recipes bundled** — all done. Google services consolidat
 
 | # | Task | Note |
 |---|------|------|
-| KWA-1 | **Migration + modello `knowledge_watches`** | Tabella: `id, path, recursive, profile_id, namespace, contact_ids (JSON), enabled, created_at, updated_at`. CRUD API `/v1/knowledge/watches` |
-| KWA-2 | **Watcher refactor** | Estendere `rag/watcher.rs` per leggere `knowledge_watches` da DB. Ogni watch ha il suo notify handler con profile_id + namespace auto-iniettati. Hot-reload watches senza restart |
-| KWA-3 | **UI Monitored Folders** | Sezione in Knowledge page (o tab dedicato). Lista cartelle con: path, stato (active/paused), profilo, namespace/contatto associato, n. documenti indicizzati. Form per aggiungere/modificare/rimuovere |
-| KWA-4 | **Scope multi-contatto/profilo** | Una cartella può essere associata a più contatti (JSON array) o a più profili. UI con multi-select contatti e profili. Documenti indicizzati ereditano il namespace configurato |
+| KWA-1 | **Migration + modello `knowledge_watches`** | ✅ DONE (2026-03-25) — Migration 045, struct `KnowledgeWatch` + 7 DB functions in `rag/db.rs`. CRUD API `/v1/knowledge/watches`. Split `knowledge.rs` → `knowledge/mod.rs` + `knowledge/watches.rs`. `WatchUpdate::Reload` enum + `watch_update_tx` on AppState |
+| KWA-2 | **Watcher refactor** | ✅ DONE (2026-03-25) — `RagWatcher` now DB-driven: loads enabled watches + legacy config dirs. Prefix matching (longest-first) maps file events to watch context (namespace/profile_id). Hot-reload via `WatchUpdate::Reload` channel. `reingest_file()` accepts namespace param |
+| KWA-3 | **UI Monitored Folders** | ✅ DONE (2026-03-25) — "Monitored Folders" panel in Knowledge page: table with path, status badge, recursive badge, namespace label, contact count, doc count. Inline add form with path/recursive/namespace. Toggle enable/disable, delete with confirmation. Safe DOM construction |
+| KWA-4 | **Scope multi-contatto/profilo** | ✅ DONE (2026-03-25) — `add_namespace_to_perimeter()` / `remove_namespace_from_perimeter()` helpers in `contacts/perimeter.rs`. Watch create/update/delete auto-syncs contact perimeters (add for new contacts, diff+remove for removed, cleanup on delete) |
 
 #### 4E. UI Redesign
 
