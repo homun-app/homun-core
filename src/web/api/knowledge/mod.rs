@@ -486,4 +486,9 @@ mod inner {
 }
 
 #[cfg(feature = "embeddings")]
-pub(super) use inner::routes;
+mod watches;
+
+#[cfg(feature = "embeddings")]
+pub(super) fn routes() -> axum::Router<std::sync::Arc<crate::web::server::AppState>> {
+    inner::routes().merge(watches::routes())
+}

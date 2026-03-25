@@ -707,7 +707,7 @@ mod tests {
         );
 
         let source_id = rag
-            .ingest_file(&md, "test", None, None)
+            .ingest_file(&md, "test", None, None, None)
             .await
             .unwrap()
             .unwrap();

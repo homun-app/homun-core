@@ -7,6 +7,38 @@ use anyhow::{Context, Result};
 
 use crate::storage::{Database, RagChunkRow, RagSourceRow};
 
+/// A monitored folder configuration for automatic RAG ingestion.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
+pub struct KnowledgeWatch {
+    pub id: i64,
+    pub path: String,
+    pub recursive: i64,
+    pub enabled: i64,
+    pub profile_id: Option<i64>,
+    pub namespace: String,
+    /// JSON array of contact IDs that can see ingested content.
+    pub contact_ids: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl KnowledgeWatch {
+    /// Parse contact_ids JSON into a Vec<i64>.
+    pub fn contacts(&self) -> Vec<i64> {
+        serde_json::from_str(&self.contact_ids).unwrap_or_default()
+    }
+
+    /// Whether this watch is recursive.
+    pub fn is_recursive(&self) -> bool {
+        self.recursive != 0
+    }
+
+    /// Whether this watch is enabled.
+    pub fn is_enabled(&self) -> bool {
+        self.enabled != 0
+    }
+}
+
 impl Database {
     // ─── RAG Knowledge Base ──────────────────────────────────────
 
@@ -285,5 +317,130 @@ impl Database {
             .context("Failed to delete RAG chunks by source")?;
 
         Ok(result.rows_affected())
+    }
+
+    // ─── Knowledge Watches (Monitored Folders) ────────────────────
+
+    /// Insert a new knowledge watch. Returns the watch ID.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_knowledge_watch(
+        &self,
+        path: &str,
+        recursive: bool,
+        profile_id: Option<i64>,
+        namespace: &str,
+        contact_ids: &str,
+    ) -> Result<i64> {
+        let result = sqlx::query(
+            "INSERT INTO knowledge_watches (path, recursive, profile_id, namespace, contact_ids)
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(path)
+        .bind(recursive as i64)
+        .bind(profile_id)
+        .bind(namespace)
+        .bind(contact_ids)
+        .execute(self.pool())
+        .await
+        .context("Failed to insert knowledge watch")?;
+
+        Ok(result.last_insert_rowid())
+    }
+
+    /// Load a knowledge watch by ID.
+    pub async fn load_knowledge_watch(&self, id: i64) -> Result<Option<KnowledgeWatch>> {
+        let row = sqlx::query_as::<_, KnowledgeWatch>(
+            "SELECT id, path, recursive, enabled, profile_id, namespace, contact_ids, created_at, updated_at
+             FROM knowledge_watches WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(self.pool())
+        .await
+        .context("Failed to load knowledge watch")?;
+
+        Ok(row)
+    }
+
+    /// List all knowledge watches.
+    pub async fn list_knowledge_watches(&self) -> Result<Vec<KnowledgeWatch>> {
+        let rows = sqlx::query_as::<_, KnowledgeWatch>(
+            "SELECT id, path, recursive, enabled, profile_id, namespace, contact_ids, created_at, updated_at
+             FROM knowledge_watches ORDER BY created_at DESC",
+        )
+        .fetch_all(self.pool())
+        .await
+        .context("Failed to list knowledge watches")?;
+
+        Ok(rows)
+    }
+
+    /// List only enabled knowledge watches (for the watcher at startup).
+    pub async fn list_enabled_knowledge_watches(&self) -> Result<Vec<KnowledgeWatch>> {
+        let rows = sqlx::query_as::<_, KnowledgeWatch>(
+            "SELECT id, path, recursive, enabled, profile_id, namespace, contact_ids, created_at, updated_at
+             FROM knowledge_watches WHERE enabled = 1 ORDER BY id",
+        )
+        .fetch_all(self.pool())
+        .await
+        .context("Failed to list enabled knowledge watches")?;
+
+        Ok(rows)
+    }
+
+    /// Update a knowledge watch. Returns true if the row was found.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn update_knowledge_watch(
+        &self,
+        id: i64,
+        path: &str,
+        recursive: bool,
+        enabled: bool,
+        profile_id: Option<i64>,
+        namespace: &str,
+        contact_ids: &str,
+    ) -> Result<bool> {
+        let result = sqlx::query(
+            "UPDATE knowledge_watches SET path = ?, recursive = ?, enabled = ?,
+                    profile_id = ?, namespace = ?, contact_ids = ?,
+                    updated_at = datetime('now')
+             WHERE id = ?",
+        )
+        .bind(path)
+        .bind(recursive as i64)
+        .bind(enabled as i64)
+        .bind(profile_id)
+        .bind(namespace)
+        .bind(contact_ids)
+        .bind(id)
+        .execute(self.pool())
+        .await
+        .context("Failed to update knowledge watch")?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Delete a knowledge watch. Returns true if deleted.
+    pub async fn delete_knowledge_watch(&self, id: i64) -> Result<bool> {
+        let result = sqlx::query("DELETE FROM knowledge_watches WHERE id = ?")
+            .bind(id)
+            .execute(self.pool())
+            .await
+            .context("Failed to delete knowledge watch")?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Count sources whose file_path starts with a given prefix.
+    ///
+    /// Used to show how many documents were ingested from a monitored folder.
+    pub async fn count_sources_by_path_prefix(&self, prefix: &str) -> Result<i64> {
+        let pattern = format!("{prefix}%");
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM rag_sources WHERE file_path LIKE ?")
+                .bind(&pattern)
+                .fetch_one(self.pool())
+                .await
+                .context("Failed to count sources by path prefix")?;
+        Ok(count)
     }
 }

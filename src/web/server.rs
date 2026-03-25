@@ -73,6 +73,9 @@ pub struct AppState {
     pub tool_registry: Option<Arc<tokio::sync::RwLock<crate::tools::ToolRegistry>>>,
     /// Channel command sender — for hot-starting channels after config/pairing.
     pub channel_cmd_tx: Option<mpsc::Sender<crate::agent::gateway::ChannelCommand>>,
+    /// Signal the RAG watcher to reload its watch list from DB.
+    #[cfg(feature = "embeddings")]
+    pub watch_update_tx: Option<mpsc::Sender<crate::rag::watcher::WatchUpdate>>,
 }
 
 impl AppState {
@@ -121,6 +124,8 @@ pub struct WebServer {
     estop_handles: Arc<tokio::sync::RwLock<EStopHandles>>,
     tool_registry: Option<Arc<tokio::sync::RwLock<crate::tools::ToolRegistry>>>,
     channel_cmd_tx: Option<mpsc::Sender<crate::agent::gateway::ChannelCommand>>,
+    #[cfg(feature = "embeddings")]
+    watch_update_tx: Option<mpsc::Sender<crate::rag::watcher::WatchUpdate>>,
 }
 
 impl WebServer {
@@ -148,6 +153,8 @@ impl WebServer {
             estop_handles: Arc::new(tokio::sync::RwLock::new(EStopHandles::default())),
             tool_registry: None,
             channel_cmd_tx: None,
+            #[cfg(feature = "embeddings")]
+            watch_update_tx: None,
         }
     }
 
@@ -185,6 +192,12 @@ impl WebServer {
 
     pub fn set_channel_cmd_tx(&mut self, tx: mpsc::Sender<crate::agent::gateway::ChannelCommand>) {
         self.channel_cmd_tx = Some(tx);
+    }
+
+    /// Set the RAG watcher update channel for hot-reloading watches from DB.
+    #[cfg(feature = "embeddings")]
+    pub fn set_watch_update_tx(&mut self, tx: mpsc::Sender<crate::rag::watcher::WatchUpdate>) {
+        self.watch_update_tx = Some(tx);
     }
 
     /// Set the workflow engine for multi-step orchestration API endpoints.
@@ -242,6 +255,8 @@ impl WebServer {
             estop_handles: Arc::new(tokio::sync::RwLock::new(EStopHandles::default())),
             tool_registry: None,
             channel_cmd_tx: None,
+            #[cfg(feature = "embeddings")]
+            watch_update_tx: None,
         }
     }
 
@@ -368,6 +383,8 @@ impl WebServer {
             token_rate_limiter: token_rate_limiter.clone(),
             tool_registry: self.tool_registry,
             channel_cmd_tx: self.channel_cmd_tx,
+            #[cfg(feature = "embeddings")]
+            watch_update_tx: self.watch_update_tx,
         });
 
         // If we have outbound messages, spawn task to route them to WebSocket sessions

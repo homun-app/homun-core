@@ -15,6 +15,13 @@ use super::chunker::is_supported;
 use super::engine::RagEngine;
 use crate::utils::watcher::{spawn_watched, WatcherHandle};
 
+/// Commands to hot-update the watcher's watched directories.
+#[derive(Debug)]
+pub enum WatchUpdate {
+    /// Reload all watches from DB (after create/update/delete via API).
+    Reload,
+}
+
 /// Watches directories for file changes and auto-ingests into the RAG engine.
 pub struct RagWatcher {
     engine: Arc<Mutex<RagEngine>>,
