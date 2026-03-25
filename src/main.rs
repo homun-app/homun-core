@@ -1087,6 +1087,8 @@ async fn main() -> Result<()> {
             #[cfg(not(feature = "embeddings"))]
             let _db_for_searcher = db.clone();
             let db_for_web = db.clone();
+            #[cfg(feature = "embeddings")]
+            let db_for_watcher = db.clone();
 
             // Register RAG knowledge tool (before tool_registry is moved)
             #[cfg(feature = "embeddings")]
@@ -1302,11 +1304,11 @@ async fn main() -> Result<()> {
             );
             let _bootstrap_watcher_handle = bootstrap_watcher.start();
 
-            // Start RAG directory watcher (auto-ingest files from configured directories)
+            // Start RAG directory watcher (auto-ingest from DB watches + legacy config dirs)
             #[cfg(feature = "embeddings")]
-            let _rag_watcher_handle = {
+            let (watch_update_tx, _rag_watcher_handle) = {
                 if let Some(ref rag) = rag_engine {
-                    let watch_dirs: Vec<std::path::PathBuf> = config
+                    let legacy_dirs: Vec<std::path::PathBuf> = config
                         .knowledge
                         .watch_dirs
                         .iter()
@@ -1318,16 +1320,20 @@ async fn main() -> Result<()> {
                             }
                         })
                         .collect();
-                    if !watch_dirs.is_empty() {
-                        let w = rag::watcher::RagWatcher::new(rag.clone(), watch_dirs);
-                        Some(w.start())
-                    } else {
-                        None
-                    }
+                    let (tx, rx) = tokio::sync::mpsc::channel(16);
+                    let w = rag::watcher::RagWatcher::new(
+                        rag.clone(),
+                        db_for_watcher.clone(),
+                        legacy_dirs,
+                        rx,
+                    );
+                    (Some(tx), Some(w.start()))
                 } else {
-                    None
+                    (None, None)
                 }
             };
+            #[cfg(not(feature = "embeddings"))]
+            let watch_update_tx: Option<tokio::sync::mpsc::Sender<()>> = None;
 
             // Clone agent Arc before moving into Gateway (needed for deferred MCP task)
             #[cfg(feature = "mcp")]
@@ -1345,6 +1351,10 @@ async fn main() -> Result<()> {
             gateway.set_workflow_engine(workflow_engine, workflow_event_rx);
             // Always pass BusinessEngine to gateway (Web UI needs it regardless of tool flag)
             gateway.set_business_engine(business_engine);
+            #[cfg(feature = "embeddings")]
+            if let Some(tx) = watch_update_tx {
+                gateway.set_watch_update_tx(tx);
+            }
 
             // Populate emergency stop handles
             let estop_arc = gateway.estop_handles();
@@ -1536,6 +1546,10 @@ async fn main() -> Result<()> {
                             );
                         }
                     }
+
+                    // Store MCP manager in estop handles for API access (persistent peers)
+                    estop_for_mcp.write().await.mcp_manager =
+                        Some(std::sync::Arc::new(mcp_manager));
 
                     tracing::info!(
                         elapsed_ms = startup_t0_mcp.elapsed().as_millis(),

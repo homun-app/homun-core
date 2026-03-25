@@ -340,6 +340,7 @@ impl RagEngine {
         source_channel: &str,
         profile_id: Option<i64>,
         user_id: Option<&str>,
+        namespace: Option<&str>,
     ) -> Result<Option<i64>> {
         let content =
             std::fs::read(path).with_context(|| format!("Cannot read {}", path.display()))?;
@@ -358,7 +359,7 @@ impl RagEngine {
             self.remove_source(existing.id).await?;
         }
 
-        self.ingest_file(path, source_channel, profile_id, user_id, None)
+        self.ingest_file(path, source_channel, profile_id, user_id, namespace)
             .await
     }
 

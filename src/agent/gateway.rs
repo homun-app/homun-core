@@ -203,6 +203,9 @@ pub struct Gateway {
     /// Resolved agent definitions (from config `[agents.*]` or synthesized "default").
     /// Stored for MAG-2 routing and web API introspection.
     agent_definitions: HashMap<String, super::definition::AgentDefinition>,
+    /// Sender to signal the RAG watcher to reload watches from DB.
+    #[cfg(feature = "embeddings")]
+    watch_update_tx: Option<mpsc::Sender<crate::rag::watcher::WatchUpdate>>,
 }
 
 impl Gateway {
@@ -231,7 +234,15 @@ impl Gateway {
             business_engine: None,
             channel_health: Arc::new(ChannelHealthTracker::new()),
             agent_definitions: HashMap::new(),
+            #[cfg(feature = "embeddings")]
+            watch_update_tx: None,
         }
+    }
+
+    /// Set the RAG watcher update channel for hot-reloading watches from DB.
+    #[cfg(feature = "embeddings")]
+    pub fn set_watch_update_tx(&mut self, tx: mpsc::Sender<crate::rag::watcher::WatchUpdate>) {
+        self.watch_update_tx = Some(tx);
     }
 
     /// Get resolved agent definitions (populated after `run()` starts).
@@ -323,6 +334,8 @@ impl Gateway {
             let web_memory_searcher = default_agent.memory_searcher_handle();
             #[cfg(feature = "embeddings")]
             let web_rag_engine = default_agent.rag_engine_handle();
+            #[cfg(feature = "embeddings")]
+            let web_watch_update_tx = self.watch_update_tx.clone();
 
             let handle = tokio::spawn(async move {
                 let mut server =
@@ -348,6 +361,10 @@ impl Gateway {
                 #[cfg(feature = "embeddings")]
                 if let Some(rag) = web_rag_engine {
                     server.set_rag_engine(rag);
+                }
+                #[cfg(feature = "embeddings")]
+                if let Some(tx) = web_watch_update_tx {
+                    server.set_watch_update_tx(tx);
                 }
                 if let Err(e) = server.start().await {
                     tracing::error!(error = %e, "Web UI server error");
