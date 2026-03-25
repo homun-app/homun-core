@@ -1,6 +1,6 @@
 pub mod chunker;
 pub mod cloud;
-mod db;
+pub mod db;
 pub mod engine;
 pub mod parsers;
 pub mod sensitive;

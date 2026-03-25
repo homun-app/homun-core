@@ -156,6 +156,65 @@ pub async fn create_perimeter_for_contact(pool: &Pool<Sqlite>, contact_id: i64) 
     .await
 }
 
+/// Add a namespace to a contact's perimeter (idempotent).
+///
+/// If the contact has no perimeter row, creates one with defaults + the namespace.
+/// If the namespace is already present, does nothing.
+pub async fn add_namespace_to_perimeter(
+    pool: &Pool<Sqlite>,
+    contact_id: i64,
+    namespace: &str,
+) -> Result<()> {
+    let peri = load_perimeter(pool, contact_id).await?;
+    let mut namespaces = peri.namespaces();
+    if namespaces.iter().any(|n| n == namespace) {
+        return Ok(()); // already present
+    }
+    namespaces.push(namespace.to_string());
+    let ns_json = serde_json::to_string(&namespaces)?;
+    upsert_perimeter(
+        pool,
+        contact_id,
+        &ns_json,
+        &peri.memory_scope,
+        &peri.tools_allowed,
+        &peri.tools_denied,
+        peri.can_see_contacts != 0,
+        peri.can_see_calendar != 0,
+    )
+    .await
+}
+
+/// Remove a namespace from a contact's perimeter.
+///
+/// If the namespace is not present, does nothing.
+/// Does not remove the perimeter row even if namespaces become minimal.
+pub async fn remove_namespace_from_perimeter(
+    pool: &Pool<Sqlite>,
+    contact_id: i64,
+    namespace: &str,
+) -> Result<()> {
+    let peri = load_perimeter(pool, contact_id).await?;
+    let mut namespaces = peri.namespaces();
+    let before_len = namespaces.len();
+    namespaces.retain(|n| n != namespace);
+    if namespaces.len() == before_len {
+        return Ok(()); // wasn't present
+    }
+    let ns_json = serde_json::to_string(&namespaces)?;
+    upsert_perimeter(
+        pool,
+        contact_id,
+        &ns_json,
+        &peri.memory_scope,
+        &peri.tools_allowed,
+        &peri.tools_denied,
+        peri.can_see_contacts != 0,
+        peri.can_see_calendar != 0,
+    )
+    .await
+}
+
 /// Delete a contact's perimeter (reverts to safe defaults).
 pub async fn delete_perimeter(pool: &Pool<Sqlite>, contact_id: i64) -> Result<()> {
     sqlx::query("DELETE FROM contact_perimeters WHERE contact_id = ?")

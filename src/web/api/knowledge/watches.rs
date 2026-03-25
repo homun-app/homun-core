@@ -151,6 +151,8 @@ async fn create_watch(
         .await
     {
         Ok(id) => {
+            // Sync contact perimeters: add namespace to each contact's allowed list
+            sync_perimeters_add(db, &req.contact_ids, &req.namespace).await;
             // Signal watcher to reload
             notify_watcher(&state).await;
 
@@ -195,6 +197,9 @@ async fn update_watch(
 
     let expanded = expand_path(&req.path);
 
+    // Load old watch for perimeter diff
+    let old_watch = db.load_knowledge_watch(id).await.ok().flatten();
+
     match db
         .update_knowledge_watch(
             id,
@@ -208,6 +213,12 @@ async fn update_watch(
         .await
     {
         Ok(true) => {
+            // Sync perimeters: diff old vs new contacts
+            if let Some(ref old) = old_watch {
+                sync_perimeters_diff(db, old, &req.contact_ids, &req.namespace).await;
+            } else {
+                sync_perimeters_add(db, &req.contact_ids, &req.namespace).await;
+            }
             notify_watcher(&state).await;
             Json(serde_json::json!({"ok": true})).into_response()
         }
@@ -241,8 +252,15 @@ async fn delete_watch(
             .into_response();
     };
 
+    // Load watch before deleting (for perimeter cleanup)
+    let old_watch = db.load_knowledge_watch(id).await.ok().flatten();
+
     match db.delete_knowledge_watch(id).await {
         Ok(true) => {
+            // Remove namespace from all associated contacts' perimeters
+            if let Some(ref old) = old_watch {
+                sync_perimeters_remove(db, old).await;
+            }
             notify_watcher(&state).await;
             Json(serde_json::json!({"ok": true})).into_response()
         }
@@ -274,5 +292,68 @@ async fn notify_watcher(state: &AppState) {
     #[cfg(feature = "embeddings")]
     if let Some(ref tx) = state.watch_update_tx {
         let _ = tx.send(crate::rag::watcher::WatchUpdate::Reload).await;
+    }
+}
+
+// ── Perimeter sync helpers ───────────────────────────────────────
+
+use crate::contacts::perimeter;
+use crate::storage::Database;
+
+/// Parse contact_ids JSON string into a Vec<i64>.
+fn parse_contact_ids(json_str: &str) -> Vec<i64> {
+    serde_json::from_str(json_str).unwrap_or_default()
+}
+
+/// Add namespace to perimeters of all contacts in the JSON array.
+async fn sync_perimeters_add(db: &Database, contact_ids_json: &str, namespace: &str) {
+    let ids = parse_contact_ids(contact_ids_json);
+    for cid in ids {
+        if let Err(e) = perimeter::add_namespace_to_perimeter(db.pool(), cid, namespace).await {
+            tracing::warn!(contact_id = cid, error = %e, "Failed to add namespace to perimeter");
+        }
+    }
+}
+
+/// Diff old vs new contacts: add namespace for new contacts, remove for removed ones.
+async fn sync_perimeters_diff(
+    db: &Database,
+    old_watch: &crate::rag::db::KnowledgeWatch,
+    new_contact_ids_json: &str,
+    new_namespace: &str,
+) {
+    let old_ids = old_watch.contacts();
+    let new_ids: Vec<i64> = parse_contact_ids(new_contact_ids_json);
+
+    // Contacts removed from this watch: remove old namespace from their perimeters
+    for cid in &old_ids {
+        if !new_ids.contains(cid) {
+            if let Err(e) =
+                perimeter::remove_namespace_from_perimeter(db.pool(), *cid, &old_watch.namespace)
+                    .await
+            {
+                tracing::warn!(contact_id = cid, error = %e, "Failed to remove namespace from perimeter");
+            }
+        }
+    }
+
+    // Contacts added or retained: ensure new namespace is present
+    for cid in &new_ids {
+        if let Err(e) =
+            perimeter::add_namespace_to_perimeter(db.pool(), *cid, new_namespace).await
+        {
+            tracing::warn!(contact_id = cid, error = %e, "Failed to add namespace to perimeter");
+        }
+    }
+}
+
+/// Remove namespace from all contacts associated with a deleted watch.
+async fn sync_perimeters_remove(db: &Database, old_watch: &crate::rag::db::KnowledgeWatch) {
+    for cid in old_watch.contacts() {
+        if let Err(e) =
+            perimeter::remove_namespace_from_perimeter(db.pool(), cid, &old_watch.namespace).await
+        {
+            tracing::warn!(contact_id = cid, error = %e, "Failed to remove namespace from perimeter");
+        }
     }
 }
