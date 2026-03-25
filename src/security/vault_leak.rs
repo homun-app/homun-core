@@ -93,6 +93,39 @@ fn is_word_char(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
+/// Resolve `vault://key` references in text by replacing them with actual values.
+///
+/// This is the inverse of `redact_vault_values()`: when the LLM outputs a
+/// vault:// placeholder instead of calling the vault retrieve tool, this
+/// function resolves it so the user sees the actual value.
+///
+/// Returns the resolved text and a list of keys that were resolved (so the
+/// caller can add them to `vault_retrieved_keys` to prevent re-redaction).
+pub fn resolve_vault_references(
+    text: &str,
+    vault_entries: &[(String, String)],
+) -> (String, Vec<String>) {
+    if vault_entries.is_empty() {
+        return (text.to_string(), vec![]);
+    }
+
+    let mut result = text.to_string();
+    let mut resolved_keys = Vec::new();
+
+    for (key, value) in vault_entries {
+        if value.is_empty() {
+            continue;
+        }
+        let vault_ref = format!("vault://{}", key);
+        if result.contains(&vault_ref) {
+            result = result.replace(&vault_ref, value);
+            resolved_keys.push(key.clone());
+        }
+    }
+
+    (result, resolved_keys)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,5 +266,53 @@ mod tests {
             replace_whole_match("pass-word", "pass", "REDACTED"),
             "REDACTED-word"
         );
+    }
+
+    #[test]
+    fn test_resolve_vault_references() {
+        let text = "Il tuo codice fiscale è: vault://codice_fiscale";
+        let entries = vec![("codice_fiscale".to_string(), "RSSMRA80A01H501Z".to_string())];
+
+        let (result, keys) = resolve_vault_references(text, &entries);
+
+        assert_eq!(result, "Il tuo codice fiscale è: RSSMRA80A01H501Z");
+        assert_eq!(keys, vec!["codice_fiscale"]);
+    }
+
+    #[test]
+    fn test_resolve_multiple_references() {
+        let text = "CF: vault://cf, email: vault://email";
+        let entries = vec![
+            ("cf".to_string(), "RSSMRA80A01H501Z".to_string()),
+            ("email".to_string(), "test@example.com".to_string()),
+        ];
+
+        let (result, keys) = resolve_vault_references(text, &entries);
+
+        assert!(result.contains("RSSMRA80A01H501Z"));
+        assert!(result.contains("test@example.com"));
+        assert_eq!(keys.len(), 2);
+    }
+
+    #[test]
+    fn test_resolve_no_references() {
+        let text = "No vault references here";
+        let entries = vec![("key".to_string(), "value".to_string())];
+
+        let (result, keys) = resolve_vault_references(text, &entries);
+
+        assert_eq!(result, text);
+        assert!(keys.is_empty());
+    }
+
+    #[test]
+    fn test_resolve_empty_value_skipped() {
+        let text = "vault://empty_key";
+        let entries = vec![("empty_key".to_string(), String::new())];
+
+        let (result, keys) = resolve_vault_references(text, &entries);
+
+        assert_eq!(result, "vault://empty_key");
+        assert!(keys.is_empty());
     }
 }

@@ -64,7 +64,7 @@ pub use exfiltration::{
     ScanResult, Severity,
 };
 pub use pairing::PairingManager;
-pub use vault_leak::redact_vault_values;
+pub use vault_leak::{redact_vault_values, resolve_vault_references};
 
 #[cfg(feature = "vault-2fa")]
 pub use totp::{generate_recovery_codes, TotpError, TotpManager};

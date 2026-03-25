@@ -27,6 +27,39 @@ use super::registry::{get_optional_string, get_string_param, Tool, ToolContext, 
 /// Vault prefix for user secrets (namespaced away from provider/channel keys)
 const VAULT_PREFIX: &str = "vault.";
 
+/// Build a vault key prefix for listing, scoped to the active profile.
+///
+/// - Default profile (or None/empty/"default"): `"vault."`
+/// - Other profiles: `"vault.p:{slug}."`
+///
+/// Used by the agent loop for profile-aware vault resolution.
+pub fn vault_prefix_for_profile(profile_slug: Option<&str>) -> String {
+    match profile_slug {
+        Some(slug) if !slug.is_empty() && slug != "default" => {
+            format!("{VAULT_PREFIX}p:{slug}.")
+        }
+        _ => VAULT_PREFIX.to_string(),
+    }
+}
+
+/// Strip the vault prefix to get the user-visible key name.
+///
+/// For the default profile, excludes other profiles' scoped keys (`vault.p:*`).
+pub fn strip_vault_prefix(key: &str, profile_slug: Option<&str>) -> Option<String> {
+    let prefix = vault_prefix_for_profile(profile_slug);
+    if let Some(stripped) = key.strip_prefix(&prefix) {
+        let is_default = profile_slug.is_none()
+            || profile_slug == Some("default")
+            || profile_slug == Some("");
+        if is_default && stripped.starts_with("p:") {
+            return None;
+        }
+        Some(stripped.to_string())
+    } else {
+        None
+    }
+}
+
 /// Encrypted secret vault — LLM-accessible tool for storing sensitive data.
 ///
 /// When the user mentions passwords, tokens, or other secrets in conversation,
@@ -67,38 +100,8 @@ impl VaultTool {
     /// - Default profile (or None): `vault.{name}` (backward compatible)
     /// - Other profiles: `vault.p:{slug}.{name}`
     fn vault_key_for(name: &str, profile_slug: Option<&str>) -> SecretKey {
-        match profile_slug {
-            Some(slug) if slug != "default" => {
-                SecretKey::custom(&format!("{VAULT_PREFIX}p:{slug}.{name}"))
-            }
-            _ => SecretKey::custom(&format!("{VAULT_PREFIX}{name}")),
-        }
-    }
-
-    /// Build a vault key prefix for listing (returns the prefix string to filter).
-    fn vault_prefix_for(profile_slug: Option<&str>) -> String {
-        match profile_slug {
-            Some(slug) if slug != "default" => format!("{VAULT_PREFIX}p:{slug}."),
-            _ => VAULT_PREFIX.to_string(),
-        }
-    }
-
-    /// Strip the vault prefix from a key to get the user-visible name.
-    /// For default profile, excludes profile-scoped keys (vault.p:*).
-    fn strip_vault_prefix(key: &str, profile_slug: Option<&str>) -> Option<String> {
-        let prefix = Self::vault_prefix_for(profile_slug);
-        if let Some(stripped) = key.strip_prefix(&prefix) {
-            // When listing default profile, exclude other profiles' keys
-            let is_default = profile_slug.is_none()
-                || profile_slug == Some("default")
-                || profile_slug == Some("");
-            if is_default && stripped.starts_with("p:") {
-                return None;
-            }
-            Some(stripped.to_string())
-        } else {
-            None
-        }
+        let prefix = vault_prefix_for_profile(profile_slug);
+        SecretKey::custom(&format!("{prefix}{name}"))
     }
 
     /// Check if 2FA is enabled.
@@ -369,7 +372,7 @@ impl Tool for VaultTool {
                 let all = secrets.load()?;
                 let vault_keys: Vec<String> = all
                     .keys()
-                    .filter_map(|k| Self::strip_vault_prefix(k, profile))
+                    .filter_map(|k| strip_vault_prefix(k, profile))
                     .collect();
 
                 if vault_keys.is_empty() {
@@ -435,15 +438,15 @@ mod tests {
     #[test]
     fn test_vault_prefix_stripping() {
         // Default profile
-        let name = VaultTool::strip_vault_prefix("vault.my_key", None);
+        let name = strip_vault_prefix("vault.my_key", None);
         assert_eq!(name, Some("my_key".to_string()));
 
         // Should NOT match profile-scoped keys when filtering default
-        let name = VaultTool::strip_vault_prefix("vault.p:work.my_key", None);
+        let name = strip_vault_prefix("vault.p:work.my_key", None);
         assert_eq!(name, None);
 
         // Profile-scoped
-        let name = VaultTool::strip_vault_prefix("vault.p:work.my_key", Some("work"));
+        let name = strip_vault_prefix("vault.p:work.my_key", Some("work"));
         assert_eq!(name, Some("my_key".to_string()));
     }
 

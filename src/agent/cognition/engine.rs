@@ -25,9 +25,15 @@ const MAX_COGNITION_ITERATIONS: u32 = 4;
 /// Default timeout for the entire cognition phase (seconds).
 const DEFAULT_COGNITION_TIMEOUT_SECS: u64 = 15;
 
+/// How many recent messages to include for conversational context.
+const COGNITION_HISTORY_TAIL: usize = 10;
+
 /// Parameters for running the cognition phase.
 pub struct CognitionParams<'a> {
     pub user_prompt: &'a str,
+    /// Recent conversation history for anaphoric reference resolution
+    /// (e.g., "show it" → the codice fiscale from the previous turn).
+    pub recent_history: &'a [ChatMessage],
     pub config: &'a Config,
     pub tool_registry: &'a RwLock<ToolRegistry>,
     pub skill_registry: Option<&'a RwLock<SkillRegistry>>,
@@ -82,10 +88,20 @@ pub async fn run_cognition(params: CognitionParams<'_>) -> Option<CognitionResul
     let system_prompt = build_cognition_prompt(params.contact_summary, params.channel);
     let tool_defs = discovery::cognition_tool_definitions();
 
-    let mut messages = vec![
-        ChatMessage::system(&system_prompt),
-        ChatMessage::user(params.user_prompt),
-    ];
+    let mut messages = vec![ChatMessage::system(&system_prompt)];
+
+    // Inject recent conversation history so cognition can resolve anaphoric
+    // references ("it", "that", "show me" → referencing prior turns).
+    // Only include the tail to keep token usage low.
+    if !params.recent_history.is_empty() {
+        let tail_start = params
+            .recent_history
+            .len()
+            .saturating_sub(COGNITION_HISTORY_TAIL);
+        messages.extend_from_slice(&params.recent_history[tail_start..]);
+    }
+
+    messages.push(ChatMessage::user(params.user_prompt));
 
     let max_iterations = if params.max_iterations > 0 {
         params.max_iterations

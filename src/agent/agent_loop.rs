@@ -12,7 +12,7 @@ use crate::provider::{
     ChatMessage, ChatRequest, Provider, RequestPriority, ToolCallFunction, ToolCallSerialized,
     Usage,
 };
-use crate::security::{redact, redact_vault_values};
+use crate::security::{redact, redact_vault_values, resolve_vault_references};
 use crate::session::SessionManager;
 use crate::skills::loader::SkillRegistry;
 use crate::storage::Database;
@@ -748,6 +748,7 @@ impl AgentLoop {
         let cognition_result: CognitionResult = {
             let params = CognitionParams {
                 user_prompt: &prompt_content,
+                recent_history: &history,
                 config: &config,
                 tool_registry: &self.tool_registry,
                 skill_registry: self.skill_registry.as_deref(),
@@ -785,17 +786,50 @@ impl AgentLoop {
         // Handle answer_directly (simple requests answered by cognition)
         if cognition_result.answer_directly {
             if let Some(ref answer) = cognition_result.direct_answer {
+                // Auto-resolve vault:// references in direct answers (profile-scoped)
+                let resolved_answer = if answer.contains("vault://") {
+                    if let Ok(secrets) = crate::storage::global_secrets() {
+                        let profile_ref = active_profile_slug.as_deref();
+                        let vault_prefix =
+                            crate::tools::vault::vault_prefix_for_profile(profile_ref);
+                        let entries: Vec<(String, String)> = secrets
+                            .list_keys()
+                            .into_iter()
+                            .filter(|k| k.starts_with(&vault_prefix))
+                            .filter_map(|k| {
+                                let short =
+                                    crate::tools::vault::strip_vault_prefix(&k, profile_ref)?;
+                                let val =
+                                    secrets.get(&crate::storage::SecretKey::custom(&k)).ok()??;
+                                Some((short, val))
+                            })
+                            .collect();
+                        let (resolved, keys) = resolve_vault_references(answer, &entries);
+                        if !keys.is_empty() {
+                            tracing::info!(
+                                resolved_keys = ?keys,
+                                profile = ?profile_ref,
+                                "Auto-resolved vault:// in direct answer"
+                            );
+                        }
+                        resolved
+                    } else {
+                        answer.clone()
+                    }
+                } else {
+                    answer.clone()
+                };
                 self.session_manager
                     .add_message(session_key, "user", content)
                     .await?;
                 self.session_manager
-                    .add_message(session_key, "assistant", answer)
+                    .add_message(session_key, "assistant", &resolved_answer)
                     .await?;
                 // Stream the direct answer to the frontend
                 if let Some(ref tx) = stream_tx {
                     let _ = tx
                         .send(crate::provider::StreamChunk {
-                            delta: answer.clone(),
+                            delta: resolved_answer.clone(),
                             done: true,
                             event_type: None,
                             tool_call_data: None,
@@ -803,7 +837,7 @@ impl AgentLoop {
                         .await;
                 }
                 self.context.clear_cognition_context().await;
-                return Ok(answer.clone());
+                return Ok(resolved_answer);
             }
         }
 
@@ -1865,7 +1899,7 @@ impl AgentLoop {
             .await;
         }
 
-        let response_text = if token_budget_exhausted && final_content.is_none() {
+        let mut response_text = if token_budget_exhausted && final_content.is_none() {
             format!(
                 "(Session token budget exhausted — used {} of {} tokens. \
                  The agent stopped to avoid exceeding the configured limit.)",
@@ -1876,6 +1910,42 @@ impl AgentLoop {
                 .unwrap_or_else(|| "(max iterations reached without final response)".to_string())
         };
 
+        // Auto-resolve vault:// references the LLM left unresolved.
+        // When the LLM outputs "vault://key" literally instead of calling the
+        // vault retrieve tool, we resolve it here so the user sees the real value.
+        // Resolved keys are added to vault_retrieved_keys to prevent re-redaction.
+        // Only resolves keys belonging to the active profile.
+        if response_text.contains("vault://") {
+            if let Ok(secrets) = crate::storage::global_secrets() {
+                let profile_ref = active_profile_slug.as_deref();
+                let vault_prefix =
+                    crate::tools::vault::vault_prefix_for_profile(profile_ref);
+                let resolve_entries: Vec<(String, String)> = secrets
+                    .list_keys()
+                    .into_iter()
+                    .filter(|k| k.starts_with(&vault_prefix))
+                    .filter_map(|k| {
+                        let short_key =
+                            crate::tools::vault::strip_vault_prefix(&k, profile_ref)?;
+                        let value = secrets.get(&crate::storage::SecretKey::custom(&k)).ok()??;
+                        Some((short_key, value))
+                    })
+                    .collect();
+
+                let (resolved, keys) =
+                    resolve_vault_references(&response_text, &resolve_entries);
+                if !keys.is_empty() {
+                    tracing::info!(
+                        resolved_keys = ?keys,
+                        profile = ?profile_ref,
+                        "Auto-resolved vault:// references in LLM output"
+                    );
+                    response_text = resolved;
+                    vault_retrieved_keys.extend(keys);
+                }
+            }
+        }
+
         // Apply exfiltration filter to prevent secret leaks in output
         // This scans the response for API keys, tokens, passwords, etc.
         // and redacts them before returning to the user.
@@ -1884,13 +1954,20 @@ impl AgentLoop {
         // Also redact any vault values that might have leaked into the response.
         // EXCEPT: values the user explicitly retrieved this turn (with 2FA verified)
         // — those must pass through so the user can actually see them.
+        // Uses profile-scoped prefix so short keys match vault_retrieved_keys correctly.
         if let Ok(secrets) = crate::storage::global_secrets() {
+            let profile_ref = active_profile_slug.as_deref();
             let vault_entries: Vec<(String, String)> = secrets
                 .list_keys()
                 .into_iter()
                 .filter(|k| k.starts_with("vault."))
                 .filter_map(|k| {
-                    let short_key = k.strip_prefix("vault.")?.to_string();
+                    // Use profile-aware stripping so "vault.p:work.my_key" → "my_key"
+                    // instead of "p:work.my_key", matching vault_retrieved_keys entries.
+                    let short_key =
+                        crate::tools::vault::strip_vault_prefix(&k, profile_ref)
+                            .or_else(|| k.strip_prefix("vault.").map(|s| s.to_string()))
+                            ?;
                     // Skip keys the user explicitly retrieved this turn
                     if vault_retrieved_keys.contains(&short_key) {
                         return None;
