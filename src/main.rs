@@ -1488,7 +1488,7 @@ async fn main() -> Result<()> {
                                     // 1. Close idle browser tabs (same logic as agent loop start)
                                     monitor_session
                                         .close_idle_tabs(
-                                            crate::tools::browser::BROWSER_IDLE_TIMEOUT_SECS,
+                                            crate::tools::browser::browser_idle_timeout_secs(),
                                         )
                                         .await;
 

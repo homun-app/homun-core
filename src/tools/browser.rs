@@ -25,8 +25,12 @@ use tokio::sync::RwLock;
 use super::mcp::McpPeer;
 use super::registry::{Tool, ToolContext, ToolResult};
 
-/// Default idle timeout before auto-closing the browser (seconds).
-pub const BROWSER_IDLE_TIMEOUT_SECS: u64 = 300; // 5 minutes
+/// Read browser idle timeout from config (default 300s = 5 minutes).
+pub fn browser_idle_timeout_secs() -> u64 {
+    crate::config::Config::load()
+        .map(|c| c.browser.idle_timeout_secs)
+        .unwrap_or(300)
+}
 
 /// Shared browser session state, readable by the agent loop.
 ///
@@ -1321,6 +1325,115 @@ impl BrowserTool {
         Ok(resp.content)
     }
 
+    /// Switch browser from headless to visible mode.
+    ///
+    /// Restarts the MCP Playwright process without `--headless`. The browser
+    /// becomes visible on screen, allowing manual CAPTCHA solving or visual
+    /// debugging. Navigates back to the last URL to restore context.
+    async fn action_show(
+        &self,
+        tab: &crate::browser::tab_session::TabSession,
+    ) -> Result<ToolResult> {
+        let pool = self.pool.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("Browser visibility switching requires gateway mode (pool not available)")
+        })?;
+
+        let config = crate::config::Config::load()
+            .map_err(|e| anyhow::anyhow!("Config load failed: {e}"))?;
+        let profile = &config.browser.default_profile;
+
+        // Already visible?
+        if pool.is_visible(profile).await {
+            return Ok(ToolResult::success(
+                "Browser is already in visible mode.".to_string(),
+            ));
+        }
+
+        let last_url = tab.last_url.read().await.clone();
+
+        // Restart with visible mode — this kills the current process
+        pool.restart_visible(profile)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to switch to visible mode: {e}"))?;
+
+        // Re-inject stealth on the new process
+        self.stealth_injected
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+
+        let mut result =
+            "Browser switched to VISIBLE mode. The browser window is now showing on screen.\n"
+                .to_string();
+
+        // Re-navigate to the last URL to restore context
+        if let Some(url) = &last_url {
+            result.push_str(&format!("Re-navigating to {url}...\n"));
+            let _ = self
+                .peer
+                .call_tool("browser_navigate", json!({"url": url}))
+                .await;
+            tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+            if let Ok(snap) = self.peer.call_tool("browser_snapshot", json!({})).await {
+                let compact = compact_browser_snapshot_staged(&snap, self.seen_results());
+                result.push('\n');
+                result.push_str(&compact);
+            }
+        }
+
+        Ok(ToolResult::success(result))
+    }
+
+    /// Switch browser from visible back to headless mode.
+    ///
+    /// Restarts the MCP process with `--headless`. Useful after resolving
+    /// a CAPTCHA in visible mode — the browser goes back to background
+    /// operation without taking over the user's screen.
+    async fn action_hide(
+        &self,
+        tab: &crate::browser::tab_session::TabSession,
+    ) -> Result<ToolResult> {
+        let pool = self.pool.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("Browser visibility switching requires gateway mode (pool not available)")
+        })?;
+
+        let config = crate::config::Config::load()
+            .map_err(|e| anyhow::anyhow!("Config load failed: {e}"))?;
+        let profile = &config.browser.default_profile;
+
+        if !pool.is_visible(profile).await {
+            return Ok(ToolResult::success(
+                "Browser is already in headless mode.".to_string(),
+            ));
+        }
+
+        let last_url = tab.last_url.read().await.clone();
+
+        pool.restart_headless(profile)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to switch to headless mode: {e}"))?;
+
+        self.stealth_injected
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+
+        let mut result =
+            "Browser switched back to HEADLESS mode (running in background).\n".to_string();
+
+        if let Some(url) = &last_url {
+            result.push_str(&format!("Re-navigating to {url}...\n"));
+            let _ = self
+                .peer
+                .call_tool("browser_navigate", json!({"url": url}))
+                .await;
+            tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+            if let Ok(snap) = self.peer.call_tool("browser_snapshot", json!({})).await {
+                let compact = compact_browser_snapshot_staged(&snap, self.seen_results());
+                result.push('\n');
+                result.push_str(&compact);
+            }
+        }
+
+        Ok(ToolResult::success(result))
+    }
+
     /// Execute the `close` action.
     async fn action_close(&self, session_key: &str) -> Result<ToolResult> {
         // Close only this conversation's tab (not the entire browser)
@@ -1604,6 +1717,8 @@ impl Tool for BrowserTool {
          - screenshot(): Take screenshot and describe via vision model\n\
          - click_coordinates(x, y): Click at pixel coordinates (for canvas/SVG/maps)\n\
          - hold_click(ref OR x+y, duration_ms?): Press and hold (for 'hold to verify' CAPTCHAs). Use ref for ARIA elements, x+y coordinates for non-ARIA buttons\n\
+         - show(): Switch to visible mode (browser window appears on screen — for CAPTCHA or debugging)\n\
+         - hide(): Switch back to headless mode (browser goes to background)\n\
          - block_resources(): Block images/fonts/media for faster navigation\n\
          - unblock_resources(): Restore normal resource loading\n\
          - evaluate(expression): Read page state via JS (READ-ONLY, no DOM changes)\n\
@@ -1629,8 +1744,8 @@ impl Tool for BrowserTool {
                         "navigate", "snapshot", "screenshot", "click", "type",
                         "fill", "select_option", "press_key", "hover", "scroll",
                         "drag", "click_coordinates", "hold_click",
-                        "block_resources", "unblock_resources", "evaluate",
-                        "close", "wait"
+                        "show", "hide", "block_resources", "unblock_resources",
+                        "evaluate", "close", "wait"
                     ],
                     "description": "Browser action to perform"
                 },
@@ -1742,21 +1857,23 @@ impl Tool for BrowserTool {
             "evaluate" => self.action_evaluate(&args, &tab).await?,
             "wait" => self.action_wait(&args).await?,
             "hold_click" => self.action_hold_click(&args, &tab).await?,
+            "show" => self.action_show(&tab).await?,
+            "hide" => self.action_hide(&tab).await?,
             "close" => self.action_close(&session_key).await?,
             "" => ToolResult::error(
                 "Missing 'action' parameter. Available actions: \
                  navigate, snapshot, screenshot, click, type, fill, \
                  select_option, press_key, hover, scroll, drag, \
-                 click_coordinates, hold_click, block_resources, \
-                 unblock_resources, evaluate, wait, close"
+                 click_coordinates, hold_click, show, hide, \
+                 block_resources, unblock_resources, evaluate, wait, close"
                     .to_string(),
             ),
             unknown => ToolResult::error(format!(
                 "Unknown action \"{unknown}\". Available actions: \
                  navigate, snapshot, screenshot, click, type, fill, \
                  select_option, press_key, hover, scroll, drag, \
-                 click_coordinates, hold_click, block_resources, \
-                 unblock_resources, evaluate, wait, close"
+                 click_coordinates, hold_click, show, hide, \
+                 block_resources, unblock_resources, evaluate, wait, close"
             )),
         };
 
@@ -2305,7 +2422,9 @@ fn detect_captcha_in_sparse_page(tree: &str) -> Option<String> {
              the accessibility tree — it's a custom widget.\n\
              → Use: browser({action: \"hold_click\"})\n\
              The button will be auto-detected via JS. No coordinates needed.\n\
-             After release, take a snapshot to verify if the challenge was passed.\n"
+             After release, take a snapshot to verify if the challenge was passed.\n\
+             If hold_click fails in headless, use browser({action: \"show\"}) to switch \
+             to visible mode, then retry. After passing, use browser({action: \"hide\"}).\n"
                 .to_string(),
         );
     }

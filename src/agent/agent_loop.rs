@@ -1022,7 +1022,7 @@ impl AgentLoop {
         if let Some(ref session) = *self.browser_session.read().await {
             // Close browser tabs idle too long (frees resources)
             session
-                .close_idle_tabs(crate::tools::browser::BROWSER_IDLE_TIMEOUT_SECS)
+                .close_idle_tabs(crate::tools::browser::browser_idle_timeout_secs())
                 .await;
 
             // If this conversation has an active browser tab, tell the model

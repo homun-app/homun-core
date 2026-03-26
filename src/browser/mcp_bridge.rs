@@ -38,6 +38,15 @@ pub fn browser_mcp_server_config_for_profile(
     browser: &BrowserConfig,
     profile_name: &str,
 ) -> Option<McpServerConfig> {
+    browser_mcp_server_config_with_override(browser, profile_name, None)
+}
+
+/// Build MCP config with an optional headless override (for show/hide runtime switching).
+pub fn browser_mcp_server_config_with_override(
+    browser: &BrowserConfig,
+    profile_name: &str,
+    headless_override: Option<bool>,
+) -> Option<McpServerConfig> {
     if !browser.enabled {
         return None;
     }
@@ -61,8 +70,9 @@ pub fn browser_mcp_server_config_for_profile(
         args.push(format!("--browser={browser_type}"));
     }
 
-    // Headless mode — profile override or global
-    if browser.headless_for_profile(profile_name) {
+    // Headless mode — runtime override > profile override > global
+    let headless = headless_override.unwrap_or_else(|| browser.headless_for_profile(profile_name));
+    if headless {
         args.push("--headless".to_string());
     }
 
@@ -124,6 +134,9 @@ pub struct BrowserPool {
     peers: RwLock<HashMap<String, Arc<McpPeer>>>,
     /// Shared config for reading profile definitions at connect time.
     config: Arc<RwLock<Config>>,
+    /// Runtime headless overrides (not persisted to config).
+    /// Used by show/hide to switch between headless and visible mode.
+    headless_overrides: RwLock<HashMap<String, bool>>,
 }
 
 impl BrowserPool {
@@ -132,6 +145,7 @@ impl BrowserPool {
         Self {
             peers: RwLock::new(HashMap::new()),
             config,
+            headless_overrides: RwLock::new(HashMap::new()),
         }
     }
 
@@ -159,11 +173,17 @@ impl BrowserPool {
         }
 
         // Slow path: start a new MCP process for this profile
+        let headless_override = self.headless_overrides.read().await.get(profile_name).copied();
         let mcp_config = {
             let config = self.config.read().await;
-            browser_mcp_server_config_for_profile(&config.browser, profile_name).with_context(
-                || format!("Profile '{profile_name}' not found or browser disabled"),
-            )?
+            browser_mcp_server_config_with_override(
+                &config.browser,
+                profile_name,
+                headless_override,
+            )
+            .with_context(|| {
+                format!("Profile '{profile_name}' not found or browser disabled")
+            })?
         };
 
         let sandbox_config = {
@@ -192,6 +212,41 @@ impl BrowserPool {
         }
         peers.insert(profile_name.to_string(), Arc::clone(&peer));
         Ok(peer)
+    }
+
+    /// Restart a profile in visible (non-headless) mode.
+    ///
+    /// Shuts down the current peer and starts a new one without `--headless`.
+    /// The override persists until [`restart_headless`] clears it.
+    /// Cookies and user data are preserved (same `user_data_dir`).
+    pub async fn restart_visible(&self, profile_name: &str) -> Result<Arc<McpPeer>> {
+        tracing::info!(profile = profile_name, "Switching browser to visible mode");
+        self.shutdown_profile(profile_name).await;
+        self.headless_overrides
+            .write()
+            .await
+            .insert(profile_name.to_string(), false);
+        self.get_or_start(profile_name).await
+    }
+
+    /// Restart a profile in headless mode (clearing any visibility override).
+    ///
+    /// Returns to the config-defined headless setting for this profile.
+    pub async fn restart_headless(&self, profile_name: &str) -> Result<Arc<McpPeer>> {
+        tracing::info!(profile = profile_name, "Switching browser back to headless mode");
+        self.shutdown_profile(profile_name).await;
+        self.headless_overrides.write().await.remove(profile_name);
+        self.get_or_start(profile_name).await
+    }
+
+    /// Check if a profile is currently running in visible (non-headless) mode.
+    pub async fn is_visible(&self, profile_name: &str) -> bool {
+        self.headless_overrides
+            .read()
+            .await
+            .get(profile_name)
+            .copied()
+            == Some(false)
     }
 
     /// Shut down a specific profile's MCP process (for config changes or cleanup).

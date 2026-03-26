@@ -1680,6 +1680,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_browser_idle_timeout() -> u64 {
+    300 // 5 minutes
+}
+
 fn default_persona() -> String {
     "bot".to_string()
 }
@@ -2441,6 +2445,10 @@ pub struct BrowserConfig {
     /// and travel sites that check for automation.
     #[serde(default = "default_true")]
     pub stealth: bool,
+    /// Tab idle timeout in seconds before auto-closing (default: 300 = 5 min).
+    /// Set to 0 to disable idle cleanup.
+    #[serde(default = "default_browser_idle_timeout")]
+    pub idle_timeout_secs: u64,
     /// Action policy — allow/deny categories and URL patterns
     #[serde(default)]
     pub policy: BrowserPolicyConfig,
@@ -2557,6 +2565,7 @@ impl Default for BrowserConfig {
             default_profile: "default".to_string(),
             profiles,
             stealth: true,
+            idle_timeout_secs: 300,
             policy: BrowserPolicyConfig::default(),
         }
     }
