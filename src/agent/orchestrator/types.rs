@@ -42,7 +42,14 @@ fn default_simple() -> String {
 
 impl IntentAnalysis {
     /// Parse the `complexity` string field into a typed enum.
+    ///
+    /// Browser tasks always use `Simple` — the orchestrator's subtask
+    /// decomposition breaks the continuous browser interaction flow
+    /// (form filling, autocomplete, navigation) and loses context.
     pub fn task_complexity(&self) -> TaskComplexity {
+        if self.needs_browser {
+            return TaskComplexity::Simple;
+        }
         if self.complexity.eq_ignore_ascii_case("orchestrated") {
             TaskComplexity::Orchestrated
         } else {
@@ -133,13 +140,22 @@ mod tests {
     }
 
     #[test]
-    fn parses_orchestrated_complexity() {
+    fn browser_task_always_simple_even_if_orchestrated() {
+        // Browser tasks are forced to Simple — orchestrator subtask decomposition
+        // breaks the continuous browser interaction flow.
         let json = r#"{"complexity":"orchestrated","intent":"product_research","needs_browser":true,"multi_source":true,"entities":["moto guzzi"],"reasoning":"multi-site search"}"#;
         let analysis: IntentAnalysis = serde_json::from_str(json).unwrap();
-        assert_eq!(analysis.task_complexity(), TaskComplexity::Orchestrated);
+        assert_eq!(analysis.task_complexity(), TaskComplexity::Simple);
         assert!(analysis.needs_browser);
         assert!(analysis.multi_source);
         assert_eq!(analysis.entities, vec!["moto guzzi"]);
+    }
+
+    #[test]
+    fn non_browser_orchestrated_stays_orchestrated() {
+        let json = r#"{"complexity":"orchestrated","intent":"research","needs_browser":false,"multi_source":true,"entities":["rust"],"reasoning":"multi-source"}"#;
+        let analysis: IntentAnalysis = serde_json::from_str(json).unwrap();
+        assert_eq!(analysis.task_complexity(), TaskComplexity::Orchestrated);
     }
 
     #[test]

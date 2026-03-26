@@ -244,9 +244,10 @@ mod tests {
 
     #[test]
     fn parses_clean_json() {
+        // Browser tasks are forced to Simple even if classified as orchestrated.
         let raw = r#"{"complexity":"orchestrated","intent":"product_research","needs_browser":true,"multi_source":true,"entities":["moto guzzi"],"reasoning":"multi-site product search"}"#;
         let analysis = parse_response(raw).expect("should parse");
-        assert_eq!(analysis.task_complexity(), TaskComplexity::Orchestrated);
+        assert_eq!(analysis.task_complexity(), TaskComplexity::Simple);
         assert_eq!(analysis.intent, "product_research");
     }
 
