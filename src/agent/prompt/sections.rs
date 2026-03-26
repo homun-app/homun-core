@@ -193,7 +193,8 @@ impl PromptSection for ToolsSection {
                  - Booking sites: navigate via Google search first to establish a natural session\n\
                  - If a click fails with timeout: STOP, take snapshot() to see what's blocking (overlay, modal, banner). NEVER retry the same ref more than once\n\
                  - Before clicking 'Search' or 'Submit': verify ALL required fields are filled (especially passengers, dates, quantity). If a field looks empty in the snapshot, fill it BEFORE submitting\n\
-                 - Fill forms ONE FIELD AT A TIME: type() → check autocomplete → click match → next field. Do NOT use fill_form for booking/travel sites — it skips autocomplete and breaks reactive fields\n",
+                 - Fill forms ONE FIELD AT A TIME: type() → check autocomplete → click match → next field. Do NOT use fill_form for booking/travel sites — it skips autocomplete and breaks reactive fields\n\
+                 - When a form asks for personal info (name, email, phone, etc.), use the data from the User Profile (USER.md) — NEVER ask the user for info you already have in the profile\n",
             );
         }
 

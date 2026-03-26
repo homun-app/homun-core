@@ -413,6 +413,15 @@ impl BrowserTaskPlanState {
         }
 
         let mut lines = vec![format!("Browser task objective: {}", self.objective)];
+
+        // Inject compact user profile reminder for form-filling tasks.
+        // This combats "lost in the middle" — the LLM forgets USER.md data
+        // from the system prompt when the context is 80K+ chars deep.
+        if self.routing.browser_required {
+            if let Some(profile_hint) = Self::compact_user_profile() {
+                lines.push(profile_hint);
+            }
+        }
         if self.routing.browser_required {
             lines.push(format!(
                 "Task type: {} (browser-oriented).",
@@ -448,6 +457,46 @@ impl BrowserTaskPlanState {
         }
 
         Some(ChatMessage::user(&lines.join("\n")))
+    }
+
+    /// Extract a compact user profile from USER.md for form-filling context.
+    ///
+    /// Reads the Identity and Contacts sections from USER.md and formats
+    /// them as a short reminder. This gets injected near the end of the
+    /// message list so the LLM has the user's data fresh in context.
+    fn compact_user_profile() -> Option<String> {
+        let brain_dir = crate::config::Config::brain_dir();
+        let user_md = brain_dir.join("USER.md");
+        let content = std::fs::read_to_string(&user_md).ok()?;
+        if content.trim().is_empty() {
+            return None;
+        }
+
+        // Extract key-value lines from Identity and Contacts sections
+        let mut profile_lines = Vec::new();
+        let mut in_relevant_section = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("## ") {
+                let section = trimmed.trim_start_matches("## ").to_lowercase();
+                in_relevant_section =
+                    section == "identity" || section == "contacts" || section == "contatti";
+                continue;
+            }
+            if in_relevant_section && trimmed.starts_with("- ") && trimmed.contains(':') {
+                profile_lines.push(trimmed.to_string());
+            }
+        }
+
+        if profile_lines.is_empty() {
+            return None;
+        }
+
+        Some(format!(
+            "REMINDER — User profile data (use this for forms, do NOT ask the user):\n{}",
+            profile_lines.join("\n")
+        ))
     }
 }
 
