@@ -650,6 +650,11 @@ impl BrowserTool {
             snapshot.push_str(&error_hint);
         }
 
+        // Detect CAPTCHA/verification on sparse pages (<15 elements)
+        if let Some(captcha_hint) = detect_captcha_sparse_page(&snapshot) {
+            snapshot.push_str(&captcha_hint);
+        }
+
         let mut result = format!("Navigated to {url}\n\n");
         result.push_str(&snapshot);
         Ok(ToolResult::success(result))
@@ -743,6 +748,10 @@ impl BrowserTool {
                 // Detect hidden interactive elements on sparse pages
                 if let Some(cursor_section) = self.find_cursor_interactive(&compact).await {
                     compact.push_str(&cursor_section);
+                }
+                // Detect CAPTCHA/verification on sparse pages
+                if let Some(captcha_hint) = detect_captcha_sparse_page(&compact) {
+                    compact.push_str(&captcha_hint);
                 }
                 Ok(ToolResult::success(compact))
             }
@@ -2562,6 +2571,49 @@ fn detect_error_page(snapshot: &str) -> Option<String> {
          Try: navigate to the site's homepage and search/browse from there."
             .to_string(),
     )
+}
+
+/// Detect CAPTCHA/verification pages by checking for sparse interactive elements
+/// combined with CAPTCHA keywords. Only fires on pages with <15 interactive elements
+/// to avoid false positives on complex pages (booking forms, search results).
+fn detect_captcha_sparse_page(snapshot: &str) -> Option<String> {
+    let interactive_count = snapshot.matches("[ref=").count();
+    if interactive_count >= 15 {
+        return None; // complex page — not a CAPTCHA
+    }
+
+    let lower = snapshot.to_ascii_lowercase();
+    let is_captcha = lower.contains("persona o un robot")
+        || lower.contains("are you a robot")
+        || lower.contains("are you human")
+        || lower.contains("verify you are human")
+        || lower.contains("tieni premuto")
+        || lower.contains("press and hold")
+        || lower.contains("hold to verify")
+        || lower.contains("human verification")
+        || lower.contains("bot detection")
+        || lower.contains("security check")
+        || lower.contains("captcha")
+        || lower.contains("challenge-platform")
+        || lower.contains("cf-turnstile");
+
+    if !is_captcha {
+        return None;
+    }
+
+    tracing::info!(
+        interactive_count,
+        "CAPTCHA/verification page detected (sparse page)"
+    );
+
+    Some(format!(
+        "\n\n⚠ CAPTCHA DETECTED — This page has a bot verification challenge ({interactive_count} elements).\n\
+         Try these steps in order:\n\
+         1. Use hold_click at the center of the page (try ref of the verify button, duration_ms=15000)\n\
+         2. After hold_click, wait 3-5 seconds and take a snapshot to check\n\
+         3. If still blocked, use show() to switch to visible browser mode, then retry\n\
+         4. After passing the CAPTCHA, use hide() to switch back to headless"
+    ))
 }
 
 // ============================================================================
