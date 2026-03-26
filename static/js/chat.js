@@ -2210,7 +2210,10 @@ function connect() {
             clearTimeout(reconnectTimer);
             reconnectTimer = null;
         }
-        // Load conversation history from DB
+        // Force-reload history on reconnect — messages may have arrived
+        // while the WebSocket was disconnected (e.g. browser task completed
+        // while user was on another tab/app).
+        loadedConversationId = null;
         loadHistory();
         restoreActiveRun();
     };
