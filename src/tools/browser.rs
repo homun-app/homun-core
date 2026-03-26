@@ -1848,6 +1848,14 @@ pub fn compact_browser_snapshot_staged(output: &str, seen_results: bool) -> Stri
 
     result.push_str(&raw_tree);
 
+    // CAPTCHA detection — only on sparse pages (<15 interactive elements)
+    // to avoid false positives on full pages like Italo/Trenitalia.
+    if ref_count < 15 {
+        if let Some(captcha_hint) = detect_captcha_in_sparse_page(&raw_tree) {
+            result.push_str(&captcha_hint);
+        }
+    }
+
     // Stage-aware hints based on page structure
     if let Some(hint) = page_stage_hint(&raw_tree, seen_results) {
         result.push_str(&hint);
@@ -2160,6 +2168,56 @@ fn parse_cursor_elements(json_str: &str, snapshot: &str) -> Vec<String> {
 /// Returns a recovery hint string to append to the snapshot, or `None`.
 ///
 /// Guards against false positives: "404 results found" is not an error page.
+/// Detect CAPTCHA challenges on sparse pages (< 15 interactive elements).
+///
+/// This is safe from false positives because we only check pages with very few
+/// elements — a real website form (Italo: 50+ elements) will never match.
+/// PerimeterX "hold to verify" buttons typically don't appear in the accessibility
+/// tree, so we detect via page text and suggest hold_click at center coordinates.
+fn detect_captcha_in_sparse_page(tree: &str) -> Option<String> {
+    let lower = tree.to_ascii_lowercase();
+
+    // Hold-to-verify patterns (PerimeterX, HUMAN Security)
+    let is_hold_captcha = lower.contains("tieni premuto")
+        || lower.contains("press and hold")
+        || lower.contains("hold to verify")
+        || lower.contains("premi e tieni");
+
+    // General bot check patterns
+    let is_bot_check = lower.contains("persona o un robot")
+        || lower.contains("are you a robot")
+        || lower.contains("are you human")
+        || lower.contains("human verification")
+        || lower.contains("bot detection")
+        || lower.contains("verifica di sicurezza");
+
+    if is_hold_captcha {
+        return Some(
+            "\n\n** CAPTCHA DETECTED: Hold-to-Verify **\n\
+             This is a PerimeterX/HUMAN Security challenge. The 'hold' button is NOT in \
+             the accessibility tree — it's a custom widget.\n\
+             → Use: browser({action: \"hold_click\", x: 750, y: 475, duration_ms: 3000})\n\
+             The button is typically centered on the page at approximately (750, 475).\n\
+             After release, take a snapshot to verify if the challenge was passed.\n"
+                .to_string(),
+        );
+    }
+
+    if is_bot_check {
+        return Some(
+            "\n\n** CAPTCHA DETECTED: Bot Verification Page **\n\
+             The site is showing a bot verification challenge. Try:\n\
+             1. Use screenshot() to see the visual challenge type\n\
+             2. If it shows a 'hold to verify' button: browser({action: \"hold_click\", x: 750, y: 475, duration_ms: 3000})\n\
+             3. If it's a Cloudflare check: wait(seconds=5) then snapshot()\n\
+             4. If it's a visual CAPTCHA (image selection): inform the user it requires manual intervention\n"
+                .to_string(),
+        );
+    }
+
+    None
+}
+
 fn detect_error_page(snapshot: &str) -> Option<String> {
     let header = &snapshot[..snapshot.len().min(500)];
     let header_lower = header.to_ascii_lowercase();
