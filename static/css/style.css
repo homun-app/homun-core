@@ -4442,6 +4442,44 @@ html, body {
     min-width: 0;
 }
 
+/* ─── Response Blocks (rich cards) ────────────────────── */
+.response-blocks { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.rb-card { background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 12px 16px; max-width: 400px; }
+.rb-header { font-weight: 600; font-size: 14px; color: var(--t1); margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+.rb-subtitle, .rb-description { font-size: 13px; color: var(--t2); margin-bottom: 8px; }
+.rb-options { display: flex; flex-direction: column; gap: 6px; }
+.rb-option {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+    padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--r-md);
+    background: var(--surface-subtle); cursor: pointer; text-align: left;
+    transition: border-color 0.15s, background 0.15s; width: 100%;
+}
+.rb-option:hover:not(:disabled) { border-color: var(--accent-border); background: var(--accent-light); }
+.rb-option:disabled { opacity: 0.6; cursor: default; }
+.rb-option--selected { border-color: var(--accent); background: var(--accent-light); }
+.rb-option--selected::after { content: '✓'; margin-left: auto; color: var(--accent); font-weight: 600; }
+.rb-option-label { font-size: 14px; font-weight: 500; color: var(--t1); }
+.rb-option-subtitle { font-size: 12px; color: var(--t2); }
+.rb-actions { display: flex; gap: 8px; margin-top: 8px; }
+.rb-btn { padding: 8px 16px; border-radius: var(--r-md); font-size: 13px; font-weight: 500; cursor: pointer; border: 1px solid var(--border); transition: all 0.15s; }
+.rb-btn:disabled { opacity: 0.5; cursor: default; }
+.rb-btn--approve { background: var(--accent); color: var(--accent-contrast); border-color: var(--accent); }
+.rb-btn--approve:hover:not(:disabled) { background: var(--accent-hover); }
+.rb-btn--deny { background: var(--surface-subtle); color: var(--t1); }
+.rb-btn--deny:hover:not(:disabled) { background: var(--surface-hover); }
+.rb-status-badge { font-size: 11px; font-weight: 600; text-transform: uppercase; padding: 2px 8px; border-radius: var(--r-pill); }
+.rb-status--pending { background: var(--surface-subtle); color: var(--t2); }
+.rb-status--active { background: var(--accent-light); color: var(--accent-text); }
+.rb-status--completed { background: #ECFDF5; color: #059669; }
+.rb-status--failed { background: #FEF2F2; color: #DC2626; }
+.rb-fields { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin-top: 8px; }
+.rb-field { display: contents; }
+.rb-field-label { font-size: 12px; color: var(--t2); white-space: nowrap; }
+.rb-field-value { font-size: 13px; color: var(--t1); font-weight: 500; }
+.rb-external-meta { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
+.rb-external-sender { font-size: 13px; font-weight: 600; color: var(--t1); }
+.rb-external-source { font-size: 11px; color: var(--t2); padding: 1px 6px; background: var(--surface-subtle); border-radius: var(--r-pill); }
+
 .chat-message-attachments {
     display: flex;
     flex-wrap: wrap;

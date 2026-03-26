@@ -147,7 +147,7 @@ impl Tool for KnowledgeTool {
                 if results.is_empty() {
                     return Ok(ToolResult {
                         output: "No results found in knowledge base.".to_string(),
-                        is_error: false,
+                        is_error: false, ..Default::default()
                     });
                 }
 
@@ -171,7 +171,7 @@ impl Tool for KnowledgeTool {
 
                 Ok(ToolResult {
                     output,
-                    is_error: false,
+                    is_error: false, ..Default::default()
                 })
             }
 
@@ -203,7 +203,7 @@ impl Tool for KnowledgeTool {
                         .await?;
                     Ok(ToolResult {
                         output: format!("Ingested {} files from {}", ids.len(), path.display()),
-                        is_error: false,
+                        is_error: false, ..Default::default()
                     })
                 } else if path.is_file() {
                     match engine
@@ -212,17 +212,17 @@ impl Tool for KnowledgeTool {
                     {
                         Some(id) => Ok(ToolResult {
                             output: format!("File {} indexed (source_id={})", path.display(), id),
-                            is_error: false,
+                            is_error: false, ..Default::default()
                         }),
                         None => Ok(ToolResult {
                             output: format!("File {} already indexed (skipped)", path.display()),
-                            is_error: false,
+                            is_error: false, ..Default::default()
                         }),
                     }
                 } else {
                     Ok(ToolResult {
                         output: format!("Path not found: {}", path.display()),
-                        is_error: true,
+                        is_error: true, ..Default::default()
                     })
                 }
             }
@@ -234,7 +234,7 @@ impl Tool for KnowledgeTool {
                 if sources.is_empty() {
                     return Ok(ToolResult {
                         output: "Knowledge base is empty. Use 'ingest' to add files.".to_string(),
-                        is_error: false,
+                        is_error: false, ..Default::default()
                     });
                 }
 
@@ -248,7 +248,7 @@ impl Tool for KnowledgeTool {
 
                 Ok(ToolResult {
                     output,
-                    is_error: false,
+                    is_error: false, ..Default::default()
                 })
             }
 
@@ -275,7 +275,7 @@ impl Tool for KnowledgeTool {
                     } else {
                         format!("Source {} not found.", source_id)
                     },
-                    is_error: false,
+                    is_error: false, ..Default::default()
                 })
             }
 
@@ -325,7 +325,7 @@ impl Tool for KnowledgeTool {
                     "Unknown action '{}'. Use: search, ingest, list, remove, reveal.",
                     other
                 ),
-                is_error: true,
+                is_error: true, ..Default::default()
             }),
         }
     }

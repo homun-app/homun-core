@@ -10,11 +10,27 @@ use crate::bus::OutboundMessage;
 use crate::provider::{FunctionDefinition, ToolDefinition};
 use crate::tools::approval::ApprovalManager;
 
-/// Result of executing a tool — always a string for the LLM
+/// Result of executing a tool — always a string for the LLM.
+/// Optionally carries rich UI blocks for capable clients.
 #[derive(Debug, Clone)]
 pub struct ToolResult {
     pub output: String,
     pub is_error: bool,
+    /// Rich UI blocks for capable clients (Flutter, Web UI).
+    /// Empty for most tools — the LLM never sees these.
+    /// Defaults to empty via `Default` so existing struct literals keep working.
+    #[allow(clippy::struct_field_names)]
+    pub blocks: Vec<super::ResponseBlock>,
+}
+
+impl Default for ToolResult {
+    fn default() -> Self {
+        Self {
+            output: String::new(),
+            is_error: false,
+            blocks: Vec::new(),
+        }
+    }
 }
 
 impl ToolResult {
@@ -22,6 +38,7 @@ impl ToolResult {
         Self {
             output: output.into(),
             is_error: false,
+            blocks: Vec::new(),
         }
     }
 
@@ -29,6 +46,16 @@ impl ToolResult {
         Self {
             output: output.into(),
             is_error: true,
+            blocks: Vec::new(),
+        }
+    }
+
+    /// Success result with rich UI blocks for native rendering.
+    pub fn with_blocks(output: impl Into<String>, blocks: Vec<super::ResponseBlock>) -> Self {
+        Self {
+            output: output.into(),
+            is_error: false,
+            blocks,
         }
     }
 }

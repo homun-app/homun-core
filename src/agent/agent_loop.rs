@@ -1071,6 +1071,7 @@ impl AgentLoop {
 
         let mut final_content: Option<String> = None;
         let mut tools_used: Vec<String> = Vec::new();
+        let mut response_blocks: Vec<crate::tools::ResponseBlock> = Vec::new();
         // Track vault keys retrieved in this turn so the vault-leak filter
         // doesn't redact values the user explicitly asked for (with 2FA).
         let mut vault_retrieved_keys: std::collections::HashSet<String> =
@@ -1576,6 +1577,7 @@ impl AgentLoop {
                         crate::tools::ToolResult {
                             output,
                             is_error: false,
+                            blocks: Vec::new(),
                         }
                     } else if skill_allowed_tools
                         .as_ref()
@@ -1685,6 +1687,11 @@ impl AgentLoop {
                         {
                             tracing::warn!(error = %e, "Failed to send tool_end stream event");
                         }
+                    }
+
+                    // Collect rich UI blocks from tool result (if any)
+                    if !result.blocks.is_empty() {
+                        response_blocks.extend(result.blocks.clone());
                     }
 
                     messages.push(ChatMessage::tool_result(
@@ -2034,8 +2041,19 @@ impl AgentLoop {
         self.session_manager
             .add_message(session_key, "user", content)
             .await?;
+
+        // Encode rich blocks into the stored content (alongside text) so they
+        // appear in REST history. The LLM never sees blocks — content_for_model strips them.
+        let stored_response = if response_blocks.is_empty() {
+            safe_response.clone()
+        } else {
+            crate::web::chat_attachments::encode_inline_context(
+                &safe_response, &[], &[], &response_blocks,
+            )
+            .unwrap_or_else(|| safe_response.clone())
+        };
         self.session_manager
-            .add_message_with_tools(session_key, "assistant", &safe_response, &tools_used)
+            .add_message_with_tools(session_key, "assistant", &stored_response, &tools_used)
             .await?;
 
         if !tools_used.is_empty() {
@@ -2071,6 +2089,22 @@ impl AgentLoop {
                     tracing::warn!(error = %e, "Failed to record token usage");
                 }
             });
+        }
+
+        // Emit rich blocks via stream channel so WebSocket clients receive them
+        // before the final response. Blocks are also persisted in the stored_response above.
+        if !response_blocks.is_empty() {
+            if let Some(ref tx) = stream_tx {
+                let blocks_json = serde_json::to_string(&response_blocks).unwrap_or_default();
+                let _ = tx
+                    .send(crate::provider::StreamChunk {
+                        delta: blocks_json,
+                        done: false,
+                        event_type: Some("blocks".to_string()),
+                        tool_call_data: None,
+                    })
+                    .await;
+            }
         }
 
         // Check if memory consolidation is needed (non-blocking background task)

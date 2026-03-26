@@ -110,6 +110,9 @@ let streamRenderRafId = null;
 let lastStreamRenderTime = 0;
 const STREAM_RENDER_INTERVAL = 150; // ms — throttle gate for progressive markdown
 
+// Pending rich blocks received before the final response
+let pendingBlocks = null;
+
 // Tool call activity indicator element
 let toolIndicatorEl = null;
 
@@ -797,6 +800,7 @@ async function loadHistory() {
                 messageId: m.id,
                 attachments: m.attachments || [],
                 mcpServers: m.mcp_servers || [],
+                blocks: m.blocks || [],
                 timestamp: m.timestamp || m.created_at,
             });
         });
@@ -2280,6 +2284,10 @@ function connect() {
             } else if (data.type === 'plan') {
                 applyExecutionPlan(parsePlanPayload(data.name));
 
+            } else if (data.type === 'blocks') {
+                // Rich UI blocks (choice cards, approvals, etc.) — store until response arrives
+                pendingBlocks = data.blocks || null;
+
             } else if (data.type === 'screenshot') {
                 // Screenshot URL from browser tool — add to gallery
                 addBrowserScreenshot(data.delta);
@@ -2473,12 +2481,17 @@ function finalizeStream(content) {
         // Final render into the body child (or fallback to streamingEl)
         const bodyEl = streamingEl.querySelector('.chat-msg-body') || streamingEl;
         renderContent(bodyEl, content, 'assistant');
+        // Render rich blocks if any were received before the response
+        if (pendingBlocks && pendingBlocks.length && typeof renderBlocks === 'function') {
+            renderBlocks(pendingBlocks, bodyEl, sendBlockResponse);
+        }
         streamingEl.classList.remove('streaming');
         streamingEl = null;
         streamingContent = '';
     } else {
-        addMessage('assistant', content);
+        addMessage('assistant', content, null, { blocks: pendingBlocks });
     }
+    pendingBlocks = null;
     scrollThreadToBottom();
 
     // Reset processing state
@@ -2683,6 +2696,11 @@ function addMessage(role, content, toolsUsed, options = {}) {
         const contentEl = document.createElement('div');
         contentEl.className = 'chat-msg-body';
         renderContent(contentEl, content, role);
+        // Render rich blocks (from history or live streaming)
+        const blocks = options.blocks || null;
+        if (blocks && blocks.length && typeof renderBlocks === 'function') {
+            renderBlocks(blocks, contentEl, sendBlockResponse);
+        }
         div.appendChild(contentEl);
     }
 
@@ -2805,6 +2823,18 @@ function sendCurrentMessage() {
         conversation.updated_at = new Date().toISOString();
         conversation.message_count = (conversation.message_count || 0) + 1;
     });
+}
+
+/** Send a block interaction response (user tapped a card option).
+ *  Adds a user message to the chat and sends via WebSocket with block_response metadata. */
+function sendBlockResponse(replyText, blockResponse) {
+    if (!replyText || !ws || ws.readyState !== WebSocket.OPEN || isProcessing) return;
+    addMessage('user', replyText);
+    forceScrollToBottom();
+    const payload = { content: replyText };
+    if (blockResponse) payload.block_response = blockResponse;
+    ws.send(JSON.stringify(payload));
+    setProcessing(true);
 }
 
 chatForm.addEventListener('submit', (e) => {

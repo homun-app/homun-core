@@ -74,6 +74,9 @@ struct ChatHistoryMessage {
     attachments: Vec<super::super::chat_attachments::ChatAttachment>,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     mcp_servers: Vec<super::super::chat_attachments::ChatMcpServerRef>,
+    /// Rich UI blocks (choice cards, approvals, etc.) for capable clients.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    blocks: Vec<crate::tools::ResponseBlock>,
 }
 
 #[derive(Deserialize)]
@@ -589,6 +592,7 @@ async fn chat_history(
                 timestamp: r.timestamp,
                 attachments: parsed.attachments,
                 mcp_servers: parsed.mcp_servers,
+                blocks: parsed.blocks,
             }
         })
         .collect();

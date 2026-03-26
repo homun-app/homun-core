@@ -127,6 +127,14 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, conversation_id:
                                 "type": evt,
                                 "name": event.delta,
                             })
+                        } else if evt == "blocks" {
+                            // delta contains JSON array of ResponseBlock items
+                            let blocks: serde_json::Value = serde_json::from_str(&event.delta)
+                                .unwrap_or_else(|_| serde_json::json!([]));
+                            serde_json::json!({
+                                "type": "blocks",
+                                "blocks": blocks,
+                            })
                         } else if evt == "workflow_progress" {
                             // delta contains JSON string of progress data
                             let progress: serde_json::Value = serde_json::from_str(&event.delta)
@@ -200,6 +208,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, conversation_id:
                             content,
                             &attachments,
                             &mcp_servers,
+                            &[], // blocks are outbound-only; user messages don't carry blocks
                         )
                         .unwrap_or_else(|| content.to_string());
                         let user_message_label = if !content.is_empty() {
@@ -231,6 +240,12 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, conversation_id:
 
                         let thinking_override = parsed.get("thinking").and_then(|v| v.as_bool());
 
+                        // Parse optional block interaction response (user tapped a card option)
+                        let block_response = parsed
+                            .get("block_response")
+                            .cloned()
+                            .and_then(|v| serde_json::from_value::<crate::tools::BlockResponse>(v).ok());
+
                         let inbound = InboundMessage {
                             channel: "web".to_string(),
                             sender_id: chat_id.clone(),
@@ -240,6 +255,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, conversation_id:
                             metadata: Some(MessageMetadata {
                                 web_run_id: Some(run.run_id),
                                 thinking_override,
+                                block_response,
                                 ..MessageMetadata::default()
                             }),
                         };

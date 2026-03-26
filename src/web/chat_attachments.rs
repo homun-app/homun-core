@@ -1,6 +1,8 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::{Deserialize, Serialize};
 
+use crate::tools::ResponseBlock;
+
 const INLINE_PREFIX: &str = "[[homun-attachments:";
 const INLINE_SUFFIX: &str = "]]";
 
@@ -28,6 +30,10 @@ struct ChatInlineContext {
     attachments: Vec<ChatAttachment>,
     #[serde(default)]
     mcp_servers: Vec<ChatMcpServerRef>,
+    /// Rich UI blocks for capable clients. Added in v2 — old messages
+    /// without this field decode to an empty vec via `#[serde(default)]`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    blocks: Vec<ResponseBlock>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -35,20 +41,26 @@ pub struct ParsedChatMessageContent {
     pub text: String,
     pub attachments: Vec<ChatAttachment>,
     pub mcp_servers: Vec<ChatMcpServerRef>,
+    /// Rich UI blocks extracted from the inline context.
+    pub blocks: Vec<ResponseBlock>,
 }
 
+/// Encode attachments, MCP servers, and/or blocks into the message content.
+/// Returns `None` if all collections are empty (plain text, no encoding needed).
 pub fn encode_inline_context(
     text: &str,
     attachments: &[ChatAttachment],
     mcp_servers: &[ChatMcpServerRef],
+    blocks: &[ResponseBlock],
 ) -> Option<String> {
-    if attachments.is_empty() && mcp_servers.is_empty() {
+    if attachments.is_empty() && mcp_servers.is_empty() && blocks.is_empty() {
         return None;
     }
 
     let json = serde_json::to_vec(&ChatInlineContext {
         attachments: attachments.to_vec(),
         mcp_servers: mcp_servers.to_vec(),
+        blocks: blocks.to_vec(),
     })
     .ok()?;
     let payload = BASE64.encode(json);
@@ -61,6 +73,7 @@ pub fn parse_message_content(raw: &str) -> ParsedChatMessageContent {
             text: raw.to_string(),
             attachments: Vec::new(),
             mcp_servers: Vec::new(),
+            blocks: Vec::new(),
         };
     }
 
@@ -69,6 +82,7 @@ pub fn parse_message_content(raw: &str) -> ParsedChatMessageContent {
             text: raw.to_string(),
             attachments: Vec::new(),
             mcp_servers: Vec::new(),
+            blocks: Vec::new(),
         };
     };
 
@@ -88,6 +102,7 @@ pub fn parse_message_content(raw: &str) -> ParsedChatMessageContent {
         text,
         attachments: context.attachments,
         mcp_servers: context.mcp_servers,
+        blocks: context.blocks,
     }
 }
 
@@ -148,7 +163,7 @@ mod tests {
             transport: "stdio".to_string(),
         }];
 
-        let encoded = encode_inline_context("look at this", &attachments, &mcp_servers).unwrap();
+        let encoded = encode_inline_context("look at this", &attachments, &mcp_servers, &[]).unwrap();
         let parsed = parse_message_content(&encoded);
         assert_eq!(parsed.text, "look at this");
         assert_eq!(parsed.attachments, attachments);

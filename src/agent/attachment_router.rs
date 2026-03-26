@@ -577,7 +577,7 @@ mod tests {
             content_type: "image/png".to_string(),
             size_bytes: 1,
         };
-        let raw = encode_inline_context("describe this", &[attachment], &[]).unwrap();
+        let raw = encode_inline_context("describe this", &[attachment], &[], &[]).unwrap();
 
         let prepared = prepare_turn(&config, &raw, None).await.unwrap();
         assert_eq!(prepared.selected_model, "openai/gpt-4o");
@@ -601,7 +601,7 @@ mod tests {
             content_type: "image/png".to_string(),
             size_bytes: 1,
         };
-        let raw = encode_inline_context("describe this", &[attachment], &[]).unwrap();
+        let raw = encode_inline_context("describe this", &[attachment], &[], &[]).unwrap();
 
         let prepared = prepare_turn(&config, &raw, None).await.unwrap();
         assert_eq!(prepared.selected_model, "openai/gpt-4o");

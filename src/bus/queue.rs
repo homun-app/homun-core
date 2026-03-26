@@ -58,6 +58,10 @@ pub struct MessageMetadata {
     /// Used for contact gateway override profile resolution.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gateway_id: Option<i64>,
+    /// Block interaction response from the client (e.g. user tapped a choice).
+    /// Stored for audit — the LLM only sees the text content, not this metadata.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block_response: Option<crate::tools::BlockResponse>,
 }
 
 /// Message from a channel to the agent
