@@ -2037,6 +2037,15 @@ impl AgentLoop {
             }
         }
 
+        // Extract any ```blocks fences from LLM output (LLM-driven blocks).
+        // These are merged with tool-driven blocks already in response_blocks.
+        let (safe_response, llm_blocks) =
+            crate::tools::response_blocks::extract_fence_blocks(&safe_response);
+        if !llm_blocks.is_empty() {
+            tracing::info!(count = llm_blocks.len(), "Extracted LLM-generated fence blocks");
+            response_blocks.extend(llm_blocks);
+        }
+
         // Persist conversation to SQLite
         self.session_manager
             .add_message(session_key, "user", content)

@@ -134,6 +134,54 @@ pub struct BlockResponse {
     pub metadata: Option<Value>,
 }
 
+// ─── Fence Block Extraction ─────────────────────────────────────
+
+/// Extract `ResponseBlock` items from ` ```blocks ``` ` fences in LLM output.
+/// Returns the cleaned text (fences removed) and any valid blocks found.
+/// Invalid JSON or schema mismatches are silently skipped — the markdown
+/// stays intact as fallback.
+pub fn extract_fence_blocks(text: &str) -> (String, Vec<ResponseBlock>) {
+    let mut blocks = Vec::new();
+    let mut cleaned = String::with_capacity(text.len());
+    let mut rest = text;
+
+    while let Some(start) = rest.find("```blocks") {
+        // Append everything before the fence
+        cleaned.push_str(&rest[..start]);
+
+        // Find the closing fence
+        let after_open = &rest[start + 9..]; // skip "```blocks"
+        let body_start = after_open.find('\n').map(|i| i + 1).unwrap_or(0);
+        let body_rest = &after_open[body_start..];
+
+        if let Some(close) = body_rest.find("```") {
+            let json_str = body_rest[..close].trim();
+
+            // Try parsing as a single block or an array of blocks
+            if let Ok(block) = serde_json::from_str::<ResponseBlock>(json_str) {
+                blocks.push(block);
+            } else if let Ok(arr) = serde_json::from_str::<Vec<ResponseBlock>>(json_str) {
+                blocks.extend(arr);
+            } else {
+                tracing::debug!(json = json_str, "Failed to parse fence block JSON — keeping as markdown");
+                // Keep the fence in the output as-is
+                cleaned.push_str(&rest[start..start + 9 + body_start + close + 3]);
+            }
+            rest = &body_rest[close + 3..];
+        } else {
+            // No closing fence — keep everything
+            cleaned.push_str(&rest[start..]);
+            rest = "";
+        }
+    }
+
+    cleaned.push_str(rest);
+
+    // Trim leading/trailing whitespace caused by fence removal
+    let cleaned = cleaned.trim().to_string();
+    (cleaned, blocks)
+}
+
 // ─── Tests ──────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -209,5 +257,32 @@ mod tests {
         let json = serde_json::to_string(&resp).unwrap();
         let deserialized: BlockResponse = serde_json::from_str(&json).unwrap();
         assert_eq!(resp, deserialized);
+    }
+
+    #[test]
+    fn extract_fence_single_block() {
+        let input = "Ecco i treni:\n```blocks\n{\"block_type\":\"choice\",\"id\":\"b1\",\"title\":\"Treni\",\"options\":[{\"id\":\"o1\",\"label\":\"IC 724\"}]}\n```\nQuale preferisci?";
+        let (cleaned, blocks) = extract_fence_blocks(input);
+        assert_eq!(blocks.len(), 1);
+        assert!(cleaned.contains("Ecco i treni:"));
+        assert!(cleaned.contains("Quale preferisci?"));
+        assert!(!cleaned.contains("```blocks"));
+    }
+
+    #[test]
+    fn extract_fence_invalid_json_keeps_markdown() {
+        let input = "Testo\n```blocks\n{invalid json}\n```\nFine";
+        let (cleaned, blocks) = extract_fence_blocks(input);
+        assert!(blocks.is_empty());
+        assert!(cleaned.contains("```blocks"));
+        assert!(cleaned.contains("{invalid json}"));
+    }
+
+    #[test]
+    fn extract_fence_no_fence() {
+        let input = "Risposta normale senza blocks";
+        let (cleaned, blocks) = extract_fence_blocks(input);
+        assert!(blocks.is_empty());
+        assert_eq!(cleaned, input);
     }
 }
