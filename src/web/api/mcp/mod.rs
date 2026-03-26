@@ -64,6 +64,10 @@ pub(crate) fn routes() -> Router<Arc<AppState>> {
             get(crud::list_mcp_server_tools),
         )
         .route(
+            "/v1/mcp/servers/{name}/resources",
+            get(crud::list_mcp_server_resources),
+        )
+        .route(
             "/v1/mcp/servers/{name}",
             axum::routing::delete(crud::delete_mcp_server),
         )

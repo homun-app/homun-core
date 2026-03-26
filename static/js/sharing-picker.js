@@ -32,9 +32,10 @@
                 alert('No contacts found. Add contacts first.');
                 return;
             }
-            var tools = opts.showToolPicker ? await loadTools(opts.resourceId) : [];
+            var tools = (opts.showToolPicker || opts.showResourcePicker) ? await loadTools(opts.resourceId) : [];
+            var resources = opts.showResourcePicker ? await loadResources(opts.resourceId) : [];
             var existing = await loadExistingGrants(opts.resourceType, opts.resourceId);
-            buildModal(opts, contacts, tools, existing);
+            buildModal(opts, contacts, tools, resources, existing);
         }
     };
 
@@ -55,6 +56,12 @@
         if (!window.McpLoader) return [];
         var result = await McpLoader.discoverTools(serverName);
         return result.ok ? result.tools : [];
+    }
+
+    async function loadResources(serverName) {
+        if (!window.McpLoader) return [];
+        var result = await McpLoader.discoverResources(serverName);
+        return result.ok ? result.resources : [];
     }
 
     /** Load existing shared_resource + access grants for this resource. */
@@ -78,10 +85,18 @@
 
     // ─── Modal Builder ─────────────────────────────────
 
-    function buildModal(opts, contacts, tools, existing) {
-        // State: Map<contact_id, {selected, permission, allowed_tools: Set}>
+    function buildModal(opts, contacts, tools, resources, existing) {
+        // Unified items: resources take priority over tools (resource = concrete data, tool = abstract action)
+        var items = resources.length > 0 ? resources : tools;
+        var isResourceMode = resources.length > 0;
+        var scopeKey = isResourceMode ? 'allowed_resources' : 'allowed_tools';
+        function itemKey(item) { return isResourceMode ? item.uri : item.name; }
+        var itemNoun = isResourceMode ? 'resources' : 'tools';
+        var hasItemPicker = opts.showResourcePicker || opts.showToolPicker;
+
+        // State: Map<contact_id, {selected, permission, allowed_items: Set}>
         var state = new Map();
-        contacts.forEach(function (c) { state.set(c.id, { selected: false, permission: 'read', allowed_tools: new Set() }); });
+        contacts.forEach(function (c) { state.set(c.id, { selected: false, permission: 'read', allowed_items: new Set() }); });
 
         // Initialize from existing grants
         (existing.grants || []).forEach(function (g) {
@@ -91,13 +106,14 @@
             s.permission = g.permission || 'read';
             try {
                 var scope = JSON.parse(g.scope_json || '{}');
-                if (Array.isArray(scope.allowed_tools)) {
-                    scope.allowed_tools.forEach(function (t) { s.allowed_tools.add(t); });
+                var arr = scope[scopeKey] || scope.allowed_tools || [];
+                if (Array.isArray(arr)) {
+                    arr.forEach(function (t) { s.allowed_items.add(t); });
                 }
             } catch (_) { /* invalid scope_json, ignore */ }
         });
 
-        // Track which contact is expanded for tool selection
+        // Track which contact is expanded for item selection
         var expandedContactId = null;
 
         // Backdrop
@@ -108,7 +124,7 @@
         // Modal
         var modal = document.createElement('div');
         modal.className = 'knowledge-vis-modal';
-        if (opts.showToolPicker) modal.style.maxHeight = 'min(80vh, 620px)';
+        if (hasItemPicker) modal.style.maxHeight = 'min(80vh, 620px)';
 
         // Header
         var header = document.createElement('div');
@@ -167,32 +183,32 @@
             var s = state.get(contactId);
             if (!s) return;
             s.selected = !s.selected;
-            if (s.selected && tools.length && s.allowed_tools.size === 0) {
-                // Default: grant all tools when first selecting a contact
-                tools.forEach(function (t) { s.allowed_tools.add(t.name); });
+            if (s.selected && items.length && s.allowed_items.size === 0) {
+                // Default: grant all items when first selecting a contact
+                items.forEach(function (t) { s.allowed_items.add(itemKey(t)); });
             }
             renderBody(searchInput.value);
             updateSummary();
         }
 
-        function toggleTool(contactId, toolName) {
+        function toggleItem(contactId, key) {
             var s = state.get(contactId);
             if (!s) return;
-            if (s.allowed_tools.has(toolName)) {
-                s.allowed_tools.delete(toolName);
+            if (s.allowed_items.has(key)) {
+                s.allowed_items.delete(key);
             } else {
-                s.allowed_tools.add(toolName);
+                s.allowed_items.add(key);
             }
             renderBody(searchInput.value);
         }
 
-        function toggleAllTools(contactId) {
+        function toggleAllItems(contactId) {
             var s = state.get(contactId);
             if (!s) return;
-            if (s.allowed_tools.size === tools.length) {
-                s.allowed_tools.clear();
+            if (s.allowed_items.size === items.length) {
+                s.allowed_items.clear();
             } else {
-                tools.forEach(function (t) { s.allowed_tools.add(t.name); });
+                items.forEach(function (t) { s.allowed_items.add(itemKey(t)); });
             }
             renderBody(searchInput.value);
         }
@@ -237,11 +253,11 @@
                 nameEl.textContent = c.name;
                 item.appendChild(nameEl);
 
-                // Tool count hint (for MCP with tool picker)
-                if (opts.showToolPicker && s.selected && tools.length) {
+                // Item count hint (for MCP with tool/resource picker)
+                if (hasItemPicker && s.selected && items.length) {
                     var hint = document.createElement('span');
                     hint.className = 'knowledge-vis-option-desc';
-                    hint.textContent = s.allowed_tools.size + '/' + tools.length + ' tools';
+                    hint.textContent = s.allowed_items.size + '/' + items.length + ' ' + itemNoun;
                     item.appendChild(hint);
                 }
 
@@ -249,9 +265,9 @@
                     e.stopPropagation();
                     if (!s.selected) {
                         toggleContact(c.id);
-                        if (opts.showToolPicker && tools.length) expandedContactId = c.id;
+                        if (hasItemPicker && items.length) expandedContactId = c.id;
                         renderBody(searchInput.value);
-                    } else if (opts.showToolPicker && tools.length) {
+                    } else if (hasItemPicker && items.length) {
                         expandContact(c.id);
                     } else {
                         toggleContact(c.id);
@@ -273,8 +289,8 @@
 
                 body.appendChild(item);
 
-                // Expandable tool panel (under selected contact)
-                if (opts.showToolPicker && s.selected && expandedContactId === c.id && tools.length) {
+                // Expandable item panel (under selected contact)
+                if (hasItemPicker && s.selected && expandedContactId === c.id && items.length) {
                     var panel = document.createElement('div');
                     panel.className = 'sharing-tools-panel';
 
@@ -282,35 +298,36 @@
                     var toggleAll = document.createElement('button');
                     toggleAll.type = 'button';
                     toggleAll.className = 'sharing-tool-item sharing-tool-toggle';
-                    toggleAll.textContent = s.allowed_tools.size === tools.length ? 'Deselect all' : 'Select all';
+                    toggleAll.textContent = s.allowed_items.size === items.length ? 'Deselect all' : 'Select all';
                     toggleAll.addEventListener('click', function (e) {
                         e.stopPropagation();
-                        toggleAllTools(c.id);
+                        toggleAllItems(c.id);
                     });
                     panel.appendChild(toggleAll);
 
-                    tools.forEach(function (tool) {
+                    items.forEach(function (item) {
+                        var key = itemKey(item);
                         var row = document.createElement('label');
                         row.className = 'sharing-tool-item';
 
                         var tcb = document.createElement('input');
                         tcb.type = 'checkbox';
-                        tcb.checked = s.allowed_tools.has(tool.name);
+                        tcb.checked = s.allowed_items.has(key);
                         tcb.addEventListener('change', function (e) {
                             e.stopPropagation();
-                            toggleTool(c.id, tool.name);
+                            toggleItem(c.id, key);
                         });
                         row.appendChild(tcb);
 
                         var tn = document.createElement('span');
                         tn.className = 'sharing-tool-name';
-                        tn.textContent = tool.name;
+                        tn.textContent = item.name;
                         row.appendChild(tn);
 
-                        if (tool.description) {
+                        if (item.description) {
                             var td = document.createElement('span');
                             td.className = 'sharing-tool-desc';
-                            td.textContent = tool.description;
+                            td.textContent = item.description;
                             row.appendChild(td);
                         }
 
@@ -328,7 +345,7 @@
             doneBtn.disabled = true;
             doneBtn.textContent = 'Saving\u2026';
             try {
-                await saveGrants(opts, existing, state, tools.length > 0);
+                await saveGrants(opts, existing, state, items.length > 0, scopeKey);
                 if (opts.onSave) opts.onSave();
             } catch (e) {
                 console.error('Sharing save failed:', e);
@@ -351,7 +368,7 @@
 
     // ─── Save Logic ────────────────────────────────────
 
-    async function saveGrants(opts, existing, state, hasTools) {
+    async function saveGrants(opts, existing, state, hasItems, scopeKey) {
         var resourceDbId = existing.resourceDbId;
 
         // Collect contacts that should have access
@@ -359,8 +376,10 @@
         state.forEach(function (s, contactId) {
             if (s.selected) {
                 var scopeJson = '{}';
-                if (hasTools && s.allowed_tools.size > 0) {
-                    scopeJson = JSON.stringify({ allowed_tools: Array.from(s.allowed_tools) });
+                if (hasItems && s.allowed_items.size > 0) {
+                    var obj = {};
+                    obj[scopeKey] = Array.from(s.allowed_items);
+                    scopeJson = JSON.stringify(obj);
                 }
                 grants.push({ contact_id: contactId, permission: s.permission, scope_json: scopeJson });
             }

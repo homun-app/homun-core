@@ -38,6 +38,17 @@ pub struct McpToolInfo {
     pub parameters: Option<serde_json::Value>,
 }
 
+/// A resource exposed by an MCP server (database, calendar, channel, etc.).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct McpResourceInfo {
+    pub name: String,
+    pub uri: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+}
+
 /// A single MCP tool exposed as a Homun Tool.
 ///
 /// Each tool discovered from an MCP server becomes one of these.
@@ -794,6 +805,27 @@ pub async fn list_tools_once(
             parameters: Some(serde_json::Value::Object(
                 tool.input_schema.as_ref().clone(),
             )),
+        })
+        .collect();
+    peer.shutdown().await;
+    Ok(out)
+}
+
+/// List resources from an MCP server using a temporary on-demand connection.
+pub async fn list_resources_once(
+    server_name: &str,
+    server_config: &McpServerConfig,
+    sandbox_config: &ExecutionSandboxConfig,
+) -> Result<Vec<McpResourceInfo>> {
+    let (peer, _tools, _info) = connect_server(server_name, server_config, sandbox_config).await?;
+    let resources = peer.list_resources().await.unwrap_or_default();
+    let out = resources
+        .iter()
+        .map(|r| McpResourceInfo {
+            name: r.name.to_string(),
+            uri: r.uri.to_string(),
+            description: r.description.as_deref().map(|d| d.to_string()),
+            mime_type: r.mime_type.as_deref().map(|m| m.to_string()),
         })
         .collect();
     peer.shutdown().await;

@@ -210,12 +210,12 @@ pub(super) async fn discover_skills(
 ///
 /// When `allowed_mcp` is non-empty (contact with shared resources), only
 /// MCP servers in the allow list are visible. Each entry is
-/// `(server_name, allowed_tools)` — empty `allowed_tools` means all tools.
+/// `(server_name, allowed_tools, allowed_resources)`.
 pub(super) async fn discover_mcp(
     query: &str,
     config: &Config,
     tool_registry: &RwLock<ToolRegistry>,
-    allowed_mcp: &[(String, Vec<String>)],
+    allowed_mcp: &[(String, Vec<String>, Vec<String>)],
 ) -> String {
     let query_lower = query.to_lowercase();
     let query_words: Vec<&str> = query_lower.split_whitespace().collect();
@@ -227,13 +227,13 @@ pub(super) async fn discover_mcp(
             continue;
         }
         // Contact perimeter: if allowed_mcp is non-empty, only those are visible
-        let tool_restriction = if !allowed_mcp.is_empty() {
-            match allowed_mcp.iter().find(|(n, _)| n == name) {
-                Some((_, allowed)) => Some(allowed),
+        let (tool_restriction, _resource_restriction) = if !allowed_mcp.is_empty() {
+            match allowed_mcp.iter().find(|(n, _, _)| n == name) {
+                Some((_, tools, resources)) => (Some(tools), Some(resources)),
                 None => continue, // server not in allow list
             }
         } else {
-            None // owner: no restrictions
+            (None, None) // owner: no restrictions
         };
         let name_lower = name.to_lowercase();
         let searchable = format!(

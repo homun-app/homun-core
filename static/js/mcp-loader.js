@@ -6,6 +6,7 @@ window.McpLoader = {
 
     _serversCache: null,
     _toolsCache: {},  // keyed by server name
+    _resourcesCache: {},  // keyed by server name
 
     /**
      * Fetch configured MCP servers (with caching).
@@ -36,8 +37,9 @@ window.McpLoader = {
      */
     async discoverTools(serverName, opts) {
         if (!serverName) return { ok: false, tools: [], error: 'No server name' };
-        if (this._toolsCache[serverName] && !(opts && opts.fresh)) {
-            return this._toolsCache[serverName];
+        var cached = this._toolsCache[serverName];
+        if (cached && cached.ok && !(opts && opts.fresh)) {
+            return cached;
         }
         try {
             var res = await fetch(
@@ -48,6 +50,33 @@ window.McpLoader = {
             return data;
         } catch (e) {
             return { ok: false, tools: [], error: String(e) };
+        }
+    },
+
+    /**
+     * Discover resources for a specific MCP server (on-demand connection).
+     * Resources are concrete items: Notion databases, Google calendars, etc.
+     *
+     * @param {string} serverName - MCP server name
+     * @param {Object} [opts]
+     * @param {boolean} [opts.fresh] - Bypass cache and reconnect
+     * @returns {Promise<{ok: boolean, resources: Array, error?: string}>}
+     */
+    async discoverResources(serverName, opts) {
+        if (!serverName) return { ok: false, resources: [], error: 'No server name' };
+        var cached = this._resourcesCache[serverName];
+        if (cached && cached.ok && !(opts && opts.fresh)) {
+            return cached;
+        }
+        try {
+            var res = await fetch(
+                '/api/v1/mcp/servers/' + encodeURIComponent(serverName) + '/resources'
+            );
+            var data = await res.json();
+            this._resourcesCache[serverName] = data;
+            return data;
+        } catch (e) {
+            return { ok: false, resources: [], error: String(e) };
         }
     },
 
@@ -137,5 +166,6 @@ window.McpLoader = {
     clearCache: function() {
         this._serversCache = null;
         this._toolsCache = {};
+        this._resourcesCache = {};
     },
 };

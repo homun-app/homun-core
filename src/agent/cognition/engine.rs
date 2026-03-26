@@ -386,11 +386,13 @@ async fn resolve_allowed_skills(params: &CognitionParams<'_>) -> Vec<String> {
     }
 }
 
-/// Resolve allowed MCP servers for a contact, including per-tool restrictions.
+/// Resolve allowed MCP servers for a contact, including per-tool and per-resource restrictions.
 ///
-/// Returns `(server_name, allowed_tools)` pairs. If `allowed_tools` is empty,
-/// the contact can access all tools from that server (backward compatible).
-async fn resolve_allowed_mcp(params: &CognitionParams<'_>) -> Vec<(String, Vec<String>)> {
+/// Returns `(server_name, allowed_tools, allowed_resources)` tuples.
+/// Empty vectors mean no restrictions (backward compatible).
+async fn resolve_allowed_mcp(
+    params: &CognitionParams<'_>,
+) -> Vec<(String, Vec<String>, Vec<String>)> {
     let contact_id = match params.contact_id {
         Some(id) => id,
         None => return Vec::new(),
@@ -400,28 +402,32 @@ async fn resolve_allowed_mcp(params: &CognitionParams<'_>) -> Vec<(String, Vec<S
     };
     match crate::sharing::db::resolve_contact_access(db.pool(), contact_id).await {
         Ok(access) => {
-            let entries: Vec<(String, Vec<String>)> = access
+            let entries: Vec<(String, Vec<String>, Vec<String>)> = access
                 .mcp_servers
                 .into_iter()
                 .map(|(name, _perm, scope)| {
-                    // Parse scope_json for allowed_tools list
-                    let allowed = serde_json::from_str::<serde_json::Value>(&scope)
-                        .ok()
-                        .and_then(|v| v.get("allowed_tools")?.as_array().cloned())
-                        .map(|arr| {
-                            arr.into_iter()
-                                .filter_map(|v| v.as_str().map(String::from))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    (name, allowed)
+                    let parsed = serde_json::from_str::<serde_json::Value>(&scope).ok();
+                    let extract = |key: &str| -> Vec<String> {
+                        parsed
+                            .as_ref()
+                            .and_then(|v| v.get(key)?.as_array().cloned())
+                            .map(|arr| {
+                                arr.into_iter()
+                                    .filter_map(|v| v.as_str().map(String::from))
+                                    .collect()
+                            })
+                            .unwrap_or_default()
+                    };
+                    let allowed_tools = extract("allowed_tools");
+                    let allowed_resources = extract("allowed_resources");
+                    (name, allowed_tools, allowed_resources)
                 })
                 .collect();
             if !entries.is_empty() {
                 tracing::debug!(
                     contact_id,
                     mcp = ?entries,
-                    "Contact has shared MCP access with tool restrictions"
+                    "Contact has shared MCP access with tool/resource restrictions"
                 );
             }
             entries

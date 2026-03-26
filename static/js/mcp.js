@@ -1550,7 +1550,7 @@
             title: 'Share \u201c' + serverName + '\u201d',
             resourceType: 'mcp',
             resourceId: serverName,
-            showToolPicker: true,
+            showResourcePicker: true,
             onSave: function () { loadSharingState().then(function () { renderServers(state.servers); }); }
         });
     }

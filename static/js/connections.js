@@ -255,6 +255,7 @@
                 '<span class="conn-instance-name">' + escapeHtml(inst.name) + '</span>' +
                 '<span class="conn-instance-tools">' + inst.tool_count + ' tools</span>' +
                 '<button class="btn btn-sm btn-secondary conn-instance-test" data-name="' + escapeHtml(inst.name) + '">Test</button>' +
+                '<button class="btn btn-sm btn-secondary conn-instance-access" data-name="' + escapeHtml(inst.name) + '">Access</button>' +
                 '<button class="btn btn-sm btn-danger conn-instance-disconnect" data-name="' + escapeHtml(inst.name) + '">Disconnect</button>' +
             '</div>';
         }
@@ -289,6 +290,20 @@
                 } else {
                     showToast(btn.dataset.name + ': ' + ((res.body && res.body.error) || 'Test failed'), 'error');
                 }
+            });
+        });
+
+        // Bind access (sharing) buttons
+        modalContent.querySelectorAll('.conn-instance-access').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                if (!window.SharingPicker) return;
+                SharingPicker.open({
+                    title: 'Share \u201c' + btn.dataset.name + '\u201d',
+                    resourceType: 'mcp',
+                    resourceId: btn.dataset.name,
+                    showResourcePicker: true,
+                    onSave: function() { /* sharing state saved */ }
+                });
             });
         });
 

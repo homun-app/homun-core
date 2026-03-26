@@ -473,3 +473,70 @@ pub(super) async fn list_mcp_server_tools(
         }))),
     }
 }
+
+/// GET /v1/mcp/servers/{name}/resources — list resources from an MCP server.
+///
+/// Fast path: uses the persistent MCP peer (from estop handles) when available.
+/// Slow path: falls back to on-demand connection (may fail for OAuth servers).
+pub(super) async fn list_mcp_server_resources(
+    Path(name): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let config = state.config.read().await;
+    if !config.mcp.servers.contains_key(&name) {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    drop(config);
+
+    // Fast path: use persistent peer (already authenticated for OAuth servers)
+    #[cfg(feature = "mcp")]
+    {
+        let handles = state.estop_handles.read().await;
+        if let Some(ref manager) = handles.mcp_manager {
+            if let Some(peer) = manager.get_peer(&name) {
+                drop(handles);
+                match peer.list_resources().await {
+                    Ok(resources) => {
+                        let mapped: Vec<crate::tools::mcp::McpResourceInfo> = resources
+                            .iter()
+                            .map(|r| crate::tools::mcp::McpResourceInfo {
+                                name: r.name.to_string(),
+                                uri: r.uri.to_string(),
+                                description: r.description.as_deref().map(|d| d.to_string()),
+                                mime_type: r.mime_type.as_deref().map(|m| m.to_string()),
+                            })
+                            .collect();
+                        return Ok(Json(serde_json::json!({
+                            "ok": true,
+                            "server": name,
+                            "resources": mapped,
+                        })));
+                    }
+                    Err(e) => {
+                        tracing::debug!(server = %name, error = %e, "Persistent peer list_resources failed");
+                    }
+                }
+            }
+        }
+    }
+
+    // Slow path: on-demand connection (may fail for OAuth servers)
+    let config = state.config.read().await;
+    let server = config.mcp.servers.get(&name).cloned().unwrap();
+    let sandbox = config.security.execution_sandbox.clone();
+    drop(config);
+
+    match crate::tools::mcp::list_resources_once(&name, &server, &sandbox).await {
+        Ok(resources) => Ok(Json(serde_json::json!({
+            "ok": true,
+            "server": name,
+            "resources": resources,
+        }))),
+        Err(e) => Ok(Json(serde_json::json!({
+            "ok": false,
+            "server": name,
+            "resources": [],
+            "error": format!("{e:#}"),
+        }))),
+    }
+}
