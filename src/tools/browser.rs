@@ -2660,10 +2660,13 @@ fn classify_browser_error(raw: &str) -> &'static str {
     // HTTP/2 protocol error — site-level bot blocking (TLS fingerprint rejection)
     if lower.contains("err_http2_protocol_error") || lower.contains("err_http2_") {
         return "\n\nContext: The site is blocking the browser at the TLS/HTTP2 level \
-                (bot detection via TLS fingerprint). Direct navigation will not work. \
-                Try: navigate to Google first, search for the site, and click through \
-                from the search results. This changes the referrer and sometimes \
-                bypasses the block. If that also fails, use web_search tool instead.";
+                (bot detection via TLS fingerprint). Try these steps in order:\n\
+                1. Use show() to switch to VISIBLE browser mode — visible Chrome has \
+                   a different TLS fingerprint that many sites accept\n\
+                2. After show(), retry navigate to the same URL\n\
+                3. If still blocked, navigate to Google, search for the site, and \
+                   click through from search results\n\
+                4. After completing the task, use hide() to return to headless mode";
     }
 
     // Network errors
