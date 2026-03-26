@@ -190,7 +190,8 @@ impl PromptSection for ToolsSection {
                  - Autocomplete fields: type a FEW characters → read suggestions → click the match\n\
                  - NEVER re-navigate to a site you already have open — use snapshot() instead\n\
                  - NEVER navigate to URLs you constructed — only use URLs from search results or visible links\n\
-                 - Booking sites: navigate via Google search first to establish a natural session\n",
+                 - Booking sites: navigate via Google search first to establish a natural session\n\
+                 - If a click fails with timeout: STOP, take snapshot() to see what's blocking (overlay, modal, banner). NEVER retry the same ref more than once\n",
             );
         }
 

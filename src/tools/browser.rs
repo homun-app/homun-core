@@ -2223,10 +2223,11 @@ fn classify_browser_error(raw: &str) -> &'static str {
     if lower.contains("no element matches")
         || lower.contains("element not found")
         || lower.contains("unable to find")
+        || lower.contains("ref") && lower.contains("not found")
     {
-        return "\n\nContext: The referenced element was not found. \
-                The ref may be from an outdated snapshot, or the element \
-                may have been removed from the page.";
+        return "\n\nContext: The referenced element no longer exists on the page. \
+                The page may have changed (navigation, AJAX update, modal closed). \
+                Take a new snapshot() to get current refs. Do NOT retry with the same ref.";
     }
 
     // Network errors
@@ -2240,10 +2241,15 @@ fn classify_browser_error(raw: &str) -> &'static str {
                 have a DNS issue, or the site may be blocking automated access.";
     }
 
-    // Timeout
+    // Timeout on click — likely an overlay/popup covering the element
     if lower.contains("timeout") || lower.contains("waiting for") {
-        return "\n\nContext: The operation timed out. The page or element \
-                may still be loading — try wait() then snapshot().";
+        return "\n\nContext: The click timed out — this usually means a popup, \
+                overlay, cookie banner, or modal is covering the element. \
+                Do NOT retry the same click. Instead: \
+                1) Take a snapshot() to see the current page state \
+                2) Look for overlays/modals to dismiss first \
+                3) If no overlay is visible, the element may have moved — use fresh refs \
+                4) If it keeps failing, try screenshot() to see the visual state";
     }
 
     // Blocked by security policy
@@ -2444,8 +2450,8 @@ mod tests {
     #[test]
     fn test_classify_element_not_found() {
         let hint = classify_browser_error("No element matches selector: e99");
-        assert!(hint.contains("not found"));
-        assert!(hint.contains("outdated snapshot"));
+        assert!(hint.contains("no longer exists"));
+        assert!(hint.contains("new snapshot"));
     }
 
     #[test]
