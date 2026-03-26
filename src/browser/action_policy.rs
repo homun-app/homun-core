@@ -11,7 +11,7 @@ fn action_category(action: &str) -> &'static str {
     match action {
         "navigate" => "navigate",
         "click" | "click_coordinates" | "hold_click" => "click",
-        "type" | "fill" | "select_option" | "press_key" => "fill",
+        "type" | "fill" | "fill_form" | "select_option" | "press_key" => "fill",
         "snapshot" | "screenshot" => "observe",
         "hover" | "scroll" | "drag" => "interact",
         "evaluate" => "eval",
@@ -209,6 +209,7 @@ mod tests {
             "hold_click",
             "type",
             "fill",
+            "fill_form",
             "select_option",
             "press_key",
             "snapshot",

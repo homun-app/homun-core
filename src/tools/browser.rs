@@ -976,6 +976,82 @@ impl BrowserTool {
         Ok(ToolResult::success(base_output))
     }
 
+    /// Fill multiple form fields in a single tool call.
+    ///
+    /// Accepts an array of `{ref, value}` pairs and fills them all via
+    /// Playwright's `browser_fill_form` (one MCP call for all fields).
+    /// This is dramatically faster than individual fill() calls because
+    /// it eliminates N-1 LLM round-trips for an N-field form.
+    async fn action_fill_form(
+        &self,
+        args: &Value,
+        tab: &crate::browser::tab_session::TabSession,
+    ) -> Result<ToolResult> {
+        let fields = args
+            .get("fields")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "'fields' array is required for fill_form. \
+                     Format: [{{\"ref\": \"e1\", \"value\": \"text\"}}, ...]"
+                )
+            })?;
+
+        if fields.is_empty() {
+            return Ok(ToolResult::error(
+                "fields array is empty — nothing to fill.".to_string(),
+            ));
+        }
+
+        // Build the Playwright fill_form payload
+        let pw_fields: Vec<Value> = fields
+            .iter()
+            .filter_map(|f| {
+                let ref_val = f
+                    .get("ref")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.trim_start_matches("ref=").to_string())?;
+                let value = f.get("value").and_then(|v| v.as_str())?;
+                Some(json!({
+                    "name": format!("field_{ref_val}"),
+                    "type": "textbox",
+                    "ref": ref_val,
+                    "value": value
+                }))
+            })
+            .collect();
+
+        if pw_fields.is_empty() {
+            return Ok(ToolResult::error(
+                "No valid fields found. Each field needs 'ref' and 'value'.".to_string(),
+            ));
+        }
+
+        let count = pw_fields.len();
+        let fill_result = self
+            .call_mcp_on_tab(tab, "browser_fill_form", json!({"fields": pw_fields}))
+            .await;
+
+        let base_output = match fill_result {
+            Ok(_) => format!("Filled {count} form fields."),
+            Err(e) => return Ok(browser_error_result("Fill form", &e)),
+        };
+
+        // Auto-snapshot after filling to show updated form state
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        match self
+            .call_mcp_on_tab(tab, "browser_snapshot", json!({}))
+            .await
+        {
+            Ok(snap_output) => {
+                let compact = compact_browser_snapshot_staged(&snap_output, self.seen_results());
+                tab.last_was_snapshot.store(true, Ordering::Relaxed);
+                Ok(ToolResult::success(format!("{base_output}\n\n{compact}")))
+            }
+            Err(_) => Ok(ToolResult::success(base_output)),
+        }
+    }
+
     /// Execute the `select_option` action.
     async fn action_select_option(
         &self,
@@ -1740,7 +1816,8 @@ impl Tool for BrowserTool {
          - snapshot(): Get page accessibility tree with interactive elements [ref=eN]\n\
          - click(ref): Click element (auto-returns updated snapshot)\n\
          - type(ref, text): Type text into field (triggers autocomplete check)\n\
-         - fill(ref, text): Clear field + type (for overwriting)\n\
+         - fill(ref, text): Clear field + type (for overwriting, single field)\n\
+         - fill_form(fields): Fill MULTIPLE fields at once — fields: [{ref, value}, ...]. MUCH faster than individual fill() calls. Use this for forms with 2+ fields!\n\
          - select_option(ref, value): Select dropdown option\n\
          - press_key(text): Press key (e.g. \"Enter\", \"Tab\")\n\
          - hover(ref): Hover over element\n\
@@ -1760,9 +1837,10 @@ impl Tool for BrowserTool {
          1. navigate() already returns the page — do NOT call snapshot() right after\n\
          2. Use refs from the LATEST snapshot only (e.g. ref=\"e42\")\n\
          3. click() already returns a snapshot — no need to call snapshot() after\n\
-         4. For autocomplete fields: type partial text → look at suggestions → click match\n\
-         5. If page seems empty/broken, call snapshot() BEFORE reloading — it may still be loading\n\
-         6. For 'hold to verify' CAPTCHAs: use screenshot() to see the button, then hold_click with x+y coordinates (CAPTCHA buttons usually aren't in the accessibility tree)"
+         4. For forms: prefer fill_form() with ALL fields in one call instead of filling one by one\n\
+         5. For autocomplete fields: type partial text → look at suggestions → click match\n\
+         6. If page seems empty/broken, call snapshot() BEFORE reloading — it may still be loading\n\
+         7. For 'hold to verify' CAPTCHAs: use screenshot() to see the button, then hold_click with x+y coordinates (CAPTCHA buttons usually aren't in the accessibility tree)"
     }
 
     fn parameters(&self) -> Value {
@@ -1774,9 +1852,9 @@ impl Tool for BrowserTool {
                     "type": "string",
                     "enum": [
                         "navigate", "snapshot", "screenshot", "click", "type",
-                        "fill", "select_option", "press_key", "hover", "scroll",
-                        "drag", "click_coordinates", "hold_click",
-                        "show", "hide", "block_resources", "unblock_resources",
+                        "fill", "fill_form", "select_option", "press_key",
+                        "hover", "scroll", "drag", "click_coordinates",
+                        "hold_click", "show", "hide", "block_resources", "unblock_resources",
                         "evaluate", "close", "wait"
                     ],
                     "description": "Browser action to perform"
@@ -1825,6 +1903,18 @@ impl Tool for BrowserTool {
                 "duration_ms": {
                     "type": "integer",
                     "description": "Hold duration in ms for hold_click (default 15000, max 30000). PerimeterX CAPTCHAs need 10-20s"
+                },
+                "fields": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "ref": { "type": "string" },
+                            "value": { "type": "string" }
+                        },
+                        "required": ["ref", "value"]
+                    },
+                    "description": "Array of fields for fill_form: [{ref, value}, ...]"
                 },
                 "profile": {
                     "type": "string",
@@ -1879,6 +1969,7 @@ impl Tool for BrowserTool {
             "click" => self.action_click(&args, &tab).await?,
             "type" => self.action_type(&args, &tab).await?,
             "fill" => self.action_fill(&args, &tab).await?,
+            "fill_form" => self.action_fill_form(&args, &tab).await?,
             "select_option" => self.action_select_option(&args, &tab).await?,
             "press_key" => self.action_press_key(&args, &tab).await?,
             "hover" => self.action_hover(&args, &tab).await?,
