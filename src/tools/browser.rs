@@ -1131,29 +1131,61 @@ impl BrowserTool {
             .and_then(|v| v.as_str())
             .unwrap_or("down");
 
-        // Default scroll at viewport center; if ref provided, use element
-        let mut params = json!({
-            "coordinate": [640, 400],
-            "scroll_direction": direction
-        });
-        // If ref is provided, scroll inside that element
+        let amount = args
+            .get("amount")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(3);
+
+        // Use browser_press_key for scrolling — reliable across Playwright versions.
+        // Page Up/Down for large scrolls, arrow keys for smaller ones.
+        let key = match direction {
+            "up" => {
+                if amount >= 3 {
+                    "PageUp"
+                } else {
+                    "ArrowUp"
+                }
+            }
+            "down" => {
+                if amount >= 3 {
+                    "PageDown"
+                } else {
+                    "ArrowDown"
+                }
+            }
+            "left" => "ArrowLeft",
+            "right" => "ArrowRight",
+            _ => "PageDown",
+        };
+
+        // If a ref is provided, click it first to focus the scrollable container
         if let Ok(ref_val) = Self::normalize_ref(args) {
-            // Playwright MCP scroll doesn't take ref directly — it uses coordinates.
-            // For now, scroll at viewport center. A future improvement could
-            // get element coordinates from the snapshot.
-            let _ = ref_val; // acknowledge but don't use yet
-            params = json!({
-                "coordinate": [640, 400],
-                "scroll_direction": direction
-            });
+            let _ = self
+                .call_mcp_on_tab(tab, "browser_click", json!({"ref": ref_val}))
+                .await;
         }
 
-        match self.call_mcp_on_tab(tab, "browser_scroll", params).await {
-            Ok(output) => Ok(ToolResult::success(compact_action_short(
-                &output,
-                &format!("Scrolled {direction}."),
-            ))),
-            Err(e) => Ok(browser_error_result("Scroll", &e)),
+        let repeat = amount.unsigned_abs().max(1);
+        for _ in 0..repeat {
+            let _ = self
+                .call_mcp_on_tab(tab, "browser_press_key", json!({"key": key}))
+                .await;
+        }
+
+        // Auto-snapshot after scroll for fresh content
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        match self
+            .call_mcp_on_tab(tab, "browser_snapshot", json!({}))
+            .await
+        {
+            Ok(snap) => {
+                let compact = compact_browser_snapshot_staged(&snap, self.seen_results());
+                tab.last_was_snapshot.store(true, Ordering::Relaxed);
+                Ok(ToolResult::success(format!(
+                    "Scrolled {direction}.\n\n{compact}"
+                )))
+            }
+            Err(_) => Ok(ToolResult::success(format!("Scrolled {direction}."))),
         }
     }
 
