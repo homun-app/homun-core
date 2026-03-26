@@ -4027,38 +4027,6 @@ html, body {
     flex-direction: column;
 }
 
-.chat-topbar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-    padding: 18px 24px 12px;
-    min-height: calc(18px + var(--header-row) + 12px);
-    box-sizing: border-box;
-    background: linear-gradient(to bottom, var(--bg), transparent);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    position: sticky;
-    top: 0;
-    z-index: 10;
-}
-
-.chat-topbar-leading {
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    justify-content: flex-start;
-}
-
-.chat-topbar-statusline {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-}
-
 .chat-sidebar-toggle-btn {
     display: inline-flex;
     align-items: center;
@@ -4373,13 +4341,6 @@ html, body {
 .chat-main.is-welcome {
     justify-content: center;
     align-items: center;
-}
-
-.chat-main.is-welcome .chat-topbar {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
 }
 
 .chat-main.is-welcome .chat-thread-wrap {
@@ -5471,11 +5432,6 @@ html, body {
 
     .chat-conversation-list {
         max-height: 200px;
-    }
-
-    .chat-topbar {
-        width: 100%;
-        padding: 10px 12px 8px;
     }
 
     .chat-thread-wrap {

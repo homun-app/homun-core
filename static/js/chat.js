@@ -13,7 +13,6 @@ const btnSend = document.getElementById('btn-send');
 const chatEmptyState = document.getElementById('chat-empty-state');
 const chatShellEl = document.querySelector('.chat-layout .content-body') || document.querySelector('.chat-shell');
 const conversationListEl = document.getElementById('chat-conversation-list');
-const conversationTitleEl = document.getElementById('chat-conversation-title');
 const btnChatSidebar = document.getElementById('btn-chat-sidebar');
 // Search modal
 const btnChatSearch = document.getElementById('btn-chat-search');
@@ -299,9 +298,6 @@ function setConversationUrl(conversationId) {
 function currentConversationTitle() {
     const active = conversations.find((item) => item.conversation_id === currentConversationId);
     if (active && active.title) return active.title;
-    if (conversationTitleEl && conversationTitleEl.textContent.trim()) {
-        return conversationTitleEl.textContent.trim();
-    }
     return 'New conversation';
 }
 
@@ -353,8 +349,6 @@ function groupConversationsByDate(convos) {
 }
 
 function syncConversationHeader() {
-    if (!conversationTitleEl) return;
-    conversationTitleEl.textContent = capitalizeFirst(currentConversationTitle());
 }
 
 function applySidebarState() {
@@ -2963,7 +2957,6 @@ function maybeAutoCompact() {
 // Wire up action buttons
 document.getElementById('btn-clear-chat')?.addEventListener('click', handleClearChat);
 document.getElementById('btn-new-chat')?.addEventListener('click', handleNewChat);
-document.getElementById('btn-new-chat-topbar')?.addEventListener('click', handleNewChat);
 document.getElementById('btn-compact-chat')?.addEventListener('click', handleCompactChat);
 
 // ─── Model Selector ─────────────────────────────────────────────
