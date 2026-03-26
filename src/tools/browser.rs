@@ -1317,6 +1317,67 @@ impl BrowserTool {
     ///
     /// Uses `page.mouse.click(x, y)` via `browser_run_code`. After clicking,
     /// auto-snapshots to give the model fresh refs (same pattern as `action_click`).
+    /// Auto-detect the CAPTCHA "hold to verify" button position via JS.
+    ///
+    /// PerimeterX/HUMAN Security buttons are custom widgets not in the
+    /// accessibility tree. This searches the DOM for the characteristic
+    /// elements and returns their center coordinates.
+    async fn find_captcha_button(
+        &self,
+        tab: &crate::browser::tab_session::TabSession,
+    ) -> Option<(f64, f64)> {
+        // Search for PerimeterX hold button by multiple strategies
+        let js = r#"() => {
+            // Strategy 1: find by ID (PerimeterX uses #px-captcha)
+            let el = document.getElementById('px-captcha');
+            if (!el) {
+                // Strategy 2: find by PerimeterX class patterns
+                el = document.querySelector('[id*="px-captcha"], [class*="px-captcha"], [data-testid*="captcha"]');
+            }
+            if (!el) {
+                // Strategy 3: find large clickable div in the center area of the page
+                const vw = window.innerWidth;
+                const vh = window.innerHeight;
+                const candidates = document.querySelectorAll('div, button, a');
+                for (const c of candidates) {
+                    const r = c.getBoundingClientRect();
+                    const isCentered = Math.abs(r.x + r.width/2 - vw/2) < vw * 0.25;
+                    const isLarge = r.width > 150 && r.height > 50;
+                    const inMiddle = r.y > vh * 0.3 && r.y < vh * 0.8;
+                    if (isCentered && isLarge && inMiddle) {
+                        const style = window.getComputedStyle(c);
+                        const hasPointer = style.cursor === 'pointer';
+                        const hasBorder = style.borderWidth !== '0px' && style.borderStyle !== 'none';
+                        if (hasPointer || hasBorder) {
+                            el = c;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (el) {
+                const r = el.getBoundingClientRect();
+                return JSON.stringify({x: Math.round(r.x + r.width/2), y: Math.round(r.y + r.height/2)});
+            }
+            return null;
+        }"#;
+
+        let result = self
+            .call_mcp_on_tab(tab, "browser_evaluate", json!({"function": js}))
+            .await
+            .ok()?;
+
+        if result.contains("null") || !result.contains('{') {
+            return None;
+        }
+
+        let json_str = &result[result.find('{')? ..= result.rfind('}')?];
+        let parsed: Value = serde_json::from_str(json_str).ok()?;
+        let x = parsed.get("x").and_then(|v| v.as_f64())?;
+        let y = parsed.get("y").and_then(|v| v.as_f64())?;
+        Some((x, y))
+    }
+
     /// Execute a press-and-hold click for "hold to verify" CAPTCHAs.
     ///
     /// Uses `page.mouse.down()` + sleep + `page.mouse.up()` to simulate
@@ -1333,11 +1394,10 @@ impl BrowserTool {
             .unwrap_or(2000)
             .min(10000); // cap at 10s for safety
 
-        // Accept either ref (element) or x/y coordinates (for CAPTCHA buttons
-        // that don't appear in the accessibility tree).
+        // Accept ref, x/y coordinates, or auto-detect CAPTCHA button.
+        // Priority: ref → auto-detect → x/y fallback.
         let (cx, cy) = if let Some(ref_val) = args.get("ref").and_then(|v| v.as_str()) {
-            let normalized = if ref_val.starts_with("e") { ref_val.to_string() } else { ref_val.to_string() };
-            match self.get_element_center(tab, &normalized).await {
+            match self.get_element_center(tab, ref_val).await {
                 Some(pos) => pos,
                 None => {
                     return Ok(ToolResult::error(
@@ -1347,17 +1407,21 @@ impl BrowserTool {
                     ));
                 }
             }
-        } else if let (Some(x), Some(y)) = (
-            args.get("x").and_then(|v| v.as_f64()),
-            args.get("y").and_then(|v| v.as_f64()),
-        ) {
-            (x, y)
         } else {
-            return Ok(ToolResult::error(
-                "hold_click requires either 'ref' (element reference) or 'x'+'y' (pixel coordinates). \
-                 Use coordinates when the button is not in the accessibility tree (e.g. CAPTCHA)."
-                    .to_string(),
-            ));
+            // Try auto-detecting the CAPTCHA button via JS before falling back to coordinates
+            let auto_pos = self.find_captcha_button(tab).await;
+            if let Some(pos) = auto_pos {
+                tracing::info!("Auto-detected CAPTCHA button at ({:.0}, {:.0})", pos.0, pos.1);
+                pos
+            } else if let (Some(x), Some(y)) = (
+                args.get("x").and_then(|v| v.as_f64()),
+                args.get("y").and_then(|v| v.as_f64()),
+            ) {
+                (x, y)
+            } else {
+                // Last resort: center of viewport (CAPTCHA buttons are usually centered)
+                (640.0, 450.0)
+            }
         };
 
         // Press and hold: move → mousedown → wait → mouseup.
@@ -2196,8 +2260,8 @@ fn detect_captcha_in_sparse_page(tree: &str) -> Option<String> {
             "\n\n** CAPTCHA DETECTED: Hold-to-Verify **\n\
              This is a PerimeterX/HUMAN Security challenge. The 'hold' button is NOT in \
              the accessibility tree — it's a custom widget.\n\
-             → Use: browser({action: \"hold_click\", x: 750, y: 475, duration_ms: 3000})\n\
-             The button is typically centered on the page at approximately (750, 475).\n\
+             → Use: browser({action: \"hold_click\", duration_ms: 3000})\n\
+             The button will be auto-detected via JS. No coordinates needed.\n\
              After release, take a snapshot to verify if the challenge was passed.\n"
                 .to_string(),
         );
@@ -2207,10 +2271,9 @@ fn detect_captcha_in_sparse_page(tree: &str) -> Option<String> {
         return Some(
             "\n\n** CAPTCHA DETECTED: Bot Verification Page **\n\
              The site is showing a bot verification challenge. Try:\n\
-             1. Use screenshot() to see the visual challenge type\n\
-             2. If it shows a 'hold to verify' button: browser({action: \"hold_click\", x: 750, y: 475, duration_ms: 3000})\n\
-             3. If it's a Cloudflare check: wait(seconds=5) then snapshot()\n\
-             4. If it's a visual CAPTCHA (image selection): inform the user it requires manual intervention\n"
+             1. Use hold_click (auto-detects button position): browser({action: \"hold_click\", duration_ms: 3000})\n\
+             2. If it's a Cloudflare check: wait(seconds=5) then snapshot()\n\
+             3. If it's a visual CAPTCHA (image selection): inform the user it requires manual intervention\n"
                 .to_string(),
         );
     }
