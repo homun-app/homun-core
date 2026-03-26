@@ -10,7 +10,7 @@ use crate::config::BrowserPolicyConfig;
 fn action_category(action: &str) -> &'static str {
     match action {
         "navigate" => "navigate",
-        "click" | "click_coordinates" => "click",
+        "click" | "click_coordinates" | "hold_click" => "click",
         "type" | "fill" | "select_option" | "press_key" => "fill",
         "snapshot" | "screenshot" => "observe",
         "hover" | "scroll" | "drag" => "interact",
@@ -206,6 +206,7 @@ mod tests {
             "navigate",
             "click",
             "click_coordinates",
+            "hold_click",
             "type",
             "fill",
             "select_option",

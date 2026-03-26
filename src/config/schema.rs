@@ -2436,10 +2436,10 @@ pub struct BrowserConfig {
     /// Named browser profiles for isolation
     pub profiles: HashMap<String, BrowserProfile>,
     /// Inject anti-detection (stealth) scripts that mask automation signals
-    /// like `navigator.webdriver`. Default: false.
-    /// Modern bot detectors can detect these patches, making you MORE visible.
-    /// Only enable if a site specifically blocks `navigator.webdriver = true`.
-    #[serde(default)]
+    /// like `navigator.webdriver`, canvas fingerprint, and browser properties.
+    /// Default: true — the comprehensive patches improve success on booking
+    /// and travel sites that check for automation.
+    #[serde(default = "default_true")]
     pub stealth: bool,
     /// Action policy — allow/deny categories and URL patterns
     #[serde(default)]
@@ -2512,6 +2512,9 @@ pub struct BrowserProfile {
     pub user_agent: Option<String>,
     /// Additional browser arguments
     pub args: Vec<String>,
+    /// Override viewport size for this profile (e.g. "1920x1080").
+    /// If not set, a realistic size is chosen deterministically from the profile name.
+    pub viewport: Option<String>,
     /// Description of what this profile is for
     pub description: Option<String>,
 }
@@ -2526,6 +2529,7 @@ impl Default for BrowserProfile {
             proxy: None,
             user_agent: None,
             args: Vec::new(),
+            viewport: None,
             description: None,
         }
     }
@@ -2552,7 +2556,7 @@ impl Default for BrowserConfig {
             executable_path: String::new(),
             default_profile: "default".to_string(),
             profiles,
-            stealth: false,
+            stealth: true,
             policy: BrowserPolicyConfig::default(),
         }
     }

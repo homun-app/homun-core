@@ -185,6 +185,8 @@ impl PromptSection for ToolsSection {
             prompt.push_str(
                 "### Browser Essentials\n\n\
                  - After navigating, snapshot before interacting with page elements\n\
+                 - Forms: READ ALL fields first, then fill in logical order (the accessibility tree \
+                 order may differ from the visual layout — use field labels to determine correct sequence)\n\
                  - Autocomplete fields: type a FEW characters → read suggestions → click the match\n\
                  - NEVER re-navigate to a site you already have open — use snapshot() instead\n\
                  - NEVER navigate to URLs you constructed — only use URLs from search results or visible links\n\

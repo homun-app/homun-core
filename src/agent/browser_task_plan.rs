@@ -4,6 +4,8 @@
 //! Tracks visited sources, extraction progress, autocomplete state,
 //! and enforces browser-specific safety vetoes at runtime.
 
+use std::time::Instant;
+
 use crate::agent::cognition::CognitionResult;
 use crate::provider::ChatMessage;
 
@@ -40,6 +42,10 @@ pub struct BrowserTaskPlanState {
     requires_fresh_snapshot: bool,
     /// Whether the agent has entered a booking site via Google search.
     used_google_entry: bool,
+    /// Rate limit backoff: block actions until this time.
+    rate_limited_until: Option<Instant>,
+    /// Consecutive rate limit detections (for exponential backoff).
+    rate_limit_count: u32,
 }
 
 impl BrowserTaskPlanState {
@@ -93,6 +99,8 @@ impl BrowserTaskPlanState {
             pending_selection: false,
             requires_fresh_snapshot: true,
             used_google_entry: false,
+            rate_limited_until: None,
+            rate_limit_count: 0,
         }
     }
 
@@ -154,6 +162,32 @@ impl BrowserTaskPlanState {
             }
             _ => {}
         }
+
+        // Rate limit detection — use specific patterns to avoid false positives.
+        // "429" alone matches prices/train numbers, so require surrounding context.
+        let is_rate_limited = lower.contains("too many requests")
+            || lower.contains("rate limit")
+            || lower.contains("troppi tentativi")
+            || lower.contains("http 429")
+            || lower.contains("status 429")
+            || lower.contains("error 429")
+            || (lower.contains("temporarily blocked")
+                && !lower.contains("temporarily blocked by"))
+            || (lower.contains("please try again later")
+                && (lower.contains("blocked") || lower.contains("error")));
+        if is_rate_limited {
+            self.rate_limit_count += 1;
+            // Exponential backoff: 30s, 60s, 120s, 240s (cap at 4min)
+            let backoff_secs = (30u64 * (1 << self.rate_limit_count.min(3))).min(240);
+            self.rate_limited_until =
+                Some(Instant::now() + std::time::Duration::from_secs(backoff_secs));
+            tracing::warn!(
+                source = ?self.current_source,
+                backoff_secs,
+                count = self.rate_limit_count,
+                "Rate limit detected, backing off"
+            );
+        }
     }
 
     /// Merge browser state into an execution plan snapshot.
@@ -190,6 +224,27 @@ impl BrowserTaskPlanState {
         action: &str,
         arguments: &serde_json::Value,
     ) -> Option<String> {
+        // Rate limit backoff — block actions until cooldown expires
+        if let Some(until) = self.rate_limited_until {
+            if Instant::now() < until {
+                let remaining = until.duration_since(Instant::now());
+                let domain = self
+                    .current_source
+                    .as_deref()
+                    .unwrap_or("current site");
+                // Allow snapshot/screenshot/wait/close during rate limit
+                if !matches!(action, "snapshot" | "screenshot" | "wait" | "close") {
+                    return Some(format!(
+                        "Browser planner veto: rate-limited on {domain}. \
+                         Wait {:.0}s before retrying. The site is blocking rapid requests. \
+                         Use wait(seconds={}) then snapshot() to check.",
+                        remaining.as_secs_f64(),
+                        remaining.as_secs().max(5)
+                    ));
+                }
+            }
+        }
+
         // Require fresh snapshot before interacting after navigation
         if self.requires_fresh_snapshot
             && matches!(

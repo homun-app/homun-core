@@ -193,6 +193,159 @@ impl BrowserTool {
         self.session.seen_results.load(Ordering::Relaxed)
     }
 
+    /// Get element bounding box via Playwright's `browser_evaluate` with ref.
+    ///
+    /// Uses Playwright MCP's internal ref→element mapping to get the bounding box.
+    /// Returns (center_x, center_y) or `None` if the element can't be resolved.
+    async fn get_element_center(
+        &self,
+        tab: &crate::browser::tab_session::TabSession,
+        ref_val: &str,
+    ) -> Option<(f64, f64)> {
+        // Use Playwright's evaluate with ref — this leverages the internal ref mapping
+        let js = "(element) => { \
+            const r = element.getBoundingClientRect(); \
+            return JSON.stringify({x: r.x + r.width/2, y: r.y + r.height/2}); \
+        }";
+        let result = self
+            .call_mcp_on_tab(
+                tab,
+                "browser_evaluate",
+                json!({"function": js, "ref": ref_val}),
+            )
+            .await
+            .ok()?;
+
+        // Parse {"x": 123.4, "y": 456.7} from the result
+        let json_str = if let Some(start) = result.find('{') {
+            if let Some(end) = result.rfind('}') {
+                &result[start..=end]
+            } else {
+                return None;
+            }
+        } else {
+            &result
+        };
+
+        let parsed: Value = serde_json::from_str(json_str).ok()?;
+        let x = parsed.get("x").and_then(|v| v.as_f64())?;
+        let y = parsed.get("y").and_then(|v| v.as_f64())?;
+        Some((x, y))
+    }
+
+    /// Annotate a snapshot with visual form field order when form fields are present.
+    ///
+    /// Runs a single JS call that finds all visible input/select/textarea elements,
+    /// reads their bounding boxes, sorts by visual position (top→bottom, left→right),
+    /// and returns a numbered list with label + ref. Prepended to the snapshot so
+    /// the LLM fills fields in visual order, not DOM order.
+    async fn annotate_form_order(
+        &self,
+        tab: &crate::browser::tab_session::TabSession,
+        snapshot: &str,
+    ) -> String {
+        // Only annotate if form fields are detected
+        if !has_form_fields(snapshot) {
+            return snapshot.to_string();
+        }
+
+        // JS: find all visible form fields, get label + bounding box, sort visually
+        let js = r#"() => {
+            const fields = document.querySelectorAll(
+                'input:not([type=hidden]):not([type=submit]):not([type=button]),' +
+                'select,textarea,[role=combobox],[role=searchbox],[role=spinbutton],[contenteditable=true]'
+            );
+            const result = [];
+            for (const el of fields) {
+                const r = el.getBoundingClientRect();
+                if (r.width === 0 || r.height === 0) continue;
+                const label = el.getAttribute('aria-label')
+                    || el.getAttribute('placeholder')
+                    || el.getAttribute('name')
+                    || el.closest('label')?.textContent?.trim()
+                    || (el.id && document.querySelector('label[for="'+el.id+'"]')?.textContent?.trim())
+                    || el.getAttribute('title')
+                    || '';
+                if (!label) continue;
+                result.push({
+                    label: label.substring(0, 40),
+                    y: Math.round(r.top),
+                    x: Math.round(r.left),
+                    tag: el.tagName.toLowerCase(),
+                    type: el.type || el.getAttribute('role') || ''
+                });
+            }
+            result.sort((a, b) => {
+                const rowA = Math.floor(a.y / 40);
+                const rowB = Math.floor(b.y / 40);
+                if (rowA !== rowB) return rowA - rowB;
+                return a.x - b.x;
+            });
+            return JSON.stringify(result);
+        }"#;
+
+        let fields = match self
+            .call_mcp_on_tab(tab, "browser_evaluate", json!({"function": js}))
+            .await
+        {
+            Ok(raw) => raw,
+            Err(_) => return snapshot.to_string(),
+        };
+
+        // Parse the JSON array from the evaluate result
+        let json_str = if let Some(start) = fields.find('[') {
+            if let Some(end) = fields.rfind(']') {
+                &fields[start..=end]
+            } else {
+                return snapshot.to_string();
+            }
+        } else {
+            return snapshot.to_string();
+        };
+
+        let items: Vec<Value> = match serde_json::from_str(json_str) {
+            Ok(v) => v,
+            Err(_) => return snapshot.to_string(),
+        };
+
+        if items.len() < 2 {
+            // Single field or no fields — no reordering needed
+            return snapshot.to_string();
+        }
+
+        let mut order_hint = String::from(
+            "\n** VISUAL FORM ORDER (fill in this sequence): **\n",
+        );
+        for (i, item) in items.iter().enumerate() {
+            let label = item.get("label").and_then(|v| v.as_str()).unwrap_or("?");
+            let field_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            let type_hint = if field_type.is_empty() {
+                String::new()
+            } else {
+                format!(" ({field_type})")
+            };
+            order_hint.push_str(&format!("  {}. {}{}\n", i + 1, label, type_hint));
+        }
+        order_hint.push('\n');
+
+        // Prepend the visual order before the tree
+        let mut result = String::new();
+        let mut inserted = false;
+        for line in snapshot.lines() {
+            // Insert before the accessibility tree starts
+            if !inserted && line.trim_start().starts_with("- ") {
+                result.push_str(&order_hint);
+                inserted = true;
+            }
+            result.push_str(line);
+            result.push('\n');
+        }
+        if !inserted {
+            result.push_str(&order_hint);
+        }
+        result
+    }
+
     /// Call an individual Playwright MCP tool through the persistent peer.
     /// Used for global operations that don't target a specific tab
     /// (stealth injection, close, resource blocking).
@@ -318,51 +471,117 @@ impl BrowserTool {
             return;
         }
 
-        // Check config — stealth is OFF by default because modern bot detectors
-        // can detect these patches, making the browser MORE identifiable.
         let stealth_enabled = crate::config::Config::load()
             .map(|c| c.browser.stealth)
-            .unwrap_or(false);
+            .unwrap_or(true);
         if !stealth_enabled {
             tracing::debug!("Browser stealth injection disabled (config: browser.stealth = false)");
             self.stealth_injected.store(true, Ordering::Relaxed);
             return;
         }
 
-        // Stealth patches — mirrors playwright-extra-plugin-stealth essentials:
+        // Comprehensive stealth patches — goes beyond basic playwright-stealth:
         // 1. navigator.webdriver = false (primary bot detection flag)
         // 2. window.chrome runtime (Chrome identity check)
-        // 3. navigator.plugins (0 plugins = automation)
+        // 3. navigator.plugins (realistic plugin list)
         // 4. navigator.permissions.query (notification permission leak)
-        // 5. WebGL vendor/renderer (headless detection)
+        // 5. navigator.languages consistency
+        // 6. navigator.hardwareConcurrency + deviceMemory (realistic values)
+        // 7. navigator.maxTouchPoints (0 for desktop)
+        // 8. window.outerWidth/outerHeight (viewport consistency)
+        // 9. Cross-frame window.chrome patching
+        // 10. Canvas fingerprint consistency (deterministic subtle modification)
         let stealth_code = r#"async (page) => {
             await page.addInitScript(() => {
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => false
-                });
+                // 1. Primary bot detection flag
+                Object.defineProperty(navigator, 'webdriver', { get: () => false });
 
+                // 2. Chrome runtime presence
                 if (!window.chrome) {
-                    window.chrome = { runtime: {}, loadTimes: function(){}, csi: function(){} };
+                    window.chrome = {
+                        runtime: { onConnect: { addListener: function(){} }, onMessage: { addListener: function(){} } },
+                        loadTimes: function(){ return {}; },
+                        csi: function(){ return {}; }
+                    };
                 }
 
+                // 3. Realistic plugin list (3 plugins = normal Chrome)
                 Object.defineProperty(navigator, 'plugins', {
                     get: () => {
-                        const plugins = [
-                            { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
-                            { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
-                            { name: 'Native Client', filename: 'internal-nacl-plugin' }
+                        const p = [
+                            { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+                            { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+                            { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' }
                         ];
-                        plugins.length = 3;
-                        return plugins;
+                        p.length = 3;
+                        p.item = (i) => p[i] || null;
+                        p.namedItem = (n) => p.find(x => x.name === n) || null;
+                        p.refresh = () => {};
+                        return p;
                     }
                 });
 
+                // 4. Permission query consistency
                 const origQuery = navigator.permissions.query.bind(navigator.permissions);
                 navigator.permissions.query = (params) => {
                     if (params.name === 'notifications') {
                         return Promise.resolve({ state: Notification.permission });
                     }
                     return origQuery(params);
+                };
+
+                // 5. Languages consistency
+                Object.defineProperty(navigator, 'languages', {
+                    get: () => ['en-US', 'en', 'it']
+                });
+
+                // 6. Hardware realism (4-core, 8GB = common laptop)
+                Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 4 });
+                if (navigator.deviceMemory !== undefined) {
+                    Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+                }
+
+                // 7. Desktop = no touch (0 touch points)
+                Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 0 });
+
+                // 8. Viewport consistency — outerWidth/Height match inner
+                Object.defineProperty(window, 'outerWidth', { get: () => window.innerWidth });
+                Object.defineProperty(window, 'outerHeight', { get: () => window.innerHeight + 85 });
+
+                // 9. Cross-frame chrome patching
+                const origGetOwnProp = Object.getOwnPropertyDescriptor;
+                const origCreateEl = document.createElement.bind(document);
+                document.createElement = function(tag) {
+                    const el = origCreateEl(tag);
+                    if (tag === 'iframe') {
+                        const origAppend = el.appendChild;
+                        const origContentWindow = origGetOwnProp(HTMLIFrameElement.prototype, 'contentWindow');
+                        Object.defineProperty(el, 'contentWindow', {
+                            get: function() {
+                                const w = origContentWindow.get.call(this);
+                                if (w && !w.chrome) {
+                                    w.chrome = window.chrome;
+                                }
+                                return w;
+                            }
+                        });
+                    }
+                    return el;
+                };
+
+                // 10. Canvas fingerprint — deterministic subtle shift (not random noise)
+                // Uses a consistent seed so the same session always returns the same fingerprint
+                const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+                HTMLCanvasElement.prototype.toDataURL = function(type) {
+                    const ctx = this.getContext('2d');
+                    if (ctx && this.width > 0 && this.height > 0) {
+                        try {
+                            const imgData = ctx.getImageData(0, 0, 1, 1);
+                            imgData.data[0] = (imgData.data[0] + 1) % 256;
+                            ctx.putImageData(imgData, 0, 0);
+                        } catch(e) { /* cross-origin canvas, skip */ }
+                    }
+                    return origToDataURL.apply(this, arguments);
                 };
             });
         }"#;
@@ -372,7 +591,7 @@ impl BrowserTool {
             .await
         {
             Ok(_) => {
-                tracing::info!("Browser stealth scripts injected (anti-bot detection)");
+                tracing::info!("Browser stealth scripts injected (10 anti-detection patches)");
                 self.stealth_injected.store(true, Ordering::Relaxed);
             }
             Err(e) => {
@@ -413,6 +632,9 @@ impl BrowserTool {
         // Wait for the page to stabilize, then auto-snapshot.
         let mut snapshot = self.wait_for_stable_snapshot(tab).await;
         tab.last_was_snapshot.store(true, Ordering::Relaxed);
+
+        // Annotate visual form field order when form detected
+        snapshot = self.annotate_form_order(tab, &snapshot).await;
 
         // Detect hidden interactive elements on pages with sparse ARIA coverage
         if let Some(cursor_section) = self.find_cursor_interactive(&snapshot).await {
@@ -512,6 +734,8 @@ impl BrowserTool {
             Ok(output) => {
                 tab.last_was_snapshot.store(true, Ordering::Relaxed);
                 let mut compact = compact_browser_snapshot_staged(&output, self.seen_results());
+                // Annotate visual form field order when form detected
+                compact = self.annotate_form_order(tab, &compact).await;
                 // Detect hidden interactive elements on sparse pages
                 if let Some(cursor_section) = self.find_cursor_interactive(&compact).await {
                     compact.push_str(&cursor_section);
@@ -1024,9 +1248,19 @@ impl BrowserTool {
             &config,
             OneShotRequest {
                 system_prompt: "Describe this browser screenshot concisely. \
-                    Focus on: page type (error page, product listing, search results, \
-                    login form, etc.), visible content, and actionable elements. \
-                    If this looks like an error page, say so."
+                    Focus on: page type, visible content, and actionable elements.\n\
+                    IMPORTANT — If the page shows any kind of bot verification or CAPTCHA, \
+                    identify it clearly and state the type:\n\
+                    - CAPTCHA_HOLD: a 'press and hold' or 'hold to verify' button → \
+                      say: \"CAPTCHA: hold-to-verify button visible at approximately (center_x, center_y). \
+                      Use hold_click action with x and y coordinates (the button is usually not in the accessibility tree).\"\n\
+                    - CAPTCHA_CHALLENGE: a Cloudflare/Turnstile 'checking your browser' page → \
+                      say: \"CAPTCHA: Cloudflare challenge. Wait 5 seconds and retry.\"\n\
+                    - CAPTCHA_VISUAL: image selection, text recognition, puzzle → \
+                      say: \"CAPTCHA: visual challenge. Requires manual user intervention.\"\n\
+                    - BLOCKED: 'access denied', 'too many requests', rate limit page → \
+                      say: \"BLOCKED: site is rate-limiting. Wait and retry later.\"\n\
+                    If the page is a normal website with no verification, do NOT mention CAPTCHA."
                     .to_string(),
                 user_message: "What is shown in this screenshot?".to_string(),
                 images: vec![ImageInput {
@@ -1058,6 +1292,88 @@ impl BrowserTool {
     ///
     /// Uses `page.mouse.click(x, y)` via `browser_run_code`. After clicking,
     /// auto-snapshots to give the model fresh refs (same pattern as `action_click`).
+    /// Execute a press-and-hold click for "hold to verify" CAPTCHAs.
+    ///
+    /// Uses `page.mouse.down()` + sleep + `page.mouse.up()` to simulate
+    /// a human pressing and holding a button. Supports PerimeterX and
+    /// Cloudflare "hold here to verify" challenges.
+    async fn action_hold_click(
+        &self,
+        args: &Value,
+        tab: &crate::browser::tab_session::TabSession,
+    ) -> Result<ToolResult> {
+        let duration_ms = args
+            .get("duration_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(2000)
+            .min(10000); // cap at 10s for safety
+
+        // Accept either ref (element) or x/y coordinates (for CAPTCHA buttons
+        // that don't appear in the accessibility tree).
+        let (cx, cy) = if let Some(ref_val) = args.get("ref").and_then(|v| v.as_str()) {
+            let normalized = if ref_val.starts_with("e") { ref_val.to_string() } else { ref_val.to_string() };
+            match self.get_element_center(tab, &normalized).await {
+                Some(pos) => pos,
+                None => {
+                    return Ok(ToolResult::error(
+                        "Could not find element position for hold_click. \
+                         Take a fresh snapshot and verify the ref, or use x/y coordinates instead."
+                            .to_string(),
+                    ));
+                }
+            }
+        } else if let (Some(x), Some(y)) = (
+            args.get("x").and_then(|v| v.as_f64()),
+            args.get("y").and_then(|v| v.as_f64()),
+        ) {
+            (x, y)
+        } else {
+            return Ok(ToolResult::error(
+                "hold_click requires either 'ref' (element reference) or 'x'+'y' (pixel coordinates). \
+                 Use coordinates when the button is not in the accessibility tree (e.g. CAPTCHA)."
+                    .to_string(),
+            ));
+        };
+
+        // Press and hold: move → mousedown → wait → mouseup.
+        // Uses page.waitForTimeout() instead of setTimeout (not available in MCP context).
+        let hold_code = format!(
+            r#"async (page) => {{
+                await page.mouse.move({cx:.0}, {cy:.0});
+                await page.mouse.down();
+                await page.waitForTimeout({duration_ms});
+                await page.mouse.up();
+            }}"#
+        );
+
+        match self
+            .call_mcp_on_tab(tab, "browser_run_code", json!({"code": hold_code}))
+            .await
+        {
+            Ok(_) => {
+                // Auto-snapshot after hold release
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                match self
+                    .call_mcp_on_tab(tab, "browser_snapshot", json!({}))
+                    .await
+                {
+                    Ok(snap) => {
+                        let compact =
+                            compact_browser_snapshot_staged(&snap, self.seen_results());
+                        tab.last_was_snapshot.store(true, Ordering::Relaxed);
+                        Ok(ToolResult::success(format!(
+                            "Held click for {duration_ms}ms at ({cx:.0}, {cy:.0}).\n\n{compact}"
+                        )))
+                    }
+                    Err(_) => Ok(ToolResult::success(format!(
+                        "Held click for {duration_ms}ms."
+                    ))),
+                }
+            }
+            Err(e) => Ok(browser_error_result("Hold click", &e)),
+        }
+    }
+
     async fn action_click_coordinates(
         &self,
         args: &Value,
@@ -1167,6 +1483,7 @@ impl Tool for BrowserTool {
          - drag(ref, end_ref): Drag from ref to end_ref\n\
          - screenshot(): Take screenshot and describe via vision model\n\
          - click_coordinates(x, y): Click at pixel coordinates (for canvas/SVG/maps)\n\
+         - hold_click(ref OR x+y, duration_ms?): Press and hold (for 'hold to verify' CAPTCHAs). Use ref for ARIA elements, x+y coordinates for non-ARIA buttons\n\
          - block_resources(): Block images/fonts/media for faster navigation\n\
          - unblock_resources(): Restore normal resource loading\n\
          - evaluate(expression): Read page state via JS (READ-ONLY, no DOM changes)\n\
@@ -1177,7 +1494,8 @@ impl Tool for BrowserTool {
          2. Use refs from the LATEST snapshot only (e.g. ref=\"e42\")\n\
          3. click() already returns a snapshot — no need to call snapshot() after\n\
          4. For autocomplete fields: type partial text → look at suggestions → click match\n\
-         5. If page seems empty/broken, call snapshot() BEFORE reloading — it may still be loading"
+         5. If page seems empty/broken, call snapshot() BEFORE reloading — it may still be loading\n\
+         6. For 'hold to verify' CAPTCHAs: use screenshot() to see the button, then hold_click with x+y coordinates (CAPTCHA buttons usually aren't in the accessibility tree)"
     }
 
     fn parameters(&self) -> Value {
@@ -1190,8 +1508,9 @@ impl Tool for BrowserTool {
                     "enum": [
                         "navigate", "snapshot", "screenshot", "click", "type",
                         "fill", "select_option", "press_key", "hover", "scroll",
-                        "drag", "click_coordinates", "block_resources",
-                        "unblock_resources", "evaluate", "close", "wait"
+                        "drag", "click_coordinates", "hold_click",
+                        "block_resources", "unblock_resources", "evaluate",
+                        "close", "wait"
                     ],
                     "description": "Browser action to perform"
                 },
@@ -1230,11 +1549,15 @@ impl Tool for BrowserTool {
                 },
                 "x": {
                     "type": "integer",
-                    "description": "X pixel coordinate for click_coordinates"
+                    "description": "X pixel coordinate for click_coordinates or hold_click"
                 },
                 "y": {
                     "type": "integer",
-                    "description": "Y pixel coordinate for click_coordinates"
+                    "description": "Y pixel coordinate for click_coordinates or hold_click"
+                },
+                "duration_ms": {
+                    "type": "integer",
+                    "description": "Hold duration in ms for hold_click (default 2000, max 10000)"
                 },
                 "profile": {
                     "type": "string",
@@ -1298,21 +1621,22 @@ impl Tool for BrowserTool {
             "unblock_resources" => self.action_unblock_resources().await?,
             "evaluate" => self.action_evaluate(&args, &tab).await?,
             "wait" => self.action_wait(&args).await?,
+            "hold_click" => self.action_hold_click(&args, &tab).await?,
             "close" => self.action_close(&session_key).await?,
             "" => ToolResult::error(
                 "Missing 'action' parameter. Available actions: \
                  navigate, snapshot, screenshot, click, type, fill, \
                  select_option, press_key, hover, scroll, drag, \
-                 click_coordinates, block_resources, unblock_resources, \
-                 evaluate, wait, close"
+                 click_coordinates, hold_click, block_resources, \
+                 unblock_resources, evaluate, wait, close"
                     .to_string(),
             ),
             unknown => ToolResult::error(format!(
                 "Unknown action \"{unknown}\". Available actions: \
                  navigate, snapshot, screenshot, click, type, fill, \
                  select_option, press_key, hover, scroll, drag, \
-                 click_coordinates, block_resources, unblock_resources, \
-                 evaluate, wait, close"
+                 click_coordinates, hold_click, block_resources, \
+                 unblock_resources, evaluate, wait, close"
             )),
         };
 
@@ -1702,12 +2026,16 @@ fn page_stage_hint(tree: &str, seen_results: bool) -> Option<String> {
     match stage {
         PageStage::SearchForm => Some(
             "\n\n** FORM PLAN — do this before filling **\n\
-             For each field, write: field → value from user's request.\n\
-             IGNORE pre-filled / default values.\n\
-             Convert: \"mattina\"→06:00-12:00, \"pomeriggio\"→12:00-18:00, \
+             1. READ all fields and labels FIRST — the tree order may differ from \
+             the visual layout (e.g. 2-column forms). Identify each field by its label.\n\
+             2. MAP fields to values from the user's request: field label → value.\n\
+             3. FILL in logical order (e.g. for travel: origin → destination → date → passengers), \
+             NOT the order they appear in the tree.\n\
+             4. IGNORE pre-filled / default values unless the user asked to change them.\n\
+             5. Convert: \"mattina\"→06:00-12:00, \"pomeriggio\"→12:00-18:00, \
              \"sera\"→18:00-23:00, \"domani\"→tomorrow's date.\n\
-             Autocomplete fields (combobox): type partial text → snapshot → click match.\n\
-             If a required value is missing, ask the user.\n"
+             6. Autocomplete fields (combobox): type partial text → snapshot → click match.\n\
+             7. If a required value is missing, ask the user.\n"
                 .to_string(),
         ),
         PageStage::ResultsListing => Some(
@@ -1728,10 +2056,12 @@ fn page_stage_hint(tree: &str, seen_results: bool) -> Option<String> {
             if has_form_fields(tree) {
                 Some(
                     "\n\n** FORM PLAN — do this before filling **\n\
-                     For each field, write: field → value from user's request.\n\
-                     IGNORE pre-filled / default values.\n\
-                     Autocomplete fields (combobox): type partial text → snapshot → click match.\n\
-                     If a required value is missing, ask the user.\n"
+                     1. READ all fields and labels FIRST — the tree order may differ from \
+                     the visual layout. Identify each field by its label.\n\
+                     2. MAP fields to values from the user's request: field label → value.\n\
+                     3. FILL in logical order based on labels, NOT tree order.\n\
+                     4. Autocomplete fields (combobox): type partial text → snapshot → click match.\n\
+                     5. If a required value is missing, ask the user.\n"
                         .to_string(),
                 )
             } else {

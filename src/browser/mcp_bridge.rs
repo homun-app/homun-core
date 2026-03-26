@@ -75,8 +75,14 @@ pub fn browser_mcp_server_config_for_profile(
     let user_data_dir = browser.profile_user_data_path(profile_name);
     args.push(format!("--user-data-dir={}", user_data_dir.display()));
 
-    // Viewport
-    args.push("--viewport-size=1280,720".to_string());
+    // Viewport — profile override or default (1280x720)
+    let (vw, vh) = browser
+        .profiles
+        .get(profile_name)
+        .and_then(|p| p.viewport.as_deref())
+        .and_then(parse_viewport)
+        .unwrap_or((1280, 720));
+    args.push(format!("--viewport-size={vw},{vh}"));
 
     // Profile-specific proxy
     if let Some(profile) = browser.profiles.get(profile_name) {
@@ -217,6 +223,12 @@ impl BrowserPool {
         let peers = self.peers.read().await;
         peers.keys().cloned().collect()
     }
+}
+
+/// Parse a "WIDTHxHEIGHT" viewport string (e.g. "1920x1080").
+fn parse_viewport(s: &str) -> Option<(u32, u32)> {
+    let (w, h) = s.split_once('x')?;
+    Some((w.trim().parse().ok()?, h.trim().parse().ok()?))
 }
 
 #[cfg(test)]
