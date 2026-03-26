@@ -46,6 +46,9 @@ pub struct BrowserTaskPlanState {
     rate_limited_until: Option<Instant>,
     /// Consecutive rate limit detections (for exponential backoff).
     rate_limit_count: u32,
+    /// Tracks failed click refs: ref → failure count. Used to veto
+    /// repeated clicks on the same element (prevents retry loops).
+    failed_click_refs: std::collections::HashMap<String, u8>,
 }
 
 impl BrowserTaskPlanState {
@@ -101,6 +104,7 @@ impl BrowserTaskPlanState {
             used_google_entry: false,
             rate_limited_until: None,
             rate_limit_count: 0,
+            failed_click_refs: std::collections::HashMap::new(),
         }
     }
 
@@ -158,6 +162,22 @@ impl BrowserTaskPlanState {
                     && self.current_source.as_deref() == Some("google")
                 {
                     self.used_google_entry = true;
+                }
+                // Track failed click refs for retry budget enforcement
+                if action.unwrap_or_default() == "click" {
+                    if lower.contains("timed out") || lower.contains("timeout")
+                        || lower.contains("not found") || lower.contains("failed")
+                    {
+                        // Extract ref from output (look for "Click on eNNN" pattern)
+                        if let Some(ref_str) = extract_ref_from_output(output) {
+                            *self.failed_click_refs.entry(ref_str).or_insert(0) += 1;
+                        }
+                    } else {
+                        // Successful click — reset failure counter for this ref
+                        if let Some(ref_str) = extract_ref_from_output(output) {
+                            self.failed_click_refs.remove(&ref_str);
+                        }
+                    }
                 }
             }
             _ => {}
@@ -241,6 +261,22 @@ impl BrowserTaskPlanState {
                         remaining.as_secs_f64(),
                         remaining.as_secs().max(5)
                     ));
+                }
+            }
+        }
+
+        // Retry budget — veto clicks on refs that have already failed 2+ times
+        if action == "click" {
+            if let Some(ref_val) = arguments.get("ref").and_then(|v| v.as_str()) {
+                if let Some(&count) = self.failed_click_refs.get(ref_val) {
+                    if count >= 2 {
+                        return Some(format!(
+                            "Browser planner veto: click on {ref_val} has failed {count} times. \
+                             STOP retrying this element. The element is likely covered by an \
+                             overlay/modal/popup. Take a screenshot() to see the visual state, \
+                             or try a different approach (dismiss overlays, scroll, use a different element)."
+                        ));
+                    }
                 }
             }
         }
@@ -472,6 +508,24 @@ fn extract_source_name(url: &str) -> Option<String> {
     } else {
         Some(source)
     }
+}
+
+/// Extract a ref string (e.g. "e1177") from browser tool output.
+///
+/// Looks for patterns like `Click on e1177`, `ref="e1177"`, or `Ref e1177`.
+fn extract_ref_from_output(output: &str) -> Option<String> {
+    // Pattern: "Click on eNNN" or "click on eNNN"
+    for prefix in &["Click on ", "click on ", "Ref ", "ref="] {
+        if let Some(idx) = output.find(prefix) {
+            let start = idx + prefix.len();
+            let rest = output[start..].trim_start_matches('"');
+            let ref_str: String = rest.chars().take_while(|c| c.is_alphanumeric()).collect();
+            if ref_str.starts_with('e') && ref_str.len() > 1 {
+                return Some(ref_str);
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]

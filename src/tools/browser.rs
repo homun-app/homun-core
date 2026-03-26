@@ -762,7 +762,31 @@ impl BrowserTool {
             .await
         {
             Ok(output) => compact_action_short(&output, "Clicked."),
-            Err(e) => return Ok(browser_error_result("Click", &e)),
+            Err(e) => {
+                // On timeout, auto-snapshot to show what's blocking the element.
+                // The snapshot reveals overlays/modals/banners covering the target.
+                let error_msg = e.to_string();
+                let is_timeout = error_msg.to_lowercase().contains("timeout");
+                if is_timeout {
+                    tab.last_was_snapshot.store(false, Ordering::Relaxed);
+                    if let Ok(snap_output) = self
+                        .call_mcp_on_tab(tab, "browser_snapshot", json!({}))
+                        .await
+                    {
+                        let compact =
+                            compact_browser_snapshot_staged(&snap_output, self.seen_results());
+                        tab.last_was_snapshot.store(true, Ordering::Relaxed);
+                        let hint = classify_browser_error(&error_msg);
+                        return Ok(ToolResult::error(format!(
+                            "Click on {ref_val} timed out — the element exists but is not \
+                             clickable. An overlay, popup, or modal is likely covering it.\n\
+                             {hint}\n\n\
+                             Current page state:\n{compact}"
+                        )));
+                    }
+                }
+                return Ok(browser_error_result("Click", &e));
+            }
         };
 
         // Brief wait for DOM to settle, then auto-snapshot for fresh refs
@@ -777,7 +801,8 @@ impl BrowserTool {
                 Ok(ToolResult::success(format!("{base_output}\n\n{compact}")))
             }
             Err(_) => {
-                // Snapshot failed (maybe navigation in progress) — return click result only
+                // Snapshot failed — reset guard so agent can try snapshot() manually
+                tab.last_was_snapshot.store(false, Ordering::Relaxed);
                 Ok(ToolResult::success(base_output))
             }
         }
