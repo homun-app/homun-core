@@ -191,7 +191,9 @@ impl PromptSection for ToolsSection {
                  - NEVER re-navigate to a site you already have open — use snapshot() instead\n\
                  - NEVER navigate to URLs you constructed — only use URLs from search results or visible links\n\
                  - Booking sites: navigate via Google search first to establish a natural session\n\
-                 - If a click fails with timeout: STOP, take snapshot() to see what's blocking (overlay, modal, banner). NEVER retry the same ref more than once\n",
+                 - If a click fails with timeout: STOP, take snapshot() to see what's blocking (overlay, modal, banner). NEVER retry the same ref more than once\n\
+                 - Before clicking 'Search' or 'Submit': verify ALL required fields are filled (especially passengers, dates, quantity). If a field looks empty in the snapshot, fill it BEFORE submitting\n\
+                 - For multi-field forms: prefer fill_form([{ref, value}, ...]) to fill all text fields in one call — much faster than individual fill() calls\n",
             );
         }
 
