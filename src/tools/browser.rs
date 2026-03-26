@@ -41,7 +41,8 @@ pub fn browser_idle_timeout_secs() -> u64 {
 /// 3. Clean up a conversation's tab when its agent run completes
 pub struct BrowserSession {
     pub(crate) tab_manager: Arc<crate::browser::TabSessionManager>,
-    peer: Arc<McpPeer>,
+    /// Swappable peer reference — updated by show()/hide() when the MCP process restarts.
+    peer: Arc<tokio::sync::RwLock<Arc<McpPeer>>>,
     operation_mutex: Arc<tokio::sync::Mutex<()>>,
     /// Set by the agent loop when a results page has been seen,
     /// enabling richer page stage detection in subsequent snapshots.
@@ -56,10 +57,20 @@ impl BrowserSession {
     ) -> Self {
         Self {
             tab_manager,
-            peer,
+            peer: Arc::new(tokio::sync::RwLock::new(peer)),
             operation_mutex,
             seen_results: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Get the current peer (may change after show/hide).
+    async fn current_peer(&self) -> Arc<McpPeer> {
+        self.peer.read().await.clone()
+    }
+
+    /// Swap the peer reference (called after show/hide restarts the MCP process).
+    async fn swap_peer(&self, new_peer: Arc<McpPeer>) {
+        *self.peer.write().await = new_peer;
     }
 
     /// Returns a continuation hint for a specific conversation session.
@@ -70,16 +81,18 @@ impl BrowserSession {
     /// Close idle browser tabs across all sessions.
     pub async fn close_idle_tabs(&self, timeout_secs: u64) {
         let _guard = self.operation_mutex.lock().await;
+        let peer = self.current_peer().await;
         self.tab_manager
-            .close_idle_tabs(std::time::Duration::from_secs(timeout_secs), &self.peer)
+            .close_idle_tabs(std::time::Duration::from_secs(timeout_secs), &peer)
             .await;
     }
 
     /// Close a specific session's browser tab (called after agent run completes).
     pub async fn close_tab_for(&self, session_key: &str) {
         let _guard = self.operation_mutex.lock().await;
+        let peer = self.current_peer().await;
         self.tab_manager
-            .close_session(session_key, &self.peer)
+            .close_session(session_key, &peer)
             .await;
     }
 
@@ -150,12 +163,12 @@ const CURSOR_INTERACTIVE_JS: &str = r#"async (page) => {
 /// A lightweight [`Mutex`] protects the atomic `tab_select → action` pair,
 /// allowing concurrent browser use across conversations.
 pub struct BrowserTool {
-    peer: Arc<McpPeer>,
     /// Multi-profile pool for lazy-starting MCP peers per profile.
     pool: Option<Arc<crate::browser::BrowserPool>>,
     /// Whether anti-detection scripts have been injected (global, covers all tabs).
     stealth_injected: AtomicBool,
     /// Shared session state, also held by the agent loop.
+    /// Contains the swappable peer reference (updated by show/hide).
     session: Arc<BrowserSession>,
     /// Per-conversation tab management.
     tab_manager: Arc<crate::browser::TabSessionManager>,
@@ -178,7 +191,6 @@ impl BrowserTool {
             Arc::clone(&operation_mutex),
         ));
         Self {
-            peer,
             pool,
             stealth_injected: AtomicBool::new(false),
             session,
@@ -190,6 +202,11 @@ impl BrowserTool {
     /// Get a clone of the shared session state for the agent loop.
     pub fn session(&self) -> Arc<BrowserSession> {
         Arc::clone(&self.session)
+    }
+
+    /// Get the current MCP peer (may change after show/hide).
+    async fn peer(&self) -> Arc<McpPeer> {
+        self.session.current_peer().await
     }
 
     /// Whether a results page has been seen (for stage-aware snapshot hints).
@@ -354,7 +371,7 @@ impl BrowserTool {
     /// Used for global operations that don't target a specific tab
     /// (stealth injection, close, resource blocking).
     async fn call_mcp(&self, tool_name: &str, args: Value) -> Result<String> {
-        self.peer.call_tool(tool_name, args).await
+        self.peer().await.call_tool(tool_name, args).await
     }
 
     /// Call an MCP tool on a specific conversation's tab.
@@ -369,19 +386,19 @@ impl BrowserTool {
         args: Value,
     ) -> Result<String> {
         let _guard = self.operation_mutex.lock().await;
+        let peer = self.peer().await;
 
         // Select the correct tab before executing the action
         if let Some(index) = *tab.tab_index.read().await {
             // Only select if there might be other tabs
             if self.tab_manager.has_any_active().await {
-                let _ = self
-                    .peer
+                let _ = peer
                     .call_tool("browser_tabs", json!({"action": "select", "index": index}))
                     .await;
             }
         }
 
-        self.peer.call_tool(tool_name, args).await
+        peer.call_tool(tool_name, args).await
     }
 
     /// Compact a snapshot and return diff if the page changed minimally.
@@ -1199,18 +1216,17 @@ impl BrowserTool {
         tab: &crate::browser::tab_session::TabSession,
     ) -> Result<ToolResult> {
         // Select the correct tab before taking the screenshot
+        let peer = self.peer().await;
         {
             let _guard = self.operation_mutex.lock().await;
             if let Some(index) = *tab.tab_index.read().await {
-                let _ = self
-                    .peer
+                let _ = peer
                     .call_tool("browser_tabs", json!({"action": "select", "index": index}))
                     .await;
             }
         }
 
-        let (_text, images) = self
-            .peer
+        let (_text, images) = peer
             .call_tool_with_images("browser_take_screenshot", json!({"type": "png"}))
             .await
             .map_err(|e| anyhow::anyhow!("Screenshot failed: {e}"))?;
@@ -1361,9 +1377,13 @@ impl BrowserTool {
         let last_url = tab.last_url.read().await.clone();
 
         // Restart with visible mode — this kills the current process
-        pool.restart_visible(profile)
+        let new_peer = pool
+            .restart_visible(profile)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to switch to visible mode: {e}"))?;
+
+        // Swap the peer reference so all subsequent calls use the new process
+        self.session.swap_peer(new_peer.clone()).await;
 
         // Re-inject stealth on the new process
         self.stealth_injected
@@ -1376,12 +1396,11 @@ impl BrowserTool {
         // Re-navigate to the last URL to restore context
         if let Some(url) = &last_url {
             result.push_str(&format!("Re-navigating to {url}...\n"));
-            let _ = self
-                .peer
+            let _ = new_peer
                 .call_tool("browser_navigate", json!({"url": url}))
                 .await;
             tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
-            if let Ok(snap) = self.peer.call_tool("browser_snapshot", json!({})).await {
+            if let Ok(snap) = new_peer.call_tool("browser_snapshot", json!({})).await {
                 let compact = compact_browser_snapshot_staged(&snap, self.seen_results());
                 result.push('\n');
                 result.push_str(&compact);
@@ -1416,9 +1435,13 @@ impl BrowserTool {
 
         let last_url = tab.last_url.read().await.clone();
 
-        pool.restart_headless(profile)
+        let new_peer = pool
+            .restart_headless(profile)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to switch to headless mode: {e}"))?;
+
+        // Swap the peer reference so all subsequent calls use the new process
+        self.session.swap_peer(new_peer.clone()).await;
 
         self.stealth_injected
             .store(false, std::sync::atomic::Ordering::Relaxed);
@@ -1428,12 +1451,11 @@ impl BrowserTool {
 
         if let Some(url) = &last_url {
             result.push_str(&format!("Re-navigating to {url}...\n"));
-            let _ = self
-                .peer
+            let _ = new_peer
                 .call_tool("browser_navigate", json!({"url": url}))
                 .await;
             tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
-            if let Ok(snap) = self.peer.call_tool("browser_snapshot", json!({})).await {
+            if let Ok(snap) = new_peer.call_tool("browser_snapshot", json!({})).await {
                 let compact = compact_browser_snapshot_staged(&snap, self.seen_results());
                 result.push('\n');
                 result.push_str(&compact);
@@ -1447,8 +1469,9 @@ impl BrowserTool {
     async fn action_close(&self, session_key: &str) -> Result<ToolResult> {
         // Close only this conversation's tab (not the entire browser)
         let _guard = self.operation_mutex.lock().await;
+        let peer = self.peer().await;
         self.tab_manager
-            .close_session(session_key, &self.peer)
+            .close_session(session_key, &peer)
             .await;
         Ok(ToolResult::success("Browser tab closed.".to_string()))
     }
@@ -1838,8 +1861,9 @@ impl Tool for BrowserTool {
         // The operation_mutex is acquired inside get_or_create / call_mcp_on_tab.
         let tab = {
             let _guard = self.operation_mutex.lock().await;
+            let peer = self.peer().await;
             self.tab_manager
-                .get_or_create(&session_key, &self.peer)
+                .get_or_create(&session_key, &peer)
                 .await?
         };
 
