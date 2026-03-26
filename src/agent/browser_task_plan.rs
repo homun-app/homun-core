@@ -49,6 +49,8 @@ pub struct BrowserTaskPlanState {
     /// Tracks failed click refs: ref → failure count. Used to veto
     /// repeated clicks on the same element (prevents retry loops).
     failed_click_refs: std::collections::HashMap<String, u8>,
+    /// Active profile's brain directory — for reading profile-scoped USER.md.
+    profile_brain_dir: Option<std::path::PathBuf>,
 }
 
 impl BrowserTaskPlanState {
@@ -56,7 +58,11 @@ impl BrowserTaskPlanState {
     ///
     /// The cognition phase determines whether the browser is needed via
     /// semantic understanding rather than keyword matching.
-    pub fn from_cognition(result: &CognitionResult, user_prompt: &str) -> Self {
+    pub fn from_cognition(
+        result: &CognitionResult,
+        user_prompt: &str,
+        profile_brain_dir: Option<std::path::PathBuf>,
+    ) -> Self {
         let browser_needed = result.tools.iter().any(|t| t.name == "browser");
         let compare_mode = result.constraints.iter().any(|c| {
             let lower = c.to_lowercase();
@@ -105,6 +111,7 @@ impl BrowserTaskPlanState {
             rate_limited_until: None,
             rate_limit_count: 0,
             failed_click_refs: std::collections::HashMap::new(),
+            profile_brain_dir,
         }
     }
 
@@ -415,10 +422,17 @@ impl BrowserTaskPlanState {
         let mut lines = vec![format!("Browser task objective: {}", self.objective)];
 
         // Inject compact user profile reminder for form-filling tasks.
-        // This combats "lost in the middle" — the LLM forgets USER.md data
-        // from the system prompt when the context is 80K+ chars deep.
+        // Uses the active profile's USER.md (not global), so each profile
+        // gets its own identity data in form fields.
         if self.routing.browser_required {
-            if let Some(profile_hint) = Self::compact_user_profile() {
+            let hint = if let Some(ref dir) = self.profile_brain_dir {
+                Self::compact_user_profile_for_dir(dir)
+            } else {
+                // Fallback to global brain dir when no profile is active
+                let global = crate::config::Config::brain_dir();
+                Self::compact_user_profile_for_dir(&global)
+            };
+            if let Some(profile_hint) = hint {
                 lines.push(profile_hint);
             }
         }
@@ -459,15 +473,21 @@ impl BrowserTaskPlanState {
         Some(ChatMessage::user(&lines.join("\n")))
     }
 
-    /// Extract a compact user profile from USER.md for form-filling context.
+    /// Extract a compact user profile from the active profile's USER.md.
     ///
-    /// Reads the Identity and Contacts sections from USER.md and formats
-    /// them as a short reminder. This gets injected near the end of the
-    /// message list so the LLM has the user's data fresh in context.
-    fn compact_user_profile() -> Option<String> {
-        let brain_dir = crate::config::Config::brain_dir();
+    /// Reads Identity and Contacts sections and formats them as a short
+    /// reminder. Uses the profile-scoped brain dir (e.g.
+    /// `~/.homun/brain/profiles/default/USER.md`) with fallback to the
+    /// global `~/.homun/brain/USER.md`.
+    fn compact_user_profile_for_dir(brain_dir: &std::path::Path) -> Option<String> {
         let user_md = brain_dir.join("USER.md");
-        let content = std::fs::read_to_string(&user_md).ok()?;
+        // Profile-scoped first, then global fallback
+        let content = std::fs::read_to_string(&user_md)
+            .or_else(|_| {
+                let global = crate::config::Config::brain_dir().join("USER.md");
+                std::fs::read_to_string(global)
+            })
+            .ok()?;
         if content.trim().is_empty() {
             return None;
         }
@@ -606,7 +626,7 @@ mod tests {
     #[test]
     fn from_cognition_classifies_booking() {
         let result = make_browser_cognition("Book a train ticket from Rome to Milan");
-        let plan = BrowserTaskPlanState::from_cognition(&result, "book a train");
+        let plan = BrowserTaskPlanState::from_cognition(&result, "book a train", None);
         assert_eq!(plan.routing.task_class, BrowserTaskClass::FormBooking);
         assert!(plan.routing.browser_required);
     }
@@ -614,7 +634,7 @@ mod tests {
     #[test]
     fn from_cognition_classifies_interactive() {
         let result = make_browser_cognition("Search for headphones on Amazon");
-        let plan = BrowserTaskPlanState::from_cognition(&result, "find headphones");
+        let plan = BrowserTaskPlanState::from_cognition(&result, "find headphones", None);
         assert_eq!(plan.routing.task_class, BrowserTaskClass::InteractiveWeb);
     }
 
@@ -622,7 +642,7 @@ mod tests {
     fn from_cognition_classifies_compare() {
         let mut result = make_browser_cognition("Compare train prices");
         result.constraints = vec!["confronta prezzi".to_string()];
-        let plan = BrowserTaskPlanState::from_cognition(&result, "confronta treni");
+        let plan = BrowserTaskPlanState::from_cognition(&result, "confronta treni", None);
         assert_eq!(
             plan.routing.task_class,
             BrowserTaskClass::MultiSourceCompare
@@ -650,7 +670,7 @@ mod tests {
             constraints: Vec::new(),
             autonomy_override: None,
         };
-        let plan = BrowserTaskPlanState::from_cognition(&result, "weather?");
+        let plan = BrowserTaskPlanState::from_cognition(&result, "weather?", None);
         assert_eq!(plan.routing.task_class, BrowserTaskClass::StaticLookup);
         assert!(!plan.routing.browser_required);
     }
@@ -658,7 +678,7 @@ mod tests {
     #[test]
     fn requires_snapshot_before_ref_actions_after_navigation() {
         let result = make_browser_cognition("Book a train on trenitalia");
-        let mut plan = BrowserTaskPlanState::from_cognition(&result, "book a train");
+        let mut plan = BrowserTaskPlanState::from_cognition(&result, "book a train", None);
         plan.note_browser_result(Some("navigate"), "Page URL: https://www.trenitalia.com");
         let veto = plan.veto_browser_action(&serde_json::json!({
             "action": "click",
@@ -670,7 +690,7 @@ mod tests {
     #[test]
     fn vetoes_non_selection_actions_when_autocomplete_is_open() {
         let result = make_browser_cognition("Book a train on trenitalia");
-        let mut plan = BrowserTaskPlanState::from_cognition(&result, "book a train");
+        let mut plan = BrowserTaskPlanState::from_cognition(&result, "book a train", None);
         plan.note_browser_result(
             Some("snapshot"),
             "Page URL: https://www.trenitalia.com/\nVisible suggestions:\n- Napoli Centrale\n- Napoli Afragola",
@@ -686,7 +706,7 @@ mod tests {
     #[test]
     fn vetoes_re_navigate_same_site() {
         let result = make_browser_cognition("Book a train on trenitalia");
-        let mut plan = BrowserTaskPlanState::from_cognition(&result, "book a train");
+        let mut plan = BrowserTaskPlanState::from_cognition(&result, "book a train", None);
         // Navigate via Google first
         plan.note_browser_result(
             Some("navigate"),
@@ -709,7 +729,7 @@ mod tests {
     #[test]
     fn vetoes_direct_navigate_for_form_booking() {
         let result = make_browser_cognition("Book a train on trenitalia");
-        let plan = BrowserTaskPlanState::from_cognition(&result, "book a train on trenitalia");
+        let plan = BrowserTaskPlanState::from_cognition(&result, "book a train on trenitalia", None);
         let veto = plan.veto_browser_action(&serde_json::json!({
             "action": "navigate",
             "url": "https://www.trenitalia.com/"
@@ -721,7 +741,7 @@ mod tests {
     #[test]
     fn allows_navigate_to_google_for_form_booking() {
         let result = make_browser_cognition("Book a train on trenitalia");
-        let plan = BrowserTaskPlanState::from_cognition(&result, "book a train");
+        let plan = BrowserTaskPlanState::from_cognition(&result, "book a train", None);
         let veto = plan.veto_browser_action(&serde_json::json!({
             "action": "navigate",
             "url": "https://www.google.com/search?q=trenitalia"

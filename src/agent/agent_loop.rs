@@ -1077,8 +1077,11 @@ impl AgentLoop {
             std::collections::HashSet::new();
         let mut total_usage = Usage::default();
         let mut execution_plan = ExecutionPlanState::new(&prompt_content);
-        let mut browser_task_plan =
-            BrowserTaskPlanState::from_cognition(&cognition_result, &prompt_content);
+        let mut browser_task_plan = BrowserTaskPlanState::from_cognition(
+            &cognition_result,
+            &prompt_content,
+            active_profile_brain_dir.clone(),
+        );
         let mut last_plan_payload: Option<String> = None;
         // Seed execution plan with cognition plan steps so the UI shows them immediately
         {
