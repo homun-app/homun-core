@@ -2158,10 +2158,14 @@ if (btnRunCleanup) {
             var headless = headlessToggle ? headlessToggle.checked : true;
             var browserEnabled = browserEnabledToggle ? browserEnabledToggle.checked : true;
             var executablePath = document.getElementById('browser-executable');
+            var stealthToggle = document.getElementById('browser-stealth');
+            var idleTimeoutInput = document.getElementById('browser-idle-timeout');
 
             var patches = [
                 { key: 'browser.enabled', value: String(browserEnabled) },
                 { key: 'browser.headless', value: String(headless) },
+                { key: 'browser.stealth', value: String(stealthToggle ? stealthToggle.checked : true) },
+                { key: 'browser.idle_timeout_secs', value: idleTimeoutInput ? (idleTimeoutInput.value || '300') : '300' },
                 { key: 'browser.executable_path', value: executablePath ? executablePath.value : '' },
                 { key: 'browser.action_timeout_secs', value: actionTimeout ? (actionTimeout.value || '10') : '10' },
                 { key: 'browser.navigation_timeout_secs', value: navTimeout ? (navTimeout.value || '30') : '30' },

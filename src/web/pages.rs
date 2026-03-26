@@ -4218,10 +4218,27 @@ pub(crate) async fn section_browser(state: &AppState) -> String {
                                 <label class="toggle-label" for="browser-headless"></label>
                             </div>
                         </div>
-                        <div class="form-group">
-                            <label>Chrome Executable Path</label>
-                            <input type="text" id="browser-executable" name="executable_path" value="{executable_path}" class="input" placeholder="Auto-detect (leave empty)">
-                            <div class="form-hint">Leave empty to auto-detect. Override if Chrome is in a custom location.</div>
+                        <div class="setting-toggle-row">
+                            <div class="setting-toggle-info">
+                                <span class="setting-toggle-name">Stealth Mode</span>
+                                <span class="setting-toggle-desc">Anti-detection patches (fingerprint, plugins, viewport). Recommended for booking sites</span>
+                            </div>
+                            <div class="toggle-wrap">
+                                <input type="checkbox" id="browser-stealth" name="stealth" class="toggle-input" {browser_stealth_checked}>
+                                <label class="toggle-label" for="browser-stealth"></label>
+                            </div>
+                        </div>
+                        <div class="form-row--2">
+                            <div class="form-group">
+                                <label>Chrome Executable Path</label>
+                                <input type="text" id="browser-executable" name="executable_path" value="{executable_path}" class="input" placeholder="Auto-detect (leave empty)">
+                                <div class="form-hint">Leave empty to auto-detect.</div>
+                            </div>
+                            <div class="form-group">
+                                <label>Idle Timeout (seconds)</label>
+                                <input type="number" id="browser-idle-timeout" name="idle_timeout_secs" value="{idle_timeout_secs}" min="0" max="3600" class="input">
+                                <div class="form-hint">Close idle tabs after this time. 0 = no auto-close.</div>
+                            </div>
                         </div>
                         <div class="form-group">
                             <label for="browser-vision-model">Vision Model</label>
@@ -4229,7 +4246,7 @@ pub(crate) async fn section_browser(state: &AppState) -> String {
                             <input type="hidden" name="vision_model" id="browser-vision-value" value="{vision_model}">
                             <div class="form-hint">Model for screenshot/image analysis. Empty = same as chat model.</div>
                         </div>
-                        <div class="form-hint" style="margin-top:10px;">Timeouts and snapshot settings are managed by the Playwright MCP server.</div>
+                        <div class="form-hint" style="margin-top:10px;">The agent can switch between headless/visible at runtime using show/hide actions.</div>
                         <div class="form-actions">
                             <button type="submit" class="btn btn-primary">Save Browser Config</button>
                             <button type="button" class="btn btn-secondary" id="btn-test-browser">Test Connection</button>
@@ -4281,6 +4298,12 @@ pub(crate) async fn section_browser(state: &AppState) -> String {
         } else {
             ""
         },
+        browser_stealth_checked = if config.browser.stealth {
+            "checked"
+        } else {
+            ""
+        },
+        idle_timeout_secs = config.browser.idle_timeout_secs,
         executable_path = config.browser.executable_path,
         vision_model = config.agent.vision_model,
         search_brave = if config.tools.web_search.provider == "brave" {
