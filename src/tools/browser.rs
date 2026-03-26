@@ -1440,8 +1440,9 @@ impl BrowserTool {
             .await
         {
             Ok(_) => {
-                // Auto-snapshot after hold release
-                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                // Wait for redirect after CAPTCHA — the page needs time to transition.
+                // PerimeterX redirects take 2-5 seconds after successful hold.
+                tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
                 match self
                     .call_mcp_on_tab(tab, "browser_snapshot", json!({}))
                     .await
@@ -1449,13 +1450,25 @@ impl BrowserTool {
                     Ok(snap) => {
                         let compact =
                             compact_browser_snapshot_staged(&snap, self.seen_results());
+                        let ref_count = compact.matches("[ref=").count();
                         tab.last_was_snapshot.store(true, Ordering::Relaxed);
+
+                        // If still very few elements, the redirect may not have completed
+                        let post_hint = if ref_count < 10 {
+                            "\n\n→ Page still looks sparse after hold_click. The redirect may \
+                             still be in progress. Try: wait(seconds=5) then snapshot() to check \
+                             if the page has loaded. Do NOT give up yet."
+                        } else {
+                            "" // Page loaded — CAPTCHA likely passed
+                        };
+
                         Ok(ToolResult::success(format!(
-                            "Held click for {duration_ms}ms at ({cx:.0}, {cy:.0}).\n\n{compact}"
+                            "Held click for {duration_ms}ms at ({cx:.0}, {cy:.0}).\n\n{compact}{post_hint}"
                         )))
                     }
                     Err(_) => Ok(ToolResult::success(format!(
-                        "Held click for {duration_ms}ms."
+                        "Held click for {duration_ms}ms. \
+                         The page may be redirecting. Try: wait(seconds=5) then snapshot()."
                     ))),
                 }
             }
