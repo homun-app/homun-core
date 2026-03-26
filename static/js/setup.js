@@ -1744,9 +1744,9 @@ populateFallbackDropdown();
 
 // ═══ Memory Configuration Form ═══
 
-const memoryForm = document.getElementById('memory-form');
-const btnRunCleanup = document.getElementById('btn-run-cleanup');
-const memoryResult = document.getElementById('memory-result');
+var memoryForm = document.getElementById('memory-form');
+var btnRunCleanup = document.getElementById('btn-run-cleanup');
+var memoryResult = document.getElementById('memory-result');
 
 if (memoryForm) {
     memoryForm.addEventListener('submit', async function(e) {
