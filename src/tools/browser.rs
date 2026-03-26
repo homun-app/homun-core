@@ -791,6 +791,10 @@ impl BrowserTool {
 
         // Brief wait for DOM to settle, then auto-snapshot for fresh refs
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        // Remember the URL before snapshot — detect unexpected navigation
+        let url_before = tab.last_url.read().await.clone();
+
         match self
             .call_mcp_on_tab(tab, "browser_snapshot", json!({}))
             .await
@@ -798,7 +802,21 @@ impl BrowserTool {
             Ok(snap_output) => {
                 let compact = compact_browser_snapshot_staged(&snap_output, self.seen_results());
                 tab.last_was_snapshot.store(true, Ordering::Relaxed);
-                Ok(ToolResult::success(format!("{base_output}\n\n{compact}")))
+
+                // Update tracked URL from snapshot (catches redirects after click)
+                if let Some(new_url) = extract_url_from_snapshot(&snap_output) {
+                    *tab.last_url.write().await = Some(new_url);
+                }
+
+                // Detect unexpected navigation (blank page redirect, page reload to home)
+                let nav_warning = detect_unexpected_navigation(&snap_output, url_before.as_deref());
+                let result_text = if let Some(warning) = nav_warning {
+                    format!("{base_output}\n\n⚠️ {warning}\n\n{compact}")
+                } else {
+                    format!("{base_output}\n\n{compact}")
+                };
+
+                Ok(ToolResult::success(result_text))
             }
             Err(_) => {
                 // Snapshot failed — reset guard so agent can try snapshot() manually
@@ -1911,6 +1929,10 @@ pub fn compact_browser_snapshot_staged(output: &str, seen_results: bool) -> Stri
     }
 
     if tree_lines.is_empty() {
+        result.push_str(
+            "\n⚠️ BLANK PAGE — no content detected. The page may be loading, \
+             redirecting, or crashed. Try: wait(seconds=3) then snapshot().\n",
+        );
         return result;
     }
 
@@ -1922,6 +1944,14 @@ pub fn compact_browser_snapshot_staged(output: &str, seen_results: bool) -> Stri
     result.push_str(&format!(
         "({ref_count} interactive elements) Use ref=\"eN\" exactly as shown.\n\n",
     ));
+
+    // Blank-ish page — very few elements and short content
+    if ref_count < 3 && raw_tree.len() < 200 {
+        result.push_str(
+            "\n⚠️ NEAR-BLANK PAGE — very few elements. The page may have redirected \
+             or reloaded. Verify you're still on the expected page before continuing.\n",
+        );
+    }
 
     result.push_str(&raw_tree);
 
@@ -2291,6 +2321,73 @@ fn detect_captcha_in_sparse_page(tree: &str) -> Option<String> {
         );
     }
 
+    None
+}
+
+/// Detect unexpected navigation — the page URL changed after a click that
+/// shouldn't have navigated (e.g. blank page redirect, page reload to home).
+///
+/// This catches the Italo scenario: click on date field → SPA redirect →
+/// home page, but agent doesn't notice and keeps using stale refs.
+/// Extract the page URL from a browser snapshot output.
+fn extract_url_from_snapshot(snapshot: &str) -> Option<String> {
+    snapshot
+        .lines()
+        .find(|line| line.contains("Page URL:"))
+        .and_then(|line| line.split("Page URL:").nth(1))
+        .map(|u| u.trim().to_string())
+        .filter(|u| !u.is_empty())
+}
+
+/// Detect unexpected navigation — the page URL changed after a click that
+/// shouldn't have navigated (e.g. blank page redirect, page reload to home).
+fn detect_unexpected_navigation(snapshot: &str, previous_url: Option<&str>) -> Option<String> {
+    let previous = previous_url?;
+    if previous.is_empty() {
+        return None;
+    }
+
+    // Extract current URL from snapshot
+    let current_url = snapshot
+        .lines()
+        .find(|line| line.starts_with("Page URL:") || line.starts_with("- Page URL:"))
+        .and_then(|line| line.split("Page URL:").nth(1))
+        .map(|u| u.trim())?;
+
+    if current_url.is_empty() || current_url == previous {
+        return None;
+    }
+
+    // Check if we went from a deep URL to the site root (home page redirect)
+    let prev_path = previous.split("//").nth(1).unwrap_or(previous);
+    let curr_path = current_url.split("//").nth(1).unwrap_or(current_url);
+    let prev_depth = prev_path.split('/').filter(|s| !s.is_empty()).count();
+    let curr_depth = curr_path.split('/').filter(|s| !s.is_empty()).count();
+
+    // Same domain, went from deep page to root → likely a redirect/reset
+    let prev_host = prev_path.split('/').next().unwrap_or("");
+    let curr_host = curr_path.split('/').next().unwrap_or("");
+
+    if prev_host == curr_host && prev_depth > curr_depth + 1 {
+        return Some(format!(
+            "NAVIGATION CHANGED: The page redirected from a deep URL to the home page. \
+             Previous: {previous} → Current: {current_url}. \
+             The form state may have been lost. Take a fresh snapshot and verify \
+             the form fields are still filled before continuing."
+        ));
+    }
+
+    // Completely different domain
+    if prev_host != curr_host {
+        return Some(format!(
+            "NAVIGATION CHANGED: The page navigated to a different domain. \
+             Previous: {previous} → Current: {current_url}. \
+             This was unexpected — verify the page state before continuing."
+        ));
+    }
+
+    // URL changed but same domain and similar depth — might be normal (form submission → results)
+    // Don't warn for these as they're expected behavior
     None
 }
 
