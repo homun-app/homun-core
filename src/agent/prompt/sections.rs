@@ -468,6 +468,23 @@ impl PromptSection for RuntimeSection {
              - If the year is not relevant to the query, omit it entirely.\n",
         );
 
+        // Rich response blocks — instruct the LLM to use ```blocks fences
+        prompt.push_str(
+            "\n**Rich Response Blocks:**\n\
+             When your response presents options the user should choose from (e.g. trains, flights, \
+             restaurants, appointments, products), wrap them in a ```blocks fence so the UI can \
+             render interactive cards. Format:\n\
+             ````\n\
+             ```blocks\n\
+             {\"block_type\":\"choice\",\"id\":\"blk_unique_id\",\"title\":\"Title\",\"options\":[\
+             {\"id\":\"opt1\",\"label\":\"Option label\",\"subtitle\":\"Details\"}]}\n\
+             ```\n\
+             ````\n\
+             Available block_type values: choice, approval, status, result, external_message.\n\
+             The fence is stripped from the rendered markdown — clients show native cards instead.\n\
+             Only use blocks when there are clear, discrete options. Regular text needs no blocks.\n",
+        );
+
         Ok(prompt)
     }
 }
