@@ -2657,6 +2657,15 @@ fn classify_browser_error(raw: &str) -> &'static str {
                 Take a new snapshot() to get current refs. Do NOT retry with the same ref.";
     }
 
+    // HTTP/2 protocol error — site-level bot blocking (TLS fingerprint rejection)
+    if lower.contains("err_http2_protocol_error") || lower.contains("err_http2_") {
+        return "\n\nContext: The site is blocking the browser at the TLS/HTTP2 level \
+                (bot detection via TLS fingerprint). Direct navigation will not work. \
+                Try: navigate to Google first, search for the site, and click through \
+                from the search results. This changes the referrer and sometimes \
+                bypasses the block. If that also fails, use web_search tool instead.";
+    }
+
     // Network errors
     if lower.contains("net::err_")
         || lower.contains("ns_error_")
@@ -2665,7 +2674,8 @@ fn classify_browser_error(raw: &str) -> &'static str {
         || lower.contains("err_cert_")
     {
         return "\n\nContext: Network error — the URL may be unreachable, \
-                have a DNS issue, or the site may be blocking automated access.";
+                have a DNS issue, or the site may be blocking automated access. \
+                Try navigating via Google search results instead of direct URL.";
     }
 
     // Timeout on click — likely an overlay/popup covering the element
