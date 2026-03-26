@@ -1391,8 +1391,8 @@ impl BrowserTool {
         let duration_ms = args
             .get("duration_ms")
             .and_then(|v| v.as_u64())
-            .unwrap_or(2000)
-            .min(10000); // cap at 10s for safety
+            .unwrap_or(15000)
+            .min(30000); // cap at 30s — PerimeterX needs 10-20s hold
 
         // Accept ref, x/y coordinates, or auto-detect CAPTCHA button.
         // Priority: ref → auto-detect → x/y fallback.
@@ -1646,7 +1646,7 @@ impl Tool for BrowserTool {
                 },
                 "duration_ms": {
                     "type": "integer",
-                    "description": "Hold duration in ms for hold_click (default 2000, max 10000)"
+                    "description": "Hold duration in ms for hold_click (default 15000, max 30000). PerimeterX CAPTCHAs need 10-20s"
                 },
                 "profile": {
                     "type": "string",
@@ -2260,7 +2260,7 @@ fn detect_captcha_in_sparse_page(tree: &str) -> Option<String> {
             "\n\n** CAPTCHA DETECTED: Hold-to-Verify **\n\
              This is a PerimeterX/HUMAN Security challenge. The 'hold' button is NOT in \
              the accessibility tree — it's a custom widget.\n\
-             → Use: browser({action: \"hold_click\", duration_ms: 3000})\n\
+             → Use: browser({action: \"hold_click\"})\n\
              The button will be auto-detected via JS. No coordinates needed.\n\
              After release, take a snapshot to verify if the challenge was passed.\n"
                 .to_string(),
@@ -2271,7 +2271,7 @@ fn detect_captcha_in_sparse_page(tree: &str) -> Option<String> {
         return Some(
             "\n\n** CAPTCHA DETECTED: Bot Verification Page **\n\
              The site is showing a bot verification challenge. Try:\n\
-             1. Use hold_click (auto-detects button position): browser({action: \"hold_click\", duration_ms: 3000})\n\
+             1. Use hold_click (auto-detects button position): browser({action: \"hold_click\"})\n\
              2. If it's a Cloudflare check: wait(seconds=5) then snapshot()\n\
              3. If it's a visual CAPTCHA (image selection): inform the user it requires manual intervention\n"
                 .to_string(),
