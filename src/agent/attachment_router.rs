@@ -167,7 +167,24 @@ pub async fn prepare_turn(
                 stream_tx,
             )
             .await?;
-            mcp_sections.extend(image_sections);
+            if image_sections.is_empty() {
+                // No way to process images — tell the agent explicitly why
+                let image_names: Vec<&str> =
+                    images.iter().map(|i| i.name.as_str()).collect();
+                let notice = format!(
+                    "[SYSTEM: The user attached {} image(s) ({}) but the current model \
+                     '{}' does not support image input. The images CANNOT be shown to you. \
+                     Tell the user to either: (1) set a vision-capable model as agent.vision_model \
+                     in config (e.g. qwen2.5-vl, llava, pixtral, gpt-4o), or \
+                     (2) switch to a vision-capable main model.]",
+                    images.len(),
+                    image_names.join(", "),
+                    &selected_model,
+                );
+                mcp_sections.push(notice);
+            } else {
+                mcp_sections.extend(image_sections);
+            }
             provider_mode = SelectedProviderMode::Preprocessed;
         }
     }
