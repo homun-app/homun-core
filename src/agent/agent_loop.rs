@@ -496,7 +496,7 @@ impl AgentLoop {
             .user_message
             .rendered_text()
             .unwrap_or_default();
-        let selected_model = prepared_turn.selected_model.clone();
+        let mut selected_model = prepared_turn.selected_model.clone();
         let using_primary_model = selected_model == config.agent.model;
 
         // Lazy provider rebuild: if the model changed (e.g. user switched model
@@ -558,7 +558,7 @@ impl AgentLoop {
         // Get the current provider for this request (clone the Arc, release lock)
         let disable_fallbacks = prepared_turn.selected_provider_mode
             == crate::agent::attachment_router::SelectedProviderMode::Multimodal;
-        let provider = if using_primary_model && !disable_fallbacks {
+        let mut provider = if using_primary_model && !disable_fallbacks {
             self.provider.read().await.clone()
         } else if disable_fallbacks {
             crate::provider::factory::create_provider_for_model_without_fallbacks(
@@ -572,7 +572,7 @@ impl AgentLoop {
             .resolve_provider(&selected_model)
             .map(|(name, _)| name)
             .unwrap_or("unknown");
-        let selected_capabilities = config
+        let mut selected_capabilities = config
             .agent
             .effective_model_capabilities(provider_name, &selected_model);
 
@@ -589,7 +589,7 @@ impl AgentLoop {
             }
         };
 
-        let xml_mode = config.should_use_xml_dispatch(provider_name, &selected_model);
+        let mut xml_mode = config.should_use_xml_dispatch(provider_name, &selected_model);
         self.use_xml_dispatch.store(xml_mode, Ordering::Relaxed);
 
         // Get conversation history from SQLite
@@ -942,6 +942,44 @@ impl AgentLoop {
                  Enable it in [browser] config and ensure @playwright/mcp is accessible via npx.",
                 cognition_result.understanding
             ));
+        }
+
+        // Switch to browser-dedicated model when configured and browser is needed.
+        // This lets users set a model with better browser/tool-use benchmarks
+        // (e.g. kimi-k2.5) while keeping a cheaper model for general chat.
+        if browser_required && browser_available {
+            let bm = config.agent.browser_model.trim();
+            if !bm.is_empty() && bm != selected_model {
+                tracing::info!(
+                    browser_model = %bm,
+                    primary_model = %selected_model,
+                    "Switching to browser model for this request"
+                );
+                selected_model = bm.to_string();
+                provider =
+                    crate::provider::factory::create_provider_for_model(&config, &selected_model)?;
+                let pn = config
+                    .resolve_provider(&selected_model)
+                    .map(|(name, _)| name)
+                    .unwrap_or("unknown");
+                selected_capabilities =
+                    config.agent.effective_model_capabilities(pn, &selected_model);
+                xml_mode = config.should_use_xml_dispatch(pn, &selected_model);
+                self.use_xml_dispatch.store(xml_mode, Ordering::Relaxed);
+                self.context.set_model_name(selected_model.clone()).await;
+
+                // Notify the UI about the model switch
+                if let Some(ref tx) = stream_tx {
+                    let _ = tx
+                        .send(crate::provider::StreamChunk {
+                            delta: selected_model.clone(),
+                            done: false,
+                            event_type: Some("model".to_string()),
+                            tool_call_data: None,
+                        })
+                        .await;
+                }
+            }
         }
 
         // Build messages with tools integrated into the prompt (for XML mode)

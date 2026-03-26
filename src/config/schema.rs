@@ -356,6 +356,11 @@ pub struct AgentConfig {
     pub model: String,
     /// Model to use for vision/image analysis. Falls back to `model` if empty.
     pub vision_model: String,
+    /// Model for browser automation reasoning (form filling, navigation, CAPTCHA).
+    /// When set, the agent switches to this model during browser tasks.
+    /// Falls back to `model` if empty.
+    #[serde(default)]
+    pub browser_model: String,
     pub max_tokens: u32,
     pub temperature: f32,
     pub max_iterations: u32,
@@ -523,6 +528,7 @@ impl Default for AgentConfig {
         Self {
             model: "anthropic/claude-sonnet-4-20250514".to_string(),
             vision_model: String::new(),
+            browser_model: String::new(),
             max_tokens: 8192,
             temperature: 0.7,
             max_iterations: 20,

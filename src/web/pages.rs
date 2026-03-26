@@ -4233,11 +4233,19 @@ pub(crate) async fn section_browser(state: &AppState) -> String {
                                 <div class="form-hint">Close idle tabs after this time. 0 = no auto-close.</div>
                             </div>
                         </div>
-                        <div class="form-group">
-                            <label for="browser-vision-model">Vision Model</label>
-                            <select id="browser-vision-model" class="input"></select>
-                            <input type="hidden" name="vision_model" id="browser-vision-value" value="{vision_model}">
-                            <div class="form-hint">Model for screenshot/image analysis. Empty = same as chat model.</div>
+                        <div class="form-row--2">
+                            <div class="form-group">
+                                <label for="browser-agent-model">Browser Agent Model</label>
+                                <select id="browser-agent-model" class="input"></select>
+                                <input type="hidden" name="browser_model" id="browser-model-value" value="{browser_model}">
+                                <div class="form-hint">Model for browser reasoning (navigation, forms). Empty = chat model.</div>
+                            </div>
+                            <div class="form-group">
+                                <label for="browser-vision-model">Vision Model</label>
+                                <select id="browser-vision-model" class="input"></select>
+                                <input type="hidden" name="vision_model" id="browser-vision-value" value="{vision_model}">
+                                <div class="form-hint">Model for screenshot analysis. Empty = chat model.</div>
+                            </div>
                         </div>
                         <div class="form-hint" style="margin-top:10px;">The agent can switch between headless/visible at runtime using show/hide actions.</div>
                         <div class="form-actions">
@@ -4298,6 +4306,7 @@ pub(crate) async fn section_browser(state: &AppState) -> String {
         },
         idle_timeout_secs = config.browser.idle_timeout_secs,
         executable_path = config.browser.executable_path,
+        browser_model = config.agent.browser_model,
         vision_model = config.agent.vision_model,
         search_brave = if config.tools.web_search.provider == "brave" {
             "selected"

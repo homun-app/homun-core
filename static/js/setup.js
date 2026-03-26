@@ -2104,22 +2104,40 @@ if (btnRunCleanup) {
     var browserVisionSelect = document.getElementById('browser-vision-model');
     var browserVisionValue = document.getElementById('browser-vision-value');
 
-    // Load vision model dropdown (reuses fetchAllModels + buildModelOptions)
-    (async function loadBrowserVisionDropdown() {
-        if (!browserVisionSelect) return;
+    // Load browser model dropdowns (reuses fetchAllModels + buildModelOptions)
+    var browserAgentSelect = document.getElementById('browser-agent-model');
+    var browserAgentValue = document.getElementById('browser-model-value');
+
+    (async function loadBrowserModelDropdowns() {
         try {
             var data = await fetchAllModels();
             var fullData = allModelsIncludingHidden(data);
-            buildModelOptions(browserVisionSelect, fullData, {
-                specialOptions: [{ value: '', label: '(Same as chat model)' }],
-                includeCustom: true,
-                selectedValue: browserVisionValue ? browserVisionValue.value : (data.vision_model || ''),
-            });
-            browserVisionSelect.addEventListener('change', function() {
-                if (browserVisionValue) browserVisionValue.value = browserVisionSelect.value;
-            });
+
+            // Browser Agent Model dropdown
+            if (browserAgentSelect) {
+                buildModelOptions(browserAgentSelect, fullData, {
+                    specialOptions: [{ value: '', label: '(Same as chat model)' }],
+                    includeCustom: true,
+                    selectedValue: browserAgentValue ? browserAgentValue.value : '',
+                });
+                browserAgentSelect.addEventListener('change', function() {
+                    if (browserAgentValue) browserAgentValue.value = browserAgentSelect.value;
+                });
+            }
+
+            // Vision Model dropdown
+            if (browserVisionSelect) {
+                buildModelOptions(browserVisionSelect, fullData, {
+                    specialOptions: [{ value: '', label: '(Same as chat model)' }],
+                    includeCustom: true,
+                    selectedValue: browserVisionValue ? browserVisionValue.value : (data.vision_model || ''),
+                });
+                browserVisionSelect.addEventListener('change', function() {
+                    if (browserVisionValue) browserVisionValue.value = browserVisionSelect.value;
+                });
+            }
         } catch (err) {
-            console.warn('[Browser] Failed to load vision models:', err);
+            console.warn('[Browser] Failed to load model dropdowns:', err);
         }
     })();
 
@@ -2170,6 +2188,7 @@ if (btnRunCleanup) {
                 { key: 'browser.action_timeout_secs', value: actionTimeout ? (actionTimeout.value || '10') : '10' },
                 { key: 'browser.navigation_timeout_secs', value: navTimeout ? (navTimeout.value || '30') : '30' },
                 { key: 'browser.snapshot_limit', value: snapshotLimit ? (snapshotLimit.value || '50') : '50' },
+                { key: 'agent.browser_model', value: browserAgentSelect ? browserAgentSelect.value : '' },
                 { key: 'agent.vision_model', value: browserVisionSelect ? browserVisionSelect.value : '' },
             ];
 
