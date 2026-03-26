@@ -286,6 +286,66 @@ fn parse_viewport(s: &str) -> Option<(u32, u32)> {
     Some((w.trim().parse().ok()?, h.trim().parse().ok()?))
 }
 
+/// Kill orphaned Playwright MCP processes from previous Homun sessions.
+///
+/// When the gateway is killed abruptly (SIGKILL, crash), child processes
+/// survive as orphans under init/launchd. This function finds and kills
+/// `npx playwright-mcp` processes whose command line contains our
+/// `user-data-dir` path (`.homun/browser-profiles`), distinguishing
+/// them from Playwright processes started by other tools (e.g. Claude Code).
+///
+/// Call this early in gateway startup, before starting new browser peers.
+pub fn cleanup_orphan_playwright_processes() {
+    #[cfg(unix)]
+    {
+        use std::process::Command;
+
+        let homun_marker = ".homun/browser-profiles";
+
+        // Find npx/playwright-mcp processes with our data dir in args
+        let output = Command::new("ps")
+            .args(["aux"])
+            .output();
+
+        let output = match output {
+            Ok(o) => o,
+            Err(e) => {
+                tracing::debug!(error = %e, "Could not run ps to check for orphan processes");
+                return;
+            }
+        };
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut killed = 0u32;
+
+        for line in stdout.lines() {
+            // Only target playwright-mcp or npx @playwright/mcp with our marker
+            let dominated_by_homun = line.contains(homun_marker)
+                && (line.contains("playwright-mcp") || line.contains("@playwright/mcp"));
+
+            if !dominated_by_homun {
+                continue;
+            }
+
+            // Extract PID (second field in ps aux output)
+            let pid: Option<u32> = line.split_whitespace().nth(1).and_then(|s| s.parse().ok());
+            if let Some(pid) = pid {
+                // Don't kill our own process
+                if pid == std::process::id() {
+                    continue;
+                }
+                tracing::info!(pid, "Killing orphaned Playwright process from previous session");
+                let _ = Command::new("kill").arg(pid.to_string()).output();
+                killed += 1;
+            }
+        }
+
+        if killed > 0 {
+            tracing::info!(killed, "Cleaned up orphaned Playwright processes");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

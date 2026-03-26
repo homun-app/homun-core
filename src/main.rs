@@ -975,6 +975,12 @@ async fn main() -> Result<()> {
             let startup_t0 = std::time::Instant::now();
 
             let mut config = Config::load()?;
+
+            // Kill any orphaned Playwright processes from previous sessions
+            // (e.g. after SIGKILL or crash where graceful shutdown didn't run)
+            #[cfg(feature = "browser")]
+            crate::browser::cleanup_orphan_playwright_processes();
+
             // Inject browser MCP server into config BEFORE wrapping in Arc<RwLock>,
             // so runtime_config lookups in McpClientTool::execute() can find it.
             #[cfg(feature = "mcp")]
