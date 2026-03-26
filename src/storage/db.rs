@@ -920,6 +920,7 @@ impl Database {
                 ) AS last_message_at
              FROM sessions s
              WHERE s.key LIKE ?
+               AND s.key NOT LIKE '%:orch:%'
              ORDER BY COALESCE(
                  (
                      SELECT m.timestamp
