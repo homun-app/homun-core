@@ -174,8 +174,11 @@
         localStorage.setItem('homun-texture', texture);
         document.documentElement.setAttribute('data-texture', texture);
 
-        // Update .content-body (or .content-row / .content) element class
-        var content = document.querySelector('.content-body') || document.querySelector('.content-row') || document.querySelector('.content');
+        // Apply to innermost visible wrapper (chat-main > content-inner > content-body)
+        var content = document.querySelector('.chat-main')
+            || document.querySelector('.content-inner')
+            || document.querySelector('.content-body')
+            || document.querySelector('.content');
         if (content) {
             var classes = content.className.split(' ').filter(function(c) {
                 return !c.startsWith('bg-texture-');

@@ -447,14 +447,19 @@ fn page_html(title: &str, active: &str, body: &str, scripts: &[&str]) -> String 
     }})();
     </script>
     <script>
-    // Apply texture class to .content-body (or .content-row for subnav pages)
-    // so the pattern is visible above the bg color
+    // Apply texture to the innermost visible content wrapper.
+    // Chat page: .chat-main (message area, WhatsApp-style bg).
+    // Subnav pages: .content-inner. Other pages: .content-body.
     document.addEventListener('DOMContentLoaded', function() {{
         var tex = document.documentElement.getAttribute('data-texture') || localStorage.getItem('homun-texture') || 'none';
         if (tex === 'none') return;
-        var el = document.querySelector('.content-body') || document.querySelector('.content-row') || document.querySelector('.content');
-        if (!el) return;
-        el.classList.add('bg-texture-' + tex);
+        var cls = 'bg-texture-' + tex;
+        var chatMain = document.querySelector('.chat-main');
+        if (chatMain) {{ chatMain.classList.add(cls); return; }}
+        var inner = document.querySelector('.content-inner');
+        if (inner) {{ inner.classList.add(cls); return; }}
+        var el = document.querySelector('.content-body') || document.querySelector('.content');
+        if (el) el.classList.add(cls);
     }});
     </script>
 </head>
