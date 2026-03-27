@@ -252,7 +252,7 @@
     flex: 1;
     min-width: 0;
     overflow-y: auto;
-    background: var(--bg);
+    background-color: var(--bg); /* keep separate so bg-texture-* classes can set background-image */
     border-top-left-radius: var(--r-xl);
     border-bottom-left-radius: var(--r-xl);
 }
@@ -459,12 +459,13 @@
 }
 
 /* Content body — full-width wrapper below topbar.
-   Transparent so texture from .content shows through. */
+   Texture applied here via bg-texture-* class; keep background-color separate
+   so background-image from the texture class is not reset. */
 .content-body {
     flex: 1;
     overflow-y: auto;
     min-height: 0;
-    background: var(--bg);
+    background-color: var(--bg); /* keep separate so bg-texture-* classes can set background-image */
     border-top-left-radius: var(--r-xl);
     border-bottom-left-radius: var(--r-xl);
 }
