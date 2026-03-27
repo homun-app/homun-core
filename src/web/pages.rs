@@ -51,6 +51,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/api-keys", get(api_keys_page))
         .route("/maintenance", get(maintenance_page))
         .route("/logs", get(logs_page))
+        .route("/traces", get(traces_page))
         .route("/onboarding", get(onboarding_page))
 }
 
@@ -109,7 +110,7 @@ const SECURITY_PAGES: &[&str] = &[
     "sandbox",
 ];
 /// Pages that belong to the "System" sub-navigation group.
-const SYSTEM_PAGES: &[&str] = &["maintenance", "logs"];
+const SYSTEM_PAGES: &[&str] = &["maintenance", "logs", "traces"];
 
 /// Build the sidebar navigation HTML (icon bar, 56px).
 fn sidebar(active: &str) -> String {
@@ -292,9 +293,11 @@ fn content_subnav(active: &str) -> String {
                 <div class="sidebar-subnav-header">SYSTEM{toggle}</div>
                 <a href="/maintenance" class="sidebar-subnav-link{0}">Database</a>
                 <a href="/logs" class="sidebar-subnav-link{1}">Logs</a>
+                <a href="/traces" class="sidebar-subnav-link{2}">Request Analysis</a>
             </aside>"#,
             a("maintenance"),
             a("logs"),
+            a("traces"),
             toggle = SUBNAV_TOGGLE,
         )
     } else {
@@ -1904,6 +1907,37 @@ async fn logs_page(State(state): State<Arc<AppState>>) -> Html<String> {
         </main>"#
     );
     Html(page_html("Logs", "logs", &body, &["logs.js"]))
+}
+
+// ─── Request Analysis ──────────────────────────────────────────────
+
+async fn traces_page(State(_state): State<Arc<AppState>>) -> Html<String> {
+    let body = r#"<main class="content">
+            <div class="content-inner">
+                <div class="page-header">
+                    <div class="page-title-group">
+                        <h1 class="page-title">Request Analysis</h1>
+                        <span class="page-subtitle">Full execution traces for each agent request</span>
+                    </div>
+                </div>
+                <div class="traces-layout" id="traces-layout">
+                    <div class="traces-list-pane" id="traces-list-pane">
+                        <div class="traces-list-header">
+                            <span id="traces-count" class="badge badge-secondary">0 traces</span>
+                            <button class="btn btn-ghost btn-sm" id="traces-refresh-btn">Refresh</button>
+                        </div>
+                        <div id="traces-list" class="traces-list"></div>
+                    </div>
+                    <div class="traces-detail-pane" id="traces-detail-pane">
+                        <div class="traces-empty" id="traces-empty">
+                            <p>Select a request to view its full execution trace</p>
+                        </div>
+                        <div id="traces-detail" style="display:none"></div>
+                    </div>
+                </div>
+            </div>
+        </main>"#;
+    Html(page_html("Request Analysis", "traces", body, &["traces.js"]))
 }
 
 // ─── Contacts ─────────────────────────────────────────────────────
@@ -5191,6 +5225,26 @@ pub(crate) async fn section_health(state: &AppState) -> String {
 pub(crate) async fn section_history(_state: &AppState) -> String {
     r#"<div class="item-list" id="dash-activity-list">
                     <div class="dash-loading">Loading activity...</div>
+                </div>"#
+        .to_string()
+}
+
+/// Request Analysis section — two-pane trace viewer embedded in the settings modal.
+pub(crate) async fn section_traces(_state: &AppState) -> String {
+    r#"<div class="traces-layout" id="traces-layout">
+                    <div class="traces-list-pane" id="traces-list-pane">
+                        <div class="traces-list-header">
+                            <span id="traces-count" class="badge badge-secondary">0 traces</span>
+                            <button class="btn btn-ghost btn-sm" id="traces-refresh-btn">Refresh</button>
+                        </div>
+                        <div id="traces-list" class="traces-list"></div>
+                    </div>
+                    <div class="traces-detail-pane" id="traces-detail-pane">
+                        <div class="traces-empty" id="traces-empty">
+                            <p>Select a request to view its full execution trace</p>
+                        </div>
+                        <div id="traces-detail" style="display:none"></div>
+                    </div>
                 </div>"#
         .to_string()
 }

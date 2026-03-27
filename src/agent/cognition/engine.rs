@@ -60,13 +60,18 @@ pub struct CognitionParams<'a> {
     pub cognition_model: Option<&'a str>,
     pub max_iterations: u32,
     pub timeout_secs: u64,
+    /// Optional request tracer to record cognition discovery steps.
+    pub tracer: Option<&'a mut crate::agent::request_trace::RequestTracer>,
 }
 
 /// Run the cognition phase: understand intent, discover resources, build plan.
 ///
 /// Returns `Some(CognitionResult)` on success, `None` on failure (caller
 /// should fall back to the old all-tools path).
-pub async fn run_cognition(params: CognitionParams<'_>) -> Option<CognitionResult> {
+/// Runs the cognition phase. Returns `Ok(result)` on success, or `Err(reason)` with a
+/// human-readable failure reason (provider error, timeout, parse failure, etc.)
+/// that can be stored in the request trace for diagnostics.
+pub async fn run_cognition(mut params: CognitionParams<'_>) -> Result<CognitionResult, String> {
     // Emit start event
     emit_status(params.stream_tx, "cognition_start", "Analyzing request...").await;
 
@@ -80,8 +85,8 @@ pub async fn run_cognition(params: CognitionParams<'_>) -> Option<CognitionResul
     let provider = match crate::provider::factory::create_provider_for_model(config, model) {
         Ok(p) => p,
         Err(e) => {
-            tracing::warn!(error = %e, "Failed to create cognition provider, skipping cognition");
-            return None;
+            tracing::warn!(error = %e, model, "Failed to create cognition provider, skipping cognition");
+            return Err(format!("provider creation failed for model '{model}': {e}"));
         }
     };
 
@@ -116,13 +121,17 @@ pub async fn run_cognition(params: CognitionParams<'_>) -> Option<CognitionResul
 
     let started = std::time::Instant::now();
     let mut cognition_result: Option<CognitionResult> = None;
+    let mut failure_reason: Option<String> = None;
 
     for iteration in 1..=max_iterations {
         if started.elapsed() >= timeout {
-            tracing::warn!(
-                elapsed_ms = started.elapsed().as_millis(),
-                "Cognition timeout reached"
+            let msg = format!(
+                "timeout after {}ms (limit {}s), model '{model}'",
+                started.elapsed().as_millis(),
+                timeout.as_secs()
             );
+            tracing::warn!(elapsed_ms = started.elapsed().as_millis(), "Cognition timeout reached");
+            failure_reason = Some(msg);
             break;
         }
 
@@ -142,11 +151,13 @@ pub async fn run_cognition(params: CognitionParams<'_>) -> Option<CognitionResul
         let response = match tokio::time::timeout(remaining, provider.chat(request)).await {
             Ok(Ok(r)) => r,
             Ok(Err(e)) => {
-                tracing::warn!(error = %e, iteration, "Cognition LLM call failed");
+                tracing::warn!(error = %e, iteration, model, "Cognition LLM call failed");
+                failure_reason = Some(format!("LLM call failed on iteration {iteration}, model '{model}': {e}"));
                 break;
             }
             Err(_) => {
-                tracing::warn!(iteration, "Cognition LLM call timed out");
+                tracing::warn!(iteration, model, "Cognition LLM call timed out");
+                failure_reason = Some(format!("LLM call timed out on iteration {iteration}, model '{model}'"));
                 break;
             }
         };
@@ -155,9 +166,23 @@ pub async fn run_cognition(params: CognitionParams<'_>) -> Option<CognitionResul
             // No tool calls — the LLM responded with text. This happens when
             // the model doesn't call plan_execution (e.g. small model just answers).
             // Try to parse it as JSON anyway, or give up.
+            let text_preview = response
+                .content
+                .as_deref()
+                .unwrap_or("")
+                .chars()
+                .take(200)
+                .collect::<String>();
             if let Some(ref text) = response.content {
                 if let Ok(result) = serde_json::from_str::<CognitionResult>(text) {
                     cognition_result = Some(result);
+                    if let Some(ref mut t) = params.tracer {
+                        t.record_cognition_step(iteration, "(text→json)", "", "parsed as CognitionResult");
+                    }
+                } else {
+                    if let Some(ref mut t) = params.tracer {
+                        t.record_cognition_step(iteration, "(text, no tool call)", &text_preview, "could not parse as plan");
+                    }
                 }
             }
             break;
@@ -195,13 +220,18 @@ pub async fn run_cognition(params: CognitionParams<'_>) -> Option<CognitionResul
                 }
             } else {
                 // Discovery tool — emit step event with result summary
+                let args_short = truncate_query(&tool_call.arguments);
+                let result_short = summarize_discovery_result(&tool_call.name, &result_text);
                 let step_summary = format!(
                     "{}({}) → {}",
-                    tool_call.name,
-                    truncate_query(&tool_call.arguments),
-                    summarize_discovery_result(&tool_call.name, &result_text),
+                    tool_call.name, args_short, result_short,
                 );
                 emit_status(params.stream_tx, "cognition_step", &step_summary).await;
+
+                // Record in request trace
+                if let Some(ref mut t) = params.tracer {
+                    t.record_cognition_step(iteration, &tool_call.name, &args_short, &result_short);
+                }
 
                 // Add assistant message with tool call
                 messages.push(ChatMessage {
@@ -235,7 +265,7 @@ pub async fn run_cognition(params: CognitionParams<'_>) -> Option<CognitionResul
     }
 
     // Validate the result if we got one
-    let result = match cognition_result {
+    match cognition_result {
         Some(mut result) => {
             let known_tools = collect_known_tool_names(params.tool_registry).await;
             let known_skills = collect_known_skill_names(params.skill_registry).await;
@@ -262,6 +292,8 @@ pub async fn run_cognition(params: CognitionParams<'_>) -> Option<CognitionResul
 
             tracing::info!(
                 understanding = %result.understanding,
+                intent = ?result.intent_type,
+                success_criteria = ?result.success_criteria,
                 tools = result.tools.len(),
                 memory = result.memory_context.is_some(),
                 plan_steps = result.plan.len(),
@@ -271,11 +303,15 @@ pub async fn run_cognition(params: CognitionParams<'_>) -> Option<CognitionResul
                 "Cognition phase complete"
             );
 
-            Some(result)
+            Ok(result)
         }
         None => {
+            let reason = failure_reason.unwrap_or_else(|| {
+                format!("no plan_execution produced after {max_iterations} iterations, model '{model}'")
+            });
             tracing::warn!(
                 elapsed_ms = started.elapsed().as_millis(),
+                reason = %reason,
                 "Cognition phase produced no result — falling back to full tool set"
             );
             emit_status(
@@ -284,11 +320,9 @@ pub async fn run_cognition(params: CognitionParams<'_>) -> Option<CognitionResul
                 "Cognition skipped — using full capabilities",
             )
             .await;
-            None
+            Err(reason)
         }
-    };
-
-    result
+    }
 }
 
 /// Dispatch a discovery tool call to the appropriate handler.
@@ -488,7 +522,25 @@ fn build_cognition_prompt(contact_summary: &str, channel: &str) -> String {
          - Preferences (e.g. \"1st class\", \"vegetarian\")\n\n\
          Write the `plan` as specific, actionable steps — especially for browser tasks.\n\
          BAD: \"Search for restaurants\" → GOOD: \"Navigate to thefork.it, set location to Novara, \
-         set date to 22 March 2026, set time to 20:00, set 4 guests, search\"\n",
+         set date to 22 March 2026, set time to 20:00, set 4 guests, search\"\n\n\
+         ## Intent Classification\n\n\
+         Classify `intent_type` — this drives how the agent executes:\n\
+         - **informational**: Find, compare, or research data. Output = present structured info to user.\n\
+         - **transactional**: Complete an action (book, buy, send, register). Output = action completed.\n\
+         - **navigational**: Go to a specific site or page. Output = navigation done.\n\
+         - **creative**: Write, generate, or transform content. Output = content delivered.\n\n\
+         This is critical: \"find me a train\" = informational (present options). \
+         \"book me a train\" = transactional (complete the purchase).\n\n\
+         ## Success Criteria\n\n\
+         Write ONE sentence in `success_criteria`: what 'done' looks like.\n\
+         GOOD: \"Present 3+ train options Naples→Florence April 7 with departure, arrival, duration, operator, price\"\n\
+         BAD: \"Help user with trains\"\n\n\
+         ## Self-Verification\n\n\
+         Before calling plan_execution, verify your plan:\n\
+         1. Does the final plan step deliver the `success_criteria`?\n\
+         2. For informational intent: final step MUST extract and present data to the user\n\
+         3. For transactional intent: final step MUST complete the action or ask user confirmation\n\
+         If not, revise the plan before submitting.\n",
     );
 
     prompt
@@ -527,6 +579,9 @@ fn format_result_summary(result: &CognitionResult) -> String {
         return "Direct answer (no tools needed)".to_string();
     }
 
+    if let Some(ref intent) = result.intent_type {
+        parts.push(format!("Intent: {}", intent.as_str()));
+    }
     if !result.tools.is_empty() {
         let names: Vec<&str> = result.tools.iter().map(|t| t.name.as_str()).collect();
         parts.push(format!("Tools: {}", names.join(", ")));
@@ -661,9 +716,12 @@ mod tests {
             plan: vec!["Step 1".to_string(), "Step 2".to_string()],
             constraints: Vec::new(),
             autonomy_override: None,
+            intent_type: Some(super::super::types::IntentType::Informational),
+            success_criteria: Some("Find train options".to_string()),
         };
         let summary = format_result_summary(&result);
         assert!(summary.contains("web_search"));
+        assert!(summary.contains("Intent: informational"));
         assert!(summary.contains("Memory: loaded"));
         assert!(summary.contains("Plan: 2 steps"));
     }

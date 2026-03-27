@@ -126,6 +126,8 @@ impl<'a> PromptContext<'a> {
             cognition_understanding: self.cognition_understanding,
             cognition_plan: self.cognition_plan,
             cognition_constraints: self.cognition_constraints,
+            cognition_intent: self.cognition_intent,
+            cognition_success_criteria: self.cognition_success_criteria,
         }
     }
 }
@@ -158,6 +160,8 @@ mod tests {
             cognition_understanding: "",
             cognition_plan: &[],
             cognition_constraints: &[],
+            cognition_intent: "",
+            cognition_success_criteria: "",
         }
     }
 

@@ -499,6 +499,11 @@ impl AgentLoop {
         let mut selected_model = prepared_turn.selected_model.clone();
         let using_primary_model = selected_model == config.agent.model;
 
+        // Create request tracer when enabled — captures the full execution trace.
+        let mut tracer = config.agent.traces_enabled.then(|| {
+            super::request_trace::RequestTracer::new(channel, session_key, &prompt_content)
+        });
+
         // Lazy provider rebuild: if the model changed (e.g. user switched model
         // in the web UI), recreate the entire provider chain so the correct
         // backend (Anthropic, OpenAI-compat, Ollama) is used.
@@ -745,7 +750,7 @@ impl AgentLoop {
             }
         }
 
-        let cognition_result: CognitionResult = {
+        let (cognition_result, cognition_failure): (CognitionResult, Option<String>) = {
             let params = CognitionParams {
                 user_prompt: &prompt_content,
                 recent_history: &history,
@@ -773,12 +778,13 @@ impl AgentLoop {
                 },
                 max_iterations: config.agent.cognition_max_iterations,
                 timeout_secs: config.agent.cognition_timeout_secs,
+                tracer: tracer.as_mut(),
             };
             match cognition::run_cognition(params).await {
-                Some(result) => result,
-                None => {
-                    tracing::warn!("Cognition failed — using full tool set fallback");
-                    cognition::fallback_full_context(&self.tool_registry).await
+                Ok(result) => (result, None),
+                Err(reason) => {
+                    tracing::warn!(reason = %reason, "Cognition failed — using full tool set fallback");
+                    (cognition::fallback_full_context(&self.tool_registry).await, Some(reason))
                 }
             }
         };
@@ -857,14 +863,35 @@ impl AgentLoop {
             .collect::<Vec<_>>()
             .join("\n");
         self.context.set_mcp_suggestions(mcp_text).await;
-        // Inject cognition understanding/plan/constraints into system prompt
+        // Inject cognition understanding/plan/constraints/intent into system prompt
         self.context
             .set_cognition_context(
                 cognition_result.understanding.clone(),
                 cognition_result.plan.clone(),
                 cognition_result.constraints.clone(),
+                cognition_result.intent_type.as_ref().map(|i| i.as_str()),
+                cognition_result.success_criteria.as_deref(),
             )
             .await;
+
+        // Record cognition result in request trace
+        if let Some(ref mut t) = tracer {
+            // Record models used
+            let cognition_model_name = config
+                .agent
+                .cognition_model
+                .as_str();
+            let cognition_model_name = if cognition_model_name.is_empty() {
+                &config.agent.model
+            } else {
+                cognition_model_name
+            };
+            t.record_models(cognition_model_name, &config.agent.model);
+            t.record_cognition(&cognition_result);
+            if let Some(ref reason) = cognition_failure {
+                t.record_cognition_fallback(reason);
+            }
+        }
 
         // Build tool definitions from cognition result
         let tool_set = cognition::build_selective_tool_defs(
@@ -1086,8 +1113,17 @@ impl AgentLoop {
         let mut last_plan_payload: Option<String> = None;
         // Seed execution plan with cognition plan steps so the UI shows them immediately
         {
+            execution_plan.set_intent_type(
+                cognition_result
+                    .intent_type
+                    .as_ref()
+                    .map(|i| i.as_str().to_string()),
+            );
             if !cognition_result.plan.is_empty() {
-                execution_plan.set_explicit_plan(cognition_result.plan.clone(), None);
+                execution_plan.set_explicit_plan(
+                    cognition_result.plan.clone(),
+                    cognition_result.success_criteria.clone(),
+                );
                 let snap = execution_plan.snapshot();
                 emit_plan_update(stream_tx.as_ref(), &snap, &mut last_plan_payload).await;
             }
@@ -1705,6 +1741,17 @@ impl AgentLoop {
                         &tool_output,
                     ));
 
+                    // Record tool call in request trace
+                    if let Some(ref mut t) = tracer {
+                        t.record_step(
+                            iteration,
+                            &tool_call.name,
+                            &tool_call.arguments,
+                            &result.output,
+                            result.is_error,
+                        );
+                    }
+
                     // For browser tool: extract action from args for tracking
                     #[cfg(feature = "browser")]
                     let browser_action = if crate::browser::is_browser_tool(&tool_call.name) {
@@ -2137,6 +2184,19 @@ impl AgentLoop {
             active_profile_slug,
         )
         .await;
+
+        // Finalize and write request trace (fire-and-forget to avoid blocking response)
+        if let Some(mut t) = tracer {
+            let cancelled = crate::agent::stop::is_stop_requested();
+            t.finalize(
+                &safe_response,
+                iteration.saturating_sub(1),
+                total_usage.total_tokens,
+                cancelled,
+            );
+            let max_files = config.agent.traces_max_files;
+            tokio::spawn(async move { t.write_to_disk(max_files) });
+        }
 
         Ok(safe_response)
 

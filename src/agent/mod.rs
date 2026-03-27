@@ -25,6 +25,7 @@ mod skill_activator;
 pub mod stop;
 pub mod subagent; // Make public so spawn.rs can access it
 mod tool_builder;
+pub mod request_trace;
 mod tool_veto;
 mod verifier;
 

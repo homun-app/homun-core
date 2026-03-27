@@ -41,6 +41,7 @@ async fn section_handler(
         "sandbox" => pages::section_sandbox(&state).await,
         "maintenance" => pages::section_maintenance(&state).await,
         "logs" => pages::section_logs(&state).await,
+        "traces" => pages::section_traces(&state).await,
         "usage" => pages::section_usage(&state).await,
         "health" => pages::section_health(&state).await,
         "history" => pages::section_history(&state).await,

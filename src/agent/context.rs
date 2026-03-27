@@ -73,6 +73,10 @@ pub struct ContextBuilder {
     cognition_plan: RwLock<Vec<String>>,
     /// Cognition constraints extracted from the user's request.
     cognition_constraints: RwLock<Vec<String>>,
+    /// Intent classification (informational/transactional/navigational/creative).
+    cognition_intent: RwLock<String>,
+    /// Success criteria (what "done" looks like).
+    cognition_success_criteria: RwLock<String>,
 }
 
 impl ContextBuilder {
@@ -100,6 +104,8 @@ impl ContextBuilder {
             cognition_understanding: RwLock::new(String::new()),
             cognition_plan: RwLock::new(Vec::new()),
             cognition_constraints: RwLock::new(Vec::new()),
+            cognition_intent: RwLock::new(String::new()),
+            cognition_success_criteria: RwLock::new(String::new()),
         }
     }
 
@@ -278,10 +284,16 @@ impl ContextBuilder {
         understanding: String,
         plan: Vec<String>,
         constraints: Vec<String>,
+        intent: Option<&str>,
+        success_criteria: Option<&str>,
     ) {
         *self.cognition_understanding.write().await = understanding;
         *self.cognition_plan.write().await = plan;
         *self.cognition_constraints.write().await = constraints;
+        *self.cognition_intent.write().await =
+            intent.unwrap_or_default().to_string();
+        *self.cognition_success_criteria.write().await =
+            success_criteria.unwrap_or_default().to_string();
     }
 
     /// Append additional constraints (e.g. privacy perimeter rules).
@@ -294,6 +306,8 @@ impl ContextBuilder {
         *self.cognition_understanding.write().await = String::new();
         *self.cognition_plan.write().await = Vec::new();
         *self.cognition_constraints.write().await = Vec::new();
+        *self.cognition_intent.write().await = String::new();
+        *self.cognition_success_criteria.write().await = String::new();
     }
 
     /// Update the model name shown in the system prompt (called on hot-reload).
@@ -415,6 +429,8 @@ impl ContextBuilder {
         let cognition_understanding = self.cognition_understanding.read().await;
         let cognition_plan = self.cognition_plan.read().await;
         let cognition_constraints = self.cognition_constraints.read().await;
+        let cognition_intent = self.cognition_intent.read().await;
+        let cognition_success_criteria = self.cognition_success_criteria.read().await;
 
         // Build PromptContext
         let ctx = PromptContext {
@@ -438,6 +454,8 @@ impl ContextBuilder {
             cognition_understanding: &cognition_understanding,
             cognition_plan: &cognition_plan,
             cognition_constraints: &cognition_constraints,
+            cognition_intent: &cognition_intent,
+            cognition_success_criteria: &cognition_success_criteria,
         };
 
         // Build prompt using modular system

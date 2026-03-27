@@ -168,6 +168,15 @@ impl PromptSection for ToolsSection {
                 }
                 prompt.push('\n');
             }
+            if !ctx.cognition_intent.is_empty() {
+                prompt.push_str(&format!("**Intent**: {}\n\n", ctx.cognition_intent));
+            }
+            if !ctx.cognition_success_criteria.is_empty() {
+                prompt.push_str(&format!(
+                    "**Success criteria**: {}\n\n",
+                    ctx.cognition_success_criteria
+                ));
+            }
             if !ctx.cognition_constraints.is_empty() {
                 prompt.push_str(&format!(
                     "**Constraints**: {}\n\n",
@@ -196,6 +205,26 @@ impl PromptSection for ToolsSection {
                  - Fill forms ONE FIELD AT A TIME: type() → check autocomplete → click match → next field. Do NOT use fill_form for booking/travel sites — it skips autocomplete and breaks reactive fields\n\
                  - When a form asks for personal info (name, email, phone, etc.), use the data from the User Profile (USER.md) — NEVER ask the user for info you already have in the profile\n",
             );
+            // Intent-aware browser guidance
+            match ctx.cognition_intent {
+                "informational" => {
+                    prompt.push_str(
+                        " - **DATA EXTRACTION MODE**: Your goal is to EXTRACT and PRESENT information. \
+                         When you reach a results page, use snapshot() to READ the data (prices, times, \
+                         names, ratings, durations), then compile and present it to the user in a structured format. \
+                         Do NOT click through to detail/booking pages unless you need more info. Do NOT start a booking flow.\n",
+                    );
+                }
+                "transactional" => {
+                    prompt.push_str(
+                        " - **ACTION MODE**: Your goal is to COMPLETE a transaction. \
+                         After finding the right option on a results page, click to SELECT it and \
+                         continue through the booking/purchase flow until the action is complete \
+                         or you need user confirmation.\n",
+                    );
+                }
+                _ => {}
+            }
         }
 
         if !ctx.mcp_suggestions.is_empty() {
@@ -658,6 +687,8 @@ mod tests {
             cognition_understanding: "",
             cognition_plan: &[],
             cognition_constraints: &[],
+            cognition_intent: "",
+            cognition_success_criteria: "",
         }
     }
 

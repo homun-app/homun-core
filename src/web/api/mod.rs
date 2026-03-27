@@ -27,6 +27,7 @@ mod providers;
 mod sandbox;
 mod sessions;
 mod settings;
+mod traces;
 mod sharing;
 mod skills;
 mod status;
@@ -89,7 +90,8 @@ pub fn router() -> Router<Arc<AppState>> {
         // --- OpenAI-compatible API ---
         .merge(openai::routes())
         .merge(sessions::routes())
-        .merge(settings::routes());
+        .merge(settings::routes())
+        .merge(traces::routes());
 
     // --- Knowledge Base (RAG) ---
     #[cfg(feature = "embeddings")]

@@ -20,6 +20,35 @@ pub enum Complexity {
     Complex,
 }
 
+/// Intent classification — what kind of outcome the user expects.
+///
+/// Based on standard IR/search taxonomy (informational/transactional/navigational)
+/// plus "creative" for generation tasks. Language-agnostic by design.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IntentType {
+    /// Find, compare, or research data — present structured info to user.
+    Informational,
+    /// Complete an action (book, buy, send, register) — action completed.
+    Transactional,
+    /// Go to a specific site or page — navigation done.
+    Navigational,
+    /// Write, generate, or transform content — content delivered.
+    Creative,
+}
+
+impl IntentType {
+    /// Convert to a static string for prompt injection.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Informational => "informational",
+            Self::Transactional => "transactional",
+            Self::Navigational => "navigational",
+            Self::Creative => "creative",
+        }
+    }
+}
+
 /// Autonomy level override detected from the user's prompt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -113,6 +142,14 @@ pub struct CognitionResult {
     /// Autonomy override detected from the user's prompt language.
     #[serde(default)]
     pub autonomy_override: Option<Autonomy>,
+
+    /// Intent classification — what kind of outcome the user expects.
+    #[serde(default)]
+    pub intent_type: Option<IntentType>,
+
+    /// What "done" looks like — one sentence describing the expected output.
+    #[serde(default)]
+    pub success_criteria: Option<String>,
 }
 
 impl CognitionResult {
@@ -131,6 +168,8 @@ impl CognitionResult {
             plan: Vec::new(),
             constraints: Vec::new(),
             autonomy_override: None,
+            intent_type: None,
+            success_criteria: None,
         }
     }
 
@@ -161,6 +200,8 @@ impl CognitionResult {
             plan: Vec::new(),
             constraints: Vec::new(),
             autonomy_override: None,
+            intent_type: None,
+            success_criteria: None,
         }
     }
 }
@@ -264,9 +305,18 @@ fn plan_execution_schema() -> serde_json::Value {
                 "type": "string",
                 "enum": ["automatic", "assisted"],
                 "description": "Autonomy level if the user explicitly asked for one"
+            },
+            "intent_type": {
+                "type": "string",
+                "enum": ["informational", "transactional", "navigational", "creative"],
+                "description": "What outcome the user expects: informational (find/present data), transactional (complete action like booking/buying), navigational (go to a site), creative (generate content)"
+            },
+            "success_criteria": {
+                "type": "string",
+                "description": "One sentence: what 'done' looks like. E.g. 'Present 3+ train options with departure, arrival, duration, operator, price'"
             }
         },
-        "required": ["understanding", "complexity", "answer_directly"]
+        "required": ["understanding", "complexity", "answer_directly", "intent_type", "success_criteria"]
     })
 }
 
@@ -318,6 +368,14 @@ pub fn validate_cognition_result(
         // Don't add as hard error — the execution loop can still work with zero tools.
     }
 
+    // Soft warning: intent_type should be set for non-trivial tasks
+    if !result.answer_directly && result.intent_type.is_none() {
+        issues.push(ValidationIssue {
+            field: "intent_type".to_string(),
+            message: "intent_type not set — plan quality may be reduced".to_string(),
+        });
+    }
+
     if result.answer_directly && result.direct_answer.is_none() {
         issues.push(ValidationIssue {
             field: "direct_answer".to_string(),
@@ -339,6 +397,8 @@ mod tests {
         assert_eq!(result.direct_answer.as_deref(), Some("Sono le 14:32"));
         assert_eq!(result.complexity, Complexity::Simple);
         assert!(result.tools.is_empty());
+        assert!(result.intent_type.is_none());
+        assert!(result.success_criteria.is_none());
     }
 
     #[test]
@@ -363,6 +423,8 @@ mod tests {
             ],
             constraints: vec!["Tomorrow morning".to_string()],
             autonomy_override: None,
+            intent_type: Some(IntentType::Informational),
+            success_criteria: Some("Present train options with times and prices".to_string()),
         };
 
         let json = serde_json::to_string(&result).unwrap();
@@ -371,6 +433,8 @@ mod tests {
         assert_eq!(parsed.complexity, Complexity::Complex);
         assert_eq!(parsed.tools.len(), 1);
         assert_eq!(parsed.plan.len(), 2);
+        assert_eq!(parsed.intent_type, Some(IntentType::Informational));
+        assert!(parsed.success_criteria.is_some());
     }
 
     #[test]
@@ -392,6 +456,8 @@ mod tests {
             plan: Vec::new(),
             constraints: Vec::new(),
             autonomy_override: None,
+            intent_type: Some(IntentType::Informational),
+            success_criteria: None,
         };
 
         let issues = validate_cognition_result(
@@ -432,6 +498,8 @@ mod tests {
             plan: vec!["Send the message via WhatsApp".to_string()],
             constraints: Vec::new(),
             autonomy_override: None,
+            intent_type: Some(IntentType::Transactional),
+            success_criteria: Some("Message sent to WhatsApp contact".to_string()),
         };
 
         let issues = validate_cognition_result(
@@ -451,5 +519,61 @@ mod tests {
         assert!(props.get("complexity").is_some());
         assert!(props.get("tools").is_some());
         assert!(props.get("plan").is_some());
+        assert!(props.get("intent_type").is_some());
+        assert!(props.get("success_criteria").is_some());
+        // Both must be required
+        let required = def.function.parameters.get("required").unwrap();
+        let required: Vec<String> =
+            serde_json::from_value(required.clone()).unwrap();
+        assert!(required.contains(&"intent_type".to_string()));
+        assert!(required.contains(&"success_criteria".to_string()));
+    }
+
+    #[test]
+    fn test_intent_type_serialization() {
+        // Each variant round-trips correctly
+        for (variant, expected_str) in [
+            (IntentType::Informational, "\"informational\""),
+            (IntentType::Transactional, "\"transactional\""),
+            (IntentType::Navigational, "\"navigational\""),
+            (IntentType::Creative, "\"creative\""),
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            assert_eq!(json, expected_str);
+            let parsed: IntentType = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed, variant);
+            assert_eq!(variant.as_str(), json.trim_matches('"'));
+        }
+    }
+
+    #[test]
+    fn test_validation_missing_intent_type() {
+        let result = CognitionResult {
+            understanding: "test".to_string(),
+            complexity: Complexity::Standard,
+            answer_directly: false,
+            direct_answer: None,
+            tools: vec![DiscoveredTool {
+                name: "browser".to_string(),
+                description: "Browse".to_string(),
+                reason: "Need browser".to_string(),
+            }],
+            skills: Vec::new(),
+            mcp_tools: Vec::new(),
+            memory_context: None,
+            rag_context: None,
+            plan: Vec::new(),
+            constraints: Vec::new(),
+            autonomy_override: None,
+            intent_type: None, // missing
+            success_criteria: None,
+        };
+
+        let issues = validate_cognition_result(
+            &result,
+            &["browser".to_string()],
+            &[],
+        );
+        assert!(issues.iter().any(|i| i.field == "intent_type"));
     }
 }

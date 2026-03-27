@@ -49,6 +49,9 @@ pub struct ExecutionPlanSnapshot {
     /// Optional verification criterion supplied with the plan.
     #[serde(default)]
     pub verification: Option<String>,
+    /// Intent classification from cognition (informational/transactional/navigational/creative).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intent_type: Option<String>,
     /// Orchestrator phase: "planning", "executing", "synthesizing".
     /// Empty when not using the task orchestrator.
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -71,6 +74,8 @@ pub struct ExecutionPlanState {
     explicit_steps: Vec<PlanStep>,
     /// Optional verification note for the final goal check.
     verification: Option<String>,
+    /// Intent classification (informational/transactional/navigational/creative).
+    intent_type: Option<String>,
 }
 
 impl ExecutionPlanState {
@@ -83,6 +88,7 @@ impl ExecutionPlanState {
             seen_step_signatures: HashSet::new(),
             explicit_steps: Vec::new(),
             verification: None,
+            intent_type: None,
         }
     }
 
@@ -220,6 +226,11 @@ impl ExecutionPlanState {
         !self.explicit_steps.is_empty()
     }
 
+    /// Set the intent classification for the current plan.
+    pub fn set_intent_type(&mut self, intent: Option<String>) {
+        self.intent_type = intent;
+    }
+
     // ── Runtime message (injected each iteration) ───────────────
 
     pub fn runtime_message(&self) -> Option<ChatMessage> {
@@ -235,6 +246,19 @@ impl ExecutionPlanState {
         let mut lines = Vec::new();
         if !self.objective.is_empty() {
             lines.push(format!("Execution objective: {}", self.objective));
+        }
+
+        // Intent-aware guidance injected each iteration
+        if let Some(ref intent) = self.intent_type {
+            match intent.as_str() {
+                "informational" => lines.push(
+                    "Intent: INFORMATIONAL — extract and present data to the user. Do not complete transactions.".to_string()
+                ),
+                "transactional" => lines.push(
+                    "Intent: TRANSACTIONAL — complete the requested action. Proceed through forms/checkout.".to_string()
+                ),
+                _ => {}
+            }
         }
 
         if !self.explicit_steps.is_empty() {
@@ -316,6 +340,7 @@ impl ExecutionPlanState {
                 })
                 .collect(),
             verification: self.verification.clone(),
+            intent_type: self.intent_type.clone(),
             phase: String::new(),
         }
     }

@@ -61,6 +61,12 @@ pub struct PromptContext<'a> {
     pub cognition_plan: &'a [String],
     /// Cognition constraints extracted from the user's request.
     pub cognition_constraints: &'a [String],
+    /// Intent classification from cognition (informational/transactional/navigational/creative).
+    /// Empty string when cognition is disabled or failed.
+    pub cognition_intent: &'a str,
+    /// Success criteria from cognition (what "done" looks like).
+    /// Empty string when cognition is disabled or failed.
+    pub cognition_success_criteria: &'a str,
 }
 
 /// Tool information for prompt generation.

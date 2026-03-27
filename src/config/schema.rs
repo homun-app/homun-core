@@ -437,6 +437,15 @@ pub struct AgentConfig {
     /// Timeout in seconds for the entire cognition phase. Default: 15.
     #[serde(default)]
     pub cognition_timeout_secs: u64,
+    /// Enable request tracing. When enabled, each request writes a JSON trace file
+    /// to `~/.homun/traces/` capturing the full execution: cognition, tool calls, response.
+    /// Default: true.
+    #[serde(default = "default_true")]
+    pub traces_enabled: bool,
+    /// Maximum number of trace files to keep. Oldest are deleted automatically.
+    /// 0 = no limit. Default: 50.
+    #[serde(default)]
+    pub traces_max_files: usize,
 }
 
 /// Per-agent configuration parsed from `[agents.<id>]` TOML sections.
@@ -550,6 +559,8 @@ impl Default for AgentConfig {
             cognition_model: String::new(),
             cognition_max_iterations: 4,
             cognition_timeout_secs: 15,
+            traces_enabled: true,
+            traces_max_files: 50,
         }
     }
 }

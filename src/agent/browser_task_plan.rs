@@ -620,6 +620,8 @@ mod tests {
             plan: Vec::new(),
             constraints: Vec::new(),
             autonomy_override: None,
+            intent_type: None,
+            success_criteria: None,
         }
     }
 
@@ -669,6 +671,8 @@ mod tests {
             plan: Vec::new(),
             constraints: Vec::new(),
             autonomy_override: None,
+            intent_type: None,
+            success_criteria: None,
         };
         let plan = BrowserTaskPlanState::from_cognition(&result, "weather?", None);
         assert_eq!(plan.routing.task_class, BrowserTaskClass::StaticLookup);
