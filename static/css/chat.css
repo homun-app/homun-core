@@ -1742,11 +1742,12 @@
     display: flex;
     flex-direction: column;
     position: relative;
-    background-color: var(--bg); /* keep separate so bg-texture-* classes can set background-image */
+    background-color: var(--bg);
     border-top-left-radius: var(--r-xl);
     border-bottom-left-radius: var(--r-xl);
     overflow: hidden;
     z-index: 1;
+    isolation: isolate; /* stacking context so ::before z-index:-1 stays within .chat-main */
     margin-left: -12px;
 }
 

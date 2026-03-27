@@ -6,6 +6,7 @@ html, body {
     font-family: var(--sans);
     background-color: var(--bg); /* keep separate so bg-texture-* classes can set background-image */
     color: var(--t1);
+    position: relative; /* required for bg-texture-* ::before to be clipped to body bounds */
     line-height: 1.55;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;

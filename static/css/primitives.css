@@ -1792,6 +1792,70 @@
     height: 48px;
     background-color: var(--bg);
     display: block;
+    position: relative;
+    isolation: isolate; /* stacking context for ::before z-index:-1 */
+    overflow: hidden;
+    /* Always show picker swatches at full pattern opacity regardless of global intensity */
+    --texture-intensity: 1;
+}
+
+/* ─── Intensity Slider ─── */
+.intensity-slider-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0 4px;
+}
+
+.intensity-slider {
+    flex: 1;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: linear-gradient(
+        to right,
+        var(--accent) 0%,
+        var(--accent) var(--slider-pct, 70%),
+        var(--border) var(--slider-pct, 70%),
+        var(--border) 100%
+    );
+    border-radius: 99px;
+    outline: none;
+    cursor: pointer;
+}
+
+.intensity-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+    transition: box-shadow 0.15s;
+}
+
+.intensity-slider::-webkit-slider-thumb:hover {
+    box-shadow: 0 0 0 4px var(--accent-light), 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+.intensity-slider::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+.intensity-value {
+    min-width: 36px;
+    text-align: right;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--t2);
+    font-variant-numeric: tabular-nums;
 }
 
 .texture-name {

@@ -447,10 +447,14 @@ fn page_html(title: &str, active: &str, body: &str, scripts: &[&str]) -> String 
     }})();
     </script>
     <script>
-    // Apply texture to the innermost visible content wrapper.
+    // Apply texture + intensity to the innermost visible content wrapper.
     // Chat page: .chat-main (message area, WhatsApp-style bg).
     // Subnav pages: .content-inner. Other pages: .content-body.
     document.addEventListener('DOMContentLoaded', function() {{
+        // Intensity — set before texture class so ::before is visible immediately
+        var intensity = parseFloat(localStorage.getItem('homun-texture-intensity') || '0.7');
+        document.documentElement.style.setProperty('--texture-intensity', intensity);
+
         var tex = document.documentElement.getAttribute('data-texture') || localStorage.getItem('homun-texture') || 'none';
         if (tex === 'none') return;
         var cls = 'bg-texture-' + tex;
@@ -849,6 +853,14 @@ pub(crate) async fn section_appearance(state: &AppState) -> String {
                                 </button>
                             </div>
                             <div class="form-hint">Adds a subtle pattern to the content background.</div>
+                        </div>
+                        <div class="form-group" style="margin-top:16px;">
+                            <label for="texture-intensity-input">Pattern Intensity</label>
+                            <div class="intensity-slider-row">
+                                <input type="range" id="texture-intensity-input" min="0" max="100" value="70" class="intensity-slider" aria-label="Pattern intensity">
+                                <span class="intensity-value" id="texture-intensity-value">70%</span>
+                            </div>
+                            <div class="form-hint">How visible the background pattern is. Changes apply in real time.</div>
                         </div>
                         <button type="submit" class="btn btn-primary">Save Appearance</button>
                     </form>

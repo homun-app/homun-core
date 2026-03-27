@@ -1,5 +1,5 @@
 /**
- * Appearance page — theme, language, accent color
+ * Appearance page — theme, language, accent color, texture, intensity
  */
 
 (function() {
@@ -19,6 +19,7 @@
             var language = languageSelect ? languageSelect.value : 'system';
             var accent = localStorage.getItem('homun-accent') || '';
             var texture = localStorage.getItem('homun-texture') || 'none';
+            var textureIntensity = localStorage.getItem('homun-texture-intensity') || '0.7';
 
             try {
                 var responses = await Promise.all([
@@ -41,6 +42,11 @@
                         method: 'PATCH',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ key: 'ui.texture', value: texture }),
+                    }),
+                    fetch('/api/v1/config', {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ key: 'ui.texture_intensity', value: textureIntensity }),
                     }),
                 ]);
 
@@ -193,6 +199,40 @@
         var swatches = document.querySelectorAll('.texture-swatch');
         swatches.forEach(function(s) {
             s.classList.toggle('is-active', s.getAttribute('data-texture') === texture);
+        });
+    }
+
+    // --- Texture intensity slider ---
+
+    /** Applies intensity (0–1) as the --texture-intensity CSS variable. */
+    function applyTextureIntensity(intensity) {
+        localStorage.setItem('homun-texture-intensity', intensity);
+        document.documentElement.style.setProperty('--texture-intensity', intensity);
+    }
+
+    /** Updates the slider track fill gradient to match the thumb position. */
+    function updateSliderTrack(slider) {
+        slider.style.setProperty('--slider-pct', slider.value + '%');
+    }
+
+    var intensityInput = document.getElementById('texture-intensity-input');
+    var intensityValueEl = document.getElementById('texture-intensity-value');
+
+    if (intensityInput) {
+        // Restore from localStorage
+        var storedIntensity = parseFloat(localStorage.getItem('homun-texture-intensity') || '0.7');
+        var storedPct = Math.round(storedIntensity * 100);
+        intensityInput.value = storedPct;
+        if (intensityValueEl) intensityValueEl.textContent = storedPct + '%';
+        updateSliderTrack(intensityInput);
+
+        // Real-time update on drag
+        intensityInput.addEventListener('input', function() {
+            var pct = parseInt(this.value, 10);
+            var intensity = pct / 100;
+            if (intensityValueEl) intensityValueEl.textContent = pct + '%';
+            updateSliderTrack(this);
+            applyTextureIntensity(intensity);
         });
     }
 
