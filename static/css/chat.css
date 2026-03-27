@@ -135,7 +135,7 @@
 .chat-scroll-bottom:hover {
     background: var(--accent);
     border-color: var(--accent);
-    color: #fff;
+    color: var(--text-on-accent);
 }
 
 .chat-scroll-bottom svg {
@@ -1718,7 +1718,7 @@
 
 .chat-search-restore-btn:hover {
     background: var(--accent);
-    color: #fff;
+    color: var(--text-on-accent);
 }
 
 .chat-search-result-empty {
@@ -2006,7 +2006,7 @@
 .chat-plan-task.is-completed .chat-plan-task-icon {
     background: var(--accent);
     border-color: var(--accent);
-    color: white;
+    color: var(--text-on-accent);
 }
 
 .chat-plan-task.is-in_progress .chat-plan-task-icon {

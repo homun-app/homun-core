@@ -412,34 +412,48 @@ fn page_html(title: &str, active: &str, body: &str, scripts: &[&str]) -> String 
                 return '#'+f(0)+f(8)+f(4);
             }}
             var isDk = document.documentElement.classList.contains('dark');
+            // Clamp very light accents in light mode
+            var al = l;
+            var veryLight = !isDk && l > 55;
+            if (veryLight) al = 55;
+            var es = Math.max(s, 15);
+            var effAccent = veryLight ? hx(h, es, al) : accent;
             var st = document.documentElement.style;
-            st.setProperty('--accent', accent);
-            st.setProperty('--accent-hover', hx(h, s, isDk ? Math.min(l+8,80) : Math.max(l-8,20)));
-            st.setProperty('--accent-active', hx(h, s, isDk ? l : Math.max(l-14,15)));
+            st.setProperty('--accent', effAccent);
+            st.setProperty('--accent-hover', hx(h, es, isDk ? Math.min(l+8,80) : Math.max(al-8,20)));
+            st.setProperty('--accent-active', hx(h, es, isDk ? l : Math.max(al-14,15)));
             st.setProperty('--accent-light', hx(h, isDk ? Math.max(s-30,10) : Math.min(s+5,40), isDk ? 18 : 90));
-            st.setProperty('--accent-border', hx(h, isDk ? Math.max(s-15,15) : Math.min(s,35), isDk ? 30 : 75));
-            st.setProperty('--accent-text', isDk ? hx(h, Math.min(s+10,100), Math.min(l+15,85)) : accent);
-            st.setProperty('--focus-ring', hx(h, Math.min(s+5,60), isDk ? Math.min(l+10,70) : Math.min(l+10,55)));
+            st.setProperty('--accent-border', hx(h, isDk ? Math.max(s-15,15) : Math.min(es,35), isDk ? 30 : 75));
+            st.setProperty('--accent-text', isDk ? hx(h, Math.min(s+10,100), Math.min(l+15,85)) : hx(h, es, Math.min(al,45)));
+            st.setProperty('--focus-ring', hx(h, Math.min(es+5,60), isDk ? Math.min(l+10,70) : Math.min(al+10,55)));
             st.setProperty('--selection-bg', hx(h, isDk ? 20 : 25, isDk ? 22 : 82));
-            st.setProperty('--chart-primary', accent);
-            // Nav bar inherits accent as background
+            st.setProperty('--chart-primary', effAccent);
+            // Nav bar uses original hex so user sees their chosen color
             st.setProperty('--nav-bg', accent);
-            // Compute contrasting icon colors based on nav-bg luminance
+            // Contrasting icon colors based on original luminance
             var navLight = l > 55;
-            st.setProperty('--nav-text', navLight ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.35)');
+            st.setProperty('--accent-contrast', navLight ? '#1a1a1a' : '#ffffff');
+            st.setProperty('--text-on-accent', navLight ? '#1a1a1a' : '#ffffff');
+            st.setProperty('--nav-text', navLight ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.55)');
             st.setProperty('--nav-text-hover', navLight ? 'rgba(0,0,0,0.85)' : '#FFFFFF');
             st.setProperty('--nav-active-text', navLight ? '#000000' : '#FFFFFF');
+            st.setProperty('--nav-hover-bg', navLight ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.08)');
+            st.setProperty('--nav-active-bg', navLight ? 'rgba(0,0,0,0.10)' : 'rgba(255,255,255,0.12)');
+            st.setProperty('--nav-icon', navLight ? "url('/static/img/icon_braun.png')" : "url('/static/img/icon_white.png')");
+            st.setProperty('--nav-border', l > 85 ? '1px solid var(--border)' : 'none');
         }} else if (accent) {{
             document.documentElement.setAttribute('data-accent', accent);
         }}
     }})();
     </script>
     <script>
-    // Apply texture class to .content after DOM ready
+    // Apply texture class to .content-body (or .content-row for subnav pages)
+    // so the pattern is visible above the bg color
     document.addEventListener('DOMContentLoaded', function() {{
         var tex = document.documentElement.getAttribute('data-texture') || localStorage.getItem('homun-texture') || 'none';
-        var el = document.querySelector('.content');
-        if (!el || tex === 'none') return;
+        if (tex === 'none') return;
+        var el = document.querySelector('.content-body') || document.querySelector('.content-row') || document.querySelector('.content');
+        if (!el) return;
         el.classList.add('bg-texture-' + tex);
     }});
     </script>
@@ -3129,7 +3143,7 @@ fn standalone_page(title: &str, body: &str) -> String {
         .auth-card label {{ display: block; font-size: 0.8125rem; font-weight: 500; margin-bottom: 0.375rem; color: var(--t2); }}
         .auth-card input[type="text"], .auth-card input[type="password"] {{ width: 100%; padding: 0.625rem 0.75rem; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--bg); color: var(--t1); font-size: 0.875rem; box-sizing: border-box; margin-bottom: 1rem; }}
         .auth-card input:focus {{ outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-light); }}
-        .auth-card button {{ width: 100%; padding: 0.75rem; border: none; border-radius: var(--r-full); background: var(--accent); color: white; font-size: 0.875rem; font-weight: 600; cursor: pointer; transition: opacity 0.15s; }}
+        .auth-card button {{ width: 100%; padding: 0.75rem; border: none; border-radius: var(--r-pill); background: var(--accent); color: var(--text-on-accent); font-size: 0.875rem; font-weight: 600; cursor: pointer; transition: opacity 0.15s; }}
         .auth-card button:hover {{ opacity: 0.9; }}
         .auth-card button:disabled {{ opacity: 0.5; cursor: not-allowed; }}
         .auth-error {{ color: var(--err); font-size: 0.8125rem; text-align: center; min-height: 1.25rem; margin-bottom: 0.5rem; }}

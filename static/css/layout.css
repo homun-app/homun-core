@@ -20,6 +20,8 @@
     z-index: 30;
     padding: 16px 0;
     border: none;
+    /* When accent is very light (near white), JS sets --nav-border to add separation */
+    border-right: var(--nav-border, none);
 }
 
 /* All three columns (nav, subnav, content) share a fixed header-row

@@ -38,19 +38,29 @@
         var isDark = document.documentElement.classList.contains('dark');
         var root = document.documentElement.style;
 
-        root.setProperty('--accent', hex);
-        root.setProperty('--accent-text', isDark ? hslToHex(h, Math.min(s + 10, 100), Math.min(l + 15, 85)) : hex);
-        root.setProperty('--accent-hover', hslToHex(h, s, isDark ? Math.min(l + 8, 80) : Math.max(l - 8, 20)));
-        root.setProperty('--accent-active', hslToHex(h, s, isDark ? l : Math.max(l - 14, 15)));
+        // Clamp very light accents in light mode: ensure accent is visible on white bg
+        // In light mode, cap lightness at 55% so buttons/badges remain readable
+        var accentL = l;
+        var isVeryLight = !isDark && l > 55;
+        if (isVeryLight) accentL = 55;
+
+        var effectiveAccent = (isVeryLight) ? hslToHex(h, Math.max(s, 15), accentL) : hex;
+
+        root.setProperty('--accent', effectiveAccent);
+        root.setProperty('--accent-text', isDark ? hslToHex(h, Math.min(s + 10, 100), Math.min(l + 15, 85)) : hslToHex(h, Math.max(s, 15), Math.min(accentL, 45)));
+        root.setProperty('--accent-hover', hslToHex(h, Math.max(s, 15), isDark ? Math.min(l + 8, 80) : Math.max(accentL - 8, 20)));
+        root.setProperty('--accent-active', hslToHex(h, Math.max(s, 15), isDark ? l : Math.max(accentL - 14, 15)));
         root.setProperty('--accent-light', hslToHex(h, isDark ? Math.max(s - 30, 10) : Math.min(s + 5, 40), isDark ? 18 : 90));
-        root.setProperty('--accent-border', hslToHex(h, isDark ? Math.max(s - 15, 15) : Math.min(s, 35), isDark ? 30 : 75));
-        root.setProperty('--focus-ring', hslToHex(h, Math.min(s + 5, 60), isDark ? Math.min(l + 10, 70) : Math.min(l + 10, 55)));
+        root.setProperty('--accent-border', hslToHex(h, isDark ? Math.max(s - 15, 15) : Math.min(Math.max(s, 10), 35), isDark ? 30 : 75));
+        root.setProperty('--focus-ring', hslToHex(h, Math.min(Math.max(s, 15) + 5, 60), isDark ? Math.min(l + 10, 70) : Math.min(accentL + 10, 55)));
         root.setProperty('--selection-bg', hslToHex(h, isDark ? 20 : 25, isDark ? 22 : 82));
-        root.setProperty('--chart-primary', hex);
+        root.setProperty('--chart-primary', effectiveAccent);
+        // Nav bar uses the original (unclamped) hex so the user sees their chosen color
         root.setProperty('--nav-bg', hex);
-        // Derive nav text/icon colors based on nav-bg luminance
+        // Derive nav text/icon colors based on original nav-bg luminance
         var navLight = l > 55;
         root.setProperty('--accent-contrast', navLight ? '#1a1a1a' : '#ffffff');
+        root.setProperty('--text-on-accent', navLight ? '#1a1a1a' : '#ffffff');
         root.setProperty('--nav-text', navLight ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.55)');
         root.setProperty('--nav-text-hover', navLight ? 'rgba(0,0,0,0.85)' : '#FFFFFF');
         root.setProperty('--nav-active-text', navLight ? '#000000' : '#FFFFFF');
@@ -59,14 +69,16 @@
         root.setProperty('--nav-icon', navLight
             ? "url('/static/img/icon_braun.png')"
             : "url('/static/img/icon_white.png')");
+        // When nav-bg is very light, add a subtle border to separate from content
+        root.setProperty('--nav-border', l > 85 ? '1px solid var(--border)' : 'none');
     }
 
     function clearCustomAccent() {
         var props = ['--accent', '--accent-text', '--accent-hover', '--accent-active',
                      '--accent-light', '--accent-border', '--focus-ring', '--selection-bg',
-                     '--chart-primary', '--nav-bg', '--accent-contrast',
+                     '--chart-primary', '--nav-bg', '--accent-contrast', '--text-on-accent',
                      '--nav-text', '--nav-text-hover', '--nav-active-text',
-                     '--nav-hover-bg', '--nav-active-bg', '--nav-icon'];
+                     '--nav-hover-bg', '--nav-active-bg', '--nav-icon', '--nav-border'];
         props.forEach(function(p) { document.documentElement.style.removeProperty(p); });
     }
 

@@ -174,8 +174,8 @@
         localStorage.setItem('homun-texture', texture);
         document.documentElement.setAttribute('data-texture', texture);
 
-        // Update .content element class
-        var content = document.querySelector('.content');
+        // Update .content-body (or .content-row / .content) element class
+        var content = document.querySelector('.content-body') || document.querySelector('.content-row') || document.querySelector('.content');
         if (content) {
             var classes = content.className.split(' ').filter(function(c) {
                 return !c.startsWith('bg-texture-');
