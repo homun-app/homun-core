@@ -26,6 +26,19 @@ pub enum ResponseBlock {
     ExternalMessage(ExternalMessageBlock),
 }
 
+impl ResponseBlock {
+    /// Returns the block type name for logging.
+    pub fn block_type_name(&self) -> &'static str {
+        match self {
+            Self::Choice(_) => "choice",
+            Self::Approval(_) => "approval",
+            Self::Status(_) => "status",
+            Self::Result(_) => "result",
+            Self::ExternalMessage(_) => "external_message",
+        }
+    }
+}
+
 // ─── Choice ─────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

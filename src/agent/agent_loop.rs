@@ -1691,6 +1691,11 @@ impl AgentLoop {
 
                     // Collect rich UI blocks from tool result (if any)
                     if !result.blocks.is_empty() {
+                        tracing::info!(
+                            tool = %tool_call.name,
+                            count = result.blocks.len(),
+                            "Tool returned response blocks"
+                        );
                         response_blocks.extend(result.blocks.clone());
                     }
 
@@ -2103,6 +2108,14 @@ impl AgentLoop {
         // Emit rich blocks via stream channel so WebSocket clients receive them
         // before the final response. Blocks are also persisted in the stored_response above.
         if !response_blocks.is_empty() {
+            tracing::info!(
+                total = response_blocks.len(),
+                types = %response_blocks.iter()
+                    .map(|b| b.block_type_name())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                "Sending response blocks to client"
+            );
             if let Some(ref tx) = stream_tx {
                 let blocks_json = serde_json::to_string(&response_blocks).unwrap_or_default();
                 let _ = tx
