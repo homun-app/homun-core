@@ -687,10 +687,10 @@ impl BrowserTool {
         tab: &crate::browser::tab_session::TabSession,
     ) -> String {
         const MIN_INTERACTIVE: usize = 5;
-        const DELAYS_MS: [u64; 5] = [1500, 2000, 2500, 3000, 3000];
+        const DELAYS_MS: [u64; 4] = [800, 1000, 1200, 1500];
 
-        // Initial delay for the page to start rendering + JS hydration
-        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        // Brief initial delay for page to start rendering
+        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
 
         let mut prev_count: usize = 0;
 
