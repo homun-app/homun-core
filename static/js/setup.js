@@ -2646,5 +2646,186 @@ if (btnRunCleanup) {
     console.log('[WebSearch] Form handler initialized');
 })();
 
+// ═══ Browser Allowed Sites ═══
+
+(function() {
+    var container = document.getElementById('allowed-sites-list');
+    if (!container) return;
+    var form = document.getElementById('add-site-form');
+
+    async function loadAllowedSites() {
+        try {
+            var resp = await fetch('/api/v1/browser/allowed-sites');
+            var sites = await resp.json();
+            if (!sites.length) {
+                container.textContent = 'No allowed sites configured. The agent will ask permission before navigating to any website.';
+                return;
+            }
+            // Build table via DOM methods for XSS safety
+            var table = document.createElement('table');
+            table.style.cssText = 'width:100%;border-collapse:collapse;font-size:0.9rem;';
+            var thead = document.createElement('tr');
+            thead.style.cssText = 'border-bottom:1px solid var(--border);opacity:0.7;';
+            ['Domain','Mode','Added by','Memory',''].forEach(function(h) {
+                var th = document.createElement('th');
+                th.style.cssText = 'text-align:left;padding:6px 8px;';
+                th.textContent = h;
+                thead.appendChild(th);
+            });
+            table.appendChild(thead);
+
+            for (var s of sites) {
+                var tr = document.createElement('tr');
+                tr.style.cssText = 'border-bottom:1px solid var(--border);';
+
+                var tdDomain = document.createElement('td');
+                tdDomain.style.cssText = 'padding:6px 8px;font-family:var(--font-mono);';
+                tdDomain.textContent = s.domain;
+                tr.appendChild(tdDomain);
+
+                var tdMode = document.createElement('td');
+                tdMode.style.cssText = 'padding:6px 8px;';
+                var sel = document.createElement('select');
+                sel.className = 'input';
+                sel.style.cssText = 'width:auto;padding:2px 6px;';
+                sel.dataset.domain = s.domain;
+                ['headless','visible','auto'].forEach(function(m) {
+                    var opt = document.createElement('option');
+                    opt.value = m;
+                    opt.textContent = m.charAt(0).toUpperCase() + m.slice(1);
+                    if (m === s.mode) opt.selected = true;
+                    sel.appendChild(opt);
+                });
+                sel.addEventListener('change', function() { updateSiteMode(this); });
+                tdMode.appendChild(sel);
+                tr.appendChild(tdMode);
+
+                var tdBy = document.createElement('td');
+                tdBy.style.cssText = 'padding:6px 8px;opacity:0.6;';
+                tdBy.textContent = s.added_by;
+                tr.appendChild(tdBy);
+
+                var tdMem = document.createElement('td');
+                tdMem.style.cssText = 'padding:6px 8px;';
+                tdMem.id = 'mem-' + s.domain;
+                tdMem.textContent = '…';
+                tr.appendChild(tdMem);
+
+                var tdAct = document.createElement('td');
+                tdAct.style.cssText = 'padding:6px 8px;text-align:right;';
+                if (s.added_by !== 'system') {
+                    var delBtn = document.createElement('button');
+                    delBtn.className = 'btn btn-sm';
+                    delBtn.style.color = 'var(--error)';
+                    delBtn.textContent = 'Delete';
+                    delBtn.dataset.domain = s.domain;
+                    delBtn.addEventListener('click', function() { deleteSite(this.dataset.domain); });
+                    tdAct.appendChild(delBtn);
+                }
+                tr.appendChild(tdAct);
+                table.appendChild(tr);
+            }
+            container.replaceChildren(table);
+            for (var s of sites) { checkSiteMemory(s.domain); }
+        } catch (err) {
+            container.textContent = 'Failed to load sites: ' + err.message;
+        }
+    }
+
+    async function checkSiteMemory(domain) {
+        try {
+            var resp = await fetch('/api/v1/browser/site-memory/' + encodeURIComponent(domain));
+            var data = await resp.json();
+            var el = document.getElementById('mem-' + domain);
+            if (!el) return;
+            el.replaceChildren();
+            if (data.exists) {
+                var check = document.createElement('span');
+                check.style.color = 'var(--success)';
+                check.textContent = '✓ ';
+                el.appendChild(check);
+                var resetBtn = document.createElement('button');
+                resetBtn.className = 'btn btn-sm';
+                resetBtn.textContent = '↻';
+                resetBtn.title = 'Re-learn';
+                resetBtn.dataset.domain = domain;
+                resetBtn.addEventListener('click', function() { resetSiteMemory(this.dataset.domain); });
+                el.appendChild(resetBtn);
+            } else {
+                el.textContent = '—';
+                el.style.opacity = '0.4';
+            }
+        } catch (_) { /* ignore */ }
+    }
+
+    async function updateSiteMode(select) {
+        var domain = select.dataset.domain;
+        var mode = select.value;
+        try {
+            await fetch('/api/v1/browser/allowed-sites', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({domain: domain, mode: mode})
+            });
+            showToast('Mode updated for ' + domain, 'success');
+        } catch (err) {
+            showToast('Failed: ' + err.message, 'error');
+        }
+    }
+
+    async function deleteSite(domain) {
+        if (!confirm('Remove "' + domain + '" from allowed sites?')) return;
+        try {
+            var resp = await fetch('/api/v1/browser/allowed-sites/' + encodeURIComponent(domain), {method: 'DELETE'});
+            var data = await resp.json();
+            showToast(data.message, data.success ? 'success' : 'error');
+            loadAllowedSites();
+        } catch (err) {
+            showToast('Failed: ' + err.message, 'error');
+        }
+    }
+
+    async function resetSiteMemory(domain) {
+        if (!confirm('Delete site memory for "' + domain + '"? The agent will re-learn on next visit.')) return;
+        try {
+            var resp = await fetch('/api/v1/browser/site-memory/' + encodeURIComponent(domain), {method: 'DELETE'});
+            var data = await resp.json();
+            showToast(data.message, data.success ? 'success' : 'error');
+            loadAllowedSites();
+        } catch (err) {
+            showToast('Failed: ' + err.message, 'error');
+        }
+    }
+
+    if (form) {
+        form.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            var domain = document.getElementById('site-domain').value.trim();
+            var mode = document.getElementById('site-mode').value;
+            var notes = document.getElementById('site-notes').value.trim() || undefined;
+            if (!domain) return;
+            try {
+                var resp = await fetch('/api/v1/browser/allowed-sites', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({domain: domain, mode: mode, notes: notes})
+                });
+                var data = await resp.json();
+                showToast(data.message, data.success ? 'success' : 'error');
+                if (data.success) {
+                    document.getElementById('site-domain').value = '';
+                    document.getElementById('site-notes').value = '';
+                    loadAllowedSites();
+                }
+            } catch (err) {
+                showToast('Failed: ' + err.message, 'error');
+            }
+        });
+    }
+
+    loadAllowedSites();
+    console.log('[AllowedSites] Handler initialized');
+})();
+
 console.log('[Setup] Script loaded completely');
 focusModelSettingsFromQuery();

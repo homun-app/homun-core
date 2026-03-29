@@ -1956,6 +1956,7 @@ async fn traces_page(State(_state): State<Arc<AppState>>) -> Html<String> {
                         <div class="traces-list-header">
                             <span id="traces-count" class="badge badge-secondary">0 traces</span>
                             <button class="btn btn-ghost btn-sm" id="traces-refresh-btn">Refresh</button>
+                            <button class="btn btn-ghost btn-sm" id="traces-clear-btn" style="color:var(--error);">Clear All</button>
                         </div>
                         <div id="traces-list" class="traces-list"></div>
                     </div>
@@ -4327,6 +4328,35 @@ pub(crate) async fn section_browser(state: &AppState) -> String {
                     <div id="profiles-list" class="form-hint">Loading profiles…</div>
                 </section>
 
+                <section class="section" id="section-allowed-sites">
+                    <h2>Allowed Sites</h2>
+                    <div class="form-hint" style="margin-bottom:12px;">Control which websites the browser can navigate to and their rendering mode.
+                        <strong>headless</strong> = background, <strong>visible</strong> = browser window shown,
+                        <strong>auto</strong> = starts headless, escalates to visible if stuck.</div>
+                    <form class="form" id="add-site-form" style="margin-bottom:16px;">
+                        <div class="form-row--2">
+                            <div class="form-group">
+                                <label>Domain</label>
+                                <input type="text" id="site-domain" class="input" placeholder="trenitalia.com" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Mode</label>
+                                <select id="site-mode" class="input">
+                                    <option value="headless">Headless</option>
+                                    <option value="visible">Visible</option>
+                                    <option value="auto" selected>Auto</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Notes <span style="opacity:0.5">(optional)</span></label>
+                            <input type="text" id="site-notes" class="input" placeholder="Booking site, needs visible mode for calendar">
+                        </div>
+                        <div class="form-actions"><button type="submit" class="btn btn-primary">Add Site</button></div>
+                    </form>
+                    <div id="allowed-sites-list" class="form-hint">Loading sites…</div>
+                </section>
+
                 <section class="section" id="section-web-search">
                     <h2>Web Search</h2>
                     <form class="form" id="web-search-form">
@@ -5267,6 +5297,7 @@ pub(crate) async fn section_traces(_state: &AppState) -> String {
                         <div class="traces-list-header">
                             <span id="traces-count" class="badge badge-secondary">0 traces</span>
                             <button class="btn btn-ghost btn-sm" id="traces-refresh-btn">Refresh</button>
+                            <button class="btn btn-ghost btn-sm" id="traces-clear-btn" style="color:var(--error);">Clear All</button>
                         </div>
                         <div id="traces-list" class="traces-list"></div>
                     </div>

@@ -59,10 +59,12 @@ impl Tool for RememberTool {
     }
 
     fn description(&self) -> &str {
-        "Save personal information to the user profile. Use this when the user wants \
-         you to remember something about them (preferences, contacts, personal details). \
-         The 'category' parameter determines which section the info goes into — you can \
-         use existing categories or create new ones. \
+        "Save personal information to the user profile or site-specific memory. \
+         Use this when the user wants you to remember something about them \
+         (preferences, contacts, personal details). The 'category' parameter \
+         determines which section the info goes into. \
+         When 'site' is provided, saves to site-specific memory instead of USER.md. \
+         Use site memory for navigation tips and per-site preferences. \
          Examples: 'remember my dog is named Max', 'save that I like pizza', \
          'ricorda che la mia compagna la chiamo Felix'."
     }
@@ -81,8 +83,12 @@ impl Tool for RememberTool {
                 },
                 "category": {
                     "type": "string",
-                    "description": "Section to store this in. Use existing sections (Identity, Family, Preferences, Contacts, Context) or create a new one. Default: Identity",
+                    "description": "Section to store this in. Use existing sections (Identity, Family, Preferences, Contacts, Context) or create a new one. For site memory, use 'Navigation' or 'User Preferences'. Default: Identity",
                     "default": "Identity"
+                },
+                "site": {
+                    "type": "string",
+                    "description": "If provided, save to site-specific memory instead of USER.md. Use the bare domain (e.g., 'trenitalia.com'). Site memory stores navigation tips, form field info, and per-site user preferences."
                 }
             },
             "required": ["key", "value"]
@@ -94,6 +100,7 @@ impl Tool for RememberTool {
         let value = get_string_param(&args, "value")?;
         let category =
             get_string_param(&args, "category").unwrap_or_else(|_| "Identity".to_string());
+        let site = get_string_param(&args, "site").ok();
 
         // Validate key
         if key.is_empty() || key.len() > 64 {
@@ -108,6 +115,17 @@ impl Tool for RememberTool {
             .profile_brain_dir
             .clone()
             .unwrap_or_else(|| self.data_dir.join("brain"));
+
+        // Site-specific memory: write to sites/{domain}.md instead of USER.md.
+        // Uses the profile-scoped brain dir so each profile has its own site memory.
+        if let Some(ref domain) = site {
+            let global_brain = self.data_dir.join("brain");
+            let profile_dir = ctx.profile_brain_dir.as_deref();
+            return self
+                .remember_for_site(&global_brain, profile_dir, domain, &category, &normalized_key, &value)
+                .await;
+        }
+
         let user_file = brain_dir.join("USER.md");
 
         // Ensure brain directory exists
@@ -138,6 +156,61 @@ impl Tool for RememberTool {
         Ok(ToolResult::success(format!(
             "✓ Remembered: {} = {} (in section '{}')",
             normalized_key, value, category
+        )))
+    }
+}
+
+impl RememberTool {
+    /// Save information to site-specific memory (sites/{domain}.md).
+    ///
+    /// Uses the `SiteMemory` format: YAML frontmatter + markdown sections.
+    /// Maps `category` to markdown sections (e.g., "Navigation", "User Preferences").
+    /// Writes to the profile-scoped path if available, else global.
+    async fn remember_for_site(
+        &self,
+        global_brain_dir: &std::path::Path,
+        profile_brain_dir: Option<&std::path::Path>,
+        domain: &str,
+        category: &str,
+        key: &str,
+        value: &str,
+    ) -> Result<ToolResult> {
+        use crate::browser::site_memory;
+
+        // Load existing site memory (checks profile first, then global)
+        let mut memory = site_memory::load_site_memory(global_brain_dir, profile_brain_dir, domain)
+            .await
+            .unwrap_or_else(|| site_memory::SiteMemory::new(domain));
+
+        // Map category to the appropriate section
+        let line = format!("- {key}: {value}\n");
+        let lower = category.to_lowercase();
+        if lower.contains("nav") {
+            if !memory.navigation_notes.is_empty() && !memory.navigation_notes.ends_with('\n') {
+                memory.navigation_notes.push('\n');
+            }
+            memory.navigation_notes.push_str(&line);
+        } else {
+            // Default: user preferences
+            if !memory.user_preferences.is_empty() && !memory.user_preferences.ends_with('\n') {
+                memory.user_preferences.push('\n');
+            }
+            memory.user_preferences.push_str(&line);
+        }
+
+        // Save to profile-scoped path (or global if no profile)
+        site_memory::save_site_memory(global_brain_dir, profile_brain_dir, domain, &memory).await?;
+
+        tracing::info!(
+            domain = %domain,
+            key = %key,
+            value = %value,
+            category = %category,
+            "Remembered site-specific information"
+        );
+
+        Ok(ToolResult::success(format!(
+            "✓ Remembered for {domain}: {key} = {value} (in section '{category}')"
         )))
     }
 }

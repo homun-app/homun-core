@@ -7,7 +7,7 @@ use std::sync::Arc;
 use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
-use axum::routing::get;
+use axum::routing::{delete, get};
 use axum::Router;
 use serde::Serialize;
 
@@ -17,7 +17,7 @@ use crate::utils::text::truncate_str;
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/v1/traces", get(list_handler))
+        .route("/v1/traces", get(list_handler).delete(clear_all_handler))
         .route("/v1/traces/{id}", get(detail_handler))
 }
 
@@ -105,4 +105,24 @@ async fn detail_handler(Path(id): Path<String>) -> Response {
         Some(trace) => Json(trace).into_response(),
         None => (StatusCode::NOT_FOUND, r#"{"error":"trace not found"}"#).into_response(),
     }
+}
+
+/// DELETE /api/v1/traces — clear all trace files.
+async fn clear_all_handler() -> Json<serde_json::Value> {
+    let dir = crate::agent::request_trace::traces_dir();
+    let mut deleted = 0u32;
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map(|e| e == "json").unwrap_or(false) {
+                if std::fs::remove_file(&path).is_ok() {
+                    deleted += 1;
+                }
+            }
+        }
+    }
+    Json(serde_json::json!({
+        "ok": true,
+        "deleted": deleted,
+    }))
 }

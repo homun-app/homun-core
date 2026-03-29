@@ -47,6 +47,9 @@ pub struct BrowserSession {
     /// Set by the agent loop when a results page has been seen,
     /// enabling richer page stage detection in subsequent snapshots.
     pub(crate) seen_results: Arc<AtomicBool>,
+    /// Pending mode switch requested by the browser guard.
+    /// The BrowserTool reads and clears this before navigate.
+    pending_mode_switch: Arc<tokio::sync::RwLock<Option<String>>>,
 }
 
 impl BrowserSession {
@@ -60,6 +63,7 @@ impl BrowserSession {
             peer: Arc::new(tokio::sync::RwLock::new(peer)),
             operation_mutex,
             seen_results: Arc::new(AtomicBool::new(false)),
+            pending_mode_switch: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
@@ -69,8 +73,18 @@ impl BrowserSession {
     }
 
     /// Swap the peer reference (called after show/hide restarts the MCP process).
-    async fn swap_peer(&self, new_peer: Arc<McpPeer>) {
+    pub(crate) async fn swap_peer(&self, new_peer: Arc<McpPeer>) {
         *self.peer.write().await = new_peer;
+    }
+
+    /// Queue a mode switch to be consumed by the BrowserTool before next navigate.
+    pub async fn set_pending_mode_switch(&self, mode: String) {
+        *self.pending_mode_switch.write().await = Some(mode);
+    }
+
+    /// Take the pending mode switch (consumed on read).
+    pub(crate) async fn take_pending_mode_switch(&self) -> Option<String> {
+        self.pending_mode_switch.write().await.take()
     }
 
     /// Returns a continuation hint for a specific conversation session.
@@ -202,6 +216,125 @@ impl BrowserTool {
     /// Get a clone of the shared session state for the agent loop.
     pub fn session(&self) -> Arc<BrowserSession> {
         Arc::clone(&self.session)
+    }
+
+    /// Auto visual check: take a screenshot and describe it briefly.
+    ///
+    /// Called automatically after interactive actions (click, type, fill)
+    /// to give the model a human-like view of the page state. Returns
+    /// `None` if no vision model is configured or the screenshot fails.
+    ///
+    /// Uses a concise prompt to keep the description short (~50-100 tokens).
+    async fn auto_visual_check(
+        &self,
+        _tab: &crate::browser::tab_session::TabSession,
+    ) -> Option<String> {
+        use crate::config::Config;
+        use crate::provider::one_shot::{llm_one_shot, ImageInput, OneShotRequest};
+
+        // Check if vision model is configured.
+        // If the user set a vision_model, trust it — no capability check needed.
+        let config = Config::load().ok()?;
+        let vision_model = config.agent.vision_model.trim().to_string();
+        if vision_model.is_empty() {
+            return None;
+        }
+
+        // Take screenshot
+        let peer = self.peer().await;
+        let (_text, images) = peer
+            .call_tool_with_images("browser_take_screenshot", json!({"type": "png"}))
+            .await
+            .ok()?;
+        let img = images.first()?;
+
+        // Save to temp file
+        let tmp_path = std::env::temp_dir().join(format!(
+            "homun_autoscreen_{}.png",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+        ));
+        std::fs::write(&tmp_path, &img.data).ok()?;
+
+        // Describe briefly — focused on what's visible and actionable
+        let result = llm_one_shot(
+            &config,
+            OneShotRequest {
+                system_prompt: "Describe what you see on this browser page in 1-2 sentences. \
+                    Focus on: what page/section is visible, any forms/calendars showing which month, \
+                    any errors or popups. Be very concise."
+                    .to_string(),
+                user_message: "What is shown?".to_string(),
+                images: vec![ImageInput {
+                    path: tmp_path.display().to_string(),
+                    media_type: img.mime_type.clone(),
+                }],
+                model: Some(vision_model.clone()),
+                max_tokens: 150,
+                ..Default::default()
+            },
+        )
+        .await;
+
+        let _ = std::fs::remove_file(&tmp_path);
+
+        match result {
+            Ok(resp) => {
+                let desc = resp.content.trim().to_string();
+                if desc.is_empty() {
+                    None
+                } else {
+                    Some(desc)
+                }
+            }
+            Err(_) => None,
+        }
+    }
+
+    /// Apply a pending mode switch from the browser guard.
+    ///
+    /// The guard (BrowserTaskPlanState) sets a pending mode switch via
+    /// BrowserSession when it determines the site needs a different rendering
+    /// mode. This method consumes the flag and restarts Playwright if needed.
+    async fn apply_pending_mode_switch(&self) {
+        let target_mode = match self.session.take_pending_mode_switch().await {
+            Some(m) => m,
+            None => return,
+        };
+
+        let pool = match self.pool.as_ref() {
+            Some(p) => p,
+            None => return,
+        };
+
+        let config = match crate::config::Config::load() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        let profile = &config.browser.default_profile;
+        let is_visible = pool.is_visible(profile).await;
+
+        let needs_switch = (target_mode == "visible" && !is_visible)
+            || (target_mode == "headless" && is_visible);
+
+        if !needs_switch {
+            return;
+        }
+
+        tracing::info!(target = %target_mode, "Applying mode switch from browser guard");
+        let result = if target_mode == "visible" {
+            pool.restart_visible(profile).await
+        } else {
+            pool.restart_headless(profile).await
+        };
+
+        if let Ok(new_peer) = result {
+            self.session.swap_peer(new_peer).await;
+            self.stealth_injected
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 
     /// Get the current MCP peer (may change after show/hide).
@@ -636,6 +769,11 @@ impl BrowserTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("'url' parameter is required for navigate"))?;
 
+        // Consume pending mode switch from the browser guard.
+        // The guard (BrowserTaskPlanState) determines the correct mode;
+        // the tool just executes the switch.
+        self.apply_pending_mode_switch().await;
+
         // Inject stealth scripts before the first navigation so addInitScript
         // runs BEFORE any page JavaScript (anti-bot detection countermeasure).
         self.inject_stealth().await;
@@ -674,6 +812,12 @@ impl BrowserTool {
 
         let mut result = format!("Navigated to {url}\n\n");
         result.push_str(&snapshot);
+
+        // Auto visual check after navigation
+        if let Some(visual) = self.auto_visual_check(tab).await {
+            result.push_str(&format!("\n\nVisual check: {visual}"));
+        }
+
         Ok(ToolResult::success(result))
     }
 
@@ -840,11 +984,17 @@ impl BrowserTool {
 
                 // Detect unexpected navigation (blank page redirect, page reload to home)
                 let nav_warning = detect_unexpected_navigation(&snap_output, url_before.as_deref());
-                let result_text = if let Some(warning) = nav_warning {
+                let mut result_text = if let Some(warning) = nav_warning {
                     format!("{base_output}\n\n⚠️ {warning}\n\n{compact}")
                 } else {
                     format!("{base_output}\n\n{compact}")
                 };
+
+                // Auto-screenshot: visual verification after click.
+                // Gives the model a human-like view of what happened.
+                if let Some(visual) = self.auto_visual_check(tab).await {
+                    result_text.push_str(&format!("\n\nVisual check: {visual}"));
+                }
 
                 Ok(ToolResult::success(result_text))
             }
@@ -1384,24 +1534,10 @@ impl BrowserTool {
 
         let config = Config::load().map_err(|e| anyhow::anyhow!("Config load failed: {e}"))?;
 
-        // Resolve vision-capable model: vision_model → main model → error
+        // Resolve vision model: if configured, trust it (no capability check).
         let vision_model = config.agent.vision_model.trim().to_string();
         let model = if !vision_model.is_empty() {
-            let provider = config
-                .resolve_provider(&vision_model)
-                .map(|(name, _)| name)
-                .unwrap_or("unknown");
-            let caps = config
-                .agent
-                .effective_model_capabilities(provider, &vision_model);
-            if caps.image_input {
-                vision_model
-            } else {
-                anyhow::bail!(
-                    "Configured vision_model '{}' does not support image input",
-                    vision_model
-                );
-            }
+            vision_model
         } else {
             let main_model = config.agent.model.trim().to_string();
             let provider = config
@@ -1571,6 +1707,57 @@ impl BrowserTool {
         }
 
         Ok(ToolResult::success(result))
+    }
+
+    /// Add a site to the browser allowed list.
+    ///
+    /// Called by the LLM after getting user permission. Writes to the DB
+    /// and updates the browser task plan's in-memory cache (via the pending
+    /// approval mechanism in the agent loop).
+    async fn action_add_allowed_site(&self, args: &Value) -> Result<ToolResult> {
+        let domain = args
+            .get("domain")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_lowercase();
+        if domain.is_empty() {
+            return Ok(ToolResult::error(
+                "Missing 'domain' parameter. Provide the site domain (e.g., 'trenitalia.com').",
+            ));
+        }
+
+        let mode = args
+            .get("mode")
+            .and_then(|v| v.as_str())
+            .unwrap_or("auto");
+        if !["headless", "visible", "auto"].contains(&mode) {
+            return Ok(ToolResult::error(
+                "Invalid 'mode'. Must be 'headless', 'visible', or 'auto'.",
+            ));
+        }
+
+        // Write to DB
+        let data_dir = crate::config::Config::data_dir();
+        let db_path = data_dir.join("homun.db");
+        if db_path.exists() {
+            if let Ok(db) = crate::storage::Database::open(&db_path).await {
+                if let Err(e) = db
+                    .upsert_browser_allowed_site(&domain, mode, "agent", None)
+                    .await
+                {
+                    return Ok(ToolResult::error(format!(
+                        "Failed to save allowed site: {e}"
+                    )));
+                }
+            }
+        }
+
+        tracing::info!(domain = %domain, mode = %mode, "Added site to browser allowed list");
+        Ok(ToolResult::success(format!(
+            "Site \"{domain}\" added to the allowed list (mode: {mode}). \
+             You can now navigate to {domain}."
+        )))
     }
 
     /// Execute the `close` action.
@@ -1860,6 +2047,7 @@ impl Tool for BrowserTool {
          - hold_click(ref OR x+y, duration_ms?): Press and hold (for 'hold to verify' CAPTCHAs). Use ref for ARIA elements, x+y coordinates for non-ARIA buttons\n\
          - show(): Switch to visible mode (browser window appears on screen — for CAPTCHA or debugging)\n\
          - hide(): Switch back to headless mode (browser goes to background)\n\
+         - add_allowed_site(domain, mode?): Add a site to the allowed list. Call ONLY after getting user permission. mode: headless/visible/auto (default: auto)\n\
          - block_resources(): Block images/fonts/media for faster navigation\n\
          - unblock_resources(): Restore normal resource loading\n\
          - evaluate(expression): Read page state via JS (READ-ONLY, no DOM changes)\n\
@@ -1886,8 +2074,8 @@ impl Tool for BrowserTool {
                         "navigate", "snapshot", "screenshot", "click", "type",
                         "fill", "fill_form", "select_option", "press_key",
                         "hover", "scroll", "drag", "click_coordinates",
-                        "hold_click", "show", "hide", "block_resources", "unblock_resources",
-                        "evaluate", "close", "wait"
+                        "hold_click", "show", "hide", "add_allowed_site",
+                        "block_resources", "unblock_resources", "evaluate", "close", "wait"
                     ],
                     "description": "Browser action to perform"
                 },
@@ -1951,6 +2139,15 @@ impl Tool for BrowserTool {
                 "profile": {
                     "type": "string",
                     "description": "Browser profile name for isolated cookies/sessions (uses default if omitted)"
+                },
+                "domain": {
+                    "type": "string",
+                    "description": "Site domain for add_allowed_site (e.g. 'trenitalia.com')"
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["headless", "visible", "auto"],
+                    "description": "Rendering mode for add_allowed_site (default: auto)"
                 }
             }
         })
@@ -2015,12 +2212,13 @@ impl Tool for BrowserTool {
             "hold_click" => self.action_hold_click(&args, &tab).await?,
             "show" => self.action_show(&tab).await?,
             "hide" => self.action_hide(&tab).await?,
+            "add_allowed_site" => self.action_add_allowed_site(&args).await?,
             "close" => self.action_close(&session_key).await?,
             "" => ToolResult::error(
                 "Missing 'action' parameter. Available actions: \
                  navigate, snapshot, screenshot, click, type, fill, \
                  select_option, press_key, hover, scroll, drag, \
-                 click_coordinates, hold_click, show, hide, \
+                 click_coordinates, hold_click, show, hide, add_allowed_site, \
                  block_resources, unblock_resources, evaluate, wait, close"
                     .to_string(),
             ),
@@ -2028,7 +2226,7 @@ impl Tool for BrowserTool {
                 "Unknown action \"{unknown}\". Available actions: \
                  navigate, snapshot, screenshot, click, type, fill, \
                  select_option, press_key, hover, scroll, drag, \
-                 click_coordinates, hold_click, show, hide, \
+                 click_coordinates, hold_click, show, hide, add_allowed_site, \
                  block_resources, unblock_resources, evaluate, wait, close"
             )),
         };
@@ -2209,35 +2407,46 @@ pub fn compact_browser_snapshot_staged(output: &str, seen_results: bool) -> Stri
         return result;
     }
 
-    // Pass raw tree through — no compaction
-    let raw_tree: String = tree_lines.join("\n");
+    // Compact tree: keep only lines with refs, content values, or ancestor context.
+    // Inspired by agent-browser (Vercel Labs) compact_tree algorithm.
+    let compact_tree = compact_tree_lines(&tree_lines);
 
     // Summary
-    let ref_count = raw_tree.matches("[ref=").count();
-    result.push_str(&format!(
-        "({ref_count} interactive elements) Use ref=\"eN\" exactly as shown.\n\n",
-    ));
+    let ref_count = compact_tree.matches("[ref=").count();
+    let total_refs = tree_lines.iter().filter(|l| l.contains("[ref=")).count();
+    if ref_count < total_refs {
+        result.push_str(&format!(
+            "({ref_count} relevant elements shown, {total_refs} total on page) Use ref=\"eN\" exactly as shown.\n\n",
+        ));
+    } else {
+        result.push_str(&format!(
+            "({ref_count} interactive elements) Use ref=\"eN\" exactly as shown.\n\n",
+        ));
+    }
 
     // Blank-ish page — very few elements and short content
-    if ref_count < 3 && raw_tree.len() < 200 {
+    if ref_count < 3 && compact_tree.len() < 200 {
         result.push_str(
             "\n⚠️ NEAR-BLANK PAGE — very few elements. The page may have redirected \
              or reloaded. Verify you're still on the expected page before continuing.\n",
         );
     }
 
-    result.push_str(&raw_tree);
+    result.push_str(&compact_tree);
+
+    // CAPTCHA and stage detection need the full tree (signals may be in non-ref elements)
+    let full_tree: String = tree_lines.join("\n");
 
     // CAPTCHA detection — only on sparse pages (<15 interactive elements)
     // to avoid false positives on full pages like Italo/Trenitalia.
     if ref_count < 15 {
-        if let Some(captcha_hint) = detect_captcha_in_sparse_page(&raw_tree) {
+        if let Some(captcha_hint) = detect_captcha_in_sparse_page(&full_tree) {
             result.push_str(&captcha_hint);
         }
     }
 
     // Stage-aware hints based on page structure
-    if let Some(hint) = page_stage_hint(&raw_tree, seen_results) {
+    if let Some(hint) = page_stage_hint(&full_tree, seen_results) {
         result.push_str(&hint);
     }
 
@@ -2248,6 +2457,64 @@ pub fn compact_browser_snapshot_staged(output: &str, seen_results: bool) -> Stri
     }
 
     result
+}
+
+/// Compact tree lines using agent-browser's algorithm.
+///
+/// Keeps lines containing `[ref=` (interactive elements), `": "` (values),
+/// or content role markers (heading, listitem, cell), plus all ancestor lines
+/// for structural context. Strips decorative/navigation noise.
+fn compact_tree_lines(lines: &[&str]) -> String {
+    if lines.is_empty() {
+        return String::new();
+    }
+
+    let mut keep = vec![false; lines.len()];
+
+    for (i, line) in lines.iter().enumerate() {
+        // Keep lines with refs (interactive elements)
+        let has_ref = line.contains("[ref=");
+        // Keep lines with content values (e.g. `textbox: "hello"`)
+        let has_value = line.contains("\": \"") || line.contains(": \"");
+        // Keep content role markers that provide context
+        let trimmed = line.trim().trim_start_matches("- ");
+        let is_content_role = trimmed.starts_with("heading ")
+            || trimmed.starts_with("listitem ")
+            || trimmed.starts_with("cell ")
+            || trimmed.starts_with("gridcell ")
+            || trimmed.starts_with("columnheader ")
+            || trimmed.starts_with("rowheader ")
+            || trimmed.starts_with("option ");
+
+        if has_ref || has_value || is_content_role {
+            keep[i] = true;
+            // Mark ancestors — walk backwards to preserve tree hierarchy
+            let my_indent = tree_indent(line);
+            for j in (0..i).rev() {
+                let ancestor_indent = tree_indent(lines[j]);
+                if ancestor_indent < my_indent {
+                    keep[j] = true;
+                    if ancestor_indent == 0 {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    lines
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| keep[*i])
+        .map(|(_, line)| *line)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Count indent level of a tree line (2 spaces per level).
+fn tree_indent(line: &str) -> usize {
+    let trimmed = line.trim_start();
+    (line.len() - trimmed.len()) / 2
 }
 
 /// Compact a simple browser action output — keep just the confirmation.
@@ -2891,34 +3158,88 @@ mod tests {
     }
 
     #[test]
-    fn test_compact_browser_snapshot_raw_passthrough() {
+    fn test_compact_browser_snapshot_filters_noise() {
         let output = "Page URL: https://example.com\nPage Title: Example\n- navigation\n  - heading \"Welcome\"\n  - textbox \"Email\" [ref=e5]\n  - textbox \"Password\" [ref=e6]\n  - button \"Login\" [ref=e7]\n- paragraph \"Footer text\"\n";
         let result = compact_browser_snapshot(output);
-        // All elements preserved (no compaction)
+        // Interactive elements and their ancestors preserved
         assert!(result.contains("Email"));
         assert!(result.contains("[ref=e5]"));
-        assert!(result.contains("3 interactive"));
+        assert!(result.contains("3 interactive elements"));
         assert!(result.contains("heading \"Welcome\""));
         assert!(result.contains("navigation"));
-        // Raw passthrough: paragraph is now preserved
-        assert!(result.contains("Footer text"));
+        // Non-ref paragraph gets filtered out (noise reduction)
+        assert!(!result.contains("Footer text"));
         // Form planning instruction present
         assert!(result.contains("FORM PLAN"));
     }
 
     #[test]
-    fn test_compact_raw_preserves_full_tree() {
+    fn test_compact_preserves_refs_and_content_roles() {
         let output = "- main\n  - section\n    - heading \"Results\"\n    - list\n      - listitem \"Train ICE 1234\"\n      - button \"Buy\" [ref=e10]\n  - footer\n    - paragraph \"Copyright\"\n";
         let result = compact_browser_snapshot(output);
-        // Everything preserved in raw mode
+        // Ref elements and content roles preserved with ancestors
         assert!(result.contains("button \"Buy\" [ref=e10]"));
         assert!(result.contains("list"));
         assert!(result.contains("section"));
         assert!(result.contains("main"));
         assert!(result.contains("heading \"Results\""));
         assert!(result.contains("listitem \"Train ICE 1234\""));
-        assert!(result.contains("Copyright"));
-        assert!(result.contains("footer"));
+        // Non-ref, non-content elements filtered
+        assert!(!result.contains("Copyright"));
+        assert!(!result.contains("footer"));
+    }
+
+    #[test]
+    fn test_compact_tree_lines_reduces_noise() {
+        // Simulates a noisy page with 20+ elements but only a few relevant ones
+        let lines = vec![
+            "- banner",
+            "  - navigation \"Main\"",
+            "    - link \"Home\" [ref=e1]",
+            "    - link \"Offers\" [ref=e2]",
+            "    - link \"Info\" [ref=e3]",
+            "    - link \"Help\" [ref=e4]",
+            "  - img \"Logo\"",
+            "- main",
+            "  - heading \"Book your trip\" [level=1]",
+            "  - group \"Search form\"",
+            "    - combobox \"Departure\" [ref=e10]",
+            "    - combobox \"Arrival\" [ref=e11]",
+            "    - combobox \"Date\" [ref=e12]",
+            "    - button \"Search\" [ref=e13]",
+            "  - section \"Promotions\"",
+            "    - paragraph \"Summer deals\"",
+            "    - link \"Learn more\" [ref=e20]",
+            "- contentinfo",
+            "  - navigation \"Footer\"",
+            "    - link \"Privacy\" [ref=e30]",
+            "    - link \"Terms\" [ref=e31]",
+            "    - link \"Cookies\" [ref=e32]",
+            "    - link \"Contact\" [ref=e33]",
+            "  - paragraph \"© 2026 Trenitalia\"",
+        ];
+        let result = compact_tree_lines(&lines);
+
+        // Interactive elements preserved
+        assert!(result.contains("[ref=e10]"));
+        assert!(result.contains("[ref=e13]"));
+        assert!(result.contains("heading \"Book your trip\""));
+
+        // Ancestors preserved for context
+        assert!(result.contains("main"));
+        assert!(result.contains("Search form"));
+
+        // Noise removed: decorative elements without refs
+        assert!(!result.contains("img \"Logo\""));
+        assert!(!result.contains("© 2026 Trenitalia"));
+
+        // Key metric: output is significantly shorter than input
+        let input_len = lines.join("\n").len();
+        let output_len = result.len();
+        assert!(
+            output_len < input_len,
+            "Compact should reduce size: input={input_len} output={output_len}"
+        );
     }
 
     #[test]

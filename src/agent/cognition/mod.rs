@@ -43,11 +43,16 @@ pub(crate) async fn build_selective_tool_defs(
 ) -> ToolDefinitionSet {
     let always_available = ["send_message", "remember", "approval", "vault"];
 
-    let selected_names: HashSet<&str> = discovered_tools
+    let mut selected_names: HashSet<&str> = discovered_tools
         .iter()
         .map(|t| t.name.as_str())
         .chain(always_available.iter().copied())
         .collect();
+
+    // Implicit tool associations: if one tool is selected, its companion
+    // is automatically included. These are deterministic rules that save
+    // the LLM from having to know about tool interdependencies.
+    apply_implicit_tools(&mut selected_names);
 
     let all_defs = tool_registry.read().await.get_definitions();
     let mut tool_defs: Vec<ToolDefinition> = all_defs
@@ -117,12 +122,42 @@ pub(crate) async fn build_selective_tool_defs(
     }
 }
 
+/// Apply implicit tool associations.
+///
+/// Some tools naturally go together — if one is selected, the companion
+/// should be available too. This avoids burdening the LLM with knowledge
+/// about tool interdependencies.
+fn apply_implicit_tools(selected: &mut HashSet<&str>) {
+    // web_search → browser + web_fetch (search results often need navigation)
+    if selected.contains("web_search") || selected.contains("brave-search__brave_web_search") {
+        selected.insert("browser");
+        selected.insert("web_fetch");
+    }
+    // browser → web_fetch (page content extraction)
+    if selected.contains("browser") {
+        selected.insert("web_fetch");
+    }
+    // read_email_inbox → send_message (email results should be communicated)
+    if selected.contains("read_email_inbox") {
+        selected.insert("send_message");
+    }
+    // knowledge → send_message (RAG results should be presented)
+    if selected.contains("knowledge") {
+        selected.insert("send_message");
+    }
+}
+
 /// Build a full-context fallback `CognitionResult` when the cognition
 /// LLM call fails (provider error, timeout, etc.).
 ///
-/// Returns a result listing ALL tools from the registry so the execution
-/// loop has maximum capabilities — degraded but functional.
-pub(crate) async fn fallback_full_context(tool_registry: &RwLock<ToolRegistry>) -> CognitionResult {
+/// Analyzes the user prompt with keyword heuristics to produce a
+/// meaningful intent_type, constraints, and understanding — so that
+/// `ExecutionPlanState` and `BrowserTaskPlanState` can still classify
+/// and track the task correctly even without LLM cognition.
+pub(crate) async fn fallback_full_context(
+    tool_registry: &RwLock<ToolRegistry>,
+    user_prompt: &str,
+) -> CognitionResult {
     let names: Vec<String> = tool_registry
         .read()
         .await
@@ -130,5 +165,5 @@ pub(crate) async fn fallback_full_context(tool_registry: &RwLock<ToolRegistry>) 
         .into_iter()
         .map(|s| s.to_string())
         .collect();
-    CognitionResult::fallback_full(names)
+    CognitionResult::fallback_full(names, user_prompt)
 }

@@ -425,6 +425,13 @@ impl Database {
         )
         .await?;
 
+        Self::apply_migration(
+            pool,
+            "047_browser_allowed_sites",
+            include_str!("../../migrations/047_browser_allowed_sites.sql"),
+        )
+        .await?;
+
         Ok(())
     }
 
@@ -1642,7 +1649,7 @@ impl Database {
         let rows = sqlx::query_as::<_, MobileDeviceRow>(
             "SELECT id, user_id, name, platform, app_version, public_key, push_token, token,
                     can_emergency_stop, server_fingerprint_at_pair, last_seen_at, created_at,
-                    revoked_at
+                    revoked_at, is_notify_target
              FROM mobile_devices
              WHERE user_id = ?
              ORDER BY created_at DESC",
@@ -1659,7 +1666,7 @@ impl Database {
         let row = sqlx::query_as::<_, MobileDeviceRow>(
             "SELECT id, user_id, name, platform, app_version, public_key, push_token, token,
                     can_emergency_stop, server_fingerprint_at_pair, last_seen_at, created_at,
-                    revoked_at
+                    revoked_at, is_notify_target
              FROM mobile_devices
              WHERE id = ?",
         )
@@ -1678,7 +1685,7 @@ impl Database {
         let row = sqlx::query_as::<_, MobileDeviceRow>(
             "SELECT id, user_id, name, platform, app_version, public_key, push_token,
                     token, can_emergency_stop, server_fingerprint_at_pair, last_seen_at,
-                    created_at, revoked_at
+                    created_at, revoked_at, is_notify_target
              FROM mobile_devices
              WHERE token = ? AND revoked_at IS NULL",
         )
@@ -1705,47 +1712,100 @@ impl Database {
         Ok(())
     }
 
-    pub async fn revoke_mobile_device(&self, id: &str) -> Result<bool> {
-        let now = chrono::Utc::now().to_rfc3339();
+    /// Hard-delete a mobile device and its associated bearer token.
+    ///
+    /// Deleting the webhook_token cascades to the mobile_devices row (FK ON DELETE CASCADE).
+    /// Also cleans up any pairing sessions linked to this device.
+    pub async fn delete_mobile_device(&self, id: &str) -> Result<bool> {
         let mut tx = self
             .pool
             .begin()
             .await
-            .context("Failed to start mobile device revoke transaction")?;
+            .context("Failed to start mobile device delete transaction")?;
 
-        let result = sqlx::query(
-            "UPDATE mobile_devices
-             SET revoked_at = COALESCE(revoked_at, ?)
-             WHERE id = ? AND revoked_at IS NULL",
+        // Get the token before deleting (needed for webhook_tokens cleanup)
+        let token_row = sqlx::query_scalar::<_, String>(
+            "SELECT token FROM mobile_devices WHERE id = ?",
         )
-        .bind(&now)
         .bind(id)
-        .execute(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await
-        .context("Failed to revoke mobile device")?;
+        .context("Failed to look up mobile device token")?;
 
-        if result.rows_affected() == 0 {
-            tx.rollback()
-                .await
-                .context("Failed to roll back mobile device revoke transaction")?;
+        let Some(token) = token_row else {
             return Ok(false);
-        }
+        };
 
-        sqlx::query(
-            "UPDATE webhook_tokens
-             SET enabled = 0
-             WHERE token = (SELECT token FROM mobile_devices WHERE id = ?)",
-        )
-        .bind(id)
-        .execute(&mut *tx)
-        .await
-        .context("Failed to disable mobile device token")?;
+        // Clean up pairing sessions that reference this device
+        sqlx::query("DELETE FROM mobile_pairing_sessions WHERE device_id = ?")
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to delete mobile pairing sessions")?;
+
+        // Delete the webhook token — cascades to mobile_devices row
+        sqlx::query("DELETE FROM webhook_tokens WHERE token = ?")
+            .bind(&token)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to delete mobile device token")?;
 
         tx.commit()
             .await
-            .context("Failed to commit mobile device revoke transaction")?;
+            .context("Failed to commit mobile device delete transaction")?;
 
         Ok(true)
+    }
+
+    /// Mark a mobile device as the default notification target.
+    ///
+    /// Only one device can be the notify target at a time.
+    /// When `enabled` is true, unsets all other devices first.
+    pub async fn set_mobile_notify_target(&self, device_id: &str, enabled: bool) -> Result<bool> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("Failed to start notify target transaction")?;
+
+        if enabled {
+            // Unset all other devices first
+            sqlx::query("UPDATE mobile_devices SET is_notify_target = 0 WHERE is_notify_target = 1")
+                .execute(&mut *tx)
+                .await
+                .context("Failed to clear existing notify target")?;
+        }
+
+        let result = sqlx::query(
+            "UPDATE mobile_devices SET is_notify_target = ? WHERE id = ? AND revoked_at IS NULL",
+        )
+        .bind(i32::from(enabled))
+        .bind(device_id)
+        .execute(&mut *tx)
+        .await
+        .context("Failed to set mobile notify target")?;
+
+        tx.commit()
+            .await
+            .context("Failed to commit notify target transaction")?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Get the mobile device marked as the default notification target.
+    pub async fn get_mobile_notify_target(&self) -> Result<Option<MobileDeviceRow>> {
+        let row = sqlx::query_as::<_, MobileDeviceRow>(
+            "SELECT id, user_id, name, platform, app_version, public_key, push_token,
+                    token, can_emergency_stop, server_fingerprint_at_pair, last_seen_at,
+                    created_at, revoked_at, is_notify_target
+             FROM mobile_devices
+             WHERE is_notify_target = 1 AND revoked_at IS NULL",
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .context("Failed to get mobile notify target")?;
+
+        Ok(row)
     }
 
     // --- User password ---
@@ -2178,6 +2238,83 @@ impl Database {
         .context("Failed to count vault access")?;
         Ok(count)
     }
+
+    // ── Browser allowed sites ───────────────────────────────────────
+
+    /// List all browser allowed sites, ordered by domain.
+    pub async fn list_browser_allowed_sites(&self) -> Result<Vec<BrowserAllowedSiteRow>> {
+        let rows = sqlx::query_as::<_, BrowserAllowedSiteRow>(
+            "SELECT domain, mode, added_by, created_at, notes
+             FROM browser_allowed_sites ORDER BY domain",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("Failed to list browser allowed sites")?;
+        Ok(rows)
+    }
+
+    /// Get a single browser allowed site by domain.
+    pub async fn get_browser_allowed_site(
+        &self,
+        domain: &str,
+    ) -> Result<Option<BrowserAllowedSiteRow>> {
+        let row = sqlx::query_as::<_, BrowserAllowedSiteRow>(
+            "SELECT domain, mode, added_by, created_at, notes
+             FROM browser_allowed_sites WHERE domain = ?",
+        )
+        .bind(domain)
+        .fetch_optional(&self.pool)
+        .await
+        .context("Failed to get browser allowed site")?;
+        Ok(row)
+    }
+
+    /// Insert or update a browser allowed site.
+    pub async fn upsert_browser_allowed_site(
+        &self,
+        domain: &str,
+        mode: &str,
+        added_by: &str,
+        notes: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO browser_allowed_sites (domain, mode, added_by, notes)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(domain) DO UPDATE SET mode = excluded.mode, notes = excluded.notes",
+        )
+        .bind(domain)
+        .bind(mode)
+        .bind(added_by)
+        .bind(notes)
+        .execute(&self.pool)
+        .await
+        .context("Failed to upsert browser allowed site")?;
+        Ok(())
+    }
+
+    /// Delete a browser allowed site. Returns true if a row was removed.
+    pub async fn delete_browser_allowed_site(&self, domain: &str) -> Result<bool> {
+        let result = sqlx::query("DELETE FROM browser_allowed_sites WHERE domain = ?")
+            .bind(domain)
+            .execute(&self.pool)
+            .await
+            .context("Failed to delete browser allowed site")?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Load the allowlist as a fast domain→mode lookup map.
+    ///
+    /// Used to populate in-memory caches in the browser task planner
+    /// and browser tool (avoids async DB calls on the hot path).
+    pub async fn load_browser_allowlist(&self) -> Result<std::collections::HashMap<String, String>> {
+        let rows = sqlx::query_as::<_, (String, String)>(
+            "SELECT domain, mode FROM browser_allowed_sites",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("Failed to load browser allowlist")?;
+        Ok(rows.into_iter().collect())
+    }
 }
 
 /// Skill audit log row.
@@ -2383,6 +2520,7 @@ pub struct MobileDeviceRow {
     pub last_seen_at: Option<String>,
     pub created_at: String,
     pub revoked_at: Option<String>,
+    pub is_notify_target: bool,
 }
 
 // ─── RAG Knowledge Base Row Types ────────────────────────────────
@@ -2561,6 +2699,22 @@ pub struct EmailPendingRow {
     pub profile_id: Option<i64>,
     /// Owner user ID.
     pub user_id: Option<String>,
+}
+
+// ═══════════════════════════════════════════════════════════════
+// BROWSER ALLOWED SITES
+// ═══════════════════════════════════════════════════════════════
+
+/// A browser allowed-site record with rendering mode.
+#[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
+pub struct BrowserAllowedSiteRow {
+    pub domain: String,
+    /// `"headless"`, `"visible"`, or `"auto"`.
+    pub mode: String,
+    /// `"user"`, `"system"`, or `"approval"`.
+    pub added_by: String,
+    pub created_at: String,
+    pub notes: Option<String>,
 }
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks.

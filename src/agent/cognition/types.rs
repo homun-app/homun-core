@@ -60,23 +60,121 @@ pub enum Autonomy {
 }
 
 /// A tool discovered by the cognition phase.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Supports deserialization from both string and object:
+/// - `"browser"` → `DiscoveredTool { name: "browser", .. }`
+/// - `{"name": "browser", "reason": "..."}` → full struct
+///
+/// This flexibility is needed because some models return tools
+/// as a plain string array instead of an object array.
+#[derive(Debug, Clone, Serialize)]
 pub struct DiscoveredTool {
     /// Tool name (must match a registered tool in the ToolRegistry).
     pub name: String,
     /// Human-readable description.
+    #[serde(default)]
     pub description: String,
     /// Why the cognition selected this tool for the current request.
+    #[serde(default)]
     pub reason: String,
 }
 
-/// A skill discovered by the cognition phase.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl<'de> serde::Deserialize<'de> for DiscoveredTool {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de;
+
+        struct Visitor;
+
+        impl<'de> de::Visitor<'de> for Visitor {
+            type Value = DiscoveredTool;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a tool name string or an object with 'name' field")
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                Ok(DiscoveredTool {
+                    name: v.to_string(),
+                    description: String::new(),
+                    reason: String::new(),
+                })
+            }
+
+            fn visit_map<M: de::MapAccess<'de>>(self, map: M) -> Result<Self::Value, M::Error> {
+                #[derive(Deserialize)]
+                struct Obj {
+                    name: String,
+                    #[serde(default)]
+                    description: String,
+                    #[serde(default)]
+                    reason: String,
+                }
+                let obj = Obj::deserialize(de::value::MapAccessDeserializer::new(map))?;
+                Ok(DiscoveredTool {
+                    name: obj.name,
+                    description: obj.description,
+                    reason: obj.reason,
+                })
+            }
+        }
+
+        deserializer.deserialize_any(Visitor)
+    }
+}
+
+/// A skill discovered by the cognition phase (same flexible deserialization).
+#[derive(Debug, Clone, Serialize)]
 pub struct DiscoveredSkill {
     /// Skill name (must match an installed skill).
     pub name: String,
     /// Human-readable description.
+    #[serde(default)]
     pub description: String,
+}
+
+impl<'de> serde::Deserialize<'de> for DiscoveredSkill {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de;
+
+        struct Visitor;
+
+        impl<'de> de::Visitor<'de> for Visitor {
+            type Value = DiscoveredSkill;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a skill name string or an object with 'name' field")
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                Ok(DiscoveredSkill {
+                    name: v.to_string(),
+                    description: String::new(),
+                })
+            }
+
+            fn visit_map<M: de::MapAccess<'de>>(self, map: M) -> Result<Self::Value, M::Error> {
+                #[derive(Deserialize)]
+                struct Obj {
+                    name: String,
+                    #[serde(default)]
+                    description: String,
+                }
+                let obj = Obj::deserialize(de::value::MapAccessDeserializer::new(map))?;
+                Ok(DiscoveredSkill {
+                    name: obj.name,
+                    description: obj.description,
+                })
+            }
+        }
+
+        deserializer.deserialize_any(Visitor)
+    }
 }
 
 /// An MCP service discovered by the cognition phase.
@@ -176,8 +274,13 @@ impl CognitionResult {
     /// Build a full-context fallback when cognition LLM call fails.
     ///
     /// Returns ALL tools from the registry so the execution loop has
-    /// maximum capabilities. Used only when `run_cognition()` errors.
-    pub fn fallback_full(all_tool_names: Vec<String>) -> Self {
+    /// maximum capabilities. Analyzes the user prompt with heuristics
+    /// to produce intent_type, constraints, and a meaningful understanding
+    /// so that downstream components (ExecutionPlan, BrowserTaskPlan)
+    /// can still classify and track the task correctly.
+    ///
+    /// Used only when `run_cognition()` errors.
+    pub fn fallback_full(all_tool_names: Vec<String>, user_prompt: &str) -> Self {
         let tools = all_tool_names
             .into_iter()
             .map(|name| DiscoveredTool {
@@ -187,8 +290,46 @@ impl CognitionResult {
             })
             .collect();
 
+        let lower = user_prompt.to_ascii_lowercase();
+
+        // Infer intent_type from prompt keywords
+        let intent_type = if contains_any_fallback(
+            &lower,
+            &[
+                "book", "prenota", "compra", "buy", "ordina", "order",
+                "checkout", "purchase", "registra", "register", "iscri",
+            ],
+        ) {
+            Some(IntentType::Transactional)
+        } else if contains_any_fallback(
+            &lower,
+            &[
+                "scrivi", "write", "genera", "generate", "crea", "create",
+                "traduci", "translate", "riassumi", "summarize",
+            ],
+        ) {
+            Some(IntentType::Creative)
+        } else if contains_any_fallback(
+            &lower,
+            &["vai", "apri", "open", "go to", "naviga", "navigate"],
+        ) {
+            Some(IntentType::Navigational)
+        } else {
+            Some(IntentType::Informational)
+        };
+
+        // Infer constraints from prompt (same logic as execution_plan)
+        let constraints = infer_fallback_constraints(&lower);
+
+        // Build understanding from the prompt itself (truncated)
+        let understanding = if user_prompt.len() > 200 {
+            format!("{}…", &user_prompt[..200])
+        } else {
+            user_prompt.to_string()
+        };
+
         Self {
-            understanding: "Cognition unavailable, providing full context".to_string(),
+            understanding,
             complexity: Complexity::Complex,
             answer_directly: false,
             direct_answer: None,
@@ -198,9 +339,9 @@ impl CognitionResult {
             memory_context: None,
             rag_context: None,
             plan: Vec::new(),
-            constraints: Vec::new(),
+            constraints,
             autonomy_override: None,
-            intent_type: None,
+            intent_type,
             success_criteria: None,
         }
     }
@@ -318,6 +459,80 @@ fn plan_execution_schema() -> serde_json::Value {
         },
         "required": ["understanding", "complexity", "answer_directly", "intent_type", "success_criteria"]
     })
+}
+
+// ── Fallback heuristic helpers ─────────────────────────────────────
+
+fn contains_any_fallback(text: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|n| text.contains(n))
+}
+
+/// Extract constraints from prompt via keyword matching (no LLM).
+///
+/// Mirrors the logic in `execution_plan::infer_constraints` but kept
+/// independent to avoid a circular dependency. Produces constraints
+/// that downstream `ExecutionPlanState` and `BrowserTaskPlanState`
+/// can use even when cognition failed entirely.
+fn infer_fallback_constraints(lower: &str) -> Vec<String> {
+    let mut constraints = Vec::new();
+
+    if contains_any_fallback(
+        lower,
+        &[
+            "today", "oggi", "tomorrow", "domani", "latest", "current",
+            "adesso", "stasera", "tonight", "this week", "questa settimana",
+        ],
+    ) {
+        constraints.push(
+            "Treat date/time-sensitive details as current and verify them from fresh evidence."
+                .to_string(),
+        );
+    }
+
+    if contains_any_fallback(
+        lower,
+        &[
+            "after ", "before ", "dopo ", "prima delle", "entro ", "under ",
+            "below ", "meno di", "fino a", "at least", "almeno", "between ",
+            "tra ",
+        ],
+    ) || lower.contains(':')
+        || lower.chars().any(|ch| ch.is_ascii_digit())
+    {
+        constraints.push(
+            "Respect explicit numeric, date, price, time, and threshold constraints from the request."
+                .to_string(),
+        );
+    }
+
+    if contains_any_fallback(
+        lower,
+        &[
+            "book", "booking", "reserve", "reservation", "ticket",
+            "biglietto", "prenota", "checkout", "order", "buy",
+            "purchase", "search form", "form",
+        ],
+    ) {
+        constraints.push(
+            "For multi-step forms, confirm each required field/widget before submitting."
+                .to_string(),
+        );
+    }
+
+    if contains_any_fallback(
+        lower,
+        &[
+            "compare", "confronta", "versus", " vs ", "both ",
+            "entrambi", "sia ", "che ",
+        ],
+    ) {
+        constraints.push(
+            "Cover every requested option/source and compare them before finalizing.".to_string(),
+        );
+    }
+
+    constraints.truncate(6);
+    constraints
 }
 
 /// Validation errors found in a CognitionResult.
@@ -575,5 +790,68 @@ mod tests {
             &[],
         );
         assert!(issues.iter().any(|i| i.field == "intent_type"));
+    }
+
+    // ── Fallback intelligence tests ───────────────────────────
+
+    #[test]
+    fn fallback_full_infers_transactional_intent() {
+        let tools = vec!["browser".to_string(), "web_search".to_string()];
+        let result = CognitionResult::fallback_full(tools, "prenota un treno per Venezia");
+        assert_eq!(result.intent_type, Some(IntentType::Transactional));
+        assert!(result.understanding.contains("prenota"));
+        assert!(!result.constraints.is_empty());
+    }
+
+    #[test]
+    fn fallback_full_infers_informational_by_default() {
+        let tools = vec!["browser".to_string()];
+        let result = CognitionResult::fallback_full(tools, "trova treni per Venezia il 12 agosto");
+        assert_eq!(result.intent_type, Some(IntentType::Informational));
+        // Should extract numeric constraint (date contains digits)
+        assert!(result.constraints.iter().any(|c| c.contains("numeric")));
+    }
+
+    #[test]
+    fn fallback_full_infers_navigational_intent() {
+        let tools = vec!["browser".to_string()];
+        let result = CognitionResult::fallback_full(tools, "apri il sito di trenitalia");
+        assert_eq!(result.intent_type, Some(IntentType::Navigational));
+    }
+
+    #[test]
+    fn fallback_full_infers_creative_intent() {
+        let tools = vec!["send_message".to_string()];
+        let result = CognitionResult::fallback_full(tools, "scrivi una email di risposta");
+        assert_eq!(result.intent_type, Some(IntentType::Creative));
+    }
+
+    #[test]
+    fn fallback_full_preserves_all_tools() {
+        let tools = vec![
+            "browser".to_string(),
+            "web_search".to_string(),
+            "send_message".to_string(),
+        ];
+        let result = CognitionResult::fallback_full(tools, "riprova aprendo il browser");
+        assert_eq!(result.tools.len(), 3);
+        assert!(result.tools.iter().any(|t| t.name == "browser"));
+    }
+
+    #[test]
+    fn fallback_full_extracts_booking_constraints() {
+        let tools = vec!["browser".to_string()];
+        let result = CognitionResult::fallback_full(
+            tools,
+            "prenota un biglietto treno domani dopo le 16:00",
+        );
+        assert!(result
+            .constraints
+            .iter()
+            .any(|c| c.contains("date/time-sensitive")));
+        assert!(result
+            .constraints
+            .iter()
+            .any(|c| c.contains("multi-step forms")));
     }
 }

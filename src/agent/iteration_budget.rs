@@ -70,15 +70,19 @@ pub(crate) fn maybe_extend_iteration_budget(
     let useful = tool_summaries.iter().any(|summary| summary.useful);
     let repeated_signature = state.last_signature.as_deref() == Some(signature.as_str());
 
+    // Browser actions have their own loop detector in BrowserTaskPlanState.
+    // Skip stall/cycle tracking here to avoid double-counting.
+    let is_browser = tool_summaries
+        .iter()
+        .any(|s| crate::browser::is_browser_tool(&s.name));
+
     if useful && !repeated_signature {
         state.stall_streak = 0;
-    } else {
+    } else if !is_browser {
         state.stall_streak = state.stall_streak.saturating_add(1);
     }
     state.last_signature = Some(signature.clone());
-
-    // AB-1: Rolling window cycle detection.
-    if loop_detection_window > 0 {
+    if loop_detection_window > 0 && !is_browser {
         state.recent_signatures.push(signature.clone());
         let win = loop_detection_window as usize;
         if state.recent_signatures.len() > win {

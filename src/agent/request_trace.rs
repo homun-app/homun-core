@@ -14,7 +14,7 @@ use crate::utils::text::truncate_str;
 
 const DEFAULT_MAX_FILES: usize = 50;
 const ARGS_SUMMARY_MAX: usize = 400;
-const RESULT_SUMMARY_MAX: usize = 300;
+const RESULT_SUMMARY_MAX: usize = 500;
 const RESPONSE_SUMMARY_MAX: usize = 500;
 
 /// Full execution trace for a single agent request.
@@ -52,6 +52,12 @@ pub struct RequestTrace {
     pub duration_ms: u64,
     /// How the request ended.
     pub status: TraceStatus,
+    /// Why the execution stopped (budget exhausted, model finished, user cancelled, etc.).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop_reason: Option<String>,
+    /// Final iteration budget (may differ from max_iterations if contracted).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub final_budget: Option<u32>,
 }
 
 /// Summary of the cognition phase output.
@@ -101,6 +107,18 @@ pub struct TraceStep {
     pub result_summary: String,
     /// True if the tool returned an error.
     pub is_error: bool,
+    /// Guard decision for browser actions (allow/blocked/give_up).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guard_decision: Option<String>,
+    /// Browser stuck level at time of execution (0=ok, 1-3=escalating).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser_stuck_level: Option<u8>,
+    /// Visual check description (from auto-screenshot after action).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visual_check: Option<String>,
+    /// Active iteration budget at this point.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iteration_budget: Option<u32>,
 }
 
 /// How the request ended.
@@ -140,6 +158,8 @@ impl RequestTracer {
             total_tokens: 0,
             duration_ms: 0,
             status: TraceStatus::Completed,
+            stop_reason: None,
+            final_budget: None,
         };
         Self {
             trace,
@@ -236,7 +256,38 @@ impl RequestTracer {
             args_summary,
             result_summary,
             is_error,
+            guard_decision: None,
+            browser_stuck_level: None,
+            visual_check: None,
+            iteration_budget: None,
         });
+    }
+
+    /// Annotate the last step with browser guard info.
+    pub fn annotate_last_step_browser(
+        &mut self,
+        guard_decision: &str,
+        stuck_level: u8,
+        budget: u32,
+    ) {
+        if let Some(step) = self.trace.steps.last_mut() {
+            step.guard_decision = Some(guard_decision.to_string());
+            step.browser_stuck_level = Some(stuck_level);
+            step.iteration_budget = Some(budget);
+        }
+    }
+
+    /// Annotate the last step with visual check result.
+    pub fn annotate_last_step_visual(&mut self, description: &str) {
+        if let Some(step) = self.trace.steps.last_mut() {
+            step.visual_check = Some(truncate_str(description, 200, "…"));
+        }
+    }
+
+    /// Record why the execution stopped.
+    pub fn record_stop_reason(&mut self, reason: &str, final_budget: u32) {
+        self.trace.stop_reason = Some(reason.to_string());
+        self.trace.final_budget = Some(final_budget);
     }
 
     /// Finalize the trace with the request outcome.

@@ -89,6 +89,17 @@ pub fn check_browser_policy(
     }
 }
 
+/// Extract the bare host from a URL (strip scheme, port, path).
+///
+/// `"https://www.sub.example.com:443/path"` → `"www.sub.example.com"`
+fn extract_host(url: &str) -> &str {
+    let without_scheme = url
+        .trim_start_matches("https://")
+        .trim_start_matches("http://");
+    let host_with_path = without_scheme.split('/').next().unwrap_or("");
+    host_with_path.split(':').next().unwrap_or("")
+}
+
 /// Simple glob-style URL pattern matching (no external crate).
 ///
 /// - `"*.evil.com"` — matches hosts ending with `.evil.com` (or exactly `evil.com`)
@@ -96,20 +107,80 @@ pub fn check_browser_policy(
 fn url_matches_pattern(url: &str, pattern: &str) -> bool {
     let pattern = pattern.trim();
     if let Some(suffix) = pattern.strip_prefix("*.") {
-        // Host suffix match: strip scheme, extract host.
-        let host = url
-            .trim_start_matches("https://")
-            .trim_start_matches("http://")
-            .split('/')
-            .next()
-            .unwrap_or("")
-            .split(':')
-            .next()
-            .unwrap_or("");
+        let host = extract_host(url);
         host.ends_with(&format!(".{suffix}")) || host == suffix
     } else {
         url.contains(pattern)
     }
+}
+
+// ── Domain allowlist utilities ──────────────────────────────────────
+
+/// Extract the registrable domain from a URL.
+///
+/// Strips scheme, `www.`, port, and path. Returns the last two+ segments
+/// of the host as the bare domain.
+///
+/// ```text
+/// "https://www.booking.trenitalia.com/path" → Some("trenitalia.com")
+/// "https://en.wikipedia.org/wiki/Rust"      → Some("wikipedia.org")
+/// "about:blank"                              → None
+/// ```
+pub fn extract_domain(url: &str) -> Option<String> {
+    let host = extract_host(url);
+    if host.is_empty() || !host.contains('.') {
+        return None;
+    }
+
+    // Strip leading "www."
+    let host = host.strip_prefix("www.").unwrap_or(host);
+
+    let parts: Vec<&str> = host.split('.').collect();
+    if parts.len() < 2 {
+        return None;
+    }
+
+    // For two-part TLDs (co.uk, com.au, com.br, etc.) keep 3 segments.
+    let two_part_tlds = [
+        "co.uk", "com.au", "com.br", "co.jp", "co.kr", "co.nz", "co.za", "com.ar", "com.mx",
+        "com.tr", "org.uk", "net.au",
+    ];
+    if parts.len() >= 3 {
+        let last_two = format!("{}.{}", parts[parts.len() - 2], parts[parts.len() - 1]);
+        if two_part_tlds.contains(&last_two.as_str()) {
+            // Take last 3 parts: "bbc.co.uk"
+            return Some(parts[parts.len() - 3..].join("."));
+        }
+    }
+
+    // Default: last 2 parts → "trenitalia.com"
+    Some(parts[parts.len() - 2..].join("."))
+}
+
+/// Check whether a URL's host matches a stored domain (exact or subdomain).
+///
+/// `"booking.trenitalia.com"` matches `"trenitalia.com"`.
+/// `"trenitalia.com"` matches `"trenitalia.com"`.
+/// `"evilrenitalia.com"` does NOT match `"trenitalia.com"`.
+pub fn url_matches_domain(url: &str, domain: &str) -> bool {
+    let host = extract_host(url).strip_prefix("www.").unwrap_or(extract_host(url));
+    host == domain || host.ends_with(&format!(".{domain}"))
+}
+
+/// Look up a URL's rendering mode from the allowlist cache.
+///
+/// Iterates entries (small set, <50) and returns the mode for the first
+/// matching domain. Returns `None` if the URL doesn't match any entry.
+pub fn find_site_mode<'a>(
+    url: &str,
+    allowlist: &'a std::collections::HashMap<String, String>,
+) -> Option<&'a str> {
+    for (domain, mode) in allowlist {
+        if url_matches_domain(url, domain) {
+            return Some(mode.as_str());
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -239,5 +310,84 @@ mod tests {
 
         let allow = policy("allow", &[], &[]);
         assert!(check_browser_policy(&allow, "nonexistent", &json!({})).is_none());
+    }
+
+    // ── Domain utilities tests ──────────────────────────────────────
+
+    #[test]
+    fn extract_domain_basic() {
+        assert_eq!(
+            extract_domain("https://www.trenitalia.com/path"),
+            Some("trenitalia.com".to_string())
+        );
+        assert_eq!(
+            extract_domain("https://booking.trenitalia.com/checkout"),
+            Some("trenitalia.com".to_string())
+        );
+        assert_eq!(
+            extract_domain("https://google.com"),
+            Some("google.com".to_string())
+        );
+        assert_eq!(
+            extract_domain("https://en.wikipedia.org/wiki/Rust"),
+            Some("wikipedia.org".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_domain_two_part_tlds() {
+        assert_eq!(
+            extract_domain("https://www.bbc.co.uk/news"),
+            Some("bbc.co.uk".to_string())
+        );
+        assert_eq!(
+            extract_domain("https://shop.example.com.au"),
+            Some("example.com.au".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_domain_edge_cases() {
+        assert_eq!(extract_domain("about:blank"), None);
+        assert_eq!(extract_domain("chrome://settings"), None);
+        assert_eq!(extract_domain(""), None);
+        // Localhost with port
+        assert_eq!(extract_domain("http://localhost:3000"), None);
+    }
+
+    #[test]
+    fn url_matches_domain_exact_and_subdomain() {
+        assert!(url_matches_domain("https://trenitalia.com/page", "trenitalia.com"));
+        assert!(url_matches_domain(
+            "https://booking.trenitalia.com",
+            "trenitalia.com"
+        ));
+        assert!(url_matches_domain(
+            "https://www.trenitalia.com",
+            "trenitalia.com"
+        ));
+        // Must not match partial host names
+        assert!(!url_matches_domain(
+            "https://evilrenitalia.com",
+            "trenitalia.com"
+        ));
+        assert!(!url_matches_domain("https://other.com", "trenitalia.com"));
+    }
+
+    #[test]
+    fn find_site_mode_lookup() {
+        let mut allowlist = std::collections::HashMap::new();
+        allowlist.insert("trenitalia.com".to_string(), "visible".to_string());
+        allowlist.insert("google.com".to_string(), "headless".to_string());
+
+        assert_eq!(
+            find_site_mode("https://www.trenitalia.com/search", &allowlist),
+            Some("visible")
+        );
+        assert_eq!(
+            find_site_mode("https://google.com/search?q=test", &allowlist),
+            Some("headless")
+        );
+        assert_eq!(find_site_mode("https://unknown.com", &allowlist), None);
     }
 }

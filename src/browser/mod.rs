@@ -17,6 +17,7 @@ pub mod action_policy;
 pub mod captcha;
 pub mod helpers;
 pub mod mcp_bridge;
+pub mod site_memory;
 pub mod tab_session;
 
 pub use helpers::{has_browser_tools, is_browser_tool};

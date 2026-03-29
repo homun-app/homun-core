@@ -778,13 +778,14 @@ impl AgentLoop {
                 },
                 max_iterations: config.agent.cognition_max_iterations,
                 timeout_secs: config.agent.cognition_timeout_secs,
+                max_retries: 0, // Use default (3 retries)
                 tracer: tracer.as_mut(),
             };
             match cognition::run_cognition(params).await {
                 Ok(result) => (result, None),
                 Err(reason) => {
                     tracing::warn!(reason = %reason, "Cognition failed — using full tool set fallback");
-                    (cognition::fallback_full_context(&self.tool_registry).await, Some(reason))
+                    (cognition::fallback_full_context(&self.tool_registry, &prompt_content).await, Some(reason))
                 }
             }
         };
@@ -1110,6 +1111,19 @@ impl AgentLoop {
             &prompt_content,
             active_profile_brain_dir.clone(),
         );
+
+        // Load browser site allowlist from DB and populate caches.
+        // This enables the veto system to block unlisted sites and
+        // the browser tool to auto-switch headless/visible mode.
+        match self.db.load_browser_allowlist().await {
+            Ok(allowlist) => {
+                browser_task_plan.set_allowed_sites(allowlist);
+            }
+            Err(e) => {
+                tracing::warn!("Failed to load browser allowlist: {e}");
+            }
+        }
+
         let mut last_plan_payload: Option<String> = None;
         // Seed execution plan with cognition plan steps so the UI shows them immediately
         {
@@ -1451,49 +1465,55 @@ impl AgentLoop {
                         continue;
                     }
 
-                    // Browser veto: consecutive snapshot guard is inside BrowserTool;
-                    // here we check the browser task planner veto + action policy.
+                    // Browser guard: single point of control for all browser decisions.
                     if crate::browser::is_browser_tool(&tool_call.name) {
-                        if let Some(message) =
-                            browser_task_plan.veto_browser_action(&tool_call.arguments)
-                        {
-                            tracing::info!(
-                                tool = %tool_call.name,
-                                reason = %message,
-                                "Browser action vetoed by browser planner"
-                            );
-                            messages.push(ChatMessage::tool_result(
-                                &tool_call.id,
-                                &tool_call.name,
-                                &message,
-                            ));
-                            continue;
-                        }
+                        let action = tool_call
+                            .arguments
+                            .get("action")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
 
-                        // Config-driven action policy (allow/deny by category + URL).
-                        #[cfg(feature = "browser")]
-                        {
-                            let action = tool_call
-                                .arguments
-                                .get("action")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("");
-                            if let Some(reason) =
-                                crate::browser::action_policy::check_browser_policy(
-                                    &config.browser.policy,
-                                    action,
-                                    &tool_call.arguments,
-                                )
-                            {
-                                tracing::info!(
-                                    tool = %tool_call.name,
-                                    %reason,
-                                    "Browser action denied by policy"
-                                );
+                        use super::browser_task_plan::BrowserActionDecision;
+                        match browser_task_plan.check_action(action, &tool_call.arguments) {
+                            BrowserActionDecision::Allow { mode_switch } => {
+                                // If the guard requests a mode switch, tell the BrowserTool
+                                // to perform it before navigating. The tool has the pool.
+                                #[cfg(feature = "browser")]
+                                if let Some(ref target_mode) = mode_switch {
+                                    if let Some(ref session) = *self.browser_session.read().await {
+                                        session.set_pending_mode_switch(target_mode.clone()).await;
+                                    }
+                                }
+                                // Fall through to execute
+                            }
+                            BrowserActionDecision::Blocked { reason } => {
+                                tracing::info!(tool = %tool_call.name, %reason, "Browser action blocked");
+                                if let Some(ref mut t) = tracer {
+                                    t.record_step(iteration, &tool_call.name, &tool_call.arguments, &reason, true);
+                                    t.annotate_last_step_browser(
+                                        &format!("blocked: {}", &reason[..reason.len().min(100)]),
+                                        browser_task_plan.stuck_level(),
+                                        active_iteration_budget,
+                                    );
+                                }
                                 messages.push(ChatMessage::tool_result(
                                     &tool_call.id,
                                     &tool_call.name,
                                     &reason,
+                                ));
+                                continue;
+                            }
+                            BrowserActionDecision::GiveUp => {
+                                tracing::warn!("Browser automation stuck — giving up");
+                                if let Some(ref mut t) = tracer {
+                                    t.record_step(iteration, &tool_call.name, &tool_call.arguments, "give_up", true);
+                                    t.annotate_last_step_browser("give_up", 3, active_iteration_budget);
+                                }
+                                messages.push(ChatMessage::tool_result(
+                                    &tool_call.id,
+                                    &tool_call.name,
+                                    "Unable to complete this browser action after multiple attempts. \
+                                     Inform the user about the issue and suggest alternatives.",
                                 ));
                                 continue;
                             }
@@ -1750,6 +1770,20 @@ impl AgentLoop {
                             &result.output,
                             result.is_error,
                         );
+                        // Annotate browser steps with guard state and visual check
+                        if crate::browser::is_browser_tool(&tool_call.name) {
+                            t.annotate_last_step_browser(
+                                "allow",
+                                browser_task_plan.stuck_level(),
+                                active_iteration_budget,
+                            );
+                            // Extract visual check from output if present
+                            if let Some(vis_start) = result.output.find("Visual check: ") {
+                                let vis_text = &result.output[vis_start + 14..];
+                                let vis_end = vis_text.find("\n\n").unwrap_or(vis_text.len());
+                                t.annotate_last_step_visual(&vis_text[..vis_end]);
+                            }
+                        }
                     }
 
                     // For browser tool: extract action from args for tracking
@@ -1781,12 +1815,22 @@ impl AgentLoop {
                     );
                     execution_plan.auto_advance_explicit_steps(&tool_call.name);
                     if let Some(action) = browser_action {
-                        browser_task_plan.note_browser_result(Some(action), &result.output);
+                        browser_task_plan.note_result(action, &result.output, &tool_call.arguments);
                         // Update seen_results flag for stage-aware snapshot hints
                         #[cfg(feature = "browser")]
                         if browser_task_plan.has_seen_results() {
                             if let Some(ref session) = *self.browser_session.read().await {
                                 session.set_seen_results(true);
+                            }
+                        }
+                        // Auto-switch to visible mode when guard detects stuck loop.
+                        // Sets a flag on the session; the BrowserTool reads it on next navigate.
+                        #[cfg(feature = "browser")]
+                        if browser_task_plan.needs_visible_switch() {
+                            if let Some(ref session) = *self.browser_session.read().await {
+                                session.set_pending_mode_switch("visible".to_string()).await;
+                                browser_task_plan.note_visibility_changed(true);
+                                tracing::info!("Queued auto-switch to visible mode (stuck loop detected)");
                             }
                         }
                     }
@@ -1803,6 +1847,62 @@ impl AgentLoop {
                     });
 
                     if crate::browser::is_browser_tool(&tool_call.name) {
+                        // After navigate: load/update site memory and inject into context.
+                        // This is pure Rust logic (fingerprint + form parsing), no LLM calls.
+                        if browser_action == Some("navigate") {
+                            if let Some(domain) = crate::browser::action_policy::extract_domain(
+                                tool_call.arguments.get("url").and_then(|v| v.as_str()).unwrap_or("")
+                            ) {
+                                use crate::browser::site_memory;
+
+                                let brain_dir = crate::config::Config::data_dir().join("brain");
+                                let profile_dir = active_profile_brain_dir.as_deref();
+
+                                let mut memory = site_memory::load_site_memory(
+                                    &brain_dir, profile_dir, &domain
+                                ).await.unwrap_or_else(|| site_memory::SiteMemory::new(&domain));
+
+                                // Fingerprint check: detect if the site structure changed.
+                                // If changed, invalidate navigation notes + form fields
+                                // but preserve user preferences.
+                                let snapshot_text = &result.output;
+                                let fp_status = site_memory::check_fingerprint(&memory, snapshot_text);
+                                match fp_status {
+                                    site_memory::FingerprintStatus::Changed { new, .. } => {
+                                        tracing::info!(domain = %domain, "Site structure changed — re-discovering form fields");
+                                        site_memory::invalidate_stale_sections(&mut memory, &new);
+                                        memory.form_fields = site_memory::extract_form_fields(snapshot_text);
+                                        let _ = site_memory::save_site_memory(&brain_dir, profile_dir, &domain, &memory).await;
+                                    }
+                                    site_memory::FingerprintStatus::NoFingerprint => {
+                                        // First visit: create fingerprint + discover form fields
+                                        let fp = site_memory::compute_structural_fingerprint(snapshot_text);
+                                        memory.fingerprint = Some(fp);
+                                        memory.last_verified = Some(chrono::Utc::now().to_rfc3339());
+                                        memory.form_fields = site_memory::extract_form_fields(snapshot_text);
+                                        if !memory.form_fields.is_empty() {
+                                            tracing::info!(domain = %domain, fields = memory.form_fields.len(), "Auto-discovered form fields");
+                                        }
+                                        let _ = site_memory::save_site_memory(&brain_dir, profile_dir, &domain, &memory).await;
+                                    }
+                                    site_memory::FingerprintStatus::Match => {
+                                        // Structure unchanged — memory is valid, no save needed
+                                    }
+                                }
+
+                                // Inject site memory into context (compact, max ~400 tokens).
+                                let ctx = site_memory::format_memory_for_context(&memory);
+                                if !ctx.is_empty() {
+                                    messages.push(ChatMessage::user(&format!(
+                                        "{ctx}\n\n\
+                                         PRIORITY: The user's current request overrides saved preferences. \
+                                         Use preferences ONLY for fields not mentioned in the request."
+                                    )));
+                                    tracing::debug!(domain = %domain, "Injected site memory context");
+                                }
+                            }
+                        }
+
                         if let Some(follow_up) = browser_context::browser_follow_up_instruction(&result.output) {
                             tracing::debug!(
                                 tool = %tool_call.name,
@@ -1914,6 +2014,15 @@ impl AgentLoop {
         }
 
         if final_content.is_none() && !crate::agent::stop::is_stop_requested() {
+            if let Some(ref mut t) = tracer {
+                t.record_stop_reason(
+                    &format!(
+                        "budget_exhausted (budget={}, hard_max={}, tools_used={})",
+                        active_iteration_budget, hard_max_iterations, tools_used.len()
+                    ),
+                    active_iteration_budget,
+                );
+            }
             tracing::warn!(
                 max_iterations = active_iteration_budget,
                 hard_max_iterations,
@@ -2821,9 +2930,9 @@ mod tests {
         assert!(result.contains("generic [ref=e1]"));
         // Form plan instruction present since combobox fields exist
         assert!(result.contains("FORM PLAN"));
-        // Raw passthrough: ALL elements preserved (no compaction)
-        assert!(result.contains("Copyright 2024"));
-        assert!(result.contains("Fill in the form"));
+        // Compaction active: non-ref footer/paragraph filtered out
+        assert!(!result.contains("Copyright 2024"));
+        assert!(!result.contains("Fill in the form"));
     }
 
     #[test]

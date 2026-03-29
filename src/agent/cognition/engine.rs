@@ -19,11 +19,16 @@ use crate::tools::ToolRegistry;
 use super::discovery;
 use super::types::{validate_cognition_result, CognitionResult, ValidationIssue};
 
-/// Maximum iterations for the cognition mini-loop.
-const MAX_COGNITION_ITERATIONS: u32 = 4;
+/// Maximum retries when the LLM call fails (network error, timeout, etc.).
+/// After this many consecutive failures, the cognition phase gives up and
+/// the caller falls back to the full tool set.
+const MAX_CALL_RETRIES: u32 = 3;
 
-/// Default timeout for the entire cognition phase (seconds).
-const DEFAULT_COGNITION_TIMEOUT_SECS: u64 = 15;
+/// Per-call timeout for a single LLM request (seconds).
+const PER_CALL_TIMEOUT_SECS: u64 = 60;
+
+/// Higher per-call timeout for local/slow providers (Ollama, etc.).
+const PER_CALL_TIMEOUT_LOCAL_SECS: u64 = 120;
 
 /// How many recent messages to include for conversational context.
 const COGNITION_HISTORY_TAIL: usize = 10;
@@ -59,20 +64,24 @@ pub struct CognitionParams<'a> {
     pub stream_tx: Option<&'a mpsc::Sender<StreamChunk>>,
     pub cognition_model: Option<&'a str>,
     pub max_iterations: u32,
+    /// Per-call timeout override (seconds). 0 = use default based on model.
     pub timeout_secs: u64,
+    /// Maximum retry attempts for failed LLM calls. 0 = use default.
+    pub max_retries: u32,
     /// Optional request tracer to record cognition discovery steps.
     pub tracer: Option<&'a mut crate::agent::request_trace::RequestTracer>,
 }
 
-/// Run the cognition phase: understand intent, discover resources, build plan.
+/// Run the cognition phase: understand intent and build a targeted plan.
 ///
-/// Returns `Some(CognitionResult)` on success, `None` on failure (caller
-/// should fall back to the old all-tools path).
-/// Runs the cognition phase. Returns `Ok(result)` on success, or `Err(reason)` with a
-/// human-readable failure reason (provider error, timeout, parse failure, etc.)
-/// that can be stored in the request trace for diagnostics.
+/// **Plan-first approach**: the model receives the list of available tool
+/// names in the system prompt and only `plan_execution` as a callable tool.
+/// This produces a plan in a single LLM call (~800 tokens) instead of the
+/// old multi-iteration discovery loop that many models couldn't complete.
+///
+/// Returns `Ok(CognitionResult)` on success, or `Err(reason)` for the caller
+/// to fall back to the full tool set.
 pub async fn run_cognition(mut params: CognitionParams<'_>) -> Result<CognitionResult, String> {
-    // Emit start event
     emit_status(params.stream_tx, "cognition_start", "Analyzing request...").await;
 
     let config = params.config;
@@ -81,23 +90,35 @@ pub async fn run_cognition(mut params: CognitionParams<'_>) -> Result<CognitionR
         .filter(|m| !m.is_empty())
         .unwrap_or(&config.agent.model);
 
-    // Create provider for the cognition model
     let provider = match crate::provider::factory::create_provider_for_model(config, model) {
         Ok(p) => p,
         Err(e) => {
-            tracing::warn!(error = %e, model, "Failed to create cognition provider, skipping cognition");
+            tracing::warn!(error = %e, model, "Failed to create cognition provider");
             return Err(format!("provider creation failed for model '{model}': {e}"));
         }
     };
 
-    let system_prompt = build_cognition_prompt(params.contact_summary, params.channel);
-    let tool_defs = discovery::cognition_tool_definitions();
+    // Collect available tool/skill/MCP names for the system prompt.
+    // The model sees these names and references them in its plan —
+    // no discovery tools needed.
+    let tool_names = collect_known_tool_names(params.tool_registry).await;
+    let skill_names = collect_known_skill_names(params.skill_registry).await;
+    let mcp_tool_names = collect_mcp_tool_names(params.tool_registry).await;
+
+    let system_prompt = build_cognition_prompt_plan_first(
+        params.contact_summary,
+        params.channel,
+        &tool_names,
+        &skill_names,
+        &mcp_tool_names,
+    );
+
+    // Only plan_execution as a callable tool
+    let tool_defs = vec![super::types::plan_execution_tool_definition()];
 
     let mut messages = vec![ChatMessage::system(&system_prompt)];
 
-    // Inject recent conversation history so cognition can resolve anaphoric
-    // references ("it", "that", "show me" → referencing prior turns).
-    // Only include the tail to keep token usage low.
+    // Inject recent conversation history for anaphoric reference resolution.
     if !params.recent_history.is_empty() {
         let tail_start = params
             .recent_history
@@ -108,168 +129,130 @@ pub async fn run_cognition(mut params: CognitionParams<'_>) -> Result<CognitionR
 
     messages.push(ChatMessage::user(params.user_prompt));
 
-    let max_iterations = if params.max_iterations > 0 {
-        params.max_iterations
+    let max_retries = if params.max_retries > 0 {
+        params.max_retries
     } else {
-        MAX_COGNITION_ITERATIONS
+        MAX_CALL_RETRIES
     };
-    let timeout = std::time::Duration::from_secs(if params.timeout_secs > 0 {
+    let per_call_timeout = std::time::Duration::from_secs(if params.timeout_secs > 0 {
         params.timeout_secs
+    } else if model.starts_with("ollama/") {
+        PER_CALL_TIMEOUT_LOCAL_SECS
     } else {
-        DEFAULT_COGNITION_TIMEOUT_SECS
+        PER_CALL_TIMEOUT_SECS
     });
 
     let started = std::time::Instant::now();
+
+    // Single-call with retry: send messages + plan_execution tool,
+    // retry on transient failures (network, timeout), up to max_retries.
     let mut cognition_result: Option<CognitionResult> = None;
     let mut failure_reason: Option<String> = None;
 
-    for iteration in 1..=max_iterations {
-        if started.elapsed() >= timeout {
-            let msg = format!(
-                "timeout after {}ms (limit {}s), model '{model}'",
-                started.elapsed().as_millis(),
-                timeout.as_secs()
-            );
-            tracing::warn!(elapsed_ms = started.elapsed().as_millis(), "Cognition timeout reached");
-            failure_reason = Some(msg);
-            break;
-        }
-
-        tracing::debug!(iteration, model = %model, "Cognition iteration");
+    for attempt in 1..=max_retries {
+        tracing::debug!(attempt, model = %model, "Cognition plan-first call");
 
         let request = ChatRequest {
             messages: messages.clone(),
             tools: tool_defs.clone(),
             model: model.to_string(),
-            max_tokens: 1024,
+            max_tokens: 1500,
             temperature: 0.2,
             think: Some(false),
             priority: RequestPriority::High,
         };
 
-        let remaining = timeout.saturating_sub(started.elapsed());
-        let response = match tokio::time::timeout(remaining, provider.chat(request)).await {
+        let response = match tokio::time::timeout(per_call_timeout, provider.chat(request)).await {
             Ok(Ok(r)) => r,
             Ok(Err(e)) => {
-                tracing::warn!(error = %e, iteration, model, "Cognition LLM call failed");
-                failure_reason = Some(format!("LLM call failed on iteration {iteration}, model '{model}': {e}"));
-                break;
+                tracing::warn!(
+                    error = %e, attempt, max = max_retries, model,
+                    "Cognition LLM call failed — retrying"
+                );
+                failure_reason = Some(format!(
+                    "LLM call failed (attempt {attempt}/{max_retries}), model '{model}': {e}"
+                ));
+                continue;
             }
             Err(_) => {
-                tracing::warn!(iteration, model, "Cognition LLM call timed out");
-                failure_reason = Some(format!("LLM call timed out on iteration {iteration}, model '{model}'"));
-                break;
+                tracing::warn!(
+                    attempt, max = max_retries, model,
+                    timeout_secs = per_call_timeout.as_secs(),
+                    "Cognition LLM call timed out — retrying"
+                );
+                failure_reason = Some(format!(
+                    "LLM call timed out (attempt {attempt}/{max_retries}), model '{model}'"
+                ));
+                continue;
             }
         };
 
-        if !response.has_tool_calls() {
-            // No tool calls — the LLM responded with text. This happens when
-            // the model doesn't call plan_execution (e.g. small model just answers).
-            // Try to parse it as JSON anyway, or give up.
-            let text_preview = response
-                .content
-                .as_deref()
-                .unwrap_or("")
-                .chars()
-                .take(200)
-                .collect::<String>();
-            if let Some(ref text) = response.content {
-                if let Ok(result) = serde_json::from_str::<CognitionResult>(text) {
-                    cognition_result = Some(result);
-                    if let Some(ref mut t) = params.tracer {
-                        t.record_cognition_step(iteration, "(text→json)", "", "parsed as CognitionResult");
-                    }
-                } else {
-                    if let Some(ref mut t) = params.tracer {
-                        t.record_cognition_step(iteration, "(text, no tool call)", &text_preview, "could not parse as plan");
+        // Try to extract plan_execution from tool calls
+        if response.has_tool_calls() {
+            for tool_call in &response.tool_calls {
+                if tool_call.name == "plan_execution" {
+                    match serde_json::from_value::<CognitionResult>(tool_call.arguments.clone()) {
+                        Ok(result) => {
+                            tracing::info!(
+                                understanding = %result.understanding,
+                                complexity = ?result.complexity,
+                                tools = result.tools.len(),
+                                answer_directly = result.answer_directly,
+                                "Cognition plan-first produced result"
+                            );
+                            if let Some(ref mut t) = params.tracer {
+                                let tool_names: Vec<&str> =
+                                    result.tools.iter().map(|t| t.name.as_str()).collect();
+                                t.record_cognition_step(
+                                    1,
+                                    "plan_execution",
+                                    &result.understanding,
+                                    &format!("tools={:?} plan={} steps", tool_names, result.plan.len()),
+                                );
+                            }
+                            cognition_result = Some(result);
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "Failed to parse plan_execution arguments");
+                            failure_reason = Some(format!(
+                                "plan_execution parse error: {e}, model '{model}'"
+                            ));
+                        }
                     }
                 }
             }
-            break;
-        }
-
-        // Process tool calls
-        let mut found_plan = false;
-        for tool_call in &response.tool_calls {
-            let result_text =
-                dispatch_discovery_tool(&tool_call.name, &tool_call.arguments, &params).await;
-
-            if tool_call.name == "plan_execution" {
-                // This is the output — parse as CognitionResult
-                match serde_json::from_value::<CognitionResult>(tool_call.arguments.clone()) {
-                    Ok(result) => {
-                        tracing::info!(
-                            understanding = %result.understanding,
-                            complexity = ?result.complexity,
-                            tools = result.tools.len(),
-                            answer_directly = result.answer_directly,
-                            "Cognition produced result"
-                        );
-                        cognition_result = Some(result);
-                        found_plan = true;
-                    }
-                    Err(e) => {
-                        tracing::warn!(error = %e, "Failed to parse plan_execution arguments");
-                        // Feed error back so the LLM can retry
-                        messages.push(ChatMessage::tool_result(
-                            &tool_call.id,
-                            &tool_call.name,
-                            &format!("Error: invalid JSON structure: {}. Please call plan_execution again with valid arguments.", e),
-                        ));
-                    }
+        } else if let Some(ref text) = response.content {
+            // Fallback: model responded with text instead of tool call.
+            // Try to parse as JSON (some models emit raw JSON).
+            if let Ok(result) = serde_json::from_str::<CognitionResult>(text) {
+                cognition_result = Some(result);
+                if let Some(ref mut t) = params.tracer {
+                    t.record_cognition_step(1, "(text→json)", "", "parsed as CognitionResult");
                 }
             } else {
-                // Discovery tool — emit step event with result summary
-                let args_short = truncate_query(&tool_call.arguments);
-                let result_short = summarize_discovery_result(&tool_call.name, &result_text);
-                let step_summary = format!(
-                    "{}({}) → {}",
-                    tool_call.name, args_short, result_short,
-                );
-                emit_status(params.stream_tx, "cognition_step", &step_summary).await;
-
-                // Record in request trace
+                let preview: String = text.chars().take(200).collect();
+                tracing::debug!(preview = %preview, "Cognition responded with text, not tool call");
                 if let Some(ref mut t) = params.tracer {
-                    t.record_cognition_step(iteration, &tool_call.name, &args_short, &result_short);
+                    t.record_cognition_step(1, "(text, no tool call)", &preview, "could not parse");
                 }
-
-                // Add assistant message with tool call
-                messages.push(ChatMessage {
-                    role: "assistant".to_string(),
-                    content: response.content.clone(),
-                    content_parts: None,
-                    tool_calls: Some(vec![crate::provider::ToolCallSerialized {
-                        id: tool_call.id.clone(),
-                        call_type: "function".to_string(),
-                        function: crate::provider::ToolCallFunction {
-                            name: tool_call.name.clone(),
-                            arguments: serde_json::to_string(&tool_call.arguments)
-                                .unwrap_or_else(|_| "{}".to_string()),
-                        },
-                    }]),
-                    tool_call_id: None,
-                    name: None,
-                });
-
-                messages.push(ChatMessage::tool_result(
-                    &tool_call.id,
-                    &tool_call.name,
-                    &result_text,
+                failure_reason = Some(format!(
+                    "model responded with text instead of plan_execution, model '{model}'"
                 ));
             }
         }
 
-        if found_plan {
+        // If we got a result (from tool call or text parse), stop retrying.
+        if cognition_result.is_some() {
             break;
         }
     }
 
-    // Validate the result if we got one
+    // Validate and return
     match cognition_result {
         Some(mut result) => {
-            let known_tools = collect_known_tool_names(params.tool_registry).await;
-            let known_skills = collect_known_skill_names(params.skill_registry).await;
-            let issues = validate_cognition_result(&result, &known_tools, &known_skills);
+            let known_tools = &tool_names;
+            let known_skills = &skill_names;
+            let issues = validate_cognition_result(&result, known_tools, known_skills);
 
             if !issues.is_empty() {
                 tracing::warn!(
@@ -277,7 +260,6 @@ pub async fn run_cognition(mut params: CognitionParams<'_>) -> Result<CognitionR
                     first_issue = %issues[0].message,
                     "Cognition result has validation issues"
                 );
-                // Remove invalid tools/skills instead of failing entirely
                 result
                     .tools
                     .retain(|t| known_tools.iter().any(|kt| kt == &t.name));
@@ -286,7 +268,6 @@ pub async fn run_cognition(mut params: CognitionParams<'_>) -> Result<CognitionR
                     .retain(|s| known_skills.iter().any(|ks| ks == &s.name));
             }
 
-            // Emit result summary
             let summary = format_result_summary(&result);
             emit_status(params.stream_tx, "cognition_result", &summary).await;
 
@@ -295,7 +276,6 @@ pub async fn run_cognition(mut params: CognitionParams<'_>) -> Result<CognitionR
                 intent = ?result.intent_type,
                 success_criteria = ?result.success_criteria,
                 tools = result.tools.len(),
-                memory = result.memory_context.is_some(),
                 plan_steps = result.plan.len(),
                 constraints = ?result.constraints,
                 plan = ?result.plan,
@@ -307,7 +287,7 @@ pub async fn run_cognition(mut params: CognitionParams<'_>) -> Result<CognitionR
         }
         None => {
             let reason = failure_reason.unwrap_or_else(|| {
-                format!("no plan_execution produced after {max_iterations} iterations, model '{model}'")
+                format!("no plan_execution produced after {max_retries} attempts, model '{model}'")
             });
             tracing::warn!(
                 elapsed_ms = started.elapsed().as_millis(),
@@ -473,19 +453,29 @@ async fn resolve_allowed_mcp(
     }
 }
 
-/// Build the system prompt for the cognition mini-agent.
-fn build_cognition_prompt(contact_summary: &str, channel: &str) -> String {
+/// Build the system prompt for plan-first cognition.
+///
+/// Lists available tool/skill/MCP names directly in the prompt so the model
+/// can reference them in its plan without needing discovery tool calls.
+fn build_cognition_prompt_plan_first(
+    contact_summary: &str,
+    channel: &str,
+    tool_names: &[String],
+    skill_names: &[String],
+    mcp_tool_names: &[String],
+) -> String {
     let now = chrono::Local::now();
-    let mut prompt = String::with_capacity(1200);
+    let mut prompt = String::with_capacity(2000);
 
     prompt.push_str(
         "You are the planning module of Homun, a personal AI assistant.\n\
-         Your job is to understand what the user wants and find the right resources to fulfill it.\n\n"
+         Analyze the user's request and call plan_execution with your analysis.\n\n",
     );
 
     prompt.push_str(&format!(
-        "Current time: {}\nChannel: {}\n",
+        "Current time: {}\nCurrent year: {}\nChannel: {}\n",
         now.format("%Y-%m-%d %H:%M (%A) %Z"),
+        now.format("%Y"),
         channel,
     ));
 
@@ -493,54 +483,42 @@ fn build_cognition_prompt(contact_summary: &str, channel: &str) -> String {
         prompt.push_str(&format!("Sender: {}\n", contact_summary));
     }
 
-    prompt.push_str(
-        "\n## Your discovery tools\n\n\
-         - **discover_tools(query)**: Find available tools by describing what's needed\n\
-         - **discover_skills(query)**: Find installed skills (specialized capabilities)\n\
-         - **discover_mcp(query)**: Find external services (calendar, email, GitHub, etc.)\n\
-         - **search_memory(query)**: Search user's long-term memory for relevant context\n\
-         - **search_knowledge(query)**: Search user's knowledge base (documents, notes)\n\n",
-    );
+    // List available tools
+    prompt.push_str("\n## Available tools\n\n");
+    if !tool_names.is_empty() {
+        prompt.push_str("Built-in: ");
+        prompt.push_str(&tool_names.join(", "));
+        prompt.push('\n');
+    }
+    if !skill_names.is_empty() {
+        prompt.push_str("Skills: ");
+        prompt.push_str(&skill_names.join(", "));
+        prompt.push('\n');
+    }
+    if !mcp_tool_names.is_empty() {
+        prompt.push_str("External (MCP): ");
+        prompt.push_str(&mcp_tool_names.join(", "));
+        prompt.push('\n');
+    }
 
     prompt.push_str(
-        "## Workflow\n\n\
-         1. Read the user's message and understand their intent\n\
-         2. Call **discover_tools()** to find which tools can help\n\
-         3. If past context might be relevant, call **search_memory()** with a specific query\n\
-         4. If the user's documents might contain answers, call **search_knowledge()**\n\
-         5. If external services (calendar, email, etc.) might help, call **discover_mcp()**\n\
-         6. Call **plan_execution()** with your complete analysis\n\n\
-         For simple requests (greetings, time, simple factual questions), skip discovery and \
-         call plan_execution() directly with answer_directly=true and your answer.\n\n\
-         **Important**: Only select tools you actually found via discover_tools. \
-         Do NOT invent tool names. Use the exact names from the discovery results.\n\n\
-         ## Constraints & Plan Quality\n\n\
-         Extract ALL concrete parameters from the user's request into the `constraints` field:\n\
-         - Dates and times (e.g. \"tomorrow evening\", \"March 22 2026 at 20:00\")\n\
-         - Quantities (e.g. \"4 people\", \"budget 100€\")\n\
-         - Locations (e.g. \"Novara centro\")\n\
-         - Preferences (e.g. \"1st class\", \"vegetarian\")\n\n\
-         Write the `plan` as specific, actionable steps — especially for browser tasks.\n\
+        "\nReference these exact names in your plan's `tools` field. \
+         Do NOT invent tool names not listed above.\n\n\
+         ## Instructions\n\n\
+         Extract ALL concrete parameters into `constraints`:\n\
+         - Dates/times, quantities, locations, preferences\n\n\
+         Write `plan` as specific, actionable steps.\n\
          BAD: \"Search for restaurants\" → GOOD: \"Navigate to thefork.it, set location to Novara, \
-         set date to 22 March 2026, set time to 20:00, set 4 guests, search\"\n\n\
-         ## Intent Classification\n\n\
-         Classify `intent_type` — this drives how the agent executes:\n\
-         - **informational**: Find, compare, or research data. Output = present structured info to user.\n\
-         - **transactional**: Complete an action (book, buy, send, register). Output = action completed.\n\
-         - **navigational**: Go to a specific site or page. Output = navigation done.\n\
-         - **creative**: Write, generate, or transform content. Output = content delivered.\n\n\
-         This is critical: \"find me a train\" = informational (present options). \
-         \"book me a train\" = transactional (complete the purchase).\n\n\
-         ## Success Criteria\n\n\
-         Write ONE sentence in `success_criteria`: what 'done' looks like.\n\
-         GOOD: \"Present 3+ train options Naples→Florence April 7 with departure, arrival, duration, operator, price\"\n\
-         BAD: \"Help user with trains\"\n\n\
-         ## Self-Verification\n\n\
-         Before calling plan_execution, verify your plan:\n\
-         1. Does the final plan step deliver the `success_criteria`?\n\
-         2. For informational intent: final step MUST extract and present data to the user\n\
-         3. For transactional intent: final step MUST complete the action or ask user confirmation\n\
-         If not, revise the plan before submitting.\n",
+         set date to 22 March 2026, set 4 guests, search\"\n\n\
+         Classify `intent_type`:\n\
+         - **informational**: find/compare/research data → present info\n\
+         - **transactional**: complete an action (book, buy, send) → action done\n\
+         - **navigational**: go to a specific site or page\n\
+         - **creative**: write, generate, or transform content\n\n\
+         \"find me a train\" = informational. \"book me a train\" = transactional.\n\n\
+         Write `success_criteria` as ONE sentence: what 'done' looks like.\n\n\
+         For simple requests (greetings, time, factual questions), set \
+         answer_directly=true and provide your answer in direct_answer.\n",
     );
 
     prompt
@@ -569,6 +547,21 @@ async fn collect_known_skill_names(registry: Option<&RwLock<SkillRegistry>>) -> 
             .collect(),
         None => Vec::new(),
     }
+}
+
+/// Collect MCP tool names from the tool registry.
+///
+/// MCP tools are prefixed with their server name (e.g. `google-workspace__gmail_send_email`).
+/// We extract just these for the system prompt listing.
+async fn collect_mcp_tool_names(registry: &RwLock<ToolRegistry>) -> Vec<String> {
+    registry
+        .read()
+        .await
+        .names()
+        .into_iter()
+        .filter(|n| n.contains("__"))
+        .map(|s| s.to_string())
+        .collect()
 }
 
 /// Format a human-readable summary of the cognition result for the stream.
@@ -678,16 +671,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_build_cognition_prompt_has_tools() {
-        let prompt = build_cognition_prompt("Fabio (informal)", "telegram");
-        assert!(prompt.contains("discover_tools"));
-        assert!(prompt.contains("discover_skills"));
-        assert!(prompt.contains("discover_mcp"));
-        assert!(prompt.contains("search_memory"));
-        assert!(prompt.contains("search_knowledge"));
-        assert!(prompt.contains("plan_execution"));
-        assert!(prompt.contains("telegram"));
-        assert!(prompt.contains("Fabio"));
+    fn test_build_cognition_prompt_plan_first() {
+        let tools = vec!["browser".to_string(), "web_search".to_string()];
+        let skills = vec!["summarize".to_string()];
+        let mcp = vec!["google__calendar".to_string()];
+        let prompt = build_cognition_prompt_plan_first(
+            "Fabio (informal)", "telegram", &tools, &skills, &mcp,
+        );
+        assert!(prompt.contains("browser, web_search"), "should list tools");
+        assert!(prompt.contains("summarize"), "should list skills");
+        assert!(prompt.contains("google__calendar"), "should list MCP");
+        assert!(prompt.contains("telegram"), "should include channel");
+        assert!(prompt.contains("Fabio"), "should include contact");
+        assert!(prompt.contains("plan_execution"), "should mention plan_execution");
+        assert!(prompt.contains("intent_type"), "should explain intent types");
     }
 
     #[test]

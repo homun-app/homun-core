@@ -3,6 +3,7 @@ mod agents;
 mod approvals;
 mod automations;
 mod browser;
+mod browser_sites;
 mod business;
 mod channels;
 mod chat;
@@ -104,6 +105,9 @@ pub fn router() -> Router<Arc<AppState>> {
     // --- Browser (optional) ---
     #[cfg(feature = "browser")]
     let api_router = api_router.merge(browser::routes());
+
+    // --- Browser allowed sites (always available, even without browser feature) ---
+    let api_router = api_router.merge(browser_sites::routes());
 
     api_router.merge(health::routes())
 }
