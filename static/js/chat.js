@@ -2849,7 +2849,7 @@ function sendCurrentMessage() {
 /** Send a block interaction response (user tapped a card option).
  *  Adds a user message to the chat and sends via WebSocket with block_response metadata. */
 function sendBlockResponse(replyText, blockResponse) {
-    if (!replyText || !ws || ws.readyState !== WebSocket.OPEN || isProcessing) return;
+    if (!replyText || !ws || ws.readyState !== WebSocket.OPEN) return;
     addMessage('user', replyText);
     forceScrollToBottom();
     const payload = { content: replyText };
