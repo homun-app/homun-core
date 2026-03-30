@@ -9,7 +9,7 @@ Homun is a personal AI assistant written in Rust — a digital homunculus that l
 
 **Core philosophy**: single binary, local-first, privacy-focused, skill-powered.
 
-**Scale**: ~107K LOC Rust, ~25K LOC JS, 236 source files, 43 SQLite migrations, 807+ tests, 11-check CI pipeline.
+**Scale**: ~116K LOC Rust, ~29K LOC JS, 245 source files, 48 JS files, 46 SQLite migrations, 813 tests, 11-check CI pipeline.
 
 ## Architecture Overview
 
@@ -19,31 +19,55 @@ src/
 ├── logs.rs                          # Structured logging + SSE streaming
 ├── mcp_setup.rs                     # MCP server auto-setup
 │
-├── agent/                           # Core agent loop
+├── agent/                           # Core agent loop (44 files)
 │   ├── agent_loop.rs                # ReAct loop (reason → act → observe)
-│   ├── cognition/                   # Cognition-First preprocessing (feature-gated)
+│   ├── cognition/                   # Cognition-First preprocessing (always active)
 │   │   ├── mod.rs                   # Selective tool defs from cognition results
 │   │   ├── engine.rs                # Mini ReAct loop with discovery tools
 │   │   ├── discovery.rs             # Read-only discovery tools (memory, RAG, tools, skills, MCP)
 │   │   └── types.rs                 # CognitionResult, DiscoveredTool, DiscoveredSkill, etc.
+│   ├── orchestrator/                # Multi-agent orchestration
+│   │   ├── mod.rs                   # Orchestrator entry + routing
+│   │   ├── intent.rs                # Intent classification
+│   │   ├── planner.rs               # Execution planning
+│   │   ├── executor.rs              # Plan execution
+│   │   ├── synthesizer.rs           # Result synthesis
+│   │   └── types.rs                 # Orchestrator types
+│   ├── prompt/                      # Prompt builder
+│   │   ├── mod.rs                   # Prompt module
+│   │   ├── builder.rs               # Prompt assembly
+│   │   └── sections.rs              # 15+ prompt sections
 │   ├── context.rs                   # System prompt assembly
-│   ├── prompt/                      # Prompt builder (sections.rs: 15+ prompt sections)
 │   ├── gateway.rs                   # Message routing + channel orchestration
 │   ├── memory.rs                    # Long-term memory consolidation
+│   ├── memory_db.rs                 # Memory database operations
 │   ├── memory_search.rs             # Hybrid vector + FTS5 search (RRF scoring)
 │   ├── embeddings.rs                # Embedding providers (OpenAI + fastembed)
 │   ├── subagent.rs                  # Background task spawning
 │   ├── heartbeat.rs                 # Proactive wake-up scheduler
 │   ├── bootstrap_watcher.rs         # Hot-reload USER.md/SOUL.md
 │   ├── browser_task_plan.rs         # Browser automation state tracking (cognition-driven)
+│   ├── browser_context.rs           # Browser context management
 │   ├── execution_plan.rs            # Structured execution plans + explicit plan steps
+│   ├── iteration_budget.rs          # LLM iteration budget enforcement
+│   ├── llm_caller.rs                # LLM invocation wrapper
+│   ├── tool_builder.rs              # Tool definition builder
 │   ├── tool_veto.rs                 # Minimal runtime safety checks (search-first policy)
+│   ├── skill_activator.rs           # Skill activation logic
+│   ├── context_compactor.rs         # Context window compression
+│   ├── debounce.rs                  # Message debouncing
+│   ├── definition.rs                # Agent definition types
+│   ├── registry.rs                  # Agent registry
+│   ├── profile_resolver.rs          # Profile resolution
+│   ├── request_trace.rs             # Request tracing
+│   ├── index_meta.rs                # Index metadata
+│   ├── auth.rs                      # Channel authentication
 │   ├── verifier.rs                  # Approval verification
 │   ├── attachment_router.rs         # Media attachment routing
 │   ├── email_approval.rs            # Email approval flow
 │   └── stop.rs                      # Graceful shutdown
 │
-├── provider/                        # LLM providers (14 models supported)
+├── provider/                        # LLM providers (12 files)
 │   ├── traits.rs                    # Provider trait (chat, chat_stream)
 │   ├── anthropic.rs                 # Native Claude API (tool_use, streaming)
 │   ├── openai_compat.rs             # OpenAI format (OpenRouter, DeepSeek, Groq, etc.)
@@ -52,17 +76,17 @@ src/
 │   ├── capabilities.rs              # Model capability detection (vision, tool_use, thinking)
 │   ├── health.rs                    # Circuit breaker + health monitoring
 │   ├── reliable.rs                  # Failover + retry logic
+│   ├── queued.rs                    # Priority queue + per-provider concurrency limits
 │   ├── one_shot.rs                  # Unified LLM engine for non-conversational calls
 │   └── xml_dispatcher.rs            # XML fallback for models without function calling
 │
-├── tools/                           # 20+ built-in tools
+├── tools/                           # 20+ built-in tools (33 files)
 │   ├── registry.rs                  # Tool registry + dispatch
 │   ├── shell.rs                     # Command execution (+ sandbox)
 │   ├── file.rs                      # Read/write/edit/list files
 │   ├── web.rs                       # Web search (Brave, Tavily) + fetch
 │   ├── message.rs                   # Send message to user
 │   ├── spawn.rs                     # Spawn background subagent
-│   ├── cron.rs                      # Schedule recurring tasks
 │   ├── vault.rs                     # Encrypted secret storage
 │   ├── remember.rs                  # Update USER.md memory
 │   ├── knowledge.rs                 # RAG search/ingest/list
@@ -72,18 +96,21 @@ src/
 │   ├── browser.rs                   # Browser automation (17 actions via MCP Playwright)
 │   ├── business.rs                  # Business OODA automation (13 actions)
 │   ├── mcp.rs                       # MCP server management
+│   ├── mcp_token_refresh.rs         # MCP token refresh logic
+│   ├── contacts.rs                  # Contact management tool
 │   ├── email_inbox.rs               # Read email (IMAP)
 │   ├── skill_create.rs              # LLM-driven skill generation
-│   └── sandbox/                     # Unified sandbox (7 files, 4 backends)
+│   ├── response_blocks.rs           # Rich response blocks (choice, approval, status, result)
+│   └── sandbox/                     # Unified sandbox (12 files, 5 backends)
 │       ├── mod.rs                   # SandboxManager + backend auto-detection
 │       ├── types.rs                 # SandboxConfig, SandboxResult
 │       ├── resolve.rs               # Backend resolution logic
 │       ├── env.rs                   # Environment injection
 │       ├── events.rs                # Execution event logging
 │       ├── runtime_image.rs         # Docker runtime image management
-│       └── backends/               # Docker, native/macOS, Linux Bubblewrap, Windows Job Objects
+│       └── backends/                # Docker, native/macOS, Seatbelt, Linux Bubblewrap, Windows
 │
-├── skills/                          # Agent Skills ecosystem
+├── skills/                          # Agent Skills ecosystem (12 files)
 │   ├── loader.rs                    # Scan dirs, parse SKILL.md YAML frontmatter
 │   ├── installer.rs                 # GitHub install (homun skills add owner/repo)
 │   ├── executor.rs                  # Run scripts (Python/Bash/JS) with env injection
@@ -92,69 +119,105 @@ src/
 │   ├── adapter.rs                   # Format conversion (ClawHub SKILL.toml → SKILL.md)
 │   ├── watcher.rs                   # Directory hot-reload
 │   ├── search.rs                    # Skill discovery + search
-│   ├── mcp_registry.rs             # MCP server registry + OAuth setup
+│   ├── mcp_registry.rs              # MCP server registry + OAuth setup
 │   ├── clawhub.rs                   # ClawHub marketplace integration
 │   └── openskills.rs                # Open Skills registry integration
 │
-├── channels/                        # 7 messaging channels
+├── channels/                        # 7 messaging channels (11 files)
 │   ├── traits.rs                    # Channel trait (start, send, name)
+│   ├── capabilities.rs              # Channel capability detection
+│   ├── health.rs                    # Channel health checks
 │   ├── cli.rs                       # Interactive REPL + one-shot
-│   ├── telegram.rs                  # Teloxide (long polling)
+│   ├── telegram.rs                  # Frankenstein (long polling)
 │   ├── whatsapp.rs                  # wa-rs native (no Node.js)
 │   ├── discord.rs                   # Serenity
 │   ├── slack.rs                     # Socket Mode
 │   ├── email.rs                     # IMAP + SMTP
-│   └── web (in web/ws.rs)          # WebSocket in Web UI
+│   ├── mcp_channel.rs               # MCP channel
+│   └── web (in web/ws.rs)           # WebSocket in Web UI
 │
-├── rag/                             # RAG Knowledge Base
+├── contacts/                        # Contact management (6 files)
+│   ├── mod.rs                       # Contact types + exports
+│   ├── db.rs                        # Contact database operations
+│   ├── context.rs                   # Contact context injection for agent
+│   ├── resolver.rs                  # Contact identity resolution
+│   ├── perimeter.rs                 # Contact perimeter enforcement
+│   └── events.rs                    # Contact-related events
+│
+├── connections/                     # External connections (3 files)
+│   ├── mod.rs                       # Connection types
+│   ├── connect.rs                   # Connection establishment
+│   └── recipes.rs                   # Connection recipes
+│
+├── profiles/                        # User/agent profiles (2 files)
+│   ├── mod.rs                       # Profile types + exports
+│   └── db.rs                        # Profile database operations
+│
+├── gateways/                        # Gateway services (3 files)
+│   ├── mod.rs                       # Gateway types
+│   ├── db.rs                        # Gateway database
+│   └── migrate.rs                   # Gateway migration
+│
+├── sharing/                         # Share management (2 files)
+│   ├── mod.rs                       # Sharing types
+│   └── db.rs                        # Sharing database
+│
+├── rag/                             # RAG Knowledge Base (8 files)
 │   ├── engine.rs                    # HNSW vector + FTS5 hybrid search
+│   ├── db.rs                        # RAG database operations
 │   ├── chunker.rs                   # 30+ format support (md, pdf, docx, code...)
 │   ├── parsers.rs                   # PDF/DOCX/XLSX parsing
 │   ├── sensitive.rs                 # Sensitive data classification + vault-gating
 │   ├── watcher.rs                   # Directory auto-ingestion
 │   └── cloud.rs                     # MCP cloud source integration
 │
-├── workflows/                       # Persistent workflow engine
-│   ├── engine.rs                    # Orchestration, retry, approval gates, resume-on-boot
-│   └── db.rs                        # Workflow DB operations
+├── browser/                         # Browser automation (7 files)
+│   ├── mcp_bridge.rs                # Persistent MCP Playwright peer
+│   ├── site_memory.rs               # Site-specific browsing memory
+│   ├── tab_session.rs               # Tab session state tracking
+│   ├── action_policy.rs             # Action policy enforcement
+│   ├── captcha.rs                   # CAPTCHA handling
+│   ├── helpers.rs                   # Compact snapshot utilities
+│   └── mod.rs                       # Browser manager
 │
-├── business/                        # Business Autopilot
-│   ├── engine.rs                    # OODA loop, budget enforcement, autonomy levels
-│   ├── db.rs                        # Business DB operations
-│   └── mod.rs                       # Domain types
-│
-├── security/                        # Security infrastructure
-│   ├── mod.rs                       # Exfiltration guard
+├── security/                        # Security infrastructure (7 files)
+│   ├── exfiltration.rs              # Exfiltration guard + redaction
 │   ├── estop.rs                     # Emergency kill switch
 │   ├── pairing.rs                   # DM pairing + OTP verification
 │   ├── totp.rs                      # TOTP 2FA
 │   ├── two_factor.rs                # 2FA management
 │   └── vault_leak.rs                # Vault leak detection
 │
-├── browser/                         # Browser automation
-│   ├── mcp_bridge.rs               # Persistent MCP Playwright peer
-│   ├── helpers.rs                   # Compact snapshot utilities
-│   └── mod.rs                       # Browser manager
-│
-├── web/                             # Web UI (Axum, 20 pages)
+├── web/                             # Web UI (55 files, Axum, 29 pages)
 │   ├── server.rs                    # Axum + TLS + session + rust-embed
 │   ├── auth.rs                      # PBKDF2 auth, rate limiting, API keys
-│   ├── api/                         # 50+ REST endpoints (v1/)
-│   │   ├── mod.rs                   # Router + re-exports (81 lines)
-│   │   ├── mcp/                     # MCP catalog, OAuth, install, CRUD (6 files)
-│   │   └── {domain}.rs             # 21 domain files (account, chat, skills, etc.)
-│   ├── pages.rs                     # HTML template generation
+│   ├── pages.rs                     # HTML template generation (29 pages)
 │   ├── ws.rs                        # WebSocket chat channel
 │   ├── chat_attachments.rs          # File upload handling
-│   └── run_state.rs                 # Run state tracking
+│   ├── run_state.rs                 # Run state tracking
+│   └── api/                         # 70+ REST endpoints
+│       ├── mod.rs                   # Router + re-exports
+│       ├── mcp/                     # MCP catalog, OAuth, install, CRUD (6 files)
+│       ├── knowledge/               # Knowledge API + watchers (2 files)
+│       └── {domain}.rs              # 30+ domain files (account, chat, skills, etc.)
 │
-├── scheduler/                       # Scheduling
+├── workflows/                       # Persistent workflow engine (3 files)
+│   ├── engine.rs                    # Orchestration, retry, approval gates, resume-on-boot
+│   └── db.rs                        # Workflow DB operations
+│
+├── business/                        # Business Autopilot (3 files)
+│   ├── engine.rs                    # OODA loop, budget enforcement, autonomy levels
+│   └── db.rs                        # Business DB operations
+│
+├── scheduler/                       # Scheduling (4 files)
 │   ├── cron.rs                      # tokio-cron-scheduler
-│   └── automations.rs               # Automation trigger engine
+│   ├── automations.rs               # Automation trigger engine
+│   └── background.rs                # Background task scheduling
 │
 ├── storage/
-│   ├── db.rs                        # SQLite (sqlx, 18 migrations)
-│   └── secrets.rs                   # AES-256-GCM vault + OS keychain
+│   ├── db.rs                        # SQLite (sqlx, 46 migrations)
+│   ├── secrets.rs                   # AES-256-GCM vault + OS keychain
+│   └── fixtures.rs                  # Test fixtures
 │
 ├── config/
 │   ├── schema.rs                    # 15+ config sections (TOML)
@@ -162,26 +225,29 @@ src/
 │
 ├── bus/queue.rs                     # Message bus (mpsc)
 ├── session/manager.rs               # Session state
-├── queue/                           # Batch processing
+├── queue/                           # Batch processing (3 files)
 ├── service/                         # OS service install (launchd, systemd)
-├── tui/                             # Terminal UI (ratatui)
+├── tui/                             # Terminal UI (ratatui, 4 files)
 ├── user/                            # User management
 └── utils/
     ├── retry.rs                     # Exponential backoff + network state
-    └── reasoning_filter.rs          # Strip thinking blocks
+    ├── reasoning_filter.rs          # Strip thinking blocks
+    ├── dedup.rs                     # Deduplication utilities
+    └── sandbox_import.rs            # Sandbox import helpers
 ```
 
 ### Frontend
 ```
 static/
-├── css/style.css                    # Design System "Olive Moss Console"
-└── js/                              # 43 files, ~25K LOC
+├── css/style.css                    # Design System
+└── js/                              # 48 files, ~29K LOC
     ├── chat.js                      # Chat with streaming, markdown, tool timeline
     ├── automations.js               # Visual flow builder (n8n-style SVG canvas)
     ├── auto-validate.js             # Builder real-time validation engine
     ├── flow-renderer.js             # Flow rendering engine
     ├── model-loader.js              # Shared LLM model fetcher (DRY utility)
     ├── mcp-loader.js                # Shared MCP server/tool discovery (DRY utility)
+    ├── embedding-loader.js          # Shared embedding model fetcher
     ├── schema-form.js               # JSON Schema → form fields for tool params
     ├── workflows.js                 # Workflow builder + approval UI
     ├── business.js                  # Business dashboard
@@ -195,13 +261,33 @@ static/
     ├── dash-usage.js                # Dashboard usage analytics + charts
     ├── logs.js                      # Log streaming + filtering
     ├── setup.js                     # Config wizard
+    ├── onboarding.js                # Multi-phase onboarding experience
     ├── account.js                   # User settings + API tokens
-    ├── sidebar.js                   # Navigation + session list
+    ├── account-mobile.js            # Mobile account settings
+    ├── account-gateways.js          # Gateway account settings
+    ├── api-keys.js                  # API key management
+    ├── contacts.js                  # Contact management
+    ├── connections.js               # External connections UI
+    ├── profiles.js                  # Profile management
+    ├── channels.js                  # Channel configuration
+    ├── traces.js                    # Request trace viewer
+    ├── topbar.js                    # Top navigation bar
+    ├── command-palette.js           # Command palette (Cmd+K)
+    ├── settings-modal.js            # Settings modal
+    ├── sharing-picker.js            # Sharing picker
+    ├── response-blocks.js           # Rich response block renderer
+    ├── contact-gateway-overrides.js # Contact gateway overrides
+    ├── contact-perimeter.js         # Contact perimeter UI
+    ├── sidebar.js                   # Navigation sidebar
     ├── appearance.js                # Theme + accent picker
+    ├── accent-utils.js              # Accent color utilities
     ├── theme.js                     # Light/dark mode
     ├── sandbox.js                   # Sandbox settings UI
     ├── shell.js                     # Terminal interface
-    └── file-access.js               # File access UI
+    ├── file-access.js               # File access UI
+    ├── maintenance.js               # Maintenance page
+    ├── toast.js                     # Toast notifications
+    └── csrf.js                      # CSRF token management
 ```
 
 ## Key Design Decisions
@@ -214,13 +300,14 @@ static/
 ### LLM Provider System
 - `Provider` trait in `provider/traits.rs` — `chat()`, `chat_stream()`, `name()`.
 - **Model routing**: `anthropic/claude-*` → Anthropic provider, `ollama/*` → Ollama, everything else → OpenAI-compatible.
+- **QueuedProvider** wraps providers with priority queue + per-provider concurrency limits (semaphore).
 - **ReliableProvider** wraps any provider with circuit breaker + failover.
 - **`one_shot.rs`**: shared `llm_one_shot()` for non-conversational calls (automations generation, MCP setup, skill creation). Disables extended thinking, 30s timeout.
 - **Capabilities detection**: auto-detect vision, tool_use, extended_thinking per model.
 - **XML fallback**: `xml_dispatcher.rs` for models without native function calling.
 
 ### Storage
-- **SQLite via sqlx** — 18 migrations, single file `~/.homun/homun.db`.
+- **SQLite via sqlx** — 46 migrations, single file `~/.homun/homun.db`.
 - **TOML** config at `~/.homun/config.toml`.
 - Never serde_json for config files.
 
@@ -231,8 +318,11 @@ static/
 
 ### Channel System
 - `Channel` trait: `start()`, `send()`, `name()`.
+- `ChannelBehavior` trait: unified interface for all channel configs (7 methods).
+- `behavior_for(channel_name)`: single lookup point in `ChannelsConfig`.
 - Flow: Channel → InboundMessage → MessageBus → AgentLoop → OutboundMessage → Channel.
 - 7 channels: CLI, Telegram, WhatsApp, Discord, Slack, Email, Web (WebSocket).
+- Auth centralized in gateway (`agent/auth.rs`), all channels fail-closed.
 
 ### Memory System
 - **Short-term**: session messages (in-memory + SQLite).
@@ -248,15 +338,52 @@ static/
 - **Security shield**: pre-install scanning before execution.
 - **Runtime parity** with OpenClaw: eligibility, invocation policy, tool restriction, env injection.
 
+### Cognition-First Architecture
+The agent loop follows a 4-phase pattern: **INGRESS → COGNITION → EXECUTION → POST-PROCESSING**.
+
+- **Cognition phase** (`agent/cognition/`): always active (no feature gate). A mini ReAct loop with read-only discovery tools (memory search, RAG search, tool/skill/MCP listing) analyzes the user's intent _before_ the main execution loop.
+- **Output**: `CognitionResult` with understanding, plan steps, constraints, and discovered tools/skills/MCP/memory/RAG context.
+- **Selective tool loading**: only tools identified by cognition are passed to the LLM (+ always-available set: send_message, remember, approval).
+- **System prompt injection**: cognition understanding/plan/constraints are injected into the system prompt's Task Analysis section.
+- **Browser task plan**: initialized from `CognitionResult` via `from_cognition()`.
+- **Tool veto**: minimal safety-net only (search-first policy for web_fetch). Cognition already selected the right tools.
+- **Fallback**: when `run_cognition()` fails (provider error, timeout), `fallback_full_context()` provides ALL tools so the execution loop can still function.
+
+### Multi-Agent Orchestration
+- `agent/orchestrator/`: intent classification → planning → execution → synthesis.
+- `AgentDefinition` in `agent/definition.rs`, registry in `agent/registry.rs`.
+- LLM classifier routes tasks to specialized agents.
+- Pipeline paradigm: Task > Roles, RAG-first, Few-Shot via Skills.
+
+### Contact System
+- `contacts/`: full contact management with identity resolution across channels.
+- `contacts/context.rs`: injects contact context (tone_of_voice, history) into agent prompts.
+- `contacts/perimeter.rs`: contact perimeter enforcement for privacy.
+
+### Rich Response Blocks
+- `tools/response_blocks.rs`: structured UI blocks alongside markdown for native rendering.
+- 5 block types: choice, approval, status, result, external_message.
+- Blocks in WS (stream event), REST history, inline context encoding.
+- `block_response` inbound for user interactions (option.id + metadata).
+
 ### RAG Knowledge Base
 - Multi-format ingestion (30+ formats: md, pdf, docx, xlsx, code, etc.).
 - Hybrid search: HNSW vectors + FTS5, with sensitive data vault-gating.
 - Directory watcher for auto-ingest.
 
 ### Sandbox
-- 4 backends: Docker, native/macOS, Linux Bubblewrap, Windows Job Objects.
+- 5 backends: Docker, native/macOS, Seatbelt, Linux Bubblewrap, Windows Job Objects.
 - Auto-detection of best available backend.
 - Event logging + runtime image management.
+
+### Browser Automation
+- MCP Playwright (`@playwright/mcp` via npx), persistent peer.
+- Stealth anti-bot injection, compact snapshots (tree-preserving).
+- Auto-snapshot after navigate/click/type.
+- 17 actions in unified `browser` tool.
+- Site memory (`browser/site_memory.rs`): per-site browsing patterns.
+- Tab sessions (`browser/tab_session.rs`): stateful tab management.
+- Action policy (`browser/action_policy.rs`): policy enforcement per action.
 
 ### Security
 - **Auth**: PBKDF2 (600k iterations), HMAC-signed session cookies.
@@ -268,26 +395,9 @@ static/
 
 ### Web UI
 - **Axum** server with TLS + rust-embed for static assets.
-- **20 pages**: dashboard, chat, login, setup-wizard, channels, browser, automations, workflows, business, skills, mcp, memory, knowledge, vault, permissions, approvals, account, logs, maintenance, setup.
-- **50+ REST API endpoints** under `/api/v1/`.
+- **29 pages**: chat, setup, appearance, channels, browser, automations, workflows, skills, mcp, agents, contacts, profiles, memory, knowledge, vault, file-access, shell, sandbox, approvals, account, api-keys, maintenance, logs, traces, onboarding, + OAuth callbacks.
+- **70+ REST API endpoints** under `/api/v1/`.
 - Debug mode: CSS/JS served from filesystem (hot reload), HTML templates require recompile.
-
-### Browser Automation
-- MCP Playwright (`@playwright/mcp` via npx), persistent peer.
-- Stealth anti-bot injection, compact snapshots (tree-preserving).
-- Auto-snapshot after navigate/click/type.
-- 17 actions in unified `browser` tool.
-
-### Cognition-First Architecture
-The agent loop follows a 4-phase pattern: **INGRESS → COGNITION → EXECUTION → POST-PROCESSING**.
-
-- **Cognition phase** (`agent/cognition/`): always active. A mini ReAct loop with read-only discovery tools (memory search, RAG search, tool/skill/MCP listing) analyzes the user's intent _before_ the main execution loop.
-- **Output**: `CognitionResult` with understanding, plan steps, constraints, and discovered tools/skills/MCP/memory/RAG context.
-- **Selective tool loading**: only tools identified by cognition are passed to the LLM (+ always-available set: send_message, remember, approval).
-- **System prompt injection**: cognition understanding/plan/constraints are injected into the system prompt's Task Analysis section.
-- **Browser task plan**: initialized from `CognitionResult` via `from_cognition()`.
-- **Tool veto**: minimal safety-net only (search-first policy for web_fetch). Cognition already selected the right tools.
-- **Fallback**: when `run_cognition()` fails (provider error, timeout), `fallback_full_context()` provides ALL tools so the execution loop can still function.
 
 ### Workflow Engine
 - Persistent multi-step workflows with approval gates.
@@ -335,7 +445,7 @@ The agent loop follows a 4-phase pattern: **INGRESS → COGNITION → EXECUTION 
 - `clap` (derive) — CLI
 - `tracing`, `tracing-subscriber` — logging
 - `anyhow`, `thiserror` — errors
-- `teloxide` — Telegram
+- `frankenstein` — Telegram
 - `serenity` — Discord
 - `wa-rs` — WhatsApp (GitHub fork: homunbot/wa-rs)
 - `tokio-cron-scheduler` — cron
@@ -344,6 +454,8 @@ The agent loop follows a 4-phase pattern: **INGRESS → COGNITION → EXECUTION 
 - `keyring` — OS keychain (apple-native, linux-native, windows-native)
 - `axum` — web server
 - `rust-embed` — static asset embedding
+- `rmcp` — MCP client
+- `usearch` — HNSW vector index
 
 Keep dependencies lean. Do NOT add unnecessary crates.
 
@@ -355,19 +467,21 @@ Keep dependencies lean. Do NOT add unnecessary crates.
 
 ### DRY — Don't Repeat Yourself
 
-- **Prima di creare qualsiasi cosa**: cerca nel codebase se esiste già logica simile. Estendila, non duplicarla.
+- **Prima di creare qualsiasi cosa**: cerca nel codebase se esiste gia logica simile. Estendila, non duplicarla.
 - Estrai funzioni/metodi non appena la stessa logica appare **2+ volte** — anche se le occorrenze sono in file diversi.
 - Preferisci parametrizzare piuttosto che duplicare con piccole variazioni.
-- **Pattern già esistenti — riusali sempre**:
+- **Pattern gia esistenti — riusali sempre**:
   - `provider/one_shot.rs` → qualsiasi chiamata LLM non-conversazionale (mai creare chiamate reqwest ad-hoc)
   - `utils/retry.rs` → qualsiasi operazione di rete che richiede retry (mai scrivere loop retry custom)
   - `storage/db.rs` → qualsiasi operazione SQLite (mai aprire nuove connessioni)
   - `web/auth.rs` → qualsiasi check auth/rate-limit (mai reimplementare)
   - `tools/registry.rs` → registrazione tool (segui il pattern esistente esattamente)
   - `channels/traits.rs` → astrazione canale (implementa il trait, non inventare nuovi flussi)
+  - `contacts/db.rs` → operazioni contatti (non duplicare query)
+  - `profiles/db.rs` → operazioni profili
 - **Refactor > duplica**: se due moduli condividono >20 righe di logica simile, estrai una funzione o trait condiviso.
 - **CSS**: riusa i design token di `static/css/style.css`. Mai hardcodare colori, spaziature o font. Usa variabili CSS (`var(--*)`).
-- **JS**: prima di scrivere un nuovo pattern UI, controlla se esiste già in un altro file JS della pagina.
+- **JS**: prima di scrivere un nuovo pattern UI, controlla se esiste gia in un altro file JS della pagina.
 
 ### Analisi Strutturale Prima di Ogni Implementazione
 
@@ -385,9 +499,9 @@ rg "async fn run" src/
 
 Se trovi 2+ struct con metodi simili → vai a Step 2. Altrimenti procedi normalmente.
 
-#### Step 2 — Valuta se esiste già un'astrazione
+#### Step 2 — Valuta se esiste gia un'astrazione
 Chiediti:
-- Esiste già un trait che queste struct potrebbero implementare?
+- Esiste gia un trait che queste struct potrebbero implementare?
 - Se non esiste, dovrei crearne uno prima?
 - Le struct esistenti andrebbero refactorate per implementarlo?
 
@@ -397,13 +511,13 @@ Criteri per creare un nuovo trait:
 - Il codice chiamante potrebbe usare `dyn Trait` o `impl Trait` invece di tipi concreti
 
 #### Step 3 — Proponi prima di scrivere
-Se individui un'opportunità di astrazione, **fermati e proponi** prima di implementare:
+Se individui un'opportunita di astrazione, **fermati e proponi** prima di implementare:
 
 > "Ho notato che `EmailSender` e `TelegramSender` hanno entrambi `send(msg)` e `name()`.
 > Prima di aggiungere `SlackSender`, propongo di estrarre un trait `MessageSender`.
 > Vuoi che proceda con il refactor, o aggiungo `SlackSender` direttamente?"
 
-Non fare il refactor silenziosamente. Non ignorare l'opportunità. Sempre segnala e chiedi.
+Non fare il refactor silenziosamente. Non ignorare l'opportunita. Sempre segnala e chiedi.
 
 ### Interfacce e Astrazioni
 
@@ -411,8 +525,8 @@ Non fare il refactor silenziosamente. Non ignorare l'opportunità. Sempre segnal
 - Gli oggetti concreti non devono mai dipendere da altri oggetti concreti — solo da astrazioni (trait o `Arc<dyn Trait>`).
 - Se due struct condividono campi o comportamenti, considera un trait condiviso o una struct base.
 - **Quando creare un trait vs una funzione libera**:
-  - Trait: quando esistono o esisteranno più implementazioni (es. più provider, più canali).
-  - Funzione libera: quando la logica è unica e non ha varianti polimorfiche.
+  - Trait: quando esistono o esisteranno piu implementazioni (es. piu provider, piu canali).
+  - Funzione libera: quando la logica e unica e non ha varianti polimorfiche.
 - **Extend over replace**: aggiungi varianti a enum esistenti, metodi a impl esistenti, campi a struct esistenti. Non creare tipi paralleli.
 - **Enum esaustivi**: quando aggiungi una variante a un enum, cerca tutti i `match` su quell'enum nel codebase e gestisci il nuovo caso. Non usare `_ =>` per nascondere i casi mancanti.
 
@@ -423,7 +537,7 @@ Non fare il refactor silenziosamente. Non ignorare l'opportunità. Sempre segnal
 - **Costanti**: `SCREAMING_SNAKE_CASE` (`MAX_RETRY_COUNT`, `DEFAULT_TIMEOUT_SECS`).
 - **Varianti di enum**: `PascalCase`, concise e non ridondanti (`Provider::Anthropic` non `Provider::AnthropicProvider`).
 - **Booleani**: inizia con `is_`, `has_`, `can_`, `should_` (`is_enabled`, `has_vision`, `can_retry`).
-- **Evita abbreviazioni** non standard: `config` va bene, `cfg` solo se è il nome del modulo Rust. Mai `mgr`, `hlpr`, `proc`.
+- **Evita abbreviazioni** non standard: `config` va bene, `cfg` solo se e il nome del modulo Rust. Mai `mgr`, `hlpr`, `proc`.
 - **Nomi coerenti tra Rust e JS**: se un concetto si chiama `skill` in Rust, non chiamarlo `plugin` nel JS.
 
 ### Struttura degli `impl` Block
@@ -433,27 +547,27 @@ Mantieni un ordine coerente all'interno di ogni `impl`:
 ```
 1. Costruttori (new, from_config, default)
 2. Metodi pubblici principali (logica core)
-3. Metodi pubblici di utilità (getter, helper pubblici)
+3. Metodi pubblici di utilita (getter, helper pubblici)
 4. Metodi privati (logica interna)
 ```
 
-- Un solo `impl` per struct/trait per file, salvo casi eccezionali (`impl From<X>` separato è accettabile).
-- Se l'impl supera ~150 righe, valuta se ha troppe responsabilità → split del file.
+- Un solo `impl` per struct/trait per file, salvo casi eccezionali (`impl From<X>` separato e accettabile).
+- Se l'impl supera ~150 righe, valuta se ha troppe responsabilita → split del file.
 
 ### Dimensioni dei File
 
 - **Hard limit**: nessun file Rust oltre 500 righe. Se un file si avvicina a 400 righe, pianifica uno split.
-- **Target**: 200-300 righe per file. Una responsabilità per file.
+- **Target**: 200-300 righe per file. Una responsabilita per file.
 - **Come splittare**: estrai in una directory-submodule (es. pattern `tools/sandbox/`). Il `mod.rs` rimane thin: solo re-export + orchestrazione.
-- **File JS**: stesso limite di 500 righe. I file grandi esistenti (automations.js, chat.js) sono grandfathered, ma le nuove feature vanno in file separati.
-- **Mai compattare arbitrariamente**: non unire file piccoli "per semplicità". Ogni file ha una ragione di esistere.
+- **File JS**: stesso limite di 500 righe. I file grandi esistenti sono grandfathered, ma le nuove feature vanno in file separati.
+- **Mai compattare arbitrariamente**: non unire file piccoli "per semplicita". Ogni file ha una ragione di esistere.
 
 ### Organizzazione delle Cartelle
 
 - Segui la struttura esistente del progetto — non creare nuove cartelle senza discuterne.
 - Raggruppa per **dominio/feature**, non per tipo di file (`/agent/`, `/tools/`, `/channels/` — non `/structs/`, `/helpers/`).
 - I moduli pubblici espongono le API via `mod.rs` con re-export espliciti (`pub use`).
-- I tipi condivisi tra più moduli vanno in `{dominio}/types.rs` o `{dominio}/mod.rs`, non duplicati.
+- I tipi condivisi tra piu moduli vanno in `{dominio}/types.rs` o `{dominio}/mod.rs`, non duplicati.
 - I file di test restano separati dal codice produzione: `#[cfg(test)] mod tests` per unit test, `tests/` per integration test.
 
 ### Commenti e Documentazione
@@ -462,13 +576,11 @@ Mantieni un ordine coerente all'interno di ogni `impl`:
 - Ogni `pub fn`, `pub struct`, `pub trait`, `pub enum` → doc comment `///`.
 - Ogni modulo pubblico (`mod.rs`) → `//! Module-level doc` che spiega il dominio in 1-2 righe.
 - Ogni campo di struct non ovvio → commento inline `//`.
-- Blocchi di logica complessa o non ovvia → commento `//` prima del blocco che spiega il **perché**.
+- Blocchi di logica complessa o non ovvia → commento `//` prima del blocco che spiega il **perche**.
 
 **Come scrivere i commenti:**
-- I commenti spiegano il **perché**, non il **cosa** — il codice deve essere autoesplicativo.
-- ❌ `// incrementa il contatore` → ✅ `// il rate limiter usa finestre da 60s, resetta qui`
-- ❌ `// crea il provider` → ✅ `// usa ReliableProvider per avere failover automatico`
-- Per le `pub fn`, la prima riga del `///` è il sommario (una frase). Poi riga vuota, poi dettagli se necessari.
+- I commenti spiegano il **perche**, non il **cosa** — il codice deve essere autoesplicativo.
+- Per le `pub fn`, la prima riga del `///` e il sommario (una frase). Poi riga vuota, poi dettagli se necessari.
 - Documenta i **casi d'errore** rilevanti: `/// Returns Err if the vault is locked or the key is missing.`
 
 **Cosa NON fare:**
@@ -478,8 +590,8 @@ Mantieni un ordine coerente all'interno di ogni `impl`:
 
 ### Dead Code e Feature Discipline
 
-- **Niente codice morto**: se una funzione non è usata, rimuovila. Non aggiungere `#[allow(dead_code)]` salvo casi documentati.
-- **Niente feature sperimentali nascoste**: se una feature è WIP, deve stare in un branch, non nel main commentata o dietro un flag non documentato.
+- **Niente codice morto**: se una funzione non e usata, rimuovila. Non aggiungere `#[allow(dead_code)]` salvo casi documentati.
+- **Niente feature sperimentali nascoste**: se una feature e WIP, deve stare in un branch, non nel main commentata o dietro un flag non documentato.
 - **`#[cfg(feature = "...")]`**: usalo solo per feature genuinamente opzionali e documentale in `Cargo.toml` con una descrizione.
 - **Import inutilizzati**: rimuovili sempre. `cargo check` li segnala — non ignorarli.
 
@@ -507,7 +619,7 @@ homun service install        # Install as OS service (launchd/systemd)
 
 1. `cargo check` — catch errors early.
 2. `cargo clippy` — lint before committing.
-3. `cargo test` — run 522+ tests.
+3. `cargo test` — run 813 tests.
 4. `RUST_LOG=debug cargo run -- gateway` — verbose logging.
 5. Migrations in `migrations/` are auto-applied on startup.
 
@@ -552,7 +664,7 @@ Before implementing a new component or feature domain:
 - **Every bug fix** requires a regression test.
 - **Integration tests** in `tests/` for cross-module behavior.
 - Tests are the only reliable validation for AI-generated code.
-- In tests, `.unwrap()` è accettabile — ma aggiungi un commento se l'unwrap non è ovvio (`// safe: test data is always valid`).
+- In tests, `.unwrap()` e accettabile — ma aggiungi un commento se l'unwrap non e ovvio.
 
 ### Code Quality Gates
 - `cargo check` runs automatically after edits (via Claude Code hook).
@@ -571,20 +683,19 @@ Prima di dichiarare una feature completa, verifica:
 - [ ] Nessun `TODO` abbandonato nel codice
 - [ ] Nessun `println!` — solo `tracing::*`
 - [ ] Ogni `pub fn`/`pub struct`/`pub trait` ha un `///` doc comment
-- [ ] Il file non supera 500 righe — se sì, hai pianificato lo split?
-- [ ] La logica è già presente altrove nel codebase? (DRY check)
+- [ ] Il file non supera 500 righe — se si, hai pianificato lo split?
+- [ ] La logica e gia presente altrove nel codebase? (DRY check)
 - [ ] I nomi di funzioni/struct/variabili rispettano le naming conventions?
 - [ ] `docs/UNIFIED-ROADMAP.md` aggiornato con le task completate
 
 ### Roadmap Tracking
 - **After completing a feature or significant change**, update `docs/UNIFIED-ROADMAP.md`:
-  - Mark relevant tasks as ✅ DONE with date
+  - Mark relevant tasks as done with date
   - Update "Stato Attuale" metrics table if numbers changed
   - Add new tasks discovered during implementation
 - `docs/UNIFIED-ROADMAP.md` is the **single source of truth** for project status and planning.
 
 ### UX Conventions
-- **Design system**: follow `docs/design/design-constitution.md` (Braun-inspired, 8px grid, specific scales).
 - **Quality gate**: every UI change must pass `docs/design/ui-quality-gate.md` checklist.
 - **States are mandatory**: every component must handle empty, loading, error, success states.
 - **Mobile-first**: design at 375px, then scale up. Verify at 390, 768, 1024, 1280px.
@@ -605,32 +716,7 @@ Prima di dichiarare una feature completa, verifica:
 - Do NOT panic in library code — return `Result`.
 - Do NOT use `_ =>` in match expressions to hide enum variants non gestite — gestiscile esplicitamente.
 - Do NOT lasciare codice morto o commentato nel main branch.
-- Do NOT creare tipi paralleli se esiste già un tipo che puoi estendere.
-
----
-
-## Project Status
-
-**Feature-complete** — all 8 core sprints + 5 transversal programs done.
-
-### Done
-- Sprint 1-8: agent robustness, memory search, channel security, Web UI + automations, ecosystem (skills/MCP), RAG knowledge, channels phase 2, hardening
-- Sandbox: Docker/native/Linux/Windows, CI cross-platform
-- Chat Web UI: CHAT-1..6 (multi-session, streaming, markdown, tool timeline)
-- Design System: Olive Moss Console (tokens, accent picker, semantic colors)
-- Skill Runtime Parity: eligibility, invocation policy, tool restriction, env injection
-- Security: auth + HTTPS + rate limiting + API keys + E-Stop + exfiltration guard
-- Workflow Engine: persistent, approval gates, retry, resume-on-boot
-- Business Autopilot BIZ-1: OODA core, budget enforcement
-- Cognition-First Architecture: LLM-driven intent analysis as sole routing path (keyword system removed, 2026-03-21)
-
-### Current Focus (Fase 1: Hardening Industriale)
-- Channel hardening: Slack Socket Mode, WhatsApp re-pairing, Discord reconnect, proactive messaging
-- Security: tool result scanning, webhook sanitization, browser content isolation
-- E2E testing in CI (CHAT-7)
-- Onboarding: setup wizard v2, Ollama local flow
-
-See `docs/UNIFIED-ROADMAP.md` for the full 4-phase plan.
+- Do NOT creare tipi paralleli se esiste gia un tipo che puoi estendere.
 
 ---
 
@@ -640,9 +726,9 @@ See `docs/UNIFIED-ROADMAP.md` for the full 4-phase plan.
 - `~/.homun/brain/` — Agent-writable memory (USER.md, INSTRUCTIONS.md, SOUL.md)
 - `~/.homun/skills/` — User-installed skills
 - `./skills/` — Project-local bundled skills (5)
-- `./migrations/` — SQLite migrations (18, auto-applied)
-- `./docs/services/` — Per-domain architecture docs (13 files)
-- `./static/` — Web UI assets (CSS + 21 JS files)
+- `./migrations/` — SQLite migrations (46, auto-applied)
+- `./docs/services/` — Per-domain architecture docs
+- `./static/` — Web UI assets (CSS + 48 JS files)
 
 ## File Locations (Runtime)
 
@@ -702,10 +788,16 @@ Quick reference for adding new components without re-reading the whole codebase.
 3. Loaded automatically by `src/skills/loader.rs`
 
 ### New Cognition Discovery Tool
-1. Add fn in `src/agent/cognition/discovery.rs` — follows the pattern of existing discovery fns (memory_search, rag_search, list_tools, list_skills, list_mcp)
+1. Add fn in `src/agent/cognition/discovery.rs` — follows the pattern of existing discovery fns
 2. Register the tool definition in `discovery.rs`'s `build_discovery_tools()` function
 3. Handle the tool call in `engine.rs`'s match on tool name
 4. The cognition engine will auto-invoke it during the mini ReAct loop
+
+### New Contact Domain
+1. Add DB operations in `src/contacts/db.rs`
+2. Business logic in `src/contacts/mod.rs`
+3. API endpoint in `src/web/api/contacts.rs`
+4. UI in `static/js/contacts.js`
 
 ---
 
@@ -714,19 +806,25 @@ Quick reference for adding new components without re-reading the whole codebase.
 These files exceed the 500-line limit and predate the convention. Do NOT split them unless explicitly asked — they work as-is. New code within them should follow conventions; new features should go in separate files.
 
 **Rust (>1000 lines):**
-- `web/pages.rs` (4.3K) — HTML templates; unavoidable size, templates are self-contained
-- `agent/agent_loop.rs` (3.2K) — core loop; complex but cohesive
-- `main.rs` (2.8K) — CLI entry; clap derive + subcommands
-- `storage/db.rs` (2.7K) — all DB operations; cohesive single-concern
-- `config/schema.rs` (2.2K) — all config structs; grows with features
-- `tui/app.rs` (2K) — TUI state; cohesive
-- `agent/gateway.rs` (1.6K) — message routing
-- `skills/loader.rs` (1.5K) — skill parsing + validation
-- `tools/browser.rs` (1.2K) — 17 browser actions
-- `skills/clawhub.rs` (1.1K), `skills/security.rs` (1.1K), `channels/email.rs` (1K), `agent/memory.rs` (1K), `web/server.rs` (1K)
+- `web/pages.rs` (5.3K) — HTML templates; unavoidable size, templates are self-contained
+- `tools/browser.rs` (3.5K) — 17 browser actions; complex but cohesive
+- `agent/agent_loop.rs` (3.4K) — core loop; complex but cohesive
+- `storage/db.rs` (3.3K) — all DB operations; cohesive single-concern
+- `config/schema.rs` (3.0K) — all config structs; grows with features
+- `main.rs` (2.9K) — CLI entry; clap derive + subcommands
+- `agent/gateway.rs` (2.5K) — message routing
+- `tui/app.rs` (2.0K) — TUI state; cohesive
+- `skills/loader.rs` (1.7K) — skill parsing + validation
+- `web/auth.rs` (1.6K) — authentication + rate limiting
+- `web/api/providers.rs` (1.5K) — LLM provider API
+- `agent/memory.rs` (1.4K) — memory consolidation
+- `skills/security.rs` (1.2K), `web/server.rs` (1.2K), `skills/clawhub.rs` (1.1K)
+- `channels/email.rs` (1.1K), `tools/mcp.rs` (1.1K), `scheduler/automations.rs` (1.0K)
 
 **JS (>500 lines):**
-- `chat.js` (2.9K), `automations.js` (2.5K), `setup.js` (2.5K), `mcp.js` (1.7K), `skills.js` (1K)
+- `chat.js` (3.8K), `automations.js` (3.2K), `setup.js` (2.8K), `mcp.js` (1.8K)
+- `skills.js` (1.1K), `knowledge.js` (1.0K), `connections.js` (863), `profiles.js` (859)
+- `flow-renderer.js` (775), `onboarding.js` (752), `channels.js` (726), `contacts.js` (665)
 
 ---
 
