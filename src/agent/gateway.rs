@@ -305,7 +305,8 @@ impl Gateway {
         let mut channels: Vec<ChannelHandle> = Vec::new();
 
         // --- Start channels from gateways DB (with TOML fallback) ---
-        self.start_channels_from_db_or_toml(&config, &inbound_tx, &mut channels)
+        let db_gateways = self
+            .start_channels_from_db_or_toml(&config, &inbound_tx, &mut channels)
             .await;
 
         // --- Start Web UI server ---
@@ -533,6 +534,20 @@ impl Gateway {
             }
         }
 
+        // Overlay DB gateway pairing config (takes precedence over TOML)
+        for gw in &db_gateways {
+            if let Ok(b) = gw.behavior() {
+                let ch_name = gateway_channel_name(gw);
+                pairing_config.insert(
+                    ch_name,
+                    (
+                        b.pairing_required,
+                        b.allow_from.iter().cloned().collect(),
+                    ),
+                );
+            }
+        }
+
         // Merge contact identities into pairing allow_from sets
         for (ch_name, (_pairing, allow_set)) in &mut pairing_config {
             let channel_key = if ch_name.starts_with("email:") {
@@ -603,34 +618,33 @@ impl Gateway {
             }
         }
 
+        // --- Overlay DB gateway routes (takes precedence over TOML) ---
+        // Build gateway_behaviors, channel_to_gw_id, and overlay approval_routes
+        // from the gateways DB. This makes the DB the source of truth.
+        let mut gateway_behaviors: HashMap<String, crate::gateways::GatewayBehavior> =
+            HashMap::new();
+        let mut channel_to_gw_id: HashMap<String, i64> = HashMap::new();
+        for gw in &db_gateways {
+            let ch_name = gateway_channel_name(gw);
+            channel_to_gw_id.insert(ch_name.clone(), gw.id);
+            if let Ok(b) = gw.behavior() {
+                if let (Some(nc), Some(ncid)) = (&b.notify_channel, &b.notify_chat_id) {
+                    approval_routes
+                        .insert(ch_name.clone(), (nc.clone(), ncid.clone()));
+                }
+                gateway_behaviors.insert(ch_name, b);
+            }
+        }
+
         // --- Validate: warn about "assisted" channels missing notify routes ---
         // Note: at runtime the mobile notify target is used as fallback when no
         // explicit route is configured, so these are warnings, not hard errors.
-        for ch_name in &["telegram", "whatsapp", "discord", "slack"] {
-            if let Some(b) = config.channels.behavior_for(ch_name) {
-                if b.response_mode() == "assisted" && !approval_routes.contains_key(*ch_name) {
-                    tracing::warn!(
-                        channel = %ch_name,
-                        "Channel configured as 'assisted' but no notify_channel/notify_chat_id set — will fall back to mobile notify target if configured"
-                    );
-                }
-            }
-        }
-        {
-            let mut email_validate_cfg = config.channels.clone();
-            email_validate_cfg.migrate_legacy_email();
-            for name in email_validate_cfg.emails.keys() {
-                let key = format!("email:{name}");
-                let is_assisted = email_validate_cfg
-                    .behavior_for(&key)
-                    .map(|b| b.response_mode() == "assisted")
-                    .unwrap_or(false);
-                if is_assisted && !approval_routes.contains_key(&key) {
-                    tracing::warn!(
-                        channel = %key,
-                        "Email account configured as 'assisted' but no notify_channel/notify_chat_id set — will fall back to mobile notify target if configured"
-                    );
-                }
+        for (ch_name, behavior) in &gateway_behaviors {
+            if behavior.response_mode == "assisted" && !approval_routes.contains_key(ch_name) {
+                tracing::warn!(
+                    channel = %ch_name,
+                    "Gateway configured as 'assisted' but no notify_channel/notify_chat_id — will fall back to mobile notify target if configured"
+                );
             }
         }
 
@@ -655,6 +669,8 @@ impl Gateway {
         let web_stream_tx_for_wf = web_stream_tx.clone();
         let routing_db = self.db.clone();
         let routing_config = self.config.clone();
+        let gateway_behaviors = Arc::new(gateway_behaviors);
+        let channel_to_gw_id = Arc::new(channel_to_gw_id);
 
         let channel_health = self.channel_health.clone();
         // Track known (channel, chat_id) pairs from inbound messages + contacts.
@@ -1261,42 +1277,40 @@ impl Gateway {
                     .await
                     .ok()
                     .flatten();
-                let (contact_id, contact_response_mode) = {
-                    if let Some(c) = &resolved_contact {
-                        let mode = if c.response_mode != "automatic" && !c.response_mode.is_empty()
-                        {
-                            c.response_mode.clone()
-                        } else {
-                            // Channel default from config (via unified ChannelBehavior)
-                            let cfg = routing_config.read().await;
-                            let ch_mode = cfg
-                                .channels
-                                .behavior_for(&channel_name)
-                                .map(|b| b.response_mode())
-                                .unwrap_or("automatic");
-                            if ch_mode.is_empty() {
-                                "automatic".to_string()
-                            } else {
-                                ch_mode.to_string()
-                            }
-                        };
-                        (Some(c.id), Some(mode))
+                // Resolve channel response_mode: gateway DB first, TOML fallback.
+                let channel_response_mode = {
+                    let from_db = gateway_behaviors
+                        .get(&channel_name)
+                        .map(|b| b.response_mode.as_str());
+                    if let Some(mode) = from_db.filter(|m| !m.is_empty()) {
+                        mode.to_string()
                     } else {
-                        // Unknown sender: fall back to channel's configured response_mode.
-                        // This ensures "assisted" channels require approval even for
-                        // senders without a contact record.
                         let cfg = routing_config.read().await;
                         let ch_mode = cfg
                             .channels
                             .behavior_for(&channel_name)
                             .map(|b| b.response_mode())
                             .unwrap_or("automatic");
-                        let mode = if ch_mode.is_empty() {
+                        if ch_mode.is_empty() {
                             "automatic".to_string()
                         } else {
                             ch_mode.to_string()
+                        }
+                    }
+                };
+
+                let (contact_id, contact_response_mode) = {
+                    if let Some(c) = &resolved_contact {
+                        let mode = if c.response_mode != "automatic" && !c.response_mode.is_empty()
+                        {
+                            c.response_mode.clone()
+                        } else {
+                            channel_response_mode.clone()
                         };
-                        (None, Some(mode))
+                        (Some(c.id), Some(mode))
+                    } else {
+                        // Unknown sender: use channel's response_mode.
+                        (None, Some(channel_response_mode.clone()))
                     }
                 };
 
@@ -1426,6 +1440,7 @@ impl Gateway {
                         contact_id,
                         contact_response_mode,
                         contact: resolved_contact,
+                        gateway_id: channel_to_gw_id.get(&channel_name).copied(),
                     },
                 };
 
@@ -1700,7 +1715,7 @@ impl Gateway {
         config: &Config,
         inbound_tx: &mpsc::Sender<InboundMessage>,
         channels: &mut Vec<ChannelHandle>,
-    ) {
+    ) -> Vec<crate::gateways::Gateway> {
         // Auto-migrate TOML → DB (idempotent)
         if let Err(e) =
             crate::gateways::migrate::migrate_toml_to_gateways(self.db.pool(), config).await
@@ -1736,6 +1751,7 @@ impl Gateway {
             tracing::info!("No gateways in DB, falling back to TOML config");
             start_channels_from_toml(config, &self.channel_health, inbound_tx, channels);
         }
+        db_gateways
     }
 }
 
@@ -2237,6 +2253,24 @@ fn start_channel_by_name(
     }
 }
 
+/// Derive the runtime channel_name from a gateway DB row.
+///
+/// Email gateways are migrated with display names like `"Email: lavoro"`;
+/// this strips the type prefix to produce `"email:lavoro"` — matching the
+/// TOML-era key format that `behavior_for()` and approval routing expect.
+fn gateway_channel_name(gw: &crate::gateways::Gateway) -> String {
+    match gw.channel_type.as_str() {
+        "email" => {
+            let key = gw
+                .name
+                .strip_prefix("Email: ")
+                .unwrap_or(&gw.name);
+            format!("email:{key}")
+        }
+        other => other.to_string(),
+    }
+}
+
 /// Start a channel from a gateway DB row.
 ///
 /// Deserializes config_json into the typed channel config, resolves tokens
@@ -2339,7 +2373,11 @@ fn start_gateway_from_db(
             let cfg: crate::config::EmailAccountConfig =
                 serde_json::from_str(&gw.config_json).ok()?;
             let mut accounts = std::collections::HashMap::new();
-            accounts.insert(gw.name.clone(), cfg);
+            let account_key = gateway_channel_name(gw)
+                .strip_prefix("email:")
+                .unwrap_or(&gw.name)
+                .to_string();
+            accounts.insert(account_key, cfg);
             Some(spawn_monitored_channel(
                 "email",
                 health,

@@ -50,6 +50,8 @@ pub struct DispatchContext {
     pub contact_response_mode: Option<String>,
     /// Resolved contact for agent routing (MAG-2).
     pub contact: Option<crate::contacts::Contact>,
+    /// Database gateway ID for profile resolution and contact overrides.
+    pub gateway_id: Option<i64>,
 }
 
 // ── Config ──────────────────────────────────────────────────────────
@@ -325,6 +327,7 @@ mod tests {
                 contact_id: None,
                 contact_response_mode: None,
                 contact: None,
+                gateway_id: None,
             },
         }
     }
