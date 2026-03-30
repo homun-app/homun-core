@@ -1357,8 +1357,12 @@ impl Gateway {
                     None
                 };
 
-                // Extract email metadata for draft storage (before inbound is moved)
-                let email_meta = if approval_notify.is_some() {
+                // Extract email metadata for draft storage (before inbound is moved).
+                // Extracted whenever the channel is email + assisted, not only when a
+                // notify route exists — silent drafts also need this data.
+                let is_email_assisted = channel_name.starts_with("email:")
+                    && effective_mode == "assisted";
+                let email_meta = if is_email_assisted {
                     inbound.metadata.as_ref().map(|m| {
                         (
                             m.email_account.clone().unwrap_or_default(),
@@ -1369,12 +1373,12 @@ impl Gateway {
                 } else {
                     None
                 };
-                let email_from = if approval_notify.is_some() {
+                let email_from = if is_email_assisted {
                     Some(inbound.sender_id.clone())
                 } else {
                     None
                 };
-                let email_body_preview = if approval_notify.is_some() {
+                let email_body_preview = if is_email_assisted {
                     let body = &inbound.content;
                     Some(truncate_str(body, 500, "..."))
                 } else {
@@ -1892,6 +1896,11 @@ async fn dispatch_to_agent(
     };
     let run_output = content.clone();
 
+    // Detect assisted-no-notify before ctx is partially moved below.
+    // When assisted mode has no notify route, suppress the outbound entirely.
+    let is_assisted_silent =
+        ctx.contact_response_mode.as_deref() == Some("assisted") && ctx.approval_notify.is_none();
+
     // If assisted mode, save draft + format notification for approval
     let outbound = if let Some((notify_ch, notify_cid)) = ctx.approval_notify {
         tracing::info!(
@@ -1976,6 +1985,62 @@ async fn dispatch_to_agent(
                 metadata: None,
             }
         }
+    } else if is_assisted_silent {
+        // Assisted mode but no notify route available: save a silent draft and
+        // suppress the outbound. The draft is visible in the approvals queue.
+        // Never auto-respond when the channel requires human approval.
+        if channel_name.starts_with("email:") {
+            let pending_id = uuid::Uuid::new_v4().to_string();
+            let (account_name, subject, message_id) = ctx.email_meta.unwrap_or_default();
+            let from_address = ctx.email_from.unwrap_or_default();
+            let body_preview = ctx.email_body_preview;
+            let row = EmailPendingRow {
+                id: pending_id,
+                account_name,
+                from_address,
+                subject,
+                body_preview,
+                message_id,
+                draft_response: Some(content),
+                status: "pending".to_string(),
+                notify_session_key: None, // no notify channel — visible in UI approvals queue
+                created_at: String::new(),
+                updated_at: None,
+                profile_id: None,
+                user_id: None,
+            };
+            if let Err(e) = task_db.insert_email_pending(&row).await {
+                tracing::error!(error = %e, "Failed to save silent email draft");
+            } else {
+                tracing::info!(
+                    channel = %channel_name,
+                    from = %row.from_address,
+                    "Assisted mode: draft saved silently (no notify route) — visible in approvals queue"
+                );
+            }
+        } else {
+            // Non-email assisted channel without notify: save to pending_responses
+            let _ = task_db
+                .insert_pending_response(
+                    ctx.contact_id,
+                    &channel_name,
+                    &chat_id,
+                    &inbound.content,
+                    Some(&content),
+                )
+                .await;
+            tracing::info!(
+                channel = %channel_name,
+                "Assisted mode: response saved to pending (no notify route) — visible in approvals queue"
+            );
+        }
+        // Suppress: nothing goes back to the original sender
+        OutboundMessage {
+            channel: channel_name.clone(),
+            chat_id: chat_id.clone(),
+            content: String::new(),
+            metadata: None,
+        }
     } else {
         OutboundMessage {
             channel: channel_name.clone(),
@@ -1985,7 +2050,7 @@ async fn dispatch_to_agent(
         }
     };
 
-    let mut suppress_outbound = ctx.suppress_outbound;
+    let mut suppress_outbound = ctx.suppress_outbound || is_assisted_silent;
 
     // Evaluate trigger + complete automation run via shared function.
     // This same function is called by WorkflowEngine for workflow-based automations.
