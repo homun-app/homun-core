@@ -2285,8 +2285,25 @@ function connect() {
                 applyExecutionPlan(parsePlanPayload(data.name));
 
             } else if (data.type === 'blocks') {
-                // Rich UI blocks (choice cards, approvals, etc.) — store until response arrives
+                // Rich UI blocks (choice cards, approvals, etc.)
                 pendingBlocks = data.blocks || null;
+                // Render blocks immediately during streaming so the user
+                // can interact with approval gates (pause/resume flow).
+                if (pendingBlocks && pendingBlocks.length && typeof renderBlocks === 'function') {
+                    let target = streamingEl
+                        ? (streamingEl.querySelector('.chat-msg-body') || streamingEl)
+                        : null;
+                    // If no streaming element yet (approval arrives before tool_start),
+                    // create a standalone container in the message area.
+                    if (!target) {
+                        target = document.createElement('div');
+                        target.className = 'chat-msg assistant approval-gate-container';
+                        messagesEl.appendChild(target);
+                    }
+                    renderBlocks(pendingBlocks, target, sendBlockResponse);
+                    pendingBlocks = null;
+                    scrollThreadToBottom();
+                }
 
             } else if (data.type === 'screenshot') {
                 // Screenshot URL from browser tool — add to gallery
@@ -2696,10 +2713,14 @@ function addMessage(role, content, toolsUsed, options = {}) {
         const contentEl = document.createElement('div');
         contentEl.className = 'chat-msg-body';
         renderContent(contentEl, content, role);
-        // Render rich blocks (from history or live streaming)
+        // Render rich blocks (from history — non-interactive since gates are gone)
         const blocks = options.blocks || null;
         if (blocks && blocks.length && typeof renderBlocks === 'function') {
             renderBlocks(blocks, contentEl, sendBlockResponse);
+            // Disable all buttons in history blocks (no active gate)
+            contentEl.querySelectorAll('.rb-option, .rb-btn').forEach(btn => {
+                btn.disabled = true;
+            });
         }
         div.appendChild(contentEl);
     }

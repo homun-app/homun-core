@@ -1504,66 +1504,82 @@ impl AgentLoop {
                                 continue;
                             }
                             BrowserActionDecision::SiteNotAllowed { domain } => {
-                                // Send a choice block to the user for site approval.
-                                // The user picks the mode (auto/visible/headless) or denies.
-                                tracing::info!(%domain, "Sending site approval request to user");
-                                let block_id = format!("site_approve_{}", domain.replace('.', "_"));
-                                let choice = crate::tools::ResponseBlock::Choice(crate::tools::ChoiceBlock {
-                                    id: block_id,
-                                    title: format!("Authorize navigation to {domain}?"),
-                                    subtitle: Some("Choose the rendering mode for this site".to_string()),
-                                    options: vec![
-                                        crate::tools::BlockOption {
-                                            id: "auto".to_string(),
-                                            label: "Auto (Recommended)".to_string(),
-                                            subtitle: Some("Starts headless, switches to visible if needed".to_string()),
-                                            icon: None,
-                                            metadata: Some(serde_json::json!({"domain": domain, "mode": "auto"})),
-                                        },
-                                        crate::tools::BlockOption {
-                                            id: "visible".to_string(),
-                                            label: "Visible".to_string(),
-                                            subtitle: Some("Browser window always visible on screen".to_string()),
-                                            icon: None,
-                                            metadata: Some(serde_json::json!({"domain": domain, "mode": "visible"})),
-                                        },
-                                        crate::tools::BlockOption {
-                                            id: "headless".to_string(),
-                                            label: "Headless".to_string(),
-                                            subtitle: Some("Background only, never shows browser window".to_string()),
-                                            icon: None,
-                                            metadata: Some(serde_json::json!({"domain": domain, "mode": "headless"})),
-                                        },
-                                        crate::tools::BlockOption {
-                                            id: "deny".to_string(),
-                                            label: "Deny".to_string(),
-                                            subtitle: Some("Don't allow navigation to this site".to_string()),
-                                            icon: None,
-                                            metadata: None,
-                                        },
-                                    ],
-                                });
-                                // Send the block via stream
+                                // Pause/resume: stream a ChoiceBlock and await the
+                                // user's decision inline (no new turn).
                                 if let Some(ref tx) = stream_tx {
-                                    let blocks_json = serde_json::to_string(&vec![choice]).unwrap_or_default();
-                                    let _ = tx.send(crate::provider::StreamChunk {
-                                        delta: blocks_json,
-                                        done: false,
-                                        event_type: Some("blocks".to_string()),
-                                        tool_call_data: None,
-                                    }).await;
+                                    tracing::info!(%domain, "Awaiting site approval via gate");
+                                    let block_id = format!("site_approve_{}", domain.replace('.', "_"));
+                                    let choice = crate::tools::ResponseBlock::Choice(crate::tools::ChoiceBlock {
+                                        id: block_id.clone(),
+                                        title: format!("Authorize navigation to {domain}?"),
+                                        subtitle: Some("Choose the rendering mode for this site".to_string()),
+                                        options: vec![
+                                            crate::tools::BlockOption {
+                                                id: "auto".to_string(),
+                                                label: "Auto (Recommended)".to_string(),
+                                                subtitle: Some("Starts headless, switches to visible if needed".to_string()),
+                                                icon: None,
+                                                metadata: Some(serde_json::json!({"domain": &domain, "mode": "auto"})),
+                                            },
+                                            crate::tools::BlockOption {
+                                                id: "visible".to_string(),
+                                                label: "Visible".to_string(),
+                                                subtitle: Some("Browser window always visible on screen".to_string()),
+                                                icon: None,
+                                                metadata: Some(serde_json::json!({"domain": &domain, "mode": "visible"})),
+                                            },
+                                            crate::tools::BlockOption {
+                                                id: "headless".to_string(),
+                                                label: "Headless".to_string(),
+                                                subtitle: Some("Background only, never shows browser window".to_string()),
+                                                icon: None,
+                                                metadata: Some(serde_json::json!({"domain": &domain, "mode": "headless"})),
+                                            },
+                                            crate::tools::BlockOption {
+                                                id: "deny".to_string(),
+                                                label: "Deny".to_string(),
+                                                subtitle: Some("Don't allow navigation to this site".to_string()),
+                                                icon: None,
+                                                metadata: None,
+                                            },
+                                        ],
+                                    });
+
+                                    use crate::agent::approval_gate::{await_approval, ApprovalOutcome, DEFAULT_APPROVAL_TIMEOUT};
+                                    match await_approval(choice, &block_id, tx, DEFAULT_APPROVAL_TIMEOUT).await {
+                                        ApprovalOutcome::Responded(ref resp) if resp.option_id.as_deref() != Some("deny") => {
+                                            // User approved — update DB and in-memory allowlist
+                                            let mode = resp.metadata.as_ref()
+                                                .and_then(|m| m.get("mode"))
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("auto");
+                                            if let Err(e) = self.db.upsert_browser_allowed_site(&domain, mode, "user", None).await {
+                                                tracing::warn!(%domain, error = %e, "Failed to save site approval");
+                                            }
+                                            browser_task_plan.note_site_approved(&domain, mode);
+                                            tracing::info!(%domain, %mode, "Site approved via gate — resuming");
+                                            // Fall through to re-check (the guard will now pass)
+                                        }
+                                        _ => {
+                                            // Denied, timeout, or cancelled
+                                            tracing::info!(%domain, "Site denied/timed out via gate");
+                                            messages.push(ChatMessage::tool_result(
+                                                &tool_call.id,
+                                                &tool_call.name,
+                                                &format!("User denied access to site \"{domain}\". Do not attempt to navigate there again."),
+                                            ));
+                                            continue;
+                                        }
+                                    }
+                                } else {
+                                    // No stream_tx (non-web channel) — fall back to text message
+                                    messages.push(ChatMessage::tool_result(
+                                        &tool_call.id,
+                                        &tool_call.name,
+                                        &format!("Site \"{domain}\" requires authorization. Ask the user for permission."),
+                                    ));
+                                    continue;
                                 }
-                                // Tell the model to wait for user's decision
-                                messages.push(ChatMessage::tool_result(
-                                    &tool_call.id,
-                                    &tool_call.name,
-                                    &format!(
-                                        "Site \"{domain}\" requires user authorization. \
-                                         A permission request has been sent to the user. \
-                                         Wait for the user's response before retrying navigation."
-                                    ),
-                                ));
-                                continue;
                             }
                             BrowserActionDecision::GiveUp => {
                                 tracing::warn!("Browser automation stuck — giving up");
@@ -1578,6 +1594,138 @@ impl AgentLoop {
                                      Inform the user about the issue and suggest alternatives.",
                                 ));
                                 continue;
+                            }
+                        }
+                    }
+
+                    // ── Unified approval guard ─────────────────────────────
+                    // Shell commands and web_fetch require user approval via
+                    // pause/resume gate (same mechanism as browser site approval).
+                    if tool_call.name == "shell" || tool_call.name == "web_fetch" {
+                        if let Some(ref tx) = stream_tx {
+                            use crate::agent::approval_gate::{await_approval, ApprovalOutcome, DEFAULT_APPROVAL_TIMEOUT};
+
+                            // ── Shell approval ────────────────────────────
+                            if tool_call.name == "shell" {
+                                if let Some(ref approval_mgr) = tool_ctx.approval_manager {
+                                    let cmd_str = tool_call.arguments.get("command")
+                                        .and_then(|v| v.as_str()).unwrap_or_default();
+                                    let base_cmd = cmd_str.split_whitespace().next().unwrap_or("");
+
+                                    if approval_mgr.needs_approval("shell")
+                                        && approval_mgr.needs_approval(base_cmd)
+                                        && !approval_mgr.consume_one_time_pass(base_cmd)
+                                    {
+                                        tracing::info!(command = %cmd_str, base_cmd, "Shell command requires approval");
+                                        let pending_id = approval_mgr.create_pending(
+                                            "shell", cmd_str, &tool_call.arguments, channel, chat_id,
+                                        );
+                                        let display_cmd = crate::utils::text::truncate_str(cmd_str, 80, "…");
+                                        let block_id = format!("shell_approve_{pending_id}");
+                                        let block = crate::tools::ResponseBlock::Choice(crate::tools::ChoiceBlock {
+                                            id: block_id.clone(),
+                                            title: format!("Approve command: `{display_cmd}`?"),
+                                            subtitle: if cmd_str.len() > 80 { Some(cmd_str.to_string()) } else { None },
+                                            options: vec![
+                                                crate::tools::BlockOption {
+                                                    id: "allow_once".to_string(), label: "Allow Once".to_string(),
+                                                    subtitle: Some("Run this command once".to_string()), icon: None,
+                                                    metadata: Some(serde_json::json!({"pending_id": &pending_id, "base_cmd": base_cmd})),
+                                                },
+                                                crate::tools::BlockOption {
+                                                    id: "allow_always".to_string(), label: "Allow Always".to_string(),
+                                                    subtitle: Some(format!("Auto-approve '{base_cmd}' for this session")), icon: None,
+                                                    metadata: Some(serde_json::json!({"pending_id": &pending_id, "base_cmd": base_cmd})),
+                                                },
+                                                crate::tools::BlockOption {
+                                                    id: "deny".to_string(), label: "Deny".to_string(),
+                                                    subtitle: Some("Don't run this command".to_string()), icon: None,
+                                                    metadata: Some(serde_json::json!({"pending_id": &pending_id, "base_cmd": base_cmd})),
+                                                },
+                                            ],
+                                        });
+                                        match await_approval(block, &block_id, tx, DEFAULT_APPROVAL_TIMEOUT).await {
+                                            ApprovalOutcome::Responded(ref resp) => {
+                                                match resp.option_id.as_deref() {
+                                                    Some("allow_once") => {
+                                                        approval_mgr.grant_one_time_pass(base_cmd);
+                                                        let _ = approval_mgr.approve(&pending_id, false);
+                                                        tracing::info!(base_cmd, "Shell approved once via gate");
+                                                        // Fall through to execute
+                                                    }
+                                                    Some("allow_always") => {
+                                                        let _ = approval_mgr.approve_with_cmd(&pending_id, base_cmd);
+                                                        tracing::info!(base_cmd, "Shell approved always via gate");
+                                                        // Fall through to execute
+                                                    }
+                                                    _ => {
+                                                        let _ = approval_mgr.deny(&pending_id);
+                                                        messages.push(ChatMessage::tool_result(
+                                                            &tool_call.id, &tool_call.name,
+                                                            &format!("User denied command `{cmd_str}`. Do not retry."),
+                                                        ));
+                                                        continue;
+                                                    }
+                                                }
+                                            }
+                                            _ => {
+                                                let _ = approval_mgr.deny(&pending_id);
+                                                messages.push(ChatMessage::tool_result(
+                                                    &tool_call.id, &tool_call.name,
+                                                    "Approval timed out or was cancelled. Command not executed.",
+                                                ));
+                                                continue;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // ── Web fetch site approval ───────────────────
+                            if tool_call.name == "web_fetch" {
+                                let url = tool_call.arguments.get("url")
+                                    .and_then(|v| v.as_str()).unwrap_or_default();
+                                if let Some(domain) = crate::browser::action_policy::extract_domain(url) {
+                                    if !browser_task_plan.allowed_sites().contains_key(&domain) {
+                                        tracing::info!(%url, %domain, "web_fetch requires site approval");
+                                        let block_id = format!("site_approve_{}", domain.replace('.', "_"));
+                                        let block = crate::tools::ResponseBlock::Choice(crate::tools::ChoiceBlock {
+                                            id: block_id.clone(),
+                                            title: format!("Allow access to {domain}?"),
+                                            subtitle: Some(format!("web_fetch wants to access: {url}")),
+                                            options: vec![
+                                                crate::tools::BlockOption {
+                                                    id: "allow".to_string(), label: "Allow".to_string(),
+                                                    subtitle: Some(format!("Allow access to {domain}")), icon: None,
+                                                    metadata: Some(serde_json::json!({"domain": &domain, "mode": "fetch"})),
+                                                },
+                                                crate::tools::BlockOption {
+                                                    id: "deny".to_string(), label: "Deny".to_string(),
+                                                    subtitle: Some("Block access to this site".to_string()), icon: None,
+                                                    metadata: Some(serde_json::json!({"domain": &domain})),
+                                                },
+                                            ],
+                                        });
+                                        match await_approval(block, &block_id, tx, DEFAULT_APPROVAL_TIMEOUT).await {
+                                            ApprovalOutcome::Responded(ref resp) if resp.option_id.as_deref() == Some("allow") => {
+                                                // Save to DB so future fetches pass
+                                                if let Err(e) = self.db.upsert_browser_allowed_site(&domain, "fetch", "user", None).await {
+                                                    tracing::warn!(%domain, error = %e, "Failed to save site approval for web_fetch");
+                                                }
+                                                browser_task_plan.note_site_approved(&domain, "fetch");
+                                                tracing::info!(%domain, "Site approved for web_fetch via gate — resuming");
+                                                // Fall through to execute
+                                            }
+                                            _ => {
+                                                messages.push(ChatMessage::tool_result(
+                                                    &tool_call.id, &tool_call.name,
+                                                    &format!("User denied access to {domain}. Do not fetch from this site."),
+                                                ));
+                                                continue;
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -2263,9 +2411,9 @@ impl AgentLoop {
         // Extract any ```blocks fences from LLM output (LLM-driven blocks).
         // These are merged with tool-driven blocks already in response_blocks.
         let (safe_response, llm_blocks) =
-            crate::tools::response_blocks::extract_fence_blocks(&safe_response);
+            crate::tools::response_blocks::extract_blocks(&safe_response);
         if !llm_blocks.is_empty() {
-            tracing::info!(count = llm_blocks.len(), "Extracted LLM-generated fence blocks");
+            tracing::info!(count = llm_blocks.len(), "Extracted blocks from LLM response");
             response_blocks.extend(llm_blocks);
         }
 

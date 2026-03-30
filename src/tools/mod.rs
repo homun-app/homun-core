@@ -43,7 +43,9 @@ pub use file::{EditFileTool, ListDirTool, ReadFileTool, WriteFileTool};
 pub use mcp::{McpManager, McpPeer, McpServerInfo};
 pub use message::MessageTool;
 pub use registry::{Tool, ToolContext, ToolRegistry, ToolResult};
-pub use response_blocks::{BlockOption, BlockResponse, ChoiceBlock, ResponseBlock};
+pub use response_blocks::{
+    extract_blocks, BlockOption, BlockResponse, ChoiceBlock, ResponseBlock,
+};
 pub use shell::ShellTool;
 pub use skill_create::CreateSkillTool;
 pub use spawn::SpawnTool;

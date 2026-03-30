@@ -64,6 +64,9 @@ pub struct ApprovalManager {
     session_allowlist: Mutex<HashSet<String>>,
     audit_log: Mutex<Vec<ApprovalLogEntry>>,
     pending_approvals: Mutex<HashMap<ApprovalId, PendingApproval>>,
+    /// One-time command passes granted via response block "Allow Once".
+    /// Consumed on first use — the next invocation requires approval again.
+    approved_commands: Mutex<HashSet<String>>,
 }
 
 impl ApprovalManager {
@@ -75,6 +78,7 @@ impl ApprovalManager {
             session_allowlist: Mutex::new(HashSet::new()),
             audit_log: Mutex::new(Vec::new()),
             pending_approvals: Mutex::new(HashMap::new()),
+            approved_commands: Mutex::new(HashSet::new()),
         }
     }
 
@@ -219,6 +223,16 @@ impl ApprovalManager {
     pub fn check_command(&self, command: &str, channel: &str, chat_id: &str) -> ApprovalResponse {
         let base_cmd = command.split_whitespace().next().unwrap_or("");
 
+        // Check one-time pass first (from response block "Allow Once")
+        if self.consume_one_time_pass(base_cmd) {
+            return ApprovalResponse {
+                approved: true,
+                decision: Some(ApprovalDecision::Yes),
+                message: format!("One-time pass consumed for: {}", base_cmd),
+                pending_id: None,
+            };
+        }
+
         if !self.needs_approval(base_cmd) {
             return ApprovalResponse {
                 approved: true,
@@ -240,6 +254,47 @@ impl ApprovalManager {
                 base_cmd, channel
             ),
             pending_id: Some(pending_id),
+        }
+    }
+
+    /// Grant a one-time pass for a specific base command (e.g. "npm").
+    /// Consumed by `consume_one_time_pass` on next check.
+    pub fn grant_one_time_pass(&self, base_cmd: &str) {
+        self.approved_commands
+            .lock()
+            .unwrap()
+            .insert(base_cmd.to_string());
+    }
+
+    /// Consume a one-time pass for a base command.
+    /// Returns `true` if a pass existed (and was removed), `false` otherwise.
+    pub fn consume_one_time_pass(&self, base_cmd: &str) -> bool {
+        self.approved_commands.lock().unwrap().remove(base_cmd)
+    }
+
+    /// Approve a pending request and add the base command to the session allowlist.
+    ///
+    /// Unlike `approve()`, this adds `base_cmd` (e.g. "npm") to the allowlist
+    /// instead of the tool name ("shell"), so only that command family is auto-approved.
+    pub fn approve_with_cmd(&self, id: &str, base_cmd: &str) -> Result<(), String> {
+        let mut pending = self.pending_approvals.lock().unwrap();
+        if let Some(req) = pending.remove(id) {
+            // Add the base command (not tool_name) to session allowlist
+            self.session_allowlist
+                .lock()
+                .unwrap()
+                .insert(base_cmd.to_string());
+            let entry = ApprovalLogEntry {
+                timestamp: Utc::now().to_rfc3339(),
+                tool_name: req.tool_name,
+                arguments_summary: summarize_args(&req.arguments),
+                decision: ApprovalDecision::Always,
+                channel: req.channel,
+            };
+            self.audit_log.lock().unwrap().push(entry);
+            Ok(())
+        } else {
+            Err(format!("Pending approval not found: {}", id))
         }
     }
 }

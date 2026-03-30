@@ -233,6 +233,24 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, conversation_id:
                                 .unwrap_or_default()
                         };
 
+                        // ── ApprovalGate resolution (must run BEFORE start_run) ──
+                        // If the message carries a block_response for a pending gate,
+                        // resolve it immediately. This must happen before start_run()
+                        // because the agent is already running (paused) — start_run
+                        // would reject with "already running".
+                        let block_response = parsed
+                            .get("block_response")
+                            .cloned()
+                            .and_then(|v| serde_json::from_value::<crate::tools::BlockResponse>(v).ok());
+
+                        if let Some(ref br) = block_response {
+                            let gate = crate::agent::approval_gate::approval_gate();
+                            if gate.resolve(&br.block_id, br.clone()).await {
+                                tracing::info!(block_id = %br.block_id, "Approval resolved via gate — agent will resume");
+                                continue;
+                            }
+                        }
+
                         let run = match state.web_runs.start_run(&session_key, &user_message_label)
                         {
                             Ok(run) => run,
@@ -250,34 +268,6 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, conversation_id:
                         persist_run_snapshot(&state, &run).await;
 
                         let thinking_override = parsed.get("thinking").and_then(|v| v.as_bool());
-
-                        // Parse optional block interaction response (user tapped a card option)
-                        let block_response = parsed
-                            .get("block_response")
-                            .cloned()
-                            .and_then(|v| serde_json::from_value::<crate::tools::BlockResponse>(v).ok());
-
-                        // Handle site approval block responses immediately.
-                        // When the user clicks a choice for site authorization,
-                        // write the approval to the DB so the next agent turn sees it.
-                        if let Some(ref br) = block_response {
-                            if br.block_id.starts_with("site_approve_") {
-                                if let Some(ref meta) = br.metadata {
-                                    let domain = meta.get("domain").and_then(|v| v.as_str()).unwrap_or_default();
-                                    let mode = meta.get("mode").and_then(|v| v.as_str()).unwrap_or("auto");
-                                    if !domain.is_empty() && br.option_id.as_deref() != Some("deny") {
-                                        if let Some(ref db) = state.db {
-                                            match db.upsert_browser_allowed_site(domain, mode, "user", None).await {
-                                                Ok(()) => tracing::info!(domain = %domain, mode = %mode, "Site approved by user via choice block"),
-                                                Err(e) => tracing::warn!(domain = %domain, error = %e, "Failed to save site approval"),
-                                            }
-                                        }
-                                    } else if br.option_id.as_deref() == Some("deny") {
-                                        tracing::info!(domain = %domain, "Site denied by user via choice block");
-                                    }
-                                }
-                            }
-                        }
 
                         let inbound = InboundMessage {
                             channel: "web".to_string(),

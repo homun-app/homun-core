@@ -460,6 +460,9 @@ fn create_tool_registry(
     // Initialize approval manager for command approval workflow
     tools::init_approval_manager(&config.permissions.approval);
 
+    // Initialize approval gate for pause/resume approval flow
+    crate::agent::approval_gate::init_approval_gate();
+
     // Shell tool with OS-specific permissions
     registry.register(Box::new(ShellTool::with_permissions_sandbox_and_config(
         config.tools.exec.timeout,

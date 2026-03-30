@@ -500,18 +500,51 @@ impl PromptSection for RuntimeSection {
         // Rich response blocks — instruct the LLM to use ```blocks fences
         prompt.push_str(
             "\n**Rich Response Blocks:**\n\
-             When your response presents options the user should choose from (e.g. trains, flights, \
-             restaurants, appointments, products), wrap them in a ```blocks fence so the UI can \
-             render interactive cards. Format:\n\
-             ````\n\
-             ```blocks\n\
-             {\"block_type\":\"choice\",\"id\":\"blk_unique_id\",\"title\":\"Title\",\"options\":[\
-             {\"id\":\"opt1\",\"label\":\"Option label\",\"subtitle\":\"Details\"}]}\n\
+             Your responses can mix markdown text with structured UI blocks. \
+             Wrap blocks in a ```blocks fence — the UI strips the fence and renders interactive cards.\n\n\
+             **When to use blocks (ALWAYS use them when the data fits):**\n\
+             - **choice**: user must pick from 2+ options (trains, flights, restaurants, products, plans)\n\
+             - **result**: display structured data (booking confirmation, receipt, search result, profile)\n\
+             - **status**: show progress or state (order tracking, task status, build progress)\n\
+             - **external_message**: show a message from another system (email preview, notification)\n\
+             - **approval**: ask for yes/no confirmation (payment, booking, destructive action)\n\n\
+             **Block schemas (all fields shown — omit optional ones if not needed):**\n\
              ```\n\
-             ````\n\
-             Available block_type values: choice, approval, status, result, external_message.\n\
-             The fence is stripped from the rendered markdown — clients show native cards instead.\n\
-             Only use blocks when there are clear, discrete options. Regular text needs no blocks.\n",
+             // choice — user picks one option\n\
+             {\"block_type\":\"choice\",\"id\":\"unique_id\",\"title\":\"Pick a train\",\"subtitle\":\"optional subtitle\",\n\
+              \"options\":[{\"id\":\"opt1\",\"label\":\"IC 724 14:30\",\"subtitle\":\"€49 — 2h15m\",\"icon\":\"🚄\",\n\
+              \"metadata\":{\"any\":\"json for your reference\"}}]}\n\n\
+             // result — structured key-value display\n\
+             {\"block_type\":\"result\",\"id\":\"unique_id\",\"title\":\"Booking Confirmed\",\"icon\":\"✅\",\n\
+              \"fields\":[{\"label\":\"Train\",\"value\":\"IC 724\"},{\"label\":\"Date\",\"value\":\"Mar 30\"}]}\n\n\
+             // status — progress indicator\n\
+             {\"block_type\":\"status\",\"id\":\"unique_id\",\"title\":\"Order #1234\",\n\
+              \"status\":\"active\",\"fields\":[{\"label\":\"ETA\",\"value\":\"15 min\"}]}\n\
+             // status values: pending, active, completed, failed\n\n\
+             // external_message — message from another system\n\
+             {\"block_type\":\"external_message\",\"id\":\"unique_id\",\"source\":\"Email\",\n\
+              \"sender\":\"Mario Rossi\",\"subject\":\"Re: Meeting\",\"preview\":\"Confirmed for 3pm...\"}\n\n\
+             // approval — yes/no decision\n\
+             {\"block_type\":\"approval\",\"id\":\"unique_id\",\"title\":\"Confirm booking?\",\n\
+              \"description\":\"IC 724, Mar 30, €49\",\"approve_label\":\"Book\",\"deny_label\":\"Cancel\"}\n\
+             ```\n\n\
+             **Example response with blocks:**\n\
+             ```\n\
+             Ho trovato 3 treni per Milano:\n\n\
+             \\`\\`\\`blocks\n\
+             [{\"block_type\":\"choice\",\"id\":\"trains_1\",\"title\":\"Treni Roma → Milano\",\"options\":[\n\
+              {\"id\":\"t1\",\"label\":\"IC 724 — 14:30 → 17:45\",\"subtitle\":\"€49 — 2a classe\"},\n\
+              {\"id\":\"t2\",\"label\":\"FR 9618 — 15:00 → 17:55\",\"subtitle\":\"€79 — Frecciarossa\"},\n\
+              {\"id\":\"t3\",\"label\":\"IC 730 — 16:15 → 19:30\",\"subtitle\":\"€45 — 2a classe\"}]}]\n\
+             \\`\\`\\`\n\n\
+             Quale preferisci? Il Frecciarossa è il più veloce.\n\
+             ```\n\n\
+             **Rules:**\n\
+             - IDs must be unique within the conversation (use descriptive prefixes like `trains_`, `booking_`)\n\
+             - Text before and after the ```blocks fence is rendered as normal markdown\n\
+             - You can have multiple blocks in one fence (JSON array)\n\
+             - For simple text responses, do NOT use blocks — only when data is structured\n\
+             - Always add context text around blocks to explain what the user is seeing\n",
         );
 
         Ok(prompt)

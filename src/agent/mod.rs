@@ -1,4 +1,5 @@
 mod agent_loop;
+pub mod approval_gate;
 mod attachment_router;
 pub mod auth;
 pub mod bootstrap_watcher;
