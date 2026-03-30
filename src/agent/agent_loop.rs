@@ -1503,6 +1503,68 @@ impl AgentLoop {
                                 ));
                                 continue;
                             }
+                            BrowserActionDecision::SiteNotAllowed { domain } => {
+                                // Send a choice block to the user for site approval.
+                                // The user picks the mode (auto/visible/headless) or denies.
+                                tracing::info!(%domain, "Sending site approval request to user");
+                                let block_id = format!("site_approve_{}", domain.replace('.', "_"));
+                                let choice = crate::tools::ResponseBlock::Choice(crate::tools::ChoiceBlock {
+                                    id: block_id,
+                                    title: format!("Authorize navigation to {domain}?"),
+                                    subtitle: Some("Choose the rendering mode for this site".to_string()),
+                                    options: vec![
+                                        crate::tools::BlockOption {
+                                            id: "auto".to_string(),
+                                            label: "Auto (Recommended)".to_string(),
+                                            subtitle: Some("Starts headless, switches to visible if needed".to_string()),
+                                            icon: None,
+                                            metadata: Some(serde_json::json!({"domain": domain, "mode": "auto"})),
+                                        },
+                                        crate::tools::BlockOption {
+                                            id: "visible".to_string(),
+                                            label: "Visible".to_string(),
+                                            subtitle: Some("Browser window always visible on screen".to_string()),
+                                            icon: None,
+                                            metadata: Some(serde_json::json!({"domain": domain, "mode": "visible"})),
+                                        },
+                                        crate::tools::BlockOption {
+                                            id: "headless".to_string(),
+                                            label: "Headless".to_string(),
+                                            subtitle: Some("Background only, never shows browser window".to_string()),
+                                            icon: None,
+                                            metadata: Some(serde_json::json!({"domain": domain, "mode": "headless"})),
+                                        },
+                                        crate::tools::BlockOption {
+                                            id: "deny".to_string(),
+                                            label: "Deny".to_string(),
+                                            subtitle: Some("Don't allow navigation to this site".to_string()),
+                                            icon: None,
+                                            metadata: None,
+                                        },
+                                    ],
+                                });
+                                // Send the block via stream
+                                if let Some(ref tx) = stream_tx {
+                                    let blocks_json = serde_json::to_string(&vec![choice]).unwrap_or_default();
+                                    let _ = tx.send(crate::provider::StreamChunk {
+                                        delta: blocks_json,
+                                        done: false,
+                                        event_type: Some("blocks".to_string()),
+                                        tool_call_data: None,
+                                    }).await;
+                                }
+                                // Tell the model to wait for user's decision
+                                messages.push(ChatMessage::tool_result(
+                                    &tool_call.id,
+                                    &tool_call.name,
+                                    &format!(
+                                        "Site \"{domain}\" requires user authorization. \
+                                         A permission request has been sent to the user. \
+                                         Wait for the user's response before retrying navigation."
+                                    ),
+                                ));
+                                continue;
+                            }
                             BrowserActionDecision::GiveUp => {
                                 tracing::warn!("Browser automation stuck — giving up");
                                 if let Some(ref mut t) = tracer {

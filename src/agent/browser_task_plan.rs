@@ -41,6 +41,11 @@ pub enum BrowserActionDecision {
     Blocked {
         reason: String,
     },
+    /// Site not in the allowlist. The agent loop should send a choice block
+    /// to the user for approval (not the LLM — the user directly).
+    SiteNotAllowed {
+        domain: String,
+    },
     /// The agent is stuck in an unrecoverable loop. Tell the user.
     GiveUp,
 }
@@ -314,18 +319,11 @@ impl BrowserTaskPlanState {
                 }
             }
             None => {
-                // Site not in allowlist — block and tell the model to ask
-                // the user for permission, then use add_allowed_site action.
+                // Site not in allowlist — agent loop will send a choice block
+                // to the user for approval. The LLM just waits.
                 let domain = crate::browser::action_policy::extract_domain(url)
                     .unwrap_or_else(|| url.to_string());
-                Some(BrowserActionDecision::Blocked {
-                    reason: format!(
-                        "Site \"{domain}\" is not in the allowed list. \
-                         Ask the user for permission using send_message. \
-                         If the user approves, call browser(action=\"add_allowed_site\", \
-                         domain=\"{domain}\") to add it, then retry the navigation."
-                    ),
-                })
+                Some(BrowserActionDecision::SiteNotAllowed { domain })
             }
         }
     }
@@ -339,21 +337,6 @@ impl BrowserTaskPlanState {
         output: &str,
         arguments: &serde_json::Value,
     ) {
-        // When a site is added via add_allowed_site, update the in-memory cache
-        // so the next navigate check passes without needing a DB reload.
-        if action == "add_allowed_site" && !output.contains("Failed") {
-            if let Some(domain) = arguments.get("domain").and_then(|v| v.as_str()) {
-                let mode = arguments
-                    .get("mode")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("auto");
-                self.allowed_sites
-                    .insert(domain.to_lowercase(), mode.to_string());
-                tracing::debug!(domain = %domain, mode = %mode, "Updated allowlist cache from add_allowed_site");
-            }
-            return; // No loop tracking needed for admin actions
-        }
-
         // Track action for loop detection
         let target = extract_action_target(action, Some(arguments), output);
         let action_key = format!("{action}:{target}");
@@ -709,7 +692,7 @@ mod tests {
             "navigate",
             &serde_json::json!({"url": "https://trenitalia.com"}),
         );
-        assert!(matches!(d, BrowserActionDecision::Blocked { .. }));
+        assert!(matches!(d, BrowserActionDecision::SiteNotAllowed { .. }));
     }
 
     #[test]
@@ -859,19 +842,15 @@ mod tests {
         let mut p = BrowserTaskPlanState::from_cognition(&r, "browse", None);
         p.set_allowed_sites(std::collections::HashMap::new());
 
-        // Navigate to unlisted site → blocked
+        // Navigate to unlisted site → SiteNotAllowed
         let d = p.check_action(
             "navigate",
             &serde_json::json!({"url": "https://trenitalia.com"}),
         );
-        assert!(matches!(d, BrowserActionDecision::Blocked { .. }));
+        assert!(matches!(d, BrowserActionDecision::SiteNotAllowed { .. }));
 
-        // Model calls add_allowed_site → note_result updates cache
-        p.note_result(
-            "add_allowed_site",
-            "Site \"trenitalia.com\" added to the allowed list (mode: auto).",
-            &serde_json::json!({"action": "add_allowed_site", "domain": "trenitalia.com"}),
-        );
+        // User approves via choice block → cache updated externally
+        p.note_site_approved("trenitalia.com", "auto");
 
         // Now navigate passes
         let d = p.check_action(

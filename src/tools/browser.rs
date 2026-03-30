@@ -1709,57 +1709,6 @@ impl BrowserTool {
         Ok(ToolResult::success(result))
     }
 
-    /// Add a site to the browser allowed list.
-    ///
-    /// Called by the LLM after getting user permission. Writes to the DB
-    /// and updates the browser task plan's in-memory cache (via the pending
-    /// approval mechanism in the agent loop).
-    async fn action_add_allowed_site(&self, args: &Value) -> Result<ToolResult> {
-        let domain = args
-            .get("domain")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_lowercase();
-        if domain.is_empty() {
-            return Ok(ToolResult::error(
-                "Missing 'domain' parameter. Provide the site domain (e.g., 'trenitalia.com').",
-            ));
-        }
-
-        let mode = args
-            .get("mode")
-            .and_then(|v| v.as_str())
-            .unwrap_or("auto");
-        if !["headless", "visible", "auto"].contains(&mode) {
-            return Ok(ToolResult::error(
-                "Invalid 'mode'. Must be 'headless', 'visible', or 'auto'.",
-            ));
-        }
-
-        // Write to DB
-        let data_dir = crate::config::Config::data_dir();
-        let db_path = data_dir.join("homun.db");
-        if db_path.exists() {
-            if let Ok(db) = crate::storage::Database::open(&db_path).await {
-                if let Err(e) = db
-                    .upsert_browser_allowed_site(&domain, mode, "agent", None)
-                    .await
-                {
-                    return Ok(ToolResult::error(format!(
-                        "Failed to save allowed site: {e}"
-                    )));
-                }
-            }
-        }
-
-        tracing::info!(domain = %domain, mode = %mode, "Added site to browser allowed list");
-        Ok(ToolResult::success(format!(
-            "Site \"{domain}\" added to the allowed list (mode: {mode}). \
-             You can now navigate to {domain}."
-        )))
-    }
-
     /// Execute the `close` action.
     async fn action_close(&self, session_key: &str) -> Result<ToolResult> {
         // Close only this conversation's tab (not the entire browser)
@@ -2047,7 +1996,6 @@ impl Tool for BrowserTool {
          - hold_click(ref OR x+y, duration_ms?): Press and hold (for 'hold to verify' CAPTCHAs). Use ref for ARIA elements, x+y coordinates for non-ARIA buttons\n\
          - show(): Switch to visible mode (browser window appears on screen — for CAPTCHA or debugging)\n\
          - hide(): Switch back to headless mode (browser goes to background)\n\
-         - add_allowed_site(domain, mode?): Add a site to the allowed list. Call ONLY after getting user permission. mode: headless/visible/auto (default: auto)\n\
          - block_resources(): Block images/fonts/media for faster navigation\n\
          - unblock_resources(): Restore normal resource loading\n\
          - evaluate(expression): Read page state via JS (READ-ONLY, no DOM changes)\n\
@@ -2074,7 +2022,7 @@ impl Tool for BrowserTool {
                         "navigate", "snapshot", "screenshot", "click", "type",
                         "fill", "fill_form", "select_option", "press_key",
                         "hover", "scroll", "drag", "click_coordinates",
-                        "hold_click", "show", "hide", "add_allowed_site",
+                        "hold_click", "show", "hide",
                         "block_resources", "unblock_resources", "evaluate", "close", "wait"
                     ],
                     "description": "Browser action to perform"
@@ -2140,15 +2088,6 @@ impl Tool for BrowserTool {
                     "type": "string",
                     "description": "Browser profile name for isolated cookies/sessions (uses default if omitted)"
                 },
-                "domain": {
-                    "type": "string",
-                    "description": "Site domain for add_allowed_site (e.g. 'trenitalia.com')"
-                },
-                "mode": {
-                    "type": "string",
-                    "enum": ["headless", "visible", "auto"],
-                    "description": "Rendering mode for add_allowed_site (default: auto)"
-                }
             }
         })
     }
@@ -2212,13 +2151,12 @@ impl Tool for BrowserTool {
             "hold_click" => self.action_hold_click(&args, &tab).await?,
             "show" => self.action_show(&tab).await?,
             "hide" => self.action_hide(&tab).await?,
-            "add_allowed_site" => self.action_add_allowed_site(&args).await?,
             "close" => self.action_close(&session_key).await?,
             "" => ToolResult::error(
                 "Missing 'action' parameter. Available actions: \
                  navigate, snapshot, screenshot, click, type, fill, \
                  select_option, press_key, hover, scroll, drag, \
-                 click_coordinates, hold_click, show, hide, add_allowed_site, \
+                 click_coordinates, hold_click, show, hide, \
                  block_resources, unblock_resources, evaluate, wait, close"
                     .to_string(),
             ),
@@ -2226,7 +2164,7 @@ impl Tool for BrowserTool {
                 "Unknown action \"{unknown}\". Available actions: \
                  navigate, snapshot, screenshot, click, type, fill, \
                  select_option, press_key, hover, scroll, drag, \
-                 click_coordinates, hold_click, show, hide, add_allowed_site, \
+                 click_coordinates, hold_click, show, hide, \
                  block_resources, unblock_resources, evaluate, wait, close"
             )),
         };
