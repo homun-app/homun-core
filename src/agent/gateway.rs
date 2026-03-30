@@ -770,6 +770,14 @@ impl Gateway {
                     tracing::info!(count = expired, "Expired pending email drafts older than 7 days");
                 }
                 if let Ok(pending) = routing_db.load_all_pending_emails().await {
+                    // Pre-seed email recipients from pending drafts so approvals
+                    // can route replies even after a gateway restart.
+                    if let Ok(mut known) = known_chat_ids.lock() {
+                        for row in &pending {
+                            let email_ch = format!("email:{}", row.account_name);
+                            known.insert((email_ch, row.from_address.clone()));
+                        }
+                    }
                     let mut notified = 0u32;
                     let total = pending.len();
                     for row in &pending {
