@@ -537,18 +537,18 @@ impl WebServer {
                         let cors_tunnel_url = tunnel_url.clone();
                         move |origin, _| {
                             let s = origin.as_bytes();
+                            let allowed_domain_http = format!("http://{cors_domain}");
+                            let allowed_domain_https = format!("https://{cors_domain}");
                             s.starts_with(b"https://localhost")
                                 || s.starts_with(b"https://127.0.0.1")
                                 || s.starts_with(b"http://localhost")
                                 || s.starts_with(b"http://127.0.0.1")
                                 || (!cors_domain.is_empty()
-                                    && (s.starts_with(format!("https://{cors_domain}").as_bytes())
-                                        || s.starts_with(
-                                            format!("http://{cors_domain}").as_bytes(),
-                                        )))
+                                    && (s == allowed_domain_https.as_bytes()
+                                        || s == allowed_domain_http.as_bytes()))
                                 || cors_tunnel_url
                                     .as_ref()
-                                    .is_some_and(|url| s.starts_with(url.as_bytes()))
+                                    .is_some_and(|url| s == url.trim_end_matches('/').as_bytes())
                         }
                     }))
                     .allow_methods([

@@ -36,7 +36,10 @@ mod usage;
 mod vault;
 mod workflows;
 
-pub(crate) use chat::{cleanup_chat_upload_dirs, ChatUploadCleanupStats};
+pub(crate) use chat::{
+    cleanup_chat_upload_dirs, ensure_chat_conversation_access, web_session_key,
+    ChatUploadCleanupStats,
+};
 pub use health::{health, webhook_ingress};
 
 use std::sync::Arc;

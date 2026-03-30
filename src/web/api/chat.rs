@@ -114,6 +114,8 @@ struct ChatConversationQuery {
 struct ChatConversationMetadata {
     title: Option<String>,
     archived: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    owner_user_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -136,8 +138,12 @@ struct ValidatedChatUpload {
 
 // ─── Helpers ────────────────────────────────────────────────────
 
-fn web_session_key(conversation_id: &str) -> String {
+pub(crate) fn web_session_key(conversation_id: &str) -> String {
     format!("web:{conversation_id}")
+}
+
+fn default_chat_conversation_id(auth: &AuthUser) -> String {
+    format!("default-{}", sanitize_chat_segment(&auth.user_id, "user"))
 }
 
 fn chat_uploads_root() -> PathBuf {
@@ -359,6 +365,99 @@ fn parse_chat_conversation_metadata(metadata: &str) -> ChatConversationMetadata 
     serde_json::from_str(metadata).unwrap_or_default()
 }
 
+fn serialize_chat_conversation_metadata(
+    metadata: &ChatConversationMetadata,
+) -> Result<String, StatusCode> {
+    serde_json::to_string(metadata).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+async fn claim_chat_conversation_owner(
+    state: &Arc<AppState>,
+    session_key: &str,
+    metadata: &mut ChatConversationMetadata,
+    user_id: &str,
+) -> Result<String, StatusCode> {
+    let db = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    metadata.owner_user_id = Some(user_id.to_string());
+    let metadata_json = serialize_chat_conversation_metadata(metadata)?;
+    db.set_session_metadata(session_key, &metadata_json)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(metadata_json)
+}
+
+pub(crate) async fn ensure_chat_conversation_access(
+    state: &Arc<AppState>,
+    auth: &AuthUser,
+    conversation_id: &str,
+    create_if_missing: bool,
+) -> Result<Option<crate::storage::SessionRow>, StatusCode> {
+    let db = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let session_key = web_session_key(conversation_id);
+
+    match db
+        .load_session(&session_key)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    {
+        Some(mut session) => {
+            let mut metadata = parse_chat_conversation_metadata(&session.metadata);
+            match metadata.owner_user_id.as_deref() {
+                Some(owner_user_id) if owner_user_id == auth.user_id => Ok(Some(session)),
+                Some(_) => Err(StatusCode::FORBIDDEN),
+                None => {
+                    session.metadata = claim_chat_conversation_owner(
+                        state,
+                        &session_key,
+                        &mut metadata,
+                        &auth.user_id,
+                    )
+                    .await?;
+                    Ok(Some(session))
+                }
+            }
+        }
+        None if create_if_missing => {
+            let metadata = ChatConversationMetadata {
+                owner_user_id: Some(auth.user_id.clone()),
+                ..ChatConversationMetadata::default()
+            };
+            let metadata_json = serialize_chat_conversation_metadata(&metadata)?;
+            db.upsert_session(&session_key, 0)
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            db.set_session_metadata(&session_key, &metadata_json)
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            let mut session = db
+                .load_session(&session_key)
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+                .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+            session.metadata = metadata_json;
+            Ok(Some(session))
+        }
+        None => Ok(None),
+    }
+}
+
+async fn claim_chat_row_if_needed(
+    state: &Arc<AppState>,
+    auth: &AuthUser,
+    row: &mut crate::storage::SessionListRow,
+) -> Result<bool, StatusCode> {
+    let mut metadata = parse_chat_conversation_metadata(&row.metadata);
+    match metadata.owner_user_id.as_deref() {
+        Some(owner_user_id) => Ok(owner_user_id == auth.user_id),
+        None => {
+            row.metadata =
+                claim_chat_conversation_owner(state, &row.key, &mut metadata, &auth.user_id)
+                    .await?;
+            Ok(true)
+        }
+    }
+}
+
 fn chat_message_label(raw: &str) -> String {
     let parsed = super::super::chat_attachments::parse_message_content(raw);
     let text = parsed.text.trim().to_string();
@@ -411,6 +510,7 @@ fn build_chat_conversation_summary(
 
 async fn list_chat_conversations(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Query(q): Query<ChatConversationListQuery>,
 ) -> Result<Json<Vec<ChatConversationSummary>>, StatusCode> {
     let db = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
@@ -422,14 +522,18 @@ async fn list_chat_conversations(
     let search = q.q.as_deref().map(|value| value.trim().to_lowercase());
     let include_archived = q.include_archived.unwrap_or(false);
 
-    let conversations = rows
-        .into_iter()
-        .filter_map(|row| build_chat_conversation_summary(&state, row))
-        .filter(|conversation| {
+    let mut conversations = Vec::new();
+    for mut row in rows {
+        if !claim_chat_row_if_needed(&state, &auth, &mut row).await? {
+            continue;
+        }
+        let Some(conversation) = build_chat_conversation_summary(&state, row) else {
+            continue;
+        };
+        let include = {
             if !include_archived && conversation.archived {
-                return false;
-            }
-            if let Some(search) = search.as_deref() {
+                false
+            } else if let Some(search) = search.as_deref() {
                 let haystack = format!(
                     "{} {}",
                     conversation.title.to_lowercase(),
@@ -439,8 +543,11 @@ async fn list_chat_conversations(
             } else {
                 true
             }
-        })
-        .collect();
+        };
+        if include {
+            conversations.push(conversation);
+        }
+    }
 
     Ok(Json(conversations))
 }
@@ -453,12 +560,16 @@ async fn create_chat_conversation(
     let db = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
     let conversation_id = uuid::Uuid::new_v4().to_string();
     let session_key = web_session_key(&conversation_id);
-    let metadata = serde_json::json!({});
+    let metadata = ChatConversationMetadata {
+        owner_user_id: Some(auth.user_id.clone()),
+        ..ChatConversationMetadata::default()
+    };
+    let metadata_json = serialize_chat_conversation_metadata(&metadata)?;
 
     db.upsert_session(&session_key, 0)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    db.set_session_metadata(&session_key, &metadata.to_string())
+    db.set_session_metadata(&session_key, &metadata_json)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -482,15 +593,15 @@ async fn create_chat_conversation(
 
 async fn update_chat_conversation(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Path(conversation_id): Path<String>,
     Json(req): Json<UpdateChatConversationRequest>,
 ) -> Result<Json<ChatConversationSummary>, StatusCode> {
+    check_write(&auth)?;
     let db = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
     let session_key = web_session_key(&conversation_id);
-    let existing = db
-        .load_session(&session_key)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    let existing = ensure_chat_conversation_access(&state, &auth, &conversation_id, false)
+        .await?
         .ok_or(StatusCode::NOT_FOUND)?;
 
     let mut metadata = parse_chat_conversation_metadata(&existing.metadata);
@@ -506,8 +617,7 @@ async fn update_chat_conversation(
         metadata.archived = Some(archived);
     }
 
-    let metadata_json =
-        serde_json::to_string(&metadata).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let metadata_json = serialize_chat_conversation_metadata(&metadata)?;
     db.set_session_metadata(&session_key, &metadata_json)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -528,6 +638,9 @@ async fn delete_chat_conversation(
     Path(conversation_id): Path<String>,
 ) -> Result<Json<OkResponse>, StatusCode> {
     check_write(&auth)?;
+    ensure_chat_conversation_access(&state, &auth, &conversation_id, false)
+        .await?
+        .ok_or(StatusCode::NOT_FOUND)?;
     let db = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
     let session_key = web_session_key(&conversation_id);
 
@@ -555,6 +668,7 @@ async fn delete_chat_conversation(
 
 async fn chat_history(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Query(q): Query<ChatHistoryQuery>,
 ) -> Result<Json<Vec<ChatHistoryMessage>>, StatusCode> {
     let db = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
@@ -563,8 +677,13 @@ async fn chat_history(
         .conversation_id
         .as_deref()
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or("default");
-    let session_key = web_session_key(conversation_id);
+        .map(ToString::to_string)
+        .unwrap_or_else(|| default_chat_conversation_id(&auth));
+    let Some(_) = ensure_chat_conversation_access(&state, &auth, &conversation_id, false).await?
+    else {
+        return Ok(Json(Vec::new()));
+    };
+    let session_key = web_session_key(&conversation_id);
 
     let rows = db
         .load_messages(&session_key, limit)
@@ -601,9 +720,12 @@ async fn chat_history(
 }
 
 async fn upload_chat_attachment(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     mut multipart: Multipart,
 ) -> Result<Json<ChatUploadResponse>, StatusCode> {
-    let mut conversation_id = "default".to_string();
+    check_write(&auth)?;
+    let mut conversation_id = default_chat_conversation_id(&auth);
     let mut kind = "image".to_string();
     let mut file_name = None;
     let mut content_type = None;
@@ -639,6 +761,9 @@ async fn upload_chat_attachment(
     }
 
     let conversation_id = sanitize_chat_segment(&conversation_id, "default");
+    ensure_chat_conversation_access(&state, &auth, &conversation_id, true)
+        .await?
+        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
     let extension = std::path::Path::new(&file_name)
         .extension()
         .and_then(|value| value.to_str())
@@ -672,8 +797,13 @@ async fn upload_chat_attachment(
 }
 
 async fn get_chat_uploaded_file(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Path((conversation_id, file_name)): Path<(String, String)>,
 ) -> Result<Response, StatusCode> {
+    ensure_chat_conversation_access(&state, &auth, &conversation_id, false)
+        .await?
+        .ok_or(StatusCode::NOT_FOUND)?;
     let path = chat_upload_path(&conversation_id, &file_name).ok_or(StatusCode::BAD_REQUEST)?;
     let data = tokio::fs::read(&path)
         .await
@@ -701,7 +831,15 @@ async fn clear_chat_history(
 ) -> Result<Json<OkResponse>, StatusCode> {
     check_write(&auth)?;
     let db = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
-    let conversation_id = chat_conversation_id(&q);
+    let conversation_id = q
+        .conversation_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(ToString::to_string)
+        .unwrap_or_else(|| default_chat_conversation_id(&auth));
+    ensure_chat_conversation_access(&state, &auth, &conversation_id, false)
+        .await?
+        .ok_or(StatusCode::NOT_FOUND)?;
     let session_key = web_session_key(&conversation_id);
 
     db.clear_messages(&session_key)
@@ -720,14 +858,19 @@ async fn clear_chat_history(
 /// Truncate chat history from a specific message ID (for edit/resend).
 async fn truncate_chat_history(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Json(req): Json<TruncateChatRequest>,
 ) -> Result<Json<OkResponse>, StatusCode> {
+    check_write(&auth)?;
     let db = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
     let conversation_id = if req.conversation_id.trim().is_empty() {
-        "default".to_string()
+        default_chat_conversation_id(&auth)
     } else {
         req.conversation_id
     };
+    ensure_chat_conversation_access(&state, &auth, &conversation_id, false)
+        .await?
+        .ok_or(StatusCode::NOT_FOUND)?;
     let session_key = web_session_key(&conversation_id);
 
     let deleted = db
@@ -743,9 +886,19 @@ async fn truncate_chat_history(
 
 async fn current_chat_run(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Query(q): Query<ChatConversationQuery>,
 ) -> Result<Json<Option<super::super::run_state::WebChatRunSnapshot>>, StatusCode> {
-    let conversation_id = chat_conversation_id(&q);
+    let conversation_id = q
+        .conversation_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(ToString::to_string)
+        .unwrap_or_else(|| default_chat_conversation_id(&auth));
+    let Some(_) = ensure_chat_conversation_access(&state, &auth, &conversation_id, false).await?
+    else {
+        return Ok(Json(None));
+    };
     let session_key = web_session_key(&conversation_id);
 
     if let Some(run) = state.web_runs.active_snapshot(&session_key) {
@@ -764,10 +917,20 @@ async fn current_chat_run(
 /// Compact chat conversation (trigger memory consolidation)
 async fn compact_chat(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Query(q): Query<ChatConversationQuery>,
 ) -> Result<Json<OkResponse>, StatusCode> {
+    check_write(&auth)?;
     let db = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
-    let conversation_id = chat_conversation_id(&q);
+    let conversation_id = q
+        .conversation_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(ToString::to_string)
+        .unwrap_or_else(|| default_chat_conversation_id(&auth));
+    ensure_chat_conversation_access(&state, &auth, &conversation_id, false)
+        .await?
+        .ok_or(StatusCode::NOT_FOUND)?;
     let session_key = web_session_key(&conversation_id);
 
     // Check if there are enough messages to consolidate
@@ -798,9 +961,19 @@ async fn compact_chat(
 /// Request cancellation of the current web chat run.
 async fn stop_chat_run(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Query(q): Query<ChatConversationQuery>,
 ) -> Result<Json<OkResponse>, StatusCode> {
-    let conversation_id = chat_conversation_id(&q);
+    check_write(&auth)?;
+    let conversation_id = q
+        .conversation_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(ToString::to_string)
+        .unwrap_or_else(|| default_chat_conversation_id(&auth));
+    ensure_chat_conversation_access(&state, &auth, &conversation_id, false)
+        .await?
+        .ok_or(StatusCode::NOT_FOUND)?;
     let session_key = web_session_key(&conversation_id);
     let active = state.web_runs.request_stop(&session_key);
     if let Some(run) = active.as_ref() {

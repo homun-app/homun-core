@@ -10,6 +10,7 @@ use futures::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 
 use crate::bus::{InboundMessage, MessageMetadata};
+use crate::web::auth::{check_write, AuthUser};
 
 use super::server::AppState;
 
@@ -43,15 +44,25 @@ async fn persist_run_snapshot(state: &AppState, run: &super::run_state::WebChatR
 async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Query(query): Query<WsChatQuery>,
-) -> impl IntoResponse {
+) -> Result<impl IntoResponse, axum::http::StatusCode> {
+    check_write(&auth)?;
     let conversation_id = query
         .conversation_id
         .as_deref()
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or("default")
+        .unwrap_or("")
         .to_string();
-    ws.on_upgrade(move |socket| handle_socket(socket, state, conversation_id))
+    let conversation_id = if conversation_id.is_empty() {
+        format!("default-{}", auth.user_id)
+    } else {
+        conversation_id
+    };
+    super::api::ensure_chat_conversation_access(&state, &auth, &conversation_id, false)
+        .await?
+        .ok_or(axum::http::StatusCode::NOT_FOUND)?;
+    Ok(ws.on_upgrade(move |socket| handle_socket(socket, state, conversation_id)))
 }
 
 async fn handle_socket(socket: WebSocket, state: Arc<AppState>, conversation_id: String) {
