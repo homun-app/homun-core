@@ -37,8 +37,8 @@ mod vault;
 mod workflows;
 
 pub(crate) use chat::{
-    cleanup_chat_upload_dirs, ensure_chat_conversation_access, web_session_key,
-    ChatUploadCleanupStats,
+    cleanup_chat_upload_dirs, default_chat_conversation_id, ensure_chat_conversation_access,
+    web_session_key, ChatUploadCleanupStats,
 };
 pub use health::{health, webhook_ingress};
 

@@ -55,7 +55,7 @@ async fn ws_handler(
         .unwrap_or("")
         .to_string();
     let conversation_id = if conversation_id.is_empty() {
-        format!("default-{}", auth.user_id)
+        super::api::default_chat_conversation_id(&auth)
     } else {
         conversation_id
     };
@@ -267,8 +267,10 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, conversation_id:
                                     let mode = meta.get("mode").and_then(|v| v.as_str()).unwrap_or("auto");
                                     if !domain.is_empty() && br.option_id.as_deref() != Some("deny") {
                                         if let Some(ref db) = state.db {
-                                            let _ = db.upsert_browser_allowed_site(domain, mode, "user", None).await;
-                                            tracing::info!(domain = %domain, mode = %mode, "Site approved by user via choice block");
+                                            match db.upsert_browser_allowed_site(domain, mode, "user", None).await {
+                                                Ok(()) => tracing::info!(domain = %domain, mode = %mode, "Site approved by user via choice block"),
+                                                Err(e) => tracing::warn!(domain = %domain, error = %e, "Failed to save site approval"),
+                                            }
                                         }
                                     } else if br.option_id.as_deref() == Some("deny") {
                                         tracing::info!(domain = %domain, "Site denied by user via choice block");

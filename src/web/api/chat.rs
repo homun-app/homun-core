@@ -142,7 +142,7 @@ pub(crate) fn web_session_key(conversation_id: &str) -> String {
     format!("web:{conversation_id}")
 }
 
-fn default_chat_conversation_id(auth: &AuthUser) -> String {
+pub(crate) fn default_chat_conversation_id(auth: &AuthUser) -> String {
     format!("default-{}", sanitize_chat_segment(&auth.user_id, "user"))
 }
 
@@ -329,13 +329,13 @@ fn validate_chat_upload_kind(
     }
 }
 
-fn chat_conversation_id(query: &ChatConversationQuery) -> String {
-    query
-        .conversation_id
-        .as_deref()
+/// Resolve conversation ID from a query parameter, falling back to the
+/// user-scoped default. Used by all chat endpoints that take a query param.
+fn resolve_conversation_id(query_id: Option<&str>, auth: &AuthUser) -> String {
+    query_id
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or("default")
-        .to_string()
+        .map(ToString::to_string)
+        .unwrap_or_else(|| default_chat_conversation_id(auth))
 }
 
 fn chat_conversation_title(metadata: &str, first_user_message: Option<&str>) -> String {
@@ -441,20 +441,18 @@ pub(crate) async fn ensure_chat_conversation_access(
     }
 }
 
-async fn claim_chat_row_if_needed(
-    state: &Arc<AppState>,
-    auth: &AuthUser,
-    row: &mut crate::storage::SessionListRow,
-) -> Result<bool, StatusCode> {
-    let mut metadata = parse_chat_conversation_metadata(&row.metadata);
+/// Check if a conversation row belongs to (or is visible to) the authenticated user.
+///
+/// - Owned by this user → visible
+/// - Owned by another user → hidden
+/// - No owner (legacy) → visible to ALL users (backward compatible).
+///   Ownership is NOT claimed here — claiming happens only when a user
+///   directly accesses a specific conversation via `ensure_chat_conversation_access`.
+fn is_chat_row_visible_to(auth: &AuthUser, row: &crate::storage::SessionListRow) -> bool {
+    let metadata = parse_chat_conversation_metadata(&row.metadata);
     match metadata.owner_user_id.as_deref() {
-        Some(owner_user_id) => Ok(owner_user_id == auth.user_id),
-        None => {
-            row.metadata =
-                claim_chat_conversation_owner(state, &row.key, &mut metadata, &auth.user_id)
-                    .await?;
-            Ok(true)
-        }
+        Some(owner_user_id) => owner_user_id == auth.user_id,
+        None => true, // Legacy conversations visible to all
     }
 }
 
@@ -523,8 +521,8 @@ async fn list_chat_conversations(
     let include_archived = q.include_archived.unwrap_or(false);
 
     let mut conversations = Vec::new();
-    for mut row in rows {
-        if !claim_chat_row_if_needed(&state, &auth, &mut row).await? {
+    for row in rows {
+        if !is_chat_row_visible_to(&auth, &row) {
             continue;
         }
         let Some(conversation) = build_chat_conversation_summary(&state, row) else {
@@ -673,12 +671,7 @@ async fn chat_history(
 ) -> Result<Json<Vec<ChatHistoryMessage>>, StatusCode> {
     let db = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
     let limit = q.limit.unwrap_or(50);
-    let conversation_id = q
-        .conversation_id
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-        .map(ToString::to_string)
-        .unwrap_or_else(|| default_chat_conversation_id(&auth));
+    let conversation_id = resolve_conversation_id(q.conversation_id.as_deref(), &auth);
     let Some(_) = ensure_chat_conversation_access(&state, &auth, &conversation_id, false).await?
     else {
         return Ok(Json(Vec::new()));
@@ -831,12 +824,7 @@ async fn clear_chat_history(
 ) -> Result<Json<OkResponse>, StatusCode> {
     check_write(&auth)?;
     let db = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
-    let conversation_id = q
-        .conversation_id
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-        .map(ToString::to_string)
-        .unwrap_or_else(|| default_chat_conversation_id(&auth));
+    let conversation_id = resolve_conversation_id(q.conversation_id.as_deref(), &auth);
     ensure_chat_conversation_access(&state, &auth, &conversation_id, false)
         .await?
         .ok_or(StatusCode::NOT_FOUND)?;
@@ -889,12 +877,7 @@ async fn current_chat_run(
     axum::Extension(auth): axum::Extension<AuthUser>,
     Query(q): Query<ChatConversationQuery>,
 ) -> Result<Json<Option<super::super::run_state::WebChatRunSnapshot>>, StatusCode> {
-    let conversation_id = q
-        .conversation_id
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-        .map(ToString::to_string)
-        .unwrap_or_else(|| default_chat_conversation_id(&auth));
+    let conversation_id = resolve_conversation_id(q.conversation_id.as_deref(), &auth);
     let Some(_) = ensure_chat_conversation_access(&state, &auth, &conversation_id, false).await?
     else {
         return Ok(Json(None));
@@ -922,12 +905,7 @@ async fn compact_chat(
 ) -> Result<Json<OkResponse>, StatusCode> {
     check_write(&auth)?;
     let db = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
-    let conversation_id = q
-        .conversation_id
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-        .map(ToString::to_string)
-        .unwrap_or_else(|| default_chat_conversation_id(&auth));
+    let conversation_id = resolve_conversation_id(q.conversation_id.as_deref(), &auth);
     ensure_chat_conversation_access(&state, &auth, &conversation_id, false)
         .await?
         .ok_or(StatusCode::NOT_FOUND)?;
@@ -965,12 +943,7 @@ async fn stop_chat_run(
     Query(q): Query<ChatConversationQuery>,
 ) -> Result<Json<OkResponse>, StatusCode> {
     check_write(&auth)?;
-    let conversation_id = q
-        .conversation_id
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-        .map(ToString::to_string)
-        .unwrap_or_else(|| default_chat_conversation_id(&auth));
+    let conversation_id = resolve_conversation_id(q.conversation_id.as_deref(), &auth);
     ensure_chat_conversation_access(&state, &auth, &conversation_id, false)
         .await?
         .ok_or(StatusCode::NOT_FOUND)?;
