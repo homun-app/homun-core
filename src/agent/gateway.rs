@@ -695,6 +695,10 @@ impl Gateway {
                 );
             }
         }
+        // Pre-seed approval notify targets so draft notifications are not blocked.
+        for (notify_ch, notify_cid) in approval_routes.values() {
+            seed.insert((notify_ch.clone(), notify_cid.clone()));
+        }
         let known_chat_ids: Arc<std::sync::Mutex<HashSet<(String, String)>>> =
             Arc::new(std::sync::Mutex::new(seed));
         let known_chat_ids_for_routing = known_chat_ids.clone();
