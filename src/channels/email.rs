@@ -634,7 +634,7 @@ async fn process_unseen_account(
             .unwrap_or_else(|| "unknown".into());
 
         // Silently drop noreply/automated senders — no point processing them.
-        if Self::is_noreply_sender(&sender) {
+        if EmailChannel::is_noreply_sender(&sender) {
             debug!(account = %account_name, from = %sender, "Ignoring noreply/automated email");
             continue;
         }
