@@ -282,7 +282,14 @@ impl TelegramChannel {
 
             let chat_id: i64 = match msg.chat_id.parse() {
                 Ok(id) => id,
-                Err(_) => continue,
+                Err(e) => {
+                    tracing::warn!(
+                        raw_chat_id = %msg.chat_id,
+                        error = %e,
+                        "Telegram: invalid chat_id (not a numeric ID) — message dropped"
+                    );
+                    continue;
+                }
             };
 
             // Split long messages (Telegram limit: 4096 chars)

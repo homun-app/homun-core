@@ -665,6 +665,7 @@ mod tests {
             profile_slug: None,
             allowed_namespaces: None,
             contact_id: None,
+            channel_defaults: None,
         }
     }
 

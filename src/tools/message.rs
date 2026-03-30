@@ -60,7 +60,37 @@ impl Tool for MessageTool {
     async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
         let content = get_string_param(&args, "content")?;
         let channel = get_optional_string(&args, "channel").unwrap_or_else(|| ctx.channel.clone());
-        let chat_id = get_optional_string(&args, "chat_id").unwrap_or_else(|| ctx.chat_id.clone());
+        let explicit_chat_id = get_optional_string(&args, "chat_id");
+
+        // When channel is overridden but chat_id is not, resolve the default
+        // chat_id for the target channel instead of using the current context's
+        // chat_id (which belongs to the originating channel — e.g. a web session ID
+        // that Telegram can't parse as i64).
+        let chat_id = if let Some(id) = explicit_chat_id {
+            id
+        } else if channel != ctx.channel {
+            // Cross-channel send without explicit chat_id — look up the default
+            if let Some(defaults) = &ctx.channel_defaults {
+                if let Some(default_id) = defaults.get(&channel) {
+                    tracing::debug!(
+                        channel = %channel,
+                        default_chat_id = %default_id,
+                        "Resolved default chat_id for cross-channel send"
+                    );
+                    default_id.clone()
+                } else {
+                    tracing::warn!(
+                        channel = %channel,
+                        "No default chat_id found for channel — using context chat_id"
+                    );
+                    ctx.chat_id.clone()
+                }
+            } else {
+                ctx.chat_id.clone()
+            }
+        } else {
+            ctx.chat_id.clone()
+        };
 
         let tx = match &ctx.message_tx {
             Some(tx) => tx,
@@ -128,6 +158,7 @@ mod tests {
             profile_slug: None,
             allowed_namespaces: None,
             contact_id: None,
+            channel_defaults: None,
         }
     }
 
@@ -177,6 +208,7 @@ mod tests {
             profile_slug: None,
             allowed_namespaces: None,
             contact_id: None,
+            channel_defaults: None,
         };
 
         let args = serde_json::json!({"content": "Hello from the agent!"});
@@ -209,6 +241,7 @@ mod tests {
             profile_slug: None,
             allowed_namespaces: None,
             contact_id: None,
+            channel_defaults: None,
         };
 
         let args = serde_json::json!({
@@ -231,5 +264,46 @@ mod tests {
         let args = serde_json::json!({});
         let result = tool.execute(args, &test_ctx()).await;
         assert!(result.is_err());
+    }
+
+    /// Cross-channel send: channel overridden without explicit chat_id resolves
+    /// the default chat_id from channel_defaults instead of using ctx.chat_id.
+    #[tokio::test]
+    async fn test_cross_channel_resolves_default_chat_id() {
+        let tool = MessageTool::new();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(10);
+
+        let mut defaults = std::collections::HashMap::new();
+        defaults.insert("telegram".to_string(), "777888999".to_string());
+
+        let ctx = ToolContext {
+            workspace: "/tmp".to_string(),
+            channel: "web".to_string(),
+            chat_id: "web_session_abc".to_string(),
+            message_tx: Some(tx),
+            approval_manager: None,
+            skill_env: None,
+            user_id: None,
+            profile_id: None,
+            profile_brain_dir: None,
+            profile_slug: None,
+            allowed_namespaces: None,
+            contact_id: None,
+            channel_defaults: Some(defaults),
+        };
+
+        // Only specify channel, not chat_id
+        let args = serde_json::json!({
+            "content": "Cross-channel test",
+            "channel": "telegram"
+        });
+        let result = tool.execute(args, &ctx).await.unwrap();
+        assert!(!result.is_error);
+
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.channel, "telegram");
+        // Should use telegram's default, NOT the web session ID
+        assert_eq!(msg.chat_id, "777888999");
+        assert_eq!(msg.content, "Cross-channel test");
     }
 }

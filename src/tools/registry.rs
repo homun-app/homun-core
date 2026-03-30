@@ -89,6 +89,10 @@ pub struct ToolContext {
     /// Contact ID for the current conversation (None = owner/CLI).
     /// Used by knowledge tool to auto-assign contact namespace on ingest (KIX-4).
     pub contact_id: Option<i64>,
+    /// Default chat_id per channel for cross-channel messaging.
+    /// Maps channel name → default chat_id (e.g. "telegram" → "123456789").
+    /// Used by MessageTool to resolve correct chat_id when channel is overridden.
+    pub channel_defaults: Option<HashMap<String, String>>,
 }
 
 /// Tool trait — every built-in tool and skill implements this.
@@ -289,6 +293,7 @@ mod tests {
             profile_slug: None,
             allowed_namespaces: None,
             contact_id: None,
+            channel_defaults: None,
         }
     }
 

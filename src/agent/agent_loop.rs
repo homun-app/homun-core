@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -94,6 +94,8 @@ pub struct AgentLoop {
     allowed_tools: Vec<String>,
     /// Per-agent skill allowlist.  Empty = all skills visible.
     allowed_skills: Vec<String>,
+    /// Default chat_id per channel for cross-channel messaging resolution.
+    channel_defaults: HashMap<String, String>,
 }
 
 // ToolExecutionSummary, IterationBudgetState → iteration_budget.rs
@@ -201,6 +203,7 @@ impl AgentLoop {
             agent_instructions: String::new(),
             allowed_tools: Vec::new(),
             allowed_skills: Vec::new(),
+            channel_defaults: HashMap::new(),
         }
     }
 
@@ -356,8 +359,13 @@ impl AgentLoop {
 
     /// Inject available channels info for cross-channel messaging.
     /// Called after building the channel list so the agent knows where it can send.
+    /// Also stores default chat_ids for cross-channel resolution in MessageTool.
     pub fn set_channels_info(&mut self, channels: &[(&str, &str)]) {
         self.context.set_channels_info(channels);
+        self.channel_defaults = channels
+            .iter()
+            .map(|(name, id)| (name.to_string(), id.to_string()))
+            .collect();
     }
 
     /// Inject email account details (name + mode) into the system prompt.
@@ -1081,6 +1089,11 @@ impl AgentLoop {
             profile_slug: active_profile_slug.clone(),
             allowed_namespaces: contact_perimeter.as_ref().map(|p| p.namespaces()),
             contact_id: memory_contact_id,
+            channel_defaults: if self.channel_defaults.is_empty() {
+                None
+            } else {
+                Some(self.channel_defaults.clone())
+            },
         };
 
         // Browser session: idle cleanup and per-conversation continuation hint
