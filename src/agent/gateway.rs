@@ -975,11 +975,17 @@ impl Gateway {
                             email_content.push_str(draft_body);
 
                             let email_msg = OutboundMessage {
-                                channel: email_ch,
+                                channel: email_ch.clone(),
                                 chat_id: pending.from_address.clone(),
                                 content: email_content,
                                 metadata: None,
                             };
+                            // User approval IS the authorization — ensure the
+                            // recipient is in known_chat_ids so the safety check
+                            // doesn't block the send.
+                            if let Ok(mut known) = known_chat_ids.lock() {
+                                known.insert((email_ch, pending.from_address.clone()));
+                            }
                             route_outbound(email_msg, &senders_for_routing, &known_chat_ids).await;
 
                             // Update status
