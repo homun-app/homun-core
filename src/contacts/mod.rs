@@ -16,6 +16,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResponseMode {
+    /// Inherit from the channel's configured response_mode (default for contacts).
+    Inherit,
     Automatic,
     Assisted,
     OnDemand,
@@ -25,6 +27,7 @@ pub enum ResponseMode {
 impl ResponseMode {
     pub fn as_str(&self) -> &'static str {
         match self {
+            Self::Inherit => "",
             Self::Automatic => "automatic",
             Self::Assisted => "assisted",
             Self::OnDemand => "on_demand",
@@ -34,10 +37,11 @@ impl ResponseMode {
 
     pub fn from_str(s: &str) -> Self {
         match s {
+            "automatic" => Self::Automatic,
             "assisted" => Self::Assisted,
             "on_demand" => Self::OnDemand,
             "silent" => Self::Silent,
-            _ => Self::Automatic,
+            _ => Self::Inherit,
         }
     }
 }

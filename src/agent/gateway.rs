@@ -603,6 +603,37 @@ impl Gateway {
             }
         }
 
+        // --- Validate: warn about "assisted" channels missing notify routes ---
+        // Note: at runtime the mobile notify target is used as fallback when no
+        // explicit route is configured, so these are warnings, not hard errors.
+        for ch_name in &["telegram", "whatsapp", "discord", "slack"] {
+            if let Some(b) = config.channels.behavior_for(ch_name) {
+                if b.response_mode() == "assisted" && !approval_routes.contains_key(*ch_name) {
+                    tracing::warn!(
+                        channel = %ch_name,
+                        "Channel configured as 'assisted' but no notify_channel/notify_chat_id set — will fall back to mobile notify target if configured"
+                    );
+                }
+            }
+        }
+        {
+            let mut email_validate_cfg = config.channels.clone();
+            email_validate_cfg.migrate_legacy_email();
+            for name in email_validate_cfg.emails.keys() {
+                let key = format!("email:{name}");
+                let is_assisted = email_validate_cfg
+                    .behavior_for(&key)
+                    .map(|b| b.response_mode() == "assisted")
+                    .unwrap_or(false);
+                if is_assisted && !approval_routes.contains_key(&key) {
+                    tracing::warn!(
+                        channel = %key,
+                        "Email account configured as 'assisted' but no notify_channel/notify_chat_id set — will fall back to mobile notify target if configured"
+                    );
+                }
+            }
+        }
+
         // --- Email approval handler ---
         let approval_handler = EmailApprovalHandler::new(self.db.clone(), &approval_routes);
 
@@ -1251,7 +1282,21 @@ impl Gateway {
                         };
                         (Some(c.id), Some(mode))
                     } else {
-                        (None, None)
+                        // Unknown sender: fall back to channel's configured response_mode.
+                        // This ensures "assisted" channels require approval even for
+                        // senders without a contact record.
+                        let cfg = routing_config.read().await;
+                        let ch_mode = cfg
+                            .channels
+                            .behavior_for(&channel_name)
+                            .map(|b| b.response_mode())
+                            .unwrap_or("automatic");
+                        let mode = if ch_mode.is_empty() {
+                            "automatic".to_string()
+                        } else {
+                            ch_mode.to_string()
+                        };
+                        (None, Some(mode))
                     }
                 };
 
@@ -1280,19 +1325,33 @@ impl Gateway {
 
                 // --- Assisted mode: route agent response to notify channel for approval ---
                 // Works for any channel (email, telegram, whatsapp, discord, slack).
+                // The effective_mode already reflects channel config (even for unknown
+                // senders), so we only need a single unified check here.
                 let approval_notify = if effective_mode == "assisted" {
-                    approval_routes.get(&channel_name).cloned()
-                } else if channel_name.starts_with("email:") {
-                    // Email also checks metadata.requires_approval (set by email channel)
-                    let requires_approval = inbound
-                        .metadata
-                        .as_ref()
-                        .map(|m| m.requires_approval)
-                        .unwrap_or(false);
-                    if requires_approval {
-                        approval_routes.get(&channel_name).cloned()
+                    if let Some(route) = approval_routes.get(&channel_name).cloned() {
+                        Some(route)
                     } else {
-                        None
+                        // Fallback: use mobile notify target if a device is configured.
+                        // This allows the mobile app to receive approval requests even
+                        // when no explicit notify_channel is set in config.
+                        match routing_db.get_mobile_notify_target().await {
+                            Ok(Some(device)) => {
+                                tracing::info!(
+                                    channel = %channel_name,
+                                    device_id = %device.id,
+                                    "No explicit notify route — routing approval to mobile notify target"
+                                );
+                                Some(("web".to_string(), format!("mobile:{}", device.id)))
+                            }
+                            _ => {
+                                tracing::warn!(
+                                    channel = %channel_name,
+                                    sender = %inbound.sender_id,
+                                    "Channel is 'assisted' but has no notify route and no mobile target — response will be sent directly"
+                                );
+                                None
+                            }
+                        }
                     }
                 } else {
                     None
@@ -1957,7 +2016,28 @@ async fn dispatch_to_agent(
     }
 
     if !suppress_outbound {
+        // Also forward to mobile notify target (if set and not already going there)
+        let is_already_web = outbound.channel == "web";
         route_outbound(outbound, &senders, &known_chat_ids).await;
+
+        if !is_already_web {
+            if let Ok(Some(mobile_device)) = task_db.get_mobile_notify_target().await {
+                // Route a copy to the mobile device via web channel.
+                // Use the mobile device's token as conversation routing hint.
+                let mobile_outbound = OutboundMessage {
+                    channel: "web".to_string(),
+                    chat_id: format!("mobile:{}", mobile_device.id),
+                    content: run_output.clone(),
+                    metadata: None,
+                };
+                tracing::debug!(
+                    device_id = %mobile_device.id,
+                    source_channel = %channel_name,
+                    "Forwarding response to mobile notify target"
+                );
+                route_outbound(mobile_outbound, &senders, &known_chat_ids).await;
+            }
+        }
     }
 }
 

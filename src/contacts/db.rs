@@ -48,7 +48,7 @@ impl Database {
         tags: Option<&str>,
         tone_of_voice: Option<&str>,
     ) -> Result<i64> {
-        let mode = response_mode.unwrap_or("automatic");
+        let mode = response_mode.unwrap_or("");
         let tags_val = tags.unwrap_or("[]");
 
         let id = sqlx::query_scalar::<_, i64>(
@@ -618,7 +618,7 @@ mod tests {
         assert_eq!(c.name, "Marco Rossi");
         assert_eq!(c.nickname.as_deref(), Some("marco"));
         assert_eq!(c.bio, "CTO");
-        assert_eq!(c.response_mode, "automatic");
+        assert_eq!(c.response_mode, ""); // default: inherit from channel
         assert_eq!(c.tone_of_voice, "");
 
         // Update

@@ -5,7 +5,8 @@
 
 const API = '/api/v1/contacts';
 const CHANNELS = ['telegram', 'whatsapp', 'discord', 'slack', 'email', 'web'];
-const MODES = ['automatic', 'assisted', 'on_demand', 'silent'];
+const MODES = ['', 'automatic', 'assisted', 'on_demand', 'silent'];
+const MODE_LABELS = { '': 'Inherit (from channel)', 'automatic': 'Automatic', 'assisted': 'Assisted', 'on_demand': 'On Demand', 'silent': 'Silent' };
 const REL_TYPES = ['partner', 'madre', 'padre', 'figlio/a', 'fratello/sorella', 'collega', 'amico/a', 'capo', 'cliente'];
 const EVENT_TYPES = ['birthday', 'nameday', 'anniversary', 'custom'];
 let allContacts = [];
@@ -354,7 +355,7 @@ function showEditForm(id) {
         '<option value="' + ch + '"' + ((c.preferred_channel || '') === ch ? ' selected' : '') + '>' + ch + '</option>'
     ).join('');
     const mOpts = MODES.map(m =>
-        '<option value="' + m + '"' + ((c.response_mode || 'automatic') === m ? ' selected' : '') + '>' + m + '</option>'
+        '<option value="' + m + '"' + ((c.response_mode || '') === m ? ' selected' : '') + '>' + (MODE_LABELS[m] || m) + '</option>'
     ).join('');
     // All dynamic content sanitized through esc()
     el.innerHTML = '<div class="contact-create-form">'
