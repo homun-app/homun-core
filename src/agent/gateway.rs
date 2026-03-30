@@ -760,6 +760,44 @@ impl Gateway {
                         .await;
                 });
             }
+            // --- Startup recovery: expire old drafts + re-notify pending ---
+            {
+                let expired = routing_db
+                    .expire_old_pending_emails(7)
+                    .await
+                    .unwrap_or(0);
+                if expired > 0 {
+                    tracing::info!(count = expired, "Expired pending email drafts older than 7 days");
+                }
+                if let Ok(pending) = routing_db.load_all_pending_emails().await {
+                    let mut notified = 0u32;
+                    let total = pending.len();
+                    for row in &pending {
+                        if let Some(ref key) = row.notify_session_key {
+                            // Parse "channel:chat_id" from the stored key
+                            if let Some((ch, cid)) = key.split_once(':') {
+                                let notification =
+                                    EmailApprovalHandler::format_draft_notification(row, 1, total);
+                                let out = OutboundMessage {
+                                    channel: ch.to_string(),
+                                    chat_id: cid.to_string(),
+                                    content: notification,
+                                    metadata: None,
+                                };
+                                route_outbound(out, &senders_for_routing, &known_chat_ids).await;
+                                notified += 1;
+                            }
+                        }
+                    }
+                    if notified > 0 {
+                        tracing::info!(
+                            count = notified,
+                            "Re-notified pending email drafts from previous session"
+                        );
+                    }
+                }
+            }
+
             #[allow(unused_mut)] // `inbound` is mutated inside #[cfg(feature = "embeddings")]
             while let Some(mut inbound) = inbound_rx.recv().await {
                 // Track successful inbound message in channel health
@@ -949,6 +987,36 @@ impl Gateway {
                                 metadata: None,
                             };
                             route_outbound(confirm, &senders_for_routing, &known_chat_ids).await;
+
+                            // Auto-create contact for first-time approved sender
+                            if routing_db
+                                .find_contact_by_identity("email", &pending.from_address)
+                                .await
+                                .ok()
+                                .flatten()
+                                .is_none()
+                            {
+                                let name = pending
+                                    .from_address
+                                    .split('@')
+                                    .next()
+                                    .unwrap_or("Unknown");
+                                if let Ok(cid) = routing_db
+                                    .insert_contact(
+                                        name, None, None, None, None, None, None, None, None, None,
+                                    )
+                                    .await
+                                {
+                                    let _ = routing_db
+                                        .insert_contact_identity(cid, "email", &pending.from_address, None)
+                                        .await;
+                                    tracing::info!(
+                                        email = %pending.from_address,
+                                        contact_id = cid,
+                                        "Auto-created contact after first email approval"
+                                    );
+                                }
+                            }
 
                             // Show next pending draft if any
                             show_next_pending(
@@ -1955,6 +2023,11 @@ async fn dispatch_to_agent(
 
             if let Err(e) = task_db.insert_email_pending(&row).await {
                 tracing::error!(error = %e, "Failed to save email draft");
+            }
+
+            // Pre-seed email recipient so "ok" approval can route the reply
+            if let Ok(mut known) = known_chat_ids.lock() {
+                known.insert((channel_name.clone(), row.from_address.clone()));
             }
 
             let total = task_db

@@ -2132,6 +2132,37 @@ impl Database {
         Ok(rows)
     }
 
+    /// Load all pending email drafts (for startup recovery / re-notification).
+    pub async fn load_all_pending_emails(&self) -> Result<Vec<EmailPendingRow>> {
+        let rows = sqlx::query_as::<_, EmailPendingRow>(
+            "SELECT id, account_name, from_address, subject, body_preview,
+                    message_id, draft_response, status, notify_session_key,
+                    created_at, updated_at, profile_id, user_id
+             FROM email_pending
+             WHERE status = 'pending'
+             ORDER BY created_at ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("Failed to load all pending emails")?;
+        Ok(rows)
+    }
+
+    /// Expire pending drafts older than the given number of days.
+    /// Returns the count of expired rows.
+    pub async fn expire_old_pending_emails(&self, max_age_days: i64) -> Result<u64> {
+        let result = sqlx::query(
+            "UPDATE email_pending SET status = 'expired', updated_at = datetime('now')
+             WHERE status = 'pending'
+               AND created_at < datetime('now', '-' || ? || ' days')",
+        )
+        .bind(max_age_days)
+        .execute(&self.pool)
+        .await
+        .context("Failed to expire old pending emails")?;
+        Ok(result.rows_affected())
+    }
+
     /// Load a single email_pending record by ID.
     pub async fn load_email_pending_by_id(&self, id: &str) -> Result<Option<EmailPendingRow>> {
         let row = sqlx::query_as::<_, EmailPendingRow>(

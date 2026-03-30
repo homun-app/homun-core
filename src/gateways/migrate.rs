@@ -46,10 +46,10 @@ pub async fn migrate_toml_to_gateways(pool: &Pool<Sqlite>, config: &Config) -> R
     }
 
     // Email multi-account (EmailAccountConfig implements ChannelBehavior)
+    // Use the account key directly as the gateway name (no "Email: " prefix).
     for (name, email_cfg) in &ch.emails {
         if email_cfg.enabled {
-            let display_name = format!("Email: {name}");
-            migrate_channel(pool, &display_name, "email", email_cfg, config).await?;
+            migrate_channel(pool, name, "email", email_cfg, config).await?;
         }
     }
 

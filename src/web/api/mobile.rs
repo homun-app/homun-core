@@ -30,7 +30,11 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
             post(approve_pairing_session),
         )
         .route("/v1/mobile/devices", get(list_mobile_devices))
-        .route("/v1/mobile/devices/{id}", delete(revoke_mobile_device))
+        .route("/v1/mobile/devices/{id}", delete(delete_mobile_device))
+        .route(
+            "/v1/mobile/devices/{id}/notify-target",
+            post(set_notify_target),
+        )
         .route("/v1/mobile/tunnel", get(get_tunnel_config).put(save_tunnel_config))
         .route("/v1/mobile/bootstrap", get(mobile_bootstrap))
 }
@@ -152,8 +156,8 @@ struct MobileDeviceSummary {
     app_version: Option<String>,
     created_at: String,
     last_seen_at: Option<String>,
-    revoked: bool,
     can_emergency_stop: bool,
+    is_notify_target: bool,
 }
 
 #[derive(Serialize)]
@@ -406,6 +410,18 @@ async fn approve_pairing_session(
     .await
     .map_err(internal_error)?;
 
+    // If this is the only active (non-revoked) device, auto-set as notify target.
+    if let Ok(devices) = db.load_mobile_devices(&auth.user_id).await {
+        let active_count = devices.iter().filter(|d| d.revoked_at.is_none()).count();
+        if active_count == 1 {
+            let _ = db.set_mobile_notify_target(&device_id, true).await;
+            tracing::info!(
+                device_id = %device_id,
+                "Auto-set only mobile device as notify target"
+            );
+        }
+    }
+
     Ok(Json(ApprovePairingResponse {
         pairing_id: pairing.id,
         status: "approved",
@@ -481,7 +497,8 @@ async fn list_mobile_devices(
     }))
 }
 
-async fn revoke_mobile_device(
+/// Hard-delete a mobile device and its bearer token.
+async fn delete_mobile_device(
     State(state): State<Arc<AppState>>,
     axum::Extension(auth): axum::Extension<AuthUser>,
     Path(device_id): Path<String>,
@@ -498,16 +515,48 @@ async fn revoke_mobile_device(
         return Err(not_found("device_not_found", "Mobile device not found"));
     }
 
-    let revoked = db
-        .revoke_mobile_device(&device_id)
+    let deleted = db
+        .delete_mobile_device(&device_id)
         .await
         .map_err(internal_error)?;
 
-    if !revoked {
+    if !deleted {
         return Err(not_found("device_not_found", "Mobile device not found"));
     }
 
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// Set or unset a mobile device as the default notification target.
+async fn set_notify_target(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+    Path(device_id): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    require_admin(&auth)?;
+    let db = require_db(&state)?;
+
+    let enabled = body
+        .get("enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+
+    let device = db
+        .load_mobile_device(&device_id)
+        .await
+        .map_err(internal_error)?
+        .ok_or_else(|| not_found("device_not_found", "Mobile device not found"))?;
+
+    if device.user_id != auth.user_id {
+        return Err(not_found("device_not_found", "Mobile device not found"));
+    }
+
+    db.set_mobile_notify_target(&device_id, enabled)
+        .await
+        .map_err(internal_error)?;
+
+    Ok(Json(serde_json::json!({ "ok": true, "is_notify_target": enabled })))
 }
 
 async fn mobile_bootstrap(
@@ -809,8 +858,8 @@ fn device_summary(device: MobileDeviceRow) -> MobileDeviceSummary {
         app_version: device.app_version,
         created_at: device.created_at,
         last_seen_at: device.last_seen_at,
-        revoked: device.revoked_at.is_some(),
         can_emergency_stop: device.can_emergency_stop,
+        is_notify_target: device.is_notify_target,
     }
 }
 
