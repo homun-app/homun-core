@@ -479,11 +479,6 @@ impl ExfilFilter {
     }
 }
 
-/// Convenience function to scan text using the global filter.
-pub fn scan(text: &str) -> ScanResult {
-    global_filter().scan(text)
-}
-
 /// Convenience function to scan and get redacted text.
 /// Returns the redacted text directly.
 pub fn redact(text: &str) -> String {

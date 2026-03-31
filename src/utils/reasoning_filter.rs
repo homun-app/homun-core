@@ -239,14 +239,6 @@ fn has_thinking_section(text: &str) -> bool {
     thinking_headers.iter().any(|h| text.contains(h))
 }
 
-/// Extract reasoning blocks from text (for debugging).
-/// Returns a list of reasoning block contents found.
-pub fn extract_reasoning(_text: &str) -> Vec<String> {
-    // Simplified implementation - just return empty for now
-    // Can be expanded later if needed
-    Vec::new()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -183,17 +183,6 @@ impl GatewayRegistry {
             .cloned()
     }
 
-    /// Get all gateways of a given channel type (e.g. "telegram").
-    pub async fn by_channel_type(&self, channel_type: &str) -> Vec<Gateway> {
-        self.gateways
-            .read()
-            .await
-            .iter()
-            .filter(|g| g.channel_type == channel_type)
-            .cloned()
-            .collect()
-    }
-
     /// Get all enabled gateways.
     pub async fn enabled(&self) -> Vec<Gateway> {
         self.gateways

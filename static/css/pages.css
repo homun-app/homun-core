@@ -683,28 +683,6 @@
     width: 100%;
 }
 
-.skill-toast {
-    position: fixed;
-    bottom: 24px;
-    right: 24px;
-    padding: 12px 20px;
-    border-radius: var(--r-md);
-    font-size: 13px;
-    font-weight: 500;
-    z-index: 1000;
-    transition: opacity var(--fast) var(--ease);
-    box-shadow: var(--shadow-lg);
-}
-.skill-toast--success {
-    background: var(--ok);
-    color: white;
-}
-.skill-toast--error {
-    background: var(--err);
-    color: white;
-}
-
-
 /* ═══ LOG VIEWER ═══ */
 .logs-toolbar {
     display: flex;
@@ -1159,7 +1137,6 @@
 
 @media (max-width: 768px) {
     .permission-mode-grid { grid-template-columns: 1fr; }
-    .sandbox-guide-panel { grid-template-columns: 1fr; }
     .sandbox-runtime-grid { grid-template-columns: 1fr; }
 }
 
@@ -1199,57 +1176,6 @@
     font-size: 12px;
     color: var(--t3);
     line-height: 1.5;
-}
-
-.sandbox-guide-panel {
-    display: grid;
-    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
-    gap: 18px;
-    margin-bottom: 20px;
-}
-
-.sandbox-guide-summary {
-    padding: 18px 20px;
-    border-radius: var(--r-lg);
-    border: 1px solid var(--border);
-    background:
-        radial-gradient(circle at top right, var(--accent-light), transparent 38%),
-        linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent),
-        var(--surface);
-}
-
-.sandbox-guide-title {
-    font-size: 18px;
-    font-weight: 600;
-    font-family: var(--display);
-    color: var(--t1);
-    margin-bottom: 8px;
-}
-
-.sandbox-guide-copy {
-    margin: 0 0 14px;
-    font-size: 13px;
-    line-height: 1.6;
-    color: var(--t2);
-}
-
-.sandbox-guide-facts {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    margin-bottom: 16px;
-}
-
-.sandbox-guide-fact {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 10px;
-    border-radius: 999px;
-    background: var(--surface-inset);
-    border: 1px solid var(--border);
-    font-size: 12px;
-    color: var(--t2);
 }
 
 .sandbox-profile-grid {
@@ -1308,13 +1234,6 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 16px;
     margin-bottom: 18px;
-}
-
-.sandbox-runtime-card {
-    padding: 16px 18px;
-    border-radius: var(--r-lg);
-    border: 1px solid var(--border);
-    background: var(--surface);
 }
 
 /* Sandbox Docker status inline */
@@ -1770,11 +1689,6 @@
     color: var(--text-on-accent);
 }
 
-.toast-warning {
-    background: var(--warn);
-    color: var(--text-on-accent);
-}
-
 /* ─── No Model Warning ─── */
 .no-model-warning {
     background: var(--warn-bg);
@@ -1962,42 +1876,6 @@
     padding-inline: 14px;
 }
 
-.mcp-install-guide {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 12px;
-    margin-bottom: 12px;
-}
-
-.mcp-guide-step {
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
-    background: var(--surface);
-    padding: 12px 14px;
-    font-size: 13px;
-    color: var(--t2);
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    line-height: 1.45;
-}
-
-.mcp-guide-step span {
-    width: 20px;
-    height: 20px;
-    border-radius: 999px;
-    background: var(--accent-light);
-    color: var(--accent-text);
-    border: 1px solid var(--accent-border);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-family: var(--mono);
-    font-size: 11px;
-    font-weight: 700;
-    flex-shrink: 0;
-}
-
 .mcp-category-chips {
     display: flex;
     flex-wrap: wrap;
@@ -2037,12 +1915,6 @@
     border-color: var(--accent);
     background: var(--accent-light);
     color: var(--accent-text);
-}
-
-.mcp-category-section {
-    margin-bottom: 20px;
-    width: 100%;
-    display: block;
 }
 
 .mcp-category-header {
@@ -2759,12 +2631,6 @@
 .conn-status-not-connected {
     background: var(--surface-inset);
     color: var(--t3);
-}
-
-.conn-connected-actions {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
 }
 
 .conn-success-screen {
@@ -4386,6 +4252,14 @@
     align-items: center;
     gap: 8px;
     margin-bottom: 6px;
+}
+
+.trace-copy-btn {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: var(--font-sm, 0.8rem);
 }
 
 .trace-channel-badge {

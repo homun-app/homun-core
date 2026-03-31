@@ -334,47 +334,6 @@ impl OpenSkillsSource {
         Ok(())
     }
 
-    /// Get the catalog cache status (for API/UI)
-    pub async fn cache_status() -> CacheStatus {
-        let cache_path = Self::cache_path();
-        let data = match tokio::fs::read_to_string(&cache_path).await {
-            Ok(d) => d,
-            Err(_) => {
-                return CacheStatus {
-                    cached: false,
-                    stale: true,
-                    skill_count: 0,
-                    age_secs: 0,
-                }
-            }
-        };
-
-        let cache: CatalogCache = match serde_json::from_str(&data) {
-            Ok(c) => c,
-            Err(_) => {
-                return CacheStatus {
-                    cached: false,
-                    stale: true,
-                    skill_count: 0,
-                    age_secs: 0,
-                }
-            }
-        };
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let age = now.saturating_sub(cache.fetched_at);
-
-        CacheStatus {
-            cached: true,
-            stale: age > CACHE_MAX_AGE_SECS,
-            skill_count: cache.entries.len(),
-            age_secs: age,
-        }
-    }
-
     /// Fetch a file from the Open Skills repo via raw.githubusercontent.com
     async fn fetch_file(&self, path: &str) -> Result<String> {
         let url = format!(
@@ -494,14 +453,6 @@ impl OpenSkillsSource {
     fn cache_path() -> PathBuf {
         Config::data_dir().join(CACHE_FILENAME)
     }
-}
-
-/// Cache status info for API responses
-pub struct CacheStatus {
-    pub cached: bool,
-    pub stale: bool,
-    pub skill_count: usize,
-    pub age_secs: u64,
 }
 
 #[cfg(test)]

@@ -14,7 +14,6 @@
 //! ```
 
 pub mod action_policy;
-pub mod captcha;
 pub mod helpers;
 pub mod mcp_bridge;
 pub mod site_memory;
@@ -26,18 +25,3 @@ pub use mcp_bridge::{
     BROWSER_MCP_SERVER_NAME,
 };
 pub use tab_session::TabSessionManager;
-
-/// Quick runtime status check from config (no MCP connection needed).
-pub fn browser_runtime_status_for_config(
-    config: &crate::config::BrowserConfig,
-) -> crate::config::BrowserRuntimeStatus {
-    config.runtime_status()
-}
-
-/// Check current browser status from the global config.
-pub fn current_browser_status() -> crate::config::BrowserRuntimeStatus {
-    let config = crate::config::Config::load()
-        .map(|c| c.browser)
-        .unwrap_or_default();
-    browser_runtime_status_for_config(&config)
-}

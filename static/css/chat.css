@@ -357,19 +357,6 @@
     transition: height 0.1s ease;
 }
 
-/* Chat action buttons in header */
-.chat-header-actions {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-.chat-model-selector {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-}
-
 /* Styled pill overlay for model selector */
 .chat-model-pill {
     display: inline-flex;
@@ -522,12 +509,6 @@
     width: 12px;
     height: 12px;
     border-width: 1.5px;
-}
-
-.hm-spinner--lg {
-    width: 24px;
-    height: 24px;
-    border-width: 2.5px;
 }
 
 /* Inline progress row: spinner + text side by side */
@@ -1500,19 +1481,9 @@
 
 /* ─── Focus visible ─── */
 .chat-conversation-name:focus-visible,
-.chat-conv-action-btn:focus-visible,
 .chat-sidebar-toggle-btn:focus-visible {
     outline: 2px solid var(--accent-border);
     outline-offset: 2px;
-}
-
-/* ─── Multi-select checkbox ─── */
-.chat-select-checkbox {
-    flex-shrink: 0;
-    width: 16px;
-    height: 16px;
-    accent-color: var(--accent);
-    cursor: pointer;
 }
 
 /* ─── Bulk actions bar ─── */
@@ -2395,18 +2366,6 @@
     gap: 8px;
     flex-shrink: 0;
     margin-left: auto;
-}
-
-.chat-rename-input {
-    width: calc(100% - 34px);
-    min-height: 38px;
-    font-size: 14px;
-    padding: 0;
-    border: none;
-    background: transparent;
-    outline: none;
-    color: inherit;
-    font-family: inherit;
 }
 
 .chat-modal-backdrop {

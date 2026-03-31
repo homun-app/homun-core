@@ -372,5 +372,4 @@
 
     // ─── Global API ───
     window.openSettingsModal = openSettings;
-    window.closeSettingsModal = closeSettings;
 })();

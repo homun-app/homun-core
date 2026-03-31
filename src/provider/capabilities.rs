@@ -83,38 +83,20 @@ pub fn detect_model_capabilities(provider_name: &str, model: &str) -> ModelCapab
     }
 }
 
-pub fn supports_multimodal(provider_name: &str, model: &str) -> bool {
-    detect_model_capabilities(provider_name, model).multimodal
-}
-
-pub fn supports_native_documents(_provider_name: &str, _model: &str) -> bool {
-    false
-}
-
 pub fn supports_tool_calls(provider_name: &str, model: &str) -> bool {
     detect_model_capabilities(provider_name, model).tool_calls
 }
 
-pub fn supports_thinking(provider_name: &str, model: &str) -> bool {
-    detect_model_capabilities(provider_name, model).thinking
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        detect_model_capabilities, supports_multimodal, supports_native_documents,
-        supports_thinking, supports_tool_calls,
-    };
+    use super::{detect_model_capabilities, supports_tool_calls};
 
     #[test]
     fn detects_openai_family_models() {
-        assert!(supports_multimodal("openai", "openai/gpt-4o"));
-        assert!(supports_multimodal(
-            "openrouter",
-            "openrouter/google/gemini-2.0-flash"
-        ));
-        assert!(supports_multimodal("ollama", "ollama/qwen3.5:latest"));
-        assert!(!supports_multimodal("ollama", "ollama/llama3"));
+        assert!(detect_model_capabilities("openai", "openai/gpt-4o").multimodal);
+        assert!(detect_model_capabilities("openrouter", "openrouter/google/gemini-2.0-flash").multimodal);
+        assert!(detect_model_capabilities("ollama", "ollama/qwen3.5:latest").multimodal);
+        assert!(!detect_model_capabilities("ollama", "ollama/llama3").multimodal);
     }
 
     #[test]
@@ -158,36 +140,25 @@ mod tests {
     }
 
     #[test]
-    fn documents_are_disabled_until_provider_support_is_explicit() {
-        assert!(!supports_native_documents("openai", "openai/gpt-4o"));
-    }
-
-    #[test]
     fn detects_thinking_models() {
         // Ollama thinking models
-        assert!(supports_thinking("ollama", "ollama/deepseek-r1:8b"));
-        assert!(supports_thinking("ollama", "ollama/qwq:32b"));
-        assert!(supports_thinking("ollama", "ollama/qwen3:cloud"));
-        assert!(supports_thinking("ollama", "ollama/marco-o1:7b"));
-        assert!(!supports_thinking("ollama", "ollama/llama3:8b"));
-        assert!(!supports_thinking("ollama", "ollama/qwen2.5:latest"));
+        assert!(detect_model_capabilities("ollama", "ollama/deepseek-r1:8b").thinking);
+        assert!(detect_model_capabilities("ollama", "ollama/qwq:32b").thinking);
+        assert!(detect_model_capabilities("ollama", "ollama/qwen3:cloud").thinking);
+        assert!(detect_model_capabilities("ollama", "ollama/marco-o1:7b").thinking);
+        assert!(!detect_model_capabilities("ollama", "ollama/llama3:8b").thinking);
+        assert!(!detect_model_capabilities("ollama", "ollama/qwen2.5:latest").thinking);
 
         // Anthropic thinking models
-        assert!(supports_thinking("anthropic", "anthropic/claude-opus-4"));
-        assert!(supports_thinking(
-            "anthropic",
-            "anthropic/claude-sonnet-4-20250514"
-        ));
-        assert!(!supports_thinking("anthropic", "anthropic/claude-3-haiku"));
+        assert!(detect_model_capabilities("anthropic", "anthropic/claude-opus-4").thinking);
+        assert!(detect_model_capabilities("anthropic", "anthropic/claude-sonnet-4-20250514").thinking);
+        assert!(!detect_model_capabilities("anthropic", "anthropic/claude-3-haiku").thinking);
 
         // OpenAI / generic thinking models
-        assert!(supports_thinking("openai", "o1-preview"));
-        assert!(supports_thinking("openai", "o3-mini"));
-        assert!(supports_thinking("openrouter", "deepseek/deepseek-r1"));
-        assert!(supports_thinking(
-            "openrouter",
-            "deepseek/deepseek-reasoner"
-        ));
-        assert!(!supports_thinking("openai", "gpt-4o"));
+        assert!(detect_model_capabilities("openai", "o1-preview").thinking);
+        assert!(detect_model_capabilities("openai", "o3-mini").thinking);
+        assert!(detect_model_capabilities("openrouter", "deepseek/deepseek-r1").thinking);
+        assert!(detect_model_capabilities("openrouter", "deepseek/deepseek-reasoner").thinking);
+        assert!(!detect_model_capabilities("openai", "gpt-4o").thinking);
     }
 }

@@ -298,12 +298,6 @@ function setConversationUrl(conversationId) {
     window.history.replaceState({}, '', url);
 }
 
-function currentConversationTitle() {
-    const active = conversations.find((item) => item.conversation_id === currentConversationId);
-    if (active && active.title) return active.title;
-    return 'New conversation';
-}
-
 function truncateConversationText(value, max = 48) {
     const compact = String(value || '').trim().replace(/\s+/g, ' ');
     if (!compact) return '';
@@ -3075,10 +3069,6 @@ function modelCapabilityLabels(modelId) {
     return labels;
 }
 
-function formatModelOptionLabel(label, _modelId) {
-    return label;
-}
-
 function renderActiveModelCapabilities(modelId) {
     if (!chatModelCapabilitiesEl) return;
     const caps = normalizeModelCapabilities(chatModelCapabilities[modelId]);
@@ -3837,12 +3827,6 @@ function handleWorkflowProgress(progress) {
 function startConversationPolling() {
     if (conversationPollTimer) return;
     conversationPollTimer = setInterval(refreshConversationList, 5000);
-}
-function stopConversationPolling() {
-    if (conversationPollTimer) {
-        clearInterval(conversationPollTimer);
-        conversationPollTimer = null;
-    }
 }
 
 async function bootstrapChat() {

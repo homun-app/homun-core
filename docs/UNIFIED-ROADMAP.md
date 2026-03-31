@@ -258,12 +258,17 @@ Target: **17 verified recipes bundled** — all done. Google services consolidat
 
 #### 3C. App Mobile (Flutter)
 
-| # | Task | Effort |
-|---|------|--------|
-| APP-1 | Fondazioni: pairing sicuro + channel "app" + chat base + push | 3-4 settimane |
-| APP-2 | Esperienza ricca: vault mobile + dashboard + approval inline + allegati | 2-3 settimane |
-| APP-3 | Polish: offline cache + biometric lock + widget | 2 settimane |
-| APP-4 | Store publishing (App Store + Play Store) | 1 settimana |
+> Repo: `homun-app/`
+>
+> Source of truth: vedere `homun-app/docs/ROADMAP.md` per stato, gap e prossimi step dell'app Flutter.
+> Questa sezione resta volutamente sintetica; il dettaglio operativo va mantenuto nel repo dell'app.
+
+| # | Task | Effort | Note |
+|---|------|--------|------|
+| APP-1 | Fondazioni: pairing sicuro + channel "app" + chat base | 3-4 settimane | ✅ DONE (2026-03) — QR pairing (claim+poll+bootstrap), bearer auth, multi-conversation chat, WebSocket streaming (delta/blocks/tool_call), markdown rendering, file/image attachments (multipart upload), voice dictation, drawer+bottom nav (4 tab) |
+| APP-2 | Esperienza ricca: approval inline + activity feed + settings + block rendering | 2-3 settimane | ⏳ IN PROGRESS — Message block model completo (choice/approval/status/result/external_message), widget rendering incompleto. Activity feed e Approvals scaffoldati con mock data, nessuna API backend collegata. Settings page minimale |
+| APP-3 | Polish: offline cache + biometric lock + widget + push notifications | 2 settimane | ⏳ PARTIAL — Biometric lock ✅ DONE (local_auth + grace period 2min + secure storage). Push notifications, offline queue, message search: TODO |
+| APP-4 | Store publishing (App Store + Play Store) | 1 settimana | |
 
 #### 3D. Osservabilità
 

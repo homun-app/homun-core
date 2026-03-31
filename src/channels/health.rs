@@ -159,15 +159,6 @@ impl ChannelHealthTracker {
         }
     }
 
-    /// Set the enabled flag (from config).
-    pub fn mark_enabled(&self, channel: &str, enabled: bool) {
-        let mut map = self.get_or_create();
-        let m = map
-            .entry(channel.to_string())
-            .or_insert_with(ChannelMetrics::new);
-        m.enabled = enabled;
-    }
-
     /// Record a successfully processed inbound message.
     pub fn record_message(&self, channel: &str) {
         let mut map = self.get_or_create();

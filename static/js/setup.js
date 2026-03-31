@@ -598,10 +598,6 @@ function loadWizardCheckpoint() {
     } catch(_) { return null; }
 }
 
-function clearWizardCheckpoint() {
-    try { localStorage.removeItem(WIZARD_CHECKPOINT_KEY); } catch(_) {}
-}
-
 function setWizardStepState(stepEl, state) {
     if (!stepEl) return;
     stepEl.classList.remove('is-active');

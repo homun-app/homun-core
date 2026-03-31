@@ -107,16 +107,6 @@
 
 /* ─── Flow renderer (n8n-style) ─────────────────────────────── */
 
-/* Mini strip bar between item row and editor */
-.automation-flow-strip {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 16px;
-    border-top: 1px solid var(--border-subtle);
-    background: var(--surface-subtle);
-}
-
 .automation-flow-mini {
     flex: 1;
     min-width: 0;
@@ -253,17 +243,6 @@
 /* Edges */
 .flow-edge path {
     transition: stroke 0.2s;
-}
-
-/* Running animation */
-@keyframes flow-dash {
-    to { stroke-dashoffset: -20; }
-}
-
-.flow-edge--active path {
-    stroke: var(--accent);
-    stroke-dasharray: 5 5;
-    animation: flow-dash 0.8s linear infinite;
 }
 
 .automation-history-item {

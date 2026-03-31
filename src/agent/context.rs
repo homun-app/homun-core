@@ -263,11 +263,6 @@ impl ContextBuilder {
         *self.contact_context.write().await = ctx;
     }
 
-    /// Update the persona prompt prefix (called per-message after persona resolution).
-    pub async fn set_persona_context(&self, ctx: String) {
-        *self.persona_context.write().await = ctx;
-    }
-
     /// Set structured profile context from PROFILE.json.
     pub async fn set_profile_context(&self, ctx: String) {
         *self.profile_context.write().await = ctx;

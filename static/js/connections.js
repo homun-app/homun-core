@@ -858,6 +858,5 @@
 
     // ── Init ─────────────────────────────────────────────────────────
 
-    window._connectionsLoad = loadCatalog;
     loadCatalog();
 })();

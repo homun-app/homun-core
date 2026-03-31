@@ -424,29 +424,6 @@ impl AgentLoop {
         .await
     }
 
-    /// Process a message with optional streaming output.
-    /// Streaming chunks are sent to `stream_tx` if provided.
-    pub async fn process_message_streaming(
-        &self,
-        content: &str,
-        session_key: &str,
-        channel: &str,
-        chat_id: &str,
-        stream_tx: mpsc::Sender<crate::provider::StreamChunk>,
-    ) -> Result<String> {
-        self.process_message_inner(
-            content,
-            session_key,
-            channel,
-            chat_id,
-            Some(stream_tx),
-            &[],
-            None,
-            None,
-        )
-        .await
-    }
-
     /// Streaming variant with per-request blocked tools and optional thinking override.
     #[allow(clippy::too_many_arguments)]
     pub async fn process_message_streaming_with_options(
@@ -2990,11 +2967,11 @@ mod tests {
         let base = 20_u32;
         // Simulate: model already used an earlier different signature,
         // then starts repeating "snapshot" at iteration 49 (near budget).
-        state.last_signature = Some("browser:{\"action\":\"click\"}".to_string());
+        state.last_signature = Some("file_read:{\"path\":\"/old\"}".to_string());
 
         let summaries = vec![ToolExecutionSummary {
-            name: "browser".to_string(),
-            signature: "browser:{\"action\":\"snapshot\"}".to_string(),
+            name: "file_read".to_string(),
+            signature: "file_read:{\"path\":\"/test\"}".to_string(),
             useful: true,
         }];
 
@@ -3035,7 +3012,7 @@ mod tests {
         }
 
         // Call 5: stall_streak=4 → budget CONTRACTS to iteration + 2
-        let iter = 55_u32;
+        let iter = 50_u32;
         maybe_extend_iteration_budget(
             &mut active_budget,
             hard_max,

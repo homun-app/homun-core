@@ -32,20 +32,6 @@ pub async fn create_resource(
     Ok(id)
 }
 
-/// List all shared resources for a profile.
-pub async fn list_resources_by_profile(
-    pool: &Pool<Sqlite>,
-    profile_id: i64,
-) -> Result<Vec<SharedResource>> {
-    sqlx::query_as::<_, SharedResource>(
-        "SELECT * FROM shared_resources WHERE owner_profile_id = ? ORDER BY resource_type, resource_id",
-    )
-    .bind(profile_id)
-    .fetch_all(pool)
-    .await
-    .context("Failed to list shared resources")
-}
-
 /// List all shared resources (all profiles).
 pub async fn list_all_resources(pool: &Pool<Sqlite>) -> Result<Vec<SharedResource>> {
     sqlx::query_as::<_, SharedResource>(

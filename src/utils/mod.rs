@@ -5,7 +5,7 @@ pub mod retry;
 pub mod text;
 pub mod watcher;
 
-pub use reasoning_filter::{extract_reasoning, has_reasoning, strip_reasoning};
+pub use reasoning_filter::{has_reasoning, strip_reasoning};
 pub use retry::{
     is_network_online, retry_with_backoff, retry_with_condition, set_network_online, RetryConfig,
     RetryDecision, RetryWrapper, RetryableError,

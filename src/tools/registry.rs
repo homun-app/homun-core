@@ -12,7 +12,7 @@ use crate::tools::approval::ApprovalManager;
 
 /// Result of executing a tool — always a string for the LLM.
 /// Optionally carries rich UI blocks for capable clients.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ToolResult {
     pub output: String,
     pub is_error: bool,
@@ -21,16 +21,6 @@ pub struct ToolResult {
     /// Defaults to empty via `Default` so existing struct literals keep working.
     #[allow(clippy::struct_field_names)]
     pub blocks: Vec<super::ResponseBlock>,
-}
-
-impl Default for ToolResult {
-    fn default() -> Self {
-        Self {
-            output: String::new(),
-            is_error: false,
-            blocks: Vec::new(),
-        }
-    }
 }
 
 impl ToolResult {
@@ -136,11 +126,6 @@ impl ToolRegistry {
         let name = tool.name().to_string();
         tracing::debug!(tool = %name, "Registered tool");
         self.tools.insert(name, tool);
-    }
-
-    /// Unregister a tool by name
-    pub fn unregister(&mut self, name: &str) -> bool {
-        self.tools.remove(name).is_some()
     }
 
     /// Get a tool by name
@@ -349,12 +334,4 @@ mod tests {
         assert!(result.output.contains("Missing required parameter"));
     }
 
-    #[test]
-    fn test_unregister() {
-        let mut registry = ToolRegistry::new();
-        registry.register(Box::new(DummyTool));
-        assert!(registry.unregister("dummy"));
-        assert!(!registry.unregister("dummy"));
-        assert_eq!(registry.len(), 0);
-    }
 }

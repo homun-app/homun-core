@@ -427,8 +427,36 @@ impl Database {
 
         Self::apply_migration(
             pool,
+            "045_knowledge_watches",
+            include_str!("../../migrations/045_knowledge_watches.sql"),
+        )
+        .await?;
+
+        Self::apply_migration(
+            pool,
+            "046_mobile_notify_target",
+            include_str!("../../migrations/046_mobile_notify_target.sql"),
+        )
+        .await?;
+
+        Self::apply_migration(
+            pool,
             "047_browser_allowed_sites",
             include_str!("../../migrations/047_browser_allowed_sites.sql"),
+        )
+        .await?;
+
+        Self::apply_migration(
+            pool,
+            "048_contact_response_mode_inherit",
+            include_str!("../../migrations/048_contact_response_mode_inherit.sql"),
+        )
+        .await?;
+
+        Self::apply_migration(
+            pool,
+            "049_gateway_name_normalize",
+            include_str!("../../migrations/049_gateway_name_normalize.sql"),
         )
         .await?;
 
@@ -1062,7 +1090,7 @@ impl Database {
 
     /// Prune old conversation messages based on retention policy.
     /// Returns the number of messages deleted.
-    pub async fn prune_old_messages(&self, retention_days: u32) -> Result<u64> {
+    pub(crate) async fn prune_old_messages(&self, retention_days: u32) -> Result<u64> {
         if retention_days == 0 {
             return Ok(0); // Never prune
         }
@@ -1090,7 +1118,7 @@ impl Database {
 
     /// Prune old memory chunks (history entries) based on retention policy.
     /// Returns the number of chunks deleted.
-    pub async fn prune_old_memory_chunks(&self, retention_days: u32) -> Result<u64> {
+    pub(crate) async fn prune_old_memory_chunks(&self, retention_days: u32) -> Result<u64> {
         if retention_days == 0 {
             return Ok(0); // Never prune
         }
@@ -1116,44 +1144,6 @@ impl Database {
             );
         }
         Ok(deleted)
-    }
-
-    /// Get list of daily memory files that are older than the archive threshold.
-    /// Returns list of dates (YYYY-MM-DD format) that can be archived.
-    pub fn get_old_daily_files(&self, archive_months: u32) -> Result<Vec<String>> {
-        if archive_months == 0 {
-            return Ok(Vec::new()); // Never archive
-        }
-
-        let cutoff = chrono::Utc::now() - chrono::Duration::days(archive_months as i64 * 30);
-        let cutoff_date = cutoff.format("%Y-%m-%d").to_string();
-
-        let data_dir = crate::config::Config::data_dir();
-        let memory_dir = data_dir.join("memory");
-
-        if !memory_dir.exists() {
-            return Ok(Vec::new());
-        }
-
-        let mut old_files = Vec::new();
-        for entry in std::fs::read_dir(&memory_dir)
-            .with_context(|| format!("Failed to read memory directory {}", memory_dir.display()))?
-        {
-            let entry = entry.context("Failed to read directory entry")?;
-            let filename = entry.file_name();
-            let name = filename.to_string_lossy();
-
-            // Check if it's a daily file (YYYY-MM-DD.md)
-            if name.len() == 14 && name.ends_with(".md") {
-                let date = &name[..10]; // YYYY-MM-DD
-                if date < cutoff_date.as_str() {
-                    old_files.push(date.to_string());
-                }
-            }
-        }
-
-        old_files.sort();
-        Ok(old_files)
     }
 
     /// Run full memory cleanup based on retention policies.
@@ -1824,16 +1814,6 @@ impl Database {
         Ok(())
     }
 
-    /// Count total users in the database (for first-run detection).
-    pub async fn count_users(&self) -> Result<i64> {
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
-            .fetch_one(&self.pool)
-            .await
-            .context("Failed to count users")?;
-
-        Ok(count)
-    }
-
     /// Count users that have a password set (for web auth first-run detection).
     /// Returns 0 when no user has ever set up web credentials.
     pub async fn count_users_with_password(&self) -> Result<i64> {
@@ -2256,18 +2236,6 @@ impl Database {
         .await
         .context("Failed to list vault access log")?;
         Ok(rows)
-    }
-
-    /// Count access log entries for a specific key.
-    pub async fn count_vault_access_for_key(&self, key_name: &str) -> Result<i64> {
-        let count = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM vault_access_log WHERE key_name = ?",
-        )
-        .bind(key_name)
-        .fetch_one(&self.pool)
-        .await
-        .context("Failed to count vault access")?;
-        Ok(count)
     }
 
     // ── Browser allowed sites ───────────────────────────────────────

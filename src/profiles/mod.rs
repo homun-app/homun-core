@@ -261,21 +261,6 @@ impl ProfileRegistry {
             .cloned()
     }
 
-    /// Get a profile by slug.
-    pub async fn get_by_slug(&self, slug: &str) -> Option<Profile> {
-        self.profiles.read().await.get(slug).cloned()
-    }
-
-    /// Get a profile by database id.
-    pub async fn get_by_id(&self, id: i64) -> Option<Profile> {
-        self.profiles
-            .read()
-            .await
-            .values()
-            .find(|p| p.id == id)
-            .cloned()
-    }
-
     /// List all profiles.
     pub async fn list(&self) -> Vec<Profile> {
         self.profiles.read().await.values().cloned().collect()

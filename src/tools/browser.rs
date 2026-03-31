@@ -101,15 +101,6 @@ impl BrowserSession {
             .await;
     }
 
-    /// Close a specific session's browser tab (called after agent run completes).
-    pub async fn close_tab_for(&self, session_key: &str) {
-        let _guard = self.operation_mutex.lock().await;
-        let peer = self.current_peer().await;
-        self.tab_manager
-            .close_session(session_key, &peer)
-            .await;
-    }
-
     /// Check if any session has an active browser tab.
     pub async fn has_any_active(&self) -> bool {
         self.tab_manager.has_any_active().await

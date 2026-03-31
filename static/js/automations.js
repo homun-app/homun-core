@@ -1347,7 +1347,6 @@ async function getCachedTargets() {
 
 // Cache for smart parameter overrides
 let _cachedEmailAccounts = null;
-let _cachedModels = null;
 
 async function getCachedEmailAccounts() {
     if (_cachedEmailAccounts) return _cachedEmailAccounts;
@@ -1356,16 +1355,6 @@ async function getCachedEmailAccounts() {
         // API returns { accounts: [...] } — extract the array
         const arr = Array.isArray(resp) ? resp : (resp && Array.isArray(resp.accounts) ? resp.accounts : null);
         if (arr && arr.length > 0) _cachedEmailAccounts = arr;
-        return arr || [];
-    } catch (_) { return []; } // Don't cache errors — retry next time
-}
-async function getCachedModels() {
-    if (_cachedModels) return _cachedModels;
-    try {
-        const resp = await apiRequest('/v1/providers/models');
-        // API returns { ok, models: [...], current, ... } — extract the array
-        const arr = Array.isArray(resp) ? resp : (resp && Array.isArray(resp.models) ? resp.models : null);
-        if (arr && arr.length > 0) _cachedModels = arr;
         return arr || [];
     } catch (_) { return []; } // Don't cache errors — retry next time
 }
@@ -2956,7 +2945,7 @@ const Builder = {
             case 'require_2fa':
                 addHint('This node requires two-factor authentication verification before the automation can continue. The user will be prompted to enter their 2FA code.');
                 addHint('Make sure 2FA is enabled in Settings > Vault & 2FA.');
-                addLink('\u2192 Configure 2FA', '/vault');
+                addLink('\u2192 Configure 2FA', 'javascript:openSettingsModal("vault")');
                 break;
 
             // ─── DELIVER ────────────────────────────────────────

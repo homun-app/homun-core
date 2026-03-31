@@ -153,7 +153,7 @@ pub struct BlockResponse {
 /// Returns the cleaned text (fences removed) and any valid blocks found.
 /// Invalid JSON or schema mismatches are silently skipped — the markdown
 /// stays intact as fallback.
-pub fn extract_fence_blocks(text: &str) -> (String, Vec<ResponseBlock>) {
+fn extract_fence_blocks(text: &str) -> (String, Vec<ResponseBlock>) {
     let mut blocks = Vec::new();
     let mut cleaned = String::with_capacity(text.len());
     let mut rest = text;
@@ -204,8 +204,6 @@ pub fn extract_fence_blocks(text: &str) -> (String, Vec<ResponseBlock>) {
 ///    markdown patterns (numbered lists with consistent key-value fields)
 ///
 /// Returns the cleaned text (fences removed) and any blocks found.
-/// This is the primary entry point — use this instead of calling
-/// `extract_fence_blocks` or `detect_blocks_from_markdown` directly.
 pub fn extract_blocks(text: &str) -> (String, Vec<ResponseBlock>) {
     let (cleaned, fence_blocks) = extract_fence_blocks(text);
 
@@ -233,7 +231,7 @@ pub fn extract_blocks(text: &str) -> (String, Vec<ResponseBlock>) {
 ///
 /// Returns `None` if no structured pattern is detected (the output is
 /// plain prose or doesn't match known patterns).
-pub fn detect_blocks_from_markdown(text: &str) -> Option<Vec<ResponseBlock>> {
+fn detect_blocks_from_markdown(text: &str) -> Option<Vec<ResponseBlock>> {
     // Try numbered-heading pattern: "## N. **Title**" or "N. **Title**" or "**N. Title**"
     if let Some(blocks) = detect_numbered_items(text) {
         if !blocks.is_empty() {

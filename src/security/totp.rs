@@ -119,10 +119,6 @@ impl TotpManager {
         false
     }
 
-    /// Verify a TOTP code with strict timing (no window tolerance).
-    pub fn verify_strict(&self, code: &str) -> bool {
-        self.totp.check_current(code.trim()).unwrap_or(false)
-    }
 }
 
 /// Generate recovery codes (10 codes, format: XXXX-XXXX)

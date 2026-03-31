@@ -221,13 +221,6 @@
     cursor: pointer;
 }
 
-.builder-edge-hitbox {
-    fill: none;
-    stroke: transparent;
-    stroke-width: 15;
-    cursor: pointer;
-}
-
 /* ── Builder Layout ──────────────────────────────── */
 .builder-view {
     display: none;

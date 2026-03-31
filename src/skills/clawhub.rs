@@ -781,51 +781,6 @@ impl ClawHubInstaller {
         Ok(results)
     }
 
-    /// Browse skills by a specific owner — returns all skills from a publisher
-    pub async fn browse_owner(&self, owner: &str) -> Result<Vec<ClawHubSearchResult>> {
-        let owner_url = format!(
-            "https://api.github.com/repos/{}/{}/contents/{}/{}?ref={}",
-            CLAWHUB_REPO_OWNER, CLAWHUB_REPO_NAME, CLAWHUB_SKILLS_PATH, owner, CLAWHUB_BRANCH
-        );
-
-        let skill_entries: Vec<GitHubDirEntry> = self
-            .client
-            .get(&owner_url)
-            .header("Accept", "application/vnd.github.v3+json")
-            .send()
-            .await
-            .with_context(|| format!("Failed to list skills for owner '{}'", owner))?
-            .error_for_status()
-            .with_context(|| format!("Owner '{}' not found on ClawHub", owner))?
-            .json()
-            .await
-            .context("Failed to parse owner skills listing")?;
-
-        let mut results = Vec::new();
-
-        for entry in &skill_entries {
-            if entry.entry_type != "dir" {
-                continue;
-            }
-
-            let skill_md_path = format!("{}/SKILL.md", entry.path);
-            if let Ok(content) = self.fetch_file_from_monorepo(&skill_md_path).await {
-                if let Ok((meta, _)) = parse_skill_md_public(&content) {
-                    results.push(ClawHubSearchResult {
-                        owner: owner.to_string(),
-                        skill_name: entry.name.clone(),
-                        description: meta.description,
-                        slug: format!("{}/{}", owner, entry.name),
-                        downloads: 0,
-                        stars: 0,
-                    });
-                }
-            }
-        }
-
-        Ok(results)
-    }
-
     // --- Private helpers ---
 
     /// Fetch a single file from the ClawHub monorepo.

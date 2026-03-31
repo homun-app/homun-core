@@ -60,8 +60,8 @@ mod two_factor;
 
 pub use estop::{emergency_stop, resume, EStopHandles, EStopReport};
 pub use exfiltration::{
-    global_filter, init_global_filter, redact, scan, Detection, ExfilConfig, ExfilFilter,
-    ScanResult, Severity,
+    global_filter, init_global_filter, redact, Detection, ExfilConfig, ExfilFilter, ScanResult,
+    Severity,
 };
 pub use pairing::PairingManager;
 pub use vault_leak::{redact_vault_values, resolve_vault_references};
