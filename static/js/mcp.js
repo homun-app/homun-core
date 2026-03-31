@@ -669,7 +669,7 @@
                 '<button type="button" class="btn btn-secondary btn-sm" id="mcp-oauth-start-btn">' + escapeHtml(config.consentLabel) + '</button>' +
                 '<button type="button" class="btn btn-primary btn-sm" id="mcp-oauth-exchange-btn">Exchange Code</button>' +
                 '<button type="button" class="btn btn-secondary btn-sm" id="mcp-oauth-retry-btn">Retry Consent</button>' +
-                '<a class="btn btn-secondary btn-sm" href="/vault" target="_blank" rel="noopener noreferrer">Open Vault</a>' +
+                '<button type="button" class="btn btn-secondary btn-sm" onclick="openSettingsModal(\'vault\')">Open Vault</button>' +
             '</div>' +
             '<div class="mcp-oauth-helper-status" id="mcp-oauth-status"></div>';
 

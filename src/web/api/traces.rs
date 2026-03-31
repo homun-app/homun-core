@@ -114,10 +114,10 @@ async fn clear_all_handler() -> Json<serde_json::Value> {
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().map(|e| e == "json").unwrap_or(false) {
-                if std::fs::remove_file(&path).is_ok() {
-                    deleted += 1;
-                }
+            if path.extension().map(|e| e == "json").unwrap_or(false)
+                && std::fs::remove_file(&path).is_ok()
+            {
+                deleted += 1;
             }
         }
     }

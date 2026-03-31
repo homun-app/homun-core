@@ -67,8 +67,7 @@
         const badge = byId('mobile-devices-count');
         if (!list || !badge) return;
 
-        const activeDevices = devices.filter(d => !d.revoked);
-        badge.textContent = String(activeDevices.length);
+        badge.textContent = String(devices.length);
 
         list.innerHTML = '';
         if (devices.length === 0) {
@@ -106,20 +105,36 @@
             const actions = document.createElement('div');
             actions.className = 'item-actions';
 
+            if (device.is_notify_target) {
+                const defaultBadge = document.createElement('span');
+                defaultBadge.className = 'badge badge-accent';
+                defaultBadge.textContent = 'Default';
+                actions.appendChild(defaultBadge);
+                actions.appendChild(document.createTextNode(' '));
+            }
+
             const status = document.createElement('span');
-            status.className = device.revoked ? 'badge badge-neutral' : 'badge badge-success';
-            status.textContent = device.revoked ? 'Revoked' : 'Active';
+            status.className = 'badge badge-success';
+            status.textContent = 'Active';
             actions.appendChild(status);
             actions.appendChild(document.createTextNode(' '));
 
-            const revokeBtn = document.createElement('button');
-            revokeBtn.className = 'btn btn-ghost btn-sm';
-            revokeBtn.textContent = device.revoked ? 'Removed' : 'Revoke';
-            revokeBtn.disabled = !!device.revoked;
-            revokeBtn.addEventListener('click', function () {
-                revokeDevice(device.id);
+            const notifyBtn = document.createElement('button');
+            notifyBtn.className = 'btn btn-ghost btn-sm';
+            notifyBtn.textContent = device.is_notify_target ? 'Unset default' : 'Set as default';
+            notifyBtn.addEventListener('click', function () {
+                toggleNotifyTarget(device.id, !device.is_notify_target);
             });
-            actions.appendChild(revokeBtn);
+            actions.appendChild(notifyBtn);
+            actions.appendChild(document.createTextNode(' '));
+
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'btn btn-ghost btn-sm';
+            deleteBtn.textContent = 'Remove';
+            deleteBtn.addEventListener('click', function () {
+                deleteDevice(device.id);
+            });
+            actions.appendChild(deleteBtn);
 
             row.appendChild(info);
             row.appendChild(actions);
@@ -240,13 +255,27 @@
         }
     }
 
-    async function revokeDevice(id) {
-        if (!confirm('Revoke this mobile device? It will have to pair again.')) return;
+    async function deleteDevice(id) {
+        if (!confirm('Remove this mobile device? It will need to pair again.')) return;
         try {
             await fetchJson('/api/v1/mobile/devices/' + encodeURIComponent(id), {
                 method: 'DELETE'
             });
-            showMessage('Mobile device revoked.');
+            showMessage('Mobile device removed.');
+            await loadDevices();
+        } catch (error) {
+            showMessage(error.message, 'error');
+        }
+    }
+
+    async function toggleNotifyTarget(id, enabled) {
+        try {
+            await fetchJson('/api/v1/mobile/devices/' + encodeURIComponent(id) + '/notify-target', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: enabled })
+            });
+            showMessage(enabled ? 'Device set as default notification target.' : 'Default notification target removed.');
             await loadDevices();
         } catch (error) {
             showMessage(error.message, 'error');

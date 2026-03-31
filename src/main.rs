@@ -1342,7 +1342,7 @@ async fn main() -> Result<()> {
                 }
             };
             #[cfg(not(feature = "embeddings"))]
-            let watch_update_tx: Option<tokio::sync::mpsc::Sender<()>> = None;
+            let _watch_update_tx: Option<tokio::sync::mpsc::Sender<()>> = None;
 
             // Clone agent Arc before moving into Gateway (needed for deferred MCP task)
             #[cfg(feature = "mcp")]

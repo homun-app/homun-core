@@ -12,10 +12,6 @@ use super::server::AppState;
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/", get(chat_page))
-        .route("/setup", get(setup_page))
-        .route("/appearance", get(appearance_page))
-        .route("/channels", get(channels_page))
-        .route("/browser", get(browser_page))
         .route("/chat", get(chat_page))
         .route("/automations", get(automations_page))
         .route("/workflows", get(workflows_page))
@@ -38,20 +34,6 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/profiles", get(profiles_page))
         .route("/memory", get(memory_page))
         .route("/knowledge", get(knowledge_page))
-        .route("/vault", get(vault_page))
-        .route("/file-access", get(file_access_page))
-        .route("/shell", get(shell_page))
-        .route("/sandbox", get(sandbox_page))
-        .route(
-            "/permissions",
-            get(|| async { axum::response::Redirect::permanent("/file-access") }),
-        )
-        .route("/approvals", get(approvals_page))
-        .route("/account", get(account_page))
-        .route("/api-keys", get(api_keys_page))
-        .route("/maintenance", get(maintenance_page))
-        .route("/logs", get(logs_page))
-        .route("/traces", get(traces_page))
         .route("/onboarding", get(onboarding_page))
 }
 
@@ -98,19 +80,6 @@ const AUTOMATION_PAGES: &[&str] = &["automations", "workflows"];
 const BRAIN_PAGES: &[&str] = &["memory", "knowledge", "contacts", "profiles"];
 /// Pages that belong to the "Extensions" sub-navigation group.
 const EXTENSIONS_PAGES: &[&str] = &["skills", "mcp", "agents"];
-/// Pages that belong to the "Settings" sub-navigation group.
-const SETTINGS_PAGES: &[&str] = &["settings", "appearance", "channels", "browser"];
-/// Pages that belong to the "Security" sub-navigation group.
-const SECURITY_PAGES: &[&str] = &[
-    "vault",
-    "api-keys",
-    "approvals",
-    "file-access",
-    "shell",
-    "sandbox",
-];
-/// Pages that belong to the "System" sub-navigation group.
-const SYSTEM_PAGES: &[&str] = &["maintenance", "logs", "traces"];
 
 /// Build the sidebar navigation HTML (icon bar, 56px).
 fn sidebar(active: &str) -> String {
@@ -247,57 +216,6 @@ fn content_subnav(active: &str) -> String {
             a("skills"),
             a("mcp"),
             a("agents"),
-            toggle = SUBNAV_TOGGLE,
-        )
-    } else if SETTINGS_PAGES.contains(&active) {
-        format!(
-            r#"<aside class="sidebar-subnav is-open">
-                <div class="sidebar-subnav-header">SETTINGS{toggle}</div>
-                <div class="subnav-section">General</div>
-                <a href="/setup" class="sidebar-subnav-link{0}">Model &amp; Providers</a>
-                <a href="/appearance" class="sidebar-subnav-link{1}">Appearance</a>
-                <div class="subnav-section">Channels</div>
-                <a href="/channels" class="sidebar-subnav-link{2}">Channels</a>
-                <a href="/browser" class="sidebar-subnav-link{3}">Browser</a>
-            </aside>"#,
-            a("settings"),
-            a("appearance"),
-            a("channels"),
-            a("browser"),
-            toggle = SUBNAV_TOGGLE,
-        )
-    } else if SECURITY_PAGES.contains(&active) {
-        format!(
-            r#"<aside class="sidebar-subnav is-open">
-                <div class="sidebar-subnav-header">SECURITY{toggle}</div>
-                <div class="subnav-section">Secrets</div>
-                <a href="/vault" class="sidebar-subnav-link{0}">Vault</a>
-                <a href="/api-keys" class="sidebar-subnav-link{1}">API Keys</a>
-                <div class="subnav-section">Access</div>
-                <a href="/approvals" class="sidebar-subnav-link{2}">Approvals</a>
-                <a href="/file-access" class="sidebar-subnav-link{3}">File Access</a>
-                <a href="/shell" class="sidebar-subnav-link{4}">Shell</a>
-                <a href="/sandbox" class="sidebar-subnav-link{5}">Sandbox</a>
-            </aside>"#,
-            a("vault"),
-            a("api-keys"),
-            a("approvals"),
-            a("file-access"),
-            a("shell"),
-            a("sandbox"),
-            toggle = SUBNAV_TOGGLE,
-        )
-    } else if SYSTEM_PAGES.contains(&active) {
-        format!(
-            r#"<aside class="sidebar-subnav is-open">
-                <div class="sidebar-subnav-header">SYSTEM{toggle}</div>
-                <a href="/maintenance" class="sidebar-subnav-link{0}">Database</a>
-                <a href="/logs" class="sidebar-subnav-link{1}">Logs</a>
-                <a href="/traces" class="sidebar-subnav-link{2}">Request Analysis</a>
-            </aside>"#,
-            a("maintenance"),
-            a("logs"),
-            a("traces"),
             toggle = SUBNAV_TOGGLE,
         )
     } else {
@@ -591,19 +509,19 @@ async fn dashboard(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 
     // Show warning if no model is configured
     let no_model_warning = if provider == "none" || config.agent.model.is_empty() {
-        r#"<div class="no-model-warning">
+        r##"<div class="no-model-warning">
             <span class="no-model-warning-icon">⚠️</span>
             <div class="no-model-warning-text">
                 <strong>No model configured</strong>
-                <p>Select a model in <a href="/setup">Settings → Agent Configuration</a> to enable the assistant.</p>
+                <p>Select a model in <a href="#" onclick="openSettingsModal('setup');return false">Settings → Agent Configuration</a> to enable the assistant.</p>
             </div>
-        </div>"#
+        </div>"##
     } else {
         ""
     };
 
     let body = format!(
-        r#"<main class="content">
+        r##"<main class="content">
             <div class="content-inner">
                 <div class="page-header">
                     <div class="page-title-group">
@@ -618,7 +536,7 @@ async fn dashboard(State(state): State<Arc<AppState>>) -> impl IntoResponse {
                 {no_model_warning}
 
                 <div class="stats-grid">
-                    <a href="/setup" class="stat-card stat-card-link">
+                    <a href="#" class="stat-card stat-card-link" onclick="openSettingsModal('setup');return false">
                         <div class="stat-label">Model</div>
                         <div class="stat-value">{model}</div>
                         <div class="stat-sub">via {provider}</div>
@@ -705,7 +623,7 @@ async fn dashboard(State(state): State<Arc<AppState>>) -> impl IntoResponse {
                     </div>
                 </section>
             </div>
-        </main>"#,
+        </main>"##,
         model = config.agent.model,
         provider = provider,
         uptime_secs = uptime,
@@ -720,55 +638,6 @@ async fn dashboard(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         &["dashboard.js", "dash-usage.js"],
     ))
     .into_response()
-}
-
-// ─── Settings ───────────────────────────────────────────────────
-
-async fn setup_page(State(state): State<Arc<AppState>>) -> Html<String> {
-    let section = section_setup(&state).await;
-    let body = format!(
-        r#"<main class="content">
-            <div class="content-inner">
-                <div class="page-header">
-                    <div class="page-title-group">
-                        <h1 class="page-title">Model &amp; Providers</h1>
-                    </div>
-                </div>
-                {section}
-            </div>
-        </main>"#
-    );
-
-    Html(page_html(
-        "Settings",
-        "settings",
-        &body,
-        &["embedding-loader.js", "setup.js"],
-    ))
-}
-
-// ─── Appearance ────────────────────────────────────────────────
-
-async fn appearance_page(State(state): State<Arc<AppState>>) -> Html<String> {
-    let section = section_appearance(&state).await;
-    let body = format!(
-        r#"<main class="content">
-            <div class="content-inner">
-                <div class="page-header">
-                    <div class="page-title-group">
-                        <h1 class="page-title">Appearance</h1>
-                    </div>
-                </div>
-                {section}
-            </div>
-        </main>"#
-    );
-    Html(page_html(
-        "Appearance",
-        "appearance",
-        &body,
-        &["accent-utils.js", "appearance.js"],
-    ))
 }
 
 /// Section HTML fragment for the settings modal.
@@ -899,46 +768,6 @@ pub(crate) async fn section_appearance(state: &AppState) -> String {
             ""
         },
     )
-}
-
-// ─── Channels ──────────────────────────────────────────────────
-
-async fn channels_page(State(state): State<Arc<AppState>>) -> Html<String> {
-    let section = section_channels(&state).await;
-    let body = format!(
-        r#"<main class="content">
-            <div class="content-inner">
-                <div class="page-header">
-                    <div class="page-title-group">
-                        <h1 class="page-title">Channels</h1>
-                    </div>
-                </div>
-                {section}
-            </div>
-        </main>"#
-    );
-
-    Html(page_html("Channels", "channels", &body, &["channels.js"]))
-}
-
-// ─── Browser ──────────────────────────────────────────────────
-
-async fn browser_page(State(state): State<Arc<AppState>>) -> Html<String> {
-    let section = section_browser(&state).await;
-    let body = format!(
-        r#"<main class="content">
-            <div class="content-inner">
-                <div class="page-header">
-                    <div class="page-title-group">
-                        <h1 class="page-title">Browser Automation</h1>
-                    </div>
-                </div>
-                {section}
-            </div>
-        </main>"#
-    );
-
-    Html(page_html("Browser", "browser", &body, &["setup.js"]))
 }
 
 // ─── Chat ───────────────────────────────────────────────────────
@@ -1920,58 +1749,6 @@ fn render_mcp_oauth_callback_page(
     ))
 }
 
-// ─── Logs ───────────────────────────────────────────────────────
-
-async fn logs_page(State(state): State<Arc<AppState>>) -> Html<String> {
-    let inner = section_logs(&state).await;
-    let body = format!(
-        r#"<main class="content">
-            <div class="content-inner">
-                <div class="page-header">
-                    <div class="page-title-group">
-                        <h1 class="page-title">Logs</h1>
-                        <span id="logs-status" class="badge badge-warning">Connecting...</span>
-                    </div>
-                </div>
-                {inner}
-            </div>
-        </main>"#
-    );
-    Html(page_html("Logs", "logs", &body, &["logs.js"]))
-}
-
-// ─── Request Analysis ──────────────────────────────────────────────
-
-async fn traces_page(State(_state): State<Arc<AppState>>) -> Html<String> {
-    let body = r#"<main class="content">
-            <div class="content-inner">
-                <div class="page-header">
-                    <div class="page-title-group">
-                        <h1 class="page-title">Request Analysis</h1>
-                        <span class="page-subtitle">Full execution traces for each agent request</span>
-                    </div>
-                </div>
-                <div class="traces-layout" id="traces-layout">
-                    <div class="traces-list-pane" id="traces-list-pane">
-                        <div class="traces-list-header">
-                            <span id="traces-count" class="badge badge-secondary">0 traces</span>
-                            <button class="btn btn-ghost btn-sm" id="traces-refresh-btn">Refresh</button>
-                            <button class="btn btn-ghost btn-sm" id="traces-clear-btn" style="color:var(--error);">Clear All</button>
-                        </div>
-                        <div id="traces-list" class="traces-list"></div>
-                    </div>
-                    <div class="traces-detail-pane" id="traces-detail-pane">
-                        <div class="traces-empty" id="traces-empty">
-                            <p>Select a request to view its full execution trace</p>
-                        </div>
-                        <div id="traces-detail" style="display:none"></div>
-                    </div>
-                </div>
-            </div>
-        </main>"#;
-    Html(page_html("Request Analysis", "traces", body, &["traces.js"]))
-}
-
 // ─── Contacts ─────────────────────────────────────────────────────
 
 async fn contacts_page(State(_state): State<Arc<AppState>>) -> Html<String> {
@@ -2196,115 +1973,9 @@ async fn memory_page(State(state): State<Arc<AppState>>) -> Html<String> {
     Html(page_html("Memory", "memory", &body, &["memory.js"]))
 }
 
-// ─── Vault ───────────────────────────────────────────────────────
-
-async fn vault_page(State(state): State<Arc<AppState>>) -> Html<String> {
-    let section = section_vault(&state).await;
-    let body = format!(
-        r#"<main class="content">
-            <div class="content-inner">
-                <div class="page-header">
-                    <div class="page-title-group">
-                        <h1 class="page-title">Vault</h1>
-                        <span class="badge badge-neutral" id="vault-count">Loading…</span>
-                    </div>
-                </div>
-
-                {section}
-
-            </div>
-        </main>"#
-    );
-
-    Html(page_html("Vault", "vault", &body, &["vault.js"]))
-}
-
 // ─── File Access ─────────────────────────────────────────────────
 
-async fn file_access_page(State(state): State<Arc<AppState>>) -> Html<String> {
-    let config = state.config.read().await;
-    let acl_count = config.permissions.acl.len();
-    drop(config);
-
-    let section = section_file_access(&state).await;
-    let body = format!(
-        r#"<main class="content">
-            <div class="content-inner">
-                <div class="page-header">
-                    <div class="page-title-group">
-                        <h1 class="page-title">File Access</h1>
-                        <span class="badge badge-info">{acl_count} ACL rules</span>
-                    </div>
-                </div>
-
-                {section}
-
-            </div>
-        </main>"#
-    );
-
-    Html(page_html(
-        "File Access",
-        "file-access",
-        &body,
-        &["file-access.js"],
-    ))
-}
-
 // ─── Shell ───────────────────────────────────────────────────────
-
-async fn shell_page(State(state): State<Arc<AppState>>) -> Html<String> {
-    let inner = section_shell(&state).await;
-    let body = format!(
-        r#"<main class="content">
-            <div class="content-inner">
-                <div class="page-header">
-                    <div class="page-title-group">
-                        <h1 class="page-title">Shell</h1>
-                    </div>
-                </div>
-                {inner}
-            </div>
-        </main>"#
-    );
-    Html(page_html("Shell", "shell", &body, &["shell.js"]))
-}
-
-// ─── Sandbox ─────────────────────────────────────────────────────
-
-async fn sandbox_page(State(state): State<Arc<AppState>>) -> Html<String> {
-    let config = state.config.read().await;
-    let sandbox_badge_class = if config.security.execution_sandbox.enabled {
-        "badge-success"
-    } else {
-        "badge-neutral"
-    };
-    let sandbox_badge_text = if config.security.execution_sandbox.enabled {
-        "Enabled"
-    } else {
-        "Disabled"
-    };
-    drop(config);
-
-    let section = section_sandbox(&state).await;
-    let body = format!(
-        r#"<main class="content">
-            <div class="content-inner">
-                <div class="page-header">
-                    <div class="page-title-group">
-                        <h1 class="page-title">Execution Sandbox</h1>
-                        <span class="badge {sandbox_badge_class}" id="sandbox-current-badge">{sandbox_badge_text}</span>
-                    </div>
-                </div>
-
-                {section}
-
-            </div>
-        </main>"#
-    );
-
-    Html(page_html("Sandbox", "sandbox", &body, &["sandbox.js"]))
-}
 
 // ─── Helpers ────────────────────────────────────────────────────
 
@@ -2825,59 +2496,6 @@ fn format_uptime(secs: u64) -> String {
     }
 }
 
-// ─── Account Page ─────────────────────────────────────────────────
-
-async fn account_page(State(state): State<Arc<AppState>>) -> Html<String> {
-    let section = section_account(&state).await;
-    let body = format!(
-        r#"<main class="content">
-            <div class="content-inner">
-                <div class="page-header">
-                    <div class="page-title-group">
-                        <h1 class="page-title">Account</h1>
-                        <span class="badge badge-neutral" id="account-status">Loading…</span>
-                    </div>
-                </div>
-                {section}
-            </div>
-        </main>"#
-    );
-
-    let html = page_html(
-        "Account",
-        "account",
-        &body,
-        &["account.js", "account-gateways.js", "account-mobile.js"],
-    );
-    Html(html)
-}
-
-// ═══════════════════════════════════════════════════════════════
-// APPROVALS PAGE (P0-4)
-// ═══════════════════════════════════════════════════════════════
-
-async fn approvals_page(State(state): State<Arc<AppState>>) -> Html<String> {
-    let section = section_approvals(&state).await;
-    let body = format!(
-        r#"
-        <main class="content">
-            <div class="content-inner">
-                <div class="page-header">
-                    <div class="page-title-group">
-                        <h1 class="page-title">Approvals</h1>
-                        <span class="badge badge-info" id="pending-count">0 pending</span>
-                    </div>
-                    <p class="page-desc">Manage command approval workflow for shell commands</p>
-                </div>
-
-                {section}
-            </div>
-        </main>"#
-    );
-
-    let html = page_html("Approvals", "approvals", &body, &["approvals.js"]);
-    Html(html)
-}
 
 // ─── Knowledge Page ────────────────────────────────────────────────
 
@@ -3345,51 +2963,6 @@ pub async fn setup_wizard_page() -> Html<String> {
     Html(standalone_page("Setup", body))
 }
 
-// ─── API Keys ────────────────────────────────────────────────────
-
-async fn api_keys_page(State(state): State<Arc<AppState>>) -> Html<String> {
-    let inner = section_api_keys(&state).await;
-    let body = format!(
-        r#"<main class="content">
-            <div class="content-inner">
-                <div class="page-header">
-                    <div class="page-title-group">
-                        <h1 class="page-title">API Keys</h1>
-                        <span class="badge badge-neutral" id="keys-count">0</span>
-                    </div>
-                    <button class="btn btn-primary btn-sm" id="create-key-btn">+ Create Key</button>
-                </div>
-                {inner}
-            </div>
-        </main>"#
-    );
-    Html(page_html("API Keys", "api-keys", &body, &["api-keys.js"]))
-}
-
-// ─── Maintenance ─────────────────────────────────────────────────
-
-async fn maintenance_page(State(state): State<Arc<AppState>>) -> Html<String> {
-    let inner = section_maintenance(&state).await;
-    let body = format!(
-        r#"<main class="content">
-            <div class="content-inner">
-                <div class="page-header">
-                    <div class="page-title-group">
-                        <h1 class="page-title">Database</h1>
-                        <p class="page-subtitle">View storage usage and purge data by domain</p>
-                    </div>
-                </div>
-                {inner}
-            </div>
-        </main>"#
-    );
-    Html(page_html(
-        "Database",
-        "maintenance",
-        &body,
-        &["maintenance.js"],
-    ))
-}
 
 // ─── Onboarding ─────────────────────────────────────────────────
 
@@ -3462,7 +3035,7 @@ async fn agents_page(State(_state): State<Arc<AppState>>) -> Html<String> {
             <div class="callout callout--info" style="margin-bottom:24px">
                 <strong>Multi-Agent</strong> &mdash; Define specialized agents with different models, instructions, and tool access.
                 Messages are routed to agents by: <strong>contact override</strong> &rarr; <strong>channel default</strong> &rarr; <strong>LLM classifier</strong> &rarr; <strong>default agent</strong>.
-                Assign agents to channels in <a href="/channels">Channels</a> or to contacts in <a href="/contacts">Contacts</a>.
+                Assign agents to channels in <a href="#" onclick="openSettingsModal('channels');return false">Channels</a> or to contacts in <a href="/contacts">Contacts</a>.
             </div>
 
             <section class="section" id="routing-section">
@@ -3635,7 +3208,7 @@ pub(crate) async fn section_account(state: &AppState) -> String {
                 <section class="section">
                     <div class="section-header"><h2>API Keys</h2></div>
                     <p style="color:var(--muted);margin-bottom:1rem;font-size:0.875rem">
-                        <a href="/api-keys" style="color:var(--accent)">Manage API keys →</a>
+                        <a href="#" style="color:var(--accent)" onclick="openSettingsModal('api-keys');return false">Manage API keys →</a>
                     </p>
                 </section>
 

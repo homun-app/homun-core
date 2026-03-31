@@ -545,6 +545,9 @@ mod tests {
     use super::*;
 
     fn test_ctx() -> ToolContext {
+        // Clear global stop flag to avoid interference from parallel tests
+        // (e.g. stop::tests::wait_for_stop_resolves_after_request sets it)
+        crate::agent::stop::clear_stop();
         ToolContext {
             workspace: "/tmp".to_string(),
             channel: "cli".to_string(),
@@ -838,9 +841,25 @@ mod tests {
     #[tokio::test]
     async fn test_stderr() {
         let tool = ShellTool::new(10, false);
-        let args = serde_json::json!({"command": "echo err >&2"});
-        let result = tool.execute(args, &test_ctx()).await.unwrap();
-        assert!(result.output.contains("[stderr]"));
-        assert!(result.output.contains("err"));
+        // The global stop flag (toggled by parallel stop::tests) can cause
+        // spurious "Command cancelled by user" results. Retry up to 5 times
+        // with a short sleep to let the stop test complete its cycle.
+        for attempt in 0..5 {
+            crate::agent::stop::clear_stop();
+            let args = serde_json::json!({"command": "printf 'stderr_marker' >&2"});
+            let result = tool.execute(args, &test_ctx()).await.unwrap();
+            if result.output.contains("cancelled") {
+                tokio::time::sleep(std::time::Duration::from_millis(50 * (attempt + 1))).await;
+                continue;
+            }
+            assert!(
+                result.output.contains("[stderr]"),
+                "expected [stderr] in output: {:?}",
+                result.output
+            );
+            assert!(result.output.contains("stderr_marker"));
+            return;
+        }
+        panic!("test_stderr: still cancelled after 5 retries — global stop flag stuck");
     }
 }
