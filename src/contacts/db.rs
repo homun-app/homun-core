@@ -82,27 +82,50 @@ impl Database {
         Ok(row)
     }
 
-    pub async fn list_contacts(&self, query: Option<&str>) -> Result<Vec<Contact>> {
-        match query {
+    /// List contacts with optional text search and profile scoping.
+    ///
+    /// When `profile_id` is `Some`, only contacts belonging to that profile
+    /// (or with NULL profile_id, i.e. global) are returned.
+    pub async fn list_contacts(
+        &self,
+        query: Option<&str>,
+        profile_id: Option<i64>,
+    ) -> Result<Vec<Contact>> {
+        let profile_clause = match profile_id {
+            Some(_) => " AND (profile_id IS NULL OR profile_id = ?)",
+            None => "",
+        };
+
+        let rows = match query {
             Some(q) if !q.is_empty() => {
                 let pattern = format!("%{q}%");
-                sqlx::query_as::<_, Contact>(
-                    "SELECT * FROM contacts
-                     WHERE name LIKE ?1 OR nickname LIKE ?1 OR bio LIKE ?1
-                     ORDER BY name COLLATE NOCASE",
-                )
-                .bind(&pattern)
-                .fetch_all(self.pool())
-                .await
-                .context("Failed to list contacts")
+                let sql = format!(
+                    "SELECT * FROM contacts \
+                     WHERE (name LIKE ?1 OR nickname LIKE ?1 OR bio LIKE ?1){profile_clause} \
+                     ORDER BY name COLLATE NOCASE"
+                );
+                let mut qry = sqlx::query_as::<_, Contact>(&sql).bind(&pattern);
+                if let Some(pid) = profile_id {
+                    qry = qry.bind(pid);
+                }
+                qry.fetch_all(self.pool())
+                    .await
+                    .context("Failed to list contacts")?
             }
             _ => {
-                sqlx::query_as::<_, Contact>("SELECT * FROM contacts ORDER BY name COLLATE NOCASE")
-                    .fetch_all(self.pool())
+                let sql = format!(
+                    "SELECT * FROM contacts WHERE 1=1{profile_clause} ORDER BY name COLLATE NOCASE"
+                );
+                let mut qry = sqlx::query_as::<_, Contact>(&sql);
+                if let Some(pid) = profile_id {
+                    qry = qry.bind(pid);
+                }
+                qry.fetch_all(self.pool())
                     .await
-                    .context("Failed to list contacts")
+                    .context("Failed to list contacts")?
             }
-        }
+        };
+        Ok(rows)
     }
 
     pub async fn update_contact(&self, id: i64, upd: &ContactUpdate) -> Result<bool> {
@@ -635,13 +658,13 @@ mod tests {
         assert_eq!(c.tone_of_voice, "formale e professionale");
 
         // List
-        let all = db.list_contacts(None).await.unwrap();
+        let all = db.list_contacts(None, None).await.unwrap();
         assert_eq!(all.len(), 1);
 
         // Search
-        let found = db.list_contacts(Some("marco")).await.unwrap();
+        let found = db.list_contacts(Some("marco"), None).await.unwrap();
         assert_eq!(found.len(), 1);
-        let empty = db.list_contacts(Some("zzz")).await.unwrap();
+        let empty = db.list_contacts(Some("zzz"), None).await.unwrap();
         assert!(empty.is_empty());
 
         // Delete

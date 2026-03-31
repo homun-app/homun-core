@@ -2694,7 +2694,7 @@ impl AgentLoop {
 
                             // Budget pruning: remove low-value chunks if over limit
                             if max_memory_chunks > 0 {
-                                match memory.prune_if_over_budget(max_memory_chunks).await {
+                                match memory.prune_if_over_budget(max_memory_chunks, profile_id).await {
                                     Ok(pruned_ids) if !pruned_ids.is_empty() => {
                                         tracing::info!(
                                             pruned = pruned_ids.len(),

@@ -17,6 +17,19 @@ use crate::web::auth::{require_write, AuthUser};
 
 type ApiErr = (StatusCode, Json<Value>);
 
+/// Resolve a profile slug query param to an id. Returns None if empty/missing.
+async fn resolve_profile_filter(db: &Database, slug: Option<&str>) -> Option<i64> {
+    let slug = slug?.trim();
+    if slug.is_empty() {
+        return None;
+    }
+    crate::profiles::db::load_profile_by_slug(db.pool(), slug)
+        .await
+        .ok()
+        .flatten()
+        .map(|p| p.id)
+}
+
 fn require_db(state: &AppState) -> Result<&Database, ApiErr> {
     state.db.as_ref().ok_or_else(|| {
         (
@@ -82,6 +95,8 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
 #[derive(Deserialize)]
 struct ListQuery {
     q: Option<String>,
+    /// Profile slug — when set, only contacts in that profile (+ global) are returned.
+    profile: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -143,8 +158,9 @@ async fn list_contacts(
     Query(params): Query<ListQuery>,
 ) -> Result<Json<Vec<crate::contacts::Contact>>, ApiErr> {
     let db = require_db(&state)?;
+    let profile_id = resolve_profile_filter(db, params.profile.as_deref()).await;
     let contacts = db
-        .list_contacts(params.q.as_deref())
+        .list_contacts(params.q.as_deref(), profile_id)
         .await
         .map_err(internal)?;
     Ok(Json(contacts))

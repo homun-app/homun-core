@@ -551,17 +551,28 @@ impl MemoryConsolidator {
 
     /// Prune memory chunks if total count exceeds the budget.
     ///
+    /// When `profile_id` is `Some`, only considers chunks visible to that
+    /// profile, preventing cross-profile data loss during pruning.
     /// Returns IDs of deleted chunks (for HNSW index cleanup).
     /// A budget of 0 means no limit.
-    pub async fn prune_if_over_budget(&self, max_chunks: u32) -> Result<Vec<i64>> {
+    pub async fn prune_if_over_budget(
+        &self,
+        max_chunks: u32,
+        profile_id: Option<i64>,
+    ) -> Result<Vec<i64>> {
         if max_chunks == 0 {
             return Ok(Vec::new());
         }
-        let count = self.store.count_memory_chunks().await?;
+        let count = match profile_id {
+            Some(pid) => self.store.count_memory_chunks_for_profile(pid).await?,
+            None => self.store.count_memory_chunks().await?,
+        };
         if count <= max_chunks as i64 {
             return Ok(Vec::new());
         }
-        self.store.prune_memory_chunks_to_budget(max_chunks).await
+        self.store
+            .prune_memory_chunks_to_budget(max_chunks, profile_id)
+            .await
     }
 
     /// Create a hierarchical summary for a completed time period.

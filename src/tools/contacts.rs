@@ -95,12 +95,13 @@ impl Tool for ContactsTool {
         })
     }
 
-    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
         let action = args["action"].as_str().unwrap_or("");
+        let profile_id = ctx.profile_id;
 
         match action {
-            "search" => self.do_search(&args).await,
-            "resolve" => self.do_resolve(&args).await,
+            "search" => self.do_search(&args, profile_id).await,
+            "resolve" => self.do_resolve(&args, profile_id).await,
             "get" => self.do_get(&args).await,
             "create" => self.do_create(&args).await,
             "update" => self.do_update(&args).await,
@@ -108,7 +109,7 @@ impl Tool for ContactsTool {
             "add_relationship" => self.do_add_relationship(&args).await,
             "add_event" => self.do_add_event(&args).await,
             "upcoming" => self.do_upcoming(&args).await,
-            "send" => self.do_send(&args).await,
+            "send" => self.do_send(&args, profile_id).await,
             _ => Ok(ToolResult {
                 output: format!("Unknown action: {action}. Valid: search, resolve, get, create, update, add_identity, add_relationship, add_event, upcoming, send"),
                 is_error: true, ..Default::default()
@@ -118,9 +119,9 @@ impl Tool for ContactsTool {
 }
 
 impl ContactsTool {
-    async fn do_search(&self, args: &Value) -> Result<ToolResult> {
+    async fn do_search(&self, args: &Value, profile_id: Option<i64>) -> Result<ToolResult> {
         let query = args["query"].as_str();
-        let contacts = self.db.list_contacts(query).await?;
+        let contacts = self.db.list_contacts(query, profile_id).await?;
         let output = if contacts.is_empty() {
             "No contacts found.".to_string()
         } else {
@@ -148,7 +149,7 @@ impl ContactsTool {
         })
     }
 
-    async fn do_resolve(&self, args: &Value) -> Result<ToolResult> {
+    async fn do_resolve(&self, args: &Value, profile_id: Option<i64>) -> Result<ToolResult> {
         let query = args["query"].as_str().unwrap_or("");
         if query.is_empty() {
             return Ok(ToolResult {
@@ -157,7 +158,9 @@ impl ContactsTool {
             });
         }
         let config = self.config.read().await.clone();
-        match crate::contacts::resolver::resolve_contact(&self.db, &config, query).await? {
+        match crate::contacts::resolver::resolve_contact(&self.db, &config, query, profile_id)
+            .await?
+        {
             Some(result) => Ok(ToolResult {
                 output: format!(
                     "Resolved: #{} {} (confidence: {:.0}%)\nPath: {}",
@@ -401,7 +404,7 @@ impl ContactsTool {
         })
     }
 
-    async fn do_send(&self, args: &Value) -> Result<ToolResult> {
+    async fn do_send(&self, args: &Value, profile_id: Option<i64>) -> Result<ToolResult> {
         let message = args["message"].as_str().unwrap_or("");
         if message.is_empty() {
             return Ok(ToolResult {
@@ -415,7 +418,7 @@ impl ContactsTool {
             self.db.load_contact(id).await?
         } else if let Some(query) = args["query"].as_str() {
             let config = self.config.read().await.clone();
-            crate::contacts::resolver::resolve_contact(&self.db, &config, query)
+            crate::contacts::resolver::resolve_contact(&self.db, &config, query, profile_id)
                 .await?
                 .map(|r| r.contact)
         } else {

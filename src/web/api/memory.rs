@@ -414,21 +414,13 @@ async fn get_memory_history(
 ) -> Result<Json<SearchResponse>, StatusCode> {
     let db = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
 
+    let profile_id = resolve_profile_filter(db, q.profile.as_deref()).await;
     let rows = db
-        .list_memory_history(q.limit, q.offset)
+        .list_memory_history(q.limit, q.offset, profile_id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    // Filter by profile if specified
-    let profile_id = resolve_profile_filter(db, q.profile.as_deref()).await;
-    let chunks: Vec<ChunkView> = rows
-        .into_iter()
-        .filter(|r| match profile_id {
-            Some(pid) => r.profile_id.is_none() || r.profile_id == Some(pid),
-            None => true,
-        })
-        .map(ChunkView::from)
-        .collect();
+    let chunks: Vec<ChunkView> = rows.into_iter().map(ChunkView::from).collect();
 
     Ok(Json(SearchResponse { chunks }))
 }

@@ -2887,14 +2887,26 @@ impl super::traits::MemoryStore for Database {
     async fn count_memory_chunks(&self) -> Result<i64> {
         Database::count_memory_chunks(self).await
     }
-    async fn list_memory_history(&self, limit: i64, offset: i64) -> Result<Vec<MemoryChunkRow>> {
-        Database::list_memory_history(self, limit, offset).await
+    async fn count_memory_chunks_for_profile(&self, profile_id: i64) -> Result<i64> {
+        Database::count_memory_chunks_for_profile(self, profile_id).await
+    }
+    async fn list_memory_history(
+        &self,
+        limit: i64,
+        offset: i64,
+        profile_id: Option<i64>,
+    ) -> Result<Vec<MemoryChunkRow>> {
+        Database::list_memory_history(self, limit, offset, profile_id).await
     }
     async fn load_all_memory_chunks(&self) -> Result<Vec<MemoryChunkRow>> {
         Database::load_all_memory_chunks(self).await
     }
-    async fn prune_memory_chunks_to_budget(&self, keep_count: u32) -> Result<Vec<i64>> {
-        Database::prune_memory_chunks_to_budget(self, keep_count).await
+    async fn prune_memory_chunks_to_budget(
+        &self,
+        keep_count: u32,
+        profile_id: Option<i64>,
+    ) -> Result<Vec<i64>> {
+        Database::prune_memory_chunks_to_budget(self, keep_count, profile_id).await
     }
     async fn load_chunks_in_range(
         &self,

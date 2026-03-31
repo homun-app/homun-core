@@ -110,21 +110,43 @@ impl Database {
     }
 
     /// List memory history chunks (type='history'), ordered by newest first.
+    ///
+    /// When `profile_id` is `Some`, only returns chunks visible to that profile
+    /// (profile's own + global NULL).
     pub async fn list_memory_history(
         &self,
         limit: i64,
         offset: i64,
+        profile_id: Option<i64>,
     ) -> Result<Vec<MemoryChunkRow>> {
-        let rows = sqlx::query_as::<_, MemoryChunkRow>(
-            "SELECT id, date, source, heading, content, memory_type, created_at, contact_id, agent_id, importance, profile_id \
-             FROM memory_chunks WHERE memory_type = 'history' \
-             ORDER BY created_at DESC LIMIT ? OFFSET ?",
-        )
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(self.pool())
-        .await
-        .context("Failed to list memory history")?;
+        let rows = match profile_id {
+            Some(pid) => {
+                sqlx::query_as::<_, MemoryChunkRow>(
+                    "SELECT id, date, source, heading, content, memory_type, created_at, contact_id, agent_id, importance, profile_id \
+                     FROM memory_chunks \
+                     WHERE memory_type = 'history' AND (profile_id IS NULL OR profile_id = ?) \
+                     ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                )
+                .bind(pid)
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(self.pool())
+                .await
+                .context("Failed to list memory history for profile")?
+            }
+            None => {
+                sqlx::query_as::<_, MemoryChunkRow>(
+                    "SELECT id, date, source, heading, content, memory_type, created_at, contact_id, agent_id, importance, profile_id \
+                     FROM memory_chunks WHERE memory_type = 'history' \
+                     ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                )
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(self.pool())
+                .await
+                .context("Failed to list memory history")?
+            }
+        };
         Ok(rows)
     }
 
@@ -143,18 +165,43 @@ impl Database {
     /// Prune lowest-scoring memory chunks to stay within budget.
     ///
     /// Keeps the `keep_count` most valuable chunks, deleting the rest.
-    /// Score is approximated as `importance * recency` where recency penalizes old chunks.
+    /// When `profile_id` is `Some`, only prunes chunks visible to that profile
+    /// (profile's own + global NULL), preventing cross-profile data loss.
     /// Returns the IDs of deleted chunks (for HNSW index cleanup).
-    pub async fn prune_memory_chunks_to_budget(&self, keep_count: u32) -> Result<Vec<i64>> {
-        let deleted_ids: Vec<(i64,)> = sqlx::query_as(
-            "SELECT id FROM memory_chunks
-             ORDER BY importance ASC, created_at ASC
-             LIMIT (SELECT MAX(0, COUNT(*) - ?) FROM memory_chunks)",
-        )
-        .bind(keep_count as i64)
-        .fetch_all(self.pool())
-        .await
-        .context("Failed to identify chunks to prune")?;
+    pub async fn prune_memory_chunks_to_budget(
+        &self,
+        keep_count: u32,
+        profile_id: Option<i64>,
+    ) -> Result<Vec<i64>> {
+        let deleted_ids: Vec<(i64,)> = match profile_id {
+            Some(pid) => {
+                sqlx::query_as(
+                    "SELECT id FROM memory_chunks
+                     WHERE profile_id IS NULL OR profile_id = ?
+                     ORDER BY importance ASC, created_at ASC
+                     LIMIT (SELECT MAX(0, COUNT(*) - ?)
+                            FROM memory_chunks
+                            WHERE profile_id IS NULL OR profile_id = ?)",
+                )
+                .bind(pid)
+                .bind(keep_count as i64)
+                .bind(pid)
+                .fetch_all(self.pool())
+                .await
+                .context("Failed to identify chunks to prune for profile")?
+            }
+            None => {
+                sqlx::query_as(
+                    "SELECT id FROM memory_chunks
+                     ORDER BY importance ASC, created_at ASC
+                     LIMIT (SELECT MAX(0, COUNT(*) - ?) FROM memory_chunks)",
+                )
+                .bind(keep_count as i64)
+                .fetch_all(self.pool())
+                .await
+                .context("Failed to identify chunks to prune")?
+            }
+        };
 
         if deleted_ids.is_empty() {
             return Ok(Vec::new());

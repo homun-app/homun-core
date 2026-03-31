@@ -118,14 +118,31 @@ pub trait MemoryStore: Send + Sync {
     /// Count total memory chunks.
     async fn count_memory_chunks(&self) -> Result<i64>;
 
+    /// Count memory chunks visible to a specific profile (profile's own + global NULL).
+    async fn count_memory_chunks_for_profile(&self, profile_id: i64) -> Result<i64>;
+
     /// List memory chunks with pagination (for UI).
-    async fn list_memory_history(&self, limit: i64, offset: i64) -> Result<Vec<MemoryChunkRow>>;
+    ///
+    /// When `profile_id` is `Some`, only chunks visible to that profile are returned.
+    async fn list_memory_history(
+        &self,
+        limit: i64,
+        offset: i64,
+        profile_id: Option<i64>,
+    ) -> Result<Vec<MemoryChunkRow>>;
 
     /// Load all memory chunks (for HNSW reindex).
     async fn load_all_memory_chunks(&self) -> Result<Vec<MemoryChunkRow>>;
 
     /// Prune low-importance chunks to stay within budget. Returns pruned IDs.
-    async fn prune_memory_chunks_to_budget(&self, keep_count: u32) -> Result<Vec<i64>>;
+    ///
+    /// When `profile_id` is `Some`, only chunks belonging to that profile
+    /// (or with NULL profile_id) are considered, preventing cross-profile data loss.
+    async fn prune_memory_chunks_to_budget(
+        &self,
+        keep_count: u32,
+        profile_id: Option<i64>,
+    ) -> Result<Vec<i64>>;
 
     /// Load chunks in a date range (for period summarization).
     async fn load_chunks_in_range(

@@ -81,10 +81,11 @@ pub async fn resolve_contact(
     db: &Database,
     config: &Config,
     description: &str,
+    profile_id: Option<i64>,
 ) -> Result<Option<ResolveResult>> {
     // Fast path: direct name search
     if !has_relationship_keywords(description) {
-        let matches = db.list_contacts(Some(description)).await?;
+        let matches = db.list_contacts(Some(description), profile_id).await?;
         if matches.len() == 1 {
             return Ok(Some(ResolveResult {
                 resolution_path: format!("Direct match: {}", matches[0].name),
@@ -99,7 +100,7 @@ pub async fn resolve_contact(
     }
 
     // Slow path: LLM resolution with relationship graph
-    let contacts = db.list_contacts(None).await?;
+    let contacts = db.list_contacts(None, profile_id).await?;
     if contacts.is_empty() {
         return Ok(None);
     }
