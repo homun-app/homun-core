@@ -82,7 +82,10 @@ pub(crate) fn maybe_extend_iteration_budget(
         state.stall_streak = state.stall_streak.saturating_add(1);
     }
     state.last_signature = Some(signature.clone());
-    if loop_detection_window > 0 && !is_browser {
+    // Cycle detection runs for ALL tools (including browser) as a safety net.
+    // Stall-streak tracking is still skipped for browser to avoid double-counting
+    // with BrowserTaskPlanState, but cycle detection must catch budget runaway.
+    if loop_detection_window > 0 {
         state.recent_signatures.push(signature.clone());
         let win = loop_detection_window as usize;
         if state.recent_signatures.len() > win {
@@ -195,14 +198,16 @@ pub(crate) fn detect_cycle(signatures: &[String]) -> Option<usize> {
 
 /// Coarsen a composite signature for fuzzy cycle detection.
 ///
-/// `web_search:{query}` and `web_fetch:{url}` are collapsed to just the tool
-/// name, so queries with different parameters are treated as the same action.
-/// All other tool segments are preserved verbatim.
+/// `web_search`, `web_fetch`, and `browser` are collapsed to just the tool
+/// name, so queries/actions with different parameters are treated as the
+/// same action. All other tool segments are preserved verbatim.
 pub(crate) fn normalize_signature_for_cycle(sig: &str) -> String {
     sig.split('|')
         .map(|segment| {
             let tool_name = segment.split(':').next().unwrap_or(segment);
-            if matches!(tool_name, "web_search" | "web_fetch") {
+            // Browser actions vary in ref IDs / URLs across iterations but
+            // represent the same conceptual action; collapse for fuzzy matching.
+            if matches!(tool_name, "web_search" | "web_fetch" | "browser") {
                 tool_name.to_string()
             } else {
                 segment.to_string()
@@ -210,4 +215,84 @@ pub(crate) fn normalize_signature_for_cycle(sig: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("|")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn browser_summary(sig: &str) -> ToolExecutionSummary {
+        ToolExecutionSummary {
+            name: "browser".to_string(),
+            signature: sig.to_string(),
+            useful: true,
+        }
+    }
+
+    #[test]
+    fn browser_cycle_detection_enabled() {
+        // Browser tools must NOT be exempt from cycle detection.
+        // This test reproduces the bug where navigate→click looped forever
+        // because iteration_budget skipped cycle detection for browser.
+        let mut budget = 50u32;
+        let hard_max = 100u32;
+        let base = 50u32;
+        let mut state = IterationBudgetState::default();
+
+        // Simulate alternating browser actions (period-2 cycle).
+        // With fuzzy normalization, all browser signatures collapse to "browser",
+        // making this a period-1 cycle.
+        let sigs = [
+            r#"browser:{"action":"navigate","url":"https://example.com"}"#,
+            r#"browser:{"action":"click","ref":"e125"}"#,
+        ];
+
+        for i in 0..10u32 {
+            let summaries = vec![browser_summary(sigs[(i as usize) % 2])];
+            maybe_extend_iteration_budget(
+                &mut budget,
+                hard_max,
+                base,
+                49 + i, // approaching budget
+                &summaries,
+                &mut state,
+                20,
+            );
+        }
+
+        // Budget should have been contracted (not extended to 100)
+        assert!(
+            budget < hard_max,
+            "Budget should be contracted when browser is cycling, got {}",
+            budget
+        );
+        assert!(
+            state.cycle_detected.is_some(),
+            "Cycle should be detected for browser tools"
+        );
+    }
+
+    #[test]
+    fn normalize_collapses_browser() {
+        let sig = r#"browser:{"action":"click","ref":"e125"}"#;
+        assert_eq!(normalize_signature_for_cycle(sig), "browser");
+    }
+
+    #[test]
+    fn detect_cycle_period_1() {
+        let sigs: Vec<String> = vec!["a", "a"].into_iter().map(String::from).collect();
+        assert_eq!(detect_cycle(&sigs), Some(1));
+    }
+
+    #[test]
+    fn detect_cycle_period_2() {
+        let sigs: Vec<String> = vec!["a", "b", "a", "b"].into_iter().map(String::from).collect();
+        assert_eq!(detect_cycle(&sigs), Some(2));
+    }
+
+    #[test]
+    fn no_cycle_when_different() {
+        let sigs: Vec<String> = vec!["a", "b", "c", "d"].into_iter().map(String::from).collect();
+        assert_eq!(detect_cycle(&sigs), None);
+    }
 }

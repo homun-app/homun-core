@@ -89,6 +89,9 @@ pub struct BrowserTaskPlanState {
     /// next interactive action to proceed without re-blocking, but the
     /// stuck_level stays elevated so further identical actions will escalate.
     veto_satisfied: bool,
+    /// How many consecutive times a cycle pattern (e.g. A→B→A→B) has been
+    /// observed. Escalates after 3 full cycle repetitions.
+    cycle_count: u8,
 
     // ── Rate limiting ──────────────────────────────────────────
     /// Block actions until this time.
@@ -150,6 +153,7 @@ impl BrowserTaskPlanState {
             stuck_level: 0,
             last_output_hash: 0,
             veto_satisfied: false,
+            cycle_count: 0,
             rate_limited_until: None,
             rate_limit_count: 0,
             failed_refs: std::collections::HashMap::new(),
@@ -345,6 +349,26 @@ impl BrowserTaskPlanState {
             self.recent_actions.pop_front();
         }
 
+        // Cycle detection: catch alternating patterns like A→B→A→B (period 2)
+        // or A→B→C→A→B→C (period 3) that the consecutive-action check misses.
+        {
+            let actions_vec: Vec<&str> = self.recent_actions.iter().map(|s| s.as_str()).collect();
+            if detect_action_cycle(&actions_vec).is_some() {
+                self.cycle_count = self.cycle_count.saturating_add(1);
+                // Escalate after 3 full cycle repetitions to avoid false positives
+                if self.cycle_count >= 3 && self.cycle_count % 3 == 0 {
+                    tracing::warn!(
+                        cycle_count = self.cycle_count,
+                        domain = ?self.current_domain,
+                        "Browser cycle detected (alternating action pattern)"
+                    );
+                    self.escalate();
+                }
+            } else {
+                self.cycle_count = 0;
+            }
+        }
+
         // Loop detection: count consecutive identical actions AND verify
         // the output is also identical (same hash). This distinguishes:
         // - Real loops: same action + same output = page didn't change → escalate
@@ -370,8 +394,11 @@ impl BrowserTaskPlanState {
             // If output changed, no escalation — the action is making progress
         }
 
-        // Reset stuck level on navigation (new page = fresh start).
-        if action == "navigate" {
+        // Reset stuck level on navigation (new page = fresh start),
+        // but NOT when we're in an active cycle — resetting would prevent
+        // the cycle detector from ever escalating (the bug that caused
+        // infinite navigate→click→navigate→click loops).
+        if action == "navigate" && self.cycle_count == 0 {
             self.stuck_level = 0;
             self.veto_satisfied = false;
         }
@@ -546,6 +573,37 @@ impl BrowserTaskPlanState {
             ))
         }
     }
+}
+
+/// Check for multi-action repeating cycles of period 2 or 3 in the action window.
+///
+/// Detects patterns like A→B→A→B (period 2) or A→B→C→A→B→C (period 3).
+/// Period-1 cycles (same action repeated consecutively) are intentionally
+/// excluded — they are already handled by the output-hash-based loop detector
+/// and skipping them here avoids double-counting false positives (e.g. a
+/// calendar that legitimately clicks the same "next" button many times but
+/// with different page content each time).
+///
+/// Returns the shortest detected period, or `None` if no cycle is found.
+fn detect_action_cycle(actions: &[&str]) -> Option<usize> {
+    let len = actions.len();
+    for period in 2..=3 {
+        if len < 2 * period {
+            continue;
+        }
+        let is_cycle =
+            (0..period).all(|i| actions[len - 1 - i] == actions[len - 1 - i - period]);
+        if is_cycle {
+            // Exclude degenerate case: all actions in the period are identical.
+            // That is just a period-1 cycle repeated at a higher period, already
+            // handled by the output-hash consecutive-action detector.
+            let all_same = (0..period).all(|i| actions[len - 1 - i] == actions[len - 1]);
+            if !all_same {
+                return Some(period);
+            }
+        }
+    }
+    None
 }
 
 /// Compute a fast hash of browser output for loop detection.
@@ -896,5 +954,101 @@ mod tests {
         // Headless mode: skip level 2 (visible switch) → go straight to give up
         assert_eq!(p.stuck_level, 3);
         assert!(!p.needs_visible_switch());
+    }
+
+    #[test]
+    fn cycle_detection_navigate_click_loop() {
+        // Reproduces the shoppingmap.it bug: navigate→click→navigate→click
+        // alternating forever. The old detector missed this because each
+        // action appeared only once consecutively.
+        let r = make_cognition("Browse diesel products", &["browser"]);
+        let mut p = BrowserTaskPlanState::from_cognition(&r, "browse", None);
+        p.current_mode = Some("auto".to_string());
+        p.allowlist_loaded = true;
+        p.allowed_sites
+            .insert("shoppingmap.it".to_string(), "auto".to_string());
+
+        let nav_args = serde_json::json!({"url": "https://www.shoppingmap.it/brand/137-diesel"});
+        let click_args = serde_json::json!({"action": "click", "ref": "e125"});
+
+        // Simulate the loop: navigate→click repeated.
+        // cycle_count needs 3 repetitions → 6 actions (3 navigate + 3 click).
+        // But detection starts after 2*period=4 actions.
+        // cycle_count increments each time the cycle is detected.
+        for i in 0..6 {
+            if i % 2 == 0 {
+                p.note_result(
+                    "navigate",
+                    "Page URL: https://www.shoppingmap.it/brand/137-diesel\n291 elements",
+                    &nav_args,
+                );
+            } else {
+                p.note_result("click", "Clicked e125. 291 elements", &click_args);
+            }
+        }
+        // After 6 actions (3 cycles of period 2), cycle_count should be >= 3
+        // and escalation should have triggered.
+        assert!(
+            p.stuck_level >= 1,
+            "Should escalate after navigate→click cycle, got stuck_level={}",
+            p.stuck_level
+        );
+        assert!(
+            p.cycle_count >= 3,
+            "Should detect 3+ cycle repetitions, got {}",
+            p.cycle_count
+        );
+    }
+
+    #[test]
+    fn cycle_no_false_positive_different_urls() {
+        // Navigate to URL A → click → navigate to URL B → click
+        // is NOT a cycle because the navigate targets differ.
+        let r = make_cognition("Browse", &["browser"]);
+        let mut p = BrowserTaskPlanState::from_cognition(&r, "browse", None);
+        p.current_mode = Some("auto".to_string());
+
+        let nav_a = serde_json::json!({"url": "https://example.com/page-a"});
+        let nav_b = serde_json::json!({"url": "https://example.com/page-b"});
+        let click = serde_json::json!({"action": "click", "ref": "e10"});
+
+        for _ in 0..4 {
+            p.note_result("navigate", "Page URL: https://example.com/page-a", &nav_a);
+            p.note_result("click", "Clicked", &click);
+            p.note_result("navigate", "Page URL: https://example.com/page-b", &nav_b);
+            p.note_result("click", "Clicked", &click);
+        }
+
+        assert_eq!(
+            p.stuck_level, 0,
+            "Should NOT escalate for different navigation targets"
+        );
+    }
+
+    #[test]
+    fn cycle_detection_navigate_does_not_reset_stuck_during_cycle() {
+        // Verify that navigate does NOT reset stuck_level when a cycle is active.
+        let r = make_cognition("Browse", &["browser"]);
+        let mut p = BrowserTaskPlanState::from_cognition(&r, "browse", None);
+        p.current_mode = Some("auto".to_string());
+
+        let nav = serde_json::json!({"url": "https://example.com"});
+        let click = serde_json::json!({"action": "click", "ref": "e1"});
+
+        // Build up a cycle until escalation
+        for _ in 0..6 {
+            p.note_result("navigate", "Page URL: https://example.com", &nav);
+            p.note_result("click", "Clicked", &click);
+        }
+
+        let level_after_cycle = p.stuck_level;
+        assert!(level_after_cycle >= 1, "Should have escalated");
+
+        // Navigate during active cycle should NOT reset stuck_level
+        p.note_result("navigate", "Page URL: https://example.com", &nav);
+        assert_eq!(
+            p.stuck_level, level_after_cycle,
+            "Navigate should not reset stuck_level during active cycle"
+        );
     }
 }
