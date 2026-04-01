@@ -27,6 +27,7 @@ Ogni documento copre: comportamento atteso (prospettiva utente) + dettagli tecni
 | 13 | [Configurazione](13-configurazione.md) | Config | Config TOML schema, 15+ sezioni, Setup wizard, Provider management, Config API, Dotpath access, Hot-reload |
 | 14 | [Osservabilità](14-osservabilita.md) | Observability | Structured logging (tracing), SSE log streaming, Request tracing, Provider health monitoring, Channel health, Circuit breaker |
 | 15 | [Condivisione e Connessioni](15-condivisione-connessioni.md) | Sharing + Connections | Share management, Connection establishment, Connection recipes, Namespace scoping |
+| 16 | [App Mobile](16-app-mobile.md) | Mobile App | Mobile Pairing (QR flow), Device management, Bootstrap, Tunnel config, Chat Profile API |
 
 ---
 
@@ -86,6 +87,7 @@ Il grafo mostra le dipendenze principali tra domini (A → B significa "A dipend
 | 13 Config | — | Tutti i moduli |
 | 14 Osservabilità | 13 Config | Tutti i moduli |
 | 15 Condivisione | 13 Config | 10 Contatti, 11 Web |
+| 16 App Mobile | 06 Sicurezza, 10 Profili, 11 Web (API) | Client Flutter |
 
 ---
 

@@ -45,6 +45,10 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route("/v1/chat/run", get(current_chat_run))
         .route("/v1/chat/compact", axum::routing::post(compact_chat))
         .route("/v1/chat/stop", axum::routing::post(stop_chat_run))
+        .route(
+            "/v1/chat/profile",
+            get(get_chat_profile).put(set_chat_profile),
+        )
 }
 
 // Local copy of OkResponse for this module
@@ -965,6 +969,171 @@ async fn stop_chat_run(
             "No active chat run".to_string()
         }),
     }))
+}
+
+// ─── Chat Profile API ───────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct ChatProfileQuery {
+    conversation_id: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ProfileSummary {
+    id: i64,
+    slug: String,
+    display_name: String,
+    avatar_emoji: String,
+    color: String,
+    is_default: bool,
+}
+
+impl From<crate::profiles::Profile> for ProfileSummary {
+    fn from(p: crate::profiles::Profile) -> Self {
+        Self {
+            id: p.id,
+            slug: p.slug,
+            display_name: p.display_name,
+            avatar_emoji: p.avatar_emoji,
+            color: p.color,
+            is_default: p.is_default != 0,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct ChatProfileResponse {
+    conversation_id: String,
+    active_profile: ProfileSummary,
+    available_profiles: Vec<ProfileSummary>,
+}
+
+#[derive(Deserialize)]
+struct SetChatProfileRequest {
+    conversation_id: String,
+    profile_slug: String,
+}
+
+#[derive(Serialize)]
+struct SetChatProfileResponse {
+    ok: bool,
+    conversation_id: String,
+    active_profile: ProfileSummary,
+}
+
+/// GET /api/v1/chat/profile?conversation_id=...
+///
+/// Returns the active profile for the conversation and all available profiles.
+/// If the session has an explicit `profile_id`, that is used.
+/// Otherwise falls back to the global default profile resolution chain.
+async fn get_chat_profile(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+    Query(params): Query<ChatProfileQuery>,
+) -> Result<Json<ChatProfileResponse>, StatusCode> {
+    let conversation_id = params
+        .conversation_id
+        .filter(|s| !s.is_empty())
+        .ok_or(StatusCode::BAD_REQUEST)?;
+
+    ensure_chat_conversation_access(&state, &auth, &conversation_id, false)
+        .await?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let db = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let session_key = web_session_key(&conversation_id);
+
+    // Load all profiles for the response
+    let all_profiles = crate::profiles::db::load_all_profiles(db.pool())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // Resolve the active profile
+    let active = resolve_active_profile(db, &session_key, &state).await?;
+
+    Ok(Json(ChatProfileResponse {
+        conversation_id,
+        active_profile: active.into(),
+        available_profiles: all_profiles.into_iter().map(ProfileSummary::from).collect(),
+    }))
+}
+
+/// PUT /api/v1/chat/profile
+///
+/// Switch the active profile for a conversation thread.
+/// Persists via `set_session_profile_id` — no chat message is written.
+async fn set_chat_profile(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+    Json(body): Json<SetChatProfileRequest>,
+) -> Result<Json<SetChatProfileResponse>, StatusCode> {
+    if body.conversation_id.is_empty() || body.profile_slug.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    check_write(&auth)?;
+
+    ensure_chat_conversation_access(&state, &auth, &body.conversation_id, false)
+        .await?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let db = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let session_key = web_session_key(&body.conversation_id);
+
+    // Find the target profile by slug
+    let profile = crate::profiles::db::load_profile_by_slug(db.pool(), &body.profile_slug)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    // Persist the profile switch on this session
+    db.set_session_profile_id(&session_key, profile.id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(SetChatProfileResponse {
+        ok: true,
+        conversation_id: body.conversation_id,
+        active_profile: profile.into(),
+    }))
+}
+
+/// Resolve the active profile for a web chat session.
+///
+/// Priority:
+/// 1. Explicit `session.profile_id` (set via PUT /chat/profile or /profile command)
+/// 2. Global `profiles.default` config slug
+/// 3. The hardcoded default profile (always exists)
+async fn resolve_active_profile(
+    db: &crate::storage::Database,
+    session_key: &str,
+    state: &Arc<AppState>,
+) -> Result<crate::profiles::Profile, StatusCode> {
+    // 1. Check explicit session override
+    if let Some(pid) = db.get_session_profile_id(session_key).await {
+        if let Ok(Some(profile)) = crate::profiles::db::load_profile_by_id(db.pool(), pid).await {
+            return Ok(profile);
+        }
+        // profile_id points to a deleted profile — fall through
+    }
+
+    // 2. Global config default
+    let global_default = {
+        let cfg = state.config.read().await;
+        cfg.profiles.default.clone()
+    };
+    if !global_default.is_empty() && global_default != "default" {
+        if let Ok(Some(profile)) =
+            crate::profiles::db::load_profile_by_slug(db.pool(), &global_default).await
+        {
+            return Ok(profile);
+        }
+    }
+
+    // 3. Hardcoded default (always exists)
+    crate::profiles::db::get_default_profile(db.pool())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
 // ─── Tests ──────────────────────────────────────────────────────
