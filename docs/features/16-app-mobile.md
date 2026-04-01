@@ -138,8 +138,10 @@ Tre componenti consumano `sessions.profile_id` e devono concordare sulla risoluz
 | Componente | Modulo | Comportamento |
 |---|---|---|
 | **Agent loop** | `agent_loop.rs` | Legge `session.profile_id` **prima** della cascata del resolver. Se presente e valido, usa quello. Altrimenti fallback a contact → channel → global → default. |
-| **Comando `/profile`** | `gateway.rs` | Se `session.profile_id` e valorizzato, mostra quel profilo. Se NULL, mostra il profilo default effettivo dal DB (non la stringa "default"). |
-| **API GET /chat/profile** | `chat.rs` | Cascata a 3 livelli: session override → global config → default. Restituisce il profilo risolto con tutti i campi. |
+| **Comando `/profile`** | `gateway.rs` | Usa `resolve_session_profile()` — stessa cascata della API. |
+| **API GET /chat/profile** | `chat.rs` | Usa `resolve_session_profile()` — stessa cascata del comando. |
+
+La funzione condivisa `resolve_session_profile()` vive in `src/agent/profile_resolver.rs` ed e la **singola source of truth** per la risoluzione profilo sessione web/mobile.
 
 **Invariante**: dopo un PUT che setta `profile_slug = "work"`, tutti e tre i consumatori devono restituire/usare il profilo "work" per quella sessione. Altre sessioni non sono influenzate.
 
@@ -208,11 +210,11 @@ Risposta 200:
 | 503 | Database non disponibile |
 
 ### Dettagli Tecnici
-- **Moduli:** `src/web/api/chat.rs`
+- **Moduli:** `src/web/api/chat.rs`, `src/agent/profile_resolver.rs`
 - **Funzioni principali:**
   - `get_chat_profile()` — handler GET, valida accesso, risolve profilo attivo, carica lista profili
   - `set_chat_profile()` — handler PUT, valida accesso + write permission, trova profilo per slug, persiste con `set_session_profile_id`
-  - `resolve_active_profile()` — cascata a 3 livelli per determinare il profilo effettivo
+  - `resolve_session_profile()` (`profile_resolver.rs`) — cascata condivisa a 3 livelli, usata da API e `/profile` command
 - **Tipi:** `ProfileSummary`, `ChatProfileResponse`, `SetChatProfileRequest`, `SetChatProfileResponse`
 - **Tabelle DB:** `sessions` (campo `profile_id`), `profiles`
 - **Accesso:** `ensure_chat_conversation_access()` per validare ownership della conversazione
