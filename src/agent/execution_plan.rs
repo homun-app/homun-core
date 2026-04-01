@@ -1015,10 +1015,17 @@ fn infer_blockers(tool_name: &str, output: &str, is_error: bool) -> Vec<String> 
         );
     }
     if is_error && blockers.is_empty() {
-        blockers.push(format!(
-            "Latest {} step failed; inspect the last tool result and adjust the next action instead of repeating blindly.",
-            tool_name
-        ));
+        if lower.contains("missing required parameter") || lower.contains("missing parameter") {
+            blockers.push(format!(
+                "Latest {} call failed due to a missing parameter. Read the error message, add the missing parameter, and retry the SAME tool call immediately.",
+                tool_name
+            ));
+        } else {
+            blockers.push(format!(
+                "Latest {} step failed; inspect the last tool result and adjust the next action instead of repeating blindly.",
+                tool_name
+            ));
+        }
     }
 
     blockers.truncate(MAX_PLAN_ITEMS);

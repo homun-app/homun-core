@@ -3586,9 +3586,11 @@ mod cycle_detection_tests {
     }
 
     #[test]
-    fn normalize_preserves_non_search() {
+    fn normalize_collapses_browser() {
+        // Browser signatures are collapsed for fuzzy cycle detection
+        // (different ref IDs / URLs represent the same conceptual action).
         let sig = "browser:navigate:https://example.com";
-        assert_eq!(normalize_signature_for_cycle(sig), sig);
+        assert_eq!(normalize_signature_for_cycle(sig), "browser");
     }
 
     #[test]
@@ -3596,7 +3598,7 @@ mod cycle_detection_tests {
         let sig = "web_search:query1|browser:click:ref123";
         assert_eq!(
             normalize_signature_for_cycle(sig),
-            "web_search|browser:click:ref123"
+            "web_search|browser"
         );
     }
 

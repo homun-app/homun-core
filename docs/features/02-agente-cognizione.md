@@ -53,8 +53,10 @@ L'architettura è implementata in Rust con asincronia `tokio`. I moduli principa
   4. Fase EXECUTION: loop `for iteration in 0..active_budget` → `llm_caller::call_llm_with_fallback()` → dispatch tool calls → observe results
   5. Check stop flag (`AtomicBool`) ad ogni iterazione e durante le tool call
   6. `iteration_budget::maybe_extend_iteration_budget()` valutato ad ogni iterazione
-  7. Fase POST-PROCESSING: `memory::MemoryConsolidator`, token usage su DB
-- Tabelle DB: `token_usage` (tracking consumo), `memories` (consolidamento)
+  7. `execution_plan::note_iteration()` dopo ogni tool result → `PlanAction` (checkpoint/rotation/give-up)
+  8. Persist checkpoint su DB per crash recovery (`task_checkpoints` table)
+  9. Fase POST-PROCESSING: `memory::MemoryConsolidator`, token usage su DB, cleanup checkpoint
+- Tabelle DB: `token_usage` (tracking consumo), `memories` (consolidamento), `task_checkpoints` (crash recovery)
 - Endpoint API: nessuno diretto; esposto tramite Gateway (canali)
 
 ### Dipendenze
@@ -428,3 +430,59 @@ L'architettura è implementata in Rust con asincronia `tokio`. I moduli principa
 
 - Da cosa dipende: `ToolRegistry` (per lista nomi), `CognitionResult::fallback_full`
 - Cosa dipende da questa feature: `agent_loop` (chiama `cognition::fallback_full_context()` in caso di `Err` da `run_cognition()`)
+
+---
+
+## Feature: Execution Discipline
+
+### Comportamento Atteso
+
+- Dopo ogni tool result (qualsiasi tool, non solo browser), `ExecutionPlanState::note_iteration()` valuta il progresso e decide l'azione successiva.
+- Ritorna `PlanAction`: `Continue` (nessuna azione), `Checkpoint` (compatta contesto + inietta summary), `StrategyRotation` (cambia approccio), `GiveUp` (report finale).
+- **Checkpoint**: ogni `CHECKPOINT_INTERVAL = 6` iterazioni di tool, compatta il contesto vecchio e inietta un riassunto strutturato del progresso (step completati/corrente/rimanenti).
+- **Strategy rotation**: quando uno step e bloccato per `MAX_ITERATIONS_PER_STEP = 8` iterazioni, inietta un prompt tool-agnostico che forza il modello a cambiare approccio. Massimo `MAX_STRATEGY_ROTATIONS = 2` per step.
+- **Give-up**: dopo aver esaurito tutte le rotazioni, lo step viene marcato `Skipped` e il piano passa al successivo. Se tutti gli step sono risolti, genera un report dettagliato.
+- **Auto-avanzamento semantico**: euristica keyword che avanza automaticamente lo step corrente quando un tool result indica completamento (web_search → "cerca", write_file → "salva/crea", browser navigate → "naviga/vai", etc.).
+- **Progress status**: emette `"status"` stream event dopo ogni tool con messaggio user-facing ("Step 2/5: Estraendo dati...").
+- Attivo solo quando esiste un piano esplicito (`has_explicit_plan()`).
+- Ortogonale a `BrowserTaskPlanState` (guard azione-level) e `IterationBudgetState` (budget-level).
+
+### Dettagli Tecnici
+
+- Modulo: `src/agent/execution_plan.rs`
+- Enum: `PlanAction` con 4 varianti, `StepStatus::Skipped`
+- Costanti: `MAX_ITERATIONS_PER_STEP = 8`, `CHECKPOINT_INTERVAL = 6`, `MAX_STRATEGY_ROTATIONS = 2`
+- Entry point: `note_iteration(tool_name, output)` chiamato per ogni tool result
+- Integrazione: dopo `auto_advance_explicit_steps()` nell'agent loop
+
+### Dipendenze
+
+- Da cosa dipende: nulla (logica interna a `ExecutionPlanState`)
+- Cosa dipende da questa feature: `agent_loop` (reagisce a `PlanAction`)
+
+---
+
+## Feature: Task Persistence & Resume
+
+### Comportamento Atteso
+
+- A ogni checkpoint, lo stato del piano viene persistito nella tabella `task_checkpoints`.
+- Su stop esplicito (utente clicca stop): checkpoint salvato con `status = 'paused'`.
+- Su completamento: checkpoint eliminato (cleanup).
+- Al riavvio del server o reconnect WebSocket: se esistono task interrotti per la sessione, viene inviato un `ChoiceBlock` con opzioni "Resume" / "Cancel".
+- Resume costruisce un prompt con: richiesta originale, step completati/interrotti, file creati, dati raccolti. Il modello riprende da dove si era fermato.
+- Cleanup periodico al gateway startup: elimina checkpoint `completed/cancelled` e `running` piu vecchi di 7 giorni (orfani da crash).
+
+### Dettagli Tecnici
+
+- Modulo: `src/agent/execution_plan.rs` (`TaskCheckpoint`, `to_checkpoint()`, `build_resume_prompt()`)
+- Migration: `migrations/051_task_checkpoints.sql`
+- DB operations: `storage/db.rs` (`upsert_task_checkpoint`, `load_interrupted_tasks`, `delete_task_checkpoint`, `cleanup_stale_task_checkpoints`)
+- Agent loop: persist ai checkpoint + cleanup post-processing
+- WebSocket: check al connect + ChoiceBlock resume
+- Gateway: cleanup al startup
+
+### Dipendenze
+
+- Da cosa dipende: `ExecutionPlanState` (serializzazione), `storage/db.rs` (CRUD), `approval_gate` (ChoiceBlock pattern)
+- Cosa dipende da questa feature: `ws.rs` (resume check), `gateway.rs` (startup cleanup)
