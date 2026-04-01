@@ -334,11 +334,12 @@ pub(super) async fn search_memory(
     contact_id: Option<i64>,
     agent_id: Option<&str>,
     profile_ids: &[i64],
+    allowed_namespaces: Option<&[String]>,
 ) -> String {
     let mut guard = searcher.lock().await;
-    // TODO(IGA): pass allowed_namespaces from contact perimeter for namespace filtering
+    let ns = allowed_namespaces.unwrap_or(&[]);
     match guard
-        .search_scoped_full(query, 3, contact_id, agent_id, profile_ids, &[])
+        .search_scoped_full(query, 3, contact_id, agent_id, profile_ids, ns)
         .await
     {
         Ok(results) if !results.is_empty() => {

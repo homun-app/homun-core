@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Json;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::Router;
 use serde::{Deserialize, Serialize};
 
@@ -43,6 +43,9 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
             "/v1/memory/cleanup",
             axum::routing::post(run_memory_cleanup),
         )
+        .route("/v1/memory/audit", get(memory_audit))
+        .route("/v1/memory/audit/classify", post(classify_chunks))
+        .route("/v1/memory/audit/classify-all", post(classify_all))
 }
 
 // Local copy of OkResponse for this module
@@ -566,5 +569,145 @@ async fn get_daily_file(
         ok: true,
         date,
         content,
+    }))
+}
+
+// ── Memory Audit ──────────────────────────────────────────────────
+
+#[derive(Serialize)]
+struct AuditResponse {
+    /// Owner-private chunks (namespace=_private, contact_id=NULL).
+    private_owner_chunks: i64,
+    /// Chunks with namespace != _private (visible to contacts).
+    public_chunks: i64,
+    /// Chunks assigned to a specific contact.
+    contact_scoped_chunks: i64,
+    /// Sample of private owner chunks for preview.
+    unscoped_samples: Vec<AuditSample>,
+}
+
+#[derive(Serialize)]
+struct AuditSample {
+    id: i64,
+    heading: String,
+    date: String,
+    content_preview: String,
+    /// Full content for expand/collapse in the UI.
+    content: String,
+    memory_type: String,
+}
+
+#[derive(Deserialize, Default)]
+struct AuditQuery {
+    /// Profile slug — when set, audit is scoped to this profile.
+    profile: Option<String>,
+}
+
+/// `GET /v1/memory/audit` — visibility audit dashboard.
+async fn memory_audit(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<AuditQuery>,
+) -> Result<Json<AuditResponse>, StatusCode> {
+    let db = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let profile_id = resolve_profile_filter(db, q.profile.as_deref()).await;
+
+    let (private, public, contact_scoped) = db
+        .audit_namespace_counts(profile_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let samples = db
+        .audit_private_samples(20, profile_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let unscoped_samples = samples
+        .into_iter()
+        .map(|c| {
+            let preview = if c.content.len() > 120 {
+                format!("{}…", &c.content[..120])
+            } else {
+                c.content.clone()
+            };
+            AuditSample {
+                id: c.id,
+                heading: c.heading,
+                date: c.date,
+                content_preview: preview,
+                content: c.content,
+                memory_type: c.memory_type,
+            }
+        })
+        .collect();
+
+    Ok(Json(AuditResponse {
+        private_owner_chunks: private,
+        public_chunks: public,
+        contact_scoped_chunks: contact_scoped,
+        unscoped_samples,
+    }))
+}
+
+#[derive(Deserialize)]
+struct ClassifyRequest {
+    chunk_ids: Vec<i64>,
+    /// Target namespace: "_public" or "_private".
+    namespace: String,
+}
+
+/// `POST /v1/memory/audit/classify` — reclassify specific chunks.
+async fn classify_chunks(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+    Json(body): Json<ClassifyRequest>,
+) -> Result<Json<OkResponse>, StatusCode> {
+    check_write(&auth).map_err(|_| StatusCode::FORBIDDEN)?;
+    let db = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+
+    if body.namespace != "_public" && body.namespace != "_private" {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let updated = db
+        .reclassify_chunks(&body.chunk_ids, &body.namespace)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(OkResponse {
+        ok: true,
+        message: Some(format!("{updated} chunks reclassified to {}", body.namespace)),
+    }))
+}
+
+#[derive(Deserialize)]
+struct ClassifyAllRequest {
+    /// Target namespace: "_public" or "_private".
+    namespace: String,
+    /// Profile slug — when set, only reclassifies chunks in this profile.
+    profile: Option<String>,
+}
+
+/// `POST /v1/memory/audit/classify-all` — reclassify ALL private owner chunks.
+async fn classify_all(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+    Json(body): Json<ClassifyAllRequest>,
+) -> Result<Json<OkResponse>, StatusCode> {
+    check_write(&auth).map_err(|_| StatusCode::FORBIDDEN)?;
+    let db = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+
+    if body.namespace != "_public" && body.namespace != "_private" {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let profile_id = resolve_profile_filter(db, body.profile.as_deref()).await;
+    let updated = db
+        .reclassify_all_private(&body.namespace, profile_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(OkResponse {
+        ok: true,
+        message: Some(format!("{updated} chunks reclassified to {}", body.namespace)),
     }))
 }

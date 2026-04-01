@@ -7,6 +7,7 @@ document.addEventListener('profile-changed', () => {
     if (typeof loadMemoryFile === 'function') loadMemoryFile();
     if (typeof loadInstructions === 'function') loadInstructions();
     reloadMemoryStats();
+    if (typeof loadAudit === 'function') loadAudit();
 });
 
 /** Get the current profile filter slug from global topbar (empty = all). */
@@ -606,8 +607,156 @@ if (btnDailyBack) {
     });
 }
 
+// ─── Visibility Audit ───
+const auditList = document.getElementById('audit-list');
+const auditBadge = document.getElementById('audit-badge');
+const btnClassifyAllPrivate = document.getElementById('btn-classify-all-private');
+
+async function loadAudit() {
+    if (!auditList) return;
+    try {
+        var pf = getProfileFilter();
+        var profileParam = pf ? '?profile=' + encodeURIComponent(pf) : '';
+        const resp = await fetch('/api/v1/memory/audit' + profileParam);
+        if (!resp.ok) return;
+        const data = await resp.json();
+
+        // Update badge
+        if (auditBadge) {
+            auditBadge.textContent = data.private_owner_chunks;
+            auditBadge.style.display = data.private_owner_chunks > 0 ? '' : 'none';
+        }
+
+        // Clear list safely
+        while (auditList.firstChild) auditList.removeChild(auditList.firstChild);
+
+        if (data.unscoped_samples.length === 0) {
+            var empty = document.createElement('div');
+            empty.className = 'empty-state';
+            empty.textContent = 'No private chunks to review.';
+            auditList.appendChild(empty);
+            if (btnClassifyAllPrivate) btnClassifyAllPrivate.style.display = 'none';
+            return;
+        }
+
+        data.unscoped_samples.forEach(function (s) {
+            var item = document.createElement('div');
+            item.className = 'item-row';
+            item.style.cursor = 'pointer';
+            item.setAttribute('data-id', s.id);
+
+            var info = document.createElement('div');
+            info.className = 'item-info';
+            info.style.flex = '1';
+            info.style.minWidth = '0';
+
+            var headerRow = document.createElement('div');
+            headerRow.style.display = 'flex';
+            headerRow.style.alignItems = 'center';
+            headerRow.style.gap = '8px';
+
+            var heading = document.createElement('strong');
+            heading.textContent = s.heading || s.memory_type;
+            headerRow.appendChild(heading);
+
+            var date = document.createElement('span');
+            date.className = 'badge badge-neutral';
+            date.textContent = s.date;
+            headerRow.appendChild(date);
+
+            info.appendChild(headerRow);
+
+            var preview = document.createElement('div');
+            preview.className = 'form-hint';
+            preview.textContent = s.content_preview;
+            info.appendChild(preview);
+
+            // Full content (hidden by default)
+            var full = document.createElement('pre');
+            full.className = 'form-hint';
+            full.style.display = 'none';
+            full.style.whiteSpace = 'pre-wrap';
+            full.style.wordBreak = 'break-word';
+            full.style.marginTop = '8px';
+            full.style.padding = '12px';
+            full.style.background = 'var(--bg-secondary, #f5f5f5)';
+            full.style.borderRadius = '8px';
+            full.style.maxHeight = '300px';
+            full.style.overflow = 'auto';
+            full.textContent = s.content;
+            info.appendChild(full);
+
+            // Click to toggle expand/collapse
+            var expanded = false;
+            info.addEventListener('click', function (e) {
+                if (e.target.tagName === 'BUTTON') return; // don't toggle on button click
+                expanded = !expanded;
+                preview.style.display = expanded ? 'none' : '';
+                full.style.display = expanded ? '' : 'none';
+            });
+
+            var actions = document.createElement('div');
+            actions.className = 'item-actions';
+
+            var btnPublic = document.createElement('button');
+            btnPublic.className = 'btn btn-secondary btn-sm';
+            btnPublic.textContent = 'Share';
+            btnPublic.title = 'Make visible to contacts';
+            btnPublic.addEventListener('click', function (e) {
+                e.stopPropagation();
+                classifyChunks([s.id], '_public');
+            });
+            actions.appendChild(btnPublic);
+
+            item.appendChild(info);
+            item.appendChild(actions);
+            auditList.appendChild(item);
+        });
+    } catch (_) {}
+}
+
+async function classifyChunks(ids, namespace) {
+    try {
+        var resp = await fetch('/api/v1/memory/audit/classify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chunk_ids: ids, namespace: namespace }),
+        });
+        if (resp.ok) {
+            window.showToast('Chunks reclassified', 'success');
+            loadAudit();
+        } else {
+            window.showToast('Failed to reclassify', 'error');
+        }
+    } catch (_) {
+        window.showToast('Network error', 'error');
+    }
+}
+
+if (btnClassifyAllPrivate) {
+    btnClassifyAllPrivate.addEventListener('click', async function () {
+        if (!confirm('Confirm: keep all owner chunks private (not visible to contacts)?')) return;
+        try {
+            var resp = await fetch('/api/v1/memory/audit/classify-all', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ namespace: '_private', profile: getProfileFilter() || undefined }),
+            });
+            if (resp.ok) {
+                window.showToast('All chunks confirmed as private', 'success');
+                loadAudit();
+            } else {
+                window.showToast('Failed to classify', 'error');
+            }
+        } catch (_) {
+            window.showToast('Network error', 'error');
+        }
+    });
+}
+
 // ─── Init ───
 loadMemoryFile();
 loadInstructions();
 loadHistory();
 loadDailyList();
+loadAudit();

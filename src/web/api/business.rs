@@ -49,6 +49,8 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
 #[derive(Deserialize)]
 struct BusinessListQuery {
     status: Option<String>,
+    /// Profile slug for filtering.
+    profile: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -73,9 +75,22 @@ async fn list_businesses_api(
         StatusCode::SERVICE_UNAVAILABLE,
         "Business engine not available".into(),
     ))?;
+    let profile_id = if let Some(ref slug) = q.profile {
+        if !slug.is_empty() {
+            crate::profiles::db::load_profile_by_slug(engine.db().pool(), slug)
+                .await
+                .ok()
+                .flatten()
+                .map(|p| p.id)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     let businesses = engine
         .db()
-        .list_businesses(q.status.as_deref())
+        .list_businesses(q.status.as_deref(), profile_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 

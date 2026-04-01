@@ -80,8 +80,23 @@ async fn list_skill_audits(
     Query(params): Query<AuditQueryParams>,
 ) -> Json<Vec<SkillAuditView>> {
     let limit = params.limit.unwrap_or(50).min(200);
+    let profile_id = if let (Some(ref slug), Some(ref db)) = (&params.profile, &state.db) {
+        if !slug.is_empty() {
+            crate::profiles::db::load_profile_by_slug(db.pool(), slug)
+                .await
+                .ok()
+                .flatten()
+                .map(|p| p.id)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     let rows = if let Some(ref db) = state.db {
-        db.list_skill_audits(limit).await.unwrap_or_default()
+        db.list_skill_audits(limit, profile_id)
+            .await
+            .unwrap_or_default()
     } else {
         Vec::new()
     };
@@ -102,6 +117,8 @@ async fn list_skill_audits(
 #[derive(Deserialize)]
 struct AuditQueryParams {
     limit: Option<i64>,
+    /// Profile slug for filtering.
+    profile: Option<String>,
 }
 
 #[derive(Serialize)]

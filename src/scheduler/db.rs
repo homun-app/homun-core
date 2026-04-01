@@ -92,21 +92,41 @@ impl Database {
         Ok(())
     }
 
-    /// Load all automations.
-    pub async fn load_automations(&self) -> Result<Vec<AutomationRow>> {
-        let rows = sqlx::query_as::<_, AutomationRow>(
-            "SELECT id, name, prompt, schedule, enabled, status, deliver_to,
+    /// Load automations, optionally filtered by profile.
+    ///
+    /// When `profile_id` is `Some`, returns automations belonging to that
+    /// profile (+ global with NULL profile_id). When `None`, returns all.
+    pub async fn load_automations(
+        &self,
+        profile_id: Option<i64>,
+    ) -> Result<Vec<AutomationRow>> {
+        let cols = "id, name, prompt, schedule, enabled, status, deliver_to,
                     trigger_kind, trigger_value,
                     last_run, last_result, created_at, updated_at,
                     plan_json, dependencies_json, plan_version, validation_errors,
-                    workflow_steps_json, flow_json, profile_id
-             FROM automations
-             ORDER BY created_at DESC",
-        )
-        .fetch_all(self.pool())
-        .await
-        .context("Failed to load automations")?;
-
+                    workflow_steps_json, flow_json, profile_id";
+        let rows = match profile_id {
+            Some(pid) => {
+                let sql = format!(
+                    "SELECT {cols} FROM automations \
+                     WHERE profile_id IS NULL OR profile_id = ? \
+                     ORDER BY created_at DESC"
+                );
+                sqlx::query_as::<_, AutomationRow>(&sql)
+                    .bind(pid)
+                    .fetch_all(self.pool())
+                    .await
+                    .context("Failed to load automations for profile")?
+            }
+            None => {
+                let sql =
+                    format!("SELECT {cols} FROM automations ORDER BY created_at DESC");
+                sqlx::query_as::<_, AutomationRow>(&sql)
+                    .fetch_all(self.pool())
+                    .await
+                    .context("Failed to load automations")?
+            }
+        };
         Ok(rows)
     }
 
@@ -221,7 +241,7 @@ impl Database {
         dependency_name: &str,
         reason: &str,
     ) -> Result<u64> {
-        let rows = self.load_automations().await?;
+        let rows = self.load_automations(None).await?;
         let mut affected = 0_u64;
 
         for row in rows {

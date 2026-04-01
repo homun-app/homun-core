@@ -306,18 +306,35 @@ impl Database {
         Ok(row.map(|r| r.into_business()))
     }
 
-    pub async fn list_businesses(&self, status_filter: Option<&str>) -> Result<Vec<Business>> {
+    /// List businesses, optionally filtered by status and profile.
+    pub async fn list_businesses(
+        &self,
+        status_filter: Option<&str>,
+        profile_id: Option<i64>,
+    ) -> Result<Vec<Business>> {
+        let profile_clause = match profile_id {
+            Some(_) => " AND (profile_id IS NULL OR profile_id = ?)",
+            None => "",
+        };
+
         let rows = if let Some(status) = status_filter {
-            sqlx::query_as::<_, BusinessRow>(
-                "SELECT * FROM businesses WHERE status = ? ORDER BY created_at DESC",
-            )
-            .bind(status)
-            .fetch_all(self.pool())
-            .await?
+            let sql = format!(
+                "SELECT * FROM businesses WHERE status = ?{profile_clause} ORDER BY created_at DESC"
+            );
+            let mut q = sqlx::query_as::<_, BusinessRow>(&sql).bind(status);
+            if let Some(pid) = profile_id {
+                q = q.bind(pid);
+            }
+            q.fetch_all(self.pool()).await?
         } else {
-            sqlx::query_as::<_, BusinessRow>("SELECT * FROM businesses ORDER BY created_at DESC")
-                .fetch_all(self.pool())
-                .await?
+            let sql = format!(
+                "SELECT * FROM businesses WHERE 1=1{profile_clause} ORDER BY created_at DESC"
+            );
+            let mut q = sqlx::query_as::<_, BusinessRow>(&sql);
+            if let Some(pid) = profile_id {
+                q = q.bind(pid);
+            }
+            q.fetch_all(self.pool()).await?
         };
 
         Ok(rows.into_iter().map(|r| r.into_business()).collect())

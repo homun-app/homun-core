@@ -335,7 +335,7 @@ async fn list_automations(
         None
     };
 
-    let rows = db.load_automations().await.map_err(|e| {
+    let rows = db.load_automations(filter_profile_id).await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to list automations: {e}"),
@@ -344,10 +344,6 @@ async fn list_automations(
     let now = chrono::Utc::now();
     let items = rows
         .into_iter()
-        .filter(|row| match filter_profile_id {
-            Some(pid) => row.profile_id.is_none() || row.profile_id == Some(pid),
-            None => true, // no filter = show all
-        })
         .map(|mut row| {
             let next_run = crate::scheduler::AutomationSchedule::next_run_from_stored(
                 &row.schedule,

@@ -1038,9 +1038,10 @@ impl AgentLoop {
                 let skill = name.to_string();
                 let ch = channel.to_string();
                 let q = prompt_content.clone();
+                let pid = Some(active_profile_id);
                 tokio::spawn(async move {
                     if let Err(e) = db
-                        .insert_skill_audit(&skill, &ch, &q, "slash_command")
+                        .insert_skill_audit(&skill, &ch, &q, "slash_command", pid)
                         .await
                     {
                         tracing::debug!(error = %e, "Skill audit insert failed (slash)");
@@ -1821,9 +1822,10 @@ impl AgentLoop {
                             let skill = tool_call.name.clone();
                             let ch = channel.to_string();
                             let q = query.to_string();
+                            let pid = Some(active_profile_id);
                             tokio::spawn(async move {
                                 if let Err(e) =
-                                    db.insert_skill_audit(&skill, &ch, &q, "tool_call").await
+                                    db.insert_skill_audit(&skill, &ch, &q, "tool_call", pid).await
                                 {
                                     tracing::debug!(error = %e, "Skill audit insert failed");
                                 }

@@ -462,10 +462,12 @@ async fn upcoming_events(
 
 async fn list_pending(
     State(state): State<Arc<AppState>>,
+    Query(params): Query<ListQuery>,
 ) -> Result<Json<Vec<crate::contacts::PendingResponse>>, ApiErr> {
     let db = require_db(&state)?;
+    let profile_id = resolve_profile_filter(db, params.profile.as_deref()).await;
     let pending = db
-        .list_pending_responses(Some("pending"))
+        .list_pending_responses(Some("pending"), profile_id)
         .await
         .map_err(internal)?;
     Ok(Json(pending))

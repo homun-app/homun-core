@@ -559,25 +559,43 @@ impl Database {
         .context("Failed to list pending responses for notify")
     }
 
+    /// List pending responses, optionally filtered by status and profile.
     pub async fn list_pending_responses(
         &self,
         status: Option<&str>,
+        profile_id: Option<i64>,
     ) -> Result<Vec<PendingResponse>> {
-        match status {
-            Some(s) => sqlx::query_as::<_, PendingResponse>(
-                "SELECT * FROM pending_responses WHERE status = ? ORDER BY created_at DESC",
-            )
-            .bind(s)
-            .fetch_all(self.pool())
-            .await
-            .context("Failed to list pending responses"),
-            None => sqlx::query_as::<_, PendingResponse>(
-                "SELECT * FROM pending_responses ORDER BY created_at DESC",
-            )
-            .fetch_all(self.pool())
-            .await
-            .context("Failed to list pending responses"),
-        }
+        let profile_clause = match profile_id {
+            Some(_) => " AND (profile_id IS NULL OR profile_id = ?)",
+            None => "",
+        };
+        let rows = match status {
+            Some(s) => {
+                let sql = format!(
+                    "SELECT * FROM pending_responses WHERE status = ?{profile_clause} ORDER BY created_at DESC"
+                );
+                let mut q = sqlx::query_as::<_, PendingResponse>(&sql).bind(s);
+                if let Some(pid) = profile_id {
+                    q = q.bind(pid);
+                }
+                q.fetch_all(self.pool())
+                    .await
+                    .context("Failed to list pending responses")?
+            }
+            None => {
+                let sql = format!(
+                    "SELECT * FROM pending_responses WHERE 1=1{profile_clause} ORDER BY created_at DESC"
+                );
+                let mut q = sqlx::query_as::<_, PendingResponse>(&sql);
+                if let Some(pid) = profile_id {
+                    q = q.bind(pid);
+                }
+                q.fetch_all(self.pool())
+                    .await
+                    .context("Failed to list pending responses")?
+            }
+        };
+        Ok(rows)
     }
 
     pub async fn update_pending_response_status(&self, id: i64, status: &str) -> Result<bool> {
@@ -817,14 +835,14 @@ mod tests {
         assert!(pid > 0);
 
         // List all
-        let all = db.list_pending_responses(None).await.unwrap();
+        let all = db.list_pending_responses(None, None).await.unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].status, "pending");
 
         // List by status
-        let pending = db.list_pending_responses(Some("pending")).await.unwrap();
+        let pending = db.list_pending_responses(Some("pending"), None).await.unwrap();
         assert_eq!(pending.len(), 1);
-        let approved = db.list_pending_responses(Some("approved")).await.unwrap();
+        let approved = db.list_pending_responses(Some("approved"), None).await.unwrap();
         assert!(approved.is_empty());
 
         // Update status

@@ -261,7 +261,7 @@ impl BusinessTool {
             Some(s) => Some(s),
         };
 
-        let businesses = engine.db().list_businesses(status_filter).await?;
+        let businesses = engine.db().list_businesses(status_filter, None).await?;
 
         let items: Vec<Value> = businesses
             .iter()

@@ -2185,7 +2185,7 @@ async fn main() -> Result<()> {
 
             match command {
                 AutomationCommands::List => {
-                    let automations = db.load_automations().await?;
+                    let automations = db.load_automations(None).await?;
                     if automations.is_empty() {
                         println!("No automations found.");
                         println!(

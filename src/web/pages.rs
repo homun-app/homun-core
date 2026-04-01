@@ -1946,6 +1946,18 @@ async fn memory_page(State(state): State<Arc<AppState>>) -> Html<String> {
                     </div>
                 </section>
 
+                <section class="section" id="audit-section">
+                    <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px">
+                        <h2 style="margin: 0">
+                            Visibility Audit
+                            <span class="badge badge-warning" id="audit-badge" style="display:none">0</span>
+                        </h2>
+                        <button class="btn btn-secondary btn-sm" id="btn-classify-all-private">Mark all private</button>
+                    </div>
+                    <p class="form-hint" id="audit-hint">Owner-private memory chunks not visible to contacts.</p>
+                    <div class="item-list" id="audit-list"></div>
+                </section>
+
             </div>
         </main>"#,
         chunk_count = chunk_count,

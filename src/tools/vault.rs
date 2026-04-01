@@ -79,14 +79,14 @@ impl VaultTool {
     }
 
     /// Fire-and-forget audit log (VLT-4).
-    fn log_access(&self, key: &str, action: &str, success: bool) {
+    fn log_access(&self, key: &str, action: &str, success: bool, profile_id: Option<i64>) {
         if let Some(db) = &self.db {
             let db = db.clone();
             let key = key.to_string();
             let action = action.to_string();
             tokio::spawn(async move {
                 if let Err(e) = db
-                    .insert_vault_access(&key, &action, "tool", success, None)
+                    .insert_vault_access(&key, &action, "tool", success, None, profile_id)
                     .await
                 {
                     tracing::warn!(error = ?e, "Failed to write vault audit log");
@@ -279,7 +279,7 @@ impl Tool for VaultTool {
                 let secrets = global_secrets()
                     .map_err(|e| anyhow::anyhow!("Failed to access vault: {e}"))?;
                 secrets.set(&Self::vault_key_for(&key, profile), &value)?;
-                self.log_access(&key, "store", true);
+                self.log_access(&key, "store", true, ctx.profile_id);
 
                 tracing::info!(key = %key, profile = ?profile, "Stored secret in vault");
                 Ok(ToolResult::success(format!(
@@ -329,7 +329,7 @@ impl Tool for VaultTool {
 
                 match secrets.get(&Self::vault_key_for(&key, profile))? {
                     Some(value) => {
-                        self.log_access(&key, "retrieve", true);
+                        self.log_access(&key, "retrieve", true, ctx.profile_id);
                         tracing::info!(key = %key, "Retrieved secret from vault");
                         Ok(ToolResult::success(format!(
                             "**Secret value:**\n```\n{value}\n```\n\n\
@@ -338,7 +338,7 @@ impl Tool for VaultTool {
                         )))
                     }
                     None => {
-                        self.log_access(&key, "retrieve", false);
+                        self.log_access(&key, "retrieve", false, ctx.profile_id);
                         Ok(ToolResult::error(format!(
                             "Secret '{key}' not found in vault."
                         )))
@@ -365,7 +365,7 @@ impl Tool for VaultTool {
                 }
             }
             "list" => {
-                self.log_access("*", "list", true);
+                self.log_access("*", "list", true, ctx.profile_id);
                 let secrets = global_secrets()
                     .map_err(|e| anyhow::anyhow!("Failed to access vault: {e}"))?;
 
@@ -404,7 +404,7 @@ impl Tool for VaultTool {
                 }
 
                 secrets.delete(&vault_key)?;
-                self.log_access(&key, "delete", true);
+                self.log_access(&key, "delete", true, ctx.profile_id);
                 tracing::info!(key = %key, "Deleted secret from vault");
                 Ok(ToolResult::success(format!(
                     "Secret '{key}' deleted from vault."

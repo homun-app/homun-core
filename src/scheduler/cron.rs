@@ -56,7 +56,7 @@ impl CronScheduler {
     pub async fn start(self: Arc<Self>) -> Result<tokio::task::JoinHandle<()>> {
         let count = self
             .db
-            .load_automations()
+            .load_automations(None)
             .await?
             .iter()
             .filter(|a| a.enabled)
@@ -95,7 +95,7 @@ impl CronScheduler {
     /// Both paths converge on the same trigger evaluation and run completion semantics.
     async fn check_and_fire_automations(&self) -> Result<()> {
         let now = chrono::Utc::now();
-        let automations = self.db.load_automations().await?;
+        let automations = self.db.load_automations(None).await?;
         let runtime_config = crate::config::Config::load().ok();
 
         for automation in automations {

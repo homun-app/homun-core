@@ -351,6 +351,7 @@ async fn dispatch_discovery_tool(
                     params.contact_id,
                     params.agent_id,
                     &params.visible_profile_ids,
+                    params.allowed_namespaces.as_deref(),
                 )
                 .await;
             }

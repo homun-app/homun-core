@@ -9,6 +9,11 @@ use crate::storage::{Database, MemoryChunkRow, MemorySummaryRow};
 
 impl Database {
     /// Insert a memory chunk and return its row ID (for vector indexing).
+    ///
+    /// Namespace controls visibility: `_private` (owner-only, default),
+    /// `_public` (visible to all contacts), or custom (e.g. `acme`).
+    /// When `contact_id` is set, namespace is automatically set to `_public`
+    /// so the contact can see their own conversation memories.
     #[allow(clippy::too_many_arguments)]
     pub async fn insert_memory_chunk(
         &self,
@@ -22,9 +27,17 @@ impl Database {
         importance: i32,
         profile_id: Option<i64>,
     ) -> Result<i64> {
+        // Contact-scoped chunks are _public so the contact can see them;
+        // owner chunks (contact_id=NULL) default to _private.
+        let namespace = if contact_id.is_some() {
+            "_public"
+        } else {
+            "_private"
+        };
+
         let result = sqlx::query(
-            "INSERT INTO memory_chunks (date, source, heading, content, memory_type, contact_id, agent_id, importance, profile_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO memory_chunks (date, source, heading, content, memory_type, contact_id, agent_id, importance, profile_id, namespace)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(date)
         .bind(source)
@@ -35,6 +48,7 @@ impl Database {
         .bind(agent_id)
         .bind(importance)
         .bind(profile_id)
+        .bind(namespace)
         .execute(self.pool())
         .await
         .context("Failed to insert memory chunk")?;
@@ -313,6 +327,125 @@ impl Database {
         .fetch_all(self.pool())
         .await
         .context("Failed to load memory summaries")?;
+        Ok(rows)
+    }
+
+    // --- Memory audit operations (visibility classification) ---
+
+    /// Count chunks by namespace for the audit dashboard, scoped to a profile.
+    pub async fn audit_namespace_counts(
+        &self,
+        profile_id: Option<i64>,
+    ) -> Result<(i64, i64, i64)> {
+        let profile_filter = match profile_id {
+            Some(_) => " AND (profile_id IS NULL OR profile_id = ?)",
+            None => "",
+        };
+
+        let sql = format!(
+            "SELECT COUNT(*) FROM memory_chunks WHERE namespace = '_private' AND contact_id IS NULL{profile_filter}"
+        );
+        let mut q = sqlx::query_scalar::<_, i64>(&sql);
+        if let Some(pid) = profile_id {
+            q = q.bind(pid);
+        }
+        let private = q.fetch_one(self.pool()).await.context("Failed to count private owner chunks")?;
+
+        let sql = format!(
+            "SELECT COUNT(*) FROM memory_chunks WHERE namespace != '_private'{profile_filter}"
+        );
+        let mut q = sqlx::query_scalar::<_, i64>(&sql);
+        if let Some(pid) = profile_id {
+            q = q.bind(pid);
+        }
+        let public = q.fetch_one(self.pool()).await.context("Failed to count public chunks")?;
+
+        let sql = format!(
+            "SELECT COUNT(*) FROM memory_chunks WHERE contact_id IS NOT NULL{profile_filter}"
+        );
+        let mut q = sqlx::query_scalar::<_, i64>(&sql);
+        if let Some(pid) = profile_id {
+            q = q.bind(pid);
+        }
+        let contact_scoped = q.fetch_one(self.pool()).await.context("Failed to count contact-scoped chunks")?;
+
+        Ok((private, public, contact_scoped))
+    }
+
+    /// Load a sample of owner-private chunks for audit preview, scoped to a profile.
+    pub async fn audit_private_samples(
+        &self,
+        limit: i64,
+        profile_id: Option<i64>,
+    ) -> Result<Vec<MemoryChunkRow>> {
+        let profile_filter = match profile_id {
+            Some(_) => " AND (profile_id IS NULL OR profile_id = ?)",
+            None => "",
+        };
+        let sql = format!(
+            "SELECT id, date, source, heading, content, memory_type, created_at, \
+             contact_id, agent_id, importance, profile_id, namespace \
+             FROM memory_chunks \
+             WHERE namespace = '_private' AND contact_id IS NULL{profile_filter} \
+             ORDER BY created_at DESC LIMIT ?"
+        );
+        let mut q = sqlx::query_as::<_, MemoryChunkRow>(&sql);
+        if let Some(pid) = profile_id {
+            q = q.bind(pid);
+        }
+        q.bind(limit)
+            .fetch_all(self.pool())
+            .await
+            .context("Failed to load audit samples")
+    }
+
+    /// Reclassify specific chunks to a new namespace.
+    pub async fn reclassify_chunks(&self, chunk_ids: &[i64], namespace: &str) -> Result<u64> {
+        if chunk_ids.is_empty() {
+            return Ok(0);
+        }
+        let mut total = 0u64;
+        for batch in chunk_ids.chunks(100) {
+            let placeholders: Vec<String> = batch.iter().map(|_| "?".to_string()).collect();
+            let sql = format!(
+                "UPDATE memory_chunks SET namespace = ? WHERE id IN ({})",
+                placeholders.join(",")
+            );
+            let mut q = sqlx::query(&sql).bind(namespace);
+            for id in batch {
+                q = q.bind(id);
+            }
+            total += q
+                .execute(self.pool())
+                .await
+                .context("Failed to reclassify chunks")?
+                .rows_affected();
+        }
+        Ok(total)
+    }
+
+    /// Reclassify ALL owner-private chunks to a new namespace, scoped to a profile.
+    pub async fn reclassify_all_private(
+        &self,
+        namespace: &str,
+        profile_id: Option<i64>,
+    ) -> Result<u64> {
+        let profile_filter = match profile_id {
+            Some(_) => " AND (profile_id IS NULL OR profile_id = ?)",
+            None => "",
+        };
+        let sql = format!(
+            "UPDATE memory_chunks SET namespace = ? WHERE namespace = '_private' AND contact_id IS NULL{profile_filter}"
+        );
+        let mut q = sqlx::query(&sql).bind(namespace);
+        if let Some(pid) = profile_id {
+            q = q.bind(pid);
+        }
+        let rows = q
+            .execute(self.pool())
+            .await
+            .context("Failed to reclassify all private chunks")?
+            .rows_affected();
         Ok(rows)
     }
 

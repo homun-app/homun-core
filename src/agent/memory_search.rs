@@ -147,6 +147,10 @@ impl MemorySearcher {
                         if chunk.contact_id.is_some() && chunk.contact_id != Some(cid) {
                             return None; // belongs to a different contact
                         }
+                        // Owner-scoped: contacts cannot see _private chunks
+                        if chunk.namespace == "_private" {
+                            return None;
+                        }
                     }
                     // Agent scoping: include global chunks + agent-specific chunks
                     if let Some(aid) = agent_id {
@@ -227,6 +231,10 @@ impl MemorySearcher {
                     // Contact scoping
                     if let Some(cid) = contact_id {
                         if chunk.contact_id.is_some() && chunk.contact_id != Some(cid) {
+                            return None;
+                        }
+                        // Owner-scoped: contacts cannot see _private chunks
+                        if chunk.namespace == "_private" {
                             return None;
                         }
                     }

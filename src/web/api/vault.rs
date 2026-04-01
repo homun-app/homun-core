@@ -319,7 +319,7 @@ fn audit_log(state: &Arc<AppState>, key: &str, action: &str, success: bool) {
         let action = action.to_string();
         tokio::spawn(async move {
             if let Err(e) = db
-                .insert_vault_access(&key, &action, "web_api", success, None)
+                .insert_vault_access(&key, &action, "web_api", success, None, None)
                 .await
             {
                 tracing::warn!(error = ?e, "Failed to write vault audit log");
@@ -332,6 +332,8 @@ fn audit_log(state: &Arc<AppState>, key: &str, action: &str, success: bool) {
 struct AuditQuery {
     #[serde(default = "default_audit_limit")]
     limit: i64,
+    /// Profile slug for filtering.
+    profile: Option<String>,
 }
 
 fn default_audit_limit() -> i64 {
@@ -343,8 +345,21 @@ async fn get_vault_audit_log(
     axum::extract::Query(q): axum::extract::Query<AuditQuery>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let db = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let profile_id = if let Some(ref slug) = q.profile {
+        if !slug.is_empty() {
+            crate::profiles::db::load_profile_by_slug(db.pool(), slug)
+                .await
+                .ok()
+                .flatten()
+                .map(|p| p.id)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     let rows = db
-        .list_vault_access_log(q.limit)
+        .list_vault_access_log(q.limit, profile_id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(serde_json::json!({ "entries": rows })))

@@ -2169,32 +2169,47 @@ impl Database {
         channel: &str,
         query: &str,
         activation_type: &str,
+        profile_id: Option<i64>,
     ) -> Result<i64> {
         let row = sqlx::query_scalar::<_, i64>(
-            "INSERT INTO skill_audit (skill_name, channel, query, activation_type)
-             VALUES (?, ?, ?, ?)
+            "INSERT INTO skill_audit (skill_name, channel, query, activation_type, profile_id)
+             VALUES (?, ?, ?, ?, ?)
              RETURNING id",
         )
         .bind(skill_name)
         .bind(channel)
         .bind(query)
         .bind(activation_type)
+        .bind(profile_id)
         .fetch_one(&self.pool)
         .await
         .context("Failed to insert skill audit")?;
         Ok(row)
     }
 
-    /// List recent skill audit entries.
-    pub async fn list_skill_audits(&self, limit: i64) -> Result<Vec<SkillAuditRow>> {
-        let rows = sqlx::query_as::<_, SkillAuditRow>(
-            "SELECT id, timestamp, skill_name, channel, query, activation_type, success
-             FROM skill_audit ORDER BY id DESC LIMIT ?",
-        )
-        .bind(limit)
-        .fetch_all(&self.pool)
-        .await
-        .context("Failed to list skill audits")?;
+    /// List recent skill audit entries, optionally filtered by profile.
+    pub async fn list_skill_audits(
+        &self,
+        limit: i64,
+        profile_id: Option<i64>,
+    ) -> Result<Vec<SkillAuditRow>> {
+        let profile_filter = match profile_id {
+            Some(_) => " WHERE profile_id IS NULL OR profile_id = ?",
+            None => "",
+        };
+        let sql = format!(
+            "SELECT id, timestamp, skill_name, channel, query, activation_type, success \
+             FROM skill_audit{profile_filter} ORDER BY id DESC LIMIT ?"
+        );
+        let mut q = sqlx::query_as::<_, SkillAuditRow>(&sql);
+        if let Some(pid) = profile_id {
+            q = q.bind(pid);
+        }
+        let rows = q
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await
+            .context("Failed to list skill audits")?;
         Ok(rows)
     }
 
@@ -2208,10 +2223,11 @@ impl Database {
         source: &str,
         success: bool,
         user_agent: Option<&str>,
+        profile_id: Option<i64>,
     ) -> Result<i64> {
         let row = sqlx::query_scalar::<_, i64>(
-            "INSERT INTO vault_access_log (key_name, action, source, success, user_agent)
-             VALUES (?, ?, ?, ?, ?)
+            "INSERT INTO vault_access_log (key_name, action, source, success, user_agent, profile_id)
+             VALUES (?, ?, ?, ?, ?, ?)
              RETURNING id",
         )
         .bind(key_name)
@@ -2219,22 +2235,36 @@ impl Database {
         .bind(source)
         .bind(success as i32)
         .bind(user_agent)
+        .bind(profile_id)
         .fetch_one(&self.pool)
         .await
         .context("Failed to insert vault access log")?;
         Ok(row)
     }
 
-    /// List recent vault access log entries.
-    pub async fn list_vault_access_log(&self, limit: i64) -> Result<Vec<VaultAccessLogRow>> {
-        let rows = sqlx::query_as::<_, VaultAccessLogRow>(
-            "SELECT id, timestamp, key_name, action, source, success, user_agent
-             FROM vault_access_log ORDER BY id DESC LIMIT ?",
-        )
-        .bind(limit)
-        .fetch_all(&self.pool)
-        .await
-        .context("Failed to list vault access log")?;
+    /// List recent vault access log entries, optionally filtered by profile.
+    pub async fn list_vault_access_log(
+        &self,
+        limit: i64,
+        profile_id: Option<i64>,
+    ) -> Result<Vec<VaultAccessLogRow>> {
+        let profile_filter = match profile_id {
+            Some(_) => " WHERE profile_id IS NULL OR profile_id = ?",
+            None => "",
+        };
+        let sql = format!(
+            "SELECT id, timestamp, key_name, action, source, success, user_agent \
+             FROM vault_access_log{profile_filter} ORDER BY id DESC LIMIT ?"
+        );
+        let mut q = sqlx::query_as::<_, VaultAccessLogRow>(&sql);
+        if let Some(pid) = profile_id {
+            q = q.bind(pid);
+        }
+        let rows = q
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await
+            .context("Failed to list vault access log")?;
         Ok(rows)
     }
 
@@ -3292,7 +3322,7 @@ END;
         .await
         .unwrap();
 
-        let rows = db.load_automations().await.unwrap();
+        let rows = db.load_automations(None).await.unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].id, "auto-1");
         assert_eq!(rows[0].name, "Daily brief");

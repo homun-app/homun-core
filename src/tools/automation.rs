@@ -221,7 +221,7 @@ impl AutomationTool {
     async fn handle_list(&self, args: &Value) -> Result<ToolResult> {
         let filter = args.get("filter").and_then(|v| v.as_str()).unwrap_or("all");
 
-        let automations = match self.db.load_automations().await {
+        let automations = match self.db.load_automations(None).await {
             Ok(a) => a,
             Err(e) => {
                 return Ok(ToolResult::error(format!(
@@ -715,7 +715,7 @@ mod tests {
         assert!(!res.is_error, "create failed: {}", res.output);
         assert!(res.output.contains("Automation created"));
 
-        let rows = db.load_automations().await.unwrap();
+        let rows = db.load_automations(None).await.unwrap();
         assert_eq!(rows.len(), 1);
         let row = &rows[0];
         assert_eq!(row.name, "Email Digest");
@@ -749,7 +749,7 @@ mod tests {
         assert!(res.output.contains("Test Auto"));
 
         // Status by ID
-        let rows = db.load_automations().await.unwrap();
+        let rows = db.load_automations(None).await.unwrap();
         let id = &rows[0].id;
         let res = tool
             .execute(
@@ -776,7 +776,7 @@ mod tests {
             "schedule": "every:600"
         });
         tool.execute(args, &test_ctx()).await.unwrap();
-        let id = db.load_automations().await.unwrap()[0].id.clone();
+        let id = db.load_automations(None).await.unwrap()[0].id.clone();
 
         // Disable
         let res = tool
