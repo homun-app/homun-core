@@ -89,7 +89,13 @@ impl Tool for SpawnTool {
                 };
 
                 match manager
-                    .spawn(description, message, &ctx.channel, &ctx.chat_id)
+                    .spawn(
+                        description,
+                        message,
+                        &ctx.channel,
+                        &ctx.chat_id,
+                        ctx.profile_id,
+                    )
                     .await
                 {
                     Ok(task_id) => ToolResult::success(format!(

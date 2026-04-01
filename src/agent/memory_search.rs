@@ -117,7 +117,14 @@ impl MemorySearcher {
                 );
                 // Fallback: use vector results only
                 return self
-                    .search_vector_only(&vector_results, top_k, contact_id, agent_id, profile_ids)
+                    .search_vector_only(
+                        &vector_results,
+                        top_k,
+                        contact_id,
+                        agent_id,
+                        profile_ids,
+                        allowed_namespaces,
+                    )
                     .await;
             }
         };
@@ -168,7 +175,6 @@ impl MemorySearcher {
                     }
                     // Namespace scoping: only include chunks in allowed namespaces
                     if !allowed_namespaces.is_empty()
-                        && !chunk.namespace.is_empty()
                         && !allowed_namespaces.iter().any(|ns| ns == &chunk.namespace)
                     {
                         return None; // namespace not in allowed set
@@ -205,6 +211,7 @@ impl MemorySearcher {
         contact_id: Option<i64>,
         agent_id: Option<&str>,
         profile_ids: &[i64],
+        allowed_namespaces: &[String],
     ) -> Result<Vec<SearchResult>> {
         if vector_results.is_empty() {
             return Ok(Vec::new());
@@ -251,6 +258,12 @@ impl MemorySearcher {
                                 return None;
                             }
                         }
+                    }
+                    // Namespace scoping (must match main search path)
+                    if !allowed_namespaces.is_empty()
+                        && !allowed_namespaces.iter().any(|ns| ns == &chunk.namespace)
+                    {
+                        return None;
                     }
                     Some(SearchResult {
                         chunk: chunk.clone(),

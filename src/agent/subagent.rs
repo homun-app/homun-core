@@ -50,6 +50,9 @@ impl SubagentManager {
     }
 
     /// Spawn a new background task.
+    ///
+    /// If `profile_id` is provided, the subagent inherits the parent's profile
+    /// via a session override, ensuring memory and context isolation.
     /// Returns the task_id for tracking.
     pub async fn spawn(
         &self,
@@ -57,6 +60,7 @@ impl SubagentManager {
         message: &str,
         channel: &str,
         chat_id: &str,
+        profile_id: Option<i64>,
     ) -> Result<String> {
         let task_id = uuid::Uuid::new_v4().to_string()[..8].to_string();
         let session_key = format!("subagent:{}", task_id);
@@ -97,6 +101,18 @@ impl SubagentManager {
         let cid = chat_id.to_string();
 
         tokio::spawn(async move {
+            // Inherit parent's profile via session override so the subagent
+            // resolves to the same profile for memory and context isolation.
+            if let Some(pid) = profile_id {
+                if let Err(e) = agent.db.set_session_profile_id(&session_key, pid).await {
+                    tracing::warn!(
+                        task_id = %task_id_clone,
+                        error = %e,
+                        "Failed to set subagent profile override"
+                    );
+                }
+            }
+
             let result = match agent.process_message(&msg, &session_key, &ch, &cid).await {
                 Ok(text) => SubagentResult {
                     task_id: task_id_clone.clone(),
