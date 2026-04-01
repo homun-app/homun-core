@@ -103,8 +103,12 @@ pub async fn update_profile(
 
 /// Delete a profile and all its scoped data. Refuses to delete the default profile.
 ///
-/// Cascades deletion to: memory_chunks, rag_chunks, rag_sources, contacts,
-/// sessions, automations, workflows, memory_summaries, businesses, email_pending.
+/// Cascade order:
+/// 1. FK-constrained children (contact_gateway_overrides, shared_resources)
+/// 2. Scoped data (memory_chunks, rag_*, contacts, sessions, automations,
+///    workflows, businesses, email_pending, knowledge_watches, audit logs)
+/// 3. Profile row itself
+/// 4. Filesystem cleanup (brain dir, memory daily logs)
 pub async fn delete_profile(pool: &Pool<Sqlite>, id: i64) -> Result<()> {
     let is_default: i64 = sqlx::query_scalar("SELECT is_default FROM profiles WHERE id = ?")
         .bind(id)
@@ -117,8 +121,40 @@ pub async fn delete_profile(pool: &Pool<Sqlite>, id: i64) -> Result<()> {
         bail!("Cannot delete the default profile");
     }
 
-    // Cascade: delete all scoped data before removing the profile.
-    // Errors for missing tables are silently ignored (test DBs may not have all tables).
+    // Load profile slug before deletion (for filesystem cleanup).
+    let slug: Option<String> =
+        sqlx::query_scalar("SELECT slug FROM profiles WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&*pool)
+            .await
+            .context("Failed to load profile slug")?;
+
+    // Cascade: delete FK-constrained child tables FIRST (no ON DELETE CASCADE on profiles FK),
+    // then scoped data, then the profile itself.
+    // Order matters: contact_gateway_overrides references contacts, so delete it before contacts.
+    // shared_resource_access references shared_resources, so delete shared_resources first
+    // (shared_resource_access has ON DELETE CASCADE on shared_resources.id).
+
+    // Phase 1: FK-constrained tables that reference profiles directly (NOT NULL FK, no CASCADE)
+    let fk_tables_profile_id = [
+        ("contact_gateway_overrides", "profile_id"),
+        ("shared_resources", "owner_profile_id"),
+    ];
+    for (table, col) in &fk_tables_profile_id {
+        let result = sqlx::query(&format!("DELETE FROM {table} WHERE {col} = ?"))
+            .bind(id)
+            .execute(&*pool)
+            .await;
+        if let Err(e) = &result {
+            if !e.to_string().contains("no such table") {
+                result.with_context(|| {
+                    format!("Failed to cascade delete {table} for profile {id}")
+                })?;
+            }
+        }
+    }
+
+    // Phase 2: scoped data tables (nullable profile_id)
     let scoped_tables = [
         "memory_chunks",
         "rag_chunks",
@@ -130,14 +166,17 @@ pub async fn delete_profile(pool: &Pool<Sqlite>, id: i64) -> Result<()> {
         "memory_summaries",
         "businesses",
         "email_pending",
+        "knowledge_watches",
+        "vault_access_log",
+        "skill_audit",
+        "pending_responses",
     ];
     for table in &scoped_tables {
         let result = sqlx::query(&format!("DELETE FROM {table} WHERE profile_id = ?"))
             .bind(id)
-            .execute(pool)
+            .execute(&*pool)
             .await;
         if let Err(e) = &result {
-            // "no such table" is expected in test DBs that only have the profiles table
             if !e.to_string().contains("no such table") {
                 result.with_context(|| {
                     format!("Failed to cascade delete {table} for profile {id}")
@@ -146,11 +185,41 @@ pub async fn delete_profile(pool: &Pool<Sqlite>, id: i64) -> Result<()> {
         }
     }
 
+    // Phase 3: delete the profile row
     sqlx::query("DELETE FROM profiles WHERE id = ?")
         .bind(id)
-        .execute(pool)
+        .execute(&*pool)
         .await
         .context("Failed to delete profile")?;
+
+    // Phase 4: clean up brain directory on filesystem
+    if let Some(slug) = slug {
+        let data_dir = crate::config::Config::data_dir();
+        let brain_dir = data_dir.join("brain").join("profiles").join(&slug);
+        if brain_dir.exists() {
+            if let Err(e) = std::fs::remove_dir_all(&brain_dir) {
+                tracing::warn!(
+                    profile_slug = %slug,
+                    error = %e,
+                    "Failed to remove profile brain directory"
+                );
+            } else {
+                tracing::info!(profile_slug = %slug, "Removed profile brain directory");
+            }
+        }
+
+        // Also clean up profile-specific memory daily logs
+        let memory_dir = data_dir.join("memory").join("profiles").join(&slug);
+        if memory_dir.exists() {
+            if let Err(e) = std::fs::remove_dir_all(&memory_dir) {
+                tracing::warn!(
+                    profile_slug = %slug,
+                    error = %e,
+                    "Failed to remove profile memory directory"
+                );
+            }
+        }
+    }
 
     Ok(())
 }
