@@ -79,6 +79,55 @@ pub async fn resolve_profile_id_from_values(
     }
 }
 
+/// Resolve the effective profile for a session (web/mobile chat).
+///
+/// Used by GET /chat/profile and `/profile` command to show the active profile.
+/// Cascade:
+/// 1. Explicit session override (`sessions.profile_id`)
+/// 2. Global config default slug (`profiles.default`)
+/// 3. The DB default profile (`is_default = 1`)
+///
+/// This is a simplified cascade for channels without contact/gateway context
+/// (web chat, mobile). For full resolution with contact overrides, use
+/// [`resolve_profile_id_from_values`].
+pub async fn resolve_session_profile(
+    db: &Database,
+    session_key: &str,
+    global_default_slug: &str,
+) -> profiles::Profile {
+    // 1. Session override
+    if let Some(pid) = db.get_session_profile_id(session_key).await {
+        if let Ok(Some(profile)) = profiles::db::load_profile_by_id(db.pool(), pid).await {
+            return profile;
+        }
+    }
+
+    // 2. Global config default
+    if !global_default_slug.is_empty() && global_default_slug != "default" {
+        if let Ok(Some(profile)) =
+            profiles::db::load_profile_by_slug(db.pool(), global_default_slug).await
+        {
+            return profile;
+        }
+    }
+
+    // 3. DB default (always exists)
+    profiles::db::get_default_profile(db.pool())
+        .await
+        .unwrap_or_else(|_| profiles::Profile {
+            id: 1,
+            slug: "default".into(),
+            display_name: "Default".into(),
+            avatar_emoji: "\u{1f464}".into(),
+            color: "#64748B".into(),
+            profile_json: "{}".into(),
+            is_default: 1,
+            user_id: None,
+            created_at: String::new(),
+            updated_at: String::new(),
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -878,8 +878,17 @@ impl Gateway {
                     || content_trimmed == "!profile"
                     || content_trimmed.starts_with("!profile ");
                 if is_profile_cmd {
-                    let response =
-                        handle_profile_command(content_trimmed, &session_key, &routing_db).await;
+                    let global_default_slug = {
+                        let cfg = routing_config.read().await;
+                        cfg.profiles.default.clone()
+                    };
+                    let response = handle_profile_command(
+                        content_trimmed,
+                        &session_key,
+                        &routing_db,
+                        &global_default_slug,
+                    )
+                    .await;
                     let outbound = OutboundMessage {
                         channel: channel_name.clone(),
                         chat_id: chat_id.clone(),
@@ -2703,7 +2712,12 @@ async fn route_outbound(
 ///
 /// - `/profile` — show the active profile for the current session
 /// - `/profile <slug>` — switch the session to a different profile
-async fn handle_profile_command(content: &str, session_key: &str, db: &Database) -> String {
+async fn handle_profile_command(
+    content: &str,
+    session_key: &str,
+    db: &Database,
+    global_default_slug: &str,
+) -> String {
     // Parse slug argument (strip prefix: /profile or !profile)
     let slug_arg = content
         .strip_prefix("/profile")
@@ -2712,20 +2726,10 @@ async fn handle_profile_command(content: &str, session_key: &str, db: &Database)
         .unwrap_or("");
 
     if slug_arg.is_empty() {
-        // Show current profile — resolve the effective profile, not just session override
-        let current = match db.get_session_profile_id(session_key).await {
-            Some(pid) => match crate::profiles::db::load_profile_by_id(db.pool(), pid).await {
-                Ok(Some(p)) => format!("{} {} ({})", p.avatar_emoji, p.display_name, p.slug),
-                _ => "default".to_string(),
-            },
-            None => {
-                // No explicit override — show the effective default profile
-                match crate::profiles::db::get_default_profile(db.pool()).await {
-                    Ok(p) => format!("{} {} ({})", p.avatar_emoji, p.display_name, p.slug),
-                    Err(_) => "default".to_string(),
-                }
-            }
-        };
+        // Show current profile — same resolution as GET /chat/profile:
+        // 1. session override → 2. global config default → 3. DB default
+        let effective = crate::agent::profile_resolver::resolve_session_profile(db, session_key, global_default_slug).await;
+        let current = format!("{} {} ({})", effective.avatar_emoji, effective.display_name, effective.slug);
         return format!("Active profile: {current}\n\nUse /profile <slug> to switch.");
     }
 
@@ -2766,3 +2770,4 @@ async fn handle_profile_command(content: &str, session_key: &str, db: &Database)
         profile.avatar_emoji, profile.display_name, profile.slug
     )
 }
+

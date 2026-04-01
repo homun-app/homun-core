@@ -1049,7 +1049,7 @@ async fn get_chat_profile(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // Resolve the active profile
-    let active = resolve_active_profile(db, &session_key, &state).await?;
+    let active = resolve_active_profile(db, &session_key, &state).await;
 
     Ok(Json(ChatProfileResponse {
         conversation_id,
@@ -1100,40 +1100,18 @@ async fn set_chat_profile(
 
 /// Resolve the active profile for a web chat session.
 ///
-/// Priority:
-/// 1. Explicit `session.profile_id` (set via PUT /chat/profile or /profile command)
-/// 2. Global `profiles.default` config slug
-/// 3. The hardcoded default profile (always exists)
+/// Delegates to [`profile_resolver::resolve_session_profile`] which implements
+/// the shared cascade: session override → global config default → DB default.
 async fn resolve_active_profile(
     db: &crate::storage::Database,
     session_key: &str,
     state: &Arc<AppState>,
-) -> Result<crate::profiles::Profile, StatusCode> {
-    // 1. Check explicit session override
-    if let Some(pid) = db.get_session_profile_id(session_key).await {
-        if let Ok(Some(profile)) = crate::profiles::db::load_profile_by_id(db.pool(), pid).await {
-            return Ok(profile);
-        }
-        // profile_id points to a deleted profile — fall through
-    }
-
-    // 2. Global config default
+) -> crate::profiles::Profile {
     let global_default = {
         let cfg = state.config.read().await;
         cfg.profiles.default.clone()
     };
-    if !global_default.is_empty() && global_default != "default" {
-        if let Ok(Some(profile)) =
-            crate::profiles::db::load_profile_by_slug(db.pool(), &global_default).await
-        {
-            return Ok(profile);
-        }
-    }
-
-    // 3. Hardcoded default (always exists)
-    crate::profiles::db::get_default_profile(db.pool())
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+    crate::agent::profile_resolver::resolve_session_profile(db, session_key, &global_default).await
 }
 
 // ─── Tests ──────────────────────────────────────────────────────
