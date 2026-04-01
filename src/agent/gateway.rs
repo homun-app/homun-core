@@ -2712,13 +2712,19 @@ async fn handle_profile_command(content: &str, session_key: &str, db: &Database)
         .unwrap_or("");
 
     if slug_arg.is_empty() {
-        // Show current profile
+        // Show current profile — resolve the effective profile, not just session override
         let current = match db.get_session_profile_id(session_key).await {
             Some(pid) => match crate::profiles::db::load_profile_by_id(db.pool(), pid).await {
                 Ok(Some(p)) => format!("{} {} ({})", p.avatar_emoji, p.display_name, p.slug),
                 _ => "default".to_string(),
             },
-            None => "default".to_string(),
+            None => {
+                // No explicit override — show the effective default profile
+                match crate::profiles::db::get_default_profile(db.pool()).await {
+                    Ok(p) => format!("{} {} ({})", p.avatar_emoji, p.display_name, p.slug),
+                    Err(_) => "default".to_string(),
+                }
+            }
         };
         return format!("Active profile: {current}\n\nUse /profile <slug> to switch.");
     }

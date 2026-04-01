@@ -3375,4 +3375,44 @@ END;
         let deleted = db.delete_automation("auto-1").await.unwrap();
         assert!(deleted);
     }
+
+    #[tokio::test]
+    async fn test_session_profile_id_lifecycle() {
+        let (db, _dir) = test_db().await;
+        let key = "web:test-conv-1";
+
+        // The default profile (id=1) is seeded by migrations.
+        // Create a second profile for the switch test.
+        let profile_b = crate::profiles::db::insert_profile(
+            db.pool(),
+            "work",
+            "Work",
+            "\u{1f4bc}",
+            "#2563EB",
+            "{}",
+            None,
+        )
+        .await
+        .unwrap();
+
+        // Create session
+        db.upsert_session(key, 0).await.unwrap();
+
+        // Initially no profile_id set
+        assert!(db.get_session_profile_id(key).await.is_none());
+
+        // Set profile_id to default (id=1, seeded)
+        db.set_session_profile_id(key, 1).await.unwrap();
+        assert_eq!(db.get_session_profile_id(key).await, Some(1));
+
+        // Switch to the second profile
+        db.set_session_profile_id(key, profile_b).await.unwrap();
+        assert_eq!(db.get_session_profile_id(key).await, Some(profile_b));
+
+        // Another session is not affected
+        let key2 = "web:test-conv-2";
+        db.upsert_session(key2, 0).await.unwrap();
+        assert!(db.get_session_profile_id(key2).await.is_none());
+        assert_eq!(db.get_session_profile_id(key).await, Some(profile_b));
+    }
 }

@@ -624,25 +624,62 @@ impl AgentLoop {
                 .unwrap_or("")
                 .to_string();
             let global_default_profile = config.profiles.default.clone();
-            // Resolve active profile (contact > channel > config default)
-            // Resolve gateway_id from hint or by looking up channel type in DB
-            let gateway_id: Option<i64> = if _gateway_id_hint.is_some() {
-                _gateway_id_hint
-            } else {
-                // Fallback: find the first enabled gateway for this channel type
-                crate::gateways::db::load_gateways_by_type(self.db.pool(), channel)
+            // Resolve active profile.
+            // Priority 0: explicit session override (set via /profile or chat profile API).
+            // If unset, fall back to the resolver cascade (contact > channel > config default).
+            let session_override = self.db.get_session_profile_id(session_key).await;
+            let profile_id = if let Some(pid) = session_override {
+                // Verify the profile still exists (might have been deleted)
+                if crate::profiles::db::load_profile_by_id(self.db.pool(), pid)
                     .await
                     .ok()
-                    .and_then(|gws| gws.first().map(|g| g.id))
+                    .flatten()
+                    .is_some()
+                {
+                    pid
+                } else {
+                    tracing::warn!(
+                        session = session_key,
+                        deleted_profile_id = pid,
+                        "Session profile_id points to deleted profile, falling back to resolver"
+                    );
+                    // Fall through to resolver
+                    let gateway_id: Option<i64> = if _gateway_id_hint.is_some() {
+                        _gateway_id_hint
+                    } else {
+                        crate::gateways::db::load_gateways_by_type(self.db.pool(), channel)
+                            .await
+                            .ok()
+                            .and_then(|gws| gws.first().map(|g| g.id))
+                    };
+                    crate::agent::profile_resolver::resolve_profile_id_from_values(
+                        contact.as_ref(),
+                        &ch_default_profile,
+                        &global_default_profile,
+                        &self.db,
+                        gateway_id,
+                    )
+                    .await
+                }
+            } else {
+                // No session override — use resolver cascade
+                let gateway_id: Option<i64> = if _gateway_id_hint.is_some() {
+                    _gateway_id_hint
+                } else {
+                    crate::gateways::db::load_gateways_by_type(self.db.pool(), channel)
+                        .await
+                        .ok()
+                        .and_then(|gws| gws.first().map(|g| g.id))
+                };
+                crate::agent::profile_resolver::resolve_profile_id_from_values(
+                    contact.as_ref(),
+                    &ch_default_profile,
+                    &global_default_profile,
+                    &self.db,
+                    gateway_id,
+                )
+                .await
             };
-            let profile_id = crate::agent::profile_resolver::resolve_profile_id_from_values(
-                contact.as_ref(),
-                &ch_default_profile,
-                &global_default_profile,
-                &self.db,
-                gateway_id,
-            )
-            .await;
 
             // Build profile brain dir path + inject profile context
             let data_dir = Config::data_dir();
