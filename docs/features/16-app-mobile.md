@@ -132,6 +132,17 @@ Il backend determina il profilo attivo con questa cascata:
 
 > **Nota:** la catena completa del `profile_resolver.rs` (5 livelli con contact/gateway override) non si applica alla web/mobile chat, che non ha il concetto di contact o gateway override. La cascata ridotta a 3 livelli e corretta per questo contesto.
 
+### Coerenza Cross-Componente
+Tre componenti consumano `sessions.profile_id` e devono concordare sulla risoluzione:
+
+| Componente | Modulo | Comportamento |
+|---|---|---|
+| **Agent loop** | `agent_loop.rs` | Legge `session.profile_id` **prima** della cascata del resolver. Se presente e valido, usa quello. Altrimenti fallback a contact → channel → global → default. |
+| **Comando `/profile`** | `gateway.rs` | Se `session.profile_id` e valorizzato, mostra quel profilo. Se NULL, mostra il profilo default effettivo dal DB (non la stringa "default"). |
+| **API GET /chat/profile** | `chat.rs` | Cascata a 3 livelli: session override → global config → default. Restituisce il profilo risolto con tutti i campi. |
+
+**Invariante**: dopo un PUT che setta `profile_slug = "work"`, tutti e tre i consumatori devono restituire/usare il profilo "work" per quella sessione. Altre sessioni non sono influenzate.
+
 ### Contratto API
 
 **GET /api/v1/chat/profile?conversation_id=...**
