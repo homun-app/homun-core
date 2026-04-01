@@ -33,6 +33,23 @@ pub enum ApprovalOutcome {
 
 // ─── Gate Registry ─────────────────────────────────────────────
 
+/// A pending gate entry: the oneshot sender + the block content for replay.
+struct PendingEntry {
+    tx: oneshot::Sender<BlockResponse>,
+    /// Serialized `Vec<ResponseBlock>` JSON — kept for re-streaming on
+    /// WebSocket reconnect so the client can re-render the approval UI.
+    block_json: String,
+}
+
+// Manual Debug impl to avoid exposing oneshot internals.
+impl std::fmt::Debug for PendingEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PendingEntry")
+            .field("block_json_len", &self.block_json.len())
+            .finish()
+    }
+}
+
 /// Global registry of pending approval oneshot channels.
 ///
 /// The agent loop calls `register()` to create a pending gate, then
@@ -41,8 +58,8 @@ pub enum ApprovalOutcome {
 /// the agent loop.
 #[derive(Debug)]
 pub struct ApprovalGate {
-    /// Pending oneshot senders keyed by block_id.
-    pending: Mutex<HashMap<String, oneshot::Sender<BlockResponse>>>,
+    /// Pending entries keyed by block_id.
+    pending: Mutex<HashMap<String, PendingEntry>>,
 }
 
 impl ApprovalGate {
@@ -55,11 +72,21 @@ impl ApprovalGate {
 
     /// Register a pending approval and return the receiver to await.
     ///
+    /// `block_json` is the serialized `Vec<ResponseBlock>` JSON, stored
+    /// so pending blocks can be re-streamed on WebSocket reconnect.
+    ///
     /// The caller must stream the corresponding `ChoiceBlock` to the client
     /// before (or immediately after) calling this method.
-    pub async fn register(&self, block_id: &str) -> oneshot::Receiver<BlockResponse> {
+    pub async fn register(
+        &self,
+        block_id: &str,
+        block_json: String,
+    ) -> oneshot::Receiver<BlockResponse> {
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().await.insert(block_id.to_string(), tx);
+        self.pending
+            .lock()
+            .await
+            .insert(block_id.to_string(), PendingEntry { tx, block_json });
         tracing::debug!(block_id, "Approval gate registered");
         rx
     }
@@ -70,8 +97,8 @@ impl ApprovalGate {
     /// pending gate exists for this `block_id` (e.g. timeout already
     /// cleaned it up, or it's a non-gated block).
     pub async fn resolve(&self, block_id: &str, response: BlockResponse) -> bool {
-        if let Some(tx) = self.pending.lock().await.remove(block_id) {
-            let ok = tx.send(response).is_ok();
+        if let Some(entry) = self.pending.lock().await.remove(block_id) {
+            let ok = entry.tx.send(response).is_ok();
             if ok {
                 tracing::info!(block_id, "Approval gate resolved");
             } else {
@@ -89,6 +116,18 @@ impl ApprovalGate {
         if self.pending.lock().await.remove(block_id).is_some() {
             tracing::debug!(block_id, "Approval gate cancelled");
         }
+    }
+
+    /// Return all pending block entries as `(block_id, block_json)` pairs.
+    ///
+    /// Used to re-stream pending approval blocks on WebSocket reconnect.
+    pub async fn pending_blocks(&self) -> Vec<(String, String)> {
+        self.pending
+            .lock()
+            .await
+            .iter()
+            .map(|(id, entry)| (id.clone(), entry.block_json.clone()))
+            .collect()
     }
 }
 
@@ -138,16 +177,16 @@ pub async fn await_approval(
     let blocks_json = serde_json::to_string(&vec![block]).unwrap_or_default();
     let _ = stream_tx
         .send(StreamChunk {
-            delta: blocks_json,
+            delta: blocks_json.clone(),
             done: false,
             event_type: Some("blocks".to_string()),
             tool_call_data: None,
         })
         .await;
 
-    // 2. Register the gate and get the receiver
+    // 2. Register the gate (with block content for reconnect replay)
     let gate = approval_gate();
-    let rx = gate.register(block_id).await;
+    let rx = gate.register(block_id, blocks_json).await;
 
     // 3. Wait for response or timeout.
     // NOTE: we intentionally do NOT include wait_for_stop() here.
@@ -181,7 +220,7 @@ mod tests {
     #[tokio::test]
     async fn register_and_resolve() {
         let gate = ApprovalGate::new();
-        let rx = gate.register("test_1").await;
+        let rx = gate.register("test_1", "[]".to_string()).await;
 
         let response = BlockResponse {
             block_id: "test_1".into(),
@@ -211,9 +250,37 @@ mod tests {
     #[tokio::test]
     async fn cancel_drops_sender() {
         let gate = ApprovalGate::new();
-        let rx = gate.register("test_cancel").await;
+        let rx = gate.register("test_cancel", "[]".to_string()).await;
         gate.cancel("test_cancel").await;
         assert!(rx.await.is_err(), "receiver should get error after cancel");
+    }
+
+    #[tokio::test]
+    async fn pending_blocks_returns_stored_json() {
+        let gate = ApprovalGate::new();
+        let _rx1 = gate
+            .register("block_a", r#"[{"block_type":"choice"}]"#.to_string())
+            .await;
+        let _rx2 = gate
+            .register("block_b", r#"[{"block_type":"approval"}]"#.to_string())
+            .await;
+
+        let pending = gate.pending_blocks().await;
+        assert_eq!(pending.len(), 2);
+        assert!(pending.iter().any(|(id, _)| id == "block_a"));
+        assert!(pending.iter().any(|(id, _)| id == "block_b"));
+
+        // After resolve, the entry is gone
+        let response = BlockResponse {
+            block_id: "block_a".into(),
+            option_id: Some("ok".into()),
+            action: None,
+            metadata: None,
+        };
+        gate.resolve("block_a", response).await;
+        let pending = gate.pending_blocks().await;
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].0, "block_b");
     }
 
     #[tokio::test]

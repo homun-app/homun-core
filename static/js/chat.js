@@ -1114,6 +1114,23 @@ function hydrateActiveRun(run) {
         setRunBadge('warning', 'Failed');
     }
 
+    // Render pending approval blocks (survive WS reconnect via run snapshot)
+    if (run.pending_blocks && run.pending_blocks.length && typeof renderBlocks === 'function') {
+        for (const entry of run.pending_blocks) {
+            try {
+                const blocks = JSON.parse(entry.blocks_json);
+                const target = document.createElement('div');
+                target.className = 'chat-msg assistant approval-gate-container';
+                target.dataset.blockId = entry.block_id;
+                messagesEl.appendChild(target);
+                renderBlocks(blocks, target, sendBlockResponse);
+            } catch (e) {
+                console.error('Failed to render pending block:', e);
+            }
+        }
+        scrollThreadToBottom();
+    }
+
     // Hide stale plan panel if run is no longer active
     if (run.status !== 'running' && run.status !== 'stopping') {
         clearExecutionPlan();
@@ -2284,19 +2301,26 @@ function connect() {
                 // Render blocks immediately during streaming so the user
                 // can interact with approval gates (pause/resume flow).
                 if (pendingBlocks && pendingBlocks.length && typeof renderBlocks === 'function') {
-                    let target = streamingEl
-                        ? (streamingEl.querySelector('.chat-msg-body') || streamingEl)
-                        : null;
-                    // If no streaming element yet (approval arrives before tool_start),
-                    // create a standalone container in the message area.
-                    if (!target) {
-                        target = document.createElement('div');
-                        target.className = 'chat-msg assistant approval-gate-container';
-                        messagesEl.appendChild(target);
+                    // Dedup: skip if this block was already rendered by hydrateActiveRun
+                    const blockId = pendingBlocks[0]?.id;
+                    if (blockId && document.querySelector(`.approval-gate-container[data-block-id="${blockId}"]`)) {
+                        pendingBlocks = null;
+                    } else {
+                        let target = streamingEl
+                            ? (streamingEl.querySelector('.chat-msg-body') || streamingEl)
+                            : null;
+                        // If no streaming element yet (approval arrives before tool_start),
+                        // create a standalone container in the message area.
+                        if (!target) {
+                            target = document.createElement('div');
+                            target.className = 'chat-msg assistant approval-gate-container';
+                            if (blockId) target.dataset.blockId = blockId;
+                            messagesEl.appendChild(target);
+                        }
+                        renderBlocks(pendingBlocks, target, sendBlockResponse);
+                        pendingBlocks = null;
+                        scrollThreadToBottom();
                     }
-                    renderBlocks(pendingBlocks, target, sendBlockResponse);
-                    pendingBlocks = null;
-                    scrollThreadToBottom();
                 }
 
             } else if (data.type === 'screenshot') {
@@ -2844,6 +2868,13 @@ function sendCurrentMessage() {
  *  Adds a user message to the chat and sends via WebSocket with block_response metadata. */
 function sendBlockResponse(replyText, blockResponse) {
     if (!replyText || !ws || ws.readyState !== WebSocket.OPEN) return;
+    // Remove the approval gate container so it doesn't linger in the UI
+    if (blockResponse && blockResponse.block_id) {
+        const container = document.querySelector(
+            `.approval-gate-container[data-block-id="${blockResponse.block_id}"]`
+        );
+        if (container) container.remove();
+    }
     addMessage('user', replyText);
     forceScrollToBottom();
     const payload = { content: replyText };

@@ -2450,6 +2450,9 @@ impl TryFrom<WebChatRunRow> for crate::web::run_state::WebChatRunSnapshot {
             updated_at: row.updated_at,
             events,
             error: row.error,
+            // DB-persisted runs never have live pending blocks — gates
+            // only exist in-memory while the agent is actively waiting.
+            pending_blocks: Vec::new(),
         })
     }
 }
@@ -3162,6 +3165,7 @@ END;
                 tool_call: None,
             }],
             error: None,
+            pending_blocks: Vec::new(),
         };
 
         db.upsert_web_chat_run(&run).await.unwrap();

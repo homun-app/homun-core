@@ -98,6 +98,23 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, conversation_id:
     });
     let _ = sender.send(Message::Text(welcome.to_string().into())).await;
 
+    // Re-stream any pending approval blocks so the client can re-render
+    // approval gates that were lost during a WebSocket reconnect.
+    {
+        let gate = crate::agent::approval_gate::approval_gate();
+        let pending = gate.pending_blocks().await;
+        for (block_id, blocks_json) in pending {
+            let _ = client_stream_tx
+                .send(WsStreamEvent {
+                    delta: blocks_json,
+                    event_type: Some("blocks".to_string()),
+                    tool_call_data: None,
+                })
+                .await;
+            tracing::debug!(%block_id, "Re-streamed pending approval block on reconnect");
+        }
+    }
+
     // Task: forward both full responses and stream chunks to WebSocket.
     // Stream chunks arrive as `type: "stream"` messages.
     // Full responses arrive as `type: "response"` messages.
@@ -246,9 +263,22 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, conversation_id:
                         if let Some(ref br) = block_response {
                             let gate = crate::agent::approval_gate::approval_gate();
                             if gate.resolve(&br.block_id, br.clone()).await {
+                                // Remove from run snapshot so it won't re-stream on next reconnect
+                                state.web_runs.remove_pending_block(&session_key, &br.block_id);
                                 tracing::info!(block_id = %br.block_id, "Approval resolved via gate — agent will resume");
                                 continue;
                             }
+                            // Gate already resolved or timed out — clean up stale UI
+                            state.web_runs.remove_pending_block(&session_key, &br.block_id);
+                            let _ = client_stream_tx
+                                .send(WsStreamEvent {
+                                    delta: format!("Approval for \"{}\" has expired or was already handled.", br.block_id),
+                                    event_type: Some("error".to_string()),
+                                    tool_call_data: None,
+                                })
+                                .await;
+                            tracing::info!(block_id = %br.block_id, "Stale block_response — gate already resolved/expired");
+                            continue;
                         }
 
                         let run = match state.web_runs.start_run(&session_key, &user_message_label)

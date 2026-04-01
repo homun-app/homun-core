@@ -15,6 +15,15 @@ pub struct WebChatRunEvent {
     pub tool_call: Option<crate::provider::ToolCallData>,
 }
 
+/// A pending approval block stored in the run snapshot for reconnect replay.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingBlockEntry {
+    /// The unique block_id matching the `ApprovalGate` registry key.
+    pub block_id: String,
+    /// Serialized `Vec<ResponseBlock>` JSON — the full block payload.
+    pub blocks_json: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebChatRunSnapshot {
     pub run_id: String,
@@ -29,6 +38,11 @@ pub struct WebChatRunSnapshot {
     pub events: Vec<WebChatRunEvent>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Pending approval blocks awaiting user response.
+    /// Present only while an approval gate is active; cleared when
+    /// the gate is resolved or times out.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_blocks: Vec<PendingBlockEntry>,
 }
 
 #[derive(Debug, Default)]
@@ -75,6 +89,7 @@ impl WebRunStore {
             updated_at: now,
             events: Vec::new(),
             error: None,
+            pending_blocks: Vec::new(),
         };
 
         inner
@@ -110,6 +125,24 @@ impl WebRunStore {
                 name: msg.delta.clone(),
                 tool_call: msg.tool_call_data.clone(),
             };
+            // Blocks events: store as pending approval blocks for reconnect replay.
+            if event_type == "blocks" {
+                if let Ok(blocks) = serde_json::from_str::<Vec<serde_json::Value>>(&msg.delta) {
+                    if let Some(block_id) =
+                        blocks.first().and_then(|b| b.get("id")).and_then(|v| v.as_str())
+                    {
+                        // Avoid duplicates (same block_id re-streamed)
+                        if !run.pending_blocks.iter().any(|b| b.block_id == block_id) {
+                            run.pending_blocks.push(PendingBlockEntry {
+                                block_id: block_id.to_string(),
+                                blocks_json: msg.delta.clone(),
+                            });
+                        }
+                    }
+                }
+                // Don't push blocks as a generic event — they're tracked separately
+                return Some(run.clone());
+            }
             // Plan events: keep only the latest snapshot (replace, don't accumulate)
             // to avoid replaying stale intermediate states on reconnect.
             if event_type == "plan" {
@@ -157,6 +190,23 @@ impl WebRunStore {
             inner.runs.remove(&run_id);
         }
         inner.runs.retain(|_, run| run.session_key != session_key);
+    }
+
+    /// Remove a pending approval block from the active run.
+    ///
+    /// Called when a gate is resolved (user clicked) or timed out, so the
+    /// block is not re-streamed on subsequent reconnects.
+    pub fn remove_pending_block(
+        &self,
+        session_key: &str,
+        block_id: &str,
+    ) -> Option<WebChatRunSnapshot> {
+        let mut inner = self.inner.lock().expect("web run store lock poisoned");
+        let run_id = inner.active_by_session.get(session_key).cloned()?;
+        let run = inner.runs.get_mut(&run_id)?;
+        run.pending_blocks.retain(|b| b.block_id != block_id);
+        run.updated_at = Utc::now().to_rfc3339();
+        Some(run.clone())
     }
 
     /// Mark runs that have been "running" or "stopping" for too long as
