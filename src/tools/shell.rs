@@ -82,8 +82,9 @@ const DENY_REGEX_PATTERNS: &[&str] = &[
     r"(cat|cp|scp|curl).*\.ssh/(id_|authorized_keys)",
     // History theft
     r"(cat|cp|curl).*\.(bash_|zsh_)?history",
-    // Config / secrets file reads — prevent exfiltration of Homun config
-    r"(cat|less|head|tail|more|bat|strings|xxd|hexdump)\s+.*\.homun/",
+    // Config / secrets file reads — prevent exfiltration of Homun config.
+    // Note: .homun/workspace/ is explicitly allowed (agent output files).
+    r"(cat|less|head|tail|more|bat|strings|xxd|hexdump)\s+.*\.homun/(config\.toml|homun\.db|secrets\.enc|brain/USER\.md|brain/SOUL\.md)",
     r"(cat|less|head|tail|more|bat)\s+.*config\.toml",
     r"(cat|less|head|tail|more|bat)\s+.*secrets\.enc",
     r"(cat|less|head|tail|more|bat)\s+.*/\.env(\b|$)",
@@ -719,19 +720,39 @@ mod tests {
 
     #[tokio::test]
     async fn test_safe_echo() {
-        let tool = ShellTool::new(10, false);
-        let args = serde_json::json!({"command": "echo hello"});
-        let result = tool.execute(args, &test_ctx()).await.unwrap();
-        assert!(!result.is_error);
-        assert_eq!(result.output.trim(), "hello");
+        // Global stop flag race: test_shell_command_cancelled_by_stop_request may set
+        // the flag between our clear and execute. Retry to handle the race window.
+        for attempt in 0..5 {
+            crate::agent::stop::clear_stop();
+            let tool = ShellTool::new(10, false);
+            let args = serde_json::json!({"command": "echo hello"});
+            let result = tool.execute(args, &test_ctx()).await.unwrap();
+            if result.is_error && result.output.contains("cancelled") {
+                tokio::time::sleep(std::time::Duration::from_millis(50 * (attempt + 1))).await;
+                continue;
+            }
+            assert!(!result.is_error, "Unexpected error: {}", result.output);
+            assert_eq!(result.output.trim(), "hello");
+            return;
+        }
+        panic!("test_safe_echo: still cancelled after 5 retries");
     }
 
     #[tokio::test]
     async fn test_safe_ls() {
-        let tool = ShellTool::new(10, false);
-        let args = serde_json::json!({"command": "ls /tmp"});
-        let result = tool.execute(args, &test_ctx()).await.unwrap();
-        assert!(!result.is_error);
+        for attempt in 0..5 {
+            crate::agent::stop::clear_stop();
+            let tool = ShellTool::new(10, false);
+            let args = serde_json::json!({"command": "ls /tmp"});
+            let result = tool.execute(args, &test_ctx()).await.unwrap();
+            if result.is_error && result.output.contains("cancelled") {
+                tokio::time::sleep(std::time::Duration::from_millis(50 * (attempt + 1))).await;
+                continue;
+            }
+            assert!(!result.is_error, "Unexpected error: {}", result.output);
+            return;
+        }
+        panic!("test_safe_ls: still cancelled after 5 retries");
     }
 
     #[tokio::test]
@@ -788,14 +809,26 @@ mod tests {
             Some(shared_config.clone()),
         );
 
-        let ok = tool
-            .execute(
-                serde_json::json!({"command": "echo hot-reload"}),
-                &test_ctx(),
-            )
-            .await
-            .unwrap();
-        assert!(!ok.is_error);
+        // Retry loop: global stop flag from parallel test may race.
+        let mut ok_result = None;
+        for attempt in 0..5 {
+            crate::agent::stop::clear_stop();
+            let ok = tool
+                .execute(
+                    serde_json::json!({"command": "echo hot-reload"}),
+                    &test_ctx(),
+                )
+                .await
+                .unwrap();
+            if ok.is_error && ok.output.contains("cancelled") {
+                tokio::time::sleep(std::time::Duration::from_millis(50 * (attempt + 1))).await;
+                continue;
+            }
+            ok_result = Some(ok);
+            break;
+        }
+        let ok = ok_result.expect("test_hot_reload: still cancelled after 5 retries");
+        assert!(!ok.is_error, "Unexpected error: {}", ok.output);
         assert!(ok.output.contains("hot-reload"));
 
         {
@@ -831,11 +864,26 @@ mod tests {
 
     #[tokio::test]
     async fn test_exit_code() {
-        let tool = ShellTool::new(10, false);
-        let args = serde_json::json!({"command": "false"});
-        let result = tool.execute(args, &test_ctx()).await.unwrap();
-        assert!(result.is_error);
-        assert!(result.output.contains("exit code"));
+        for attempt in 0..5 {
+            crate::agent::stop::clear_stop();
+            let tool = ShellTool::new(10, false);
+            let args = serde_json::json!({"command": "false"});
+            let result = tool.execute(args, &test_ctx()).await.unwrap();
+            // Both "cancelled" and "exit code" indicate is_error=true,
+            // but we need "exit code" specifically. Retry on stop-flag race.
+            if result.output.contains("cancelled") {
+                tokio::time::sleep(std::time::Duration::from_millis(50 * (attempt + 1))).await;
+                continue;
+            }
+            assert!(result.is_error);
+            assert!(
+                result.output.contains("exit code"),
+                "expected 'exit code' in: {}",
+                result.output
+            );
+            return;
+        }
+        panic!("test_exit_code: still cancelled after 5 retries");
     }
 
     #[tokio::test]

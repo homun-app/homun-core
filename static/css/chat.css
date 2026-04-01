@@ -1006,6 +1006,15 @@
     overflow: hidden;
     text-overflow: ellipsis;
 }
+.chat-tool-download {
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 500;
+    margin-left: 6px;
+}
+.chat-tool-download:hover {
+    text-decoration: underline;
+}
 
 .chat-tool-call-meta {
     margin-left: auto;

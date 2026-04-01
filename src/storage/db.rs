@@ -460,6 +460,12 @@ impl Database {
         )
         .await?;
 
+        // One-shot backfill post-migration-050 (namespace isolation):
+        // Chunks created by contacts before the namespace feature had `namespace = '_private'`
+        // (the SQL column default). With the new structural filter in memory_search.rs,
+        // contacts would stop seeing their own past memories. Fix: set them to '_public'.
+        Self::backfill_contact_namespaces(pool).await?;
+
         Ok(())
     }
 
@@ -613,6 +619,52 @@ impl Database {
                 }
                 _ => {}
             }
+        }
+
+        Ok(())
+    }
+
+    /// Backfill namespace on memory chunks created by contacts before namespace isolation.
+    ///
+    /// Before the namespace feature, all chunks had `namespace = '_private'` (column default).
+    /// With the structural filter in `memory_search.rs`, contacts cannot see `_private` chunks,
+    /// so their past memories would vanish. This sets contact-owned chunks to `_public`.
+    /// Idempotent: rows already `_public` are unaffected; no-op once all are fixed.
+    async fn backfill_contact_namespaces(pool: &Pool<Sqlite>) -> Result<()> {
+        let result = sqlx::query(
+            "UPDATE memory_chunks SET namespace = '_public' \
+             WHERE contact_id IS NOT NULL AND namespace = '_private'",
+        )
+        .execute(pool)
+        .await;
+
+        match result {
+            Ok(r) if r.rows_affected() > 0 => {
+                tracing::info!(
+                    rows = r.rows_affected(),
+                    "Backfilled contact memory_chunks namespace _private → _public"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to backfill contact namespaces");
+            }
+            _ => {}
+        }
+
+        // Verification: ensure no contact-owned chunks remain _private
+        let remaining: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM memory_chunks \
+             WHERE contact_id IS NOT NULL AND namespace = '_private'",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap_or(-1);
+
+        if remaining > 0 {
+            tracing::error!(
+                remaining,
+                "Contact namespace backfill incomplete — chunks still _private"
+            );
         }
 
         Ok(())
@@ -2343,6 +2395,117 @@ impl Database {
         .await
         .context("Failed to load browser allowlist")?;
         Ok(rows.into_iter().collect())
+    }
+
+    // ── Task checkpoints (execution persistence) ──────────────
+
+    /// Persist or update a task checkpoint for crash recovery.
+    pub async fn upsert_task_checkpoint(
+        &self,
+        checkpoint: &crate::agent::TaskCheckpoint,
+    ) -> Result<()> {
+        let files_json =
+            serde_json::to_string(&checkpoint.files_created).unwrap_or_else(|_| "[]".to_string());
+        let data_json = serde_json::to_string(&checkpoint.completed_data)
+            .unwrap_or_else(|_| "[]".to_string());
+
+        sqlx::query(
+            "INSERT INTO task_checkpoints (id, session_key, profile_id, channel, chat_id,
+                user_prompt, plan_json, files_created, completed_data, status, iteration,
+                created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+             ON CONFLICT(id) DO UPDATE SET
+                plan_json = excluded.plan_json,
+                files_created = excluded.files_created,
+                completed_data = excluded.completed_data,
+                status = excluded.status,
+                iteration = excluded.iteration,
+                updated_at = datetime('now')",
+        )
+        .bind(&checkpoint.id)
+        .bind(&checkpoint.session_key)
+        .bind(&checkpoint.profile_id)
+        .bind(&checkpoint.channel)
+        .bind(&checkpoint.chat_id)
+        .bind(&checkpoint.user_prompt)
+        .bind(&checkpoint.plan_json)
+        .bind(&files_json)
+        .bind(&data_json)
+        .bind(&checkpoint.status)
+        .bind(checkpoint.iteration as i64)
+        .execute(&self.pool)
+        .await
+        .context("Failed to upsert task checkpoint")?;
+        Ok(())
+    }
+
+    /// Load interrupted tasks for a given session or channel+chat_id.
+    pub async fn load_interrupted_tasks(
+        &self,
+        session_key: &str,
+    ) -> Result<Vec<crate::agent::TaskCheckpoint>> {
+        let rows = sqlx::query_as::<_, (String, String, Option<String>, String, String, String, String, String, String, String, i64)>(
+            "SELECT id, session_key, profile_id, channel, chat_id,
+                    user_prompt, plan_json, files_created, completed_data, status, iteration
+             FROM task_checkpoints
+             WHERE session_key = ? AND status IN ('running', 'paused')
+             ORDER BY updated_at DESC",
+        )
+        .bind(session_key)
+        .fetch_all(&self.pool)
+        .await
+        .context("Failed to load interrupted tasks")?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| crate::agent::TaskCheckpoint {
+                id: r.0,
+                session_key: r.1,
+                profile_id: r.2,
+                channel: r.3,
+                chat_id: r.4,
+                user_prompt: r.5,
+                plan_json: r.6,
+                files_created: serde_json::from_str(&r.7).unwrap_or_default(),
+                completed_data: serde_json::from_str(&r.8).unwrap_or_default(),
+                status: r.9,
+                iteration: r.10 as u32,
+            })
+            .collect())
+    }
+
+    /// Delete a task checkpoint (after completion or cancellation).
+    pub async fn delete_task_checkpoint(&self, id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM task_checkpoints WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .context("Failed to delete task checkpoint")?;
+        Ok(())
+    }
+
+    /// Delete a task checkpoint by session key (after successful completion).
+    pub async fn delete_task_checkpoint_by_session(&self, session_key: &str) -> Result<()> {
+        sqlx::query("DELETE FROM task_checkpoints WHERE session_key = ?")
+            .bind(session_key)
+            .execute(&self.pool)
+            .await
+            .context("Failed to delete task checkpoint by session")?;
+        Ok(())
+    }
+
+    /// Clean up stale task checkpoints (orphans from crashes).
+    /// Removes completed tasks and running tasks older than 7 days.
+    pub async fn cleanup_stale_task_checkpoints(&self) -> Result<u64> {
+        let result = sqlx::query(
+            "DELETE FROM task_checkpoints
+             WHERE status IN ('completed', 'cancelled')
+             OR (status = 'running' AND updated_at < datetime('now', '-7 days'))",
+        )
+        .execute(&self.pool)
+        .await
+        .context("Failed to cleanup stale task checkpoints")?;
+        Ok(result.rows_affected())
     }
 }
 

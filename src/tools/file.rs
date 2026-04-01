@@ -558,11 +558,24 @@ impl Tool for WriteFileTool {
         }
 
         match tokio::fs::write(&path, &content).await {
-            Ok(()) => Ok(ToolResult::success(format!(
-                "Wrote {} bytes to {}",
-                content.len(),
-                path_str
-            ))),
+            Ok(()) => {
+                let mut msg = format!("Wrote {} bytes to {}", content.len(), path_str);
+
+                // If the file is in the workspace, append a download URL
+                let workspace = crate::config::Config::data_dir().join("workspace");
+                if let (Ok(file_canonical), Ok(ws_canonical)) =
+                    (path.canonicalize(), workspace.canonicalize())
+                {
+                    if let Ok(relative) = file_canonical.strip_prefix(&ws_canonical) {
+                        let url_path = relative.to_string_lossy().replace('\\', "/");
+                        msg.push_str(&format!(
+                            "\nDownload: /api/v1/workspace/files/{url_path}"
+                        ));
+                    }
+                }
+
+                Ok(ToolResult::success(msg))
+            }
             Err(e) => Ok(ToolResult::error(format!("Failed to write file: {e}"))),
         }
     }

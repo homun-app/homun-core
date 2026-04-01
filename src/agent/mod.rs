@@ -45,7 +45,7 @@ pub use bootstrap_watcher::{BootstrapContent, BootstrapFiles, BootstrapWatcher};
 pub use browser_task_plan::BrowserTaskPlanState;
 pub use context::ContextBuilder;
 pub use definition::AgentDefinition;
-pub use execution_plan::{ExecutionPlanSnapshot, ExecutionPlanState};
+pub use execution_plan::{ExecutionPlanSnapshot, ExecutionPlanState, TaskCheckpoint};
 pub use gateway::Gateway;
 pub use heartbeat::HeartbeatService;
 pub use memory::MemoryConsolidator;

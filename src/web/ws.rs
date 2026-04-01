@@ -115,6 +115,67 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, conversation_id:
         }
     }
 
+    // Check for interrupted tasks from previous sessions.
+    // If found, send a ChoiceBlock asking the user if they want to resume.
+    if let Some(db) = state.db.as_ref() {
+        let session_key = format!("web:{chat_id}");
+        if let Ok(tasks) = db.load_interrupted_tasks(&session_key).await {
+            for task in tasks {
+                let done = task.completed_data.len();
+                let total_desc = if task.plan_json.len() > 2 {
+                    if let Ok(snap) = serde_json::from_str::<crate::agent::ExecutionPlanSnapshot>(
+                        &task.plan_json,
+                    ) {
+                        let total = snap.explicit_steps.len();
+                        let done_count = snap
+                            .explicit_steps
+                            .iter()
+                            .filter(|s| s.status == "completed")
+                            .count();
+                        format!("{done_count}/{total} steps completed")
+                    } else {
+                        format!("{done} steps completed")
+                    }
+                } else {
+                    format!("{done} steps completed")
+                };
+
+                let block = serde_json::json!([{
+                    "block_type": "choice",
+                    "id": format!("task_resume_{}", task.id),
+                    "title": "Interrupted task found",
+                    "subtitle": format!("{} — {}", crate::utils::text::truncate_str(&task.user_prompt, 80, ""), total_desc),
+                    "options": [
+                        {
+                            "id": "resume",
+                            "label": "Resume",
+                            "subtitle": "Continue from where you left off",
+                            "metadata": { "task_id": task.id, "action": "resume" }
+                        },
+                        {
+                            "id": "cancel",
+                            "label": "Cancel",
+                            "subtitle": "Discard the interrupted task",
+                            "metadata": { "task_id": task.id, "action": "cancel" }
+                        }
+                    ]
+                }]);
+
+                let _ = client_stream_tx
+                    .send(WsStreamEvent {
+                        delta: block.to_string(),
+                        event_type: Some("blocks".to_string()),
+                        tool_call_data: None,
+                    })
+                    .await;
+                tracing::info!(
+                    task_id = %task.id,
+                    "Sent resume choice block for interrupted task"
+                );
+            }
+        }
+    }
+
     // Task: forward both full responses and stream chunks to WebSocket.
     // Stream chunks arrive as `type: "stream"` messages.
     // Full responses arrive as `type: "response"` messages.
@@ -259,6 +320,62 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, conversation_id:
                             .get("block_response")
                             .cloned()
                             .and_then(|v| serde_json::from_value::<crate::tools::BlockResponse>(v).ok());
+
+                        // Handle task resume/cancel choice blocks
+                        if let Some(ref br) = block_response {
+                            if br.block_id.starts_with("task_resume_") {
+                                let task_id = br.block_id.strip_prefix("task_resume_").unwrap_or("");
+                                let action = br.option_id.as_deref().unwrap_or("cancel");
+
+                                if let Some(db) = state.db.as_ref() {
+                                    if action == "resume" {
+                                        // Load checkpoint and build resume prompt
+                                        if let Ok(tasks) = db.load_interrupted_tasks(&session_key).await {
+                                            if let Some(task) = tasks.into_iter().find(|t| t.id == task_id) {
+                                                let resume_prompt = crate::agent::ExecutionPlanState::build_resume_prompt(&task);
+                                                // Delete the checkpoint (we're resuming, fresh start)
+                                                let _ = db.delete_task_checkpoint(task_id).await;
+
+                                                // Send as new inbound message
+                                                let run = match state.web_runs.start_run(&session_key, "Resuming interrupted task") {
+                                                    Ok(run) => run,
+                                                    Err(msg) => {
+                                                        let _ = client_stream_tx.send(WsStreamEvent {
+                                                            delta: msg,
+                                                            event_type: Some("error".to_string()),
+                                                            tool_call_data: None,
+                                                        }).await;
+                                                        continue;
+                                                    }
+                                                };
+                                                persist_run_snapshot(&state, &run).await;
+
+                                                let inbound = InboundMessage {
+                                                    channel: "web".to_string(),
+                                                    sender_id: chat_id.clone(),
+                                                    chat_id: chat_id.clone(),
+                                                    content: resume_prompt,
+                                                    timestamp: Utc::now(),
+                                                    metadata: Some(MessageMetadata {
+                                                        web_run_id: Some(run.run_id),
+                                                        ..MessageMetadata::default()
+                                                    }),
+                                                };
+                                                if let Some(ref tx) = state.inbound_tx {
+                                                    let _ = tx.send(inbound).await;
+                                                }
+                                                tracing::info!(task_id, "Resuming interrupted task");
+                                            }
+                                        }
+                                    } else {
+                                        // Cancel — delete checkpoint
+                                        let _ = db.delete_task_checkpoint(task_id).await;
+                                        tracing::info!(task_id, "Cancelled interrupted task");
+                                    }
+                                }
+                                continue;
+                            }
+                        }
 
                         if let Some(ref br) = block_response {
                             let gate = crate::agent::approval_gate::approval_gate();

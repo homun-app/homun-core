@@ -1834,9 +1834,25 @@ function endToolIndicator(toolName, toolCallData) {
                 // Add truncated result as a summary line
                 const summary = document.createElement('span');
                 summary.className = 'chat-tool-summary';
-                summary.textContent = resultText.length > 80
-                    ? resultText.substring(0, 80) + '…'
-                    : resultText;
+                // Check for workspace download link in result
+                const downloadMatch = resultText.match(/Download: (\/api\/v1\/workspace\/files\/\S+)/);
+                if (downloadMatch) {
+                    const cleanResult = resultText.split('\nDownload:')[0];
+                    summary.textContent = cleanResult.length > 80
+                        ? cleanResult.substring(0, 80) + '…'
+                        : cleanResult;
+                    const dlLink = document.createElement('a');
+                    dlLink.href = downloadMatch[1];
+                    dlLink.className = 'chat-tool-download';
+                    dlLink.textContent = ' ⬇ Download';
+                    dlLink.target = '_blank';
+                    dlLink.setAttribute('download', '');
+                    summary.appendChild(dlLink);
+                } else {
+                    summary.textContent = resultText.length > 80
+                        ? resultText.substring(0, 80) + '…'
+                        : resultText;
+                }
                 const compact = completedCard.querySelector('.chat-tool-call-compact');
                 if (compact) compact.appendChild(summary);
             } else {

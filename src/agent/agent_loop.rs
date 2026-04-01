@@ -80,8 +80,8 @@ pub struct AgentLoop {
     /// Auto-detected on first error — tools are then injected into the system
     /// prompt as XML and parsed from the LLM's text response.
     use_xml_dispatch: AtomicBool,
-    /// Database handle for token usage tracking.
-    db: Database,
+    /// Database handle for token usage tracking, memory, sessions.
+    pub(crate) db: Database,
     /// Shared browser session state for continuation hints and idle cleanup.
     /// Wrapped in RwLock so MCP background startup can inject it after Arc wrapping.
     #[cfg(feature = "browser")]
@@ -1134,12 +1134,14 @@ impl AgentLoop {
             std::collections::HashSet::new();
         let mut total_usage = Usage::default();
         let mut execution_plan = ExecutionPlanState::new(&prompt_content);
+        // Task persistence: checkpoint ID and file tracker for crash recovery.
+        let checkpoint_id = uuid::Uuid::new_v4().to_string();
+        let mut files_created: Vec<String> = Vec::new();
         let mut browser_task_plan = BrowserTaskPlanState::from_cognition(
             &cognition_result,
             &prompt_content,
             active_profile_brain_dir.clone(),
         );
-
         // Load browser site allowlist from DB and populate caches.
         // This enables the veto system to block unlisted sites and
         // the browser tool to auto-switch headless/visible mode.
@@ -2163,9 +2165,110 @@ impl AgentLoop {
                             );
                             messages.push(screenshot_msg);
                         }
+
+                    }
+
+                    // ── Execution discipline: checkpoint + strategy rotation ──
+                    // Applies to ALL tool calls (not just browser). Operates AFTER
+                    // all tool-specific post-processing to avoid compacting
+                    // freshly-injected context.
+                    {
+                        use super::execution_plan::PlanAction;
+
+                        let plan_action = execution_plan.note_iteration(
+                            &tool_call.name,
+                            &result.output,
+                        );
+
+                        match plan_action {
+                            PlanAction::Checkpoint { summary } => {
+                                // Browser-specific: supersede stale snapshots
+                                if crate::browser::is_browser_tool(&tool_call.name) {
+                                    browser_context::supersede_stale_browser_context(&mut messages);
+                                }
+                                // Universal: compact old context
+                                context_compactor::auto_compact_context(&mut messages);
+                                // Inject structured progress summary
+                                messages.push(ChatMessage::user(&summary));
+                                tracing::info!(iteration, "Execution checkpoint — injected progress summary");
+                                emit_plan_update(
+                                    stream_tx.as_ref(),
+                                    &merged_execution_snapshot(&execution_plan, &browser_task_plan),
+                                    &mut last_plan_payload,
+                                ).await;
+                                // Persist checkpoint for crash recovery
+                                if execution_plan.has_explicit_plan() {
+                                    let cp = execution_plan.to_checkpoint(
+                                        &checkpoint_id, session_key,
+                                        Some(&active_profile_id.to_string()),
+                                        channel, chat_id,
+                                        &prompt_content, &files_created, "running",
+                                    );
+                                    if let Err(e) = self.db.upsert_task_checkpoint(&cp).await {
+                                        tracing::warn!(error = %e, "Failed to persist task checkpoint");
+                                    }
+                                }
+                            }
+                            PlanAction::StrategyRotation { prompt } => {
+                                messages.push(ChatMessage::user(&prompt));
+                                tracing::info!(iteration, "Strategy rotation — injected alternative approach prompt");
+                                emit_plan_update(
+                                    stream_tx.as_ref(),
+                                    &merged_execution_snapshot(&execution_plan, &browser_task_plan),
+                                    &mut last_plan_payload,
+                                ).await;
+                            }
+                            PlanAction::GiveUp { report } => {
+                                if !report.is_empty() {
+                                    messages.push(ChatMessage::user(&report));
+                                    tracing::warn!(iteration, "Execution plan recommends giving up");
+                                }
+                                emit_plan_update(
+                                    stream_tx.as_ref(),
+                                    &merged_execution_snapshot(&execution_plan, &browser_task_plan),
+                                    &mut last_plan_payload,
+                                ).await;
+                            }
+                            PlanAction::Continue => {}
+                        }
+
+                        // Emit progress status to UI
+                        if let Some(status) = execution_plan.progress_status() {
+                            if let Some(tx) = stream_tx.as_ref() {
+                                let _ = tx.send(crate::provider::StreamChunk {
+                                    delta: status,
+                                    done: false,
+                                    event_type: Some("status".to_string()),
+                                    tool_call_data: None,
+                                }).await;
+                            }
+                        }
+                    }
+
+                    // Track files created by write_file tool
+                    if tool_call.name == "write_file" && !result.is_error {
+                        if let Some(path) = tool_call.arguments.get("path").and_then(|v| v.as_str()) {
+                            if !files_created.contains(&path.to_string()) {
+                                files_created.push(path.to_string());
+                            }
+                        }
                     }
 
                     if crate::agent::stop::is_stop_requested() {
+                        // Persist checkpoint on stop for later resume
+                        if execution_plan.has_explicit_plan() {
+                            let cp = execution_plan.to_checkpoint(
+                                &checkpoint_id, session_key,
+                                Some(&active_profile_id.to_string()),
+                                channel, chat_id,
+                                &prompt_content, &files_created, "paused",
+                            );
+                            if let Err(e) = self.db.upsert_task_checkpoint(&cp).await {
+                                tracing::warn!(error = %e, "Failed to persist task checkpoint on stop");
+                            } else {
+                                tracing::info!("Task checkpoint saved — can be resumed later");
+                            }
+                        }
                         final_content = Some("Stopped by user.".to_string());
                         break 'agent_loop;
                     }
@@ -2522,6 +2625,12 @@ impl AgentLoop {
                     })
                     .await;
             }
+        }
+
+        // Clean up task checkpoint on successful completion.
+        // The checkpoint is no longer needed since the task finished.
+        if let Err(e) = self.db.delete_task_checkpoint_by_session(session_key).await {
+            tracing::debug!(error = %e, "Failed to cleanup task checkpoint (may not exist)");
         }
 
         // Check if memory consolidation is needed (non-blocking background task)

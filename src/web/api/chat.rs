@@ -42,6 +42,10 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
             "/v1/chat/uploads/{conversation_id}/{file_name}",
             get(get_chat_uploaded_file),
         )
+        .route(
+            "/v1/workspace/files/*path",
+            get(get_workspace_file),
+        )
         .route("/v1/chat/run", get(current_chat_run))
         .route("/v1/chat/compact", axum::routing::post(compact_chat))
         .route("/v1/chat/stop", axum::routing::post(stop_chat_run))
@@ -816,6 +820,61 @@ async fn get_chat_uploaded_file(
     response.headers_mut().insert(
         CACHE_CONTROL,
         HeaderValue::from_static("private, max-age=3600"),
+    );
+    Ok(response)
+}
+
+/// Download a file from the agent workspace.
+///
+/// Files are created by the `write_file` tool in `~/.homun/workspace/`.
+/// Path traversal is blocked: only files strictly inside the workspace
+/// directory are served.
+async fn get_workspace_file(
+    axum::Extension(auth): axum::Extension<AuthUser>,
+    Path(file_path): Path<String>,
+) -> Result<Response, StatusCode> {
+    check_write(&auth)?;
+
+    let workspace = crate::config::Config::data_dir().join("workspace");
+    let requested = workspace.join(&file_path);
+
+    // Canonicalize to block path traversal (../../etc/passwd)
+    let canonical = requested
+        .canonicalize()
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+    let workspace_canonical = workspace
+        .canonicalize()
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+
+    if !canonical.starts_with(&workspace_canonical) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let data = tokio::fs::read(&canonical)
+        .await
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+
+    let content_type = mime_guess::from_path(&canonical).first_or_octet_stream();
+    let file_name = canonical
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("download");
+
+    let mut response = Response::new(Body::from(data));
+    response.headers_mut().insert(
+        CONTENT_TYPE,
+        HeaderValue::from_str(content_type.as_ref())
+            .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream")),
+    );
+    // Content-Disposition triggers browser download dialog
+    if let Ok(val) = HeaderValue::from_str(&format!("attachment; filename=\"{file_name}\"")) {
+        response
+            .headers_mut()
+            .insert(axum::http::header::CONTENT_DISPOSITION, val);
+    }
+    response.headers_mut().insert(
+        CACHE_CONTROL,
+        HeaderValue::from_static("private, no-cache"),
     );
     Ok(response)
 }

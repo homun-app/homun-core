@@ -1643,6 +1643,22 @@ impl Gateway {
                 }
             });
 
+            // Clean up stale task checkpoints (orphans from previous crashes).
+            // Running tasks older than 7 days and completed/cancelled ones are removed.
+            // Paused tasks are preserved — the user will be prompted to resume.
+            let cleanup_db = self.db.clone();
+            tokio::spawn(async move {
+                match cleanup_db.cleanup_stale_task_checkpoints().await {
+                    Ok(n) if n > 0 => {
+                        tracing::info!(count = n, "Cleaned up stale task checkpoints");
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Failed to cleanup stale task checkpoints");
+                    }
+                    _ => {}
+                }
+            });
+
             let stream_tx_wf = web_stream_tx_for_wf.clone();
             Some(tokio::spawn(async move {
                 while let Some(event) = wf_rx.recv().await {
