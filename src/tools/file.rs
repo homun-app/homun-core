@@ -529,10 +529,15 @@ impl Tool for WriteFileTool {
         let content = match get_optional_string(&args, "content") {
             Some(c) if !c.is_empty() => c,
             _ => {
-                return Ok(ToolResult::error(
-                    "write_file requires 'content' (the text to write) and 'path' (where to save). \
-                     Example: write_file({\"path\": \"/home/user/.homun/workspace/output.csv\", \"content\": \"col1,col2\\nval1,val2\"})"
-                ));
+                let workspace = crate::config::Config::data_dir().join("workspace");
+                return Ok(ToolResult::error(format!(
+                    "write_file failed: no content received (args were empty). \
+                     This usually happens when the content is too large for tool call parameters. \
+                     WORKAROUND: Use the shell tool instead to write the file. Example:\n\
+                     shell({{\"command\": \"cat << 'CSVEOF' > {workspace}/output.csv\\nNome,Indirizzo,Citta\\nNegozio1,Via Roma 1,Milano\\nCSVEOF\"}})\n\
+                     Use a heredoc (cat << 'EOF' > file\\n...\\nEOF) to write multi-line content.",
+                    workspace = workspace.display()
+                )));
             }
         };
         // Auto-generate workspace path when model omits the `path` parameter.

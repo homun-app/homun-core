@@ -417,7 +417,7 @@ impl ExecutionPlanState {
                  You MUST try a DIFFERENT approach:\n\
                  - If a web search isn't finding results, try different search terms\n\
                  - If a website doesn't respond, try an alternative source\n\
-                 - If a file write fails, verify the path and retry\n\
+                 - If write_file fails repeatedly, use the shell tool with a heredoc instead (cat << 'EOF' > file)\n\
                  - If a command fails, try a different approach\n\
                  - If nothing works, explain to the user what you found and what blocked you",
                 step_desc,
@@ -1015,7 +1015,18 @@ fn infer_blockers(tool_name: &str, output: &str, is_error: bool) -> Vec<String> 
         );
     }
     if is_error && blockers.is_empty() {
-        if lower.contains("missing required parameter") || lower.contains("missing parameter") {
+        if lower.contains("no content received") || lower.contains("args were empty") {
+            // write_file with empty args — model can't serialize large content.
+            // Direct it to use shell as workaround.
+            blockers.push(
+                "write_file failed because the content was too large for tool parameters. \
+                 You MUST use the shell tool with a heredoc to write the file instead. \
+                 Do NOT retry write_file — use shell."
+                    .to_string(),
+            );
+        } else if lower.contains("missing required parameter")
+            || lower.contains("missing parameter")
+        {
             blockers.push(format!(
                 "Latest {} call failed due to a missing parameter. Read the error message, add the missing parameter, and retry the SAME tool call immediately.",
                 tool_name
