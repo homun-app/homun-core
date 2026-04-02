@@ -40,6 +40,7 @@ pub(crate) async fn build_selective_tool_defs(
     discovered_skills: &[DiscoveredSkill],
     blocked_tools: &HashSet<&str>,
     xml_mode: bool,
+    implicit_browser: bool,
 ) -> ToolDefinitionSet {
     let always_available = ["send_message", "remember", "approval", "vault"];
 
@@ -50,9 +51,9 @@ pub(crate) async fn build_selective_tool_defs(
         .collect();
 
     // Implicit tool associations: if one tool is selected, its companion
-    // is automatically included. These are deterministic rules that save
-    // the LLM from having to know about tool interdependencies.
-    apply_implicit_tools(&mut selected_names);
+    // is automatically included. These rules save the LLM from having to
+    // know about tool interdependencies.
+    apply_implicit_tools(&mut selected_names, implicit_browser);
 
     let all_defs = tool_registry.read().await.get_definitions();
     let mut tool_defs: Vec<ToolDefinition> = all_defs
@@ -127,10 +128,15 @@ pub(crate) async fn build_selective_tool_defs(
 /// Some tools naturally go together — if one is selected, the companion
 /// should be available too. This avoids burdening the LLM with knowledge
 /// about tool interdependencies.
-fn apply_implicit_tools(selected: &mut HashSet<&str>) {
-    // web_search → browser + web_fetch (search results often need navigation)
+fn apply_implicit_tools(selected: &mut HashSet<&str>, implicit_browser: bool) {
+    // web_search → web_fetch (search results may need page reading).
+    // Browser is only added when `implicit_browser` is true (legacy behavior).
+    // By default, browser must be explicitly selected by cognition to avoid
+    // the model using it for Google searches instead of web_search API.
     if selected.contains("web_search") || selected.contains("brave-search__brave_web_search") {
-        selected.insert("browser");
+        if implicit_browser {
+            selected.insert("browser");
+        }
         selected.insert("web_fetch");
     }
     // browser → web_fetch (page content extraction)
@@ -166,4 +172,61 @@ pub(crate) async fn fallback_full_context(
         .map(|s| s.to_string())
         .collect();
     CognitionResult::fallback_full(names, user_prompt)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn apply_implicit_tools_no_browser_by_default() {
+        let mut selected: HashSet<&str> = HashSet::new();
+        selected.insert("web_search");
+
+        apply_implicit_tools(&mut selected, false);
+
+        assert!(selected.contains("web_fetch"), "web_fetch should be added");
+        assert!(
+            !selected.contains("browser"),
+            "browser should NOT be added when implicit_browser=false"
+        );
+    }
+
+    #[test]
+    fn apply_implicit_tools_browser_with_legacy_flag() {
+        let mut selected: HashSet<&str> = HashSet::new();
+        selected.insert("web_search");
+
+        apply_implicit_tools(&mut selected, true);
+
+        assert!(selected.contains("web_fetch"), "web_fetch should be added");
+        assert!(
+            selected.contains("browser"),
+            "browser should be added when implicit_browser=true"
+        );
+    }
+
+    #[test]
+    fn apply_implicit_tools_browser_explicit_adds_web_fetch() {
+        let mut selected: HashSet<&str> = HashSet::new();
+        selected.insert("browser");
+
+        apply_implicit_tools(&mut selected, false);
+
+        assert!(
+            selected.contains("web_fetch"),
+            "web_fetch should be added when browser is explicitly selected"
+        );
+    }
+
+    #[test]
+    fn apply_implicit_tools_brave_mcp_same_as_web_search() {
+        let mut selected: HashSet<&str> = HashSet::new();
+        selected.insert("brave-search__brave_web_search");
+
+        apply_implicit_tools(&mut selected, false);
+
+        assert!(selected.contains("web_fetch"));
+        assert!(!selected.contains("browser"));
+    }
 }

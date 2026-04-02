@@ -705,6 +705,7 @@ mod tests {
             autonomy_override: None,
             intent_type: None,
             success_criteria: None,
+            data_schema: None,
         }
     }
 

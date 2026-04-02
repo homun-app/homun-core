@@ -437,6 +437,26 @@ pub struct AgentConfig {
     /// Timeout in seconds for the entire cognition phase. Default: 15.
     #[serde(default)]
     pub cognition_timeout_secs: u64,
+    /// Enable 3-level context compression (micro-compact, LLM summary, emergency).
+    /// When false, uses the legacy single-threshold compaction. Default: true.
+    #[serde(default = "default_true")]
+    pub context_compression_v2: bool,
+    /// Enable automatic retry with context compaction when the LLM provider
+    /// returns a context overflow error (413, context_length_exceeded).
+    /// Default: true.
+    #[serde(default = "default_true")]
+    pub retry_on_overflow: bool,
+    /// Enable the DataBuffer system for structured data collection.
+    /// When active, the cognition phase can specify a `data_schema` and
+    /// the `add_data` tool becomes available for the model to save records.
+    /// Default: true.
+    #[serde(default = "default_true")]
+    pub data_buffer_enabled: bool,
+    /// When true, selecting web_search in cognition also implicitly adds browser
+    /// to the tool set. Default: false (browser must be explicitly selected).
+    /// Set to true to restore pre-v2 behavior where browser was always available.
+    #[serde(default)]
+    pub cognition_implicit_browser: bool,
     /// Enable request tracing. When enabled, each request writes a JSON trace file
     /// to `~/.homun/traces/` capturing the full execution: cognition, tool calls, response.
     /// Default: true.
@@ -559,6 +579,10 @@ impl Default for AgentConfig {
             cognition_model: String::new(),
             cognition_max_iterations: 4,
             cognition_timeout_secs: 15,
+            context_compression_v2: true,
+            retry_on_overflow: true,
+            data_buffer_enabled: true,
+            cognition_implicit_browser: false,
             traces_enabled: true,
             traces_max_files: 50,
         }

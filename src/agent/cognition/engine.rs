@@ -519,7 +519,15 @@ fn build_cognition_prompt_plan_first(
          \"find me a train\" = informational. \"book me a train\" = transactional.\n\n\
          Write `success_criteria` as ONE sentence: what 'done' looks like.\n\n\
          For simple requests (greetings, time, factual questions), set \
-         answer_directly=true and provide your answer in direct_answer.\n",
+         answer_directly=true and provide your answer in direct_answer.\n\n\
+         ## Tool selection guidance\n\n\
+         - **web_search**: For FINDING information (search queries). Fast, structured results. \
+         Use for any \"search for\", \"find\", \"list of\", \"how many\" requests.\n\
+         - **web_fetch**: For READING a specific URL (article, wiki, static page).\n\
+         - **browser**: ONLY for INTERACTING with a site — forms, maps, login, \
+         dynamic JS apps, store locators with interactive maps, booking flows. \
+         Do NOT select browser for simple information lookup — web_search is 10x faster.\n\
+         - When in doubt between web_search and browser, prefer web_search.\n",
     );
 
     prompt
@@ -716,6 +724,7 @@ mod tests {
             autonomy_override: None,
             intent_type: Some(super::super::types::IntentType::Informational),
             success_criteria: Some("Find train options".to_string()),
+            data_schema: None,
         };
         let summary = format_result_summary(&result);
         assert!(summary.contains("web_search"));

@@ -388,7 +388,7 @@ impl AgentLoop {
         channel: &str,
         chat_id: &str,
     ) -> Result<String> {
-        self.process_message_inner(
+        self.process_message_with_retry(
             content,
             session_key,
             channel,
@@ -411,7 +411,7 @@ impl AgentLoop {
         chat_id: &str,
         blocked_tools: &[&str],
     ) -> Result<String> {
-        self.process_message_inner(
+        self.process_message_with_retry(
             content,
             session_key,
             channel,
@@ -436,7 +436,7 @@ impl AgentLoop {
         blocked_tools: &[&str],
         thinking_override: Option<bool>,
     ) -> Result<String> {
-        self.process_message_inner(
+        self.process_message_with_retry(
             content,
             session_key,
             channel,
@@ -447,6 +447,105 @@ impl AgentLoop {
             None,
         )
         .await
+    }
+
+    // ── Outer retry shell ───────────────────────────────────────────
+    //
+    // Wraps process_message_inner with context overflow recovery.
+    // On overflow error: emergency-compact the session and retry (max 2 times).
+
+    /// Process message with automatic retry on context overflow.
+    ///
+    /// When the LLM provider returns a context overflow error (413, context_length_exceeded),
+    /// applies emergency context compaction and retries the request. This recovers from
+    /// situations where the context grew too large between compaction cycles.
+    #[allow(clippy::too_many_arguments)]
+    async fn process_message_with_retry(
+        &self,
+        content: &str,
+        session_key: &str,
+        channel: &str,
+        chat_id: &str,
+        stream_tx: Option<mpsc::Sender<crate::provider::StreamChunk>>,
+        blocked_tools: &[&str],
+        thinking_override: Option<bool>,
+        gateway_id_hint: Option<i64>,
+    ) -> Result<String> {
+        let retry_enabled = self.config.read().await.agent.retry_on_overflow;
+
+        if !retry_enabled {
+            return self
+                .process_message_inner(
+                    content,
+                    session_key,
+                    channel,
+                    chat_id,
+                    stream_tx,
+                    blocked_tools,
+                    thinking_override,
+                    gateway_id_hint,
+                )
+                .await;
+        }
+
+        const MAX_RETRIES: u32 = 2;
+        let mut attempt = 0u32;
+
+        loop {
+            let result = self
+                .process_message_inner(
+                    content,
+                    session_key,
+                    channel,
+                    chat_id,
+                    stream_tx.clone(),
+                    blocked_tools,
+                    thinking_override,
+                    gateway_id_hint,
+                )
+                .await;
+
+            match result {
+                Ok(text) => return Ok(text),
+                Err(e) if is_context_overflow_error(&e) && attempt < MAX_RETRIES => {
+                    attempt += 1;
+                    tracing::warn!(
+                        attempt,
+                        error = %e,
+                        "Context overflow detected — applying emergency compaction and retrying"
+                    );
+
+                    // Notify the user via stream if available
+                    if let Some(ref tx) = stream_tx {
+                        let _ = tx
+                            .send(crate::provider::StreamChunk {
+                                delta: format!(
+                                    "[Context overflow — compacting and retrying ({attempt}/{MAX_RETRIES})]"
+                                ),
+                                done: false,
+                                event_type: Some("status".to_string()),
+                                tool_call_data: None,
+                            })
+                            .await;
+                    }
+
+                    // Emergency compact the in-memory session
+                    // The next process_message_inner call will reload from session,
+                    // but we also trim the stored history to prevent immediate re-overflow
+                    if let Err(trim_err) = self
+                        .db
+                        .delete_old_messages(session_key, 6)
+                        .await
+                    {
+                        tracing::warn!(
+                            error = %trim_err,
+                            "Failed to trim session history for retry"
+                        );
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -924,6 +1023,7 @@ impl AgentLoop {
             &cognition_result.skills,
             &blocked_set,
             xml_mode,
+            config.agent.cognition_implicit_browser,
         )
         .await;
         let mut tool_defs = tool_set.defs;
@@ -1086,6 +1186,48 @@ impl AgentLoop {
                 });
             }
         }
+
+        // ── DataBuffer setup ─────────────────────────────────────────
+        // When cognition detects a data collection task (data_schema present),
+        // create a buffer and add the `add_data` tool to the available set.
+        let data_buffer: Option<std::sync::Arc<tokio::sync::Mutex<crate::agent::data_buffer::DataBuffer>>> =
+            if config.agent.data_buffer_enabled {
+                if let Some(ref schema) = cognition_result.data_schema {
+                    if !schema.is_empty() {
+                        let buf = crate::agent::data_buffer::DataBuffer::new(
+                            schema.clone(),
+                            Some(cognition_result.understanding.clone()),
+                        );
+                        let arc = std::sync::Arc::new(tokio::sync::Mutex::new(buf));
+                        // Add the add_data tool definition to the tool set
+                        let add_data_params =
+                            crate::tools::add_data::AddDataTool::parameters_for_schema(schema);
+                        tool_defs.push(crate::provider::ToolDefinition {
+                            tool_type: "function".to_string(),
+                            function: crate::provider::FunctionDefinition {
+                                name: "add_data".to_string(),
+                                description: "Save structured data records to the collection buffer. \
+                                    Call this every time you find relevant data during research. \
+                                    Records are accumulated across tool calls and exported at the end."
+                                    .to_string(),
+                                parameters: add_data_params,
+                            },
+                        });
+                        available_tool_names.insert("add_data".to_string());
+                        tracing::info!(
+                            schema = ?schema,
+                            "DataBuffer activated — add_data tool available"
+                        );
+                        Some(arc)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
 
         // Save base tool_defs before the loop for policy-based filtering
         let base_tool_defs = tool_defs.clone();
@@ -1265,10 +1407,45 @@ impl AgentLoop {
 
             let active_model = &selected_model;
 
-            // Auto-compact context when it grows too large (prevents OOM / truncation)
-            context_compactor::auto_compact_context(&mut messages);
+            // Context compression — 2 levels before each LLM call:
+            // Level 1: Replace old tool results with one-line summaries
+            // Level 2: LLM-based summary when context exceeds 50K chars
+            if config.agent.context_compression_v2 {
+                context_compactor::micro_compact_old_results(&mut messages, 4);
+                let ctx_size: usize =
+                    messages.iter().map(|m| m.estimated_text_len()).sum();
+                if ctx_size > 50_000 {
+                    match context_compactor::auto_compact_with_summary(
+                        &mut messages,
+                        &config,
+                        50_000,
+                        8,
+                    )
+                    .await
+                    {
+                        Ok(true) => {} // logged inside the function
+                        Ok(false) => {}
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e,
+                                "Level 2 compaction failed, falling back to legacy"
+                            );
+                            context_compactor::auto_compact_context(&mut messages);
+                        }
+                    }
+                }
+            } else {
+                context_compactor::auto_compact_context(&mut messages);
+            }
 
             let mut request_messages = messages.clone();
+            // Inject DataBuffer summary so the model knows what data has been collected
+            if let Some(ref buf) = data_buffer {
+                let summary = buf.lock().await.summary();
+                if !summary.is_empty() {
+                    request_messages.push(ChatMessage::system(&summary));
+                }
+            }
             if let Some(plan_message) = execution_plan.runtime_message() {
                 request_messages.push(plan_message);
             }
@@ -1803,12 +1980,27 @@ impl AgentLoop {
                     }
 
                     // --- OBSERVE: Execute and add result ---
-                    // Check blocked tools, skills, and finally real tools.
+                    // Check blocked tools, add_data buffer, skills, and finally real tools.
                     let result = if blocked_set.contains(tool_call.name.as_str()) {
                         crate::tools::ToolResult::error(format!(
                             "Tool '{}' is disabled in this execution context.",
                             tool_call.name
                         ))
+                    } else if tool_call.name == "add_data" {
+                        // DataBuffer tool — execute via shared buffer reference
+                        if let Some(ref buf) = data_buffer {
+                            use crate::tools::Tool as _;
+                            let tool = crate::tools::add_data::AddDataTool::new(buf.clone());
+                            match tool.execute(tool_call.arguments.clone(), &tool_ctx).await {
+                                Ok(r) => r,
+                                Err(e) => crate::tools::ToolResult::error(format!("add_data: {e}")),
+                            }
+                        } else {
+                            crate::tools::ToolResult::error(
+                                "add_data tool is not available (no data_schema in cognition result)"
+                                    .to_string(),
+                            )
+                        }
                     } else if let Some(activated) = skill_activator::try_activate_skill(
                         &tool_call.name,
                         &tool_call.arguments,
@@ -2207,7 +2399,11 @@ impl AgentLoop {
                                     browser_context::supersede_stale_browser_context(&mut messages);
                                 }
                                 // Universal: compact old context
-                                context_compactor::auto_compact_context(&mut messages);
+                                if config.agent.context_compression_v2 {
+                                    context_compactor::micro_compact_old_results(&mut messages, 4);
+                                } else {
+                                    context_compactor::auto_compact_context(&mut messages);
+                                }
                                 // Inject structured progress summary
                                 messages.push(ChatMessage::user(&summary));
                                 tracing::info!(iteration, "Execution checkpoint — injected progress summary");
@@ -3094,6 +3290,22 @@ impl AgentLoop {
 // - context_compactor.rs (auto-compact, tool result formatting, injection scan)
 //
 // See those modules for the implementations.
+
+/// Check if an error indicates a context window overflow from the LLM provider.
+///
+/// Matches common error patterns from Anthropic, OpenAI, and OpenRouter APIs
+/// that indicate the request exceeded the model's context window.
+fn is_context_overflow_error(e: &anyhow::Error) -> bool {
+    let s = e.to_string().to_lowercase();
+    s.contains("context_length_exceeded")
+        || s.contains("context window")
+        || s.contains("request body too large")
+        || s.contains("payload too large")
+        || s.contains("content too large")
+        || s.contains("entity too large")
+        || s.contains("maximum context length")
+        || (s.contains("413") && (s.contains("too large") || s.contains("payload")))
+}
 
 #[cfg(test)]
 mod tests {

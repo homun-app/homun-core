@@ -248,6 +248,16 @@ pub struct CognitionResult {
     /// What "done" looks like — one sentence describing the expected output.
     #[serde(default)]
     pub success_criteria: Option<String>,
+
+    /// Column names for structured data collection.
+    ///
+    /// When present, the system creates a `DataBuffer` and makes the `add_data`
+    /// tool available. The model should call `add_data` to save records as it
+    /// finds relevant data during research.
+    ///
+    /// Example: `["name", "city", "address", "phone"]` for a store listing task.
+    #[serde(default)]
+    pub data_schema: Option<Vec<String>>,
 }
 
 impl CognitionResult {
@@ -268,6 +278,7 @@ impl CognitionResult {
             autonomy_override: None,
             intent_type: None,
             success_criteria: None,
+            data_schema: None,
         }
     }
 
@@ -343,6 +354,7 @@ impl CognitionResult {
             autonomy_override: None,
             intent_type,
             success_criteria: None,
+            data_schema: None,
         }
     }
 }
@@ -455,6 +467,11 @@ fn plan_execution_schema() -> serde_json::Value {
             "success_criteria": {
                 "type": "string",
                 "description": "One sentence: what 'done' looks like. E.g. 'Present 3+ train options with departure, arrival, duration, operator, price'"
+            },
+            "data_schema": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Column names for structured data collection. Set when the task involves gathering, comparing, or listing multiple items. E.g. ['name', 'city', 'address', 'phone'] for a store listing task. Omit for non-data-collection tasks."
             }
         },
         "required": ["understanding", "complexity", "answer_directly", "intent_type", "success_criteria"]
@@ -640,6 +657,7 @@ mod tests {
             autonomy_override: None,
             intent_type: Some(IntentType::Informational),
             success_criteria: Some("Present train options with times and prices".to_string()),
+            data_schema: None,
         };
 
         let json = serde_json::to_string(&result).unwrap();
@@ -673,6 +691,7 @@ mod tests {
             autonomy_override: None,
             intent_type: Some(IntentType::Informational),
             success_criteria: None,
+            data_schema: None,
         };
 
         let issues = validate_cognition_result(
@@ -715,6 +734,7 @@ mod tests {
             autonomy_override: None,
             intent_type: Some(IntentType::Transactional),
             success_criteria: Some("Message sent to WhatsApp contact".to_string()),
+            data_schema: None,
         };
 
         let issues = validate_cognition_result(
@@ -782,6 +802,7 @@ mod tests {
             autonomy_override: None,
             intent_type: None, // missing
             success_criteria: None,
+            data_schema: None,
         };
 
         let issues = validate_cognition_result(

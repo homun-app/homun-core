@@ -183,6 +183,228 @@ pub(crate) fn auto_compact_context(messages: &mut [ChatMessage]) {
     }
 }
 
+// ── Level 1: Micro-compact old tool results ─────────────────────────
+//
+// Replaces old tool results with one-line summaries, keeping the
+// context lean without losing track of what was done.
+
+/// Replace old tool results with one-line placeholders.
+///
+/// Preserves file tool outputs (reference material) and the latest
+/// browser snapshot. Everything else older than `protect_recent`
+/// messages from the end gets replaced with a short summary line.
+///
+/// Returns the number of messages compacted.
+pub(crate) fn micro_compact_old_results(
+    messages: &mut [ChatMessage],
+    protect_recent: usize,
+) -> usize {
+    let safe_end = messages.len().saturating_sub(protect_recent);
+    if safe_end == 0 {
+        return 0;
+    }
+
+    // Check if there's a recent browser result in the protected window
+    let has_recent_browser = messages[safe_end..].iter().any(|m| {
+        m.role == "tool"
+            && m.name
+                .as_ref()
+                .map(|n| crate::browser::is_browser_tool(n))
+                .unwrap_or(false)
+    });
+
+    let mut compacted = 0usize;
+    for msg in messages[..safe_end].iter_mut() {
+        if msg.role != "tool" {
+            continue;
+        }
+
+        let tool_name = msg.name.as_deref().unwrap_or("tool");
+
+        // Preserve file tool outputs — they're reference material
+        if matches!(
+            tool_name,
+            "read_file" | "edit_file" | "write_file" | "list_files"
+        ) {
+            continue;
+        }
+
+        // Only compact browser results if there's a newer one in the protected window
+        if crate::browser::is_browser_tool(tool_name) && !has_recent_browser {
+            continue;
+        }
+
+        // Already compacted (starts with "[")
+        let content = match msg.content.as_ref() {
+            Some(c) if !c.starts_with('[') && c.len() > 120 => c,
+            _ => continue,
+        };
+
+        // Extract first meaningful line for the summary
+        let first_line = content
+            .lines()
+            .find(|l| !l.trim().is_empty() && !l.starts_with("[SOURCE:"))
+            .unwrap_or("")
+            .chars()
+            .take(80)
+            .collect::<String>();
+
+        msg.content = Some(format!("[{tool_name}: {first_line}]"));
+        compacted += 1;
+    }
+
+    if compacted > 0 {
+        tracing::debug!(compacted, "Micro-compacted old tool results");
+    }
+    compacted
+}
+
+// ── Level 2: LLM-based context summary ──────────────────────────────
+//
+// When context exceeds 50K chars, uses an LLM call to summarize
+// older messages into a single context summary message.
+
+/// Summarize old messages with an LLM call when context exceeds threshold.
+///
+/// Preserves the system prompt (index 0) and the last `protect_recent`
+/// messages. Everything in between gets summarized into a single
+/// `[CONTEXT SUMMARY]` system message.
+///
+/// Returns `Ok(true)` if compaction was applied, `Ok(false)` if under
+/// threshold, or `Err` if the LLM summary call failed.
+pub(crate) async fn auto_compact_with_summary(
+    messages: &mut Vec<ChatMessage>,
+    config: &crate::config::Config,
+    threshold_chars: usize,
+    protect_recent: usize,
+) -> anyhow::Result<bool> {
+    let total: usize = messages.iter().map(|m| m.estimated_text_len()).sum();
+    if total <= threshold_chars {
+        return Ok(false);
+    }
+
+    // Don't summarize if there aren't enough messages to make it worthwhile
+    if messages.len() <= protect_recent + 2 {
+        return Ok(false);
+    }
+
+    let compact_end = messages.len().saturating_sub(protect_recent);
+    if compact_end <= 1 {
+        return Ok(false);
+    }
+
+    // Build text from messages to summarize (skip system prompt at [0])
+    let mut context_text = String::with_capacity(12_000);
+    for msg in &messages[1..compact_end] {
+        let role = &msg.role;
+        let content = msg.content.as_deref().unwrap_or("");
+        let name_tag = msg
+            .name
+            .as_ref()
+            .map(|n| format!(" ({n})"))
+            .unwrap_or_default();
+        context_text.push_str(&format!("[{role}{name_tag}]: "));
+        // Cap each message contribution to avoid huge inputs
+        if content.len() > 500 {
+            context_text.push_str(&content[..500]);
+            context_text.push_str("...");
+        } else {
+            context_text.push_str(content);
+        }
+        context_text.push('\n');
+        if context_text.len() > 10_000 {
+            context_text.push_str("...(earlier messages omitted)\n");
+            break;
+        }
+    }
+
+    let summary_prompt = format!(
+        "Summarize this conversation context concisely.\n\
+         Focus on:\n\
+         - What the user originally asked\n\
+         - What tools were called and their key results\n\
+         - What progress was made\n\
+         - What data was collected (if any)\n\
+         - What remains to be done\n\n\
+         Max 400 words. Be factual, no opinions.\n\n\
+         ---\n{context_text}"
+    );
+
+    let response = crate::provider::one_shot::llm_one_shot(
+        config,
+        crate::provider::one_shot::OneShotRequest {
+            system_prompt: "You are a context summarizer. Produce a concise factual summary."
+                .to_string(),
+            user_message: summary_prompt,
+            max_tokens: 800,
+            temperature: 0.2,
+            timeout_secs: 15,
+            ..Default::default()
+        },
+    )
+    .await?;
+    let summary = response.content;
+
+    // Remove old messages and insert summary
+    let removed = compact_end - 1; // don't count system prompt
+    messages.drain(1..compact_end);
+    messages.insert(
+        1,
+        ChatMessage::system(&format!(
+            "[CONTEXT SUMMARY — {removed} earlier messages compressed]\n\
+             {summary}\n\
+             [END CONTEXT SUMMARY]"
+        )),
+    );
+
+    let new_total: usize = messages.iter().map(|m| m.estimated_text_len()).sum();
+    tracing::info!(
+        original_chars = total,
+        compacted_chars = new_total,
+        messages_removed = removed,
+        "Level 2 context compaction applied (LLM summary)"
+    );
+
+    Ok(true)
+}
+
+// ── Level 3: Emergency compact ──────────────────────────────────────
+//
+// Last-resort compaction for context overflow recovery.
+// Drops everything except system prompt and last N messages.
+
+/// Emergency context compaction — drops all but the most recent messages.
+///
+/// Used as recovery when the provider returns a context overflow error.
+/// Keeps `messages[0]` (system prompt) and the last `keep_last` messages,
+/// inserting a marker so the model knows context was lost.
+///
+/// Returns the number of messages removed.
+pub(crate) fn emergency_compact(messages: &mut Vec<ChatMessage>, keep_last: usize) -> usize {
+    if messages.len() <= keep_last + 1 {
+        return 0;
+    }
+
+    let drain_end = messages.len() - keep_last;
+    let removed = drain_end - 1; // don't count system prompt
+    messages.drain(1..drain_end);
+    messages.insert(
+        1,
+        ChatMessage::system(
+            "[EMERGENCY COMPACTION: Earlier context removed due to size limits. \
+             Continue from the recent messages below.]",
+        ),
+    );
+
+    tracing::warn!(
+        removed,
+        remaining = messages.len(),
+        "Emergency context compaction applied"
+    );
+
+    removed
+}
+
 // compact_browser_snapshot moved to tools::browser — agent_loop no longer
 // needs its own copy since BrowserTool handles compaction internally.
 
@@ -272,4 +494,114 @@ fn split_browser_output(output: &str) -> (Vec<&str>, Vec<&str>) {
     }
 
     (header_lines, tree_lines)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_tool_msg(name: &str, content: &str) -> ChatMessage {
+        ChatMessage::tool_result("tc_1", name, content)
+    }
+
+    fn make_system_msg(content: &str) -> ChatMessage {
+        ChatMessage::system(content)
+    }
+
+    fn make_user_msg(content: &str) -> ChatMessage {
+        ChatMessage::user(content)
+    }
+
+    // ── micro_compact_old_results tests ──────────────────────────
+
+    #[test]
+    fn micro_compact_preserves_file_tools() {
+        let big = "x".repeat(500);
+        let mut messages = vec![
+            make_system_msg("system"),
+            make_tool_msg("read_file", &big),
+            make_tool_msg("web_search", &big),
+            make_user_msg("latest"),
+            make_tool_msg("shell", "small"),
+        ];
+
+        let compacted = micro_compact_old_results(&mut messages, 2);
+
+        // read_file should be preserved, web_search should be compacted
+        assert!(
+            messages[1].content.as_ref().unwrap().len() == 500,
+            "read_file should be preserved"
+        );
+        assert!(
+            messages[2].content.as_ref().unwrap().starts_with('['),
+            "web_search should be compacted"
+        );
+        assert_eq!(compacted, 1);
+    }
+
+    #[test]
+    fn micro_compact_skips_short_content() {
+        let mut messages = vec![
+            make_system_msg("system"),
+            make_tool_msg("web_search", "short result"),
+            make_user_msg("latest"),
+        ];
+
+        let compacted = micro_compact_old_results(&mut messages, 1);
+        assert_eq!(compacted, 0, "short content should not be compacted");
+    }
+
+    #[test]
+    fn micro_compact_protects_recent() {
+        let big = "x".repeat(500);
+        let mut messages = vec![
+            make_system_msg("system"),
+            make_tool_msg("web_search", &big),  // old — should be compacted
+            make_user_msg("middle"),
+            make_tool_msg("web_fetch", &big),   // recent — protected
+            make_user_msg("latest"),
+        ];
+
+        // protect_recent=2 means last 2 messages protected
+        let compacted = micro_compact_old_results(&mut messages, 2);
+        assert_eq!(compacted, 1); // only first tool msg compacted
+        assert!(messages[1].content.as_ref().unwrap().starts_with('['));
+        assert_eq!(messages[3].content.as_ref().unwrap().len(), 500); // preserved
+    }
+
+    // ── emergency_compact tests ──────────────────────────────────
+
+    #[test]
+    fn emergency_compact_keeps_system_and_recent() {
+        let mut messages: Vec<ChatMessage> = Vec::new();
+        messages.push(make_system_msg("system prompt"));
+        for i in 0..20 {
+            messages.push(make_user_msg(&format!("msg {i}")));
+        }
+
+        let removed = emergency_compact(&mut messages, 4);
+
+        // Should keep system + marker + last 4 = 6 total
+        assert_eq!(messages.len(), 6);
+        assert_eq!(messages[0].role, "system");
+        assert!(messages[1]
+            .content
+            .as_ref()
+            .unwrap()
+            .contains("EMERGENCY COMPACTION"));
+        assert_eq!(removed, 16);
+    }
+
+    #[test]
+    fn emergency_compact_noop_when_small() {
+        let mut messages = vec![
+            make_system_msg("system"),
+            make_user_msg("one"),
+            make_user_msg("two"),
+        ];
+
+        let removed = emergency_compact(&mut messages, 4);
+        assert_eq!(removed, 0);
+        assert_eq!(messages.len(), 3);
+    }
 }

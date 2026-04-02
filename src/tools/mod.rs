@@ -1,3 +1,4 @@
+pub mod add_data;
 pub mod approval;
 pub mod automation;
 #[cfg(feature = "browser")]
