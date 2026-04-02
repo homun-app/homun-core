@@ -390,6 +390,24 @@ impl ExecutionPlanState {
             }
         }
 
+        // If we've collected data and spent many iterations, push toward
+        // finalizing rather than continuing to explore. This prevents the
+        // model from endlessly switching sources without producing output.
+        let completed = self
+            .explicit_steps
+            .iter()
+            .filter(|s| s.status == StepStatus::Completed)
+            .count();
+        if completed > 0 && self.total_tool_iterations >= 12 && !self.completed_steps.is_empty() {
+            lines.push(String::new());
+            lines.push(
+                "IMPORTANT: You have already collected data. Stop searching for more sources. \
+                 Use what you have and produce the final output NOW. \
+                 Write the file using the shell tool with a heredoc if write_file doesn't work."
+                    .to_string(),
+            );
+        }
+
         lines.join("\n")
     }
 

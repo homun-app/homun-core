@@ -553,7 +553,29 @@ impl Provider for OpenAICompatProvider {
                 };
                 let args_str = repair_json(&raw_args);
                 let arguments: serde_json::Value =
-                    serde_json::from_str(&args_str).unwrap_or(serde_json::json!({}));
+                    serde_json::from_str(&args_str).unwrap_or_else(|e| {
+                        // JSON parse failed even after repair. This often happens
+                        // when tool call content is too large and gets truncated
+                        // mid-string by the provider. Log for diagnostics.
+                        if !raw_args.is_empty() {
+                            tracing::warn!(
+                                tool = %name,
+                                raw_len = raw_args.len(),
+                                error = %e,
+                                raw_tail = %if raw_args.len() > 100 {
+                                    &raw_args[raw_args.len()-100..]
+                                } else {
+                                    &raw_args
+                                },
+                                "Tool call arguments JSON parse failed — content may have been truncated by provider"
+                            );
+                            // Attempt partial extraction: look for key-value pairs
+                            // in the malformed JSON to salvage what we can.
+                            extract_partial_args(&raw_args)
+                        } else {
+                            serde_json::json!({})
+                        }
+                    });
                 tool_calls.push(ToolCallRequest {
                     id,
                     name,
@@ -577,6 +599,90 @@ impl Provider for OpenAICompatProvider {
 
     fn name(&self) -> &str {
         &self.provider_name
+    }
+}
+
+/// Extract key-value pairs from truncated JSON tool call arguments.
+///
+/// When a model generates a tool call with very large content (e.g. a CSV
+/// file in write_file), the JSON may be truncated mid-string by the provider.
+/// Standard JSON parsing fails, but we can still extract usable key-value
+/// pairs by finding complete `"key": "value"` patterns.
+fn extract_partial_args(raw: &str) -> serde_json::Value {
+    let mut result = serde_json::Map::new();
+
+    // Try to find "key": "value" pairs using a simple state machine.
+    // We look for patterns like: "path": "/some/path"
+    // For truncated values, we take everything after the last complete pair.
+    let mut i = 0;
+    let bytes = raw.as_bytes();
+    let len = bytes.len();
+
+    while i < len {
+        // Find opening quote of key
+        if bytes[i] != b'"' {
+            i += 1;
+            continue;
+        }
+        i += 1;
+        let key_start = i;
+        // Find closing quote of key
+        while i < len && bytes[i] != b'"' {
+            if bytes[i] == b'\\' {
+                i += 1; // skip escaped char
+            }
+            i += 1;
+        }
+        if i >= len {
+            break;
+        }
+        let key = &raw[key_start..i];
+        i += 1; // skip closing quote
+
+        // Skip colon and whitespace
+        while i < len && (bytes[i] == b':' || bytes[i] == b' ' || bytes[i] == b'\t') {
+            i += 1;
+        }
+        if i >= len {
+            break;
+        }
+
+        // Value: expect opening quote for string
+        if bytes[i] == b'"' {
+            i += 1;
+            let val_start = i;
+            let mut val_end = i;
+            // Find closing quote (may not exist if truncated)
+            while i < len {
+                if bytes[i] == b'\\' {
+                    i += 2; // skip escaped char
+                    continue;
+                }
+                if bytes[i] == b'"' {
+                    val_end = i;
+                    i += 1;
+                    break;
+                }
+                i += 1;
+                val_end = i; // track last position even if truncated
+            }
+            let value = &raw[val_start..val_end];
+            // Unescape basic sequences
+            let unescaped = value.replace("\\n", "\n").replace("\\\"", "\"");
+            result.insert(key.to_string(), serde_json::Value::String(unescaped));
+        } else {
+            i += 1;
+        }
+    }
+
+    if result.is_empty() {
+        serde_json::json!({})
+    } else {
+        tracing::info!(
+            keys = ?result.keys().collect::<Vec<_>>(),
+            "Salvaged partial args from truncated JSON"
+        );
+        serde_json::Value::Object(result)
     }
 }
 
