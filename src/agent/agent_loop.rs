@@ -1172,11 +1172,31 @@ impl AgentLoop {
                 emit_plan_update(stream_tx.as_ref(), &snap, &mut last_plan_payload).await;
             }
         }
-        let base_max_iterations = config.agent.max_iterations.max(1);
-        // Safety valve only — stall detection is the real limiter.
-        // Browser tasks need 40-80+ iterations for complex forms;
-        // non-browser tasks rarely exceed base + a few extensions.
-        let hard_max_iterations = (base_max_iterations + 80).min(120);
+        // Adaptive iteration budget based on cognition complexity.
+        // Simple tasks (greetings, facts) get a small budget.
+        // Complex tasks (browser research, multi-step) get a large budget.
+        // Plan steps add extra budget (5 iterations per step).
+        let config_max = config.agent.max_iterations.max(1);
+        let base_max_iterations = {
+            use crate::agent::cognition::Complexity;
+            let complexity_base = match cognition_result.complexity {
+                Complexity::Simple => config_max.min(10),
+                Complexity::Standard => config_max,
+                Complexity::Complex => config_max.max(30),
+            };
+            let step_bonus = (cognition_result.plan.len() as u32) * 5;
+            let adaptive = complexity_base + step_bonus;
+            tracing::info!(
+                complexity = ?cognition_result.complexity,
+                plan_steps = cognition_result.plan.len(),
+                config_max,
+                adaptive_budget = adaptive,
+                "Adaptive iteration budget calculated"
+            );
+            adaptive
+        };
+        // Safety valve: hard max is generous for complex tasks but bounded.
+        let hard_max_iterations = (base_max_iterations + 40).min(150);
         let mut active_iteration_budget = base_max_iterations;
         let mut budget_state = IterationBudgetState::default();
         let mut iteration = 1;
