@@ -2389,9 +2389,80 @@ impl AgentLoop {
                 max_iterations = active_iteration_budget,
                 hard_max_iterations,
                 tools_used = tools_used.len(),
-                "Max iterations reached without final response; attempting forced finalization"
+                "Max iterations reached without final response — asking user whether to continue"
             );
 
+            // Ask the user if they want to continue with more iterations.
+            // Only offer this if we haven't hit the absolute hard max and have a stream.
+            let mut user_wants_continue = false;
+            if active_iteration_budget < hard_max_iterations {
+                if let Some(ref tx) = stream_tx {
+                    let done_steps = execution_plan.explicit_steps_done_count();
+                    let total_steps = execution_plan.explicit_steps_count();
+                    let block_json = serde_json::json!([{
+                        "block_type": "choice",
+                        "id": format!("budget_extend_{iteration}"),
+                        "title": "Iteration budget reached",
+                        "subtitle": format!(
+                            "{done_steps}/{total_steps} steps completed after {iteration} iterations. Continue?",
+                        ),
+                        "options": [
+                            {
+                                "id": "continue",
+                                "label": "Continue",
+                                "subtitle": "Add more iterations and keep working",
+                                "metadata": { "action": "extend" }
+                            },
+                            {
+                                "id": "finalize",
+                                "label": "Finalize now",
+                                "subtitle": "Give me what you have so far",
+                                "metadata": { "action": "finalize" }
+                            }
+                        ]
+                    }]);
+
+                    let block_id = format!("budget_extend_{iteration}");
+                    let gate = crate::agent::approval_gate::approval_gate();
+                    let _ = tx.send(crate::provider::StreamChunk {
+                        delta: block_json.to_string(),
+                        done: false,
+                        event_type: Some("blocks".to_string()),
+                        tool_call_data: None,
+                    }).await;
+
+                    // Wait for user response (5 min timeout)
+                    let rx = gate.register(&block_id, block_json.to_string()).await;
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(300),
+                        rx,
+                    ).await {
+                        Ok(Ok(resp)) => {
+                            let action = resp.option_id.as_deref().unwrap_or("finalize");
+                            if action == "continue" {
+                                user_wants_continue = true;
+                            }
+                        }
+                        _ => {} // Timeout or channel error — finalize
+                    }
+                    gate.cancel(&block_id).await;
+                }
+            }
+
+            if user_wants_continue {
+                let extension = 20u32;
+                active_iteration_budget = (active_iteration_budget + extension).min(hard_max_iterations);
+                tracing::info!(
+                    new_budget = active_iteration_budget,
+                    "User approved budget extension — continuing"
+                );
+                budget_state.stall_streak = 0;
+                budget_state.cycle_detected = None;
+                // Don't finalize — the while loop condition will re-enter
+                // since active_iteration_budget was just extended.
+            }
+
+            if !user_wants_continue {
             let mut finalization_messages = messages.clone();
             if let Some(plan_message) = execution_plan.runtime_message() {
                 finalization_messages.push(plan_message);
@@ -2457,7 +2528,8 @@ impl AgentLoop {
                     }
                 }
             }
-        }
+        } // if !user_wants_continue
+        } // outer budget exhausted block
 
         // Mark all plan steps as completed now that execution is done
         if execution_plan.has_explicit_plan() {
@@ -3606,19 +3678,19 @@ mod cycle_detection_tests {
     }
 
     #[test]
-    fn normalize_collapses_browser() {
-        // Browser signatures are collapsed for fuzzy cycle detection
-        // (different ref IDs / URLs represent the same conceptual action).
-        let sig = "browser:navigate:https://example.com";
-        assert_eq!(normalize_signature_for_cycle(sig), "browser");
+    fn normalize_preserves_browser_action() {
+        // Browser signatures preserve action type for accurate cycle detection.
+        // navigate vs click should be DIFFERENT — not collapsed to same "browser".
+        let sig = r#"browser:{"action":"navigate","url":"https://example.com"}"#;
+        assert_eq!(normalize_signature_for_cycle(sig), "browser:navigate");
     }
 
     #[test]
     fn normalize_composite() {
-        let sig = "web_search:query1|browser:click:ref123";
+        let sig = r#"web_search:query1|browser:{"action":"click","ref":"ref123"}"#;
         assert_eq!(
             normalize_signature_for_cycle(sig),
-            "web_search|browser"
+            "web_search|browser:click"
         );
     }
 

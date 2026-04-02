@@ -301,6 +301,19 @@ impl ExecutionPlanState {
         !self.explicit_steps.is_empty()
     }
 
+    /// Number of completed explicit steps.
+    pub fn explicit_steps_done_count(&self) -> usize {
+        self.explicit_steps
+            .iter()
+            .filter(|s| s.status == StepStatus::Completed)
+            .count()
+    }
+
+    /// Total number of explicit steps.
+    pub fn explicit_steps_count(&self) -> usize {
+        self.explicit_steps.len()
+    }
+
     /// Set the intent classification for the current plan.
     pub fn set_intent_type(&mut self, intent: Option<String>) {
         self.intent_type = intent;

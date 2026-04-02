@@ -205,9 +205,19 @@ pub(crate) fn normalize_signature_for_cycle(sig: &str) -> String {
     sig.split('|')
         .map(|segment| {
             let tool_name = segment.split(':').next().unwrap_or(segment);
-            // Browser actions vary in ref IDs / URLs across iterations but
-            // represent the same conceptual action; collapse for fuzzy matching.
-            if matches!(tool_name, "web_search" | "web_fetch" | "browser") {
+            if matches!(tool_name, "web_search" | "web_fetch") {
+                // Collapse search/fetch to name only (different queries = same action)
+                tool_name.to_string()
+            } else if tool_name == "browser" {
+                // Preserve browser action type (navigate vs click vs type are DIFFERENT)
+                // but strip variable params (ref IDs, URLs, text).
+                // Signature format: browser:{"action":"navigate","url":"..."}
+                if let Some(args_start) = segment.find('{') {
+                    if let Ok(args) = serde_json::from_str::<serde_json::Value>(&segment[args_start..]) {
+                        let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("unknown");
+                        return format!("browser:{action}");
+                    }
+                }
                 tool_name.to_string()
             } else {
                 segment.to_string()
@@ -232,16 +242,15 @@ mod tests {
     #[test]
     fn browser_cycle_detection_enabled() {
         // Browser tools must NOT be exempt from cycle detection.
-        // This test reproduces the bug where navigate→click looped forever
-        // because iteration_budget skipped cycle detection for browser.
+        // navigate→click→navigate→click is a period-2 cycle.
+        // With action-preserving normalization, they become
+        // "browser:navigate" and "browser:click" — detected as period-2.
         let mut budget = 50u32;
         let hard_max = 100u32;
         let base = 50u32;
         let mut state = IterationBudgetState::default();
 
-        // Simulate alternating browser actions (period-2 cycle).
-        // With fuzzy normalization, all browser signatures collapse to "browser",
-        // making this a period-1 cycle.
+        // Simulate alternating browser actions: navigate→click loop.
         let sigs = [
             r#"browser:{"action":"navigate","url":"https://example.com"}"#,
             r#"browser:{"action":"click","ref":"e125"}"#,
@@ -273,9 +282,19 @@ mod tests {
     }
 
     #[test]
-    fn normalize_collapses_browser() {
-        let sig = r#"browser:{"action":"click","ref":"e125"}"#;
-        assert_eq!(normalize_signature_for_cycle(sig), "browser");
+    fn normalize_preserves_browser_action_type() {
+        // Click and navigate should be DIFFERENT signatures
+        let click = r#"browser:{"action":"click","ref":"e125"}"#;
+        let nav = r#"browser:{"action":"navigate","url":"https://example.com"}"#;
+        let typ = r#"browser:{"action":"type","ref":"e42","text":"hello"}"#;
+        assert_eq!(normalize_signature_for_cycle(click), "browser:click");
+        assert_eq!(normalize_signature_for_cycle(nav), "browser:navigate");
+        assert_eq!(normalize_signature_for_cycle(typ), "browser:type");
+        // Different action types should NOT be detected as cycles
+        assert_ne!(
+            normalize_signature_for_cycle(click),
+            normalize_signature_for_cycle(nav)
+        );
     }
 
     #[test]
