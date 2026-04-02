@@ -43,7 +43,7 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
             get(get_chat_uploaded_file),
         )
         .route(
-            "/v1/workspace/files/*path",
+            "/v1/workspace/files/{*path}",
             get(get_workspace_file),
         )
         .route("/v1/chat/run", get(current_chat_run))
