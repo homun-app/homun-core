@@ -5,7 +5,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::Value;
 
-use super::registry::{get_string_param, Tool, ToolContext, ToolResult};
+use super::registry::{get_optional_string, get_string_param, Tool, ToolContext, ToolResult};
 use crate::config::{
     AclEntry, DefaultPermissions, PathPermissions, PermissionMode, PermissionValue,
     PermissionsConfig,
@@ -524,8 +524,36 @@ impl Tool for WriteFileTool {
     }
 
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let path_str = get_string_param(&args, "path")?;
-        let content = get_string_param(&args, "content")?;
+        // Check content first — if args is completely empty ({}), give a clear
+        // error that tells the model to include BOTH path and content.
+        let content = match get_optional_string(&args, "content") {
+            Some(c) if !c.is_empty() => c,
+            _ => {
+                return Ok(ToolResult::error(
+                    "write_file requires 'content' (the text to write) and 'path' (where to save). \
+                     Example: write_file({\"path\": \"/home/user/.homun/workspace/output.csv\", \"content\": \"col1,col2\\nval1,val2\"})"
+                ));
+            }
+        };
+        // Auto-generate workspace path when model omits the `path` parameter.
+        // Some models (kimi-k2.5, etc.) consistently call write_file without path.
+        let path_str = match get_optional_string(&args, "path") {
+            Some(p) if !p.trim().is_empty() => p,
+            _ => {
+                let workspace = crate::config::Config::data_dir().join("workspace");
+                let ext = if content.starts_with("Nome,") || content.starts_with("name,") || content.contains(",\"") {
+                    "csv"
+                } else if content.starts_with('{') || content.starts_with('[') {
+                    "json"
+                } else {
+                    "txt"
+                };
+                let name = format!("output_{}.{ext}", chrono::Utc::now().format("%Y%m%d_%H%M%S"));
+                let auto_path = workspace.join(&name);
+                tracing::info!(path = %auto_path.display(), "write_file: auto-generated path (model omitted parameter)");
+                auto_path.to_string_lossy().to_string()
+            }
+        };
         let path = match resolve_path(&path_str, self.allowed_dir.as_deref()) {
             Ok(p) => p,
             Err(e) => return Ok(ToolResult::error(e)),
