@@ -16,6 +16,7 @@ pub mod message;
 pub mod registry;
 pub mod response_blocks;
 pub mod sandbox;
+pub mod send_file;
 pub mod shell;
 pub mod skill_create;
 pub mod spawn;
