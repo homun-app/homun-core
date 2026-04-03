@@ -67,20 +67,40 @@ impl Tool for MessageTool {
         let channel = get_optional_string(&args, "channel").unwrap_or_else(|| ctx.channel.clone());
         let explicit_chat_id = get_optional_string(&args, "chat_id");
 
-        // Resolve file path relative to workspace if provided
-        let file_path = get_optional_string(&args, "file_path").and_then(|fp| {
+        // Resolve file path relative to workspace if provided.
+        // Also handles "attachments" (common LLM hallucination of the param name).
+        let raw_file_path = get_optional_string(&args, "file_path").or_else(|| {
+            // Fallback: some models send "attachments" array instead of "file_path"
+            args.get("attachments")
+                .and_then(|v| v.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        });
+
+        let file_path = raw_file_path.and_then(|fp| {
             let workspace = crate::config::Config::data_dir().join("workspace");
-            let resolved = if std::path::Path::new(&fp).is_absolute() {
-                std::path::PathBuf::from(&fp)
-            } else {
-                workspace.join(&fp)
-            };
-            if resolved.exists() {
-                Some(resolved.to_string_lossy().to_string())
-            } else {
-                tracing::warn!(path = %fp, "File not found for send_message attachment");
-                None
+            // Try multiple resolution strategies
+            let candidates = [
+                // 1. As-is (absolute path or relative to cwd)
+                std::path::PathBuf::from(&fp),
+                // 2. Relative to workspace
+                workspace.join(&fp),
+                // 3. Just the filename in workspace (strip any leading dirs)
+                workspace.join(std::path::Path::new(&fp).file_name().unwrap_or_default()),
+            ];
+            for candidate in &candidates {
+                if candidate.exists() && candidate.is_file() {
+                    tracing::debug!(
+                        raw = %fp,
+                        resolved = %candidate.display(),
+                        "Resolved file attachment path"
+                    );
+                    return Some(candidate.to_string_lossy().to_string());
+                }
             }
+            tracing::warn!(path = %fp, "File not found for send_message attachment");
+            None
         });
 
         // When channel is overridden but chat_id is not, resolve the default
