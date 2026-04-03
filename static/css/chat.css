@@ -3330,9 +3330,14 @@
 .rb-external-source { font-size: 11px; color: var(--t2); padding: 1px 6px; background: var(--surface-subtle); border-radius: var(--r-pill); }
 
 /* ─── Response Block Action Buttons ─── */
-.rb-action-btn { padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; text-decoration: none; cursor: pointer; border: none; display: inline-block; }
+.rb-actions { display: flex; gap: 8px; margin-top: 10px; }
+.rb-action-btn { padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; text-decoration: none; cursor: pointer; border: none; display: inline-flex; align-items: center; gap: 5px; line-height: 1; }
+.rb-action-btn svg { flex-shrink: 0; }
 .rb-action-btn--primary { background: var(--accent, #3b82f6); color: #fff; }
 .rb-action-btn--secondary { background: var(--surface-2, #e5e7eb); color: var(--t1, #111); }
+.rb-action-btn--secondary:hover { background: var(--surface-3, #d1d5db); }
+.rb-header { display: flex; align-items: center; gap: 8px; }
+.rb-header svg { flex-shrink: 0; color: var(--t2, #6b7280); }
 
 /* ─── File Viewer Modal ─── */
 .fv-overlay { position: fixed; inset: 0; z-index: 1100; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); animation: modal-in var(--med, 0.2s) ease; }

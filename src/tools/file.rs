@@ -612,18 +612,6 @@ impl Tool for WriteFileTool {
                             .map(|n| n.to_string_lossy().to_string())
                             .unwrap_or_else(|| url_path.clone());
 
-                        let ext = path
-                            .extension()
-                            .map(|e| e.to_string_lossy().to_lowercase())
-                            .unwrap_or_default();
-                        let icon = match ext.as_str() {
-                            "csv" => "📊",
-                            "json" => "📋",
-                            "md" | "txt" => "📄",
-                            "pdf" => "📕",
-                            _ => "📁",
-                        };
-
                         use crate::tools::response_blocks::{
                             KeyValue, ResponseBlock, ResultBlock,
                         };
@@ -640,7 +628,7 @@ impl Tool for WriteFileTool {
                                     value: download_url,
                                 },
                             ],
-                            icon: Some(icon.to_string()),
+                            icon: None, // icon rendered client-side as SVG
                         })]
                     } else {
                         vec![]

@@ -9,6 +9,32 @@
 
 /* exported renderBlocks */
 
+// ─── Inline SVG Icons (outline, monocromo, 16x16) ─────────────
+// All icons use currentColor so they inherit text color from CSS.
+const SVG_NS = 'http://www.w3.org/2000/svg';
+function _svg(paths, size = 16) {
+    const s = document.createElementNS(SVG_NS, 'svg');
+    s.setAttribute('width', size);
+    s.setAttribute('height', size);
+    s.setAttribute('viewBox', '0 0 24 24');
+    s.setAttribute('fill', 'none');
+    s.setAttribute('stroke', 'currentColor');
+    s.setAttribute('stroke-width', '2');
+    s.setAttribute('stroke-linecap', 'round');
+    s.setAttribute('stroke-linejoin', 'round');
+    for (const d of paths) {
+        const p = document.createElementNS(SVG_NS, 'path');
+        p.setAttribute('d', d);
+        s.appendChild(p);
+    }
+    return s;
+}
+function iconFile()     { return _svg(['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M14 2v6h6', 'M16 13H8', 'M16 17H8', 'M10 9H8']); }
+function iconEye()      { return _svg(['M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z', 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z']); }
+function iconDownload() { return _svg(['M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4', 'M7 10l5 5 5-5', 'M12 15V3']); }
+function iconExpand()   { return _svg(['M15 3h6v6', 'M9 21H3v-6', 'M21 3l-7 7', 'M3 21l7-7']); }
+function iconX()        { return _svg(['M18 6L6 18', 'M6 6l12 12']); }
+
 // ─── Main Renderer ──────────────────────────────────────────────
 
 /**
@@ -185,14 +211,7 @@ function renderStatusBlock(block) {
 function renderResultBlock(block) {
     const card = createBlockCard('result');
 
-    // Icon + title
-    const header = document.createElement('div');
-    header.className = 'rb-header';
-    const iconText = block.icon ? block.icon + ' ' : '';
-    header.textContent = iconText + (block.title || 'Result');
-    card.appendChild(header);
-
-    // Separate download URL from display fields
+    // Separate download URL from display fields first
     const displayFields = [];
     let downloadUrl = null;
     if (block.fields) {
@@ -205,19 +224,28 @@ function renderResultBlock(block) {
         }
     }
 
+    // Header: outline icon + title
+    const header = document.createElement('div');
+    header.className = 'rb-header';
+    if (downloadUrl) header.appendChild(iconFile());
+    const titleSpan = document.createElement('span');
+    titleSpan.textContent = block.title || 'Result';
+    header.appendChild(titleSpan);
+    card.appendChild(header);
+
     if (displayFields.length) {
         card.appendChild(renderFields(displayFields));
     }
 
-    // File action buttons (download + view)
+    // File action buttons (outline icons, no emoji)
     if (downloadUrl) {
         const actions = document.createElement('div');
         actions.className = 'rb-actions';
-        actions.style.cssText = 'display:flex;gap:8px;margin-top:8px';
 
         const viewBtn = document.createElement('button');
         viewBtn.className = 'rb-action-btn rb-action-btn--primary';
-        viewBtn.textContent = '👁 View';
+        viewBtn.appendChild(iconEye());
+        viewBtn.appendChild(document.createTextNode(' View'));
         viewBtn.addEventListener('click', () => openFileViewer(downloadUrl, block.title || 'File'));
         actions.appendChild(viewBtn);
 
@@ -225,7 +253,8 @@ function renderResultBlock(block) {
         dlBtn.href = downloadUrl;
         dlBtn.setAttribute('download', '');
         dlBtn.className = 'rb-action-btn rb-action-btn--secondary';
-        dlBtn.textContent = '⬇ Download';
+        dlBtn.appendChild(iconDownload());
+        dlBtn.appendChild(document.createTextNode(' Download'));
         actions.appendChild(dlBtn);
 
         card.appendChild(actions);
@@ -266,13 +295,14 @@ async function openFileViewer(url, filename) {
     const fsBtn = document.createElement('button');
     fsBtn.className = 'fv-btn-icon';
     fsBtn.title = 'Toggle fullscreen';
-    fsBtn.textContent = '\u26F6'; // ⛶
+    fsBtn.appendChild(iconExpand());
     fsBtn.addEventListener('click', () => modal.classList.toggle('fv-fullscreen'));
     headerActions.appendChild(fsBtn);
 
     const closeBtn = document.createElement('button');
     closeBtn.className = 'fv-btn-icon';
-    closeBtn.textContent = '\u2715'; // ✕
+    closeBtn.title = 'Close';
+    closeBtn.appendChild(iconX());
     closeBtn.addEventListener('click', () => overlay.remove());
     headerActions.appendChild(closeBtn);
 
@@ -292,7 +322,8 @@ async function openFileViewer(url, filename) {
     dlLink.href = url;
     dlLink.setAttribute('download', '');
     dlLink.className = 'rb-action-btn rb-action-btn--primary';
-    dlLink.textContent = '\u2B07 Download';
+    dlLink.appendChild(iconDownload());
+    dlLink.appendChild(document.createTextNode(' Download'));
     footer.appendChild(dlLink);
     modal.appendChild(footer);
 
