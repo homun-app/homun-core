@@ -3328,3 +3328,35 @@
 .rb-external-meta { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
 .rb-external-sender { font-size: 13px; font-weight: 600; color: var(--t1); }
 .rb-external-source { font-size: 11px; color: var(--t2); padding: 1px 6px; background: var(--surface-subtle); border-radius: var(--r-pill); }
+
+/* ─── Response Block Action Buttons ─── */
+.rb-action-btn { padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; text-decoration: none; cursor: pointer; border: none; display: inline-block; }
+.rb-action-btn--primary { background: var(--accent, #3b82f6); color: #fff; }
+.rb-action-btn--secondary { background: var(--surface-2, #e5e7eb); color: var(--t1, #111); }
+
+/* ─── File Viewer Modal ─── */
+.fv-overlay { position: fixed; inset: 0; z-index: 1100; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); animation: modal-in var(--med, 0.2s) ease; }
+.fv-modal { background: var(--surface, #fff); border: 1px solid var(--border, #e5e7eb); border-radius: var(--r-lg, 12px); box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25); width: 90vw; max-width: 800px; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; transition: max-width 0.3s ease, max-height 0.3s ease; }
+.fv-modal.fv-fullscreen { max-width: 95vw; max-height: 95vh; border-radius: 8px; }
+.fv-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border, #e5e7eb); flex-shrink: 0; }
+.fv-title { font-weight: 600; font-size: 14px; color: var(--t1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fv-header-actions { display: flex; gap: 4px; }
+.fv-btn-icon { background: none; border: none; cursor: pointer; font-size: 16px; width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: var(--t2); }
+.fv-btn-icon:hover { background: var(--surface-2, #f3f4f6); color: var(--t1); }
+.fv-body { flex: 1; overflow: auto; padding: 16px; min-height: 200px; }
+.fv-footer { display: flex; align-items: center; justify-content: flex-end; padding: 10px 16px; border-top: 1px solid var(--border, #e5e7eb); flex-shrink: 0; }
+.fv-pre { margin: 0; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.fv-error { color: var(--danger, #ef4444); font-size: 14px; text-align: center; padding: 32px 16px; }
+
+/* File Viewer — CSV Table */
+.fv-table-wrap { overflow: auto; max-height: 100%; }
+.fv-table { width: 100%; border-collapse: collapse; font-size: 13px; font-family: var(--font-mono, 'SF Mono', Menlo, monospace); }
+.fv-table thead { position: sticky; top: 0; z-index: 1; }
+.fv-table th { background: var(--surface-2, #f3f4f6); color: var(--t1); font-weight: 600; text-align: left; padding: 8px 12px; border-bottom: 2px solid var(--border, #e5e7eb); white-space: nowrap; }
+.fv-table td { padding: 6px 12px; border-bottom: 1px solid var(--border-light, #f0f0f0); color: var(--t1); }
+.fv-table tbody tr:nth-child(even) { background: var(--surface-subtle, #fafafa); }
+.fv-table tbody tr:hover { background: var(--accent-subtle, #eff6ff); }
+
+/* File Viewer — Code / JSON */
+.fv-body pre { margin: 0; font-size: 13px; line-height: 1.6; }
+.fv-body pre code { display: block; padding: 0; background: none; }

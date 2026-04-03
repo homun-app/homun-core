@@ -832,6 +832,7 @@ async fn get_chat_uploaded_file(
 async fn get_workspace_file(
     axum::Extension(auth): axum::Extension<AuthUser>,
     Path(file_path): Path<String>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Result<Response, StatusCode> {
     check_write(&auth)?;
 
@@ -860,14 +861,19 @@ async fn get_workspace_file(
         .and_then(|n| n.to_str())
         .unwrap_or("download");
 
+    let inline = params.get("inline").map(|v| v == "true").unwrap_or(false);
+
     let mut response = Response::new(Body::from(data));
     response.headers_mut().insert(
         CONTENT_TYPE,
         HeaderValue::from_str(content_type.as_ref())
             .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream")),
     );
-    // Content-Disposition triggers browser download dialog
-    if let Ok(val) = HeaderValue::from_str(&format!("attachment; filename=\"{file_name}\"")) {
+    // Content-Disposition: attachment forces download, inline allows browser preview
+    let disposition = if inline { "inline" } else { "attachment" };
+    if let Ok(val) =
+        HeaderValue::from_str(&format!("{disposition}; filename=\"{file_name}\""))
+    {
         response
             .headers_mut()
             .insert(axum::http::header::CONTENT_DISPOSITION, val);
