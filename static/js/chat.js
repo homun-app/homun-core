@@ -170,6 +170,16 @@ function renderContent(el, content, role) {
             '\n\n![Screenshot](/api/v1/browser/screenshots/$1)\n\n'
         );
 
+        // Convert workspace file references to download links.
+        // Matches filenames with common extensions mentioned in the response text.
+        processedContent = processedContent.replace(
+            /(?:File creato|File created|Saved|Created|Scritto)[:\s]+[`"]?(\S+\.(?:csv|json|txt|md|xlsx|pdf))[`"]?/gi,
+            (match, filename) => {
+                const clean = filename.replace(/[`"]/g, '');
+                return `**[${clean}](/api/v1/workspace/files/${clean})** ⬇`;
+            }
+        );
+
         const rawHtml = marked.parse(processedContent);
         // safe: DOMPurify sanitizes all HTML; ADD_ATTR allows target for new-tab links
         const sanitized = DOMPurify.sanitize(rawHtml, { ADD_ATTR: ['target'] });
@@ -1618,6 +1628,21 @@ function updateReasoningCount() {
     }
 }
 
+/** Add a reasoning note (intermediate text absorbed from streaming). */
+function addReasoningNote(text) {
+    if (!reasoningSectionEl) createReasoningSection();
+    if (!reasoningContentEl) return;
+    const note = document.createElement('div');
+    note.className = 'chat-tool-call-card';
+    const compact = document.createElement('div');
+    compact.className = 'chat-tool-call-compact';
+    compact.style.opacity = '0.7';
+    compact.style.fontStyle = 'italic';
+    compact.textContent = text.length > 120 ? text.substring(0, 120) + '…' : text;
+    note.appendChild(compact);
+    reasoningContentEl.appendChild(note);
+}
+
 function showToolIndicator(toolName, toolCallData) {
     purgeOrphanLiveArtifacts();
     activeTools.push(toolName);
@@ -2275,6 +2300,15 @@ function connect() {
 
             } else if (data.type === 'tool_start') {
                 removeTypingIndicator();
+                // Absorb any in-progress streaming text into reasoning.
+                // Text generated before a tool call is "thinking out loud",
+                // not the final answer — hide it from the main chat flow.
+                if (streamingEl && streamingContent.trim()) {
+                    addReasoningNote(streamingContent.trim());
+                    streamingEl.remove();
+                    streamingEl = null;
+                    streamingContent = '';
+                }
                 // Agent is calling a tool
                 showToolIndicator(data.name, data.tool_call);
 
