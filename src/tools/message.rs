@@ -51,6 +51,10 @@ impl Tool for MessageTool {
                 "chat_id": {
                     "type": "string",
                     "description": "Override target chat ID. Defaults to the current chat."
+                },
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to a workspace file to attach (e.g. 'coworking_italia.csv'). The file will be sent as a document attachment on channels that support it (Telegram, Discord, etc.)."
                 }
             },
             "required": ["content"]
@@ -61,6 +65,22 @@ impl Tool for MessageTool {
         let content = get_string_param(&args, "content")?;
         let channel = get_optional_string(&args, "channel").unwrap_or_else(|| ctx.channel.clone());
         let explicit_chat_id = get_optional_string(&args, "chat_id");
+
+        // Resolve file path relative to workspace if provided
+        let file_path = get_optional_string(&args, "file_path").and_then(|fp| {
+            let workspace = crate::config::Config::data_dir().join("workspace");
+            let resolved = if std::path::Path::new(&fp).is_absolute() {
+                std::path::PathBuf::from(&fp)
+            } else {
+                workspace.join(&fp)
+            };
+            if resolved.exists() {
+                Some(resolved.to_string_lossy().to_string())
+            } else {
+                tracing::warn!(path = %fp, "File not found for send_message attachment");
+                None
+            }
+        });
 
         // When channel is overridden but chat_id is not, resolve the default
         // chat_id for the target channel instead of using the current context's
@@ -113,6 +133,7 @@ impl Tool for MessageTool {
             chat_id: chat_id.clone(),
             content,
             metadata: None,
+            file_path,
         };
 
         match tx.send(outbound).await {

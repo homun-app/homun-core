@@ -124,6 +124,11 @@ pub struct OutboundMessage {
     /// Optional metadata for channel-specific routing (threading, email headers).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<OutboundMetadata>,
+    /// Optional file path to attach (workspace files, generated documents).
+    /// When set, channels that support file sending (Telegram, Discord, etc.)
+    /// will deliver the file alongside the text content.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
 }
 
 /// A streaming text chunk routed to a specific chat session.

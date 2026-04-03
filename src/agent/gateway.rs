@@ -790,7 +790,7 @@ impl Gateway {
                                     channel: ch.to_string(),
                                     chat_id: cid.to_string(),
                                     content: notification,
-                                    metadata: None,
+                                    metadata: None, file_path: None,
                                 };
                                 route_outbound(out, &senders_for_routing, &known_chat_ids).await;
                                 notified += 1;
@@ -893,7 +893,7 @@ impl Gateway {
                         channel: channel_name.clone(),
                         chat_id: chat_id.clone(),
                         content: response,
-                        metadata: None,
+                        metadata: None, file_path: None,
                     };
                     route_outbound(outbound, &senders_for_routing, &known_chat_ids).await;
                     continue;
@@ -931,7 +931,7 @@ impl Gateway {
                                             channel: channel_name.clone(),
                                             chat_id: chat_id.clone(),
                                             content: response,
-                                            metadata: None,
+                                            metadata: None, file_path: None,
                                         };
                                         route_outbound(
                                             outbound,
@@ -987,7 +987,7 @@ impl Gateway {
                                 channel: email_ch.clone(),
                                 chat_id: pending.from_address.clone(),
                                 content: email_content,
-                                metadata: None,
+                                metadata: None, file_path: None,
                             };
                             // User approval IS the authorization — ensure the
                             // recipient is in known_chat_ids so the safety check
@@ -1007,7 +1007,7 @@ impl Gateway {
                                 channel: channel_name.clone(),
                                 chat_id: chat_id.clone(),
                                 content: format!("✅ Email inviata a {}", pending.from_address),
-                                metadata: None,
+                                metadata: None, file_path: None,
                             };
                             route_outbound(confirm, &senders_for_routing, &known_chat_ids).await;
 
@@ -1061,7 +1061,7 @@ impl Gateway {
                                 channel: channel_name.clone(),
                                 chat_id: chat_id.clone(),
                                 content: "❌ Bozza scartata".to_string(),
-                                metadata: None,
+                                metadata: None, file_path: None,
                             };
                             route_outbound(confirm, &senders_for_routing, &known_chat_ids).await;
 
@@ -1086,7 +1086,7 @@ impl Gateway {
                                     channel: channel_name.clone(),
                                     chat_id: chat_id.clone(),
                                     content: msg,
-                                    metadata: None,
+                                    metadata: None, file_path: None,
                                 };
                                 route_outbound(out, &senders_for_routing, &known_chat_ids).await;
                             }
@@ -1122,7 +1122,7 @@ impl Gateway {
                                             channel: modify_channel,
                                             chat_id: modify_chat_id,
                                             content: format!("❌ Errore nella rigenerazione: {e}"),
-                                            metadata: None,
+                                            metadata: None, file_path: None,
                                         };
                                         route_outbound(err_msg, &modify_senders, &modify_known)
                                             .await;
@@ -1152,7 +1152,7 @@ impl Gateway {
                                         channel: modify_channel,
                                         chat_id: modify_chat_id,
                                         content: msg,
-                                        metadata: None,
+                                        metadata: None, file_path: None,
                                     };
                                     route_outbound(out, &modify_senders, &modify_known).await;
                                 }
@@ -1189,7 +1189,7 @@ impl Gateway {
                                             channel: p.channel.clone(),
                                             chat_id: p.chat_id.clone(),
                                             content: draft,
-                                            metadata: None,
+                                            metadata: None, file_path: None,
                                         };
                                         route_outbound(out, &senders_for_routing, &known_chat_ids)
                                             .await;
@@ -1203,7 +1203,7 @@ impl Gateway {
                                                 "✅ Message sent to {} on {}",
                                                 p.chat_id, p.channel
                                             ),
-                                            metadata: None,
+                                            metadata: None, file_path: None,
                                         };
                                         route_outbound(
                                             confirm,
@@ -1223,7 +1223,7 @@ impl Gateway {
                                             channel: channel_name.clone(),
                                             chat_id: chat_id.clone(),
                                             content: "❌ Draft discarded".to_string(),
-                                            metadata: None,
+                                            metadata: None, file_path: None,
                                         };
                                         route_outbound(
                                             confirm,
@@ -1254,7 +1254,7 @@ impl Gateway {
                                                 p.chat_id,
                                                 preview
                                             ),
-                                            metadata: None,
+                                            metadata: None, file_path: None,
                                         };
                                         route_outbound(out, &senders_for_routing, &known_chat_ids)
                                             .await;
@@ -1300,7 +1300,7 @@ impl Gateway {
                                         content: format!(
                                             "📄 Indexed \"{file_name}\" into knowledge base."
                                         ),
-                                        metadata: None,
+                                        metadata: None, file_path: None,
                                     };
                                     route_outbound(confirm, &senders_for_routing, &known_chat_ids)
                                         .await;
@@ -1328,7 +1328,7 @@ impl Gateway {
                                         channel: channel_name.clone(),
                                         chat_id: chat_id.clone(),
                                         content: format!("📄 \"{file_name}\" already in knowledge base (duplicate)."),
-                                        metadata: None,
+                                        metadata: None, file_path: None,
                                     };
                                     route_outbound(confirm, &senders_for_routing, &known_chat_ids)
                                         .await;
@@ -1345,7 +1345,7 @@ impl Gateway {
                                         channel: channel_name.clone(),
                                         chat_id: chat_id.clone(),
                                         content: format!("❌ Failed to index \"{file_name}\": {e}"),
-                                        metadata: None,
+                                        metadata: None, file_path: None,
                                     };
                                     route_outbound(confirm, &senders_for_routing, &known_chat_ids)
                                         .await;
@@ -1686,7 +1686,7 @@ impl Gateway {
                                 channel: channel.to_string(),
                                 chat_id: chat_id.to_string(),
                                 content: notification,
-                                metadata: None,
+                                metadata: None, file_path: None,
                             };
                             route_outbound(outbound, &senders_for_wf, &known_for_wf).await;
                         }
@@ -2081,7 +2081,7 @@ async fn dispatch_to_agent(
                 channel: notify_ch,
                 chat_id: notify_cid,
                 content: formatted,
-                metadata: None,
+                metadata: None, file_path: None,
             }
         } else {
             // Chat channels: use generic pending_responses table
@@ -2114,7 +2114,7 @@ async fn dispatch_to_agent(
                 channel: notify_ch,
                 chat_id: notify_cid,
                 content: formatted,
-                metadata: None,
+                metadata: None, file_path: None,
             }
         }
     } else if is_assisted_silent {
@@ -2171,14 +2171,14 @@ async fn dispatch_to_agent(
             channel: channel_name.clone(),
             chat_id: chat_id.clone(),
             content: String::new(),
-            metadata: None,
+            metadata: None, file_path: None,
         }
     } else {
         OutboundMessage {
             channel: channel_name.clone(),
             chat_id: chat_id.clone(),
             content,
-            metadata: build_outbound_meta(inbound.metadata.as_ref()),
+            metadata: build_outbound_meta(inbound.metadata.as_ref()), file_path: None,
         }
     };
 
@@ -2225,7 +2225,7 @@ async fn dispatch_to_agent(
                     channel: "web".to_string(),
                     chat_id: format!("mobile:{}", mobile_device.id),
                     content: run_output.clone(),
-                    metadata: None,
+                    metadata: None, file_path: None,
                 };
                 tracing::debug!(
                     device_id = %mobile_device.id,
@@ -2612,7 +2612,7 @@ async fn show_next_pending(
                 channel: channel.to_string(),
                 chat_id: chat_id.to_string(),
                 content: msg,
-                metadata: None,
+                metadata: None, file_path: None,
             };
             route_outbound(out, senders, known).await;
         }

@@ -292,6 +292,32 @@ impl TelegramChannel {
                 }
             };
 
+            // Send file attachment if present
+            if let Some(ref fp) = msg.file_path {
+                let path = std::path::Path::new(fp);
+                if path.exists() {
+                    use frankenstein::input_file::FileUpload;
+                    use frankenstein::methods::SendDocumentParams;
+                    let params = SendDocumentParams::builder()
+                        .chat_id(ChatId::Integer(chat_id))
+                        .document(FileUpload::from(path.to_path_buf()))
+                        .caption(&msg.content)
+                        .build();
+                    match api.send_document(&params).await {
+                        Ok(_) => {
+                            tracing::info!(file = %fp, "Telegram: file sent");
+                            continue; // file + caption sent, skip text-only path
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = ?e, file = %fp, "Telegram: send_document failed, falling back to text");
+                            // Fall through to text-only send
+                        }
+                    }
+                } else {
+                    tracing::warn!(file = %fp, "Telegram: attachment file not found");
+                }
+            }
+
             // Split long messages (Telegram limit: 4096 chars)
             let chunks = split_message(&msg.content, 4000);
 
