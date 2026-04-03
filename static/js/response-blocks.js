@@ -185,13 +185,53 @@ function renderStatusBlock(block) {
 function renderResultBlock(block) {
     const card = createBlockCard('result');
 
+    // Icon + title
     const header = document.createElement('div');
     header.className = 'rb-header';
-    header.textContent = block.title || 'Result';
+    const iconText = block.icon ? block.icon + ' ' : '';
+    header.textContent = iconText + (block.title || 'Result');
     card.appendChild(header);
 
-    if (block.fields && block.fields.length) {
-        card.appendChild(renderFields(block.fields));
+    // Separate download URL from display fields
+    const displayFields = [];
+    let downloadUrl = null;
+    if (block.fields) {
+        for (const f of block.fields) {
+            if (f.label === 'Download' && f.value.startsWith('/api/')) {
+                downloadUrl = f.value;
+            } else {
+                displayFields.push(f);
+            }
+        }
+    }
+
+    if (displayFields.length) {
+        card.appendChild(renderFields(displayFields));
+    }
+
+    // File action buttons (download + view)
+    if (downloadUrl) {
+        const actions = document.createElement('div');
+        actions.className = 'rb-actions';
+        actions.style.cssText = 'display:flex;gap:8px;margin-top:8px';
+
+        const dlBtn = document.createElement('a');
+        dlBtn.href = downloadUrl;
+        dlBtn.setAttribute('download', '');
+        dlBtn.className = 'rb-action-btn';
+        dlBtn.textContent = '⬇ Download';
+        dlBtn.style.cssText = 'padding:6px 14px;border-radius:6px;background:var(--accent,#3b82f6);color:#fff;text-decoration:none;font-size:13px;font-weight:500';
+        actions.appendChild(dlBtn);
+
+        const viewBtn = document.createElement('a');
+        viewBtn.href = downloadUrl;
+        viewBtn.target = '_blank';
+        viewBtn.className = 'rb-action-btn';
+        viewBtn.textContent = '👁 View';
+        viewBtn.style.cssText = 'padding:6px 14px;border-radius:6px;background:var(--surface-2,#e5e7eb);color:var(--text-1,#111);text-decoration:none;font-size:13px;font-weight:500';
+        actions.appendChild(viewBtn);
+
+        card.appendChild(actions);
     }
 
     return card;

@@ -592,22 +592,68 @@ impl Tool for WriteFileTool {
 
         match tokio::fs::write(&path, &content).await {
             Ok(()) => {
-                let mut msg = format!("Wrote {} bytes to {}", content.len(), path_str);
+                let size_bytes = content.len();
+                let mut msg = format!("Wrote {size_bytes} bytes to {path_str}");
 
-                // If the file is in the workspace, append a download URL
+                // If the file is in the workspace, append a download URL and
+                // emit a ResultBlock so the UI shows a download/view card.
                 let workspace = crate::config::Config::data_dir().join("workspace");
-                if let (Ok(file_canonical), Ok(ws_canonical)) =
+                let blocks = if let (Ok(file_canonical), Ok(ws_canonical)) =
                     (path.canonicalize(), workspace.canonicalize())
                 {
                     if let Ok(relative) = file_canonical.strip_prefix(&ws_canonical) {
                         let url_path = relative.to_string_lossy().replace('\\', "/");
-                        msg.push_str(&format!(
-                            "\nDownload: /api/v1/workspace/files/{url_path}"
-                        ));
-                    }
-                }
+                        let download_url =
+                            format!("/api/v1/workspace/files/{url_path}");
+                        msg.push_str(&format!("\nDownload: {download_url}"));
 
-                Ok(ToolResult::success(msg))
+                        let filename = path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_else(|| url_path.clone());
+
+                        let ext = path
+                            .extension()
+                            .map(|e| e.to_string_lossy().to_lowercase())
+                            .unwrap_or_default();
+                        let icon = match ext.as_str() {
+                            "csv" => "📊",
+                            "json" => "📋",
+                            "md" | "txt" => "📄",
+                            "pdf" => "📕",
+                            _ => "📁",
+                        };
+
+                        use crate::tools::response_blocks::{
+                            KeyValue, ResponseBlock, ResultBlock,
+                        };
+                        vec![ResponseBlock::Result(ResultBlock {
+                            id: format!("file_{}", uuid::Uuid::new_v4()),
+                            title: filename,
+                            fields: vec![
+                                KeyValue {
+                                    label: "Size".to_string(),
+                                    value: format_file_size(size_bytes),
+                                },
+                                KeyValue {
+                                    label: "Download".to_string(),
+                                    value: download_url,
+                                },
+                            ],
+                            icon: Some(icon.to_string()),
+                        })]
+                    } else {
+                        vec![]
+                    }
+                } else {
+                    vec![]
+                };
+
+                if blocks.is_empty() {
+                    Ok(ToolResult::success(msg))
+                } else {
+                    Ok(ToolResult::with_blocks(msg, blocks))
+                }
             }
             Err(e) => Ok(ToolResult::error(format!("Failed to write file: {e}"))),
         }
@@ -850,6 +896,17 @@ impl Tool for ListDirTool {
         } else {
             Ok(ToolResult::success(entries.join("\n")))
         }
+    }
+}
+
+/// Format byte size into human-readable string.
+fn format_file_size(bytes: usize) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
     }
 }
 

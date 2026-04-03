@@ -170,15 +170,8 @@ function renderContent(el, content, role) {
             '\n\n![Screenshot](/api/v1/browser/screenshots/$1)\n\n'
         );
 
-        // Convert workspace file references to download links.
-        // Matches filenames with common extensions mentioned in the response text.
-        processedContent = processedContent.replace(
-            /(?:File creato|File created|Saved|Created|Scritto)[:\s]+[`"]?(\S+\.(?:csv|json|txt|md|xlsx|pdf))[`"]?/gi,
-            (match, filename) => {
-                const clean = filename.replace(/[`"]/g, '');
-                return `**[${clean}](/api/v1/workspace/files/${clean})** ⬇`;
-            }
-        );
+        // File download links are now handled via ResultBlock from write_file tool.
+        // No regex needed — the block is rendered as an interactive card.
 
         const rawHtml = marked.parse(processedContent);
         // safe: DOMPurify sanitizes all HTML; ADD_ATTR allows target for new-tab links
