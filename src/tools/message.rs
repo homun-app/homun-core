@@ -30,10 +30,11 @@ impl Tool for MessageTool {
     }
 
     fn description(&self) -> &str {
-        "Send a message to the user on any channel. By default delivers to the same channel \
-         the user wrote from, but you can override 'channel' and 'chat_id' to send cross-channel \
-         (e.g. receive on Telegram, reply on WhatsApp). Check the system prompt for available \
-         channels and their chat_ids."
+        "Send a message or file to the user on any channel. Can attach workspace files \
+         (CSV, PDF, etc.) as documents via the file_path parameter. By default delivers to \
+         the same channel the user wrote from, but you can override 'channel' and 'chat_id' \
+         to send cross-channel (e.g. receive on Telegram, reply on WhatsApp). \
+         Check the system prompt for available channels and their chat_ids."
     }
 
     fn parameters(&self) -> Value {
