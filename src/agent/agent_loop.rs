@@ -1981,7 +1981,7 @@ impl AgentLoop {
 
                     // --- OBSERVE: Execute and add result ---
                     // Check blocked tools, add_data buffer, skills, and finally real tools.
-                    let result = if blocked_set.contains(tool_call.name.as_str()) {
+                    let mut result = if blocked_set.contains(tool_call.name.as_str()) {
                         crate::tools::ToolResult::error(format!(
                             "Tool '{}' is disabled in this execution context.",
                             tool_call.name
@@ -2170,6 +2170,121 @@ impl AgentLoop {
                         }
                     }
 
+                    // ── Auto-escalation: web_fetch → browser ──────────────
+                    // When web_fetch detects a JS-rendered page (SPA shell
+                    // with no useful content), automatically retry via the
+                    // browser tool's navigate action which executes JS and
+                    // returns a rendered snapshot.
+                    if tool_call.name == "web_fetch"
+                        && result.is_error
+                        && result.output.contains("requires JavaScript")
+                        && browser_available
+                    {
+                        let escalation_url = tool_call
+                            .arguments
+                            .get("url")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default();
+
+                        if !escalation_url.is_empty() {
+                            tracing::info!(
+                                url = %escalation_url,
+                                "web_fetch JS-required → auto-escalating to browser"
+                            );
+
+                            // Notify frontend of browser escalation start
+                            let esc_id =
+                                format!("{}_browser_escalation", tool_call.id);
+                            if let Some(ref tx) = stream_tx {
+                                let _ = tx
+                                    .send(crate::provider::StreamChunk {
+                                        delta: "browser".to_string(),
+                                        done: false,
+                                        event_type: Some(
+                                            "tool_start".to_string(),
+                                        ),
+                                        tool_call_data: Some(
+                                            crate::provider::ToolCallData {
+                                                id: esc_id.clone(),
+                                                name: "browser".to_string(),
+                                                arguments: serde_json::json!({
+                                                    "action": "navigate",
+                                                    "url": escalation_url
+                                                }),
+                                                result: None,
+                                            },
+                                        ),
+                                    })
+                                    .await;
+                            }
+
+                            // Execute browser navigate (returns rendered snapshot)
+                            let browser_result = {
+                                let reg = self.tool_registry.read().await;
+                                reg.execute(
+                                    "browser",
+                                    serde_json::json!({
+                                        "action": "navigate",
+                                        "url": escalation_url
+                                    }),
+                                    &tool_ctx,
+                                )
+                                .await
+                            };
+
+                            // Notify frontend of browser escalation end
+                            if let Some(ref tx) = stream_tx {
+                                let truncated =
+                                    crate::utils::text::truncate_str(
+                                        &browser_result.output,
+                                        200,
+                                        "…",
+                                    );
+                                let _ = tx
+                                    .send(crate::provider::StreamChunk {
+                                        delta: "browser".to_string(),
+                                        done: false,
+                                        event_type: Some(
+                                            "tool_end".to_string(),
+                                        ),
+                                        tool_call_data: Some(
+                                            crate::provider::ToolCallData {
+                                                id: esc_id,
+                                                name: "browser".to_string(),
+                                                arguments:
+                                                    serde_json::Value::Null,
+                                                result: Some(
+                                                    truncated.to_string(),
+                                                ),
+                                            },
+                                        ),
+                                    })
+                                    .await;
+                            }
+
+                            // Replace web_fetch error with browser result
+                            if !browser_result.is_error {
+                                tracing::info!(
+                                    url = %escalation_url,
+                                    "Browser escalation succeeded"
+                                );
+                                result = browser_result;
+                            } else {
+                                tracing::warn!(
+                                    url = %escalation_url,
+                                    "Browser escalation also failed"
+                                );
+                                result = crate::tools::ToolResult::error(
+                                    format!(
+                                        "{}\n\nBrowser fallback also failed: {}",
+                                        result.output,
+                                        browser_result.output
+                                    ),
+                                );
+                            }
+                        }
+                    }
+
                     // For unified browser tool, output is already compacted by BrowserTool.
                     // For all other tools, apply model context formatting.
                     let tool_output =
@@ -2198,14 +2313,133 @@ impl AgentLoop {
                         }
                     }
 
-                    // Collect rich UI blocks from tool result (if any)
+                    // Collect rich UI blocks from tool result (if any).
+                    //
+                    // Sandbox escalation blocks (emitted by the shell tool
+                    // when a command is killed by an active sandbox) are
+                    // intercepted here and shown INTERACTIVELY via the
+                    // approval gate — not appended to response_blocks.
+                    // On "allow_once" we grant a one-shot sandbox bypass
+                    // so the LLM's next retry succeeds; on "deny" the
+                    // diagnostic already in the tool output drives the
+                    // LLM to adapt its approach.
                     if !result.blocks.is_empty() {
                         tracing::info!(
                             tool = %tool_call.name,
                             count = result.blocks.len(),
                             "Tool returned response blocks"
                         );
-                        response_blocks.extend(result.blocks.clone());
+                        for block in result.blocks.iter() {
+                            let block_id = match block {
+                                crate::tools::ResponseBlock::Choice(c) => c.id.clone(),
+                                _ => String::new(),
+                            };
+                            if block_id.starts_with("sandbox_escalation_") {
+                                if let Some(ref tx) = stream_tx {
+                                    use crate::agent::approval_gate::{
+                                        await_approval, ApprovalOutcome, DEFAULT_APPROVAL_TIMEOUT,
+                                    };
+                                    tracing::info!(%block_id, "Awaiting sandbox escalation decision");
+                                    match await_approval(
+                                        block.clone(),
+                                        &block_id,
+                                        tx,
+                                        DEFAULT_APPROVAL_TIMEOUT,
+                                    )
+                                    .await
+                                    {
+                                        ApprovalOutcome::Responded(resp) => {
+                                            match resp.option_id.as_deref() {
+                                                Some("allow_once") => {
+                                                    if let Some(ref mgr) = tool_ctx.approval_manager {
+                                                        if let Some(key) = resp
+                                                            .metadata
+                                                            .as_ref()
+                                                            .and_then(|m| m.get("bypass_key"))
+                                                            .and_then(|v| v.as_str())
+                                                        {
+                                                            mgr.grant_sandbox_bypass(key);
+                                                            tracing::info!(
+                                                                key,
+                                                                "Sandbox bypass granted (one-shot)"
+                                                            );
+                                                        }
+                                                    }
+                                                }
+                                                Some("allow_always_folder") | Some("allow_always_file") => {
+                                                    let path = resp
+                                                        .metadata
+                                                        .as_ref()
+                                                        .and_then(|m| m.get("path"))
+                                                        .and_then(|v| v.as_str())
+                                                        .map(|s| s.to_string());
+                                                    if let Some(path) = path {
+                                                        // Persist the path to the sandbox allow_paths
+                                                        // and write config to disk. We ALSO grant a
+                                                        // one-shot bypass for the immediate retry —
+                                                        // the updated Seatbelt profile takes effect
+                                                        // on the next invocation, but a racing retry
+                                                        // could reach the shell tool before the new
+                                                        // config is read, and the bypass covers that.
+                                                        // Update in-memory config
+                                                        {
+                                                            let mut cfg = self.config.write().await;
+                                                            let list = &mut cfg.security.execution_sandbox.allow_paths;
+                                                            if !list.contains(&path) {
+                                                                list.push(path.clone());
+                                                            }
+                                                        }
+                                                        // Persist to DB (primary) + TOML (backup)
+                                                        let sandbox_json = {
+                                                            let cfg = self.config.read().await;
+                                                            serde_json::to_string(&cfg.security.execution_sandbox)
+                                                        };
+                                                        match sandbox_json {
+                                                            Ok(json) => {
+                                                                if let Err(e) = self.db.set_settings_section(
+                                                                    crate::config::SECTION_SANDBOX, &json
+                                                                ).await {
+                                                                    tracing::warn!(%path, error = %e, "Failed to persist allow_paths to DB");
+                                                                }
+                                                                // TOML backup
+                                                                let cfg = self.config.read().await;
+                                                                if let Err(e) = cfg.save() {
+                                                                    tracing::warn!(%path, error = %e, "TOML backup write failed");
+                                                                }
+                                                                tracing::info!(%path, "Sandbox allow_paths persisted to DB + TOML");
+                                                            }
+                                                            Err(e) => tracing::warn!(%path, error = %e, "Failed to serialize sandbox config"),
+                                                        }
+                                                        if let Some(ref mgr) = tool_ctx.approval_manager {
+                                                            mgr.grant_sandbox_bypass(&path);
+                                                        }
+                                                    }
+                                                }
+                                                _ => {
+                                                    tracing::info!(
+                                                        %block_id,
+                                                        "Sandbox escalation denied by user"
+                                                    );
+                                                }
+                                            }
+                                        }
+                                        ApprovalOutcome::Timeout => {
+                                            tracing::warn!(%block_id, "Sandbox escalation timed out");
+                                        }
+                                        ApprovalOutcome::Cancelled => {
+                                            tracing::info!(%block_id, "Sandbox escalation cancelled");
+                                        }
+                                    }
+                                } else {
+                                    tracing::warn!(
+                                        %block_id,
+                                        "Sandbox escalation block dropped — channel has no stream_tx"
+                                    );
+                                }
+                            } else {
+                                response_blocks.push(block.clone());
+                            }
+                        }
                     }
 
                     messages.push(ChatMessage::tool_result(
@@ -2591,44 +2825,82 @@ impl AgentLoop {
             // Ask the user if they want to continue with more iterations.
             // Only offer this if we haven't hit the absolute hard max and have a stream.
             let mut user_wants_continue = false;
-            if active_iteration_budget < hard_max_iterations {
-                if let Some(ref tx) = stream_tx {
-                    let done_steps = execution_plan.explicit_steps_done_count();
-                    let total_steps = execution_plan.explicit_steps_count();
-                    let block_json = serde_json::json!([{
-                        "block_type": "choice",
-                        "id": format!("budget_extend_{iteration}"),
-                        "title": "Iteration budget reached",
-                        "subtitle": format!(
-                            "{done_steps}/{total_steps} steps completed after {iteration} iterations. Continue?",
-                        ),
-                        "options": [
-                            {
-                                "id": "continue",
-                                "label": "Continue",
-                                "subtitle": "Add more iterations and keep working",
-                                "metadata": { "action": "extend" }
-                            },
-                            {
-                                "id": "finalize",
-                                "label": "Finalize now",
-                                "subtitle": "Give me what you have so far",
-                                "metadata": { "action": "finalize" }
-                            }
-                        ]
-                    }]);
+            let mut block_outcome: &'static str = "not_attempted";
+            if active_iteration_budget >= hard_max_iterations {
+                block_outcome = "skipped_hard_max_reached";
+                tracing::info!(
+                    active_iteration_budget,
+                    hard_max_iterations,
+                    "Budget continuation block skipped — hard max already reached"
+                );
+            } else if stream_tx.is_none() {
+                block_outcome = "skipped_no_stream";
+                tracing::warn!(
+                    %channel,
+                    "Budget continuation block skipped — channel has no stream_tx (cannot render interactive blocks)"
+                );
+            } else if let Some(ref tx) = stream_tx {
+                let done_steps = execution_plan.explicit_steps_done_count();
+                let total_steps = execution_plan.explicit_steps_count();
+                // Count sandbox kills by scanning the diagnostic markers
+                // appended by src/tools/shell.rs to tool result messages.
+                let sigkill_hint = count_sigkill_diagnostics(&messages);
+                let subtitle = if sigkill_hint >= 2 {
+                    format!(
+                        "{done_steps}/{total_steps} steps, {iteration} iterations, {sigkill_hint} sandbox kills detected. Continue?"
+                    )
+                } else {
+                    format!(
+                        "{done_steps}/{total_steps} steps completed after {iteration} iterations. Continue?"
+                    )
+                };
+                let block_json = serde_json::json!([{
+                    "block_type": "choice",
+                    "id": format!("budget_extend_{iteration}"),
+                    "title": "Iteration budget reached",
+                    "subtitle": subtitle,
+                    "options": [
+                        {
+                            "id": "continue",
+                            "label": "Continue",
+                            "subtitle": "Add 20 more iterations and keep working",
+                            "metadata": { "action": "extend" }
+                        },
+                        {
+                            "id": "finalize",
+                            "label": "Finalize now",
+                            "subtitle": "Give me what you have so far",
+                            "metadata": { "action": "finalize" }
+                        }
+                    ]
+                }]);
 
-                    let block_id = format!("budget_extend_{iteration}");
-                    let gate = crate::agent::approval_gate::approval_gate();
-                    let _ = tx.send(crate::provider::StreamChunk {
-                        delta: block_json.to_string(),
-                        done: false,
-                        event_type: Some("blocks".to_string()),
-                        tool_call_data: None,
-                    }).await;
+                let block_id = format!("budget_extend_{iteration}");
+                let gate = crate::agent::approval_gate::approval_gate();
 
+                // IMPORTANT: register the gate BEFORE sending the block to
+                // the channel. Otherwise a fast-clicking user can POST their
+                // response before the gate exists, causing gate.resolve() to
+                // return false and the click to be silently ignored.
+                let rx = gate.register(&block_id, block_json.to_string()).await;
+                let send_result = tx.send(crate::provider::StreamChunk {
+                    delta: block_json.to_string(),
+                    done: false,
+                    event_type: Some("blocks".to_string()),
+                    tool_call_data: None,
+                }).await;
+
+                if let Err(e) = send_result {
+                    block_outcome = "send_failed";
+                    tracing::warn!(error = %e, "Budget continuation block send failed");
+                    gate.cancel(&block_id).await;
+                } else {
+                    tracing::info!(
+                        %block_id,
+                        sigkill_hints = sigkill_hint,
+                        "Budget continuation block sent — awaiting user response (300s timeout)"
+                    );
                     // Wait for user response (5 min timeout)
-                    let rx = gate.register(&block_id, block_json.to_string()).await;
                     match tokio::time::timeout(
                         std::time::Duration::from_secs(300),
                         rx,
@@ -2637,13 +2909,35 @@ impl AgentLoop {
                             let action = resp.option_id.as_deref().unwrap_or("finalize");
                             if action == "continue" {
                                 user_wants_continue = true;
+                                block_outcome = "user_continued";
+                            } else {
+                                block_outcome = "user_finalized";
                             }
+                            tracing::info!(
+                                %block_id,
+                                action,
+                                user_wants_continue,
+                                "Budget continuation block resolved by user"
+                            );
                         }
-                        _ => {} // Timeout or channel error — finalize
+                        Ok(Err(_)) => {
+                            block_outcome = "channel_closed";
+                            tracing::warn!(%block_id, "Budget continuation gate channel closed");
+                        }
+                        Err(_) => {
+                            block_outcome = "timeout";
+                            tracing::warn!(%block_id, "Budget continuation block timed out after 300s");
+                        }
                     }
                     gate.cancel(&block_id).await;
                 }
             }
+
+            tracing::info!(
+                block_outcome,
+                user_wants_continue,
+                "Budget continuation flow completed"
+            );
 
             if user_wants_continue {
                 let extension = 20u32;
@@ -2745,8 +3039,32 @@ impl AgentLoop {
                 total_usage.total_tokens, token_budget,
             )
         } else {
-            final_content
-                .unwrap_or_else(|| "(max iterations reached without final response)".to_string())
+            final_content.unwrap_or_else(|| {
+                // Actionable fallback: include what happened and suggest
+                // next steps instead of the bare "max iterations reached"
+                // stub. Detects signal-9 kills from the shell diagnostic
+                // appended by `src/tools/shell.rs`.
+                let sigkill_hints = count_sigkill_diagnostics(&messages);
+                let tool_count = tools_used.len();
+                let mut msg = format!(
+                    "⚠️ I've used my {iteration} iteration budget ({tool_count} tool calls) without reaching a final answer."
+                );
+                if sigkill_hints >= 2 {
+                    msg.push_str(&format!(
+                        "\n\n{sigkill_hints} of the shell commands were killed by SIGKILL — this usually means the sandbox backend is silently denying the operation. Check ~/.homun/logs/sandbox-events.jsonl and the sandbox config in ~/.homun/config.toml."
+                    ));
+                }
+                if active_iteration_budget < hard_max_iterations {
+                    msg.push_str(
+                        "\n\nNext steps: reply with 'continue' to extend the budget, rephrase the task, or run /estop if the loop feels stuck.",
+                    );
+                } else {
+                    msg.push_str(
+                        "\n\nHard iteration cap reached — the task needs a different approach.",
+                    );
+                }
+                msg
+            })
         };
 
         // Auto-resolve vault:// references the LLM left unresolved.
@@ -3295,6 +3613,25 @@ impl AgentLoop {
 ///
 /// Matches common error patterns from Anthropic, OpenAI, and OpenRouter APIs
 /// that indicate the request exceeded the model's context window.
+/// Count tool-result messages carrying a shell SIGKILL diagnostic.
+///
+/// The shell tool appends a `[diagnostic] Process killed by signal 9 (SIGKILL)...`
+/// line whenever a child process is terminated by a signal (usually a
+/// silent sandbox denial). We scan the conversation to tell the user how
+/// many of their tool calls were silently killed, so the continuation
+/// block and the fallback fallback message can surface the pattern.
+fn count_sigkill_diagnostics(messages: &[ChatMessage]) -> usize {
+    messages
+        .iter()
+        .filter(|m| m.role == "tool")
+        .filter(|m| {
+            m.content
+                .as_deref()
+                .is_some_and(|c| c.contains("[diagnostic]") && c.contains("signal 9"))
+        })
+        .count()
+}
+
 fn is_context_overflow_error(e: &anyhow::Error) -> bool {
     let s = e.to_string().to_lowercase();
     s.contains("context_length_exceeded")
@@ -3322,6 +3659,32 @@ mod tests {
     };
     use crate::agent::tool_veto::veto_tool_call;
     use crate::config::ModelCapabilities;
+    use crate::provider::ChatMessage;
+
+    fn tool_msg(content: &str) -> ChatMessage {
+        let mut m = ChatMessage::user(content);
+        m.role = "tool".to_string();
+        m
+    }
+
+    #[test]
+    fn sigkill_diagnostic_counter_counts_only_tool_role_hits() {
+        let msgs = vec![
+            ChatMessage::user("elimina i csv"),
+            tool_msg("[exit code: -1]\n[diagnostic] Process killed by signal 9 (SIGKILL). Sandbox backend 'macos_seatbelt'..."),
+            tool_msg("ok output, no diagnostic"),
+            tool_msg("[exit code: -1]\n[diagnostic] Process killed by signal 9 (SIGKILL). Sandbox is not active..."),
+            tool_msg("[diagnostic] Process killed by signal 15 (SIGTERM). Sandbox..."), // not signal 9
+            // Same diagnostic string on a non-tool message must NOT be counted.
+            ChatMessage::user("[diagnostic] signal 9 SIGKILL fake from user"),
+        ];
+        assert_eq!(super::count_sigkill_diagnostics(&msgs), 2);
+    }
+
+    #[test]
+    fn sigkill_diagnostic_counter_empty_messages() {
+        assert_eq!(super::count_sigkill_diagnostics(&[]), 0);
+    }
     #[cfg(feature = "browser")]
     use crate::tools::browser::{compact_browser_snapshot, extract_autocomplete_suggestions};
     use std::collections::HashSet;
