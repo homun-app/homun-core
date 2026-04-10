@@ -920,7 +920,11 @@ function applyExecutionPlan(plan) {
 
         const label = document.createElement('span');
         label.className = 'chat-plan-task-label';
-        label.textContent = step.description || '';
+        // Strip a leading numeric prefix ("1.", "2)", "3 -") so the CSS list
+        // counter doesn't collide with numbering baked into the description
+        // by the cognition engine — see e.g. "1. 1. Use web_search…" regression.
+        const rawDescription = step.description || '';
+        label.textContent = rawDescription.replace(/^\s*\d+\s*[.\)\-]\s*/, '');
 
         li.appendChild(circle);
         li.appendChild(label);
@@ -1048,8 +1052,18 @@ function ensureRunUserMessage(run) {
     return addMessage('user', run.user_message, null, { runId: run.run_id });
 }
 
-function hydrateActiveRun(run) {
+// Rehydrate an active or replayable run into the live UI.
+//
+// opts.replayText — when true, the assistant response is re-streamed into
+// the message list. This is correct ONLY for live runs (running/stopping)
+// because for terminal runs the final message is already loaded from
+// `/chat/history` and re-streaming would duplicate it. For `failed` runs
+// we still replay events (plan + tool traces) to give debugging context,
+// but we skip the text replay.
+function hydrateActiveRun(run, opts = {}) {
     if (!run || !run.run_id) return;
+
+    const replayText = opts.replayText !== false; // default true for backwards compat
 
     activeRunId = run.run_id;
     ensureRunUserMessage(run);
@@ -1096,7 +1110,7 @@ function hydrateActiveRun(run) {
         setExecutionModel(run.effective_model);
     }
 
-    if (run.assistant_response) {
+    if (replayText && run.assistant_response) {
         if (toolIndicatorEl) {
             morphIndicatorToStreaming();
         }
@@ -1134,13 +1148,33 @@ function hydrateActiveRun(run) {
         scrollThreadToBottom();
     }
 
-    // Hide stale plan panel if run is no longer active
-    if (run.status !== 'running' && run.status !== 'stopping') {
+    // Hide the plan panel when the run is terminal AND we're not doing a
+    // failure-replay: for live runs it's actively used, and for 'failed'
+    // runs we intentionally preserve the plan display so the user sees
+    // where execution stopped (this is the whole point of including
+    // 'failed' in the restorable filter — see db.rs:load_restorable_web_chat_run).
+    const isLiveOrFailed =
+        run.status === 'running' || run.status === 'stopping' || run.status === 'failed';
+    if (!isLiveOrFailed) {
         clearExecutionPlan();
     }
 
     syncEmptyState();
 }
+
+// Live run statuses — full rehydrate (events + streaming text) so the
+// user can see in-progress work and stop it if needed.
+const LIVE_RUN_STATUSES = new Set(['running', 'stopping']);
+
+// Terminal statuses where the assistant response is already in chat history.
+// Rehydrating these would double-render the text — skip entirely.
+const TERMINAL_IN_HISTORY_STATUSES = new Set(['completed', 'interrupted']);
+
+// Failed runs are terminal but worth replaying for their events (plan +
+// tool traces) because those are only in `web_chat_runs`, not in history.
+// Replay events but SKIP the text-stream replay — the error message is
+// already in history.
+const REPLAYABLE_RUN_STATUSES = new Set(['failed']);
 
 async function restoreActiveRun() {
     if (!currentConversationId) return;
@@ -1152,7 +1186,20 @@ async function restoreActiveRun() {
             activeRunId = null;
             return;
         }
-        hydrateActiveRun(run);
+        if (TERMINAL_IN_HISTORY_STATUSES.has(run.status)) {
+            // Defensive: backend should already suppress these from /chat/run,
+            // but if one slips through we refuse to replay it.
+            activeRunId = null;
+            return;
+        }
+        const isLive = LIVE_RUN_STATUSES.has(run.status);
+        const isReplayable = REPLAYABLE_RUN_STATUSES.has(run.status);
+        if (!isLive && !isReplayable) {
+            // Unknown/future status we don't know how to handle — bail safely.
+            activeRunId = null;
+            return;
+        }
+        hydrateActiveRun(run, { replayText: isLive });
     } catch (e) {
         console.error('Failed to restore active run:', e);
     }

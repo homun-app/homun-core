@@ -471,6 +471,7 @@ impl WebServer {
                 while let Some(msg) = stream_rx.recv().await {
                     if !msg.chat_id.is_empty() {
                         let session_key = format!("web:{}", msg.chat_id);
+                        let stream_done = msg.done;
                         if let Some(run) = state_for_stream
                             .web_runs
                             .append_stream_message(&session_key, &msg)
@@ -478,6 +479,22 @@ impl WebServer {
                             if let Some(db) = state_for_stream.db.as_ref() {
                                 if let Err(error) = db.upsert_web_chat_run(&run).await {
                                     tracing::error!(run_id = %run.run_id, %error, "Failed to persist streaming web chat run");
+                                }
+                            }
+                        }
+
+                        // Stream signals end-of-turn (`done: true`) — finalize the run
+                        // so a tab focus won't re-hydrate it from DB. Idempotent: if the
+                        // outbound path already called `complete_run`, this is a no-op.
+                        if stream_done {
+                            if let Some(run) = state_for_stream
+                                .web_runs
+                                .finalize_streaming_run(&session_key)
+                            {
+                                if let Some(db) = state_for_stream.db.as_ref() {
+                                    if let Err(error) = db.upsert_web_chat_run(&run).await {
+                                        tracing::error!(run_id = %run.run_id, %error, "Failed to persist finalized web chat run");
+                                    }
                                 }
                             }
                         }

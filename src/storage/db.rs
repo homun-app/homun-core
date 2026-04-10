@@ -816,7 +816,21 @@ impl Database {
         Ok(())
     }
 
-    /// Load the latest non-completed web chat run that should be restorable in the UI.
+    /// Load the latest web chat run eligible for UI rehydration.
+    ///
+    /// Eligibility rules:
+    /// - `running` / `stopping`: the run is still live — full hydrate
+    ///   (events + streaming text) so the user can see progress and stop it.
+    /// - `failed`: terminal but still useful to rehydrate — the error message
+    ///   is already in chat history, but the events (plan, tool traces) are
+    ///   only in this table and give the user debugging context.
+    /// - `completed` / `interrupted`: pure history. Do NOT return these —
+    ///   rehydrating them double-renders the assistant response and
+    ///   resurrects stale intermediate UI. Read from `/chat/history` instead.
+    ///
+    /// The frontend must still distinguish live from failed-replayable and
+    /// skip the text-stream replay for failed runs (see `TERMINAL_RUN_STATUSES`
+    /// and `REPLAYABLE_RUN_STATUSES` in `static/js/chat.js`).
     pub async fn load_restorable_web_chat_run(
         &self,
         session_key: &str,
@@ -827,7 +841,7 @@ impl Database {
                 effective_model, events_json, error, created_at, updated_at
              FROM web_chat_runs
              WHERE session_key = ?
-               AND status IN ('running', 'stopping', 'interrupted', 'failed')
+               AND status IN ('running', 'stopping', 'failed')
              ORDER BY updated_at DESC
              LIMIT 1",
         )
@@ -3415,21 +3429,19 @@ END;
         assert_eq!(restored.assistant_response, "parziale");
         assert_eq!(restored.events.len(), 1);
 
+        // `interrupted` is no longer restorable (Option B: the final message
+        // is already in chat history, replaying events for an interrupted run
+        // would be confusing with no matching debugging need).
         let interrupted = db
             .mark_incomplete_web_chat_runs_interrupted()
             .await
             .unwrap();
         assert_eq!(interrupted, 1);
 
-        let restored = db
-            .load_restorable_web_chat_run("web:test")
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(restored.status, "interrupted");
-        assert_eq!(
-            restored.error.as_deref(),
-            Some("Run interrupted after process restart")
+        let restored = db.load_restorable_web_chat_run("web:test").await.unwrap();
+        assert!(
+            restored.is_none(),
+            "interrupted runs must not be returned by load_restorable_web_chat_run"
         );
 
         let deleted = db.delete_web_chat_runs("web:test").await.unwrap();
@@ -3439,6 +3451,102 @@ END;
             .await
             .unwrap()
             .is_none());
+    }
+
+    /// Regression test for the tab-reload double-render bug.
+    ///
+    /// Verifies the filter contract of `load_restorable_web_chat_run` (Option B):
+    /// - `running` / `stopping` → restorable (live UI needs them)
+    /// - `failed` → restorable (events are useful for debugging)
+    /// - `completed` / `interrupted` → NOT restorable (history already has the text)
+    #[tokio::test]
+    async fn test_load_restorable_filter_by_status() {
+        let (db, _dir) = test_db().await;
+
+        fn make_run(
+            run_id: &str,
+            session_key: &str,
+            status: &str,
+        ) -> crate::web::run_state::WebChatRunSnapshot {
+            crate::web::run_state::WebChatRunSnapshot {
+                run_id: run_id.to_string(),
+                session_key: session_key.to_string(),
+                status: status.to_string(),
+                user_message: "hi".to_string(),
+                effective_model: None,
+                assistant_response: String::new(),
+                created_at: "2026-03-06T10:00:00Z".to_string(),
+                updated_at: "2026-03-06T10:00:01Z".to_string(),
+                events: Vec::new(),
+                error: None,
+                pending_blocks: Vec::new(),
+            }
+        }
+
+        // running → returned
+        db.upsert_session("web:running", 0).await.unwrap();
+        db.upsert_web_chat_run(&make_run("r_running", "web:running", "running"))
+            .await
+            .unwrap();
+        assert!(
+            db.load_restorable_web_chat_run("web:running")
+                .await
+                .unwrap()
+                .is_some(),
+            "running runs must be restorable"
+        );
+
+        // stopping → returned
+        db.upsert_session("web:stopping", 0).await.unwrap();
+        db.upsert_web_chat_run(&make_run("r_stopping", "web:stopping", "stopping"))
+            .await
+            .unwrap();
+        assert!(
+            db.load_restorable_web_chat_run("web:stopping")
+                .await
+                .unwrap()
+                .is_some(),
+            "stopping runs must be restorable"
+        );
+
+        // failed → returned (Option B: rehydrate for debugging context)
+        db.upsert_session("web:failed", 0).await.unwrap();
+        db.upsert_web_chat_run(&make_run("r_failed", "web:failed", "failed"))
+            .await
+            .unwrap();
+        assert!(
+            db.load_restorable_web_chat_run("web:failed")
+                .await
+                .unwrap()
+                .is_some(),
+            "failed runs must be restorable (Option B)"
+        );
+
+        // completed → NOT returned (history has the final message)
+        db.upsert_session("web:completed", 0).await.unwrap();
+        db.upsert_web_chat_run(&make_run("r_completed", "web:completed", "completed"))
+            .await
+            .unwrap();
+        assert!(
+            db.load_restorable_web_chat_run("web:completed")
+                .await
+                .unwrap()
+                .is_none(),
+            "completed runs must NOT be restorable — this is the tab-reload bug guard"
+        );
+
+        // interrupted → NOT returned (same rationale as completed)
+        db.upsert_session("web:interrupted", 0).await.unwrap();
+        db.upsert_web_chat_run(&make_run("r_interrupted", "web:interrupted", "interrupted"))
+            .await
+            .unwrap();
+        assert!(
+            db.load_restorable_web_chat_run("web:interrupted")
+                .await
+                .unwrap()
+                .is_none(),
+            "interrupted runs must NOT be restorable"
+        );
     }
 
     #[tokio::test]
