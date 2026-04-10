@@ -308,29 +308,34 @@ mod inner {
             }));
         }
 
-        let mut config = state.config.write().await;
-        if config.browser.profiles.contains_key(&req.key) {
-            return Ok(Json(ProfileActionResponse {
-                success: false,
-                message: format!("Profile '{}' already exists", req.key),
-                fixed_count: None,
-            }));
+        {
+            let mut config = state.config.write().await;
+            if config.browser.profiles.contains_key(&req.key) {
+                return Ok(Json(ProfileActionResponse {
+                    success: false,
+                    message: format!("Profile '{}' already exists", req.key),
+                    fixed_count: None,
+                }));
+            }
+
+            config.browser.profiles.insert(
+                req.key.clone(),
+                BrowserProfile {
+                    name: req.name,
+                    description: req.description,
+                    browser_type: req.browser_type,
+                    headless: req.headless,
+                    proxy: req.proxy,
+                    user_agent: req.user_agent,
+                    ..Default::default()
+                },
+            );
         }
 
-        config.browser.profiles.insert(
-            req.key.clone(),
-            BrowserProfile {
-                name: req.name,
-                description: req.description,
-                browser_type: req.browser_type,
-                headless: req.headless,
-                proxy: req.proxy,
-                user_agent: req.user_agent,
-                ..Default::default()
-            },
-        );
-
-        if let Err(e) = config.save() {
+        if let Err(e) = state
+            .save_config_section(crate::config::SECTION_BROWSER)
+            .await
+        {
             tracing::error!("Failed to save config after profile create: {e}");
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
@@ -348,38 +353,43 @@ mod inner {
         AxumPath(profile_key): AxumPath<String>,
         Json(req): Json<UpdateProfileRequest>,
     ) -> Result<Json<ProfileActionResponse>, StatusCode> {
-        let mut config = state.config.write().await;
-        let profile = match config.browser.profiles.get_mut(&profile_key) {
-            Some(p) => p,
-            None => {
-                return Ok(Json(ProfileActionResponse {
-                    success: false,
-                    message: format!("Profile '{}' not found", profile_key),
-                    fixed_count: None,
-                }));
+        {
+            let mut config = state.config.write().await;
+            let profile = match config.browser.profiles.get_mut(&profile_key) {
+                Some(p) => p,
+                None => {
+                    return Ok(Json(ProfileActionResponse {
+                        success: false,
+                        message: format!("Profile '{}' not found", profile_key),
+                        fixed_count: None,
+                    }));
+                }
+            };
+
+            if let Some(name) = req.name {
+                profile.name = name;
             }
-        };
-
-        if let Some(name) = req.name {
-            profile.name = name;
-        }
-        if let Some(desc) = req.description {
-            profile.description = Some(desc);
-        }
-        if let Some(bt) = req.browser_type {
-            profile.browser_type = if bt.is_empty() { None } else { Some(bt) };
-        }
-        if let Some(h) = req.headless {
-            profile.headless = Some(h);
-        }
-        if let Some(proxy) = req.proxy {
-            profile.proxy = if proxy.is_empty() { None } else { Some(proxy) };
-        }
-        if let Some(ua) = req.user_agent {
-            profile.user_agent = if ua.is_empty() { None } else { Some(ua) };
+            if let Some(desc) = req.description {
+                profile.description = Some(desc);
+            }
+            if let Some(bt) = req.browser_type {
+                profile.browser_type = if bt.is_empty() { None } else { Some(bt) };
+            }
+            if let Some(h) = req.headless {
+                profile.headless = Some(h);
+            }
+            if let Some(proxy) = req.proxy {
+                profile.proxy = if proxy.is_empty() { None } else { Some(proxy) };
+            }
+            if let Some(ua) = req.user_agent {
+                profile.user_agent = if ua.is_empty() { None } else { Some(ua) };
+            }
         }
 
-        if let Err(e) = config.save() {
+        if let Err(e) = state
+            .save_config_section(crate::config::SECTION_BROWSER)
+            .await
+        {
             tracing::error!("Failed to save config after profile update: {e}");
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
@@ -396,18 +406,23 @@ mod inner {
         State(state): State<Arc<AppState>>,
         AxumPath(profile_key): AxumPath<String>,
     ) -> Result<Json<ProfileActionResponse>, StatusCode> {
-        let mut config = state.config.write().await;
-        if !config.browser.profiles.contains_key(&profile_key) {
-            return Ok(Json(ProfileActionResponse {
-                success: false,
-                message: format!("Profile '{}' not found", profile_key),
-                fixed_count: None,
-            }));
+        {
+            let mut config = state.config.write().await;
+            if !config.browser.profiles.contains_key(&profile_key) {
+                return Ok(Json(ProfileActionResponse {
+                    success: false,
+                    message: format!("Profile '{}' not found", profile_key),
+                    fixed_count: None,
+                }));
+            }
+
+            config.browser.default_profile = profile_key.clone();
         }
 
-        config.browser.default_profile = profile_key.clone();
-
-        if let Err(e) = config.save() {
+        if let Err(e) = state
+            .save_config_section(crate::config::SECTION_BROWSER)
+            .await
+        {
             tracing::error!("Failed to save config after set-default: {e}");
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
@@ -424,32 +439,37 @@ mod inner {
         State(state): State<Arc<AppState>>,
         AxumPath(profile_key): AxumPath<String>,
     ) -> Result<Json<ProfileActionResponse>, StatusCode> {
-        let mut config = state.config.write().await;
+        {
+            let mut config = state.config.write().await;
 
-        if profile_key == config.browser.default_profile {
-            return Ok(Json(ProfileActionResponse {
-                success: false,
-                message: "Cannot delete the default profile. Set another as default first."
-                    .to_string(),
-                fixed_count: None,
-            }));
+            if profile_key == config.browser.default_profile {
+                return Ok(Json(ProfileActionResponse {
+                    success: false,
+                    message: "Cannot delete the default profile. Set another as default first."
+                        .to_string(),
+                    fixed_count: None,
+                }));
+            }
+
+            if config.browser.profiles.remove(&profile_key).is_none() {
+                return Ok(Json(ProfileActionResponse {
+                    success: false,
+                    message: format!("Profile '{}' not found", profile_key),
+                    fixed_count: None,
+                }));
+            }
+
+            // Also remove the user data directory if it exists
+            let profile_path = config.browser.profile_user_data_path(&profile_key);
+            if profile_path.exists() {
+                let _ = tokio::fs::remove_dir_all(&profile_path).await;
+            }
         }
 
-        if config.browser.profiles.remove(&profile_key).is_none() {
-            return Ok(Json(ProfileActionResponse {
-                success: false,
-                message: format!("Profile '{}' not found", profile_key),
-                fixed_count: None,
-            }));
-        }
-
-        // Also remove the user data directory if it exists
-        let profile_path = config.browser.profile_user_data_path(&profile_key);
-        if profile_path.exists() {
-            let _ = tokio::fs::remove_dir_all(&profile_path).await;
-        }
-
-        if let Err(e) = config.save() {
+        if let Err(e) = state
+            .save_config_section(crate::config::SECTION_BROWSER)
+            .await
+        {
             tracing::error!("Failed to save config after profile delete: {e}");
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }

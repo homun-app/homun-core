@@ -994,20 +994,30 @@ async fn main() -> Result<()> {
                 );
                 tracing::info!("Browser MCP server injected into config from [browser] section");
             }
-            // Shared config: web UI writes → agent reads on next request (hot-reload)
-            let shared_config = Arc::new(tokio::sync::RwLock::new(config));
-            // Snapshot for one-time startup operations (provider, tools, channels, etc.)
-            let config = shared_config.read().await.clone();
             tracing::info!(
                 elapsed_ms = startup_t0.elapsed().as_millis(),
                 "⏱ config loaded"
             );
 
+            // Open DB BEFORE wrapping config in Arc so we can apply
+            // the DB settings overlay (DB overrides TOML for security/
+            // permissions sections). The storage path comes from the
+            // TOML config which is always available at this point.
             let db = Database::open(&config.storage.resolved_path()).await?;
             tracing::info!(
                 elapsed_ms = startup_t0.elapsed().as_millis(),
                 "⏱ database opened"
             );
+
+            // DB settings overlay: if a section exists in the `settings`
+            // table, its JSON replaces the TOML value. Missing/corrupt
+            // rows fall back gracefully to TOML defaults.
+            crate::config::overlay_db_settings(&mut config, &db).await;
+
+            // Shared config: web UI writes → agent reads on next request (hot-reload)
+            let shared_config = Arc::new(tokio::sync::RwLock::new(config));
+            // Snapshot for one-time startup operations (provider, tools, channels, etc.)
+            let config = shared_config.read().await.clone();
 
             // Initialize profile system: load profiles, create brain dirs, migrate legacy files
             let data_dir = Config::data_dir();
@@ -1610,7 +1620,13 @@ async fn main() -> Result<()> {
                     let mut config = Config::load()?;
                     match dotpath::config_set(&mut config, &key, &value) {
                         Ok(()) => {
-                            config.save()?;
+                            // Write to DB (primary) + TOML (backup)
+                            if let Some(section) = config::section_for_dotpath(&key) {
+                                config::cli_save_section(&config, section).await;
+                            } else {
+                                // Unknown section — TOML only
+                                config.save()?;
+                            }
                             println!("Set {key} = {value}");
                         }
                         Err(e) => {
@@ -1678,7 +1694,7 @@ async fn main() -> Result<()> {
                         if let Some(base) = api_base {
                             pc.api_base = Some(base);
                         }
-                        config.save()?;
+                        config::cli_save_section(&config, config::SECTION_PROVIDERS).await;
                         println!("Provider '{name}' configured.");
                     } else {
                         eprintln!(
@@ -1693,7 +1709,7 @@ async fn main() -> Result<()> {
                         pc.api_key.clear();
                         pc.api_base = None;
                         pc.extra_headers.clear();
-                        config.save()?;
+                        config::cli_save_section(&config, config::SECTION_PROVIDERS).await;
                         println!("Provider '{name}' removed.");
                     } else {
                         eprintln!("Unknown provider '{name}'.");
@@ -2039,7 +2055,7 @@ async fn main() -> Result<()> {
                         discovered_tool_count: None,
                     };
                     config.mcp.servers.insert(name.clone(), server);
-                    config.save()?;
+                    config::cli_save_section(&config, config::SECTION_MCP).await;
                     println!("MCP server '{name}' added.");
                 }
                 McpCommands::Setup {
@@ -2066,7 +2082,7 @@ async fn main() -> Result<()> {
                         overwrite,
                     )?;
 
-                    config.save()?;
+                    config::cli_save_section(&config, config::SECTION_MCP).await;
                     println!(
                         "MCP preset '{}' configured as server '{}'.",
                         preset.id, server_name
@@ -2130,7 +2146,7 @@ async fn main() -> Result<()> {
                 }
                 McpCommands::Remove { name } => {
                     if config.mcp.servers.remove(&name).is_some() {
-                        config.save()?;
+                        config::cli_save_section(&config, config::SECTION_MCP).await;
                         println!("MCP server '{name}' removed.");
                         match Database::open(&config.storage.resolved_path()).await {
                             Ok(db) => {
@@ -2171,7 +2187,7 @@ async fn main() -> Result<()> {
                         } else {
                             "disabled"
                         };
-                        config.save()?;
+                        config::cli_save_section(&config, config::SECTION_MCP).await;
                         println!("MCP server '{name}' {state}.");
                     } else {
                         eprintln!("MCP server '{name}' not found.");

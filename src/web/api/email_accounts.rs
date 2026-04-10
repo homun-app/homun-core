@@ -169,86 +169,89 @@ async fn configure_email_account(
     Json(req): Json<EmailAccountRequest>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     check_write(&auth)?;
-    let mut config = state.config.read().await.clone();
 
-    let acc = config
-        .channels
-        .emails
-        .entry(req.name.clone())
-        .or_insert_with(crate::config::EmailAccountConfig::default);
+    {
+        let mut config = state.config.write().await;
+        let acc = config
+            .channels
+            .emails
+            .entry(req.name.clone())
+            .or_insert_with(crate::config::EmailAccountConfig::default);
 
-    // IMAP
-    if let Some(v) = &req.imap_host {
-        acc.imap_host = v.clone();
-    }
-    if let Some(v) = req.imap_port {
-        acc.imap_port = v;
-    }
-    if let Some(v) = &req.imap_folder {
-        acc.imap_folder = v.clone();
-    }
-    // SMTP
-    if let Some(v) = &req.smtp_host {
-        acc.smtp_host = v.clone();
-    }
-    if let Some(v) = req.smtp_port {
-        acc.smtp_port = v;
-    }
-    if let Some(v) = req.smtp_tls {
-        acc.smtp_tls = v;
-    }
-    // Credentials
-    if let Some(v) = &req.username {
-        acc.username = v.clone();
-    }
-    if let Some(password) = &req.password {
-        if !password.is_empty() {
-            let secrets =
-                crate::storage::global_secrets().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            let key = crate::storage::SecretKey::custom(&format!("email.{}.password", req.name));
-            secrets
-                .set(&key, password)
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            acc.password = "***ENCRYPTED***".to_string();
+        // IMAP
+        if let Some(v) = &req.imap_host {
+            acc.imap_host = v.clone();
         }
-    }
-    if let Some(v) = &req.from_address {
-        acc.from_address = v.clone();
-    }
-    // Behaviour
-    if let Some(v) = req.idle_timeout_secs {
-        acc.idle_timeout_secs = v;
-    }
-    if let Some(v) = &req.allow_from {
-        acc.allow_from = v.clone();
-    }
-    if let Some(v) = &req.mode {
-        acc.mode = v.clone();
-    }
-    if let Some(v) = &req.notify_channel {
-        acc.notify_channel = Some(v.clone());
-    }
-    if let Some(v) = &req.notify_chat_id {
-        acc.notify_chat_id = Some(v.clone());
-    }
-    if let Some(v) = &req.trigger_word {
-        acc.trigger_word = Some(v.clone());
-    }
-    // Batching
-    if let Some(v) = req.batch_threshold {
-        acc.batch_threshold = v;
-    }
-    if let Some(v) = req.batch_window_secs {
-        acc.batch_window_secs = v;
-    }
-    if let Some(v) = req.send_delay_secs {
-        acc.send_delay_secs = v;
-    }
+        if let Some(v) = req.imap_port {
+            acc.imap_port = v;
+        }
+        if let Some(v) = &req.imap_folder {
+            acc.imap_folder = v.clone();
+        }
+        // SMTP
+        if let Some(v) = &req.smtp_host {
+            acc.smtp_host = v.clone();
+        }
+        if let Some(v) = req.smtp_port {
+            acc.smtp_port = v;
+        }
+        if let Some(v) = req.smtp_tls {
+            acc.smtp_tls = v;
+        }
+        // Credentials
+        if let Some(v) = &req.username {
+            acc.username = v.clone();
+        }
+        if let Some(password) = &req.password {
+            if !password.is_empty() {
+                let secrets = crate::storage::global_secrets()
+                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                let key =
+                    crate::storage::SecretKey::custom(&format!("email.{}.password", req.name));
+                secrets
+                    .set(&key, password)
+                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                acc.password = "***ENCRYPTED***".to_string();
+            }
+        }
+        if let Some(v) = &req.from_address {
+            acc.from_address = v.clone();
+        }
+        // Behaviour
+        if let Some(v) = req.idle_timeout_secs {
+            acc.idle_timeout_secs = v;
+        }
+        if let Some(v) = &req.allow_from {
+            acc.allow_from = v.clone();
+        }
+        if let Some(v) = &req.mode {
+            acc.mode = v.clone();
+        }
+        if let Some(v) = &req.notify_channel {
+            acc.notify_channel = Some(v.clone());
+        }
+        if let Some(v) = &req.notify_chat_id {
+            acc.notify_chat_id = Some(v.clone());
+        }
+        if let Some(v) = &req.trigger_word {
+            acc.trigger_word = Some(v.clone());
+        }
+        // Batching
+        if let Some(v) = req.batch_threshold {
+            acc.batch_threshold = v;
+        }
+        if let Some(v) = req.batch_window_secs {
+            acc.batch_window_secs = v;
+        }
+        if let Some(v) = req.send_delay_secs {
+            acc.send_delay_secs = v;
+        }
 
-    acc.enabled = true;
+        acc.enabled = true;
+    }
 
     state
-        .save_config(config)
+        .save_config_section(crate::config::SECTION_EMAIL)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -270,18 +273,18 @@ async fn deactivate_email_account(
     Json(req): Json<EmailAccountNameRequest>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     check_write(&auth)?;
-    let mut config = state.config.read().await.clone();
-
-    let acc = config
-        .channels
-        .emails
-        .get_mut(&req.name)
-        .ok_or(StatusCode::NOT_FOUND)?;
-
-    acc.enabled = false;
+    {
+        let mut config = state.config.write().await;
+        let acc = config
+            .channels
+            .emails
+            .get_mut(&req.name)
+            .ok_or(StatusCode::NOT_FOUND)?;
+        acc.enabled = false;
+    }
 
     state
-        .save_config(config)
+        .save_config_section(crate::config::SECTION_EMAIL)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -298,10 +301,11 @@ async fn delete_email_account(
     axum::Extension(auth): axum::Extension<AuthUser>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     check_write(&auth)?;
-    let mut config = state.config.read().await.clone();
-
-    if config.channels.emails.remove(&name).is_none() {
-        return Err(StatusCode::NOT_FOUND);
+    {
+        let mut config = state.config.write().await;
+        if config.channels.emails.remove(&name).is_none() {
+            return Err(StatusCode::NOT_FOUND);
+        }
     }
 
     // Clean up vault password
@@ -313,7 +317,7 @@ async fn delete_email_account(
     }
 
     state
-        .save_config(config)
+        .save_config_section(crate::config::SECTION_EMAIL)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 

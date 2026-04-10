@@ -146,27 +146,29 @@ async fn create_agent(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let mut config = state.config.read().await.clone();
-    if config.agents.contains_key(&id) {
-        return Err(StatusCode::CONFLICT);
+    {
+        let mut config = state.config.write().await;
+        if config.agents.contains_key(&id) {
+            return Err(StatusCode::CONFLICT);
+        }
+
+        config.agents.insert(
+            id.clone(),
+            AgentDefinitionConfig {
+                model: req.model,
+                instructions: req.instructions,
+                tools: req.tools,
+                skills: req.skills,
+                max_concurrency: req.max_concurrency,
+                temperature: req.temperature,
+                max_tokens: req.max_tokens,
+                fallback_models: Vec::new(),
+            },
+        );
     }
 
-    config.agents.insert(
-        id.clone(),
-        AgentDefinitionConfig {
-            model: req.model,
-            instructions: req.instructions,
-            tools: req.tools,
-            skills: req.skills,
-            max_concurrency: req.max_concurrency,
-            temperature: req.temperature,
-            max_tokens: req.max_tokens,
-            fallback_models: Vec::new(),
-        },
-    );
-
     state
-        .save_config(config)
+        .save_config_section(crate::config::SECTION_AGENTS)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -184,37 +186,39 @@ async fn update_agent(
     State(state): State<Arc<AppState>>,
     Json(req): Json<UpdateAgentRequest>,
 ) -> Result<Json<OkResponse>, StatusCode> {
-    let mut config = state.config.read().await.clone();
+    {
+        let mut config = state.config.write().await;
 
-    let entry = config
-        .agents
-        .entry(id.clone())
-        .or_insert_with(AgentDefinitionConfig::default);
+        let entry = config
+            .agents
+            .entry(id.clone())
+            .or_insert_with(AgentDefinitionConfig::default);
 
-    if let Some(model) = req.model {
-        entry.model = model;
-    }
-    if let Some(instructions) = req.instructions {
-        entry.instructions = instructions;
-    }
-    if let Some(tools) = req.tools {
-        entry.tools = tools;
-    }
-    if let Some(skills) = req.skills {
-        entry.skills = skills;
-    }
-    if let Some(max_concurrency) = req.max_concurrency {
-        entry.max_concurrency = max_concurrency;
-    }
-    if req.temperature.is_some() {
-        entry.temperature = req.temperature;
-    }
-    if req.max_tokens.is_some() {
-        entry.max_tokens = req.max_tokens;
+        if let Some(model) = req.model {
+            entry.model = model;
+        }
+        if let Some(instructions) = req.instructions {
+            entry.instructions = instructions;
+        }
+        if let Some(tools) = req.tools {
+            entry.tools = tools;
+        }
+        if let Some(skills) = req.skills {
+            entry.skills = skills;
+        }
+        if let Some(max_concurrency) = req.max_concurrency {
+            entry.max_concurrency = max_concurrency;
+        }
+        if req.temperature.is_some() {
+            entry.temperature = req.temperature;
+        }
+        if req.max_tokens.is_some() {
+            entry.max_tokens = req.max_tokens;
+        }
     }
 
     state
-        .save_config(config)
+        .save_config_section(crate::config::SECTION_AGENTS)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -235,13 +239,15 @@ async fn delete_agent(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let mut config = state.config.read().await.clone();
-    if config.agents.remove(&id).is_none() {
-        return Err(StatusCode::NOT_FOUND);
+    {
+        let mut config = state.config.write().await;
+        if config.agents.remove(&id).is_none() {
+            return Err(StatusCode::NOT_FOUND);
+        }
     }
 
     state
-        .save_config(config)
+        .save_config_section(crate::config::SECTION_AGENTS)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -269,11 +275,13 @@ async fn update_routing(
     State(state): State<Arc<AppState>>,
     Json(req): Json<UpdateRoutingRequest>,
 ) -> Result<Json<OkResponse>, StatusCode> {
-    let mut config = state.config.read().await.clone();
-    config.routing.classifier_model = req.classifier_model;
+    {
+        let mut config = state.config.write().await;
+        config.routing.classifier_model = req.classifier_model;
+    }
 
     state
-        .save_config(config)
+        .save_config_section(crate::config::SECTION_ROUTING)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 

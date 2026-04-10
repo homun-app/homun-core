@@ -93,31 +93,35 @@ pub(super) async fn setup_mcp_server(
         return Err(StatusCode::BAD_REQUEST);
     };
 
-    let mut config = state.config.read().await.clone();
     let server_name = req.name.clone().unwrap_or_else(|| preset.id.clone());
     let overwrite = req.overwrite.unwrap_or(false);
     let skip_test = req.skip_test.unwrap_or(false);
 
-    let setup = match crate::mcp_setup::apply_mcp_preset_setup(
-        &mut config,
-        &preset,
-        &server_name,
-        &req.env,
-        overwrite,
-    ) {
-        Ok(result) => result,
-        Err(e) => {
-            let msg = e.to_string();
-            if msg.contains("already exists") {
-                return Err(StatusCode::CONFLICT);
+    let (setup, config_snapshot) = {
+        let mut config = state.config.write().await;
+        let setup = match crate::mcp_setup::apply_mcp_preset_setup(
+            &mut config,
+            &preset,
+            &server_name,
+            &req.env,
+            overwrite,
+        ) {
+            Ok(result) => result,
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("already exists") {
+                    return Err(StatusCode::CONFLICT);
+                }
+                tracing::warn!(error = %e, service = %req.service, "MCP setup failed");
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
             }
-            tracing::warn!(error = %e, service = %req.service, "MCP setup failed");
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
-        }
+        };
+        let snapshot = config.clone();
+        (setup, snapshot)
     };
 
     state
-        .save_config(config.clone())
+        .save_config_section(crate::config::SECTION_MCP)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -147,13 +151,13 @@ pub(super) async fn setup_mcp_server(
         }));
     }
 
-    let Some(server) = config.mcp.servers.get(&server_name) else {
+    let Some(server) = config_snapshot.mcp.servers.get(&server_name) else {
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     };
     let report = crate::mcp_setup::test_mcp_server_connection(
         &server_name,
         server,
-        Some(config.security.execution_sandbox.clone()),
+        Some(config_snapshot.security.execution_sandbox.clone()),
     )
     .await;
 
@@ -203,10 +207,14 @@ pub(super) async fn upsert_mcp_server(
     Json(req): Json<McpServerUpsertRequest>,
 ) -> Result<Json<OkResponse>, StatusCode> {
     require_write(&auth).map_err(|_| StatusCode::FORBIDDEN)?;
-    let mut config = state.config.read().await.clone();
-    let exists = config.mcp.servers.contains_key(&req.name);
-    if exists && !req.overwrite.unwrap_or(false) {
-        return Err(StatusCode::CONFLICT);
+
+    // Check existence under read lock first
+    {
+        let config = state.config.read().await;
+        let exists = config.mcp.servers.contains_key(&req.name);
+        if exists && !req.overwrite.unwrap_or(false) {
+            return Err(StatusCode::CONFLICT);
+        }
     }
 
     let transport = req.transport.unwrap_or_else(|| "stdio".to_string());
@@ -250,9 +258,12 @@ pub(super) async fn upsert_mcp_server(
         discovered_tool_count: None,
     };
 
-    config.mcp.servers.insert(req.name.clone(), server);
+    {
+        let mut config = state.config.write().await;
+        config.mcp.servers.insert(req.name.clone(), server);
+    }
     state
-        .save_config(config)
+        .save_config_section(crate::config::SECTION_MCP)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -274,16 +285,19 @@ pub(super) async fn toggle_mcp_server(
     State(state): State<Arc<AppState>>,
     Json(req): Json<McpToggleRequest>,
 ) -> Result<Json<OkResponse>, StatusCode> {
-    let mut config = state.config.read().await.clone();
-    let Some(server) = config.mcp.servers.get_mut(&name) else {
-        return Err(StatusCode::NOT_FOUND);
+    let new_enabled = {
+        let mut config = state.config.write().await;
+        let Some(server) = config.mcp.servers.get_mut(&name) else {
+            return Err(StatusCode::NOT_FOUND);
+        };
+
+        let new_enabled = req.enabled.unwrap_or(!server.enabled);
+        server.enabled = new_enabled;
+        new_enabled
     };
 
-    let new_enabled = req.enabled.unwrap_or(!server.enabled);
-    server.enabled = new_enabled;
-
     state
-        .save_config(config)
+        .save_config_section(crate::config::SECTION_MCP)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -342,11 +356,13 @@ pub(super) async fn test_mcp_server(
 
     // Cache discovered tool count in config for catalog display
     if report.connected && report.tool_count > 0 {
-        let mut config = state.config.read().await.clone();
-        if let Some(srv) = config.mcp.servers.get_mut(&name) {
-            srv.discovered_tool_count = Some(report.tool_count);
+        {
+            let mut config = state.config.write().await;
+            if let Some(srv) = config.mcp.servers.get_mut(&name) {
+                srv.discovered_tool_count = Some(report.tool_count);
+            }
         }
-        let _ = state.save_config(config).await;
+        let _ = state.save_config_section(crate::config::SECTION_MCP).await;
     }
 
     Ok(Json(McpTestResponse {
@@ -377,12 +393,14 @@ pub(super) async fn delete_mcp_server(
     axum::Extension(auth): axum::Extension<AuthUser>,
 ) -> Result<Json<OkResponse>, StatusCode> {
     require_write(&auth).map_err(|_| StatusCode::FORBIDDEN)?;
-    let mut config = state.config.read().await.clone();
-    if config.mcp.servers.remove(&name).is_none() {
-        return Err(StatusCode::NOT_FOUND);
+    {
+        let mut config = state.config.write().await;
+        if config.mcp.servers.remove(&name).is_none() {
+            return Err(StatusCode::NOT_FOUND);
+        }
     }
     state
-        .save_config(config)
+        .save_config_section(crate::config::SECTION_MCP)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 

@@ -40,15 +40,16 @@ async fn put_permissions(
     State(state): State<Arc<AppState>>,
     Json(perms): Json<crate::config::PermissionsConfig>,
 ) -> Result<Json<crate::config::PermissionsConfig>, StatusCode> {
-    let mut config = state.config.write().await;
-    config.permissions = perms;
-
-    // Save to file
-    if let Err(e) = config.save() {
+    {
+        let mut config = state.config.write().await;
+        config.permissions = perms;
+    }
+    if let Err(e) = state.save_config_section(crate::config::SECTION_PERMISSIONS).await {
         tracing::error!("Failed to save permissions config: {}", e);
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }
 
+    let config = state.config.read().await;
     Ok(Json(config.permissions.clone()))
 }
 
@@ -85,12 +86,14 @@ async fn add_acl_entry(
     };
 
     config.permissions.acl.push(entry);
+    drop(config);
 
-    if let Err(e) = config.save() {
+    if let Err(e) = state.save_config_section(crate::config::SECTION_PERMISSIONS).await {
         tracing::error!("Failed to save ACL entry: {}", e);
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }
 
+    let config = state.config.read().await;
     Ok(Json(config.permissions.acl.clone()))
 }
 
@@ -103,13 +106,17 @@ async fn delete_acl_entry(
 
     if idx < config.permissions.acl.len() {
         config.permissions.acl.remove(idx);
+        drop(config);
 
-        if let Err(e) = config.save() {
+        if let Err(e) = state.save_config_section(crate::config::SECTION_PERMISSIONS).await {
             tracing::error!("Failed to save after ACL delete: {}", e);
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
+    } else {
+        drop(config);
     }
 
+    let config = state.config.read().await;
     Ok(Json(config.permissions.acl.clone()))
 }
 

@@ -103,24 +103,25 @@ async fn connect(
         .filter(|n| !n.trim().is_empty())
         .unwrap_or_else(|| recipe.id.clone());
 
-    let mut config = state.config.read().await.clone();
-
-    let result = crate::connections::connect::connect_recipe(
-        &mut config,
-        &recipe,
-        &instance_name,
-        &req.fields,
-        req.skip_test,
-    )
-    .await
-    .map_err(|e| {
-        tracing::error!(recipe_id = %id, instance = %instance_name, error = %e, "Connection setup failed");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let result = {
+        let mut config = state.config.write().await;
+        crate::connections::connect::connect_recipe(
+            &mut config,
+            &recipe,
+            &instance_name,
+            &req.fields,
+            req.skip_test,
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!(recipe_id = %id, instance = %instance_name, error = %e, "Connection setup failed");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+    };
 
     // Persist config if setup succeeded (even if test failed — server is configured)
     state
-        .save_config(config.clone())
+        .save_config_section(crate::config::SECTION_MCP)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -128,6 +129,7 @@ async fn connect(
     // so they're available immediately without restarting the gateway.
     #[cfg(feature = "mcp")]
     if result.ok {
+        let config = state.config.read().await;
         if let (Some(registry), Some(server_cfg)) =
             (&state.tool_registry, config.mcp.servers.get(&instance_name))
         {
@@ -136,6 +138,7 @@ async fn connect(
             let sandbox = config.security.execution_sandbox.clone();
             let runtime_cfg = Arc::clone(&state.config);
             let registry = Arc::clone(registry);
+            drop(config);
             tokio::spawn(async move {
                 match crate::tools::McpManager::connect_single(
                     &name,
@@ -185,11 +188,13 @@ async fn test_connection(
 
     // Cache discovered tool count in config for catalog display
     if report.connected && report.tool_count > 0 {
-        let mut config = state.config.read().await.clone();
-        if let Some(srv) = config.mcp.servers.get_mut(&name) {
-            srv.discovered_tool_count = Some(report.tool_count);
+        {
+            let mut config = state.config.write().await;
+            if let Some(srv) = config.mcp.servers.get_mut(&name) {
+                srv.discovered_tool_count = Some(report.tool_count);
+            }
         }
-        let _ = state.save_config(config).await;
+        let _ = state.save_config_section(crate::config::SECTION_MCP).await;
     }
 
     Ok(Json(serde_json::json!({
@@ -276,12 +281,14 @@ async fn disconnect(
     Path(name): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let mut config = state.config.read().await.clone();
-    if config.mcp.servers.remove(&name).is_none() {
-        return Err(StatusCode::NOT_FOUND);
+    {
+        let mut config = state.config.write().await;
+        if config.mcp.servers.remove(&name).is_none() {
+            return Err(StatusCode::NOT_FOUND);
+        }
     }
     state
-        .save_config(config)
+        .save_config_section(crate::config::SECTION_MCP)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 

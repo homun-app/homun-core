@@ -86,6 +86,71 @@ impl AppState {
         *self.config.write().await = config;
         Ok(())
     }
+
+    /// Persist a specific config section to the DB (primary) and TOML (backup).
+    ///
+    /// Reads the current in-memory config, serializes the requested
+    /// section to JSON, writes it to the `settings` table, and also
+    /// calls `config.save()` so the TOML stays in sync as a human-
+    /// readable backup.
+    pub async fn save_config_section(&self, section: &str) -> anyhow::Result<()> {
+        let config = self.config.read().await;
+        let value = match section {
+            // Security
+            crate::config::SECTION_SANDBOX => {
+                serde_json::to_string(&config.security.execution_sandbox)?
+            }
+            crate::config::SECTION_EXFILTRATION => {
+                serde_json::to_string(&config.security.exfiltration)?
+            }
+            // Permissions
+            crate::config::SECTION_PERMISSIONS => {
+                serde_json::to_string(&config.permissions)?
+            }
+            // Agent
+            crate::config::SECTION_AGENT => serde_json::to_string(&config.agent)?,
+            // Channels
+            crate::config::SECTION_TELEGRAM => {
+                serde_json::to_string(&config.channels.telegram)?
+            }
+            crate::config::SECTION_WHATSAPP => {
+                serde_json::to_string(&config.channels.whatsapp)?
+            }
+            crate::config::SECTION_DISCORD => {
+                serde_json::to_string(&config.channels.discord)?
+            }
+            crate::config::SECTION_SLACK => serde_json::to_string(&config.channels.slack)?,
+            crate::config::SECTION_EMAIL => {
+                serde_json::to_string(&config.channels.emails)?
+            }
+            crate::config::SECTION_WEB => serde_json::to_string(&config.channels.web)?,
+            // Tools
+            crate::config::SECTION_EXEC => serde_json::to_string(&config.tools.exec)?,
+            // Browser
+            crate::config::SECTION_BROWSER => serde_json::to_string(&config.browser)?,
+            // MCP
+            crate::config::SECTION_MCP => serde_json::to_string(&config.mcp)?,
+            // Providers
+            crate::config::SECTION_PROVIDERS => serde_json::to_string(&config.providers)?,
+            // Storage
+            crate::config::SECTION_STORAGE => serde_json::to_string(&config.storage)?,
+            // UI
+            crate::config::SECTION_UI => serde_json::to_string(&config.ui)?,
+            // Agents (multi-agent definitions)
+            crate::config::SECTION_AGENTS => serde_json::to_string(&config.agents)?,
+            // Routing
+            crate::config::SECTION_ROUTING => serde_json::to_string(&config.routing)?,
+            other => anyhow::bail!("Unknown settings section: {other}"),
+        };
+        if let Some(ref db) = self.db {
+            db.set_settings_section(section, &value).await?;
+        }
+        // TOML backup — best-effort, don't fail the request if TOML write fails
+        if let Err(e) = config.save() {
+            tracing::warn!(section, error = %e, "TOML backup write failed (DB is primary)");
+        }
+        Ok(())
+    }
 }
 
 fn mobile_reachable_base_url(domain: &str, tunnel_url: Option<&String>) -> Option<String> {

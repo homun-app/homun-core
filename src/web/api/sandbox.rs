@@ -58,10 +58,11 @@ async fn put_execution_sandbox(
 ) -> Result<Json<crate::config::ExecutionSandboxConfig>, (StatusCode, String)> {
     check_admin(&auth).map_err(|s| (s, "Admin scope required".into()))?;
     let sandbox = normalize_execution_sandbox(sandbox)?;
-    let mut config = state.config.write().await;
-    config.security.execution_sandbox = sandbox;
-
-    if let Err(e) = config.save() {
+    {
+        let mut config = state.config.write().await;
+        config.security.execution_sandbox = sandbox;
+    }
+    if let Err(e) = state.save_config_section(crate::config::SECTION_SANDBOX).await {
         tracing::error!("Failed to save execution sandbox config: {}", e);
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -69,6 +70,7 @@ async fn put_execution_sandbox(
         ));
     }
 
+    let config = state.config.read().await;
     Ok(Json(config.security.execution_sandbox.clone()))
 }
 

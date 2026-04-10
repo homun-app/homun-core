@@ -93,10 +93,12 @@ async fn onboarding_status(State(state): State<Arc<AppState>>) -> Json<Onboardin
 async fn onboarding_complete(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let mut config = state.config.read().await.clone();
-    config.ui.onboarding_completed = true;
+    {
+        let mut config = state.config.write().await;
+        config.ui.onboarding_completed = true;
+    }
     state
-        .save_config(config)
+        .save_config_section(crate::config::SECTION_UI)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(serde_json::json!({"ok": true})))

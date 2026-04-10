@@ -460,6 +460,27 @@ impl Database {
         )
         .await?;
 
+        Self::apply_migration(
+            pool,
+            "050_profile_audit_columns",
+            include_str!("../../migrations/050_profile_audit_columns.sql"),
+        )
+        .await?;
+
+        Self::apply_migration(
+            pool,
+            "051_task_checkpoints",
+            include_str!("../../migrations/051_task_checkpoints.sql"),
+        )
+        .await?;
+
+        Self::apply_migration(
+            pool,
+            "052_settings",
+            include_str!("../../migrations/052_settings.sql"),
+        )
+        .await?;
+
         // One-shot backfill post-migration-050 (namespace isolation):
         // Chunks created by contacts before the namespace feature had `namespace = '_private'`
         // (the SQL column default). With the new structural filter in memory_search.rs,
@@ -2506,6 +2527,44 @@ impl Database {
         .await
         .context("Failed to cleanup stale task checkpoints")?;
         Ok(result.rows_affected())
+    }
+
+    // ─── Settings KV (DB overrides TOML) ──────────────────────────
+
+    /// Load a config section's JSON blob from the settings table.
+    ///
+    /// Returns `None` when no row exists for this section (TOML default
+    /// should be used). Returns `Some(json_string)` when a DB override
+    /// is present.
+    pub async fn get_settings_section(&self, section: &str) -> Result<Option<String>> {
+        let row: Option<(String,)> =
+            sqlx::query_as("SELECT value_json FROM settings WHERE section = ?")
+                .bind(section)
+                .fetch_optional(&self.pool)
+                .await
+                .with_context(|| format!("Failed to read settings section '{section}'"))?;
+        Ok(row.map(|(json,)| json))
+    }
+
+    /// Persist a config section as a JSON blob in the settings table.
+    ///
+    /// Uses `INSERT OR REPLACE` so the first write creates the row and
+    /// subsequent writes update it. The `updated_at` column is always
+    /// refreshed so operators can tell when a section was last changed.
+    pub async fn set_settings_section(&self, section: &str, value_json: &str) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO settings (section, value_json, updated_at)
+             VALUES (?, ?, datetime('now'))
+             ON CONFLICT(section) DO UPDATE SET
+               value_json = excluded.value_json,
+               updated_at = excluded.updated_at",
+        )
+        .bind(section)
+        .bind(value_json)
+        .execute(&self.pool)
+        .await
+        .with_context(|| format!("Failed to write settings section '{section}'"))?;
+        Ok(())
     }
 }
 

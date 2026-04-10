@@ -681,41 +681,46 @@ async fn save_tunnel_config(
         }
     }
 
-    let mut config = state.config.read().await.clone();
-    let existing = config.channels.web.tunnel.clone();
-    let auth_token = body
-        .auth_token
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
-        .or_else(|| existing.as_ref().map(|item| item.auth_token.clone()))
-        .unwrap_or_default();
+    {
+        let mut config = state.config.write().await;
+        let existing = config.channels.web.tunnel.clone();
+        let auth_token = body
+            .auth_token
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+            .or_else(|| existing.as_ref().map(|item| item.auth_token.clone()))
+            .unwrap_or_default();
 
-    config.channels.web.tunnel = Some(TunnelConfig {
-        enabled: body.enabled,
-        provider,
-        auth_token,
-        reserved_url: body
-            .reserved_url
-            .unwrap_or_default()
-            .trim()
-            .to_string(),
-        custom_command: body
-            .custom_command
-            .unwrap_or_default()
-            .trim()
-            .to_string(),
-        custom_args: body
-            .custom_args
-            .unwrap_or_default()
-            .into_iter()
-            .map(|item| item.trim().to_string())
-            .filter(|item| !item.is_empty())
-            .collect(),
-    });
+        config.channels.web.tunnel = Some(TunnelConfig {
+            enabled: body.enabled,
+            provider,
+            auth_token,
+            reserved_url: body
+                .reserved_url
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
+            custom_command: body
+                .custom_command
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
+            custom_args: body
+                .custom_args
+                .unwrap_or_default()
+                .into_iter()
+                .map(|item| item.trim().to_string())
+                .filter(|item| !item.is_empty())
+                .collect(),
+        });
+    }
 
-    state.save_config(config).await.map_err(internal_error)?;
+    state
+        .save_config_section(crate::config::SECTION_WEB)
+        .await
+        .map_err(internal_error)?;
 
     Ok(Json(serde_json::json!({
         "ok": true,

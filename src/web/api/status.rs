@@ -150,21 +150,36 @@ async fn patch_config(
     State(state): State<Arc<AppState>>,
     Json(patch): Json<ConfigPatch>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let mut config = state.config.read().await.clone();
+    {
+        let mut config = state.config.write().await;
 
-    // For string values, use coerce_value (backwards compatible: "8192" → number).
-    // For arrays, objects, bools, numbers — use directly.
-    match &patch.value {
-        serde_json::Value::String(s) => {
-            crate::config::dotpath::config_set(&mut config, &patch.key, s)
+        // For string values, use coerce_value (backwards compatible: "8192" → number).
+        // For arrays, objects, bools, numbers — use directly.
+        match &patch.value {
+            serde_json::Value::String(s) => {
+                crate::config::dotpath::config_set(&mut config, &patch.key, s)
+            }
+            other => {
+                crate::config::dotpath::config_set_value(&mut config, &patch.key, other.clone())
+            }
         }
-        other => crate::config::dotpath::config_set_value(&mut config, &patch.key, other.clone()),
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
     }
-    .map_err(|_| StatusCode::BAD_REQUEST)?;
 
-    state
-        .save_config(config)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // Infer the DB section from the dotpath key prefix and save it
+    if let Some(section) = crate::config::section_for_dotpath(&patch.key) {
+        state
+            .save_config_section(section)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    } else {
+        // Unknown section — fall back to TOML-only save
+        let config = state.config.read().await;
+        if let Err(e) = config.save() {
+            tracing::warn!(key = %patch.key, error = %e, "TOML save failed for unmapped dotpath key");
+        }
+    }
     Ok(Json(serde_json::json!({"ok": true, "key": patch.key})))
 }
+
+// section_for_dotpath is in crate::config::section_for_dotpath

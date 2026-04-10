@@ -431,10 +431,12 @@ async fn handle_whatsapp_pairing(socket: WebSocket, state: Arc<AppState>) {
 
                         // On successful pairing, update config
                         if msg.get("type").and_then(|v| v.as_str()) == Some("paired") {
-                            let mut config = state_for_save.config.read().await.clone();
-                            config.channels.whatsapp.phone_number = phone_for_save.clone();
-                            config.channels.whatsapp.enabled = true;
-                            let _ = state_for_save.save_config(config).await;
+                            {
+                                let mut config = state_for_save.config.write().await;
+                                config.channels.whatsapp.phone_number = phone_for_save.clone();
+                                config.channels.whatsapp.enabled = true;
+                            }
+                            let _ = state_for_save.save_config_section(crate::config::SECTION_WHATSAPP).await;
 
                             // Hot-start the WhatsApp channel in the running gateway
                             if let Some(tx) = &state_for_save.channel_cmd_tx {

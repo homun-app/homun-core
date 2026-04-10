@@ -241,14 +241,16 @@ async fn put_approval_config(
         config.permissions.approval.always_ask = always_ask;
     }
 
-    // Save config
-    if let Err(e) = config.save() {
+    drop(config);
+
+    if let Err(e) = state.save_config_section(crate::config::SECTION_PERMISSIONS).await {
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to save config: {}", e),
         ));
     }
 
+    let config = state.config.read().await;
     let manager = crate::tools::global_approval_manager();
 
     Ok(Json(ApprovalConfigResponse {

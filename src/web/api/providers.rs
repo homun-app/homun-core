@@ -184,43 +184,45 @@ async fn configure_provider(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ProviderConfigRequest>,
 ) -> Result<Json<ProviderConfigResponse>, StatusCode> {
-    let mut config = state.config.read().await.clone();
+    {
+        let mut config = state.config.write().await;
 
-    // Get the provider config
-    let provider = config
-        .providers
-        .get_mut(&req.name)
-        .ok_or(StatusCode::BAD_REQUEST)?;
+        // Get the provider config
+        let provider = config
+            .providers
+            .get_mut(&req.name)
+            .ok_or(StatusCode::BAD_REQUEST)?;
 
-    // Update API key in SECURE STORAGE (encrypted)
-    if let Some(key) = &req.api_key {
-        // Store API key in encrypted secrets storage
-        let secrets =
-            crate::storage::global_secrets().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let secret_key = crate::storage::SecretKey::provider_api_key(&req.name);
-        secrets
-            .set(&secret_key, key)
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        // Update API key in SECURE STORAGE (encrypted)
+        if let Some(key) = &req.api_key {
+            // Store API key in encrypted secrets storage
+            let secrets = crate::storage::global_secrets()
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            let secret_key = crate::storage::SecretKey::provider_api_key(&req.name);
+            secrets
+                .set(&secret_key, key)
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-        // Store a marker in config (not the actual key)
-        provider.api_key = if key.is_empty() {
-            String::new()
-        } else {
-            "***ENCRYPTED***".to_string()
-        };
-    }
+            // Store a marker in config (not the actual key)
+            provider.api_key = if key.is_empty() {
+                String::new()
+            } else {
+                "***ENCRYPTED***".to_string()
+            };
+        }
 
-    // Update base URL in regular config (not sensitive)
-    if let Some(base) = &req.api_base {
-        provider.api_base = if base.is_empty() {
-            None
-        } else {
-            Some(base.clone())
-        };
+        // Update base URL in regular config (not sensitive)
+        if let Some(base) = &req.api_base {
+            provider.api_base = if base.is_empty() {
+                None
+            } else {
+                Some(base.clone())
+            };
+        }
     }
 
     state
-        .save_config(config)
+        .save_config_section(crate::config::SECTION_PROVIDERS)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -247,82 +249,92 @@ async fn activate_provider(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ActivateProviderRequest>,
 ) -> Result<Json<ActivateProviderResponse>, StatusCode> {
-    let mut config = state.config.read().await.clone();
+    let model = {
+        let mut config = state.config.write().await;
 
-    // Check provider exists
-    let provider = config
-        .providers
-        .get(&req.name)
-        .ok_or(StatusCode::BAD_REQUEST)?;
+        // Check provider exists
+        let provider = config
+            .providers
+            .get(&req.name)
+            .ok_or(StatusCode::BAD_REQUEST)?;
 
-    // Ollama, vLLM, and custom don't require API key, only base URL (optional with defaults)
-    let needs_api_key = !matches!(req.name.as_str(), "ollama" | "vllm" | "custom");
+        // Ollama, vLLM, and custom don't require API key, only base URL (optional with defaults)
+        let needs_api_key = !matches!(req.name.as_str(), "ollama" | "vllm" | "custom");
 
-    // Check if API key exists in secure storage
-    let has_encrypted_key = if needs_api_key {
-        match crate::storage::global_secrets() {
-            Ok(secrets) => {
-                let key = crate::storage::SecretKey::provider_api_key(&req.name);
-                let result: std::result::Result<Option<String>, anyhow::Error> = secrets.get(&key);
-                matches!(result, Ok(Some(_)))
+        // Check if API key exists in secure storage
+        let has_encrypted_key = if needs_api_key {
+            match crate::storage::global_secrets() {
+                Ok(secrets) => {
+                    let key = crate::storage::SecretKey::provider_api_key(&req.name);
+                    let result: std::result::Result<Option<String>, anyhow::Error> =
+                        secrets.get(&key);
+                    matches!(result, Ok(Some(_)))
+                }
+                Err(_) => false,
             }
-            Err(_) => false,
+        } else {
+            true // Doesn't need key
+        };
+
+        if needs_api_key && !has_encrypted_key && provider.api_base.is_none() {
+            return Ok(Json(ActivateProviderResponse {
+                ok: false,
+                message: "Provider not configured. Set API key first.".to_string(),
+                model: config.agent.model.clone(),
+            }));
         }
-    } else {
-        true // Doesn't need key
+
+        // Build the model string — ensure it has the provider prefix
+        let model = match req.model {
+            Some(m) if !m.is_empty() => {
+                // Ensure the model has the provider prefix (e.g. "ollama/llama3:8b")
+                let prefix = format!("{}/", req.name);
+                if m.starts_with(&prefix) {
+                    m
+                } else {
+                    format!("{}{}", prefix, m)
+                }
+            }
+            _ => {
+                // Default models per provider
+                match req.name.as_str() {
+                    "anthropic" => "anthropic/claude-sonnet-4-20250514".to_string(),
+                    "openai" => "openai/gpt-4o".to_string(),
+                    "openrouter" => "openrouter/anthropic/claude-sonnet-4".to_string(),
+                    "ollama" => "ollama/llama3:8b".to_string(),
+                    "gemini" => "gemini/gemini-2.0-flash".to_string(),
+                    "deepseek" => "deepseek/deepseek-chat".to_string(),
+                    "groq" => "groq/llama-3.1-8b-instant".to_string(),
+                    _ => format!("{}/default", req.name),
+                }
+            }
+        };
+
+        // For local providers, ensure api_base is set with a sensible default
+        if matches!(req.name.as_str(), "ollama" | "vllm" | "custom") {
+            if let Some(pc) = config.providers.get_mut(&req.name) {
+                if pc.api_base.is_none() {
+                    let default_base = match req.name.as_str() {
+                        "ollama" => "http://localhost:11434/v1",
+                        "vllm" => "http://localhost:8000/v1",
+                        _ => "http://localhost:8080/v1",
+                    };
+                    pc.api_base = Some(default_base.to_string());
+                }
+            }
+        }
+
+        config.agent.model = model.clone();
+        model
     };
 
-    if needs_api_key && !has_encrypted_key && provider.api_base.is_none() {
-        return Ok(Json(ActivateProviderResponse {
-            ok: false,
-            message: "Provider not configured. Set API key first.".to_string(),
-            model: config.agent.model.clone(),
-        }));
-    }
-
-    // Build the model string — ensure it has the provider prefix
-    let model = match req.model {
-        Some(m) if !m.is_empty() => {
-            // Ensure the model has the provider prefix (e.g. "ollama/llama3:8b")
-            let prefix = format!("{}/", req.name);
-            if m.starts_with(&prefix) {
-                m
-            } else {
-                format!("{}{}", prefix, m)
-            }
-        }
-        _ => {
-            // Default models per provider
-            match req.name.as_str() {
-                "anthropic" => "anthropic/claude-sonnet-4-20250514".to_string(),
-                "openai" => "openai/gpt-4o".to_string(),
-                "openrouter" => "openrouter/anthropic/claude-sonnet-4".to_string(),
-                "ollama" => "ollama/llama3:8b".to_string(),
-                "gemini" => "gemini/gemini-2.0-flash".to_string(),
-                "deepseek" => "deepseek/deepseek-chat".to_string(),
-                "groq" => "groq/llama-3.1-8b-instant".to_string(),
-                _ => format!("{}/default", req.name),
-            }
-        }
-    };
-
-    // For local providers, ensure api_base is set with a sensible default
-    if matches!(req.name.as_str(), "ollama" | "vllm" | "custom") {
-        if let Some(pc) = config.providers.get_mut(&req.name) {
-            if pc.api_base.is_none() {
-                let default_base = match req.name.as_str() {
-                    "ollama" => "http://localhost:11434/v1",
-                    "vllm" => "http://localhost:8000/v1",
-                    _ => "http://localhost:8080/v1",
-                };
-                pc.api_base = Some(default_base.to_string());
-            }
-        }
-    }
-
-    config.agent.model = model.clone();
+    // Save both sections: providers (api_base) and agent (model)
     state
-        .save_config(config)
+        .save_config_section(crate::config::SECTION_PROVIDERS)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    state
+        .save_config_section(crate::config::SECTION_AGENT)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -354,24 +366,31 @@ async fn deactivate_provider(
         let _ = secrets.delete(&key);
     }
 
-    let mut config = state.config.read().await.clone();
+    {
+        let mut config = state.config.write().await;
 
-    // Clear the provider config completely
-    if let Some(pc) = config.providers.get_mut(&req.name) {
-        pc.api_key = String::new();
-        pc.api_base = None; // Clear base URL for ALL providers
+        // Clear the provider config completely
+        if let Some(pc) = config.providers.get_mut(&req.name) {
+            pc.api_key = String::new();
+            pc.api_base = None; // Clear base URL for ALL providers
+        }
+
+        // If this was the active provider, clear the model to force re-selection
+        let current_provider = config
+            .resolve_provider(&config.agent.model)
+            .map(|(n, _)| n.to_string());
+        if current_provider.as_deref() == Some(req.name.as_str()) {
+            config.agent.model = String::new();
+        }
     }
 
-    // If this was the active provider, clear the model to force re-selection
-    let current_provider = config
-        .resolve_provider(&config.agent.model)
-        .map(|(n, _)| n.to_string());
-    if current_provider.as_deref() == Some(req.name.as_str()) {
-        config.agent.model = String::new();
-    }
-
+    // Save both sections: providers and agent (model may have been cleared)
     state
-        .save_config(config)
+        .save_config_section(crate::config::SECTION_PROVIDERS)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    state
+        .save_config_section(crate::config::SECTION_AGENT)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
