@@ -177,6 +177,27 @@ impl WebRunStore {
         Some(run.clone())
     }
 
+    /// Mark the active run as completed from within the streaming path.
+    ///
+    /// Called when a `StreamMessage { done: true, .. }` arrives — the
+    /// assistant response has already been accumulated delta-by-delta via
+    /// `append_stream_message`, so we only need to flip the status and
+    /// deregister the session. This is the fix for runs that finish via
+    /// pure streaming without emitting a separate `OutboundMessage`:
+    /// without this, the run would stay in `running` state forever and
+    /// `/api/v1/chat/run` would keep re-hydrating it on tab focus.
+    ///
+    /// Idempotent: if the session is already deregistered (e.g. because
+    /// `complete_run` ran first from the outbound path), returns `None`.
+    pub fn finalize_streaming_run(&self, session_key: &str) -> Option<WebChatRunSnapshot> {
+        let mut inner = self.inner.lock().expect("web run store lock poisoned");
+        let run_id = inner.active_by_session.remove(session_key)?;
+        let run = inner.runs.get_mut(&run_id)?;
+        run.status = "completed".to_string();
+        run.updated_at = Utc::now().to_rfc3339();
+        Some(run.clone())
+    }
+
     pub fn request_stop(&self, session_key: &str) -> Option<WebChatRunSnapshot> {
         let mut inner = self.inner.lock().expect("web run store lock poisoned");
         let run_id = inner.active_by_session.get(session_key).cloned()?;
@@ -267,6 +288,63 @@ mod tests {
         let done = store.complete_run("web:default", "hello world").unwrap();
         assert_eq!(done.status, "completed");
         assert!(store.active_snapshot("web:default").is_none());
+    }
+
+    /// Regression test for the tab-reload double-render bug.
+    ///
+    /// When a run finishes via pure streaming (no separate OutboundMessage),
+    /// `finalize_streaming_run` is the only path that flips status to
+    /// "completed". This test verifies:
+    /// 1. The final state is `completed` with the accumulated text intact.
+    /// 2. The session is deregistered so `active_snapshot` returns None.
+    /// 3. The call is idempotent: a second finalize (or a complete_run
+    ///    arriving late from the outbound path) is a no-op, not a panic.
+    #[test]
+    fn finalize_streaming_run_marks_completed_and_is_idempotent() {
+        let store = WebRunStore::default();
+        store.start_run("web:stream", "ciao").unwrap();
+
+        // Simulate streaming chunks accumulating the response.
+        for delta in ["Hel", "lo ", "world"] {
+            store.append_stream_message(
+                "web:stream",
+                &StreamMessage {
+                    chat_id: "stream".to_string(),
+                    delta: delta.to_string(),
+                    done: false,
+                    event_type: None,
+                    tool_call_data: None,
+                },
+            );
+        }
+
+        // Final chunk with `done: true` but empty delta (OpenAI-style EOF).
+        store.append_stream_message(
+            "web:stream",
+            &StreamMessage {
+                chat_id: "stream".to_string(),
+                delta: String::new(),
+                done: true,
+                event_type: None,
+                tool_call_data: None,
+            },
+        );
+
+        // Stream-path finalization should mark completed without touching the
+        // already-accumulated response.
+        let finalized = store.finalize_streaming_run("web:stream").unwrap();
+        assert_eq!(finalized.status, "completed");
+        assert_eq!(finalized.assistant_response, "Hello world");
+        assert!(store.active_snapshot("web:stream").is_none());
+
+        // Second finalize is a no-op (returns None) — no panic, no state change.
+        assert!(store.finalize_streaming_run("web:stream").is_none());
+
+        // A late `complete_run` from the outbound path (race condition) is
+        // also a no-op because the session was already deregistered.
+        assert!(store
+            .complete_run("web:stream", "should not overwrite")
+            .is_none());
     }
 
     #[test]
