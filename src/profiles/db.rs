@@ -124,7 +124,7 @@ pub async fn delete_profile(pool: &Pool<Sqlite>, id: i64) -> Result<()> {
     // Load profile slug before deletion (for filesystem cleanup).
     let slug: Option<String> = sqlx::query_scalar("SELECT slug FROM profiles WHERE id = ?")
         .bind(id)
-        .fetch_optional(&*pool)
+        .fetch_optional(pool)
         .await
         .context("Failed to load profile slug")?;
 
@@ -142,7 +142,7 @@ pub async fn delete_profile(pool: &Pool<Sqlite>, id: i64) -> Result<()> {
     for (table, col) in &fk_tables_profile_id {
         let result = sqlx::query(&format!("DELETE FROM {table} WHERE {col} = ?"))
             .bind(id)
-            .execute(&*pool)
+            .execute(pool)
             .await;
         if let Err(e) = &result {
             if !e.to_string().contains("no such table") {
@@ -172,7 +172,7 @@ pub async fn delete_profile(pool: &Pool<Sqlite>, id: i64) -> Result<()> {
     for table in &scoped_tables {
         let result = sqlx::query(&format!("DELETE FROM {table} WHERE profile_id = ?"))
             .bind(id)
-            .execute(&*pool)
+            .execute(pool)
             .await;
         if let Err(e) = &result {
             if !e.to_string().contains("no such table") {
@@ -186,7 +186,7 @@ pub async fn delete_profile(pool: &Pool<Sqlite>, id: i64) -> Result<()> {
     // Phase 3: delete the profile row
     sqlx::query("DELETE FROM profiles WHERE id = ?")
         .bind(id)
-        .execute(&*pool)
+        .execute(pool)
         .await
         .context("Failed to delete profile")?;
 
