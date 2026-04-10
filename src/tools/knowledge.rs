@@ -190,7 +190,7 @@ impl Tool for KnowledgeTool {
                 // KIX-4: auto-assign contact namespace when ingesting via chat
                 let namespace = ctx
                     .contact_id
-                    .map(|cid| crate::contacts::perimeter::contact_namespace(cid));
+                    .map(crate::contacts::perimeter::contact_namespace);
 
                 let mut engine = self.engine.lock().await;
 

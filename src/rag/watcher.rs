@@ -7,7 +7,7 @@
 //! Supports hot-reload: the API sends `WatchUpdate::Reload` after CRUD operations,
 //! and the watcher reconfigures its notify watchers without restart.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -116,7 +116,7 @@ impl RagWatcher {
     }
 
     /// Find the watch context that owns a file path (longest-prefix match).
-    fn match_context<'a>(contexts: &'a [WatchContext], file: &PathBuf) -> Option<&'a WatchContext> {
+    fn match_context<'a>(contexts: &'a [WatchContext], file: &Path) -> Option<&'a WatchContext> {
         contexts.iter().find(|ctx| file.starts_with(&ctx.path))
     }
 
