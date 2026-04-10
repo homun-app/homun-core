@@ -1069,6 +1069,7 @@ async fn main() -> Result<()> {
                 create_tool_registry(&config, db.clone(), Some(shared_config.clone()));
             tool_registry.register(Box::new(MessageTool::new()));
             tool_registry.register(Box::new(tools::send_file::SendFileTool::new()));
+            tool_registry.register(Box::new(tools::view_file::ViewFileTool::new()));
 
             // SpawnTool uses a late-bound OnceCell because SubagentManager needs Arc<AgentLoop>
             let spawn_manager_cell = Arc::new(tokio::sync::OnceCell::new());
