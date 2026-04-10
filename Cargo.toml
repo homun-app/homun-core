@@ -188,7 +188,7 @@ mail-parser = { version = "0.11", optional = true }
 async-imap = { version = "0.11", optional = true, default-features = false, features = ["runtime-tokio"] }
 tokio-rustls = { version = "0.26", optional = true, features = ["ring"] }
 rustls-pki-types = { version = "1", features = ["std"], optional = true }
-rcgen = { version = "0.13", optional = true }
+rcgen = { version = "0.14", optional = true }
 webpki-roots = { version = "0.26", optional = true }
 
 # --- Skill installer (archive extraction) ---
