@@ -603,47 +603,16 @@ impl Tool for WriteFileTool {
 
                 // If the file is in the workspace, append a download URL and
                 // emit a ResultBlock so the UI shows a download/view card.
-                let workspace = crate::config::Config::data_dir().join("workspace");
-                let blocks = if let (Ok(file_canonical), Ok(ws_canonical)) =
-                    (path.canonicalize(), workspace.canonicalize())
-                {
-                    if let Ok(relative) = file_canonical.strip_prefix(&ws_canonical) {
-                        let url_path = relative.to_string_lossy().replace('\\', "/");
-                        let download_url = format!("/api/v1/workspace/files/{url_path}");
-                        msg.push_str(&format!("\nDownload: {download_url}"));
-
-                        let filename = path
-                            .file_name()
-                            .map(|n| n.to_string_lossy().to_string())
-                            .unwrap_or_else(|| url_path.clone());
-
-                        use crate::tools::response_blocks::{KeyValue, ResponseBlock, ResultBlock};
-                        vec![ResponseBlock::Result(ResultBlock {
-                            id: format!("file_{}", uuid::Uuid::new_v4()),
-                            title: filename,
-                            fields: vec![
-                                KeyValue {
-                                    label: "Size".to_string(),
-                                    value: format_file_size(size_bytes),
-                                },
-                                KeyValue {
-                                    label: "Download".to_string(),
-                                    value: download_url,
-                                },
-                            ],
-                            icon: None, // icon rendered client-side as SVG
-                        })]
-                    } else {
-                        vec![]
+                let block = build_workspace_file_block(&path, size_bytes);
+                if let Some(crate::tools::response_blocks::ResponseBlock::Result(ref r)) = block {
+                    if let Some(download) = r.fields.iter().find(|f| f.label == "Download") {
+                        msg.push_str(&format!("\nDownload: {}", download.value));
                     }
-                } else {
-                    vec![]
-                };
+                }
 
-                if blocks.is_empty() {
-                    Ok(ToolResult::success(msg))
-                } else {
-                    Ok(ToolResult::with_blocks(msg, blocks))
+                match block {
+                    Some(b) => Ok(ToolResult::with_blocks(msg, vec![b])),
+                    None => Ok(ToolResult::success(msg)),
                 }
             }
             Err(e) => Ok(ToolResult::error(format!("Failed to write file: {e}"))),
@@ -891,7 +860,7 @@ impl Tool for ListDirTool {
 }
 
 /// Format byte size into human-readable string.
-fn format_file_size(bytes: usize) -> String {
+pub(crate) fn format_file_size(bytes: usize) -> String {
     if bytes < 1024 {
         format!("{bytes} B")
     } else if bytes < 1024 * 1024 {
@@ -899,6 +868,54 @@ fn format_file_size(bytes: usize) -> String {
     } else {
         format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
     }
+}
+
+/// Build a `ResultBlock` for a workspace file, suitable for inline UI rendering.
+///
+/// The frontend (`static/js/response-blocks.js`) detects any `ResultBlock`
+/// with a `"Download"` field and renders View + Download buttons that open
+/// the file viewer modal — which handles PDF, images, CSV (as table), JSON,
+/// markdown, and plain text automatically.
+///
+/// Returns `None` if the file is not inside the workspace directory (download
+/// URL generation is only meaningful for workspace-relative paths, which are
+/// the ones exposed by `/api/v1/workspace/files/{*path}`).
+///
+/// Used by both `write_file` (emits block on create) and `view_file` (emits
+/// block for an existing file).
+pub(crate) fn build_workspace_file_block(
+    path: &Path,
+    size_bytes: usize,
+) -> Option<crate::tools::response_blocks::ResponseBlock> {
+    use crate::tools::response_blocks::{KeyValue, ResponseBlock, ResultBlock};
+
+    let workspace = crate::config::Config::data_dir().join("workspace");
+    let file_canonical = path.canonicalize().ok()?;
+    let ws_canonical = workspace.canonicalize().ok()?;
+    let relative = file_canonical.strip_prefix(&ws_canonical).ok()?;
+
+    let url_path = relative.to_string_lossy().replace('\\', "/");
+    let download_url = format!("/api/v1/workspace/files/{url_path}");
+    let filename = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| url_path.clone());
+
+    Some(ResponseBlock::Result(ResultBlock {
+        id: format!("file_{}", uuid::Uuid::new_v4()),
+        title: filename,
+        fields: vec![
+            KeyValue {
+                label: "Size".to_string(),
+                value: format_file_size(size_bytes),
+            },
+            KeyValue {
+                label: "Download".to_string(),
+                value: download_url,
+            },
+        ],
+        icon: None, // rendered client-side as SVG
+    }))
 }
 
 #[cfg(test)]

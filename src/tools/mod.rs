@@ -20,6 +20,7 @@ pub mod shell;
 pub mod skill_create;
 pub mod spawn;
 pub mod vault;
+pub mod view_file;
 pub mod web;
 pub mod workflow;
 
