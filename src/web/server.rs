@@ -742,38 +742,26 @@ async fn build_tls_config(
         return None;
     };
 
-    // Load cert chain
-    let cert_data = match std::fs::read(&cert_path) {
-        Ok(d) => d,
+    // Load cert chain — `tls_pem::load_cert_chain` opens the file and
+    // parses in one call, and surfaces malformed PEM blocks as errors
+    // instead of silently dropping them like the old API did.
+    let certs = match crate::web::tls_pem::load_cert_chain(&cert_path) {
+        Ok(c) if !c.is_empty() => c,
+        Ok(_) => {
+            tracing::error!(path = %cert_path.display(), "No valid certificates found in PEM file");
+            return None;
+        }
         Err(e) => {
-            tracing::error!(path = %cert_path.display(), error = %e, "Failed to read TLS cert");
+            tracing::error!(error = %e, "Failed to load TLS cert chain");
             return None;
         }
     };
-    let certs: Vec<_> = rustls_pemfile::certs(&mut cert_data.as_slice())
-        .filter_map(|r| r.ok())
-        .collect();
-    if certs.is_empty() {
-        tracing::error!("No valid certificates found in PEM file");
-        return None;
-    }
 
     // Load private key
-    let key_data = match std::fs::read(&key_path) {
-        Ok(d) => d,
+    let key = match crate::web::tls_pem::load_private_key(&key_path) {
+        Ok(k) => k,
         Err(e) => {
-            tracing::error!(path = %key_path.display(), error = %e, "Failed to read TLS key");
-            return None;
-        }
-    };
-    let key = match rustls_pemfile::private_key(&mut key_data.as_slice()) {
-        Ok(Some(k)) => k,
-        Ok(None) => {
-            tracing::error!("No private key found in PEM file");
-            return None;
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to parse TLS private key");
+            tracing::error!(error = %e, "Failed to load TLS private key");
             return None;
         }
     };
@@ -1129,24 +1117,20 @@ mod tests {
 
         generate_self_signed(&cert_path, &key_path, &["homun.example.com"]).unwrap();
 
-        // Verify files exist and contain valid PEM
-        let cert_data = std::fs::read_to_string(&cert_path).unwrap();
-        let key_data = std::fs::read_to_string(&key_path).unwrap();
+        // Verify files exist and contain valid PEM (text-level sanity check)
+        let cert_text = std::fs::read_to_string(&cert_path).unwrap();
+        let key_text = std::fs::read_to_string(&key_path).unwrap();
 
-        assert!(cert_data.contains("BEGIN CERTIFICATE"));
-        assert!(cert_data.contains("END CERTIFICATE"));
-        assert!(key_data.contains("BEGIN PRIVATE KEY"));
-        assert!(key_data.contains("END PRIVATE KEY"));
+        assert!(cert_text.contains("BEGIN CERTIFICATE"));
+        assert!(cert_text.contains("END CERTIFICATE"));
+        assert!(key_text.contains("BEGIN PRIVATE KEY"));
+        assert!(key_text.contains("END PRIVATE KEY"));
 
-        // Verify rustls can parse them
-        let certs: Vec<_> = rustls_pemfile::certs(&mut cert_data.as_bytes())
-            .filter_map(|r| r.ok())
-            .collect();
+        // Verify rustls can parse them via the wrapper
+        let certs = crate::web::tls_pem::load_cert_chain(&cert_path).unwrap();
         assert_eq!(certs.len(), 1, "Should produce exactly one certificate");
 
-        let key = rustls_pemfile::private_key(&mut key_data.as_bytes())
-            .unwrap()
-            .expect("Should contain a private key");
+        let key = crate::web::tls_pem::load_private_key(&key_path).unwrap();
 
         // Verify we can build a valid ServerConfig
         let config = rustls::ServerConfig::builder()
@@ -1172,19 +1156,13 @@ mod tests {
         )
         .unwrap();
 
-        let cert_data = std::fs::read(&cert_path).unwrap();
-        let certs: Vec<_> = rustls_pemfile::certs(&mut cert_data.as_slice())
-            .filter_map(|r| r.ok())
-            .collect();
+        let certs = crate::web::tls_pem::load_cert_chain(&cert_path).unwrap();
         assert_eq!(certs.len(), 1);
 
         // Parse the DER certificate to verify SANs
         // The cert should be valid for localhost, homun.example.com, and my.custom.dev
         // We just verify it parses and builds a valid TLS config
-        let key_data = std::fs::read(&key_path).unwrap();
-        let key = rustls_pemfile::private_key(&mut key_data.as_slice())
-            .unwrap()
-            .unwrap();
+        let key = crate::web::tls_pem::load_private_key(&key_path).unwrap();
         let config = rustls::ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(certs, key);

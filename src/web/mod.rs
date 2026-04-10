@@ -4,6 +4,7 @@ pub mod chat_attachments;
 pub mod pages;
 pub mod run_state;
 pub mod server;
+pub mod tls_pem;
 pub mod tunnel;
 pub mod ws;
 
