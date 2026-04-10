@@ -2400,6 +2400,15 @@ pub struct ExecutionSandboxConfig {
     pub docker_read_only_rootfs: bool,
     /// Mount Homun workspace into the container at `/workspace`.
     pub docker_mount_workspace: bool,
+    /// Extra filesystem paths the sandbox is allowed to read and write.
+    ///
+    /// Populated at runtime when the user clicks "Allow Always" on a
+    /// sandbox-kill escalation block, or edited manually in the Settings
+    /// UI. Each entry must be an absolute path; glob patterns are NOT
+    /// expanded — paths are passed to the backend verbatim as subpath
+    /// allow rules (Seatbelt) or mount allowlists (Docker/Bubblewrap).
+    #[serde(default)]
+    pub allow_paths: Vec<String>,
 }
 
 impl ExecutionSandboxConfig {
@@ -2427,6 +2436,7 @@ impl Default for ExecutionSandboxConfig {
             docker_cpus: 1.0,
             docker_read_only_rootfs: true,
             docker_mount_workspace: true,
+            allow_paths: Vec::new(),
         }
     }
 }

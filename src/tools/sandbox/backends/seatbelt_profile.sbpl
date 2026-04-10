@@ -81,12 +81,16 @@
   (subpath "/private/var/db")
   (subpath "/var/db")
   (subpath "/var/select")
+  (subpath "/private/var/select")
   (subpath "/var/run")
   (subpath "/private/var/run"))
 
-;; --- Symlink/metadata resolution ---
+;; --- Root directory + symlink/metadata resolution ---
+;; macOS 26+ (Darwin 25.x): dyld/libSystem needs file-read-data on "/"
+;; at process startup, not just file-read-metadata. Without this, every
+;; sandboxed process is killed with SIGABRT before the first instruction.
+(allow file-read* (literal "/"))
 (allow file-read-metadata
-  (literal "/")
   (literal "/etc")
   (literal "/tmp")
   (literal "/var")

@@ -67,6 +67,11 @@ pub struct ApprovalManager {
     /// One-time command passes granted via response block "Allow Once".
     /// Consumed on first use — the next invocation requires approval again.
     approved_commands: Mutex<HashSet<String>>,
+    /// One-time sandbox bypasses granted after a sandbox denial escalation.
+    /// Keyed by a signature that identifies the command (usually the command
+    /// string). Consumed on first use — shell tool checks this before
+    /// wrapping the next invocation with the sandbox backend.
+    sandbox_bypasses: Mutex<HashSet<String>>,
 }
 
 impl ApprovalManager {
@@ -79,6 +84,7 @@ impl ApprovalManager {
             audit_log: Mutex::new(Vec::new()),
             pending_approvals: Mutex::new(HashMap::new()),
             approved_commands: Mutex::new(HashSet::new()),
+            sandbox_bypasses: Mutex::new(HashSet::new()),
         }
     }
 
@@ -272,6 +278,38 @@ impl ApprovalManager {
         self.approved_commands.lock().unwrap().remove(base_cmd)
     }
 
+    /// Grant a one-time sandbox bypass for the next shell invocation.
+    ///
+    /// Used when the user clicks "Allow Once" on a sandbox-kill escalation
+    /// block. The next shell command run will execute without the sandbox
+    /// wrapper, regardless of the exact command text — this matches user
+    /// intent better than keying by signature, because the LLM typically
+    /// adapts the command on retry (adds `&& ls` for verification, etc.).
+    ///
+    /// The grant is single-use: subsequent retries require a fresh
+    /// decision. The `signature` is stored for audit only.
+    pub fn grant_sandbox_bypass(&self, signature: &str) {
+        let mut grants = self.sandbox_bypasses.lock().unwrap();
+        grants.clear(); // only one pending grant at a time
+        grants.insert(signature.to_string());
+    }
+
+    /// Consume a pending sandbox bypass grant.
+    ///
+    /// Returns `true` if a grant was pending (and has been consumed),
+    /// `false` otherwise. The `signature` argument is logged in the
+    /// audit trail but does NOT need to match the granted signature —
+    /// any pending grant is consumed by any shell call.
+    pub fn consume_sandbox_bypass(&self, _signature: &str) -> bool {
+        let mut grants = self.sandbox_bypasses.lock().unwrap();
+        if grants.is_empty() {
+            false
+        } else {
+            grants.clear();
+            true
+        }
+    }
+
     /// Approve a pending request and add the base command to the session allowlist.
     ///
     /// Unlike `approve()`, this adds `base_cmd` (e.g. "npm") to the allowlist
@@ -345,6 +383,43 @@ mod tests {
             always_ask: vec!["rm".into()],
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn sandbox_bypass_grant_and_consume() {
+        let manager = ApprovalManager::new();
+        let key = "rm /tmp/foo.csv";
+        // Not granted yet.
+        assert!(!manager.consume_sandbox_bypass(key));
+        // Grant once, consume once, exhausted.
+        manager.grant_sandbox_bypass(key);
+        assert!(manager.consume_sandbox_bypass(key));
+        assert!(!manager.consume_sandbox_bypass(key));
+    }
+
+    #[test]
+    fn sandbox_bypass_any_signature_consumes_pending_grant() {
+        // The grant is global (one pending bypass at a time), so the
+        // signature passed to consume() is audit-only — any shell call
+        // consumes the pending grant. This matches user intent: when they
+        // click "Allow Once", they want the agent to proceed regardless
+        // of whether it retries the exact command.
+        let manager = ApprovalManager::new();
+        manager.grant_sandbox_bypass("rm /tmp/foo");
+        // A different command consumes the same pending grant.
+        assert!(manager.consume_sandbox_bypass("ls -la /tmp"));
+        assert!(!manager.consume_sandbox_bypass("rm /tmp/foo"));
+    }
+
+    #[test]
+    fn sandbox_bypass_only_one_pending_at_a_time() {
+        // Re-granting replaces the previous pending grant rather than
+        // accumulating. One click, one bypass.
+        let manager = ApprovalManager::new();
+        manager.grant_sandbox_bypass("cmd_a");
+        manager.grant_sandbox_bypass("cmd_b");
+        assert!(manager.consume_sandbox_bypass("whatever"));
+        assert!(!manager.consume_sandbox_bypass("whatever"));
     }
 
     #[test]
