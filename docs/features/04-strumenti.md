@@ -135,6 +135,9 @@ Ogni tool implementa il trait `Tool` e viene registrato nel `ToolRegistry`.
   - Environment del subprocess sanitizzato (API key rimosse).
   - Se `restrict_to_workspace: true`, il working_dir è limitato al workspace.
   - Esecuzione avviene dentro sandbox se configurata (vedi Feature: Sandbox).
+  - **Sandbox denial detection**: se il processo viene killato da un segnale (SIGABRT su macOS Seatbelt, SIGKILL su Linux), il tool emette un `[diagnostic]` nel output con signal number, backend risolto, e suggerimenti. L'LLM legge il diagnostic e adatta la strategia (es. suggerisce l'escalation all'utente invece di riprovare ciecamente).
+  - **Escalation Block**: quando il sandbox killa un comando, il tool emette un `ResponseBlock::Choice` con opzioni: "Allow Once" (bypass one-shot per la prossima invocazione), "Allow Always: folder" (persiste il path in `execution_sandbox.allow_paths`), "Allow Always: file" (idem), "Deny" (LLM adatta approccio).
+  - **Shell fallback**: quando sandbox attivo, usa `sh -c` al posto di `zsh -c` (zsh ha problemi di startup sotto Seatbelt su macOS 26+).
 
 ### Dettagli Tecnici
 
@@ -153,10 +156,13 @@ Ogni tool implementa il trait `Tool` e viene registrato nel `ToolRegistry`.
 - **Flusso dati**:
   1. Tool riceve `command` e `working_dir` dai parametri JSON
   2. Passa per i filtri di sicurezza (deny, regex, risky)
-  3. Chiama `sandbox::build_process_command(...)` per costruire il processo con eventuale sandbox
-  4. Esegue il processo con `tokio::process::Command`
-  5. Legge stdout/stderr con `AsyncReadExt`, applica truncation
-  6. Restituisce `ToolResult::success(output)` o `ToolResult::error(...)`
+  3. Controlla sandbox bypass grant (`ApprovalManager.consume_sandbox_bypass()`) — se presente, disabilita sandbox per questa invocazione
+  4. Se sandbox attivo e shell configurata != `sh`, fallback a `sh -c`
+  5. Chiama `sandbox::build_process_command(...)` per costruire il processo con eventuale sandbox
+  6. Esegue il processo con `tokio::process::Command`
+  7. Legge stdout/stderr con `AsyncReadExt`, applica truncation
+  8. Se processo terminato da segnale: `describe_termination()` aggiunge `[diagnostic]` + emette escalation block se sandbox attivo
+  9. Restituisce `ToolResult::success(output)` o `ToolResult::error(...)` con eventuali `blocks`
 - **Tabelle DB**: nessuna
 - **Endpoint API**: nessuno
 

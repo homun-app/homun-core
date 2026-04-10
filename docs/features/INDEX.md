@@ -28,6 +28,7 @@ Ogni documento copre: comportamento atteso (prospettiva utente) + dettagli tecni
 | 14 | [Osservabilità](14-osservabilita.md) | Observability | Structured logging (tracing), SSE log streaming, Request tracing, Provider health monitoring, Channel health, Circuit breaker |
 | 15 | [Condivisione e Connessioni](15-condivisione-connessioni.md) | Sharing + Connections | Share management, Connection establishment, Connection recipes, Namespace scoping |
 | 16 | [App Mobile](16-app-mobile.md) | Mobile App | Mobile Pairing (QR flow), Device management, Bootstrap, Tunnel config, Chat Profile API |
+| 17 | [Permission/Grant UX](17-permission-grant-ux.md) | Safety UX | Escalation Block, Sandbox denial detection, Grant persistence (session/config), Budget continuation UX, Troubleshooting |
 
 ---
 

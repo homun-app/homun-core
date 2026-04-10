@@ -1,6 +1,6 @@
 # Sandbox Runtime Baseline
 
-Updated: March 10, 2026
+Updated: April 6, 2026
 
 ## Canonical Core Baseline
 
@@ -15,6 +15,14 @@ This is the recommended Docker runtime baseline for sandboxed:
 - skill scripts
 - shell-adjacent helper commands executed through the shared sandbox
 - common MCP workloads that only require the core language/runtime toolchain
+
+## macOS 26 Compatibility (April 2026)
+
+The Seatbelt SBPL profiles (`seatbelt_profile.sbpl`, `seatbelt_profile_net_local.sbpl`) were updated for macOS 26 (Darwin 25.x):
+
+- Added `(allow file-read* (literal "/"))` — dyld/libSystem on macOS 26 requires `file-read-data` on the root directory at process startup, not just `file-read-metadata`. Without this, every sandboxed process is killed with SIGABRT before the first instruction.
+- Added `(allow file-read* (subpath "/private/var/select"))` — `/var/select` is a symlink to `/private/var/select` but Seatbelt resolves symlinks before matching rules. The old `(subpath "/var/select")` didn't match the real path.
+- Shell tool falls back to `sh -c` when sandbox is active — `zsh` has startup issues under Seatbelt on macOS 26+ (exits 1 before processing the command). POSIX `sh` works correctly.
 
 ## What The Core Baseline Includes
 

@@ -278,12 +278,16 @@ Il dominio sicurezza di Homun implementa un modello defense-in-depth con 12 sott
 - Sanitizzazione environment: solo variabili safe (`PATH`, `HOME`, `LANG`, etc.) + variabili extra esplicite.
 - Docker: supporta limitazione memoria (`docker_memory_mb`), rete (`docker_network: "none"`/`"bridge"`/`"host"`), mount workspace.
 - Bubblewrap (Linux): `--clearenv`, `--unshare-user`, `--unshare-net`, bind read-only del filesystem, `prlimit` per limiti memoria.
-- Seatbelt (macOS): profilo SBPL generato dinamicamente, workspace writable, rete bloccabile, process fork/exec consentiti.
+- Seatbelt (macOS): profilo SBPL generato dinamicamente, workspace writable, rete bloccabile, process fork/exec consentiti. Compatibile con macOS 26+ (Darwin 25.x).
+- **allow_paths**: path aggiuntivi concessi dall'utente tramite escalation block o configurazione manuale. Iniettati come regole `subpath` aggiuntive nel profilo Seatbelt a runtime (`append_allow_paths()`).
+- **Shell fallback**: quando sandbox attivo, il shell tool usa `sh` invece di `zsh` (zsh ha problemi di startup sotto Seatbelt su macOS 26+).
+- **Sandbox denial detection**: quando un processo viene killato da un segnale (SIGABRT su macOS, SIGKILL su Linux), il shell tool emette un `[diagnostic]` con signal number, backend attivo, e suggerimenti per l'utente.
+- **Escalation Block**: se il sandbox killa un comando, l'utente vede un ChoiceBlock con opzioni: Allow Once (bypass one-shot), Allow Always folder/file (persiste in `allow_paths`), Deny.
 - Runtime image management: parsing reference Docker, policy `pinned`/`floating`, drift detection.
 
 #### Dettagli Tecnici
 - **Moduli/file coinvolti**: `src/tools/sandbox/mod.rs` (orchestrazione), `src/tools/sandbox/resolve.rs` (risoluzione backend), `src/tools/sandbox/backends/` (implementazioni), `src/tools/sandbox/env.rs` (sanitizzazione env), `src/tools/sandbox/events.rs` (logging), `src/tools/sandbox/runtime_image.rs` (gestione immagini), `src/tools/sandbox/types.rs` (tipi)
-- **Struct config**: `ExecutionSandboxConfig` (in `src/config/schema.rs`) con campi `enabled`, `backend`, `strict`, `docker_image`, `docker_network`, `docker_memory_mb`, `docker_mount_workspace`
+- **Struct config**: `ExecutionSandboxConfig` (in `src/config/schema.rs`) con campi `enabled`, `backend`, `strict`, `docker_image`, `docker_network`, `docker_memory_mb`, `docker_mount_workspace`, `allow_paths`
 - **Enum backend**: `ResolvedSandboxBackend::None`, `Docker`, `LinuxNative`, `WindowsNative`, `MacosSeatbelt`
 - **Struct disponibilita**: `SandboxBackendAvailability` con metodi `detect()`, `is_available()`, `preferred_auto_backend()`, `capabilities()`
 - **Funzione principale**: `build_process_command()` — risolve backend, costruisce `Command`, logga evento
