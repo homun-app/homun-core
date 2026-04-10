@@ -1954,7 +1954,42 @@ async fn dispatch_to_agent(
             )
             .await;
 
-            bridge.abort();
+            // Drain the stream bridge instead of aborting it.
+            //
+            // When the orchestrator returns, all `chunk_tx` clones it held
+            // (directly or through inner futures) are dropped. At that point
+            // `chunk_rx.recv().await` returns None and the bridge's
+            // while-let loop exits naturally — draining any chunks still
+            // buffered in the mpsc channel (up to 128 items).
+            //
+            // The previous `bridge.abort()` pattern was racy: if the provider
+            // emitted a final chunk with `done: true` milliseconds before the
+            // orchestrator returned, that chunk could still be buffered when
+            // the abort hit, and the task would be cancelled before it could
+            // forward the chunk to `bus_stream_tx`. This silently dropped the
+            // end-of-stream sentinel that `server.rs::stream_rx` relies on to
+            // finalize the run (see PR #46) — regressing the tab-reload fix
+            // on a timing edge case.
+            //
+            // No timeout is used because there is no realistic way for this
+            // await to hang:
+            //   - A dead WebSocket peer causes `bus_stream_tx.send()` to
+            //     return `Err` (ignored via `let _ =`), not hang.
+            //   - `bus_stream_tx` backpressure resolves as the server drains.
+            //   - Rust's Drop semantics guarantee the orchestrator's sender
+            //     clones are dropped synchronously when it returns, so
+            //     `chunk_rx.recv()` sees a closed channel the moment we
+            //     reach this line.
+            //
+            // **Invariant**: no `tokio::spawn` in the orchestrator or
+            // agent_loop may capture `stream_tx` without joining that task
+            // before returning. Violating this would make `bridge.await`
+            // block until the leaked task completes. The current codebase
+            // is audited clean — any future spawn that captures stream_tx
+            // must be explicitly joined.
+            if let Err(e) = bridge.await {
+                tracing::warn!(error = ?e, "Stream bridge task panicked while draining");
+            }
             match result {
                 Ok(text) => (text, None),
                 Err(e) => {
