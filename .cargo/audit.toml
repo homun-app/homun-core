@@ -1,0 +1,62 @@
+# cargo-audit configuration
+#
+# This file documents which security advisories Homun has reviewed and
+# accepted as known/tracked. Each entry MUST include the rationale,
+# the upstream blocker (if any), and the date it was accepted so future
+# maintainers can revisit when conditions change.
+#
+# To re-evaluate this list, run `cargo audit` and check whether any of
+# the listed advisories now have a clean upgrade path through the
+# parent crate that was previously blocking the fix.
+
+[advisories]
+ignore = [
+    # ─────────────────────────────────────────────────────────────────
+    # RUSTSEC-2026-0049 — rustls-webpki 0.102.x CRL distribution point
+    # Severity: medium · Accepted: 2026-04-10
+    #
+    # Vulnerable copy enters the dep tree ONLY through:
+    #   serenity 0.12.5 → tokio-tungstenite 0.21 → rustls 0.22 →
+    #   rustls-webpki ^0.102.1
+    #
+    # The main TLS path (rustls 0.23 + rustls-webpki 0.103.10) is
+    # already on the patched version. The vulnerable copy is used only
+    # by the Discord WebSocket client to connect to gateway.discord.gg.
+    #
+    # Practical impact for Homun: very low. The advisory itself notes
+    # "limited impact" because exploitation requires a malicious CRL
+    # signed by a compromised trusted issuer. Discord's CA chain is
+    # well-known and exploitation would require a previously-revoked
+    # certificate for gateway.discord.gg — a non-realistic threat.
+    #
+    # Blocker: serenity 0.12.5 is the latest stable release and
+    # hard-pins tokio-tungstenite ^0.21. Awaiting upstream serenity
+    # release with newer rustls/tungstenite. Re-check on each
+    # `cargo audit` run.
+    "RUSTSEC-2026-0049",
+
+    # ─────────────────────────────────────────────────────────────────
+    # RUSTSEC-2023-0071 — rsa 0.9.x Marvin Attack timing side-channel
+    # Severity: medium · Accepted: 2026-04-10
+    #
+    # No fixed version exists. This is a fundamental implementation
+    # issue with the rsa crate's RSA private-key operations and the
+    # upstream maintainers have not published a patched release.
+    #
+    # rsa enters Homun's tree as a transitive dep (likely via
+    # SQLite/auth-related crates). Homun does NOT perform RSA private
+    # key operations on untrusted timing-observable channels — we use
+    # AES-GCM (vault), TLS via rustls (which uses ring/aws-lc-rs, not
+    # the `rsa` crate), and TOTP (HMAC-SHA1).
+    #
+    # Re-evaluate when:
+    #   - rsa crate publishes a patched release
+    #   - we add any feature that uses the rsa crate directly
+    "RUSTSEC-2023-0071",
+]
+
+# Pre-existing unmaintained warnings (not in dependabot, separately tracked):
+#   bincode 2.0.1 (via wa-rs) — RUSTSEC-2025-0141
+#   paste 1.0.15 (via frankenstein) — RUSTSEC-2024-0436
+#   rustls-pemfile 1.0.4 + 2.2.0 — RUSTSEC-2025-0134
+# These are tech debt to address in a future sweep, not security holes.
