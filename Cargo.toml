@@ -28,7 +28,7 @@ default = ["cli", "web-ui", "file-tools", "shell-tool", "web-tools", "cron-tool"
 # === Core Features ===
 cli = ["dep:clap", "dep:ratatui", "dep:crossterm"]
 web-ui = ["cli", "mcp", "browser", "dep:axum", "dep:tower", "dep:tower-http", "dep:rust-embed", "dep:mime_guess", "dep:pulldown-cmark",
-           "dep:tokio-rustls", "dep:rustls-pemfile", "dep:rcgen", "dep:hyper-util"]
+           "dep:tokio-rustls", "dep:rustls-pki-types", "dep:rcgen", "dep:hyper-util"]
 file-tools = []
 shell-tool = []
 web-tools = []
@@ -150,7 +150,7 @@ eventsource-stream = { version = "0.2", optional = true }
 pin-project-lite = { version = "0.2", optional = true }
 
 # --- Telegram channel ---
-frankenstein = { version = "0.47", default-features = false, features = ["client-reqwest"], optional = true }
+frankenstein = { version = "0.49", default-features = false, features = ["client-reqwest"], optional = true }
 
 # --- Discord channel ---
 serenity = { version = "0.12", default-features = false, features = ["client", "gateway", "model", "cache", "rustls_backend"], optional = true }
@@ -187,8 +187,7 @@ lettre = { version = "0.11", optional = true, default-features = false, features
 mail-parser = { version = "0.11", optional = true }
 async-imap = { version = "0.11", optional = true, default-features = false, features = ["runtime-tokio"] }
 tokio-rustls = { version = "0.26", optional = true, features = ["ring"] }
-rustls-pemfile = { version = "2", optional = true }
-rustls-pki-types = { version = "1", optional = true }
+rustls-pki-types = { version = "1", features = ["std"], optional = true }
 rcgen = { version = "0.13", optional = true }
 webpki-roots = { version = "0.26", optional = true }
 
