@@ -147,7 +147,7 @@
 - Un **profilo** definisce l'identità operativa dell'agente: nome, ruolo, linguaggio, personalità, capacità e visibilità cross-profilo.
 - Esiste sempre esattamente un **profilo default** (`is_default = 1`) che non può essere eliminato.
 - Profili aggiuntivi (es. "acme-corp", "personal") possono essere creati, modificati ed eliminati.
-- La cancellazione di un profilo non-default elimina in cascata tutti i dati associati (memoria, RAG, contatti, sessioni, automazioni, workflow, business, email pending).
+- La cancellazione di un profilo non-default elimina in cascata tutti i dati associati (memoria, RAG, contatti, sessioni, automazioni, workflow, email pending).
 - I profili sono caricati in un `ProfileRegistry` in memoria all'avvio e ricaricati a caldo senza restart.
 - **Input:** slug (identificatore URL-safe), display_name, avatar_emoji, color (hex), profile_json (JSON strutturato), user_id opzionale.
 - **Output:** oggetto `Profile`; lista ordinata default-first poi per slug.

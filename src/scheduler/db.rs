@@ -1,7 +1,7 @@
 //! Database operations for the automations subsystem.
 //!
 //! Extension `impl Database` for automation CRUD + run tracking.
-//! Follows the pattern in `business/db.rs` and `contacts/db.rs`.
+//! Follows the pattern in `contacts/db.rs`.
 
 use anyhow::{Context, Result};
 

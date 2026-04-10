@@ -40,10 +40,9 @@ ALTER TABLE rag_sources ADD COLUMN profile_id INTEGER REFERENCES profiles(id);
 CREATE INDEX IF NOT EXISTS idx_rag_sources_user ON rag_sources(user_id);
 CREATE INDEX IF NOT EXISTS idx_rag_sources_profile ON rag_sources(profile_id);
 
-ALTER TABLE businesses ADD COLUMN user_id TEXT REFERENCES users(id);
-ALTER TABLE businesses ADD COLUMN profile_id INTEGER REFERENCES profiles(id);
-CREATE INDEX IF NOT EXISTS idx_businesses_user ON businesses(user_id);
-CREATE INDEX IF NOT EXISTS idx_businesses_profile ON businesses(profile_id);
+-- Note: `businesses` table columns were added here historically; the feature
+-- has been removed and migration 053 drops the tables. Fresh installs never
+-- create the businesses table, so those ALTER statements were removed.
 
 ALTER TABLE email_pending ADD COLUMN user_id TEXT REFERENCES users(id);
 ALTER TABLE email_pending ADD COLUMN profile_id INTEGER REFERENCES profiles(id);

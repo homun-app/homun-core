@@ -4,7 +4,6 @@ mod approvals;
 mod automations;
 mod browser;
 mod browser_sites;
-mod business;
 mod channels;
 mod chat;
 mod connections;
@@ -82,7 +81,6 @@ pub fn router() -> Router<Arc<AppState>> {
         // --- Usage ---
         .merge(usage::routes())
         .merge(workflows::routes())
-        .merge(business::routes())
         .merge(contacts::routes())
         .merge(profiles::routes())
         .merge(gateways::routes())

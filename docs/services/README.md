@@ -45,8 +45,6 @@ Read in this order when you are onboarding or planning a change:
   Vault, exfiltration filtering, pairing, E-stop, optional vault 2FA.
 - `storage-and-sessions.md`
   SQLite persistence, migrations, encrypted secrets, session history model.
-- `business.md`
-  Business autopilot domain, OODA prompts, revenue/expense tracking, current limits.
 - `service-management.md`
   `homun service` support on Linux/macOS and runtime process management expectations.
 

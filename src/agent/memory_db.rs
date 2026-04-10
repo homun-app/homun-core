@@ -1,7 +1,7 @@
 //! Database operations for the memory subsystem.
 //!
 //! Extension `impl Database` for memory chunk and summary CRUD + FTS5 search.
-//! Follows the pattern in `business/db.rs` and `contacts/db.rs`.
+//! Follows the pattern in `contacts/db.rs`.
 
 use anyhow::{Context, Result};
 

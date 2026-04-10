@@ -57,8 +57,6 @@ pub struct AppState {
     pub channel_health: Option<Arc<crate::channels::ChannelHealthTracker>>,
     /// Workflow engine for multi-step orchestration.
     pub workflow_engine: Option<Arc<WorkflowEngine>>,
-    /// Business engine for autonomous business management.
-    pub business_engine: Option<Arc<crate::business::engine::BusinessEngine>>,
     /// Emergency stop handles — shared with the estop module.
     pub estop_handles: Arc<tokio::sync::RwLock<EStopHandles>>,
     /// Web authentication session store (SEC-1).
@@ -185,7 +183,6 @@ pub struct WebServer {
     health_tracker: Option<Arc<ProviderHealthTracker>>,
     channel_health: Option<Arc<crate::channels::ChannelHealthTracker>>,
     workflow_engine: Option<Arc<WorkflowEngine>>,
-    business_engine: Option<Arc<crate::business::engine::BusinessEngine>>,
     estop_handles: Arc<tokio::sync::RwLock<EStopHandles>>,
     tool_registry: Option<Arc<tokio::sync::RwLock<crate::tools::ToolRegistry>>>,
     channel_cmd_tx: Option<mpsc::Sender<crate::agent::gateway::ChannelCommand>>,
@@ -214,7 +211,6 @@ impl WebServer {
             health_tracker: None,
             channel_health: None,
             workflow_engine: None,
-            business_engine: None,
             estop_handles: Arc::new(tokio::sync::RwLock::new(EStopHandles::default())),
             tool_registry: None,
             channel_cmd_tx: None,
@@ -270,11 +266,6 @@ impl WebServer {
         self.workflow_engine = Some(engine);
     }
 
-    /// Set the business engine for autonomous business management API endpoints.
-    pub fn set_business_engine(&mut self, engine: Arc<crate::business::engine::BusinessEngine>) {
-        self.business_engine = Some(engine);
-    }
-
     /// Set the emergency stop handles (shared with the estop module).
     pub fn set_estop_handles(&mut self, handles: Arc<tokio::sync::RwLock<EStopHandles>>) {
         self.estop_handles = handles;
@@ -316,7 +307,6 @@ impl WebServer {
             health_tracker: None,
             channel_health: None,
             workflow_engine: None,
-            business_engine: None,
             estop_handles: Arc::new(tokio::sync::RwLock::new(EStopHandles::default())),
             tool_registry: None,
             channel_cmd_tx: None,
@@ -440,7 +430,6 @@ impl WebServer {
             health_tracker: self.health_tracker,
             channel_health: self.channel_health,
             workflow_engine: self.workflow_engine,
-            business_engine: self.business_engine,
             estop_handles: self.estop_handles,
             session_store: session_store.clone(),
             auth_rate_limiter: auth_rate_limiter.clone(),

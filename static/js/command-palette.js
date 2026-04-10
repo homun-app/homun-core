@@ -6,7 +6,6 @@
 
     // ── Actions registry ────────────────────────────────────────────
     var actions = [
-        { id: 'nav-dashboard',    label: 'Go to Dashboard',      keys: '', icon: '📊', fn: function() { go('/dashboard'); } },
         { id: 'nav-chat',         label: 'Go to Chat',           keys: '', icon: '💬', fn: function() { go('/chat'); } },
         { id: 'nav-automations',  label: 'Go to Automations',    keys: '', icon: '⚡', fn: function() { go('/automations'); } },
         { id: 'nav-workflows',    label: 'Go to Workflows',      keys: '', icon: '🔀', fn: function() { go('/workflows'); } },
@@ -19,7 +18,6 @@
         { id: 'nav-settings',     label: 'Open Settings',        keys: '', icon: '⚙️', fn: function() { openSettingsModal('setup'); } },
         { id: 'nav-account',      label: 'Open Account',         keys: '', icon: '👤', fn: function() { openSettingsModal('account'); } },
         { id: 'nav-browser',      label: 'Open Browser Settings', keys: '', icon: '🌐', fn: function() { openSettingsModal('browser'); } },
-        { id: 'nav-business',     label: 'Go to Business',       keys: '', icon: '💼', fn: function() { go('/business'); } },
         { id: 'toggle-theme',     label: 'Toggle Dark/Light Mode', keys: '', icon: '🌓',
             fn: function() {
                 var html = document.documentElement;

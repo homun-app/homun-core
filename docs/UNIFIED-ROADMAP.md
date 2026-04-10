@@ -187,7 +187,7 @@ Stato: SEC-6/7/8/11/12/13/14/15 tutti ✅ DONE. Scudo anti-injection completo.
 
 | # | Task | Effort | Note |
 |---|------|--------|------|
-| AAM-1 | **Scope enforcement globale** | ✅ DONE 2026-03-20 | `require_write()`/`require_admin()`/`check_write()`/`check_admin()` in auth.rs. Applicato a tutti i mutating handler (~40 endpoint): workflows, contacts, memory, knowledge, email_accounts, mcp/crud, mcp/oauth, mcp/install, skills, automations, chat, vault, sandbox, maintenance, devices, business, account. Bearer token scope (admin/write/read) enforced, session = sempre admin |
+| AAM-1 | **Scope enforcement globale** | ✅ DONE 2026-03-20 | `require_write()`/`require_admin()`/`check_write()`/`check_admin()` in auth.rs. Applicato a tutti i mutating handler (~40 endpoint): workflows, contacts, memory, knowledge, email_accounts, mcp/crud, mcp/oauth, mcp/install, skills, automations, chat, vault, sandbox, maintenance, devices, account. Bearer token scope (admin/write/read) enforced, session = sempre admin |
 | AAM-2 | **Token expiry** | ✅ DONE 2026-03-20 | Migration 031: `expires_at TEXT` su `webhook_tokens`. Dual check: Rust middleware (chrono parse) + SQL WHERE clause. API `expires_in` (7d/30d/90d/never) → RFC-3339 `expires_at` |
 | AAM-3 | **Token masking + token_id** | ✅ DONE 2026-03-20 | Lista token: `token_id` (primi 16 char) + `display_token` (mascherato `wh_****…abcd`). Token completo visibile solo alla creazione. Delete/toggle via `find_token_by_prefix()` |
 | AAM-4 | **Per-token rate limiting** | ✅ DONE 2026-03-20 | `RateLimiter<K>` generico (default IpAddr). `token_rate_limiter: RateLimiter<String>` in AppState, 60 req/min per token. Check nel Bearer auth flow |
@@ -359,7 +359,7 @@ Questi item erano nella roadmap precedente e sono stati **eliminati** dal piano 
 | Item | Motivo rimozione |
 |---|---|
 | **Nuovi canali** (Signal, IRC, Matrix, Teams, LINE, Feishu, Nostr, etc.) | ROI troppo basso per single-dev. Nessuna domanda reale. 7 canali coprono i casi d'uso principali |
-| **BIZ-2..5** (payments, accounting, marketing, crypto) | Troppo ambizioso, non core. BIZ-1 engine esiste per chi vuole sperimentare. Il resto via MCP/skill |
+| **Business Autopilot (BIZ-1..5)** | Feature rimossa da main il 2026-04-10 (commit cleanup). Verrà riscritta da zero con logica completamente diversa quando sarà il momento; migration 053 droppa le tabelle `businesses`, `business_strategies`, `products`, `transactions`, `orders`, `market_insights`. Nessun codice legacy mantenuto |
 | **Voice/telephony pipeline** | Richiede infrastruttura dedicata, non prioritario per v1 |
 | **Plugin system compilato** (dynamic Rust loading) | Eccessivamente complesso. MCP + Skills coprono l'estensibilità |
 | **Data marketplace** | Premature optimization |

@@ -31,7 +31,7 @@ The three practical runtime entry modes are:
 - `homun chat`
   Local interactive or one-shot agent execution.
 - `homun gateway`
-  Long-running multi-channel runtime with scheduler, web UI, workflows and business engine.
+  Long-running multi-channel runtime with scheduler, web UI, and workflows.
 - `homun config`
   TUI-oriented configuration flow.
 
@@ -53,7 +53,6 @@ Owned config areas:
 - `[security]`
 - `[browser]`
 - `[ui]`
-- `[business]`
 - `[skills]`
 
 Useful derived paths:

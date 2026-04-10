@@ -79,7 +79,6 @@ CREATE TABLE profiles (
 | `automations` | 006+036+037 | ✅ SÌ | ✅ SÌ | ✅ Migration 037 |
 | `workflows` | 013+036+037 | ✅ SÌ | ✅ SÌ | ✅ Migration 037 |
 | `memory_summaries` | 029+037 | ✅ SÌ | ✅ SÌ | ✅ Migration 037 |
-| `businesses` | 015+037 | ✅ SÌ | ✅ SÌ | ✅ Migration 037 |
 | `email_pending` | 005+037 | ✅ SÌ | ✅ SÌ | ✅ Migration 037 |
 
 #### CHILD — Ereditano via JOIN, nessuna colonna diretta
@@ -95,11 +94,6 @@ CREATE TABLE profiles (
 | `contact_relationships` | `contact_id → contacts(id)` | contacts.user_id + contacts.profile_id |
 | `contact_events` | `contact_id → contacts(id)` | contacts.user_id + contacts.profile_id |
 | `pending_responses` | `contact_id → contacts(id)` | contacts.user_id + contacts.profile_id |
-| `business_strategies` | `business_id → businesses(id)` | businesses.user_id + businesses.profile_id |
-| `products` | `business_id → businesses(id)` | businesses.user_id + businesses.profile_id |
-| `transactions` | `business_id → businesses(id)` | businesses.user_id + businesses.profile_id |
-| `orders` | `business_id → businesses(id)` | businesses.user_id + businesses.profile_id |
-| `market_insights` | `business_id → businesses(id)` | businesses.user_id + businesses.profile_id |
 | `memory_fts` | content-sync → memory_chunks | virtuale, auto-sincronizzata |
 | `rag_fts` | content-sync → rag_chunks | virtuale, auto-sincronizzata |
 
@@ -162,7 +156,6 @@ CREATE TABLE profiles (
 | P7: Agent loop user_id nel contesto | ✅ | `b9e5ee3` |
 | P8: Memory summaries user_id + profile_id | ✅ | `08675de` |
 | P9: RAG sources user_id + profile_id | ✅ | `90d1405` |
-| P10: Businesses user_id + profile_id | ✅ | `08675de` |
 | P11: Email pending user_id + profile_id | ✅ | `08675de` |
 | P12: Daily logs profile_id | ✅ | `63ef7c4` |
 | P12b: LogRecord profile_id via thread-local | ✅ | `a48fa01` |
@@ -252,7 +245,6 @@ Migration `037_user_profile_scoping.sql` implementata e funzionante. Vedi file i
 | P3 | RAG ingest: profile_id + user_id in source + chunk | ✅ DONE | `90d1405` |
 | P8 | Memory summaries: profile_id + user_id alla creazione | ✅ DONE | `08675de` |
 | P9 | RAG sources: taggato con profile_id + user_id | ✅ DONE (parte di P3) | `90d1405` |
-| P10 | Businesses: profile_id + user_id nella struct + INSERT | ✅ DONE | `08675de` |
 | P11 | Email pending: profile_id + user_id nella struct + INSERT | ✅ DONE | `08675de` |
 | P12 | Logs: profile_id + user_id in LogRecord (skip_none) | ✅ DONE (struct) | `08675de` |
 | P13 | Cron: usa tabella automations → coperto da P1 | ✅ N/A | — |

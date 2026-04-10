@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This subsystem owns the execution loop that turns inbound messages into model calls, tool executions, session updates, and outbound responses. It also owns the long-running gateway that routes messages between channels, schedulers, workflows, business events, and the web UI.
+This subsystem owns the execution loop that turns inbound messages into model calls, tool executions, session updates, and outbound responses. It also owns the long-running gateway that routes messages between channels, schedulers, workflows, and the web UI.
 
 ## Primary Code
 

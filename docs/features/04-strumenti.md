@@ -28,11 +28,10 @@ Ogni tool implementa il trait `Tool` e viene registrato nel `ToolRegistry`.
 | 14 | `remember` | `RememberTool` | Memoria | `embeddings` |
 | 15 | `knowledge` | `KnowledgeTool` | Conoscenza | `embeddings` |
 | 16 | `browser` | `BrowserTool` | Browser | `browser` |
-| 17 | `business` | `BusinessTool` | Business | — |
-| 18 | `create_skill` | `CreateSkillTool` | Skills | — |
-| 19 | `read_email_inbox` | `ReadEmailInboxTool` | Email | `channel-email` |
-| 20 | `mcp_*` | `McpManager` / peer tools | Protocollo MCP | `mcp` |
-| 21 | `mcp_token_refresh` | `McpTokenRefreshTool` | Protocollo MCP | `mcp` |
+| 17 | `create_skill` | `CreateSkillTool` | Skills | — |
+| 18 | `read_email_inbox` | `ReadEmailInboxTool` | Email | `channel-email` |
+| 19 | `mcp_*` | `McpManager` / peer tools | Protocollo MCP | `mcp` |
+| 20 | `mcp_token_refresh` | `McpTokenRefreshTool` | Protocollo MCP | `mcp` |
 
 > I tool con feature flag sono compilati solo quando la feature corrispondente è attiva in `Cargo.toml`.
 

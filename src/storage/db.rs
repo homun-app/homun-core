@@ -208,12 +208,6 @@ impl Database {
         .await?;
         Self::apply_migration(
             pool,
-            "015_business",
-            include_str!("../../migrations/015_business.sql"),
-        )
-        .await?;
-        Self::apply_migration(
-            pool,
             "016_skill_audit",
             include_str!("../../migrations/016_skill_audit.sql"),
         )
@@ -481,6 +475,13 @@ impl Database {
         )
         .await?;
 
+        Self::apply_migration(
+            pool,
+            "053_drop_business",
+            include_str!("../../migrations/053_drop_business.sql"),
+        )
+        .await?;
+
         // One-shot backfill post-migration-050 (namespace isolation):
         // Chunks created by contacts before the namespace feature had `namespace = '_private'`
         // (the SQL column default). With the new structural filter in memory_search.rs,
@@ -571,7 +572,7 @@ impl Database {
     /// Backfill NULL user_id to the default admin user on all parent-scoped tables.
     ///
     /// Also backfills profile_id on tables added in migration 037
-    /// (memory_summaries, rag_sources, businesses, email_pending).
+    /// (memory_summaries, rag_sources, email_pending).
     async fn backfill_user_ids(pool: &Pool<Sqlite>) -> Result<()> {
         use crate::user::DEFAULT_ADMIN_USER_ID;
 
@@ -604,12 +605,7 @@ impl Database {
         }
 
         // Tables that got both user_id + profile_id in migration 037
-        let both_tables = [
-            "memory_summaries",
-            "rag_sources",
-            "businesses",
-            "email_pending",
-        ];
+        let both_tables = ["memory_summaries", "rag_sources", "email_pending"];
 
         for table in &both_tables {
             // Backfill user_id

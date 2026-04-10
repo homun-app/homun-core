@@ -37,7 +37,6 @@ const DOMAIN_ICONS = {
     automations: '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" style="width:22px;height:22px"><circle cx="9" cy="9" r="6.5"/><path d="M9 5.5v4l2.8 1.8"/></svg>',
     workflows: '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" style="width:22px;height:22px"><circle cx="5" cy="4" r="2"/><circle cx="13" cy="4" r="2"/><circle cx="9" cy="14" r="2"/><path d="M5 6v2a3 3 0 0 0 3 3h1"/><path d="M13 6v2a3 3 0 0 1-3 3h-1"/></svg>',
     knowledge: '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" style="width:22px;height:22px"><path d="M2 3h5l2 2h7v10H2z"/><path d="M6 9h6"/></svg>',
-    business: '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" style="width:22px;height:22px"><rect x="2" y="6" width="14" height="10" rx="1.5"/><path d="M6 6V4a3 3 0 0 1 6 0v2"/></svg>',
     usage: '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" style="width:22px;height:22px"><path d="M2 16V6l4-4h8l2 2v12H2z"/><path d="M6 2v4H2"/></svg>',
     cron: '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" style="width:22px;height:22px"><circle cx="9" cy="9" r="7"/><path d="M9 5v4l3 2"/></svg>',
     email: '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" style="width:22px;height:22px"><rect x="1" y="3" width="16" height="12" rx="2"/><path d="M1 5l8 5 8-5"/></svg>',

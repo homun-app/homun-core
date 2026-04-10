@@ -1,7 +1,7 @@
 //! Database operations for the RAG knowledge base.
 //!
-//! Extension `impl Database` following the pattern in `business/db.rs`
-//! and `contacts/db.rs`. Handles source and chunk CRUD + FTS5 search.
+//! Extension `impl Database` following the pattern in `contacts/db.rs`.
+//! Handles source and chunk CRUD + FTS5 search.
 
 use anyhow::{Context, Result};
 

@@ -244,11 +244,10 @@ L'architettura è implementata in Rust con asincronia `tokio`. I moduli principa
   5. `ToolsSection` — definizioni tool in XML (solo XML mode) + regole routing
   6. `SafetySection` — regole sicurezza (SEC-7, SEC-13, ecc.)
   7. `SkillsSection` — riepilogo skill disponibili
-  8. `BusinessSection` — contesto business utente
-  9. `MemorySection` — memoria a lungo termine (MEMORY.md) + memorie rilevanti da vector search
-  10. `ContactsSection` — profilo contact del mittente corrente
-  11. `WorkspaceSection` — directory workspace
-  12. `RuntimeSection` — info runtime: data/ora corrente, canale, dati cognizione (understanding, plan, constraints, intent, success_criteria)
+  8. `MemorySection` — memoria a lungo termine (MEMORY.md) + memorie rilevanti da vector search
+  9. `ContactsSection` — profilo contact del mittente corrente
+  10. `WorkspaceSection` — directory workspace
+  11. `RuntimeSection` — info runtime: data/ora corrente, canale, dati cognizione (understanding, plan, constraints, intent, success_criteria)
 - `PromptContext` contiene campi dedicati per cognition: `cognition_understanding`, `cognition_plan`, `cognition_constraints`, `cognition_intent`, `cognition_success_criteria`
 - Tabelle DB: nessuna diretta
 - Endpoint API: nessuno

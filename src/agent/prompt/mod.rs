@@ -10,9 +10,9 @@ mod sections;
 
 pub use builder::SystemPromptBuilder;
 pub use sections::{
-    AgentInstructionsSection, BusinessSection, ContactsSection, IdentitySection, MemorySection,
-    PersonaSection, ProfileSection, PromptSection, RuntimeSection, SafetySection, SkillsSection,
-    ToolsSection, WorkspaceSection,
+    AgentInstructionsSection, ContactsSection, IdentitySection, MemorySection, PersonaSection,
+    ProfileSection, PromptSection, RuntimeSection, SafetySection, SkillsSection, ToolsSection,
+    WorkspaceSection,
 };
 
 use std::path::Path;

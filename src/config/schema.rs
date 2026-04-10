@@ -20,7 +20,6 @@ pub struct Config {
     pub security: SecurityConfig,
     pub browser: BrowserConfig,
     pub ui: UiConfig,
-    pub business: BusinessConfig,
     pub skills: SkillsConfig,
     /// Named agent definitions.
     /// Parsed from `[agents.<id>]` TOML sections.
@@ -2780,40 +2779,6 @@ impl BrowserConfig {
                 candidate.exists()
             })
         })
-    }
-}
-
-/// Business Autopilot configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct BusinessConfig {
-    /// Enable the business tool
-    pub enabled: bool,
-    /// Default autonomy level: "semi", "budget", "full"
-    pub default_autonomy: String,
-    /// Default currency
-    pub default_currency: String,
-    /// Default OODA review interval (cron-style schedule)
-    pub default_ooda_interval: String,
-    /// Fiscal country (ISO 3166-1 alpha-2)
-    pub fiscal_country: String,
-    /// VAT number (P.IVA for IT)
-    pub vat_number: Option<String>,
-    /// Fiscal regime: "standard", "forfettario", "exempt"
-    pub fiscal_regime: String,
-}
-
-impl Default for BusinessConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            default_autonomy: "semi".to_string(),
-            default_currency: "EUR".to_string(),
-            default_ooda_interval: "every:86400".to_string(),
-            fiscal_country: "IT".to_string(),
-            vat_number: None,
-            fiscal_regime: "standard".to_string(),
-        }
     }
 }
 

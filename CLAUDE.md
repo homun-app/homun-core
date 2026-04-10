@@ -94,7 +94,6 @@ src/
 │   ├── automation.rs                # Create/manage automations
 │   ├── workflow.rs                  # Multi-step workflow orchestration
 │   ├── browser.rs                   # Browser automation (17 actions via MCP Playwright)
-│   ├── business.rs                  # Business OODA automation (13 actions)
 │   ├── mcp.rs                       # MCP server management
 │   ├── mcp_token_refresh.rs         # MCP token refresh logic
 │   ├── contacts.rs                  # Contact management tool
@@ -205,10 +204,6 @@ src/
 │   ├── engine.rs                    # Orchestration, retry, approval gates, resume-on-boot
 │   └── db.rs                        # Workflow DB operations
 │
-├── business/                        # Business Autopilot (3 files)
-│   ├── engine.rs                    # OODA loop, budget enforcement, autonomy levels
-│   └── db.rs                        # Business DB operations
-│
 ├── scheduler/                       # Scheduling (4 files)
 │   ├── cron.rs                      # tokio-cron-scheduler
 │   ├── automations.rs               # Automation trigger engine
@@ -250,7 +245,6 @@ static/
     ├── embedding-loader.js          # Shared embedding model fetcher
     ├── schema-form.js               # JSON Schema → form fields for tool params
     ├── workflows.js                 # Workflow builder + approval UI
-    ├── business.js                  # Business dashboard
     ├── skills.js                    # Skill marketplace + install
     ├── knowledge.js                 # RAG document upload + search
     ├── memory.js                    # Memory editor + search
@@ -407,11 +401,6 @@ The agent loop follows a 4-phase pattern: **INGRESS → COGNITION → EXECUTION 
 - Visual flow canvas (n8n-style SVG), 11 node kinds.
 - Guided inspector (dropdown from API, no free text).
 - NLP flow generation via LLM (`one_shot.rs`).
-
-### Business Autopilot
-- OODA loop engine with budget enforcement.
-- Autonomy levels, transaction tracking.
-- 13 LLM tool actions.
 
 ---
 

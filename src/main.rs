@@ -36,7 +36,6 @@ mod browser {
     }
 }
 mod bus;
-mod business;
 mod channels;
 mod config;
 mod connections;
@@ -74,9 +73,8 @@ use crate::storage::Database;
 #[cfg(feature = "channel-email")]
 use crate::tools::ReadEmailInboxTool;
 use crate::tools::{
-    AutomationTool, BusinessTool, ContactsTool, EditFileTool, ListDirTool, MessageTool,
-    ReadFileTool, ShellTool, SpawnTool, ToolRegistry, VaultTool, WebFetchTool, WebSearchTool,
-    WorkflowTool, WriteFileTool,
+    AutomationTool, ContactsTool, EditFileTool, ListDirTool, MessageTool, ReadFileTool, ShellTool,
+    SpawnTool, ToolRegistry, VaultTool, WebFetchTool, WebSearchTool, WorkflowTool, WriteFileTool,
 };
 
 #[cfg(feature = "mcp")]
@@ -1080,12 +1078,6 @@ async fn main() -> Result<()> {
             let workflow_engine_cell = Arc::new(tokio::sync::OnceCell::new());
             tool_registry.register(Box::new(WorkflowTool::new(workflow_engine_cell.clone())));
 
-            // BusinessTool — late-bound OnceCell (BusinessEngine needs DB which is created later)
-            let business_engine_cell = Arc::new(tokio::sync::OnceCell::new());
-            if config.business.enabled {
-                tool_registry.register(Box::new(BusinessTool::new(business_engine_cell.clone())));
-            }
-
             // MCP servers are connected in the background (deferred) to avoid blocking
             // gateway startup. Tool discovery + registration happens asynchronously.
             // Save MCP config for the background task.
@@ -1299,16 +1291,6 @@ async fn main() -> Result<()> {
             // Bind workflow engine to cron scheduler for automation-triggered workflows
             cron_scheduler.set_workflow_engine(workflow_engine.clone());
 
-            // Create BusinessEngine and bind to the BusinessTool OnceCell
-            let business_engine =
-                Arc::new(business::engine::BusinessEngine::new(db_for_web.clone()));
-            if business_engine_cell.set(business_engine.clone()).is_err() {
-                tracing::error!("BusinessTool OnceCell was already initialized — this is a bug");
-            }
-            if config.business.enabled {
-                tracing::info!("Business engine initialized (BusinessTool registered)");
-            }
-
             // Start skill hot-reload watcher (watches ~/.homun/skills/ for changes)
             let skills_dir = config::Config::data_dir().join("skills");
             let skill_watcher = skills::SkillWatcher::new(skills_summary_handle, skills_dir);
@@ -1369,8 +1351,6 @@ async fn main() -> Result<()> {
             gateway.set_tool_message_rx(tool_msg_rx);
             gateway.set_health_tracker(health_tracker);
             gateway.set_workflow_engine(workflow_engine, workflow_event_rx);
-            // Always pass BusinessEngine to gateway (Web UI needs it regardless of tool flag)
-            gateway.set_business_engine(business_engine);
             #[cfg(feature = "embeddings")]
             if let Some(tx) = watch_update_tx {
                 gateway.set_watch_update_tx(tx);

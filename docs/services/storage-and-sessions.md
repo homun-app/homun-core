@@ -27,7 +27,6 @@ The current migration chain reaches at least:
 - persisted web chat runs
 - RAG knowledge
 - workflows
-- business tables
 - skill audit
 - web auth
 
@@ -47,7 +46,6 @@ SQLite currently stores:
 - web chat runs
 - RAG sources and chunks
 - workflows and workflow steps
-- business entities
 - skill audit records
 - web auth data
 

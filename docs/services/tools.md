@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This subsystem owns the built-in tool contract, tool registration, execution context, and the boundary between the agent loop and concrete side effects such as shell, file, web, vault, automation, workflow, business, and MCP-backed actions.
+This subsystem owns the built-in tool contract, tool registration, execution context, and the boundary between the agent loop and concrete side effects such as shell, file, web, vault, automation, workflow, and MCP-backed actions.
 
 ## Primary Code
 
@@ -54,7 +54,6 @@ This is the main way tool behavior changes across CLI, web, channel, and skill e
 - send message
 - spawn subagent
 - workflow
-- business
 - MCP tools
 - unified browser tool
 

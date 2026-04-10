@@ -551,40 +551,6 @@ impl PromptSection for RuntimeSection {
     }
 }
 
-// ── Business Section ─────────────────────────────────────────────────
-
-pub struct BusinessSection;
-
-impl PromptSection for BusinessSection {
-    fn name(&self) -> &str {
-        "business"
-    }
-
-    fn build(&self, ctx: &PromptContext<'_>) -> Result<String> {
-        let has_business = ctx.registered_tool_names.iter().any(|n| n == "business");
-
-        if !has_business {
-            return Ok(String::new());
-        }
-
-        Ok(String::from(
-            "### Business Autopilot Rules\n\n\
-             You have the **business** tool for autonomous business management.\n\n\
-             **Actions**: launch, list, status, research, strategize, create_product, \
-             record_sale, record_expense, revenue, review, pivot, pause, close.\n\n\
-             **Autonomy levels**:\n\
-             - **semi**: Always propose strategies, products, and pivots to the user before executing.\n\
-             - **budget**: Execute freely within budget. Propose anything exceeding remaining budget.\n\
-             - **full**: Execute all actions autonomously.\n\n\
-             **OODA Reviews**: After launching a business, create an automation with the `ooda_prompt` \
-             returned by the launch action. This enables periodic strategy review cycles.\n\n\
-             **Research before strategy**: Use `research` to gather market insights before creating strategies.\n\
-             **MCP integration**: If MCP tools are available for payments, marketing, or analytics, \
-             use them alongside the business tool for execution.\n",
-        ))
-    }
-}
-
 // ============================================================================
 // PERSONA SECTION
 // ============================================================================

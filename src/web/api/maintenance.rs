@@ -46,18 +46,6 @@ const DOMAIN_GROUPS: &[(&str, &str, &[&str])] = &[
         &["rag_sources", "rag_chunks"],
     ),
     (
-        "business",
-        "Business strategies, products, transactions, and orders",
-        &[
-            "businesses",
-            "business_strategies",
-            "products",
-            "transactions",
-            "orders",
-            "market_insights",
-        ],
-    ),
-    (
         "usage",
         "Token usage statistics and skill audit log",
         &["token_usage", "skill_audit"],

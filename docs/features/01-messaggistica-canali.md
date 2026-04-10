@@ -41,7 +41,7 @@ Discord ───┘
 ### Dettagli Tecnici
 
 - **File:** `src/agent/gateway.rs`
-- **Struttura principale:** `Gateway` — contiene `AgentRegistry`, `Config` (Arc<RwLock>), `CronScheduler`, handle opzionali per web-ui, workflow engine, business engine.
+- **Struttura principale:** `Gateway` — contiene `AgentRegistry`, `Config` (Arc<RwLock>), `CronScheduler`, handle opzionali per web-ui, workflow engine.
 - **Flusso dati:**
   1. Ogni canale viene avvolto in `spawn_monitored_channel`, che crea un `ChannelHandle` con `outbound_tx` stabile.
   2. Il Gateway tiene una `SharedOutboundSenders` (`Arc<RwLock<Vec<(String, Sender<OutboundMessage>)>>>`).

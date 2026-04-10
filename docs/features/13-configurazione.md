@@ -13,7 +13,7 @@ Il dominio Configurazione governa il caricamento, la validazione, la persistenza
 #### Comportamento Atteso
 - Il file `~/.homun/config.toml` contiene tutte le impostazioni dell'applicazione, organizzate in sezioni TOML.
 - Al caricamento, ogni campo non presente nel file assume il valore di default definito in `impl Default`.
-- La struct root `Config` contiene 17 sezioni top-level: `agent`, `providers`, `channels`, `tools`, `storage`, `memory`, `knowledge`, `mcp`, `permissions`, `security`, `browser`, `ui`, `business`, `skills`, `agents`, `routing`, `profiles`.
+- La struct root `Config` contiene 16 sezioni top-level: `agent`, `providers`, `channels`, `tools`, `storage`, `memory`, `knowledge`, `mcp`, `permissions`, `security`, `browser`, `ui`, `skills`, `agents`, `routing`, `profiles`.
 - Il salvataggio (`Config::save()`) rimuove automaticamente il server MCP virtuale "playwright" prima di scrivere su disco per evitare che configurazioni auto-iniettate finiscano nel file.
 - **Input**: file TOML su disco o `Config::default()` se assente.
 - **Output**: struct `Config` completa con tutti i campi risolti.
@@ -41,7 +41,6 @@ Il dominio Configurazione governa il caricamento, la validazione, la persistenza
 | `[security]` | `SecurityConfig` | exfiltration.enabled=true, sandbox.backend="auto" |
 | `[browser]` | `BrowserConfig` | enabled=false, headless=true, browser_type="chromium", stealth=true |
 | `[ui]` | `UiConfig` | theme="system", language="system", accent="moss" |
-| `[business]` | `BusinessConfig` | enabled=false, autonomy="semi", currency="EUR" |
 | `[skills]` | `SkillsConfig` | entries={} (vuoto) |
 | `[agents.*]` | `AgentDefinitionConfig` | Eredita da `[agent]` se vuoto |
 | `[routing]` | `RoutingConfig` | classifier_model="" (disabilitato) |

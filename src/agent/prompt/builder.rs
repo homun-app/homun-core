@@ -24,9 +24,9 @@ impl SystemPromptBuilder {
     /// Create a builder with default sections in standard order.
     pub fn with_defaults() -> Self {
         use super::{
-            AgentInstructionsSection, BusinessSection, ContactsSection, IdentitySection,
-            MemorySection, PersonaSection, ProfileSection, RuntimeSection, SafetySection,
-            SkillsSection, ToolsSection, WorkspaceSection,
+            AgentInstructionsSection, ContactsSection, IdentitySection, MemorySection,
+            PersonaSection, ProfileSection, RuntimeSection, SafetySection, SkillsSection,
+            ToolsSection, WorkspaceSection,
         };
 
         Self {
@@ -38,7 +38,6 @@ impl SystemPromptBuilder {
                 Box::new(ToolsSection),
                 Box::new(SafetySection),
                 Box::new(SkillsSection),
-                Box::new(BusinessSection),
                 Box::new(MemorySection),
                 Box::new(ContactsSection),
                 Box::new(WorkspaceSection),

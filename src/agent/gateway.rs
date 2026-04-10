@@ -196,8 +196,6 @@ pub struct Gateway {
     /// Workflow engine + event receiver for persistent multi-step tasks
     workflow_engine: Option<Arc<WorkflowEngine>>,
     workflow_event_rx: Option<mpsc::Receiver<WorkflowEvent>>,
-    /// Business engine for autonomous business management
-    business_engine: Option<Arc<crate::business::engine::BusinessEngine>>,
     /// Channel health tracker for circuit breaker + auto-restart
     channel_health: Arc<ChannelHealthTracker>,
     /// Resolved agent definitions (from config `[agents.*]` or synthesized "default").
@@ -231,7 +229,6 @@ impl Gateway {
             )),
             workflow_engine: None,
             workflow_event_rx: None,
-            business_engine: None,
             channel_health: Arc::new(ChannelHealthTracker::new()),
             agent_definitions: HashMap::new(),
             #[cfg(feature = "embeddings")]
@@ -273,11 +270,6 @@ impl Gateway {
     ) {
         self.workflow_engine = Some(engine);
         self.workflow_event_rx = Some(event_rx);
-    }
-
-    /// Set the business engine for autonomous business management.
-    pub fn set_business_engine(&mut self, engine: Arc<crate::business::engine::BusinessEngine>) {
-        self.business_engine = Some(engine);
     }
 
     /// Get the estop handles Arc (for populating from main.rs after gateway creation).
@@ -326,7 +318,6 @@ impl Gateway {
             let web_channel_health = self.channel_health.clone();
             let web_channel_cmd_tx = channel_cmd_tx.clone();
             let web_workflow_engine = self.workflow_engine.clone();
-            let web_business_engine = self.business_engine.clone();
             let web_estop_handles = self.estop_handles.clone();
             let default_agent = self.registry.default_agent();
             let web_tool_registry = default_agent.tool_registry_handle();
@@ -348,9 +339,6 @@ impl Gateway {
                 server.set_channel_health(web_channel_health);
                 if let Some(wf_engine) = web_workflow_engine {
                     server.set_workflow_engine(wf_engine);
-                }
-                if let Some(biz_engine) = web_business_engine {
-                    server.set_business_engine(biz_engine);
                 }
                 server.set_estop_handles(web_estop_handles);
                 server.set_tool_registry(web_tool_registry);

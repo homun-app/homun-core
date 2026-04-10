@@ -20,7 +20,6 @@ Ogni documento copre: comportamento atteso (prospettiva utente) + dettagli tecni
 | 06 | [Sicurezza](06-sicurezza.md) | Security | Vault AES-256-GCM, Web Auth PBKDF2, E-Stop, Exfiltration Guard, Channel Pairing OTP, 2FA TOTP, Vault Leak Detection, API Keys |
 | 07 | [Automazioni e Scheduling](07-automazioni-scheduling.md) | Scheduler + Automations | Cron jobs, Automation triggers (cron/every/event), Automation Builder v2, NLP generation, Heartbeat proattivo, Background tasks |
 | 08 | [Workflow Engine](08-workflow.md) | Workflows | Workflow multi-step, Approval gates, Retry logic, Resume-on-boot, Workflow builder UI |
-| 09 | [Business Autopilot](09-business.md) | Business | OODA loop, Autonomy levels, Budget enforcement, Transaction tracking, 13 LLM tool actions |
 | 10 | [Contatti e Profili](10-contatti-profili.md) | Contacts + Profiles + Gateways | Contact CRUD, Context injection, Contact Perimeter, Identity Resolution, Profiles, Profile Brain Dir, Gateways, Gateway Overrides, Auto-Association |
 | 11 | [Interfaccia Web](11-interfaccia-web.md) | Web UI + API | Web Server Axum, Auth Web, API Keys, 29 Pagine, WebSocket Chat, Chat UI, Navigazione, Tema, Upload Allegati, REST API (70+ endpoint), Run State streaming, Toast, Visual Flow Builder |
 | 12 | [Browser Automation](12-browser-automation.md) | Browser | 21 browser actions, MCP Playwright Bridge, Browser Task Plan, Site Memory, Tab Sessions, Action Policy, CAPTCHA Handling, Compact Snapshots, Stealth injection |
@@ -51,10 +50,6 @@ Il grafo mostra le dipendenze principali tra domini (A → B significa "A dipend
 │              ┌───────────────────┼───────────────────┐                 │
 │              ↓                   ↓                   ↓                 │
 │    [11 Interfaccia Web]  [08 Workflow]         [07 Automazioni]        │
-│              │                   │                   │                  │
-│              └───────────────────┴───────────────────┘                 │
-│                                  ↓                                      │
-│                          [09 Business]                                  │
 │                                                                         │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                         LIVELLO TRASVERSALE                             │
@@ -79,9 +74,8 @@ Il grafo mostra le dipendenze principali tra domini (A → B significa "A dipend
 | 04 Strumenti | 06 Sicurezza, 02 Agente (Tool Registry), 05 Skills | 02 Agente (esecuzione) |
 | 05 Skills | 04 Strumenti, 06 Sicurezza, 13 Config | 02 Agente, 11 Web (API) |
 | 06 Sicurezza | 13 Config (vault) | Tutti i moduli |
-| 07 Automazioni | 02 Agente, 13 Config | 09 Business, 11 Web |
-| 08 Workflow | 02 Agente, 06 Sicurezza (approval) | 09 Business, 11 Web |
-| 09 Business | 02 Agente, 07 Automazioni, 08 Workflow | 11 Web |
+| 07 Automazioni | 02 Agente, 13 Config | 11 Web |
+| 08 Workflow | 02 Agente, 06 Sicurezza (approval) | 11 Web |
 | 10 Contatti | 13 Config, 15 Condivisione | 01 Canali, 02 Agente (context), 11 Web |
 | 11 Web | Tutti | Browser (client) |
 | 12 Browser | 02 Agente, 05 Skills (MCP Playwright), 06 Sicurezza | 02 Agente (browser tool) |
@@ -170,8 +164,6 @@ Il grafo mostra le dipendenze principali tra domini (A → B significa "A dipend
 | **Workflow** | Sequenza multi-step persistente con supporto per approval gates, retry, e resume-on-boot. Ogni step può essere eseguito dall'agente o richiedere approvazione umana. |
 | **Automation** | Job schedulato (cron/every) o event-driven (always/on_change/contains) che invoca l'agente con un prompt fisso. |
 | **Approval Gate** | Punto di controllo in un workflow o autonomy level che richiede approvazione esplicita umana prima di procedere. |
-| **OODA Loop** | Observe → Orient → Decide → Act — framework per decisioni autonome del Business Autopilot. Permette all'agente di operare senza supervisione entro budget/autonomia configurati. |
-| **Autonomy Level** | Livello di autonomia del business engine: supervised (approva tutto), semi-autonomous (approva sopra soglia), autonomous (opera liberamente entro budget). |
 | **Heartbeat** | Wake-up proattivo dell'agente a intervalli configurabili per controllare task pendenti, follow-up, e trigger time-based senza input utente. |
 
 ### Configurazione e Infrastruttura
@@ -202,7 +194,6 @@ Ogni dominio filtra per `profile_id` con il pattern `WHERE profile_id IS NULL OR
 | RAG sources | rag_sources | ✅ SQL | `list_rag_sources_for_profile()` |
 | Contacts | contacts | ✅ SQL | Commit b992488 |
 | Automations | automations | ✅ SQL | Scheduler carica tutto (None) |
-| Business | businesses | ✅ SQL | Commit 0336b11 |
 | Workflows | workflows | ✅ SQL | |
 | Vault log | vault_access_log | ✅ SQL | Migration 050 |
 | Skill audit | skill_audit | ✅ SQL | Migration 050 |

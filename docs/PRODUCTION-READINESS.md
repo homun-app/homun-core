@@ -53,7 +53,6 @@ Cambiare profilo nella topbar e verificare che ogni sezione aggiorni i dati:
 - [ ] Memory → chunk count e history cambiano
 - [ ] Memory Audit → badge e lista cambiano
 - [ ] Automations → lista filtrata per profilo
-- [ ] Business → lista filtrata per profilo
 - [ ] Contacts → lista filtrata per profilo
 - [ ] Vault Audit → log filtrato per profilo
 - [ ] Skills Audit → log filtrato per profilo
@@ -169,7 +168,6 @@ Una sola password, nessuna user management UI, session store in-memory.
 | RAG search | ✅ | ✅ (namespace) | ✅ | — |
 | Contacts | ✅ | — | — | ✅ |
 | Automations | ✅ | — | — | ✅ |
-| Business | ✅ | — | — | ✅ |
 | Workflows | ✅ | — | — | ✅ |
 | Vault log | ✅ | — | — | ✅ |
 | Skill audit | ✅ | — | — | ✅ |

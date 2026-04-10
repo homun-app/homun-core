@@ -106,7 +106,7 @@ pub async fn update_profile(
 /// Cascade order:
 /// 1. FK-constrained children (contact_gateway_overrides, shared_resources)
 /// 2. Scoped data (memory_chunks, rag_*, contacts, sessions, automations,
-///    workflows, businesses, email_pending, knowledge_watches, audit logs)
+///    workflows, email_pending, knowledge_watches, audit logs)
 /// 3. Profile row itself
 /// 4. Filesystem cleanup (brain dir, memory daily logs)
 pub async fn delete_profile(pool: &Pool<Sqlite>, id: i64) -> Result<()> {
@@ -164,7 +164,6 @@ pub async fn delete_profile(pool: &Pool<Sqlite>, id: i64) -> Result<()> {
         "automations",
         "workflows",
         "memory_summaries",
-        "businesses",
         "email_pending",
         "knowledge_watches",
         "vault_access_log",

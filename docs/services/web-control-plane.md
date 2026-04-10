@@ -36,7 +36,6 @@ The web server can run in two modes:
 - optional RAG engine
 - optional provider health tracker
 - optional workflow engine
-- optional business engine
 - shared E-stop handles
 - optional auth session store
 - auth and API rate limiters
@@ -53,7 +52,6 @@ The current codebase exposes more than a chat screen. The web layer includes:
 - provider config and health
 - automations
 - workflows
-- business screens
 - memory and knowledge views
 - vault and permissions views
 - logs

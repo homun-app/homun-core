@@ -41,7 +41,6 @@ pub struct AppState {
     pub health_tracker: Option<Arc<ProviderHealthTracker>>,
     pub channel_health: Option<Arc<ChannelHealthTracker>>,
     pub workflow_engine: Option<Arc<WorkflowEngine>>,
-    pub business_engine: Option<Arc<BusinessEngine>>,
     pub estop_handles: Arc<tokio::sync::RwLock<EStopHandles>>,
     pub session_store: Option<Arc<SessionStore>>,              // SEC-1
     pub auth_rate_limiter: Arc<RateLimiter>,                   // 5 req/min per IP
@@ -219,7 +218,6 @@ struct CreateTokenResponse {
 | `/traces` | `traces_page()` | traces.js | Request analysis, latency traces, debugging |
 | `/onboarding` | `onboarding_page()` | onboarding.js | Setup wizard per primo accesso |
 | `/agents` | `agents_page()` | agents.js | Agent registry, multi-agent orchestration |
-| `/business` | `business_page()` | business.js | Business engine, autonomous task execution |
 
 #### Rendering Comune
 
@@ -613,7 +611,6 @@ pub fn router() -> Router<Arc<AppState>> {
         .merge(automations::routes())
         .merge(maintenance::routes())
         .merge(workflows::routes())
-        .merge(business::routes())
         .merge(contacts::routes())
         .merge(profiles::routes())
         .merge(gateways::routes())

@@ -3,7 +3,6 @@ pub mod approval;
 pub mod automation;
 #[cfg(feature = "browser")]
 pub mod browser;
-pub mod business;
 pub mod contacts;
 #[cfg(feature = "channel-email")]
 pub mod email_inbox;
@@ -36,7 +35,6 @@ pub use approval::{
 pub use automation::AutomationTool;
 #[cfg(feature = "browser")]
 pub use browser::{BrowserSession, BrowserTool};
-pub use business::BusinessTool;
 pub use contacts::ContactsTool;
 #[cfg(feature = "channel-email")]
 pub use email_inbox::ReadEmailInboxTool;
