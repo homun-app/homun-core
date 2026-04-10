@@ -840,9 +840,15 @@ mod tests {
         assert_eq!(all[0].status, "pending");
 
         // List by status
-        let pending = db.list_pending_responses(Some("pending"), None).await.unwrap();
+        let pending = db
+            .list_pending_responses(Some("pending"), None)
+            .await
+            .unwrap();
         assert_eq!(pending.len(), 1);
-        let approved = db.list_pending_responses(Some("approved"), None).await.unwrap();
+        let approved = db
+            .list_pending_responses(Some("approved"), None)
+            .await
+            .unwrap();
         assert!(approved.is_empty());
 
         // Update status

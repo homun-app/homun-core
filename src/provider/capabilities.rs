@@ -94,7 +94,10 @@ mod tests {
     #[test]
     fn detects_openai_family_models() {
         assert!(detect_model_capabilities("openai", "openai/gpt-4o").multimodal);
-        assert!(detect_model_capabilities("openrouter", "openrouter/google/gemini-2.0-flash").multimodal);
+        assert!(
+            detect_model_capabilities("openrouter", "openrouter/google/gemini-2.0-flash")
+                .multimodal
+        );
         assert!(detect_model_capabilities("ollama", "ollama/qwen3.5:latest").multimodal);
         assert!(!detect_model_capabilities("ollama", "ollama/llama3").multimodal);
     }
@@ -151,7 +154,9 @@ mod tests {
 
         // Anthropic thinking models
         assert!(detect_model_capabilities("anthropic", "anthropic/claude-opus-4").thinking);
-        assert!(detect_model_capabilities("anthropic", "anthropic/claude-sonnet-4-20250514").thinking);
+        assert!(
+            detect_model_capabilities("anthropic", "anthropic/claude-sonnet-4-20250514").thinking
+        );
         assert!(!detect_model_capabilities("anthropic", "anthropic/claude-3-haiku").thinking);
 
         // OpenAI / generic thinking models

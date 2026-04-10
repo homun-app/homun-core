@@ -28,7 +28,10 @@ fn append_allow_paths(base_profile: &str, allow_paths: &[String]) -> String {
     profile.push_str("\n\n;; --- Runtime allow_paths (user-granted) ---\n");
     for path in allow_paths {
         if path.contains('"') {
-            tracing::warn!(path, "Skipping allow_path with quote char — breaks sbpl parser");
+            tracing::warn!(
+                path,
+                "Skipping allow_path with quote char — breaks sbpl parser"
+            );
             continue;
         }
         profile.push_str(&format!(

@@ -121,10 +121,7 @@ impl RagWatcher {
     }
 
     /// Configure notify watchers from contexts.
-    fn configure_watcher(
-        watcher: &mut RecommendedWatcher,
-        contexts: &[WatchContext],
-    ) {
+    fn configure_watcher(watcher: &mut RecommendedWatcher, contexts: &[WatchContext]) {
         for ctx in contexts {
             if ctx.path.exists() {
                 let mode = if ctx.recursive {
@@ -134,7 +131,9 @@ impl RagWatcher {
                 };
                 match watcher.watch(&ctx.path, mode) {
                     Ok(()) => tracing::info!(path = %ctx.path.display(), "RAG watcher active"),
-                    Err(e) => tracing::warn!(path = %ctx.path.display(), error = %e, "Failed to watch"),
+                    Err(e) => {
+                        tracing::warn!(path = %ctx.path.display(), error = %e, "Failed to watch")
+                    }
                 }
             } else {
                 tracing::warn!(path = %ctx.path.display(), "Watch dir does not exist, skipping");

@@ -243,7 +243,10 @@ async fn put_approval_config(
 
     drop(config);
 
-    if let Err(e) = state.save_config_section(crate::config::SECTION_PERMISSIONS).await {
+    if let Err(e) = state
+        .save_config_section(crate::config::SECTION_PERMISSIONS)
+        .await
+    {
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to save config: {}", e),

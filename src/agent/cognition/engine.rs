@@ -176,7 +176,9 @@ pub async fn run_cognition(mut params: CognitionParams<'_>) -> Result<CognitionR
             }
             Err(_) => {
                 tracing::warn!(
-                    attempt, max = max_retries, model,
+                    attempt,
+                    max = max_retries,
+                    model,
                     timeout_secs = per_call_timeout.as_secs(),
                     "Cognition LLM call timed out — retrying"
                 );
@@ -207,16 +209,19 @@ pub async fn run_cognition(mut params: CognitionParams<'_>) -> Result<CognitionR
                                     1,
                                     "plan_execution",
                                     &result.understanding,
-                                    &format!("tools={:?} plan={} steps", tool_names, result.plan.len()),
+                                    &format!(
+                                        "tools={:?} plan={} steps",
+                                        tool_names,
+                                        result.plan.len()
+                                    ),
                                 );
                             }
                             cognition_result = Some(result);
                         }
                         Err(e) => {
                             tracing::warn!(error = %e, "Failed to parse plan_execution arguments");
-                            failure_reason = Some(format!(
-                                "plan_execution parse error: {e}, model '{model}'"
-                            ));
+                            failure_reason =
+                                Some(format!("plan_execution parse error: {e}, model '{model}'"));
                         }
                     }
                 }
@@ -362,7 +367,13 @@ async fn dispatch_discovery_tool(
         "search_knowledge" => {
             #[cfg(feature = "embeddings")]
             if let Some(rag) = params.rag_engine {
-                return discovery::search_knowledge(query, rag, &params.visible_profile_ids, params.allowed_namespaces.as_deref()).await;
+                return discovery::search_knowledge(
+                    query,
+                    rag,
+                    &params.visible_profile_ids,
+                    params.allowed_namespaces.as_deref(),
+                )
+                .await;
             }
             "[]".to_string()
         }
@@ -685,15 +696,25 @@ mod tests {
         let skills = vec!["summarize".to_string()];
         let mcp = vec!["google__calendar".to_string()];
         let prompt = build_cognition_prompt_plan_first(
-            "Fabio (informal)", "telegram", &tools, &skills, &mcp,
+            "Fabio (informal)",
+            "telegram",
+            &tools,
+            &skills,
+            &mcp,
         );
         assert!(prompt.contains("browser, web_search"), "should list tools");
         assert!(prompt.contains("summarize"), "should list skills");
         assert!(prompt.contains("google__calendar"), "should list MCP");
         assert!(prompt.contains("telegram"), "should include channel");
         assert!(prompt.contains("Fabio"), "should include contact");
-        assert!(prompt.contains("plan_execution"), "should mention plan_execution");
-        assert!(prompt.contains("intent_type"), "should explain intent types");
+        assert!(
+            prompt.contains("plan_execution"),
+            "should mention plan_execution"
+        );
+        assert!(
+            prompt.contains("intent_type"),
+            "should explain intent types"
+        );
     }
 
     #[test]

@@ -128,8 +128,10 @@ impl WebRunStore {
             // Blocks events: store as pending approval blocks for reconnect replay.
             if event_type == "blocks" {
                 if let Ok(blocks) = serde_json::from_str::<Vec<serde_json::Value>>(&msg.delta) {
-                    if let Some(block_id) =
-                        blocks.first().and_then(|b| b.get("id")).and_then(|v| v.as_str())
+                    if let Some(block_id) = blocks
+                        .first()
+                        .and_then(|b| b.get("id"))
+                        .and_then(|v| v.as_str())
                     {
                         // Avoid duplicates (same block_id re-streamed)
                         if !run.pending_blocks.iter().any(|b| b.block_id == block_id) {

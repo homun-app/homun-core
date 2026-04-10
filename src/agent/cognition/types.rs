@@ -307,16 +307,24 @@ impl CognitionResult {
         let intent_type = if contains_any_fallback(
             &lower,
             &[
-                "book", "prenota", "compra", "buy", "ordina", "order",
-                "checkout", "purchase", "registra", "register", "iscri",
+                "book", "prenota", "compra", "buy", "ordina", "order", "checkout", "purchase",
+                "registra", "register", "iscri",
             ],
         ) {
             Some(IntentType::Transactional)
         } else if contains_any_fallback(
             &lower,
             &[
-                "scrivi", "write", "genera", "generate", "crea", "create",
-                "traduci", "translate", "riassumi", "summarize",
+                "scrivi",
+                "write",
+                "genera",
+                "generate",
+                "crea",
+                "create",
+                "traduci",
+                "translate",
+                "riassumi",
+                "summarize",
             ],
         ) {
             Some(IntentType::Creative)
@@ -496,8 +504,17 @@ fn infer_fallback_constraints(lower: &str) -> Vec<String> {
     if contains_any_fallback(
         lower,
         &[
-            "today", "oggi", "tomorrow", "domani", "latest", "current",
-            "adesso", "stasera", "tonight", "this week", "questa settimana",
+            "today",
+            "oggi",
+            "tomorrow",
+            "domani",
+            "latest",
+            "current",
+            "adesso",
+            "stasera",
+            "tonight",
+            "this week",
+            "questa settimana",
         ],
     ) {
         constraints.push(
@@ -509,8 +526,18 @@ fn infer_fallback_constraints(lower: &str) -> Vec<String> {
     if contains_any_fallback(
         lower,
         &[
-            "after ", "before ", "dopo ", "prima delle", "entro ", "under ",
-            "below ", "meno di", "fino a", "at least", "almeno", "between ",
+            "after ",
+            "before ",
+            "dopo ",
+            "prima delle",
+            "entro ",
+            "under ",
+            "below ",
+            "meno di",
+            "fino a",
+            "at least",
+            "almeno",
+            "between ",
             "tra ",
         ],
     ) || lower.contains(':')
@@ -525,9 +552,19 @@ fn infer_fallback_constraints(lower: &str) -> Vec<String> {
     if contains_any_fallback(
         lower,
         &[
-            "book", "booking", "reserve", "reservation", "ticket",
-            "biglietto", "prenota", "checkout", "order", "buy",
-            "purchase", "search form", "form",
+            "book",
+            "booking",
+            "reserve",
+            "reservation",
+            "ticket",
+            "biglietto",
+            "prenota",
+            "checkout",
+            "order",
+            "buy",
+            "purchase",
+            "search form",
+            "form",
         ],
     ) {
         constraints.push(
@@ -539,8 +576,14 @@ fn infer_fallback_constraints(lower: &str) -> Vec<String> {
     if contains_any_fallback(
         lower,
         &[
-            "compare", "confronta", "versus", " vs ", "both ",
-            "entrambi", "sia ", "che ",
+            "compare",
+            "confronta",
+            "versus",
+            " vs ",
+            "both ",
+            "entrambi",
+            "sia ",
+            "che ",
         ],
     ) {
         constraints.push(
@@ -758,8 +801,7 @@ mod tests {
         assert!(props.get("success_criteria").is_some());
         // Both must be required
         let required = def.function.parameters.get("required").unwrap();
-        let required: Vec<String> =
-            serde_json::from_value(required.clone()).unwrap();
+        let required: Vec<String> = serde_json::from_value(required.clone()).unwrap();
         assert!(required.contains(&"intent_type".to_string()));
         assert!(required.contains(&"success_criteria".to_string()));
     }
@@ -805,11 +847,7 @@ mod tests {
             data_schema: None,
         };
 
-        let issues = validate_cognition_result(
-            &result,
-            &["browser".to_string()],
-            &[],
-        );
+        let issues = validate_cognition_result(&result, &["browser".to_string()], &[]);
         assert!(issues.iter().any(|i| i.field == "intent_type"));
     }
 

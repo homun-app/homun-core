@@ -675,7 +675,10 @@ async fn classify_chunks(
 
     Ok(Json(OkResponse {
         ok: true,
-        message: Some(format!("{updated} chunks reclassified to {}", body.namespace)),
+        message: Some(format!(
+            "{updated} chunks reclassified to {}",
+            body.namespace
+        )),
     }))
 }
 
@@ -708,6 +711,9 @@ async fn classify_all(
 
     Ok(Json(OkResponse {
         ok: true,
-        message: Some(format!("{updated} chunks reclassified to {}", body.namespace)),
+        message: Some(format!(
+            "{updated} chunks reclassified to {}",
+            body.namespace
+        )),
     }))
 }

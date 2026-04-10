@@ -33,11 +33,7 @@ fn resolve_workspace_file(raw: &str) -> Option<String> {
     let candidates = [
         std::path::PathBuf::from(raw),
         workspace.join(raw),
-        workspace.join(
-            std::path::Path::new(raw)
-                .file_name()
-                .unwrap_or_default(),
-        ),
+        workspace.join(std::path::Path::new(raw).file_name().unwrap_or_default()),
     ];
     for candidate in &candidates {
         if candidate.exists() && candidate.is_file() {
@@ -91,10 +87,9 @@ impl Tool for SendFileTool {
 
     async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
         let raw_file = get_string_param(&args, "file")?;
-        let caption = get_optional_string(&args, "caption")
-            .unwrap_or_else(|| format!("File: {raw_file}"));
-        let channel = get_optional_string(&args, "channel")
-            .unwrap_or_else(|| ctx.channel.clone());
+        let caption =
+            get_optional_string(&args, "caption").unwrap_or_else(|| format!("File: {raw_file}"));
+        let channel = get_optional_string(&args, "channel").unwrap_or_else(|| ctx.channel.clone());
         let explicit_chat_id = get_optional_string(&args, "chat_id");
 
         // Resolve file path
@@ -165,9 +160,7 @@ impl Tool for SendFileTool {
             }
             Err(e) => {
                 tracing::error!(error = %e, "Failed to send file");
-                Ok(ToolResult::error(format!(
-                    "Failed to deliver file: {e}"
-                )))
+                Ok(ToolResult::error(format!("Failed to deliver file: {e}")))
             }
         }
     }

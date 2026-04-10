@@ -169,8 +169,7 @@ pub async fn prepare_turn(
             .await?;
             if image_sections.is_empty() {
                 // No way to process images — tell the agent explicitly why
-                let image_names: Vec<&str> =
-                    images.iter().map(|i| i.name.as_str()).collect();
+                let image_names: Vec<&str> = images.iter().map(|i| i.name.as_str()).collect();
                 let notice = format!(
                     "[SYSTEM: The user attached {} image(s) ({}) but the current model \
                      '{}' does not support image input. The images CANNOT be shown to you. \

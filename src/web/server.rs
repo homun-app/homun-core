@@ -102,25 +102,15 @@ impl AppState {
                 serde_json::to_string(&config.security.exfiltration)?
             }
             // Permissions
-            crate::config::SECTION_PERMISSIONS => {
-                serde_json::to_string(&config.permissions)?
-            }
+            crate::config::SECTION_PERMISSIONS => serde_json::to_string(&config.permissions)?,
             // Agent
             crate::config::SECTION_AGENT => serde_json::to_string(&config.agent)?,
             // Channels
-            crate::config::SECTION_TELEGRAM => {
-                serde_json::to_string(&config.channels.telegram)?
-            }
-            crate::config::SECTION_WHATSAPP => {
-                serde_json::to_string(&config.channels.whatsapp)?
-            }
-            crate::config::SECTION_DISCORD => {
-                serde_json::to_string(&config.channels.discord)?
-            }
+            crate::config::SECTION_TELEGRAM => serde_json::to_string(&config.channels.telegram)?,
+            crate::config::SECTION_WHATSAPP => serde_json::to_string(&config.channels.whatsapp)?,
+            crate::config::SECTION_DISCORD => serde_json::to_string(&config.channels.discord)?,
             crate::config::SECTION_SLACK => serde_json::to_string(&config.channels.slack)?,
-            crate::config::SECTION_EMAIL => {
-                serde_json::to_string(&config.channels.emails)?
-            }
+            crate::config::SECTION_EMAIL => serde_json::to_string(&config.channels.emails)?,
             crate::config::SECTION_WEB => serde_json::to_string(&config.channels.web)?,
             // Tools
             crate::config::SECTION_EXEC => serde_json::to_string(&config.tools.exec)?,

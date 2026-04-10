@@ -1143,7 +1143,9 @@ mod tests {
         assert!(EmailChannel::is_noreply_sender("donotreply@service.io"));
         assert!(EmailChannel::is_noreply_sender("mailer-daemon@google.com"));
         assert!(EmailChannel::is_noreply_sender("postmaster@mail.com"));
-        assert!(EmailChannel::is_noreply_sender("notifications-noreply@github.com"));
+        assert!(EmailChannel::is_noreply_sender(
+            "notifications-noreply@github.com"
+        ));
         assert!(EmailChannel::is_noreply_sender("NOREPLY@EXAMPLE.COM"));
         // Should NOT match normal senders
         assert!(!EmailChannel::is_noreply_sender("fabio@cantone.me"));

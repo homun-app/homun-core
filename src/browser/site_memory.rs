@@ -147,8 +147,14 @@ fn parse_site_memory(content: &str, domain: &str) -> Option<SiteMemory> {
         if json.is_null() {
             SiteMemory::new(domain)
         } else {
-            let fingerprint = json.get("fingerprint").and_then(|v| v.as_str()).map(String::from);
-            let last_verified = json.get("last_verified").and_then(|v| v.as_str()).map(String::from);
+            let fingerprint = json
+                .get("fingerprint")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let last_verified = json
+                .get("last_verified")
+                .and_then(|v| v.as_str())
+                .map(String::from);
             let form_fields = json
                 .get("form_fields")
                 .and_then(|v| v.as_array())
@@ -343,7 +349,15 @@ fn extract_role_and_name(line: &str) -> String {
 /// Parses the snapshot text for interactive form elements and infers
 /// their behavior from role and name patterns.
 pub fn extract_form_fields(snapshot_text: &str) -> Vec<FormFieldInfo> {
-    let form_roles = ["textbox", "combobox", "checkbox", "radio", "slider", "spinbutton", "searchbox"];
+    let form_roles = [
+        "textbox",
+        "combobox",
+        "checkbox",
+        "radio",
+        "slider",
+        "spinbutton",
+        "searchbox",
+    ];
     let mut fields = Vec::new();
 
     for line in snapshot_text.lines() {
@@ -562,7 +576,10 @@ mod tests {
             user_preferences: String::new(),
         };
 
-        assert_eq!(check_fingerprint(&memory, snapshot), FingerprintStatus::Match);
+        assert_eq!(
+            check_fingerprint(&memory, snapshot),
+            FingerprintStatus::Match
+        );
     }
 
     #[test]

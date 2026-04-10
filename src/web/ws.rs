@@ -123,9 +123,9 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, conversation_id:
             for task in tasks {
                 let done = task.completed_data.len();
                 let total_desc = if task.plan_json.len() > 2 {
-                    if let Ok(snap) = serde_json::from_str::<crate::agent::ExecutionPlanSnapshot>(
-                        &task.plan_json,
-                    ) {
+                    if let Ok(snap) =
+                        serde_json::from_str::<crate::agent::ExecutionPlanSnapshot>(&task.plan_json)
+                    {
                         let total = snap.explicit_steps.len();
                         let done_count = snap
                             .explicit_steps
@@ -316,35 +316,46 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, conversation_id:
                         // resolve it immediately. This must happen before start_run()
                         // because the agent is already running (paused) — start_run
                         // would reject with "already running".
-                        let block_response = parsed
-                            .get("block_response")
-                            .cloned()
-                            .and_then(|v| serde_json::from_value::<crate::tools::BlockResponse>(v).ok());
+                        let block_response = parsed.get("block_response").cloned().and_then(|v| {
+                            serde_json::from_value::<crate::tools::BlockResponse>(v).ok()
+                        });
 
                         // Handle task resume/cancel choice blocks
                         if let Some(ref br) = block_response {
                             if br.block_id.starts_with("task_resume_") {
-                                let task_id = br.block_id.strip_prefix("task_resume_").unwrap_or("");
+                                let task_id =
+                                    br.block_id.strip_prefix("task_resume_").unwrap_or("");
                                 let action = br.option_id.as_deref().unwrap_or("cancel");
 
                                 if let Some(db) = state.db.as_ref() {
                                     if action == "resume" {
                                         // Load checkpoint and build resume prompt
-                                        if let Ok(tasks) = db.load_interrupted_tasks(&session_key).await {
-                                            if let Some(task) = tasks.into_iter().find(|t| t.id == task_id) {
+                                        if let Ok(tasks) =
+                                            db.load_interrupted_tasks(&session_key).await
+                                        {
+                                            if let Some(task) =
+                                                tasks.into_iter().find(|t| t.id == task_id)
+                                            {
                                                 let resume_prompt = crate::agent::ExecutionPlanState::build_resume_prompt(&task);
                                                 // Delete the checkpoint (we're resuming, fresh start)
                                                 let _ = db.delete_task_checkpoint(task_id).await;
 
                                                 // Send as new inbound message
-                                                let run = match state.web_runs.start_run(&session_key, "Resuming interrupted task") {
+                                                let run = match state.web_runs.start_run(
+                                                    &session_key,
+                                                    "Resuming interrupted task",
+                                                ) {
                                                     Ok(run) => run,
                                                     Err(msg) => {
-                                                        let _ = client_stream_tx.send(WsStreamEvent {
-                                                            delta: msg,
-                                                            event_type: Some("error".to_string()),
-                                                            tool_call_data: None,
-                                                        }).await;
+                                                        let _ = client_stream_tx
+                                                            .send(WsStreamEvent {
+                                                                delta: msg,
+                                                                event_type: Some(
+                                                                    "error".to_string(),
+                                                                ),
+                                                                tool_call_data: None,
+                                                            })
+                                                            .await;
                                                         continue;
                                                     }
                                                 };
@@ -364,7 +375,10 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, conversation_id:
                                                 if let Some(ref tx) = state.inbound_tx {
                                                     let _ = tx.send(inbound).await;
                                                 }
-                                                tracing::info!(task_id, "Resuming interrupted task");
+                                                tracing::info!(
+                                                    task_id,
+                                                    "Resuming interrupted task"
+                                                );
                                             }
                                         }
                                     } else {
@@ -381,15 +395,22 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, conversation_id:
                             let gate = crate::agent::approval_gate::approval_gate();
                             if gate.resolve(&br.block_id, br.clone()).await {
                                 // Remove from run snapshot so it won't re-stream on next reconnect
-                                state.web_runs.remove_pending_block(&session_key, &br.block_id);
+                                state
+                                    .web_runs
+                                    .remove_pending_block(&session_key, &br.block_id);
                                 tracing::info!(block_id = %br.block_id, "Approval resolved via gate — agent will resume");
                                 continue;
                             }
                             // Gate already resolved or timed out — clean up stale UI
-                            state.web_runs.remove_pending_block(&session_key, &br.block_id);
+                            state
+                                .web_runs
+                                .remove_pending_block(&session_key, &br.block_id);
                             let _ = client_stream_tx
                                 .send(WsStreamEvent {
-                                    delta: format!("Approval for \"{}\" has expired or was already handled.", br.block_id),
+                                    delta: format!(
+                                        "Approval for \"{}\" has expired or was already handled.",
+                                        br.block_id
+                                    ),
                                     event_type: Some("error".to_string()),
                                     tool_call_data: None,
                                 })

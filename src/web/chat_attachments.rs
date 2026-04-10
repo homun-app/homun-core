@@ -163,7 +163,8 @@ mod tests {
             transport: "stdio".to_string(),
         }];
 
-        let encoded = encode_inline_context("look at this", &attachments, &mcp_servers, &[]).unwrap();
+        let encoded =
+            encode_inline_context("look at this", &attachments, &mcp_servers, &[]).unwrap();
         let parsed = parse_message_content(&encoded);
         assert_eq!(parsed.text, "look at this");
         assert_eq!(parsed.attachments, attachments);

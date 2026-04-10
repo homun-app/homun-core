@@ -142,12 +142,15 @@ impl Tool for KnowledgeTool {
             "search" => {
                 let query = get_string_param(&args, "query")?;
                 let mut engine = self.engine.lock().await;
-                let results = engine.search(&query, 5, ctx.profile_id, ctx.allowed_namespaces.as_deref()).await?;
+                let results = engine
+                    .search(&query, 5, ctx.profile_id, ctx.allowed_namespaces.as_deref())
+                    .await?;
 
                 if results.is_empty() {
                     return Ok(ToolResult {
                         output: "No results found in knowledge base.".to_string(),
-                        is_error: false, ..Default::default()
+                        is_error: false,
+                        ..Default::default()
                     });
                 }
 
@@ -171,7 +174,8 @@ impl Tool for KnowledgeTool {
 
                 Ok(ToolResult {
                     output,
-                    is_error: false, ..Default::default()
+                    is_error: false,
+                    ..Default::default()
                 })
             }
 
@@ -184,9 +188,9 @@ impl Tool for KnowledgeTool {
                     .unwrap_or(false);
 
                 // KIX-4: auto-assign contact namespace when ingesting via chat
-                let namespace = ctx.contact_id.map(|cid| {
-                    crate::contacts::perimeter::contact_namespace(cid)
-                });
+                let namespace = ctx
+                    .contact_id
+                    .map(|cid| crate::contacts::perimeter::contact_namespace(cid));
 
                 let mut engine = self.engine.lock().await;
 
@@ -203,26 +207,36 @@ impl Tool for KnowledgeTool {
                         .await?;
                     Ok(ToolResult {
                         output: format!("Ingested {} files from {}", ids.len(), path.display()),
-                        is_error: false, ..Default::default()
+                        is_error: false,
+                        ..Default::default()
                     })
                 } else if path.is_file() {
                     match engine
-                        .ingest_file(&path, "tool", ctx.profile_id, ctx.user_id.as_deref(), namespace.as_deref())
+                        .ingest_file(
+                            &path,
+                            "tool",
+                            ctx.profile_id,
+                            ctx.user_id.as_deref(),
+                            namespace.as_deref(),
+                        )
                         .await?
                     {
                         Some(id) => Ok(ToolResult {
                             output: format!("File {} indexed (source_id={})", path.display(), id),
-                            is_error: false, ..Default::default()
+                            is_error: false,
+                            ..Default::default()
                         }),
                         None => Ok(ToolResult {
                             output: format!("File {} already indexed (skipped)", path.display()),
-                            is_error: false, ..Default::default()
+                            is_error: false,
+                            ..Default::default()
                         }),
                     }
                 } else {
                     Ok(ToolResult {
                         output: format!("Path not found: {}", path.display()),
-                        is_error: true, ..Default::default()
+                        is_error: true,
+                        ..Default::default()
                     })
                 }
             }
@@ -234,7 +248,8 @@ impl Tool for KnowledgeTool {
                 if sources.is_empty() {
                     return Ok(ToolResult {
                         output: "Knowledge base is empty. Use 'ingest' to add files.".to_string(),
-                        is_error: false, ..Default::default()
+                        is_error: false,
+                        ..Default::default()
                     });
                 }
 
@@ -248,7 +263,8 @@ impl Tool for KnowledgeTool {
 
                 Ok(ToolResult {
                     output,
-                    is_error: false, ..Default::default()
+                    is_error: false,
+                    ..Default::default()
                 })
             }
 
@@ -275,7 +291,8 @@ impl Tool for KnowledgeTool {
                     } else {
                         format!("Source {} not found.", source_id)
                     },
-                    is_error: false, ..Default::default()
+                    is_error: false,
+                    ..Default::default()
                 })
             }
 
@@ -325,7 +342,8 @@ impl Tool for KnowledgeTool {
                     "Unknown action '{}'. Use: search, ingest, list, remove, reveal.",
                     other
                 ),
-                is_error: true, ..Default::default()
+                is_error: true,
+                ..Default::default()
             }),
         }
     }

@@ -122,7 +122,14 @@ impl Tool for RememberTool {
             let global_brain = self.data_dir.join("brain");
             let profile_dir = ctx.profile_brain_dir.as_deref();
             return self
-                .remember_for_site(&global_brain, profile_dir, domain, &category, &normalized_key, &value)
+                .remember_for_site(
+                    &global_brain,
+                    profile_dir,
+                    domain,
+                    &category,
+                    &normalized_key,
+                    &value,
+                )
                 .await;
         }
 

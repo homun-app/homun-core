@@ -440,7 +440,11 @@ impl Tool for ShellTool {
         // profile on macOS 26+ (exits 1 before processing the command).
         let (shell, shell_args) = {
             let configured = self.get_shell_command();
-            if !sandbox_bypassed && sandbox_config.enabled && sandbox_config.backend != "none" && configured.0 != "sh" {
+            if !sandbox_bypassed
+                && sandbox_config.enabled
+                && sandbox_config.backend != "none"
+                && configured.0 != "sh"
+            {
                 ("sh", vec!["-c"])
             } else {
                 configured
@@ -632,7 +636,9 @@ impl Tool for ShellTool {
 fn extract_candidate_paths(command: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for raw in command.split(|c: char| c.is_whitespace() || "&|;<>".contains(c)) {
-        let tok = raw.trim_matches(|c: char| c == '\'' || c == '"').trim_end_matches('/');
+        let tok = raw
+            .trim_matches(|c: char| c == '\'' || c == '"')
+            .trim_end_matches('/');
         if !tok.starts_with('/') || tok == "/" || tok.contains('"') {
             continue;
         }
@@ -1216,7 +1222,11 @@ mod tests {
                 tokio::time::sleep(std::time::Duration::from_millis(50 * (attempt + 1))).await;
                 continue;
             }
-            assert!(result.is_error, "expected error on SIGKILL: {}", result.output);
+            assert!(
+                result.is_error,
+                "expected error on SIGKILL: {}",
+                result.output
+            );
             assert!(
                 result.output.contains("[diagnostic]"),
                 "expected diagnostic block in output: {}",

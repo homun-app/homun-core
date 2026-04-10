@@ -85,9 +85,7 @@ impl super::Tunnel for NgrokTunnel {
         .await
         .context("Timed out waiting for ngrok URL (15s)")??;
 
-        tokio::spawn(async move {
-            while let Ok(Some(_line)) = reader.next_line().await {}
-        });
+        tokio::spawn(async move { while let Ok(Some(_line)) = reader.next_line().await {} });
 
         self.child = Some(child);
         Ok(url)

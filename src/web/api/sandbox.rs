@@ -62,7 +62,10 @@ async fn put_execution_sandbox(
         let mut config = state.config.write().await;
         config.security.execution_sandbox = sandbox;
     }
-    if let Err(e) = state.save_config_section(crate::config::SECTION_SANDBOX).await {
+    if let Err(e) = state
+        .save_config_section(crate::config::SECTION_SANDBOX)
+        .await
+    {
         tracing::error!("Failed to save execution sandbox config: {}", e);
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,

@@ -59,7 +59,10 @@ async fn upsert_site(
     if !["headless", "visible", "auto"].contains(&req.mode.as_str()) {
         return Ok(Json(SiteActionResponse {
             success: false,
-            message: format!("Invalid mode '{}'. Must be headless, visible, or auto.", req.mode),
+            message: format!(
+                "Invalid mode '{}'. Must be headless, visible, or auto.",
+                req.mode
+            ),
         }));
     }
 
@@ -114,8 +117,7 @@ async fn get_site_memory(
     let data_dir = crate::config::Config::data_dir();
     let brain_dir = data_dir.join("brain");
 
-    let memory =
-        crate::browser::site_memory::load_site_memory(&brain_dir, None, &domain).await;
+    let memory = crate::browser::site_memory::load_site_memory(&brain_dir, None, &domain).await;
 
     match memory {
         Some(mem) => {
@@ -147,7 +149,9 @@ async fn delete_site_memory(
         match tokio::fs::remove_file(&path).await {
             Ok(()) => Json(SiteActionResponse {
                 success: true,
-                message: format!("Site memory for '{domain}' deleted. Will re-learn on next visit."),
+                message: format!(
+                    "Site memory for '{domain}' deleted. Will re-learn on next visit."
+                ),
             }),
             Err(e) => Json(SiteActionResponse {
                 success: false,
@@ -180,10 +184,7 @@ pub(crate) fn routes() -> Router<Arc<AppState>> {
             "/v1/browser/allowed-sites",
             get(list_sites).post(upsert_site),
         )
-        .route(
-            "/v1/browser/allowed-sites/{domain}",
-            delete(delete_site),
-        )
+        .route("/v1/browser/allowed-sites/{domain}", delete(delete_site))
         .route(
             "/v1/browser/site-memory/{domain}",
             get(get_site_memory).delete(delete_site_memory),

@@ -285,7 +285,16 @@ impl RagEngine {
         let source_ns_map: HashMap<i64, String> = sources
             .iter()
             .filter(|s| source_ids.contains(&s.id))
-            .map(|s| (s.id, if s.namespace.is_empty() { "_private".to_string() } else { s.namespace.clone() }))
+            .map(|s| {
+                (
+                    s.id,
+                    if s.namespace.is_empty() {
+                        "_private".to_string()
+                    } else {
+                        s.namespace.clone()
+                    },
+                )
+            })
             .collect();
 
         let results = merged
@@ -628,7 +637,10 @@ mod tests {
             "# Heading One\n\nSome content about Rust.\n\n# Heading Two\n\nMore about async.",
         );
 
-        let result = rag.ingest_file(&md, "test", None, None, None).await.unwrap();
+        let result = rag
+            .ingest_file(&md, "test", None, None, None)
+            .await
+            .unwrap();
         assert!(result.is_some(), "Should return source_id");
 
         let sources = rag.list_sources(None).await.unwrap();
@@ -644,10 +656,16 @@ mod tests {
 
         let md = write_test_md(dir.path(), "dedup.md", "# Test\n\nContent.");
 
-        let first = rag.ingest_file(&md, "test", None, None, None).await.unwrap();
+        let first = rag
+            .ingest_file(&md, "test", None, None, None)
+            .await
+            .unwrap();
         assert!(first.is_some());
 
-        let second = rag.ingest_file(&md, "test", None, None, None).await.unwrap();
+        let second = rag
+            .ingest_file(&md, "test", None, None, None)
+            .await
+            .unwrap();
         assert!(second.is_none(), "Same file should be deduplicated");
 
         let sources = rag.list_sources(None).await.unwrap();
@@ -665,7 +683,9 @@ mod tests {
              # Databases\n\nSQLite is a lightweight embedded database engine.",
         );
 
-        rag.ingest_file(&md, "test", None, None, None).await.unwrap();
+        rag.ingest_file(&md, "test", None, None, None)
+            .await
+            .unwrap();
 
         let results = rag.search("neural networks", 5, None, None).await.unwrap();
         assert!(!results.is_empty(), "Search should return results");
@@ -684,7 +704,9 @@ mod tests {
             "# Config\n\napi_key: sk-abc123456789012345678901234567890123456789\n\nDon't share this.",
         );
 
-        rag.ingest_file(&md, "test", None, None, None).await.unwrap();
+        rag.ingest_file(&md, "test", None, None, None)
+            .await
+            .unwrap();
 
         let results = rag.search("api key config", 5, None, None).await.unwrap();
         // Find the sensitive chunk — it should be redacted
@@ -733,7 +755,9 @@ mod tests {
             "stats.md",
             "# Section A\n\nContent A.\n\n# Section B\n\nContent B.",
         );
-        rag.ingest_file(&md, "test", None, None, None).await.unwrap();
+        rag.ingest_file(&md, "test", None, None, None)
+            .await
+            .unwrap();
 
         let stats_after = rag.stats().await.unwrap();
         assert_eq!(stats_after.source_count, 1);
@@ -749,7 +773,9 @@ mod tests {
             "reindex.md",
             "# Topic A\n\nInformation about topic A.\n\n# Topic B\n\nDetails on topic B.",
         );
-        rag.ingest_file(&md, "test", None, None, None).await.unwrap();
+        rag.ingest_file(&md, "test", None, None, None)
+            .await
+            .unwrap();
 
         let stats = rag.stats().await.unwrap();
         let chunk_count_before = stats.chunk_count;

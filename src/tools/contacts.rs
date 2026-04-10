@@ -145,7 +145,8 @@ impl ContactsTool {
         };
         Ok(ToolResult {
             output,
-            is_error: false, ..Default::default()
+            is_error: false,
+            ..Default::default()
         })
     }
 
@@ -154,7 +155,8 @@ impl ContactsTool {
         if query.is_empty() {
             return Ok(ToolResult {
                 output: "Missing 'query' for resolve".to_string(),
-                is_error: true, ..Default::default()
+                is_error: true,
+                ..Default::default()
             });
         }
         let config = self.config.read().await.clone();
@@ -169,11 +171,13 @@ impl ContactsTool {
                     result.confidence * 100.0,
                     result.resolution_path,
                 ),
-                is_error: false, ..Default::default()
+                is_error: false,
+                ..Default::default()
             }),
             None => Ok(ToolResult {
                 output: format!("Could not resolve '{query}' to any contact."),
-                is_error: false, ..Default::default()
+                is_error: false,
+                ..Default::default()
             }),
         }
     }
@@ -183,7 +187,8 @@ impl ContactsTool {
         if id == 0 {
             return Ok(ToolResult {
                 output: "Missing contact_id".into(),
-                is_error: true, ..Default::default()
+                is_error: true,
+                ..Default::default()
             });
         }
         let contact = self.db.load_contact(id).await?;
@@ -217,12 +222,14 @@ impl ContactsTool {
                 );
                 Ok(ToolResult {
                     output,
-                    is_error: false, ..Default::default()
+                    is_error: false,
+                    ..Default::default()
                 })
             }
             None => Ok(ToolResult {
                 output: format!("Contact #{id} not found"),
-                is_error: true, ..Default::default()
+                is_error: true,
+                ..Default::default()
             }),
         }
     }
@@ -232,7 +239,8 @@ impl ContactsTool {
         if name.is_empty() {
             return Ok(ToolResult {
                 output: "Missing 'name' for create".into(),
-                is_error: true, ..Default::default()
+                is_error: true,
+                ..Default::default()
             });
         }
         let id = self
@@ -260,7 +268,8 @@ impl ContactsTool {
 
         Ok(ToolResult {
             output: format!("Created contact #{id}: {name}"),
-            is_error: false, ..Default::default()
+            is_error: false,
+            ..Default::default()
         })
     }
 
@@ -269,7 +278,8 @@ impl ContactsTool {
         if id == 0 {
             return Ok(ToolResult {
                 output: "Missing contact_id".into(),
-                is_error: true, ..Default::default()
+                is_error: true,
+                ..Default::default()
             });
         }
         let upd = ContactUpdate {
@@ -308,7 +318,8 @@ impl ContactsTool {
         if contact_id == 0 || channel.is_empty() || identifier.is_empty() {
             return Ok(ToolResult {
                 output: "Missing contact_id, channel, or identifier".into(),
-                is_error: true, ..Default::default()
+                is_error: true,
+                ..Default::default()
             });
         }
         let id = self
@@ -317,7 +328,8 @@ impl ContactsTool {
             .await?;
         Ok(ToolResult {
             output: format!("Added identity #{id}: {channel}:{identifier}"),
-            is_error: false, ..Default::default()
+            is_error: false,
+            ..Default::default()
         })
     }
 
@@ -328,7 +340,8 @@ impl ContactsTool {
         if from_id == 0 || to_id == 0 || rel_type.is_empty() {
             return Ok(ToolResult {
                 output: "Missing contact_id, to_contact_id, or relationship_type".into(),
-                is_error: true, ..Default::default()
+                is_error: true,
+                ..Default::default()
             });
         }
         let bidir = args["bidirectional"].as_bool().unwrap_or(false);
@@ -345,7 +358,8 @@ impl ContactsTool {
             .await?;
         Ok(ToolResult {
             output: format!("Added relationship #{id}: {rel_type}"),
-            is_error: false, ..Default::default()
+            is_error: false,
+            ..Default::default()
         })
     }
 
@@ -356,7 +370,8 @@ impl ContactsTool {
         if contact_id == 0 || event_type.is_empty() || date.is_empty() {
             return Ok(ToolResult {
                 output: "Missing contact_id, event_type, or date".into(),
-                is_error: true, ..Default::default()
+                is_error: true,
+                ..Default::default()
             });
         }
         let id = self
@@ -373,7 +388,8 @@ impl ContactsTool {
             .await?;
         Ok(ToolResult {
             output: format!("Added event #{id}: {event_type} on {date}"),
-            is_error: false, ..Default::default()
+            is_error: false,
+            ..Default::default()
         })
     }
 
@@ -383,7 +399,8 @@ impl ContactsTool {
         if events.is_empty() {
             return Ok(ToolResult {
                 output: format!("No events in the next {days} days."),
-                is_error: false, ..Default::default()
+                is_error: false,
+                ..Default::default()
             });
         }
         let lines: Vec<String> = events
@@ -400,7 +417,8 @@ impl ContactsTool {
             .collect();
         Ok(ToolResult {
             output: format!("Upcoming events (next {days} days):\n{}", lines.join("\n")),
-            is_error: false, ..Default::default()
+            is_error: false,
+            ..Default::default()
         })
     }
 
@@ -409,7 +427,8 @@ impl ContactsTool {
         if message.is_empty() {
             return Ok(ToolResult {
                 output: "Missing 'message'".into(),
-                is_error: true, ..Default::default()
+                is_error: true,
+                ..Default::default()
             });
         }
 
@@ -424,7 +443,8 @@ impl ContactsTool {
         } else {
             return Ok(ToolResult {
                 output: "Provide contact_id or query to identify the recipient".into(),
-                is_error: true, ..Default::default()
+                is_error: true,
+                ..Default::default()
             });
         };
 
@@ -453,7 +473,8 @@ impl ContactsTool {
                              and your message content.",
                             name = c.name,
                         ),
-                        is_error: false, ..Default::default()
+                        is_error: false,
+                        ..Default::default()
                     })
                 } else {
                     let available = identities
@@ -472,13 +493,15 @@ impl ContactsTool {
                                 available
                             },
                         ),
-                        is_error: true, ..Default::default()
+                        is_error: true,
+                        ..Default::default()
                     })
                 }
             }
             None => Ok(ToolResult {
                 output: "Contact not found. Create it first or provide a valid contact_id.".into(),
-                is_error: true, ..Default::default()
+                is_error: true,
+                ..Default::default()
             }),
         }
     }

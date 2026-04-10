@@ -188,33 +188,29 @@ impl Database {
         profile_id: Option<i64>,
     ) -> Result<Vec<i64>> {
         let deleted_ids: Vec<(i64,)> = match profile_id {
-            Some(pid) => {
-                sqlx::query_as(
-                    "SELECT id FROM memory_chunks
+            Some(pid) => sqlx::query_as(
+                "SELECT id FROM memory_chunks
                      WHERE profile_id IS NULL OR profile_id = ?
                      ORDER BY importance ASC, created_at ASC
                      LIMIT (SELECT MAX(0, COUNT(*) - ?)
                             FROM memory_chunks
                             WHERE profile_id IS NULL OR profile_id = ?)",
-                )
-                .bind(pid)
-                .bind(keep_count as i64)
-                .bind(pid)
-                .fetch_all(self.pool())
-                .await
-                .context("Failed to identify chunks to prune for profile")?
-            }
-            None => {
-                sqlx::query_as(
-                    "SELECT id FROM memory_chunks
+            )
+            .bind(pid)
+            .bind(keep_count as i64)
+            .bind(pid)
+            .fetch_all(self.pool())
+            .await
+            .context("Failed to identify chunks to prune for profile")?,
+            None => sqlx::query_as(
+                "SELECT id FROM memory_chunks
                      ORDER BY importance ASC, created_at ASC
                      LIMIT (SELECT MAX(0, COUNT(*) - ?) FROM memory_chunks)",
-                )
-                .bind(keep_count as i64)
-                .fetch_all(self.pool())
-                .await
-                .context("Failed to identify chunks to prune")?
-            }
+            )
+            .bind(keep_count as i64)
+            .fetch_all(self.pool())
+            .await
+            .context("Failed to identify chunks to prune")?,
         };
 
         if deleted_ids.is_empty() {
@@ -333,10 +329,7 @@ impl Database {
     // --- Memory audit operations (visibility classification) ---
 
     /// Count chunks by namespace for the audit dashboard, scoped to a profile.
-    pub async fn audit_namespace_counts(
-        &self,
-        profile_id: Option<i64>,
-    ) -> Result<(i64, i64, i64)> {
+    pub async fn audit_namespace_counts(&self, profile_id: Option<i64>) -> Result<(i64, i64, i64)> {
         let profile_filter = match profile_id {
             Some(_) => " AND (profile_id IS NULL OR profile_id = ?)",
             None => "",
@@ -349,7 +342,10 @@ impl Database {
         if let Some(pid) = profile_id {
             q = q.bind(pid);
         }
-        let private = q.fetch_one(self.pool()).await.context("Failed to count private owner chunks")?;
+        let private = q
+            .fetch_one(self.pool())
+            .await
+            .context("Failed to count private owner chunks")?;
 
         let sql = format!(
             "SELECT COUNT(*) FROM memory_chunks WHERE namespace != '_private'{profile_filter}"
@@ -358,7 +354,10 @@ impl Database {
         if let Some(pid) = profile_id {
             q = q.bind(pid);
         }
-        let public = q.fetch_one(self.pool()).await.context("Failed to count public chunks")?;
+        let public = q
+            .fetch_one(self.pool())
+            .await
+            .context("Failed to count public chunks")?;
 
         let sql = format!(
             "SELECT COUNT(*) FROM memory_chunks WHERE contact_id IS NOT NULL{profile_filter}"
@@ -367,7 +366,10 @@ impl Database {
         if let Some(pid) = profile_id {
             q = q.bind(pid);
         }
-        let contact_scoped = q.fetch_one(self.pool()).await.context("Failed to count contact-scoped chunks")?;
+        let contact_scoped = q
+            .fetch_one(self.pool())
+            .await
+            .context("Failed to count contact-scoped chunks")?;
 
         Ok((private, public, contact_scoped))
     }

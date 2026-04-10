@@ -173,7 +173,12 @@ impl BrowserPool {
         }
 
         // Slow path: start a new MCP process for this profile
-        let headless_override = self.headless_overrides.read().await.get(profile_name).copied();
+        let headless_override = self
+            .headless_overrides
+            .read()
+            .await
+            .get(profile_name)
+            .copied();
         let mcp_config = {
             let config = self.config.read().await;
             browser_mcp_server_config_with_override(
@@ -181,9 +186,7 @@ impl BrowserPool {
                 profile_name,
                 headless_override,
             )
-            .with_context(|| {
-                format!("Profile '{profile_name}' not found or browser disabled")
-            })?
+            .with_context(|| format!("Profile '{profile_name}' not found or browser disabled"))?
         };
 
         let sandbox_config = {
@@ -233,7 +236,10 @@ impl BrowserPool {
     ///
     /// Returns to the config-defined headless setting for this profile.
     pub async fn restart_headless(&self, profile_name: &str) -> Result<Arc<McpPeer>> {
-        tracing::info!(profile = profile_name, "Switching browser back to headless mode");
+        tracing::info!(
+            profile = profile_name,
+            "Switching browser back to headless mode"
+        );
         self.shutdown_profile(profile_name).await;
         self.headless_overrides.write().await.remove(profile_name);
         self.get_or_start(profile_name).await
@@ -303,9 +309,7 @@ pub fn cleanup_orphan_playwright_processes() {
         let homun_marker = ".homun/browser-profiles";
 
         // Find npx/playwright-mcp processes with our data dir in args
-        let output = Command::new("ps")
-            .args(["aux"])
-            .output();
+        let output = Command::new("ps").args(["aux"]).output();
 
         let output = match output {
             Ok(o) => o,
@@ -334,7 +338,10 @@ pub fn cleanup_orphan_playwright_processes() {
                 if pid == std::process::id() {
                     continue;
                 }
-                tracing::info!(pid, "Killing orphaned Playwright process from previous session");
+                tracing::info!(
+                    pid,
+                    "Killing orphaned Playwright process from previous session"
+                );
                 let _ = Command::new("kill").arg(pid.to_string()).output();
                 killed += 1;
             }

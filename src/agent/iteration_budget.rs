@@ -213,8 +213,13 @@ pub(crate) fn normalize_signature_for_cycle(sig: &str) -> String {
                 // but strip variable params (ref IDs, URLs, text).
                 // Signature format: browser:{"action":"navigate","url":"..."}
                 if let Some(args_start) = segment.find('{') {
-                    if let Ok(args) = serde_json::from_str::<serde_json::Value>(&segment[args_start..]) {
-                        let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("unknown");
+                    if let Ok(args) =
+                        serde_json::from_str::<serde_json::Value>(&segment[args_start..])
+                    {
+                        let action = args
+                            .get("action")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
                         return format!("browser:{action}");
                     }
                 }
@@ -305,13 +310,19 @@ mod tests {
 
     #[test]
     fn detect_cycle_period_2() {
-        let sigs: Vec<String> = vec!["a", "b", "a", "b"].into_iter().map(String::from).collect();
+        let sigs: Vec<String> = vec!["a", "b", "a", "b"]
+            .into_iter()
+            .map(String::from)
+            .collect();
         assert_eq!(detect_cycle(&sigs), Some(2));
     }
 
     #[test]
     fn no_cycle_when_different() {
-        let sigs: Vec<String> = vec!["a", "b", "c", "d"].into_iter().map(String::from).collect();
+        let sigs: Vec<String> = vec!["a", "b", "c", "d"]
+            .into_iter()
+            .map(String::from)
+            .collect();
         assert_eq!(detect_cycle(&sigs), None);
     }
 }

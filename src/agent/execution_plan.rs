@@ -508,9 +508,7 @@ impl ExecutionPlanState {
         }
 
         lines.push(String::new());
-        lines.push(
-            "Please inform the user about what you found and what blocked you.".to_string(),
-        );
+        lines.push("Please inform the user about what you found and what blocked you.".to_string());
 
         lines.join("\n")
     }
@@ -565,7 +563,9 @@ impl ExecutionPlanState {
 
     /// Whether any step was skipped (partial failure).
     fn has_skipped_steps(&self) -> bool {
-        self.explicit_steps.iter().any(|s| s.status == StepStatus::Skipped)
+        self.explicit_steps
+            .iter()
+            .any(|s| s.status == StepStatus::Skipped)
     }
 
     /// Skip the current in-progress step. Does NOT clear failed_approaches
@@ -738,9 +738,7 @@ impl ExecutionPlanState {
         ];
 
         // Parse plan snapshot and show step status
-        if let Ok(snap) =
-            serde_json::from_str::<ExecutionPlanSnapshot>(&checkpoint.plan_json)
-        {
+        if let Ok(snap) = serde_json::from_str::<ExecutionPlanSnapshot>(&checkpoint.plan_json) {
             if !snap.explicit_steps.is_empty() {
                 lines.push("Progress before interruption:".to_string());
                 for step in &snap.explicit_steps {
@@ -1486,10 +1484,7 @@ mod tests {
     fn semantic_advance_web_search() {
         let mut state = ExecutionPlanState::new("task");
         state.set_explicit_plan(
-            vec![
-                "Cerca negozi Diesel".into(),
-                "Estrai i dettagli".into(),
-            ],
+            vec!["Cerca negozi Diesel".into(), "Estrai i dettagli".into()],
             None,
         );
 
@@ -1503,10 +1498,7 @@ mod tests {
     fn semantic_advance_write_file() {
         let mut state = ExecutionPlanState::new("task");
         state.set_explicit_plan(
-            vec![
-                "Raccogli dati".into(),
-                "Salva il file CSV".into(),
-            ],
+            vec!["Raccogli dati".into(), "Salva il file CSV".into()],
             None,
         );
 
@@ -1522,10 +1514,7 @@ mod tests {
     #[test]
     fn progress_status_updates_on_change() {
         let mut state = ExecutionPlanState::new("task");
-        state.set_explicit_plan(
-            vec!["Step A".into(), "Step B".into()],
-            None,
-        );
+        state.set_explicit_plan(vec!["Step A".into(), "Step B".into()], None);
 
         let s1 = state.progress_status();
         assert!(s1.is_some());
@@ -1547,10 +1536,7 @@ mod tests {
     #[test]
     fn checkpoint_summary_has_structure() {
         let mut state = ExecutionPlanState::new("Find Diesel stores");
-        state.set_explicit_plan(
-            vec!["Search web".into(), "Extract data".into()],
-            None,
-        );
+        state.set_explicit_plan(vec!["Search web".into(), "Extract data".into()], None);
 
         state.note_iteration("web_search", "found results");
         // Step 0 advances, now on step 1
@@ -1565,11 +1551,13 @@ mod tests {
         state.set_explicit_plan(vec!["Difficult step".into()], None);
 
         // Exhaust everything
-        for _ in 0..(super::MAX_ITERATIONS_PER_STEP * (super::MAX_STRATEGY_ROTATIONS as u32 + 1))
-        {
+        for _ in 0..(super::MAX_ITERATIONS_PER_STEP * (super::MAX_STRATEGY_ROTATIONS as u32 + 1)) {
             let action = state.note_iteration("browser", "same result");
             if let super::PlanAction::GiveUp { report } = action {
-                assert!(report.contains("[FAILED]"), "Report should show failed step");
+                assert!(
+                    report.contains("[FAILED]"),
+                    "Report should show failed step"
+                );
                 assert!(report.contains("Attempt"), "Report should include attempts");
                 return;
             }

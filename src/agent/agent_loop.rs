@@ -532,11 +532,7 @@ impl AgentLoop {
                     // Emergency compact the in-memory session
                     // The next process_message_inner call will reload from session,
                     // but we also trim the stored history to prevent immediate re-overflow
-                    if let Err(trim_err) = self
-                        .db
-                        .delete_old_messages(session_key, 6)
-                        .await
-                    {
+                    if let Err(trim_err) = self.db.delete_old_messages(session_key, 6).await {
                         tracing::warn!(
                             error = %trim_err,
                             "Failed to trim session history for retry"
@@ -3448,7 +3444,10 @@ impl AgentLoop {
 
                             // Budget pruning: remove low-value chunks if over limit
                             if max_memory_chunks > 0 {
-                                match memory.prune_if_over_budget(max_memory_chunks, profile_id).await {
+                                match memory
+                                    .prune_if_over_budget(max_memory_chunks, profile_id)
+                                    .await
+                                {
                                     Ok(pruned_ids) if !pruned_ids.is_empty() => {
                                         tracing::info!(
                                             pruned = pruned_ids.len(),

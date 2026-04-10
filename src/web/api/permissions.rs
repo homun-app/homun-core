@@ -44,7 +44,10 @@ async fn put_permissions(
         let mut config = state.config.write().await;
         config.permissions = perms;
     }
-    if let Err(e) = state.save_config_section(crate::config::SECTION_PERMISSIONS).await {
+    if let Err(e) = state
+        .save_config_section(crate::config::SECTION_PERMISSIONS)
+        .await
+    {
         tracing::error!("Failed to save permissions config: {}", e);
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }
@@ -88,7 +91,10 @@ async fn add_acl_entry(
     config.permissions.acl.push(entry);
     drop(config);
 
-    if let Err(e) = state.save_config_section(crate::config::SECTION_PERMISSIONS).await {
+    if let Err(e) = state
+        .save_config_section(crate::config::SECTION_PERMISSIONS)
+        .await
+    {
         tracing::error!("Failed to save ACL entry: {}", e);
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }
@@ -108,7 +114,10 @@ async fn delete_acl_entry(
         config.permissions.acl.remove(idx);
         drop(config);
 
-        if let Err(e) = state.save_config_section(crate::config::SECTION_PERMISSIONS).await {
+        if let Err(e) = state
+            .save_config_section(crate::config::SECTION_PERMISSIONS)
+            .await
+        {
             tracing::error!("Failed to save after ACL delete: {}", e);
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }

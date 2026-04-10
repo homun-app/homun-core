@@ -176,7 +176,10 @@ fn extract_fence_blocks(text: &str) -> (String, Vec<ResponseBlock>) {
             } else if let Ok(arr) = serde_json::from_str::<Vec<ResponseBlock>>(json_str) {
                 blocks.extend(arr);
             } else {
-                tracing::debug!(json = json_str, "Failed to parse fence block JSON — keeping as markdown");
+                tracing::debug!(
+                    json = json_str,
+                    "Failed to parse fence block JSON — keeping as markdown"
+                );
                 // Keep the fence in the output as-is
                 cleaned.push_str(&rest[start..start + 9 + body_start + close + 3]);
             }
@@ -213,7 +216,10 @@ pub fn extract_blocks(text: &str) -> (String, Vec<ResponseBlock>) {
 
     // Fallback: auto-detect structured patterns in markdown
     if let Some(auto_blocks) = detect_blocks_from_markdown(text) {
-        tracing::debug!(count = auto_blocks.len(), "Auto-detected blocks from markdown");
+        tracing::debug!(
+            count = auto_blocks.len(),
+            "Auto-detected blocks from markdown"
+        );
         return (text.to_string(), auto_blocks);
     }
 
@@ -297,13 +303,12 @@ fn detect_numbered_items(text: &str) -> Option<Vec<ResponseBlock>> {
     }
 
     // Check field consistency: all items should have at least 1 field in common
-    let first_labels: std::collections::HashSet<&str> = items[0]
-        .2
-        .iter()
-        .map(|f| f.label.as_str())
-        .collect();
+    let first_labels: std::collections::HashSet<&str> =
+        items[0].2.iter().map(|f| f.label.as_str()).collect();
     let has_common_fields = items[1..].iter().all(|item| {
-        item.2.iter().any(|f| first_labels.contains(f.label.as_str()))
+        item.2
+            .iter()
+            .any(|f| first_labels.contains(f.label.as_str()))
     });
 
     if !has_common_fields {
@@ -337,9 +342,10 @@ fn detect_numbered_items(text: &str) -> Option<Vec<ResponseBlock>> {
                     None
                 } else {
                     // Store all fields as metadata for reference
-                    Some(serde_json::json!(
-                        fields.iter().map(|f| (f.label.clone(), f.value.clone())).collect::<std::collections::HashMap<_, _>>()
-                    ))
+                    Some(serde_json::json!(fields
+                        .iter()
+                        .map(|f| (f.label.clone(), f.value.clone()))
+                        .collect::<std::collections::HashMap<_, _>>()))
                 },
             }
         })
@@ -660,12 +666,26 @@ Quale preferisci? Posso cercare disponibilità e prenotare."#;
         match &blocks[0] {
             ResponseBlock::Choice(choice) => {
                 assert_eq!(choice.options.len(), 3, "Should have 3 options");
-                assert!(choice.options[0].label.contains("Necci"), "First option should be Necci: got {}", choice.options[0].label);
-                assert!(choice.options[1].label.contains("Adelaide"), "Second option should be Adelaide: got {}", choice.options[1].label);
-                assert!(choice.options[2].label.contains("Ciambella"), "Third option should be La Ciambella");
+                assert!(
+                    choice.options[0].label.contains("Necci"),
+                    "First option should be Necci: got {}",
+                    choice.options[0].label
+                );
+                assert!(
+                    choice.options[1].label.contains("Adelaide"),
+                    "Second option should be Adelaide: got {}",
+                    choice.options[1].label
+                );
+                assert!(
+                    choice.options[2].label.contains("Ciambella"),
+                    "Third option should be La Ciambella"
+                );
                 // Each option should have metadata with fields
                 assert!(choice.options[0].metadata.is_some(), "Should have metadata");
-                assert!(choice.options[0].subtitle.is_some(), "Should have subtitle from fields");
+                assert!(
+                    choice.options[0].subtitle.is_some(),
+                    "Should have subtitle from fields"
+                );
             }
             _ => panic!("Expected ChoiceBlock"),
         }

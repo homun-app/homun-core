@@ -42,10 +42,7 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
             "/v1/chat/uploads/{conversation_id}/{file_name}",
             get(get_chat_uploaded_file),
         )
-        .route(
-            "/v1/workspace/files/{*path}",
-            get(get_workspace_file),
-        )
+        .route("/v1/workspace/files/{*path}", get(get_workspace_file))
         .route("/v1/chat/run", get(current_chat_run))
         .route("/v1/chat/compact", axum::routing::post(compact_chat))
         .route("/v1/chat/stop", axum::routing::post(stop_chat_run))
@@ -871,17 +868,14 @@ async fn get_workspace_file(
     );
     // Content-Disposition: attachment forces download, inline allows browser preview
     let disposition = if inline { "inline" } else { "attachment" };
-    if let Ok(val) =
-        HeaderValue::from_str(&format!("{disposition}; filename=\"{file_name}\""))
-    {
+    if let Ok(val) = HeaderValue::from_str(&format!("{disposition}; filename=\"{file_name}\"")) {
         response
             .headers_mut()
             .insert(axum::http::header::CONTENT_DISPOSITION, val);
     }
-    response.headers_mut().insert(
-        CACHE_CONTROL,
-        HeaderValue::from_static("private, no-cache"),
-    );
+    response
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("private, no-cache"));
     Ok(response)
 }
 

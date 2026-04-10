@@ -291,15 +291,8 @@ impl RequestTracer {
     }
 
     /// Finalize the trace with the request outcome.
-    pub fn finalize(
-        &mut self,
-        response: &str,
-        iterations: u32,
-        tokens: u32,
-        cancelled: bool,
-    ) {
-        self.trace.final_response =
-            Some(truncate_str(response, RESPONSE_SUMMARY_MAX, "…"));
+    pub fn finalize(&mut self, response: &str, iterations: u32, tokens: u32, cancelled: bool) {
+        self.trace.final_response = Some(truncate_str(response, RESPONSE_SUMMARY_MAX, "…"));
         self.trace.total_iterations = iterations;
         self.trace.total_tokens = tokens;
         self.trace.duration_ms = self.started_at.elapsed().as_millis() as u64;
@@ -489,11 +482,14 @@ mod tests {
             "status": "completed"
         });
         let json_str = serde_json::to_string(&sample).unwrap();
-        let parsed: RequestTrace = serde_json::from_str(&json_str)
-            .expect("round-trip deserialization must succeed");
+        let parsed: RequestTrace =
+            serde_json::from_str(&json_str).expect("round-trip deserialization must succeed");
         assert_eq!(parsed.id, "abc12345");
         assert_eq!(parsed.channel, "web");
-        assert_eq!(parsed.cognition_model.as_deref(), Some("claude-sonnet-4-20250514"));
+        assert_eq!(
+            parsed.cognition_model.as_deref(),
+            Some("claude-sonnet-4-20250514")
+        );
         assert_eq!(parsed.steps.len(), 1);
         assert!(matches!(parsed.status, TraceStatus::Completed));
         let cog = parsed.cognition.unwrap();
@@ -526,8 +522,8 @@ mod tests {
             "status": "completed"
         });
         let json_str = serde_json::to_string(&old_format).unwrap();
-        let parsed: RequestTrace = serde_json::from_str(&json_str)
-            .expect("old format must deserialize (backward compat)");
+        let parsed: RequestTrace =
+            serde_json::from_str(&json_str).expect("old format must deserialize (backward compat)");
         // New fields default to None/false
         assert!(parsed.cognition_model.is_none());
         assert!(parsed.execution_model.is_none());

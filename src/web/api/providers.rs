@@ -196,8 +196,8 @@ async fn configure_provider(
         // Update API key in SECURE STORAGE (encrypted)
         if let Some(key) = &req.api_key {
             // Store API key in encrypted secrets storage
-            let secrets = crate::storage::global_secrets()
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            let secrets =
+                crate::storage::global_secrets().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
             let secret_key = crate::storage::SecretKey::provider_api_key(&req.name);
             secrets
                 .set(&secret_key, key)

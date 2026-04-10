@@ -48,9 +48,8 @@ pub fn vault_prefix_for_profile(profile_slug: Option<&str>) -> String {
 pub fn strip_vault_prefix(key: &str, profile_slug: Option<&str>) -> Option<String> {
     let prefix = vault_prefix_for_profile(profile_slug);
     if let Some(stripped) = key.strip_prefix(&prefix) {
-        let is_default = profile_slug.is_none()
-            || profile_slug == Some("default")
-            || profile_slug == Some("");
+        let is_default =
+            profile_slug.is_none() || profile_slug == Some("default") || profile_slug == Some("");
         if is_default && stripped.starts_with("p:") {
             return None;
         }

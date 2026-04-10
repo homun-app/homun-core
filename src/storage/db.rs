@@ -1783,13 +1783,12 @@ impl Database {
             .context("Failed to start mobile device delete transaction")?;
 
         // Get the token before deleting (needed for webhook_tokens cleanup)
-        let token_row = sqlx::query_scalar::<_, String>(
-            "SELECT token FROM mobile_devices WHERE id = ?",
-        )
-        .bind(id)
-        .fetch_optional(&mut *tx)
-        .await
-        .context("Failed to look up mobile device token")?;
+        let token_row =
+            sqlx::query_scalar::<_, String>("SELECT token FROM mobile_devices WHERE id = ?")
+                .bind(id)
+                .fetch_optional(&mut *tx)
+                .await
+                .context("Failed to look up mobile device token")?;
 
         let Some(token) = token_row else {
             return Ok(false);
@@ -1829,10 +1828,12 @@ impl Database {
 
         if enabled {
             // Unset all other devices first
-            sqlx::query("UPDATE mobile_devices SET is_notify_target = 0 WHERE is_notify_target = 1")
-                .execute(&mut *tx)
-                .await
-                .context("Failed to clear existing notify target")?;
+            sqlx::query(
+                "UPDATE mobile_devices SET is_notify_target = 0 WHERE is_notify_target = 1",
+            )
+            .execute(&mut *tx)
+            .await
+            .context("Failed to clear existing notify target")?;
         }
 
         let result = sqlx::query(
@@ -2404,13 +2405,14 @@ impl Database {
     ///
     /// Used to populate in-memory caches in the browser task planner
     /// and browser tool (avoids async DB calls on the hot path).
-    pub async fn load_browser_allowlist(&self) -> Result<std::collections::HashMap<String, String>> {
-        let rows = sqlx::query_as::<_, (String, String)>(
-            "SELECT domain, mode FROM browser_allowed_sites",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .context("Failed to load browser allowlist")?;
+    pub async fn load_browser_allowlist(
+        &self,
+    ) -> Result<std::collections::HashMap<String, String>> {
+        let rows =
+            sqlx::query_as::<_, (String, String)>("SELECT domain, mode FROM browser_allowed_sites")
+                .fetch_all(&self.pool)
+                .await
+                .context("Failed to load browser allowlist")?;
         Ok(rows.into_iter().collect())
     }
 
@@ -2423,8 +2425,8 @@ impl Database {
     ) -> Result<()> {
         let files_json =
             serde_json::to_string(&checkpoint.files_created).unwrap_or_else(|_| "[]".to_string());
-        let data_json = serde_json::to_string(&checkpoint.completed_data)
-            .unwrap_or_else(|_| "[]".to_string());
+        let data_json =
+            serde_json::to_string(&checkpoint.completed_data).unwrap_or_else(|_| "[]".to_string());
 
         sqlx::query(
             "INSERT INTO task_checkpoints (id, session_key, profile_id, channel, chat_id,
@@ -2461,7 +2463,22 @@ impl Database {
         &self,
         session_key: &str,
     ) -> Result<Vec<crate::agent::TaskCheckpoint>> {
-        let rows = sqlx::query_as::<_, (String, String, Option<String>, String, String, String, String, String, String, String, i64)>(
+        let rows = sqlx::query_as::<
+            _,
+            (
+                String,
+                String,
+                Option<String>,
+                String,
+                String,
+                String,
+                String,
+                String,
+                String,
+                String,
+                i64,
+            ),
+        >(
             "SELECT id, session_key, profile_id, channel, chat_id,
                     user_prompt, plan_json, files_created, completed_data, status, iteration
              FROM task_checkpoints

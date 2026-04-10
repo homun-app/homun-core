@@ -35,7 +35,10 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
             "/v1/mobile/devices/{id}/notify-target",
             post(set_notify_target),
         )
-        .route("/v1/mobile/tunnel", get(get_tunnel_config).put(save_tunnel_config))
+        .route(
+            "/v1/mobile/tunnel",
+            get(get_tunnel_config).put(save_tunnel_config),
+        )
         .route("/v1/mobile/bootstrap", get(mobile_bootstrap))
 }
 
@@ -259,7 +262,8 @@ async fn create_pairing_session(
         server_fingerprint: server_fingerprint.clone(),
         expires_at: expires_at.clone(),
     };
-    let qr_json = serde_json::to_string(&qr_payload).map_err(|error| internal_error(error.into()))?;
+    let qr_json =
+        serde_json::to_string(&qr_payload).map_err(|error| internal_error(error.into()))?;
 
     Ok(Json(CreatePairingSessionResponse {
         pairing_id,
@@ -463,8 +467,7 @@ async fn pairing_result(
                 .await
                 .map_err(internal_error)?;
             Ok(Json(
-                serde_json::to_value(response)
-                    .map_err(|error| internal_error(error.into()))?,
+                serde_json::to_value(response).map_err(|error| internal_error(error.into()))?,
             ))
         }
         "completed" => Ok(Json(serde_json::json!({
@@ -556,7 +559,9 @@ async fn set_notify_target(
         .await
         .map_err(internal_error)?;
 
-    Ok(Json(serde_json::json!({ "ok": true, "is_notify_target": enabled })))
+    Ok(Json(
+        serde_json::json!({ "ok": true, "is_notify_target": enabled }),
+    ))
 }
 
 async fn mobile_bootstrap(
@@ -671,7 +676,12 @@ async fn save_tunnel_config(
     }
 
     if provider == "ngrok" {
-        if let Some(url) = body.reserved_url.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+        if let Some(url) = body
+            .reserved_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
             if !(url.starts_with("https://") || url.starts_with("http://")) {
                 return Err(bad_request(
                     "invalid_reserved_url",
@@ -697,16 +707,8 @@ async fn save_tunnel_config(
             enabled: body.enabled,
             provider,
             auth_token,
-            reserved_url: body
-                .reserved_url
-                .unwrap_or_default()
-                .trim()
-                .to_string(),
-            custom_command: body
-                .custom_command
-                .unwrap_or_default()
-                .trim()
-                .to_string(),
+            reserved_url: body.reserved_url.unwrap_or_default().trim().to_string(),
+            custom_command: body.custom_command.unwrap_or_default().trim().to_string(),
             custom_args: body
                 .custom_args
                 .unwrap_or_default()
@@ -728,7 +730,9 @@ async fn save_tunnel_config(
     })))
 }
 
-fn require_db(state: &AppState) -> Result<&crate::storage::Database, (StatusCode, Json<serde_json::Value>)> {
+fn require_db(
+    state: &AppState,
+) -> Result<&crate::storage::Database, (StatusCode, Json<serde_json::Value>)> {
     state
         .db
         .as_ref()
@@ -822,9 +826,7 @@ fn validate_platform(platform: &str) -> Result<(), (StatusCode, Json<serde_json:
     }
 }
 
-fn require_mobile_scope(
-    auth: &AuthUser,
-) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+fn require_mobile_scope(auth: &AuthUser) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
     match &auth.auth_method {
         crate::web::auth::AuthMethod::BearerToken { scope }
             if matches!(scope.as_str(), "mobile" | "mobile_stop") =>

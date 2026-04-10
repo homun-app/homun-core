@@ -34,18 +34,12 @@ pub enum BrowserTaskClass {
 pub enum BrowserActionDecision {
     /// Action is allowed. If `mode_switch` is set, the agent loop must
     /// switch the browser to the given mode BEFORE executing the action.
-    Allow {
-        mode_switch: Option<String>,
-    },
+    Allow { mode_switch: Option<String> },
     /// Action is blocked. The reason is sent back to the LLM as a tool error.
-    Blocked {
-        reason: String,
-    },
+    Blocked { reason: String },
     /// Site not in the allowlist. The agent loop should send a choice block
     /// to the user for approval (not the LLM — the user directly).
-    SiteNotAllowed {
-        domain: String,
-    },
+    SiteNotAllowed { domain: String },
     /// The agent is stuck in an unrecoverable loop. Tell the user.
     GiveUp,
 }
@@ -281,10 +275,7 @@ impl BrowserTaskPlanState {
     }
 
     /// Check navigate action against allowlist and determine mode switching.
-    fn check_navigate(
-        &mut self,
-        arguments: &serde_json::Value,
-    ) -> Option<BrowserActionDecision> {
+    fn check_navigate(&mut self, arguments: &serde_json::Value) -> Option<BrowserActionDecision> {
         let url = arguments.get("url").and_then(|v| v.as_str())?;
 
         // Internal URLs always allowed
@@ -335,12 +326,7 @@ impl BrowserTaskPlanState {
     // ── Result tracking ────────────────────────────────────────
 
     /// Update state after a browser tool result.
-    pub fn note_result(
-        &mut self,
-        action: &str,
-        output: &str,
-        arguments: &serde_json::Value,
-    ) {
+    pub fn note_result(&mut self, action: &str, output: &str, arguments: &serde_json::Value) {
         // Track action for loop detection
         let target = extract_action_target(action, Some(arguments), output);
         let action_key = format!("{action}:{target}");
@@ -470,8 +456,8 @@ impl BrowserTaskPlanState {
     fn escalate(&mut self) {
         let prev = self.stuck_level;
         // Only escalate for "auto" mode sites (or when no mode set = default behavior)
-        let can_switch_visible = self.current_mode.as_deref() == Some("auto")
-            || self.current_mode.is_none();
+        let can_switch_visible =
+            self.current_mode.as_deref() == Some("auto") || self.current_mode.is_none();
 
         self.stuck_level = match prev {
             0 => 1,
@@ -543,13 +529,12 @@ impl BrowserTaskPlanState {
     /// Extract a compact user profile from USER.md.
     fn compact_user_profile(&self) -> Option<String> {
         let default_brain = crate::config::Config::brain_dir();
-        let dir = self
-            .profile_brain_dir
-            .as_deref()
-            .unwrap_or(&default_brain);
+        let dir = self.profile_brain_dir.as_deref().unwrap_or(&default_brain);
         let user_md = dir.join("USER.md");
         let content = std::fs::read_to_string(&user_md)
-            .or_else(|_| std::fs::read_to_string(crate::config::Config::brain_dir().join("USER.md")))
+            .or_else(|_| {
+                std::fs::read_to_string(crate::config::Config::brain_dir().join("USER.md"))
+            })
             .ok()?;
 
         let mut identity_lines = Vec::new();
@@ -591,8 +576,7 @@ fn detect_action_cycle(actions: &[&str]) -> Option<usize> {
         if len < 2 * period {
             continue;
         }
-        let is_cycle =
-            (0..period).all(|i| actions[len - 1 - i] == actions[len - 1 - i - period]);
+        let is_cycle = (0..period).all(|i| actions[len - 1 - i] == actions[len - 1 - i - period]);
         if is_cycle {
             // Exclude degenerate case: all actions in the period are identical.
             // That is just a period-1 cycle repeated at a higher period, already
@@ -743,7 +727,10 @@ mod tests {
         );
 
         // google.com allowed
-        let d = p.check_action("navigate", &serde_json::json!({"url": "https://google.com"}));
+        let d = p.check_action(
+            "navigate",
+            &serde_json::json!({"url": "https://google.com"}),
+        );
         assert!(matches!(d, BrowserActionDecision::Allow { .. }));
 
         // trenitalia.com not listed
@@ -930,12 +917,36 @@ mod tests {
         let click = serde_json::json!({"action": "click", "ref": "e553"});
 
         // Each click shows a different month → output hash changes → no loop
-        p.note_result("click", "Clicked. Calendar shows April 2026 (472 elements)", &click);
-        p.note_result("click", "Clicked. Calendar shows May 2026 (472 elements)", &click);
-        p.note_result("click", "Clicked. Calendar shows June 2026 (472 elements)", &click);
-        p.note_result("click", "Clicked. Calendar shows July 2026 (472 elements)", &click);
-        p.note_result("click", "Clicked. Calendar shows August 2026 (472 elements)", &click);
-        p.note_result("click", "Clicked. Calendar shows September 2026 (472 elements)", &click);
+        p.note_result(
+            "click",
+            "Clicked. Calendar shows April 2026 (472 elements)",
+            &click,
+        );
+        p.note_result(
+            "click",
+            "Clicked. Calendar shows May 2026 (472 elements)",
+            &click,
+        );
+        p.note_result(
+            "click",
+            "Clicked. Calendar shows June 2026 (472 elements)",
+            &click,
+        );
+        p.note_result(
+            "click",
+            "Clicked. Calendar shows July 2026 (472 elements)",
+            &click,
+        );
+        p.note_result(
+            "click",
+            "Clicked. Calendar shows August 2026 (472 elements)",
+            &click,
+        );
+        p.note_result(
+            "click",
+            "Clicked. Calendar shows September 2026 (472 elements)",
+            &click,
+        );
 
         // No escalation because the output changed each time
         assert_eq!(p.stuck_level, 0, "Should not escalate when output changes");

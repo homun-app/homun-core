@@ -118,7 +118,6 @@ impl TotpManager {
         tracing::warn!("TOTP code verification failed");
         false
     }
-
 }
 
 /// Generate recovery codes (10 codes, format: XXXX-XXXX)

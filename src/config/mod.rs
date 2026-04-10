@@ -55,8 +55,16 @@ pub async fn overlay_db_settings(config: &mut Config, db: &crate::storage::Datab
     }
 
     // Security
-    overlay_section!(SECTION_SANDBOX, ExecutionSandboxConfig, config.security.execution_sandbox);
-    overlay_section!(SECTION_EXFILTRATION, ExfiltrationConfig, config.security.exfiltration);
+    overlay_section!(
+        SECTION_SANDBOX,
+        ExecutionSandboxConfig,
+        config.security.execution_sandbox
+    );
+    overlay_section!(
+        SECTION_EXFILTRATION,
+        ExfiltrationConfig,
+        config.security.exfiltration
+    );
     // Permissions
     overlay_section!(SECTION_PERMISSIONS, PermissionsConfig, config.permissions);
     // Agent

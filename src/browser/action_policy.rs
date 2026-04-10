@@ -163,7 +163,9 @@ pub fn extract_domain(url: &str) -> Option<String> {
 /// `"trenitalia.com"` matches `"trenitalia.com"`.
 /// `"evilrenitalia.com"` does NOT match `"trenitalia.com"`.
 pub fn url_matches_domain(url: &str, domain: &str) -> bool {
-    let host = extract_host(url).strip_prefix("www.").unwrap_or(extract_host(url));
+    let host = extract_host(url)
+        .strip_prefix("www.")
+        .unwrap_or(extract_host(url));
     host == domain || host.ends_with(&format!(".{domain}"))
 }
 
@@ -357,7 +359,10 @@ mod tests {
 
     #[test]
     fn url_matches_domain_exact_and_subdomain() {
-        assert!(url_matches_domain("https://trenitalia.com/page", "trenitalia.com"));
+        assert!(url_matches_domain(
+            "https://trenitalia.com/page",
+            "trenitalia.com"
+        ));
         assert!(url_matches_domain(
             "https://booking.trenitalia.com",
             "trenitalia.com"

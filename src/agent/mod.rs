@@ -1,7 +1,6 @@
 mod agent_loop;
 pub mod approval_gate;
 mod attachment_router;
-pub mod data_buffer;
 pub mod auth;
 pub mod bootstrap_watcher;
 mod browser_context;
@@ -9,6 +8,7 @@ mod browser_task_plan;
 pub mod cognition;
 mod context;
 mod context_compactor;
+pub mod data_buffer;
 pub mod debounce;
 pub mod definition;
 pub mod email_approval;
@@ -23,11 +23,11 @@ pub mod orchestrator;
 pub(crate) mod profile_resolver;
 pub mod prompt; // New modular prompt system
 pub mod registry;
+pub mod request_trace;
 mod skill_activator;
 pub mod stop;
 pub mod subagent; // Make public so spawn.rs can access it
 mod tool_builder;
-pub mod request_trace;
 mod tool_veto;
 mod verifier;
 

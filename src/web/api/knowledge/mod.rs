@@ -240,7 +240,13 @@ mod inner {
             let profile_id = resolve_profile_id(&state, &params).await;
             let mut engine = rag.lock().await;
             match engine
-                .ingest_file(&tmp_path, "web", profile_id, Some(&auth.user_id), params.get("namespace").map(|s| s.as_str()))
+                .ingest_file(
+                    &tmp_path,
+                    "web",
+                    profile_id,
+                    Some(&auth.user_id),
+                    params.get("namespace").map(|s| s.as_str()),
+                )
                 .await
             {
                 Ok(Some(id)) => {
@@ -330,7 +336,14 @@ mod inner {
 
         let mut engine = rag.lock().await;
         match engine
-            .ingest_directory(&path, recursive, "web", profile_id, Some(&auth.user_id), req["namespace"].as_str())
+            .ingest_directory(
+                &path,
+                recursive,
+                "web",
+                profile_id,
+                Some(&auth.user_id),
+                req["namespace"].as_str(),
+            )
             .await
         {
             Ok(ids) => Json(serde_json::json!({

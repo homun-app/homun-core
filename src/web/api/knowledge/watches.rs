@@ -83,10 +83,7 @@ async fn list_watches(State(state): State<Arc<AppState>>) -> impl IntoResponse {
             // Enrich each watch with doc_count
             let mut items = Vec::with_capacity(watches.len());
             for w in &watches {
-                let doc_count = db
-                    .count_sources_by_path_prefix(&w.path)
-                    .await
-                    .unwrap_or(0);
+                let doc_count = db.count_sources_by_path_prefix(&w.path).await.unwrap_or(0);
                 items.push(serde_json::json!({
                     "id": w.id,
                     "path": w.path,
@@ -339,8 +336,7 @@ async fn sync_perimeters_diff(
 
     // Contacts added or retained: ensure new namespace is present
     for cid in &new_ids {
-        if let Err(e) =
-            perimeter::add_namespace_to_perimeter(db.pool(), *cid, new_namespace).await
+        if let Err(e) = perimeter::add_namespace_to_perimeter(db.pool(), *cid, new_namespace).await
         {
             tracing::warn!(contact_id = cid, error = %e, "Failed to add namespace to perimeter");
         }

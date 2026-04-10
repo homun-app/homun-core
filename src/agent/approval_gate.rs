@@ -296,8 +296,7 @@ mod tests {
             options: vec![],
         });
 
-        let outcome =
-            await_approval(block, "timeout_test", &tx, Duration::from_millis(50)).await;
+        let outcome = await_approval(block, "timeout_test", &tx, Duration::from_millis(50)).await;
 
         assert!(
             matches!(outcome, ApprovalOutcome::Timeout),
@@ -335,8 +334,7 @@ mod tests {
             .await;
         });
 
-        let outcome =
-            await_approval(block, "resolve_test", &tx, Duration::from_secs(5)).await;
+        let outcome = await_approval(block, "resolve_test", &tx, Duration::from_secs(5)).await;
 
         match outcome {
             ApprovalOutcome::Responded(resp) => {

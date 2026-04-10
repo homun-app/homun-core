@@ -122,12 +122,11 @@ pub async fn delete_profile(pool: &Pool<Sqlite>, id: i64) -> Result<()> {
     }
 
     // Load profile slug before deletion (for filesystem cleanup).
-    let slug: Option<String> =
-        sqlx::query_scalar("SELECT slug FROM profiles WHERE id = ?")
-            .bind(id)
-            .fetch_optional(&*pool)
-            .await
-            .context("Failed to load profile slug")?;
+    let slug: Option<String> = sqlx::query_scalar("SELECT slug FROM profiles WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&*pool)
+        .await
+        .context("Failed to load profile slug")?;
 
     // Cascade: delete FK-constrained child tables FIRST (no ON DELETE CASCADE on profiles FK),
     // then scoped data, then the profile itself.

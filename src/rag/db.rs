@@ -79,12 +79,14 @@ impl Database {
 
     /// Update the namespace of an existing source.
     pub async fn update_rag_source_namespace(&self, id: i64, namespace: &str) -> Result<()> {
-        sqlx::query("UPDATE rag_sources SET namespace = ?, updated_at = datetime('now') WHERE id = ?")
-            .bind(namespace)
-            .bind(id)
-            .execute(self.pool())
-            .await
-            .context("Failed to update RAG source namespace")?;
+        sqlx::query(
+            "UPDATE rag_sources SET namespace = ?, updated_at = datetime('now') WHERE id = ?",
+        )
+        .bind(namespace)
+        .bind(id)
+        .execute(self.pool())
+        .await
+        .context("Failed to update RAG source namespace")?;
         Ok(())
     }
 
@@ -169,10 +171,7 @@ impl Database {
     /// List document sources filtered by profile.
     ///
     /// Returns sources matching the given profile plus global sources (profile_id IS NULL).
-    pub async fn list_rag_sources_for_profile(
-        &self,
-        profile_id: i64,
-    ) -> Result<Vec<RagSourceRow>> {
+    pub async fn list_rag_sources_for_profile(&self, profile_id: i64) -> Result<Vec<RagSourceRow>> {
         let rows = sqlx::query_as::<_, RagSourceRow>(
             "SELECT id, file_path, file_name, file_hash, doc_type, file_size,
                     chunk_count, status, error_message, source_channel, created_at, updated_at, profile_id

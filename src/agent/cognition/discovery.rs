@@ -407,7 +407,11 @@ pub(super) async fn search_knowledge(
 
 /// Stub for when embeddings feature is disabled.
 #[cfg(not(feature = "embeddings"))]
-pub(super) async fn search_knowledge(_query: &str, _profile_ids: &[i64], _allowed_namespaces: Option<&[String]>) -> String {
+pub(super) async fn search_knowledge(
+    _query: &str,
+    _profile_ids: &[i64],
+    _allowed_namespaces: Option<&[String]>,
+) -> String {
     "[]".to_string()
 }
 

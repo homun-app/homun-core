@@ -333,5 +333,4 @@ mod tests {
         assert!(result.is_error);
         assert!(result.output.contains("Missing required parameter"));
     }
-
 }

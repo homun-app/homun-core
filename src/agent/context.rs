@@ -285,8 +285,7 @@ impl ContextBuilder {
         *self.cognition_understanding.write().await = understanding;
         *self.cognition_plan.write().await = plan;
         *self.cognition_constraints.write().await = constraints;
-        *self.cognition_intent.write().await =
-            intent.unwrap_or_default().to_string();
+        *self.cognition_intent.write().await = intent.unwrap_or_default().to_string();
         *self.cognition_success_criteria.write().await =
             success_criteria.unwrap_or_default().to_string();
     }

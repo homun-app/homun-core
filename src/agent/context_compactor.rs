@@ -556,9 +556,9 @@ mod tests {
         let big = "x".repeat(500);
         let mut messages = vec![
             make_system_msg("system"),
-            make_tool_msg("web_search", &big),  // old — should be compacted
+            make_tool_msg("web_search", &big), // old — should be compacted
             make_user_msg("middle"),
-            make_tool_msg("web_fetch", &big),   // recent — protected
+            make_tool_msg("web_fetch", &big), // recent — protected
             make_user_msg("latest"),
         ];
 

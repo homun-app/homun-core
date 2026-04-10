@@ -1258,7 +1258,12 @@ async fn skills_page() -> Html<String> {
         source_chips_html = source_chips_html,
     );
 
-    Html(page_html("Skills", "skills", &body, &["sharing-picker.js", "skills.js"]))
+    Html(page_html(
+        "Skills",
+        "skills",
+        &body,
+        &["sharing-picker.js", "skills.js"],
+    ))
 }
 
 // ─── MCP ────────────────────────────────────────────────────────
@@ -1436,7 +1441,12 @@ async fn mcp_page(State(state): State<Arc<AppState>>) -> Html<String> {
         "MCP",
         "mcp",
         &body,
-        &["connections.js", "mcp-loader.js", "sharing-picker.js", "mcp.js"],
+        &[
+            "connections.js",
+            "mcp-loader.js",
+            "sharing-picker.js",
+            "mcp.js",
+        ],
     ))
 }
 
@@ -2363,7 +2373,6 @@ fn format_uptime(secs: u64) -> String {
     }
 }
 
-
 // ─── Knowledge Page ────────────────────────────────────────────────
 
 async fn knowledge_page(State(_state): State<Arc<AppState>>) -> Html<String> {
@@ -2697,7 +2706,6 @@ pub async fn setup_wizard_page() -> Html<String> {
 
     Html(standalone_page("Setup", body))
 }
-
 
 // ─── Onboarding ─────────────────────────────────────────────────
 

@@ -203,10 +203,7 @@ mod tests {
 
     #[tokio::test]
     async fn add_data_extends_schema() {
-        let buffer = Arc::new(Mutex::new(DataBuffer::new(
-            vec!["name".into()],
-            None,
-        )));
+        let buffer = Arc::new(Mutex::new(DataBuffer::new(vec!["name".into()], None)));
         let tool = AddDataTool::new(buffer.clone());
 
         let args = serde_json::json!({

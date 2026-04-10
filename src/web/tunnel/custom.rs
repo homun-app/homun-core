@@ -64,9 +64,7 @@ impl super::Tunnel for CustomTunnel {
         .await
         .context("Timed out waiting for custom tunnel URL (30s)")??;
 
-        tokio::spawn(async move {
-            while let Ok(Some(_line)) = reader.next_line().await {}
-        });
+        tokio::spawn(async move { while let Ok(Some(_line)) = reader.next_line().await {} });
 
         self.child = Some(child);
         Ok(url)

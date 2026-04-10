@@ -546,14 +546,20 @@ impl Tool for WriteFileTool {
             Some(p) if !p.trim().is_empty() => p,
             _ => {
                 let workspace = crate::config::Config::data_dir().join("workspace");
-                let ext = if content.starts_with("Nome,") || content.starts_with("name,") || content.contains(",\"") {
+                let ext = if content.starts_with("Nome,")
+                    || content.starts_with("name,")
+                    || content.contains(",\"")
+                {
                     "csv"
                 } else if content.starts_with('{') || content.starts_with('[') {
                     "json"
                 } else {
                     "txt"
                 };
-                let name = format!("output_{}.{ext}", chrono::Utc::now().format("%Y%m%d_%H%M%S"));
+                let name = format!(
+                    "output_{}.{ext}",
+                    chrono::Utc::now().format("%Y%m%d_%H%M%S")
+                );
                 let auto_path = workspace.join(&name);
                 tracing::info!(path = %auto_path.display(), "write_file: auto-generated path (model omitted parameter)");
                 auto_path.to_string_lossy().to_string()
@@ -603,8 +609,7 @@ impl Tool for WriteFileTool {
                 {
                     if let Ok(relative) = file_canonical.strip_prefix(&ws_canonical) {
                         let url_path = relative.to_string_lossy().replace('\\', "/");
-                        let download_url =
-                            format!("/api/v1/workspace/files/{url_path}");
+                        let download_url = format!("/api/v1/workspace/files/{url_path}");
                         msg.push_str(&format!("\nDownload: {download_url}"));
 
                         let filename = path
@@ -612,9 +617,7 @@ impl Tool for WriteFileTool {
                             .map(|n| n.to_string_lossy().to_string())
                             .unwrap_or_else(|| url_path.clone());
 
-                        use crate::tools::response_blocks::{
-                            KeyValue, ResponseBlock, ResultBlock,
-                        };
+                        use crate::tools::response_blocks::{KeyValue, ResponseBlock, ResultBlock};
                         vec![ResponseBlock::Result(ResultBlock {
                             id: format!("file_{}", uuid::Uuid::new_v4()),
                             title: filename,

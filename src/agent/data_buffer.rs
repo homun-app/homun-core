@@ -69,10 +69,7 @@ impl DataBuffer {
             return String::new();
         }
 
-        let label = self
-            .label
-            .as_deref()
-            .unwrap_or("collected data");
+        let label = self.label.as_deref().unwrap_or("collected data");
 
         let mut s = format!(
             "[DATA BUFFER: {label} ({} records)]\nSchema: {}\n",
@@ -170,10 +167,7 @@ mod tests {
 
     #[test]
     fn to_csv_basic() {
-        let mut buf = DataBuffer::new(
-            vec!["name".into(), "city".into()],
-            None,
-        );
+        let mut buf = DataBuffer::new(vec!["name".into(), "city".into()], None);
 
         let mut r1 = HashMap::new();
         r1.insert("name".into(), "Store A".into());

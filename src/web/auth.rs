@@ -507,14 +507,14 @@ pub async fn auth_middleware(
                                     scope: token_row.scope,
                                 },
                             });
-                            req.extensions_mut()
-                                .insert(BearerTokenValue(token.clone()));
+                            req.extensions_mut().insert(BearerTokenValue(token.clone()));
 
                             if token.starts_with("hm_mobile_") {
                                 let db_clone = db.clone();
                                 let token_clone = token.clone();
                                 tokio::spawn(async move {
-                                    let _ = db_clone.touch_mobile_device_by_token(&token_clone).await;
+                                    let _ =
+                                        db_clone.touch_mobile_device_by_token(&token_clone).await;
                                 });
                             }
                             return next.run(req).await;

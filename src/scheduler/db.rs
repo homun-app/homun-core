@@ -96,10 +96,7 @@ impl Database {
     ///
     /// When `profile_id` is `Some`, returns automations belonging to that
     /// profile (+ global with NULL profile_id). When `None`, returns all.
-    pub async fn load_automations(
-        &self,
-        profile_id: Option<i64>,
-    ) -> Result<Vec<AutomationRow>> {
+    pub async fn load_automations(&self, profile_id: Option<i64>) -> Result<Vec<AutomationRow>> {
         let cols = "id, name, prompt, schedule, enabled, status, deliver_to,
                     trigger_kind, trigger_value,
                     last_run, last_result, created_at, updated_at,
@@ -119,8 +116,7 @@ impl Database {
                     .context("Failed to load automations for profile")?
             }
             None => {
-                let sql =
-                    format!("SELECT {cols} FROM automations ORDER BY created_at DESC");
+                let sql = format!("SELECT {cols} FROM automations ORDER BY created_at DESC");
                 sqlx::query_as::<_, AutomationRow>(&sql)
                     .fetch_all(self.pool())
                     .await

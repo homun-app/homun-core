@@ -307,8 +307,8 @@ impl BrowserTool {
         let profile = &config.browser.default_profile;
         let is_visible = pool.is_visible(profile).await;
 
-        let needs_switch = (target_mode == "visible" && !is_visible)
-            || (target_mode == "headless" && is_visible);
+        let needs_switch =
+            (target_mode == "visible" && !is_visible) || (target_mode == "headless" && is_visible);
 
         if !needs_switch {
             return;
@@ -458,9 +458,7 @@ impl BrowserTool {
             return snapshot.to_string();
         }
 
-        let mut order_hint = String::from(
-            "\n** VISUAL FORM ORDER (fill in this sequence): **\n",
-        );
+        let mut order_hint = String::from("\n** VISUAL FORM ORDER (fill in this sequence): **\n");
         for (i, item) in items.iter().enumerate() {
             let label = item.get("label").and_then(|v| v.as_str()).unwrap_or("?");
             let field_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
@@ -1272,10 +1270,7 @@ impl BrowserTool {
             .and_then(|v| v.as_str())
             .unwrap_or("down");
 
-        let amount = args
-            .get("amount")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(3);
+        let amount = args.get("amount").and_then(|v| v.as_i64()).unwrap_or(3);
 
         // Use browser_press_key for scrolling — reliable across Playwright versions.
         // Page Up/Down for large scrolls, arrow keys for smaller ones.
@@ -1595,7 +1590,9 @@ impl BrowserTool {
         tab: &crate::browser::tab_session::TabSession,
     ) -> Result<ToolResult> {
         let pool = self.pool.as_ref().ok_or_else(|| {
-            anyhow::anyhow!("Browser visibility switching requires gateway mode (pool not available)")
+            anyhow::anyhow!(
+                "Browser visibility switching requires gateway mode (pool not available)"
+            )
         })?;
 
         let config = crate::config::Config::load()
@@ -1655,7 +1652,9 @@ impl BrowserTool {
         tab: &crate::browser::tab_session::TabSession,
     ) -> Result<ToolResult> {
         let pool = self.pool.as_ref().ok_or_else(|| {
-            anyhow::anyhow!("Browser visibility switching requires gateway mode (pool not available)")
+            anyhow::anyhow!(
+                "Browser visibility switching requires gateway mode (pool not available)"
+            )
         })?;
 
         let config = crate::config::Config::load()
@@ -1705,9 +1704,7 @@ impl BrowserTool {
         // Close only this conversation's tab (not the entire browser)
         let _guard = self.operation_mutex.lock().await;
         let peer = self.peer().await;
-        self.tab_manager
-            .close_session(session_key, &peer)
-            .await;
+        self.tab_manager.close_session(session_key, &peer).await;
         Ok(ToolResult::success("Browser tab closed.".to_string()))
     }
 
@@ -1769,7 +1766,7 @@ impl BrowserTool {
             return None;
         }
 
-        let json_str = &result[result.find('{')? ..= result.rfind('}')?];
+        let json_str = &result[result.find('{')?..=result.rfind('}')?];
         let parsed: Value = serde_json::from_str(json_str).ok()?;
         let x = parsed.get("x").and_then(|v| v.as_f64())?;
         let y = parsed.get("y").and_then(|v| v.as_f64())?;
@@ -1809,7 +1806,11 @@ impl BrowserTool {
             // Try auto-detecting the CAPTCHA button via JS before falling back to coordinates
             let auto_pos = self.find_captcha_button(tab).await;
             if let Some(pos) = auto_pos {
-                tracing::info!("Auto-detected CAPTCHA button at ({:.0}, {:.0})", pos.0, pos.1);
+                tracing::info!(
+                    "Auto-detected CAPTCHA button at ({:.0}, {:.0})",
+                    pos.0,
+                    pos.1
+                );
                 pos
             } else if let (Some(x), Some(y)) = (
                 args.get("x").and_then(|v| v.as_f64()),
@@ -1846,8 +1847,7 @@ impl BrowserTool {
                     .await
                 {
                     Ok(snap) => {
-                        let compact =
-                            compact_browser_snapshot_staged(&snap, self.seen_results());
+                        let compact = compact_browser_snapshot_staged(&snap, self.seen_results());
                         let ref_count = compact.matches("[ref=").count();
                         tab.last_was_snapshot.store(true, Ordering::Relaxed);
 
@@ -2111,9 +2111,7 @@ impl Tool for BrowserTool {
         let tab = {
             let _guard = self.operation_mutex.lock().await;
             let peer = self.peer().await;
-            self.tab_manager
-                .get_or_create(&session_key, &peer)
-                .await?
+            self.tab_manager.get_or_create(&session_key, &peer).await?
         };
 
         // Reset consecutive snapshot flag for non-snapshot actions (per-tab)
