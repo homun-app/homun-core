@@ -52,11 +52,38 @@ Il dominio Configurazione governa il caricamento, la validazione, la persistenza
 - **Serializzazione**: `toml::to_string_pretty` per il salvataggio
 - **Migrazione legacy**: `ChannelsConfig::migrate_legacy_email()` promuove `[channels.email]` a `[channels.emails.default]`; `BrowserConfig::maybe_auto_enable_for_legacy_config()` abilita automaticamente il browser per config legacy se npx e disponibile
 - **Directory statiche**: `Config::data_dir()` -> `~/.homun/`, `Config::workspace_dir()`, `Config::skills_dir()`, `Config::brain_dir()`, `Config::memory_dir()`, `Config::knowledge_dir()`, `Config::cache_dir()`, `Config::logs_dir()`, `Config::tls_dir()`
-- **Nessuna tabella DB**: la config vive interamente su filesystem TOML
+- **Persistenza**: dal 2026-04 il TOML non è più l'unica sorgente — esiste un **DB overlay** (tabella `settings`, migration 052) che sovrascrive sezioni del TOML caricate all'avvio. Il TOML resta come backup e sorgente di default. Vedi feature successiva "DB Settings Overlay".
 
 #### Dipendenze
 - **Da cosa dipende**: `serde`, `toml`, `dirs` (home dir), `crate::storage` (per API key encrypted)
 - **Cosa dipende da questa feature**: tutto il sistema -- ogni modulo legge la config
+
+---
+
+### 1bis. DB Settings Overlay (2026-04)
+
+#### Comportamento Atteso
+- All'avvio, dopo `Config::load()` dal TOML, l'applicazione applica un **overlay DB**: per ogni sezione configurabile presente nella tabella `settings`, il valore JSON sovrascrive il corrispondente campo della struct `Config`. Sezioni mancanti → fallback al default TOML. JSON corrotto → warning in log + mantenimento default (mai crash).
+- **Scrittura**: quando l'utente modifica una sezione dalla Web UI o via CLI, il sistema persiste il valore in DB come **sorgente primaria** e riscrive il TOML come **backup**. Se il DB è offline (CLI senza AppState), il TOML viene comunque aggiornato in modalità best-effort.
+- **Perché esiste**: la Web UI fa hot-reload delle impostazioni senza toccare il filesystem (è transazionale, multi-istanza safe, e il DB è già il source-of-truth per altre risorse). Il TOML resta utile per configurazione manuale, backup e bootstrap.
+- **Sezioni gestite dall'overlay** (19): `security.execution_sandbox`, `security.exfiltration`, `permissions`, `agent`, `channels.telegram`, `channels.whatsapp`, `channels.discord`, `channels.slack`, `channels.email` (mappa account), `channels.web`, `tools.exec`, `browser`, `mcp`, `providers`, `storage`, `ui`, `agents` (definizioni multi-agent), `routing`.
+- **Sezioni NON nell'overlay** (by design): `memory`, `knowledge`, `skills`, `profiles` — queste sono gestite da moduli dedicati con la loro persistenza.
+- **Edge case**:
+  - Una riga DB con JSON non deserializzabile viene ignorata (warning in log con `section` + errore), e si usa il valore TOML.
+  - `cli_save_section()` è la path CLI: apre il DB puntualmente, serializza, scrive. Errori stampati su stderr ma non bloccanti.
+  - La macro `overlay_section!` incapsula il pattern deserialize → replace → track, riducendo ~200 righe di boilerplate a 19 call site.
+
+#### Dettagli Tecnici
+- **File**: `src/config/mod.rs` (funzione `overlay_db_settings`, `cli_save_section`, costanti `SECTION_*`)
+- **DB**: tabella `settings (section TEXT PRIMARY KEY, value_json TEXT, updated_at TEXT DEFAULT datetime('now'))` — migration `052_settings.sql`
+- **API DB**: `Database::get_settings_section(section) → Option<String>`, `Database::set_settings_section(section, value_json)` (INSERT OR REPLACE)
+- **Chiamata startup**: `overlay_db_settings(&mut config, &db).await` invocata dopo `Config::load()` e prima di `Arc::new(RwLock::new(config))`
+- **Pattern di sezione**: tutte le costanti `SECTION_*` seguono il formato dot-path (`security.execution_sandbox`) coerente con `dotpath.rs`
+- **Observability**: log `info` elenca le sezioni effettivamente applicate all'avvio; `debug` se il DB è vuoto
+
+#### Dipendenze
+- **Da cosa dipende**: `crate::storage::Database`, `serde_json`, struct `Config` completa
+- **Cosa dipende da questa feature**: Web UI settings pages (tutte le pagine che salvano config usano `set_settings_section` via API), CLI `homun config set ...`, bootstrap `main.rs` (chiama l'overlay)
 
 ---
 

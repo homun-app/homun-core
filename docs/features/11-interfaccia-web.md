@@ -308,6 +308,13 @@ state.stream_sessions.write().await.insert(chat_id.clone(), stream_tx);
 
 **Run persistence**: snapshot salvata async in DB via `db.upsert_web_chat_run(run)` senza bloccare il forward loop
 
+**Finalize & drain bridge (2026-04)**: lo stream WebSocket ha due proprietà critiche per evitare corrompere la run dal lato client:
+
+1. **Run finalization on tab reload** (commit `d5c3178`): quando il client ricarica la pagina mentre una run è in streaming, il server finalizza la run corrente (persistenza snapshot + chiusura stato) invece di lasciarla in `running` orfana. Al reconnect, `force-reload history` carica la run finalizzata dal DB, evitando il bug "double render" (il frontend vedeva sia la history sia i chunk live sovrapposti).
+2. **Drain stream bridge** (commit `d0c8ccd`): quando il client si disconnette, il bridge tra `stream_rx` (interno) e il WebSocket **non abortisce** — `drena` i chunk residui fino a EOF prima di chiudere. Senza questo, gli ultimi delta (il `finish` dell'LLM, gli ultimi `tool_end`, il `result` finale) venivano persi e la run risultava "tronca" al reconnect successivo.
+
+Entrambi i fix riguardano la stessa proprietà invariante: **una run avviata deve arrivare a uno stato terminale persistito**, indipendentemente da disconnessioni client intermedie.
+
 **File**: `src/web/ws.rs`
 
 #### Dipendenze
@@ -333,6 +340,19 @@ state.stream_sessions.write().await.insert(chat_id.clone(), stream_tx);
 - **Plan panel**: collapsibile bottom panel con task checklist da AI plan
 - **Auto-scroll**: segue i messaggi arrivanti, manual scroll abilita "scroll to bottom" button
 - **Connection status**: topbar mostra "Connected", "Connecting…", "Disconnected"
+- **File viewer modal (2026-04)**: quando un tool emette un `ResultBlock` con campo `Download`, il frontend rileva la signature e renderizza una card con pulsanti **View** + **Download**. Il click su View apre un modal overlay con **smart rendering per tipo di file**:
+
+  | Tipo | Rendering |
+  |---|---|
+  | `.csv`, `.tsv` | Tabella HTML con header da prima riga |
+  | `.pdf` | `<embed>` inline con controlli nativi del browser |
+  | `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg` | `<img>` full-size con fallback su errore |
+  | `.json` | Pretty-print con syntax highlighting |
+  | `.md`, `.markdown` | Reso come markdown (stesso pipeline del messaggio chat) |
+  | `.js`, `.ts`, `.py`, `.rs`, ecc. | Syntax highlighting per linguaggio |
+  | Altro | `<pre>` plain text |
+
+  Il pulsante Download triggera un `GET /api/v1/workspace/files/{*path}` con `Content-Disposition: attachment`. Il modal è chiudibile con `Escape` o click outside. Emesso da `write_file` (on-create), `view_file` (esplicito), tool con output strutturati che salvano nel workspace.
 
 #### Dettagli Tecnici
 
@@ -354,6 +374,7 @@ const conversationListEl = document.getElementById('chat-conversation-list');
 - `GET /api/v1/chat/uploads/{conversation_id}/{file_name}`
 - `GET /api/v1/chat/run` → active WebChatRunSnapshot
 - `POST /api/v1/chat/stop` → stop chat run
+- `GET /api/v1/workspace/files/{*path}` (2026-04) → serve workspace files per View/Download card del file viewer modal. Usa la sintassi wildcard Axum 0.7 (`{*path}`) per supportare path annidati. Content-Type inferito dall'estensione; Content-Disposition controllato dal query param `?download=1`.
 
 **WebSocket connection**: `ws://localhost:3000/ws/chat?conversation_id={id}`
 

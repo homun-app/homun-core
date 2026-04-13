@@ -32,8 +32,12 @@ Ogni tool implementa il trait `Tool` e viene registrato nel `ToolRegistry`.
 | 18 | `read_email_inbox` | `ReadEmailInboxTool` | Email | `channel-email` |
 | 19 | `mcp_*` | `McpManager` / peer tools | Protocollo MCP | `mcp` |
 | 20 | `mcp_token_refresh` | `McpTokenRefreshTool` | Protocollo MCP | `mcp` |
+| 21 | `send_file` | `SendFileTool` | File/Comunicazione | — |
+| 22 | `view_file` | `ViewFileTool` | File/UI | — |
+| 23 | `add_data` | `AddDataTool` | Data collection | — (dinamico) |
 
 > I tool con feature flag sono compilati solo quando la feature corrispondente è attiva in `Cargo.toml`.
+> `add_data` è **dinamico**: viene creato solo quando la fase di Cognition identifica un `data_schema` (task di raccolta dati strutturati). Lo schema dei parametri include i nomi delle colonne del `DataBuffer` in modo che l'LLM sappia esattamente quali campi fornire.
 
 ---
 
@@ -179,7 +183,9 @@ Ogni tool implementa il trait `Tool` e viene registrato nel `ToolRegistry`.
 - Fornisce quattro tool distinti per operazioni su file: lettura, scrittura, modifica e listing directory.
 - Ogni operazione è soggetta a controllo ACL (Access Control List) configurato dall'utente.
 - **`read_file`**: legge il contenuto di un file. Input: `path`. Output: contenuto testuale (max 50.000 caratteri).
-- **`write_file`**: scrive o crea un file. Input: `path`, `content`. Output: conferma.
+- **`write_file`**: scrive o crea un file. Input: `path`, `content`. Output: conferma + `ResultBlock` (con `Size` e `Download`) quando il file è dentro il workspace.
+  - **Auto-generate workspace path**: se l'LLM omette `path` (o passa path vuoto), il tool genera automaticamente un path dentro `~/.homun/workspace/` basato su un filename derivato dal content type o da un UUID. Serve a difendersi da tool call args incompleti dei modelli più piccoli.
+  - **Heredoc fallback**: quando il modello invia `{}` come args (args vuoti = truncation o mis-generation), il tool tenta un fallback via shell heredoc parsando il testo precedente della risposta LLM. Insieme al salvage dei truncated tool call args lato provider, elimina la classe "generated huge content but args arrived empty".
 - **`edit_file`**: modifica parziale di un file (ricerca e sostituzione o patch). Input: `path`, parametri di edit.
 - **`list_dir`**: elenca file e directory in un path. Input: `path`. Output: lista file con metadati.
 - **Controllo permessi ACL**:
@@ -222,10 +228,11 @@ Ogni tool implementa il trait `Tool` e viene registrato nel `ToolRegistry`.
 - **`web_search`**: ricerca web tramite API Brave Search. Input: `query: String`. Output: lista di risultati (titolo, URL, descrizione), numerati.
 - **`web_fetch`**: scarica e restituisce il contenuto testuale di una URL nota. Input: `url: String`. Output: testo estratto dall'HTML (max 50.000 caratteri).
 - **`web_search` — Stato errore**: API key mancante → errore descrittivo; HTTP error → errore con status code; nessun risultato → messaggio "No results found".
-- **`web_fetch` — Stato errore**: URL non valida → errore; HTTP error → errore con status; pagina JS-only → errore con hint "usa il browser tool".
+- **`web_fetch` — Stato errore**: URL non valida → errore; HTTP error → errore con status; pagina JS-only → **auto-escalate al browser tool** (vedi sotto).
 - **Edge case**:
   - `web_search`: configurabile `max_results` (parametro costruttore).
   - `web_fetch`: max 5 redirect seguiti; timeout 30 secondi; stripping HTML tag (basic); rilevazione pagine JavaScript-only.
+  - **Auto-escalate to browser** (2026-04): quando `looks_like_js_required()` identifica una SPA vuota, invece di fallire con un hint testuale, l'agent loop escala automaticamente alla pipeline browser (navigate + snapshot) senza perdere l'iterazione. Questo elimina il giro "fetch → errore → LLM capisce → ri-prompt browser" su siti JS-rendered.
   - Brave Search alternativa: è possibile integrare Tavily come provider alternativo (pattern architetturale previsto).
 
 ### Dettagli Tecnici
@@ -293,6 +300,115 @@ Ogni tool implementa il trait `Tool` e viene registrato nel `ToolRegistry`.
 
 - **Da cosa dipende**: `crate::bus::OutboundMessage`, `crate::channels::capabilities_for`, `ctx.message_tx`, `ctx.channel_defaults`
 - **Cosa dipende da questa feature**: automation job (notifiche), workflow engine (progress update), spawn subagent (completamento task)
+
+> **Nota — allegati via `send_message`**: dal 2026-04 `send_message` accetta anche il parametro `file` per allegare un file del workspace come documento di canale (stesso pipeline di `send_file`). Il tool dedicato `send_file` rimane il canale preferito per delivery esplicita; l'allegato su `send_message` è pensato per i casi in cui l'LLM vuole accompagnare un testo con un file in un'unica chiamata.
+
+---
+
+## Feature: Send File Tool
+
+### Comportamento Atteso
+
+- Consegna un file del workspace all'utente come **documento allegato** sul canale messaggistica (es. `sendDocument` di Telegram, attachment WhatsApp/Discord/Email).
+- Esiste come tool dedicato — **non è solo uno shortcut** di `send_message` — per rendere chiaro anche ai modelli più piccoli che *"mandami il file CSV"* deve instradare qui invece che tentare di dumpare bytes con `read_file`.
+- **Azioni e parametri**:
+  - `file` (obbligatorio): filename o path del file nel workspace (es. `report.pdf`, `data/out.csv`).
+  - `caption` (opzionale): messaggio di accompagnamento; default: `"File: {filename}"`.
+  - `channel` (opzionale): canale di destinazione, default il canale corrente.
+  - `chat_id` (opzionale): override destinatario, default la chat corrente.
+- **Risoluzione path**: cerca in ordine (1) path assoluto, (2) relativo al workspace, (3) solo filename dentro il workspace — specchio di `view_file`.
+- **Stato errore**: file non trovato → errore descrittivo con hint a `write_file`/`list_dir`; canale senza supporto file upload → messaggio di fallback; nessun `message_tx` (CLI) → errore.
+- **Edge case**: il file deve esistere fisicamente in `~/.homun/workspace/` al momento della chiamata; non vengono applicate ACL del filesystem tool perché il workspace è esplicitamente lo scope consentito.
+
+### Dettagli Tecnici
+
+- **File**: `src/tools/send_file.rs`
+- **Struct**: `SendFileTool` (zero-sized)
+- **Nome LLM**: `send_file`
+- **Flusso dati**:
+  1. `resolve_workspace_file(raw)` → `Option<String>` (assoluto/relativo/bare filename)
+  2. Determinazione `channel` (esplicito o da `ctx.channel`) e `chat_id`
+  3. Lookup capabilities canale via `capabilities_for(channel)`
+  4. Costruzione `OutboundMessage` con metadata `{ "file": path, "caption": ... }`
+  5. Invio via `ctx.message_tx.send(...)`
+  6. Restituisce conferma + `ResultBlock` con download link workspace
+- **Tabelle DB**: nessuna
+- **Endpoint API**: nessuno diretto; il recupero lato client passa da `GET /api/v1/workspace/files/{*path}`
+
+### Dipendenze
+
+- **Da cosa dipende**: `crate::bus::OutboundMessage`, `crate::channels::capabilities_for`, `ctx.message_tx`, `crate::config::Config::data_dir`
+- **Cosa dipende da questa feature**: `AgentLoop` (registra il tool), canali con upload file (Telegram, WhatsApp, Discord, Email), Web UI (download card inline)
+
+---
+
+## Feature: View File Tool
+
+### Comportamento Atteso
+
+- Mostra un file del workspace **inline nella chat UI** con un preview rich (modal) dotato di smart rendering per tipo di file.
+- Complementare a `read_file` (dump raw per ispezione interna) e a `send_file` (consegna su canali esterni): `view_file` è il tool giusto quando l'utente dice *"mostrami"*, *"visualizza"*, *"fammi vedere"* un file nella Web UI.
+- **Smart rendering per tipo** (gestito da `static/js/response-blocks.js`):
+  - `.csv`/`.tsv` → tabella
+  - `.pdf` → preview inline
+  - immagini → `<img>`
+  - `.json`, `.md`, sorgenti di codice → syntax highlighting
+  - altro → `<pre>` plain text
+- **Parametri**: solo `file` (obbligatorio) — filename, path relativo o assoluto dentro il workspace.
+- **Output LLM**: messaggio testuale conferma + `ResultBlock` con campi `Size` e `Download`; il frontend rileva la presenza del campo `Download` e aggiunge pulsanti View + Download che aprono il file viewer modal.
+- **Stato errore**: file mancante → errore con hint; `metadata()` fallisce → errore su stat.
+- **Edge case**: per file non dentro il workspace `build_workspace_file_block` ritorna `None` → nessun ResultBlock generato (ma tool result resta valido come testo).
+
+### Dettagli Tecnici
+
+- **File**: `src/tools/view_file.rs` (helper in `src/tools/file.rs::build_workspace_file_block`)
+- **Struct**: `ViewFileTool` (zero-sized)
+- **Nome LLM**: `view_file`
+- **Flusso dati**:
+  1. `resolve_workspace_file(raw) → Option<PathBuf>` (stesso pattern di `send_file`)
+  2. `tokio::fs::metadata(&path)` per size
+  3. `build_workspace_file_block(&path, size_bytes)` → `Option<ResponseBlock::Result>` con `Size`/`Download`
+  4. `ToolResult::with_blocks(testo, vec![block])`
+- **Endpoint API**: il frontend scarica via `GET /api/v1/workspace/files/{*path}` (rotta Axum 0.7 wildcard)
+- **Tabelle DB**: nessuna
+
+### Dipendenze
+
+- **Da cosa dipende**: `crate::tools::file::build_workspace_file_block`, `crate::tools::response_blocks::{ResultBlock, KeyValue}`, `crate::config::Config::data_dir`
+- **Cosa dipende da questa feature**: Web UI file viewer modal (`static/js/chat.js`), gateway che serializza `ResponseBlock::Result` nel WS stream
+
+---
+
+## Feature: Add Data Tool (dinamico)
+
+### Comportamento Atteso
+
+- Permette all'LLM di **accumulare record strutturati fuori dal context window** durante un task di raccolta dati (scraping di listing, comparazioni, estrazione fatti).
+- **Perché esiste**: senza di esso il modello doveva generare interi CSV come argomento di `write_file`, con conseguente troncamento frequente dei tool call args sui modelli più piccoli. `add_data` spinge i record in un `DataBuffer` lato agente, che viene esportato al termine.
+- **Attivazione**: non è un tool sempre presente — viene registrato **dinamicamente dall'agent loop** solo quando la Cognition phase identifica un `data_schema` nel `CognitionResult` (cioè quando il task richiede raccolta strutturata).
+- **Schema dei parametri dinamico**: i nomi delle colonne del `DataBuffer` vengono iniettati come `properties` dell'item record in `parameters_for_schema(&schema)`, così il modello vede esattamente quali campi fornire.
+- **Input**: `records: Array<Object>` — ogni oggetto ha i campi dello schema (tutti stringhe).
+- **Output**: conferma `"Added N records (total: M)"`.
+- **Edge case**: `records` vuoto → `"No records provided."` (success, non errore); entry non-object → skippata silenziosamente; schema non configurato → fallback a `additionalProperties: string`.
+
+### Dettagli Tecnici
+
+- **File**: `src/tools/add_data.rs`
+- **Struct**: `AddDataTool { buffer: Arc<Mutex<DataBuffer>> }` — share con l'agent loop tramite `Arc<Mutex<>>`
+- **Nome LLM**: `add_data`
+- **Metodo helper**: `AddDataTool::parameters_for_schema(schema: &[String]) → Value` per generare lo schema JSON dinamico
+- **Flusso dati**:
+  1. Cognition identifica `data_schema` in `CognitionResult`
+  2. Agent loop crea `DataBuffer` con quel schema, poi `AddDataTool::new(Arc::new(Mutex::new(buffer)))`
+  3. LLM chiama `add_data` con array di record → lock sul buffer, push N record
+  4. Al termine del task, l'agent loop esporta il buffer (tipicamente CSV) e emette `ResultBlock` con download link
+- **Tabelle DB**: nessuna (buffer in-memory per la run; esportato come file workspace)
+- **Endpoint API**: nessuno diretto
+
+### Dipendenze
+
+- **Da cosa dipende**: `crate::agent::data_buffer::DataBuffer`, `tokio::sync::Mutex`
+- **Cosa dipende da questa feature**: `AgentLoop` (registrazione dinamica via `CognitionResult.data_schema`), Cognition engine (decide quando emetterlo), esportazione finale (scrive il file workspace + emette `view_file`/download block)
 
 ---
 

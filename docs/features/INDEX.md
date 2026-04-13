@@ -1,7 +1,7 @@
 # Homun — Indice Specifiche Funzionali
 
-> **Aggiornato**: 2026-04-01
-> **Versione codebase**: ~116K LOC Rust, ~29K LOC JS, 245 source files, 864 test, 50 migrazioni SQLite
+> **Aggiornato**: 2026-04-10
+> **Versione codebase**: ~121K LOC Rust, ~29K LOC JS, 245 source files, 45 file JS, 952 test, 53 migrazioni SQLite
 
 Questo indice raccoglie le specifiche funzionali di tutti i domini di Homun.
 Ogni documento copre: comportamento atteso (prospettiva utente) + dettagli tecnici (struct, tabelle DB, endpoint API) + dipendenze.
@@ -20,6 +20,7 @@ Ogni documento copre: comportamento atteso (prospettiva utente) + dettagli tecni
 | 06 | [Sicurezza](06-sicurezza.md) | Security | Vault AES-256-GCM, Web Auth PBKDF2, E-Stop, Exfiltration Guard, Channel Pairing OTP, 2FA TOTP, Vault Leak Detection, API Keys |
 | 07 | [Automazioni e Scheduling](07-automazioni-scheduling.md) | Scheduler + Automations | Cron jobs, Automation triggers (cron/every/event), Automation Builder v2, NLP generation, Heartbeat proattivo, Background tasks |
 | 08 | [Workflow Engine](08-workflow.md) | Workflows | Workflow multi-step, Approval gates, Retry logic, Resume-on-boot, Workflow builder UI |
+| 09 | ⚰️ _Business Autopilot_ (rimosso) | — | Dominio ritirato il 2026-04-10 (commit `17087916`). Sarà riscritto da zero con logica diversa quando servirà. Numero lasciato libero come ID storico — non rinumerare le entry successive. |
 | 10 | [Contatti e Profili](10-contatti-profili.md) | Contacts + Profiles + Gateways | Contact CRUD, Context injection, Contact Perimeter, Identity Resolution, Profiles, Profile Brain Dir, Gateways, Gateway Overrides, Auto-Association |
 | 11 | [Interfaccia Web](11-interfaccia-web.md) | Web UI + API | Web Server Axum, Auth Web, API Keys, 29 Pagine, WebSocket Chat, Chat UI, Navigazione, Tema, Upload Allegati, REST API (70+ endpoint), Run State streaming, Toast, Visual Flow Builder |
 | 12 | [Browser Automation](12-browser-automation.md) | Browser | 21 browser actions, MCP Playwright Bridge, Browser Task Plan, Site Memory, Tab Sessions, Action Policy, CAPTCHA Handling, Compact Snapshots, Stealth injection |
@@ -241,12 +242,12 @@ La Web UI (pagina `/memory`) include una sezione "Visibility Audit" per gestire 
 
 | Metrica | Valore |
 |---------|--------|
-| Linee di codice Rust | ~116K LOC |
+| Linee di codice Rust | ~121K LOC |
 | Linee di codice JavaScript | ~29K LOC |
 | File sorgente Rust | 245 |
-| File JavaScript | 48 |
-| Migrazioni SQLite | 50 |
-| Test totali | 864 |
+| File JavaScript | 45 |
+| Migrazioni SQLite | 53 |
+| Test totali | 952 |
 | Canali supportati | 7 (CLI, Telegram, WhatsApp, Discord, Slack, Email, Web) |
 | Pagine Web UI | 29 |
 | REST API endpoints | 70+ |

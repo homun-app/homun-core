@@ -173,12 +173,14 @@ Parametro opzionale `profile` per tutte le azioni: se specificato, l'azione vien
 - **Rate limiting**: rileva 429/rate limit nell'output del tool. Backoff esponenziale: `30s * 2^count` (min 60s, max 240s). Blocca azioni fino alla scadenza.
 - **Retry budget**: per-ref, massimo 2 fallimenti per click. Dopo 2 timeout/errori sullo stesso ref, l'azione viene bloccata con suggerimento di usare screenshot o provare un elemento diverso.
 - **Loop detection**: finestra scorrevole di 20 azioni recenti (`RECENT_ACTION_WINDOW = 20`). Conta azioni consecutive identiche (stessa action + stesso target + stesso output hash). Soglia: `LOOP_THRESHOLD = 6` azioni identiche.
+  - **Action-aware cycle detection (2026-04)**: oltre al conteggio di azioni consecutive identiche, il detector rileva ora anche **pattern alternati A→B→A→B** e A→B→C→A→B→C nelle ultime N azioni — cattura i cicli reali in cui il modello rimbalza tra due stati (es. `click next` → `snapshot` → `click next` → `snapshot`), pattern che il match "consecutive identical" non vedeva. Integra quello che `IterationBudgetState` fa per i tool non-browser, ma qui operando sul dominio browser-specifico.
   - **Escalation**:
     - Livello 0 -> 1: "usa screenshot per diagnosticare" (blocca azioni interattive finche non viene fatto screenshot)
     - Livello 1 -> 2: auto-switch a modalita visibile (solo per siti in modo `"auto"`)
     - Livello 2 -> 3: give up — informa l'utente
   - **Distinzione loop reali vs ripetizioni legittime**: confronta anche l'hash dell'output (`hash_output_sample()`). Se l'output cambia (es. click "mese successivo" nel calendario, ogni volta mostra un mese diverso), nessuna escalation.
   - **Screenshot soddisfa il veto**: uno screenshot/snapshot a livello > 0 setta `veto_satisfied = true`, permettendo la prossima azione interattiva. Ma il livello NON si resetta — ulteriori azioni identiche continuano a escalare.
+  - **Budget extension utente (2026-04)**: quando il livello raggiunge il limite, il tool emette un `ChoiceBlock` "Extend budget" / "Stop" che permette all'utente di concedere manualmente iterazioni aggiuntive senza abortire il task.
   - Navigate resetta il livello a 0 (nuova pagina = fresh start).
 - **Azioni read-only** (snapshot, screenshot, wait, close): sempre permesse indipendentemente dallo stato.
 - **Runtime message**: costruisce contesto per l'LLM con obiettivo, dominio corrente, e profilo utente compatto (sezioni Identity/Contacts da USER.md) per form filling.
@@ -279,7 +281,7 @@ Parametro opzionale `profile` per tutte le azioni: se specificato, l'azione vien
 #### Dettagli Tecnici
 
 - **Modulo**: `src/tools/browser.rs` (metodi `action_*`)
-- **`wait_for_stable_snapshot()`**: 4 retry con delay crescenti [800, 1000, 1200, 1500] ms. Soglia minima: `MIN_INTERACTIVE = 5` elementi. Stabilita = count elementi non cresce piu (o ultimo tentativo). Delay iniziale 800ms prima del primo snapshot.
+- **`wait_for_stable_snapshot()`** (2026-04, perf tuning): finestra di attesa complessiva ridotta da **~13.5s a ~5.3s** per accelerare il loop su siti reattivi. Retry con delay crescenti più stretti; la soglia minima `MIN_INTERACTIVE = 5` elementi e il criterio di stabilità (count non cresce più o ultimo tentativo) restano invariati. La perf è misurabile sul loop browser "typico" — 5 step → ~40s di wait saved per task.
 - **Guard consecutive snapshot**: `tab.last_was_snapshot` (AtomicBool) — impedisce snapshot consecutivi. Resettato da ogni azione non-snapshot.
 - **Auto-snapshot path**: azioni interattive -> wait -> `call_mcp_on_tab("browser_snapshot")` -> `compact_browser_snapshot_staged()` -> append al risultato tool
 
@@ -454,6 +456,30 @@ Parametro opzionale `profile` per tutte le azioni: se specificato, l'azione vien
 
 - Dipende da: nessuna dipendenza esterna (usa solo la logica interna di `ExecutionPlanState`)
 - Dipendono da questo: agent loop (invoca `note_iteration()` dopo ogni risultato tool e reagisce al `PlanAction`)
+
+---
+
+### 14. Web Fetch → Browser Auto-Escalate (2026-04)
+
+#### Comportamento Atteso
+
+- Entry point esterno al dominio browser: quando `web_fetch` incontra una SPA JS-rendered (rilevata via `looks_like_js_required()`), **l'agent loop sostituisce automaticamente** il fallimento testuale con una pipeline browser (`navigate` + `snapshot`), senza chiedere all'LLM di ri-prompat-are.
+- Dal punto di vista del BrowserTaskPlan: l'azione arriva come una normale `navigate` generata dall'agent loop — passa per `check_navigate()` (allowlist), può triggerare mode switching, e viene tracciata nella finestra di cycle detection.
+- **Perché qui**: documentato in questo doc perché il punto di atterraggio effettivo è la pipeline browser. La logica di rilevamento è in `tools/web.rs`, ma l'orchestrazione (sostituzione del tool call) è nell'agent loop.
+- **Rimandi**: vedi `04-strumenti.md#feature-web-tool` per il detection side e `02-agente-cognizione.md#feature-web-fetch-auto-escalate-to-browser-2026-04` per il meccanismo di sostituzione.
+
+#### Dettagli Tecnici
+
+- File: `src/tools/web.rs` (detection `looks_like_js_required`), `src/agent/agent_loop.rs` (sostituzione)
+- Pre-requisito: `config.browser.enabled = true` — altrimenti fallback al vecchio errore testuale
+- Interazione con allowlist: l'URL deve superare `check_navigate()` del `BrowserTaskPlanState`; se non è in `browser_allowed_sites`, viene emesso un choice block all'utente per autorizzarlo una tantum (flow standard siti non in whitelist)
+- Sicurezza: l'escalate **non** bypassa il contact perimeter — se l'URL è esclusa dal perimeter dell'interlocutore, niente escalate
+- Tabelle DB: nessuna nuova; riusa `browser_allowed_sites`
+
+#### Dipendenze
+
+- Dipende da: `BrowserTool`, `BrowserTaskPlanState`, `tools::web::WebFetchTool`, `agent::agent_loop`
+- Dipendono da questo: nessuno direttamente — è trasparente per l'LLM
 
 ---
 

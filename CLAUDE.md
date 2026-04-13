@@ -9,7 +9,7 @@ Homun is a personal AI assistant written in Rust — a digital homunculus that l
 
 **Core philosophy**: single binary, local-first, privacy-focused, skill-powered.
 
-**Scale**: ~116K LOC Rust, ~29K LOC JS, 245 source files, 48 JS files, 46 SQLite migrations, 813 tests, 11-check CI pipeline.
+**Scale**: ~121K LOC Rust, ~29K LOC JS, 245 source files, 45 JS files, 53 SQLite migrations, 952 tests, 11-check CI pipeline.
 
 ## Architecture Overview
 
@@ -49,12 +49,13 @@ src/
 │   ├── browser_task_plan.rs         # Browser automation state tracking (cognition-driven)
 │   ├── browser_context.rs           # Browser context management
 │   ├── execution_plan.rs            # Structured execution plans + explicit plan steps
-│   ├── iteration_budget.rs          # LLM iteration budget enforcement
+│   ├── iteration_budget.rs          # LLM iteration budget (adaptive on cognition complexity)
 │   ├── llm_caller.rs                # LLM invocation wrapper
 │   ├── tool_builder.rs              # Tool definition builder
 │   ├── tool_veto.rs                 # Minimal runtime safety checks (search-first policy)
 │   ├── skill_activator.rs           # Skill activation logic
-│   ├── context_compactor.rs         # Context window compression
+│   ├── data_buffer.rs               # Structured data accumulator (off-context, used by add_data)
+│   ├── context_compactor.rs         # Context window compression (3-level: micro/LLM-summary/truncate)
 │   ├── debounce.rs                  # Message debouncing
 │   ├── definition.rs                # Agent definition types
 │   ├── registry.rs                  # Agent registry
@@ -80,12 +81,15 @@ src/
 │   ├── one_shot.rs                  # Unified LLM engine for non-conversational calls
 │   └── xml_dispatcher.rs            # XML fallback for models without function calling
 │
-├── tools/                           # 20+ built-in tools (33 files)
+├── tools/                           # 23+ built-in tools (37 files)
 │   ├── registry.rs                  # Tool registry + dispatch
 │   ├── shell.rs                     # Command execution (+ sandbox)
-│   ├── file.rs                      # Read/write/edit/list files
-│   ├── web.rs                       # Web search (Brave, Tavily) + fetch
-│   ├── message.rs                   # Send message to user
+│   ├── file.rs                      # Read/write/edit/list files (+ build_workspace_file_block)
+│   ├── send_file.rs                 # Deliver workspace file as channel attachment
+│   ├── view_file.rs                 # Display workspace file inline in chat UI (modal)
+│   ├── add_data.rs                  # Save structured records into DataBuffer (dynamic)
+│   ├── web.rs                       # Web search (Brave, Tavily) + fetch (auto-escalate to browser)
+│   ├── message.rs                   # Send message to user (optional file attach)
 │   ├── spawn.rs                     # Spawn background subagent
 │   ├── vault.rs                     # Encrypted secret storage
 │   ├── remember.rs                  # Update USER.md memory
@@ -93,7 +97,7 @@ src/
 │   ├── approval.rs                  # Request user approval for actions
 │   ├── automation.rs                # Create/manage automations
 │   ├── workflow.rs                  # Multi-step workflow orchestration
-│   ├── browser.rs                   # Browser automation (17 actions via MCP Playwright)
+│   ├── browser.rs                   # Browser automation (21 actions via MCP Playwright)
 │   ├── mcp.rs                       # MCP server management
 │   ├── mcp_token_refresh.rs         # MCP token refresh logic
 │   ├── contacts.rs                  # Contact management tool
@@ -210,7 +214,7 @@ src/
 │   └── background.rs                # Background task scheduling
 │
 ├── storage/
-│   ├── db.rs                        # SQLite (sqlx, 46 migrations)
+│   ├── db.rs                        # SQLite (sqlx, 53 migrations)
 │   ├── secrets.rs                   # AES-256-GCM vault + OS keychain
 │   └── fixtures.rs                  # Test fixtures
 │
@@ -301,7 +305,7 @@ static/
 - **XML fallback**: `xml_dispatcher.rs` for models without native function calling.
 
 ### Storage
-- **SQLite via sqlx** — 46 migrations, single file `~/.homun/homun.db`.
+- **SQLite via sqlx** — 53 migrations, single file `~/.homun/homun.db`.
 - **TOML** config at `~/.homun/config.toml`.
 - Never serde_json for config files.
 
@@ -374,7 +378,7 @@ The agent loop follows a 4-phase pattern: **INGRESS → COGNITION → EXECUTION 
 - MCP Playwright (`@playwright/mcp` via npx), persistent peer.
 - Stealth anti-bot injection, compact snapshots (tree-preserving).
 - Auto-snapshot after navigate/click/type.
-- 17 actions in unified `browser` tool.
+- 21 actions in unified `browser` tool.
 - Site memory (`browser/site_memory.rs`): per-site browsing patterns.
 - Tab sessions (`browser/tab_session.rs`): stateful tab management.
 - Action policy (`browser/action_policy.rs`): policy enforcement per action.
@@ -608,7 +612,7 @@ homun service install        # Install as OS service (launchd/systemd)
 
 1. `cargo check` — catch errors early.
 2. `cargo clippy` — lint before committing.
-3. `cargo test` — run 813 tests.
+3. `cargo test` — run 952 tests.
 4. `RUST_LOG=debug cargo run -- gateway` — verbose logging.
 5. Migrations in `migrations/` are auto-applied on startup.
 
@@ -715,9 +719,9 @@ Prima di dichiarare una feature completa, verifica:
 - `~/.homun/brain/` — Agent-writable memory (USER.md, INSTRUCTIONS.md, SOUL.md)
 - `~/.homun/skills/` — User-installed skills
 - `./skills/` — Project-local bundled skills (5)
-- `./migrations/` — SQLite migrations (46, auto-applied)
+- `./migrations/` — SQLite migrations (53, auto-applied)
 - `./docs/services/` — Per-domain architecture docs
-- `./static/` — Web UI assets (CSS + 48 JS files)
+- `./static/` — Web UI assets (CSS + 45 JS files)
 
 ## File Locations (Runtime)
 

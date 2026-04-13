@@ -264,12 +264,17 @@ L'architettura è implementata in Rust con asincronia `tokio`. I moduli principa
 ### Comportamento Atteso
 
 - Il budget di iterazioni limita il numero massimo di chiamate LLM nel loop di esecuzione per singola richiesta.
-- Il budget è dinamico: si estende quando il modello fa progressi reali (tool call utili e non ripetute), si contrae in caso di stallo o cicli.
-- Stall detection: se le ultime 4+ iterazioni non producono tool call utili o nuove, il budget viene contratto a `iteration + 2`.
-- Cycle detection: rileva cicli di periodo 1, 2, 3 nelle firme delle tool call (exact match e fuzzy match per `web_search`/`web_fetch`).
-- Budget extension: +10 per browser-heavy, +4 per search-heavy, +3 altrimenti; limitato da `hard_max_iterations`.
+- **Adaptive budget (2026-04)**: il `base_max_iterations` è calcolato dinamicamente dalla complessità del task classificata dalla Cognition, invece di essere un numero fisso:
+  - `Complexity::Simple` → `min(config.agent.max_iterations, 10)` (saluti, risposte fattuali)
+  - `Complexity::Standard` → `config.agent.max_iterations` (default)
+  - `Complexity::Complex` → `max(config.agent.max_iterations, 30)` (browser research, multi-step)
+  - **Step bonus**: `+5 × plan.len()` — ogni step di piano riconosciuto dalla Cognition aggiunge 5 iterazioni
+  - **Hard max safety valve**: `hard_max = (base + 40).min(150)` — bound assoluto per evitare runaway anche su task estremamente complessi
+- **Runtime extension**: oltre al base calcolato, il budget si estende a runtime quando il modello fa progressi reali (tool call utili e non ripetute), si contrae in caso di stallo o cicli.
+- **Stall detection**: se le ultime 4+ iterazioni non producono tool call utili o nuove, il budget viene contratto a `iteration + 2`.
+- **Cycle detection**: rileva cicli di periodo 1, 2, 3 nelle firme delle tool call (exact match e fuzzy match per `web_search`/`web_fetch`).
 - Edge case:
-  - Tool browser: hanno il proprio loop detector in `BrowserTaskPlanState`; stall/cycle tracking disabilitato qui per evitare doppio conteggio
+  - Tool browser: hanno il proprio loop detector in `BrowserTaskPlanState`; stall tracking disabilitato qui per evitare doppio conteggio, ma **la cycle detection resta attiva come safety net** (2026-04) per catturare runaway di budget anche su azioni browser
   - Firma vuota (nessuna tool call): incrementa `stall_streak` senza aggiornare `last_signature`
   - Ciclo rilevato ma stall basso: solo warning, budget non contratto
   - Firma identica ma risultato diverso: trattato come ripetizione (no extension)
@@ -370,21 +375,34 @@ L'architettura è implementata in Rust con asincronia `tokio`. I moduli principa
 ### Comportamento Atteso
 
 - Previene l'overflow della context window durante sessioni lunghe (browser, workflow multi-step).
-- Soglia: 150.000 caratteri totali nella lista messaggi.
-- Strategia di compressione: preserva messaggi system e user; preserva gli ultimi 6 messaggi (active context); tronca tool result > 500 char → mantiene primi 200 char + "[compacted]"; rimuove `content_parts` (immagini) da messaggi non recenti.
-- Etichettatura source (SEC-7): wrappa output tool con `[SOURCE: tool — label]\n...\n[END SOURCE]` per distinguere contenuto trusted da untrusted.
-- Scan injection (SEC-13): scansiona output tool per pattern di prompt injection; aggiunge warning `⚠️ INJECTION DETECTED` se rilevato.
+- **Sistema a 3 livelli (2026-04)**: il compactor ha 3 strategie con intensità crescente, applicate dall'agent loop in sequenza prima di ogni chiamata LLM:
+
+  | Livello | Funzione | Intensità | Costo |
+  |---|---|---|---|
+  | **1 — Micro-compact** | `micro_compact_old_results(messages, protect_recent=4)` | Sostituisce vecchi tool result con riepiloghi one-liner. Preserva file tools (materiale di riferimento) e l'ultima browser snapshot (contesto attivo). | zero — operazione locale |
+  | **2 — LLM summary** | `auto_compact_with_summary(messages, config, threshold, protect_recent)` | Mantiene il system prompt + ultimi N messaggi; tutti i messaggi in mezzo vengono riassunti da un `llm_one_shot()` in un unico messaggio `[CONTEXT SUMMARY]` iniettato dopo il system prompt. | 1 LLM call (15s timeout, max 800 token, temperature 0.2) |
+  | **3 — Legacy auto-compact** | `auto_compact_context(messages)` | Fallback basato su soglia: 150K char → tronca tool result > 500 char mantenendo primi 200, compatta assistant messages > 1000 char, rimuove `content_parts` (immagini). | zero — deterministico |
+  | **Emergency** | `emergency_compact(messages, keep_last)` | Drop violento di tutti i messaggi salvo gli ultimi N. Usato come escape hatch quando i 3 livelli non bastano. | zero |
+
+- **Strategia dell'agent loop**: per ogni iterazione chiama `micro_compact_old_results` (level 1) in modo gratuito; quando la size supera la soglia, tenta `auto_compact_with_summary` (level 2); se la LLM call fallisce o non è disponibile, cade su `auto_compact_context` (level 3).
+- **Etichettatura source (SEC-7)**: wrappa output tool con `[SOURCE: tool — label]\n...\n[END SOURCE]` per distinguere contenuto trusted da untrusted.
+- **Scan injection (SEC-13)**: scansiona output tool per pattern di prompt injection; aggiunge warning `⚠️ INJECTION DETECTED` se rilevato.
 - Edge case:
   - Output tool < 100 char: skip labeling (overhead non giustificato)
   - Tool con formattazione propria (`vault`, `remember`, `approval`, `automation`, `workflow`, `spawn`): skip labeling
   - Feature `embeddings` disabilitata: scan injection non eseguito
+  - Level 2 summary fallisce (provider down, timeout): degrade graceful a Level 3 — il loop non si rompe
 
 ### Dettagli Tecnici
 
 - Moduli: `src/agent/context_compactor.rs`
 - Funzioni principali:
   - `tool_result_for_model_context(tool_name, output)`: formatta output tool con source label e scan injection; label specifiche per: `web_fetch`/`web_search` (untrusted web), `read_email_inbox` (email untrusted), `shell` (command output untrusted), file tools (file content), `knowledge_search` (knowledge base untrusted), browser tools (page content untrusted), default (tool output untrusted)
-  - `auto_compact_context(messages)`: compressione automatica; costanti: `THRESHOLD_CHARS=150_000`, `PROTECT_RECENT=6`, `TRUNCATE_MIN_LEN=500`, `TRUNCATE_KEEP=200`
+  - `micro_compact_old_results(messages, protect_recent)` (**Level 1**): sostituisce tool result non protetti con riepiloghi. Preserva file tools e l'ultima browser snapshot. Ritorna il numero di messaggi compattati.
+  - `auto_compact_with_summary(messages, config, threshold, protect_recent)` (**Level 2**): genera summary via `llm_one_shot` con prompt dedicato (focus su user intent, tool results, progress, data collected, remaining work; max 400 parole, temperature 0.2). Rimuove i messaggi compressi e inserisce un `ChatMessage::system("[CONTEXT SUMMARY — N earlier messages compressed]\n...")` subito dopo il system prompt originale.
+  - `auto_compact_context(messages)` (**Level 3**): compressione deterministica; costanti `THRESHOLD_CHARS=150_000`, `PROTECT_RECENT=6`, `TRUNCATE_MIN_LEN=500`, `TRUNCATE_KEEP=200`
+  - `emergency_compact(messages, keep_last)` (**Emergency**): mantiene solo gli ultimi `keep_last` messaggi + system prompt
+  - `compact_browser_action_with_tree(output, prefix)` / `compact_browser_action_short(output)`: formattatori specializzati per output browser (riducono accessibility tree a elementi interattivi chiave)
   - `scan_tool_for_injection(text)`: delega a `crate::rag::sensitive::detect_injection()` (feature `embeddings`)
 - Tabelle DB: nessuna
 - Endpoint API: nessuno
@@ -485,3 +503,70 @@ L'architettura è implementata in Rust con asincronia `tokio`. I moduli principa
 
 - Da cosa dipende: `ExecutionPlanState` (serializzazione), `storage/db.rs` (CRUD), `approval_gate` (ChoiceBlock pattern)
 - Cosa dipende da questa feature: `ws.rs` (resume check), `gateway.rs` (startup cleanup)
+
+---
+
+## Feature: DataBuffer (2026-04)
+
+### Comportamento Atteso
+
+- Il `DataBuffer` è una struttura che vive **fuori dal context window** per accumulare record strutturati durante task di raccolta dati (scraping listing, comparazioni, estrazioni fatti).
+- **Problema risolto**: prima del DataBuffer il modello doveva generare l'intero CSV come argomento di `write_file`, con troncamento ricorrente dei tool call args sui modelli piccoli (~6KB limite). Il DataBuffer separa **produzione** (tool `add_data` batch di record) dall'**esportazione** (fatta dall'agent loop al termine, senza LLM).
+- **Attivazione**: gated da `config.agent.data_buffer_enabled`. Quando attivo, se la fase Cognition identifica un `data_schema` nel `CognitionResult`, l'agent loop:
+  1. Crea `DataBuffer::new(schema, label)`
+  2. Registra dinamicamente il tool `add_data` con lo schema JSON dei record
+  3. Inietta un **summary compatto** nel context ad ogni turno: `[DATA BUFFER: label (N records)]\nSchema: ...\n  last 3 records...\n[END DATA BUFFER]` (≤500 char)
+- **Schema flessibile**: se un record contiene chiavi non presenti nello schema originale, il buffer le aggiunge automaticamente come nuove colonne (auto-extend).
+- **Esportazione**: al termine del task l'agent loop esporta via `to_csv()` o `to_json()` e scrive il file nel workspace, emettendo un `ResultBlock` con download link (→ `view_file`/download button).
+- **Edge case**:
+  - Record con chiavi mancanti rispetto allo schema: campi vuoti ("")
+  - Buffer vuoto alla fine: nessun file generato, solo messaggio testuale
+  - Config flag `data_buffer_enabled = false`: nessun tool `add_data`, il modello torna al pattern write_file classico
+  - Cognition non identifica schema: buffer non creato, tool non registrato
+
+### Dettagli Tecnici
+
+- Moduli: `src/agent/data_buffer.rs`, tool in `src/tools/add_data.rs`
+- Struct: `DataBuffer { schema: Vec<String>, records: Vec<HashMap<String, String>>, label: Option<String> }`
+- API: `new(schema, label)`, `add_record(map) → usize`, `len()`, `is_empty()`, `summary() → String`, `to_csv() → String`, `to_json() → String`
+- Shared ownership: `Arc<tokio::sync::Mutex<DataBuffer>>` — l'agent loop e `AddDataTool` condividono lo stesso buffer. Il lock è su `tokio::sync::Mutex` per supportare il contesto async.
+- Registrazione dinamica: `AddDataTool::parameters_for_schema(&schema)` genera uno schema JSON con le colonne come properties dei record, così il modello sa esattamente quali campi inviare.
+- Inject nel context: `agent_loop.rs` chiama `buf.lock().await.summary()` a ogni iterazione e lo aggiunge come messaggio system effimero prima della LLM call.
+- Tabelle DB: nessuna — il buffer è in-memory per la durata della run. Solo il file esportato finisce su disco.
+
+### Dipendenze
+
+- Da cosa dipende: `std::collections::HashMap`, `tokio::sync::Mutex`
+- Cosa dipende da questa feature: `AgentLoop` (gestione lifecycle), `AddDataTool` (scrive nel buffer), Cognition (decide quando attivarlo via `data_schema`)
+
+---
+
+## Feature: Web Fetch Auto-Escalate to Browser (2026-04)
+
+### Comportamento Atteso
+
+- Quando `web_fetch` rileva che una URL è una SPA JS-rendered (pagina con body vuoto o shell di caricamento), invece di fallire con un errore testuale e "hint per usare il browser", **escala automaticamente** alla pipeline browser senza sprecare un'iterazione LLM.
+- **Flusso**:
+  1. `web_fetch` esegue GET e legge il body
+  2. `looks_like_js_required(&body, &text)` torna `true`
+  3. Il tool result include un marker speciale che l'agent loop riconosce come "escalate to browser"
+  4. L'agent loop sostituisce il tool call originale con un equivalente `browser_action(navigate, url)` e prosegue con `browser_action(snapshot)` per ottenere il contenuto effettivo
+  5. L'LLM vede il risultato come se avesse chiamato direttamente il browser — nessuna retry esplicita, nessun messaggio d'errore intermedio
+- **Perché esiste**: elimina il round-trip "fetch → errore → modello capisce → ri-prompt con browser → retry". Sulle SPA moderne (e-commerce, social, doc-viewer) questo era il pattern dominante e bruciava 2-3 iterazioni per nulla.
+- **Edge case**:
+  - Browser non abilitato (`config.browser.enabled = false`): fallback al vecchio comportamento (errore testuale)
+  - URL in site blocklist o non consentita dal perimeter contatto: niente escalation, errore
+  - Escalate già consumato per la stessa URL nel corso della run: evita loop infiniti
+
+### Dettagli Tecnici
+
+- File: `src/tools/web.rs` (rilevamento), `src/agent/agent_loop.rs` (gestione escalate)
+- Helper: `looks_like_js_required(body, text)` — euristiche su body length, tag `<noscript>`, `<div id="root">` vuoti, text stripped length
+- Integrazione: il tool result di `web_fetch` emette un flag; l'agent loop lo intercetta prima di feedare il risultato all'LLM e inietta un browser navigate/snapshot come tool call sintetica
+- Tabelle DB: nessuna
+- Endpoint API: nessuno
+
+### Dipendenze
+
+- Da cosa dipende: `BrowserTool`, `web_fetch` (rilevamento SPA), `config.browser.enabled`, `BrowserTaskPlanState` (per non violare il loop detector browser)
+- Cosa dipende da questa feature: ricerca/scraping su siti moderni, task su e-commerce, Cognition (può sfruttare il fatto che `web_fetch` "sa" fallback-are)
