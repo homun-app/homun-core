@@ -25,7 +25,7 @@
 | Dominio | Doc spec | Stato | Ultimo check | Note |
 |---|---|---|---|---|
 | Canali e Messaggistica | [01](./features/01-messaggistica-canali.md) | ❓ | — | Non ancora testato |
-| Agente + Cognizione | [02](./features/02-agente-cognizione.md) | ⚠️ | 2026-04-13 | Cognition funziona solo su modelli grandi. qwen3.5 75%, deepseek-v3.2 56%. Vedi #2, Recipe B |
+| Agente + Cognizione | [02](./features/02-agente-cognizione.md) | 🔧 | 2026-04-13 | 6 sub-fix implementati per #2. Target >90% success rate. Da validare con test manuali |
 | Memoria + RAG | [03](./features/03-memoria-conoscenza.md) | ❓ | — | |
 | Strumenti (Tools) | [04](./features/04-strumenti.md) | ⚠️ | 2026-04-13 | Vault: #1 #3. send_file su web ignora file_path (#8). view_file mai invocato (#9) |
 | Skills + MCP | [05](./features/05-skills-mcp.md) | ❓ | — | |
@@ -530,8 +530,8 @@ Risultati chiave:
 - qwen3.5:397b-cloud: 75% success rate (9/12), latenza 5-50s
 - deepseek-v3.2:cloud: 56% success rate (5/9), latenza 18-49s
 - Pattern: timeout (qwen3.5) e text-instead-of-tool (deepseek-v3.2)
-- 6 fix proposti in #2 — nessuno implementato
-- Next: testare con Claude Sonnet come cognition_model per baseline
+- 6 fix proposti in #2 — **tutti implementati** (2026-04-13)
+- Next: test di regressione manuale per validare il target >90% success rate
 
 ### C — File viewer modal ⚠️ (eseguita 2026-04-13)
 
@@ -610,7 +610,7 @@ Quando verifichi una feature:
 |---|---|
 | 2026-04-10 | Creato doc. Popolato con findings dal trace utente (vault #1, cognition #2) |
 | 2026-04-13 | Recipe A (Vault) eseguita. Confermato: store/retrieve su default funziona, 2FA round-trip OK, cognition non-deterministica confermata. Nuovi bug: #3 (save profilo non-default silent fail), A-bug-1/7/8/9. Totale 3 issue critici, 9 sub-bug tracciati |
-| 2026-04-13 | Recipe B (Cognition) eseguita. Analisi quantitativa su 22 run: qwen3.5 75%, deepseek-v3.2 56%, overall 68%. Root cause confermati: timeout config, no retry feedback, all-or-nothing fallback. 6 fix proposti, 0 implementati |
+| 2026-04-13 | Recipe B (Cognition) eseguita. Analisi quantitativa su 22 run: qwen3.5 75%, deepseek-v3.2 56%, overall 68%. Root cause confermati: timeout config, no retry feedback, all-or-nothing fallback. 6 fix proposti |
 | 2026-04-13 | Recipe D (Streaming WS) eseguita. Stream drain fix (PR #51) verificato corretto. 1 nuovo bug (#4, expire_stale_runs non persiste in DB, severity bassa). 13/15 run completate. Architettura bus→store indipendente da WS confermata robusta |
 | 2026-04-13 | Recipe G (Auto-escalate) eseguita. web_fetch→browser per JS-required funziona (3/3 success). 1 nuovo bug (#5, escalation non copre HTTP 403/503, severity alta). Difesa in profondità confermata (cognition + veto + escalation) |
 | 2026-04-13 | Recipe C (File viewer) eseguita. Architettura completa: write_file→ResultBlock→modal con rendering per tipo. 2 nuovi bug (#6 syntax HL, #7 binary guard, severity bassa). view_file registrato ma mai invocato (0 run) |
@@ -619,3 +619,4 @@ Quando verifichi una feature:
 | 2026-04-13 | **Sprint 1 fix implementati**: #4 (expire→DB persist), #5 (escalation HTTP 403/503), #6 (syntax HL 27 ext), #7 (binary guard), #9 (view_file always-available). 952 test pass, 0 warning |
 | 2026-04-13 | **Sprint 2 fix implementati**: #8 (send_file web→ResultBlock), #3+A-bug-1 (vault.js submit handler re-attach + no double init). 952 test pass |
 | 2026-04-13 | **Sprint 3 fix implementati**: #1 (vault 2FA success→error + prompt anti-hallucination rule + retrieve_2fa_blocked audit log), A-bug-7 (confirm action audit log). 952 test pass |
+| 2026-04-13 | **#2 Cognition Reliability — 6 sub-fix implementati**: (A) fallback keyword-based max 15 tool, (B) retry con feedback per text-instead-of-tool, (C) timeout auto-detect 0=smart default (120s ollama, 60s cloud), (D) schema required 5→2, (E) budget globale 90s, (F) cognition_metrics SQLite + API. 953 test pass. CI verde. Target: >90% success rate (da 68% baseline) |
