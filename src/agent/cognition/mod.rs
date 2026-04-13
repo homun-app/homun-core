@@ -42,7 +42,14 @@ pub(crate) async fn build_selective_tool_defs(
     xml_mode: bool,
     implicit_browser: bool,
 ) -> ToolDefinitionSet {
-    let always_available = ["send_message", "send_file", "view_file", "remember", "approval", "vault"];
+    let always_available = [
+        "send_message",
+        "send_file",
+        "view_file",
+        "remember",
+        "approval",
+        "vault",
+    ];
 
     let mut selected_names: HashSet<&str> = discovered_tools
         .iter()

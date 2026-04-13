@@ -534,7 +534,15 @@ const KEYWORD_TOOL_MAP: &[(&[&str], &[&str])] = &[
     // Files
     (
         &[
-            "file", "csv", "json", "write", "read", "scrivi", "leggi", "documento", "document",
+            "file",
+            "csv",
+            "json",
+            "write",
+            "read",
+            "scrivi",
+            "leggi",
+            "documento",
+            "document",
         ],
         &[
             "write_file",
@@ -548,15 +556,7 @@ const KEYWORD_TOOL_MAP: &[(&[&str], &[&str])] = &[
     // Shell / code execution
     (
         &[
-            "shell",
-            "command",
-            "comando",
-            "terminal",
-            "esegui",
-            "execute",
-            "run",
-            "script",
-            "pip",
+            "shell", "command", "comando", "terminal", "esegui", "execute", "run", "script", "pip",
             "npm",
         ],
         &["shell"],
@@ -574,20 +574,14 @@ const KEYWORD_TOOL_MAP: &[(&[&str], &[&str])] = &[
         &["knowledge"],
     ),
     // Memory
-    (
-        &["memory", "ricorda", "remember", "memoria"],
-        &["remember"],
-    ),
+    (&["memory", "ricorda", "remember", "memoria"], &["remember"]),
     // Vault / secrets
     (
         &["vault", "secret", "segreto", "password", "token", "api key"],
         &["vault"],
     ),
     // Contacts
-    (
-        &["contact", "contatt", "rubrica"],
-        &["contacts"],
-    ),
+    (&["contact", "contatt", "rubrica"], &["contacts"]),
     // Automation / workflow
     (
         &[
@@ -601,15 +595,9 @@ const KEYWORD_TOOL_MAP: &[(&[&str], &[&str])] = &[
         &["automation", "workflow"],
     ),
     // Spawn / background
-    (
-        &["background", "spawn", "parallel", "sfondo"],
-        &["spawn"],
-    ),
+    (&["background", "spawn", "parallel", "sfondo"], &["spawn"]),
     // MCP
-    (
-        &["mcp", "server", "integration"],
-        &["mcp"],
-    ),
+    (&["mcp", "server", "integration"], &["mcp"]),
 ];
 
 /// Select the most relevant tools for a user prompt via keyword matching.

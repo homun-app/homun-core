@@ -258,7 +258,10 @@ impl WebRunStore {
             inner.active_by_session.remove(key);
         }
         if !expired_snapshots.is_empty() {
-            tracing::info!(count = expired_snapshots.len(), "Expired stale web chat runs");
+            tracing::info!(
+                count = expired_snapshots.len(),
+                "Expired stale web chat runs"
+            );
         }
         expired_snapshots
     }
