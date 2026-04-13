@@ -314,11 +314,16 @@ impl Tool for VaultTool {
                             Err(e) => return Ok(ToolResult::error(e)),
                         }
                     } else {
-                        // No session, no code - require 2FA
-                        return Ok(ToolResult::success(
-                            "2FA_REQUIRED: Two-factor authentication is enabled. \
-                             Please provide your authenticator code using the 'code' parameter, \
-                             or first call 'confirm' with the code to get a session_id."
+                        // No session, no code — block access until 2FA is provided.
+                        // CRITICAL: this MUST be ToolResult::error, not success.
+                        // A success result causes small LLMs to hallucinate a fake
+                        // secret value instead of asking the user for their 2FA code.
+                        self.log_access(&key, "retrieve_2fa_blocked", false, ctx.profile_id);
+                        return Ok(ToolResult::error(
+                            "ACCESS DENIED — Two-factor authentication required. \
+                             The secret value was NOT retrieved. Do NOT fabricate or guess any value. \
+                             Ask the user for their authenticator code, then call this tool again \
+                             with the 'code' parameter to authenticate."
                         ));
                     }
                 }
@@ -354,13 +359,19 @@ impl Tool for VaultTool {
                 }
 
                 match Self::verify_and_create_session(&code).await? {
-                    Ok(session_id) => Ok(ToolResult::success(format!(
-                        "2FA verified successfully. Session ID: {}\n\
-                         Use this session_id with 'retrieve' to access secrets. \
-                         Session expires in 5 minutes.",
-                        session_id
-                    ))),
-                    Err(e) => Ok(ToolResult::error(e)),
+                    Ok(session_id) => {
+                        self.log_access("*", "confirm", true, ctx.profile_id);
+                        Ok(ToolResult::success(format!(
+                            "2FA verified successfully. Session ID: {}\n\
+                             Use this session_id with 'retrieve' to access secrets. \
+                             Session expires in 5 minutes.",
+                            session_id
+                        )))
+                    }
+                    Err(e) => {
+                        self.log_access("*", "confirm", false, ctx.profile_id);
+                        Ok(ToolResult::error(e))
+                    }
                 }
             }
             "list" => {

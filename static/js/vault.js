@@ -399,45 +399,49 @@ async function loadKeys() {
 }
 
 // ─── Store secret ───
-if (vaultForm) {
-    vaultForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const key = keyInput.value.trim();
-        const value = valueInput.value;
+// Named handler so it can be re-attached after DOM re-renders (profile switch,
+// settings modal reload). Without this, switching profiles orphans the old
+// listener and the form falls back to a native POST → page reload → data loss.
+async function handleVaultSubmit(e) {
+    e.preventDefault();
+    const key = keyInput.value.trim();
+    const value = valueInput.value;
 
-        if (!key || !value) {
-            showToast('Key and value are required', 'error');
-            return;
-        }
+    if (!key || !value) {
+        showToast('Key and value are required', 'error');
+        return;
+    }
 
-        if (!/^[a-z0-9_]+$/.test(key)) {
-            showToast('Key must match [a-z0-9_]+', 'error');
-            return;
-        }
+    if (!/^[a-z0-9_]+$/.test(key)) {
+        showToast('Key must match [a-z0-9_]+', 'error');
+        return;
+    }
 
-        try {
-            const profile = getVaultProfile();
-            const payload = { key, value };
-            if (profile) payload.profile = profile;
-            const resp = await fetch('/api/v1/vault', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-            });
-            const data = await resp.json();
-            if (data.ok) {
-                showToast(`Secret "${key}" stored`);
-                keyInput.value = '';
-                valueInput.value = '';
-                loadKeys();
-            } else {
-                showToast(data.message || 'Failed to store secret', 'error');
-            }
-        } catch (e) {
-            showToast('Failed to store secret', 'error');
+    try {
+        const profile = getVaultProfile();
+        const payload = { key, value };
+        if (profile) payload.profile = profile;
+        const resp = await fetch('/api/v1/vault', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        if (data.ok) {
+            showToast(`Secret "${key}" stored`);
+            keyInput.value = '';
+            valueInput.value = '';
+            loadKeys();
+        } else {
+            showToast(data.message || 'Failed to store secret', 'error');
         }
-    });
+    } catch (e) {
+        showToast('Failed to store secret', 'error');
+    }
 }
+
+// Attach submit handler (will be re-attached in initVault after DOM re-renders)
+let _vaultFormBound = null;
 
 // ─── Reveal secret (with 2FA support) ───
 async function revealSecret(key) {
@@ -560,10 +564,19 @@ function initVault() {
     grabVaultDom();
     // Guard: skip if vault DOM not present
     if (!vaultList) return;
-    console.log('[vault.js] Initializing...');
+
+    // Re-attach form submit handler to the (possibly new) DOM node.
+    // Remove from the old node first to avoid duplicates on re-init.
+    if (_vaultFormBound) {
+        _vaultFormBound.removeEventListener('submit', handleVaultSubmit);
+    }
+    if (vaultForm) {
+        vaultForm.addEventListener('submit', handleVaultSubmit);
+        _vaultFormBound = vaultForm;
+    }
+
     loadKeys();
     load2FaStatus();
-    console.log('[vault.js] Init complete');
 }
 
 initVault();

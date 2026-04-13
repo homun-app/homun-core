@@ -449,6 +449,35 @@ impl WebServer {
                             }
                         }
                     }
+                    // Web channel: if the outbound message carries a file attachment,
+                    // emit a ResultBlock with View + Download buttons before the text.
+                    // Other channels (Telegram, WhatsApp) handle file_path natively;
+                    // the web channel needs to translate it into a UI block.
+                    if msg.channel == "web" {
+                        if let Some(ref fp) = msg.file_path {
+                            let path = std::path::Path::new(fp);
+                            if path.exists() {
+                                let size = path.metadata().map(|m| m.len() as usize).unwrap_or(0);
+                                if let Some(block) =
+                                    crate::tools::file::build_workspace_file_block(path, size)
+                                {
+                                    let blocks_json =
+                                        serde_json::to_string(&vec![block]).unwrap_or_default();
+                                    let streams = state_for_outbound.stream_sessions.read().await;
+                                    if let Some(stream_tx) = streams.get(&msg.chat_id) {
+                                        let _ = stream_tx
+                                            .send(super::ws::WsStreamEvent {
+                                                delta: blocks_json,
+                                                event_type: Some("blocks".to_string()),
+                                                tool_call_data: None,
+                                            })
+                                            .await;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     let sessions = state_for_outbound.ws_sessions.read().await;
                     if let Some(tx) = sessions.get(&msg.chat_id) {
                         if tx.send(msg.content).await.is_err() {
@@ -531,8 +560,16 @@ impl WebServer {
                     auth_rl.cleanup().await;
                     api_rl.cleanup().await;
                     token_rl.cleanup().await;
-                    // Expire web chat runs stuck in "running" for >10 min (orphaned).
-                    state_for_cleanup.web_runs.expire_stale_runs(600);
+                    // Expire web chat runs stuck in "running" for >10 min (orphaned)
+                    // and persist the updated snapshots to DB.
+                    let expired = state_for_cleanup.web_runs.expire_stale_runs(600);
+                    if let Some(db) = state_for_cleanup.db.as_ref() {
+                        for run in &expired {
+                            if let Err(e) = db.upsert_web_chat_run(run).await {
+                                tracing::warn!(run_id = %run.run_id, error = %e, "Failed to persist expired run");
+                            }
+                        }
+                    }
                 }
             });
         }

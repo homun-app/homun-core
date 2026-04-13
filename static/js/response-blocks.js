@@ -356,15 +356,40 @@ async function openFileViewer(url, filename) {
         } else {
             const resp = await fetch(inlineUrl);
             if (!resp.ok) throw new Error('HTTP ' + resp.status);
+
+            // Guard: binary files cannot be previewed as text
+            const ct = (resp.headers.get('content-type') || '').toLowerCase();
+            if (ct.includes('octet-stream') || ct.includes('application/zip') ||
+                ct.includes('application/x-sqlite') || ct.includes('application/gzip')) {
+                body.textContent = '';
+                const notice = document.createElement('div');
+                notice.className = 'fv-error';
+                notice.textContent = 'Binary file \u2014 download to view.';
+                body.appendChild(notice);
+                return;
+            }
+
             const text = await resp.text();
             body.textContent = '';
 
+            // Language mapping for syntax highlighting (hljs language names)
+            const langMap = {
+                json: 'json', js: 'javascript', ts: 'typescript', jsx: 'javascript', tsx: 'typescript',
+                py: 'python', rs: 'rust', go: 'go', rb: 'ruby', java: 'java', kt: 'kotlin',
+                sh: 'bash', bash: 'bash', zsh: 'bash', fish: 'bash',
+                html: 'xml', htm: 'xml', xml: 'xml', svg: 'xml',
+                css: 'css', scss: 'scss', less: 'less',
+                sql: 'sql', yaml: 'yaml', yml: 'yaml', toml: 'ini',
+                c: 'c', cpp: 'cpp', h: 'c', hpp: 'cpp',
+                swift: 'swift', cs: 'csharp', php: 'php', lua: 'lua',
+            };
+
             if (ext === 'csv') {
                 body.appendChild(renderCsvTable(text));
-            } else if (ext === 'json') {
-                renderCodeBlock(body, text, 'json');
             } else if (ext === 'md') {
                 renderMarkdownContent(body, text);
+            } else if (langMap[ext]) {
+                renderCodeBlock(body, text, langMap[ext]);
             } else {
                 const pre = document.createElement('pre');
                 pre.className = 'fv-pre';

@@ -2167,14 +2167,16 @@ impl AgentLoop {
                     }
 
                     // ── Auto-escalation: web_fetch → browser ──────────────
-                    // When web_fetch detects a JS-rendered page (SPA shell
-                    // with no useful content), automatically retry via the
-                    // browser tool's navigate action which executes JS and
-                    // returns a rendered snapshot.
-                    if tool_call.name == "web_fetch"
+                    // When web_fetch detects a JS-rendered page (SPA shell)
+                    // or gets blocked by a WAF/Cloudflare challenge (403/503/52x),
+                    // automatically retry via the browser tool's navigate action
+                    // which executes JS and returns a rendered snapshot.
+                    let should_escalate_to_browser = tool_call.name == "web_fetch"
                         && result.is_error
-                        && result.output.contains("requires JavaScript")
                         && browser_available
+                        && (result.output.contains("requires JavaScript")
+                            || result.output.contains("[HINT:"));
+                    if should_escalate_to_browser
                     {
                         let escalation_url = tool_call
                             .arguments

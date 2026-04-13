@@ -235,27 +235,32 @@ impl WebRunStore {
     /// Mark runs that have been "running" or "stopping" for too long as
     /// "interrupted".  Prevents orphaned runs when the agent crashes or
     /// the WebSocket disconnects without a clean completion.
-    pub fn expire_stale_runs(&self, max_age_secs: u64) {
+    /// Returns snapshots of runs that were just marked as interrupted,
+    /// so the caller can persist them to the database.
+    pub fn expire_stale_runs(&self, max_age_secs: u64) -> Vec<WebChatRunSnapshot> {
         let cutoff = Utc::now() - chrono::Duration::seconds(max_age_secs as i64);
         let mut inner = self.inner.lock().expect("web run store lock poisoned");
-        let mut expired = Vec::new();
+        let mut expired_keys = Vec::new();
+        let mut expired_snapshots = Vec::new();
         for run in inner.runs.values_mut() {
             if matches!(run.status.as_str(), "running" | "stopping") {
                 if let Ok(created) = chrono::DateTime::parse_from_rfc3339(&run.created_at) {
                     if created < cutoff {
                         run.status = "interrupted".to_string();
                         run.updated_at = Utc::now().to_rfc3339();
-                        expired.push(run.session_key.clone());
+                        expired_keys.push(run.session_key.clone());
+                        expired_snapshots.push(run.clone());
                     }
                 }
             }
         }
-        for key in &expired {
+        for key in &expired_keys {
             inner.active_by_session.remove(key);
         }
-        if !expired.is_empty() {
-            tracing::info!(count = expired.len(), "Expired stale web chat runs");
+        if !expired_snapshots.is_empty() {
+            tracing::info!(count = expired_snapshots.len(), "Expired stale web chat runs");
         }
+        expired_snapshots
     }
 }
 
@@ -354,13 +359,17 @@ mod tests {
         assert_eq!(run.status, "running");
 
         // With max_age=0 every running run is considered stale
-        store.expire_stale_runs(0);
+        let expired = store.expire_stale_runs(0);
 
-        // Run should be interrupted and no longer active
+        // Should return the expired snapshot for DB persistence
+        assert_eq!(expired.len(), 1);
+        assert_eq!(expired[0].status, "interrupted");
+
+        // Run should no longer be active
         assert!(store.active_snapshot("web:stale").is_none());
         let inner = store.inner.lock().unwrap();
-        let expired = inner.runs.values().next().unwrap();
-        assert_eq!(expired.status, "interrupted");
+        let stored = inner.runs.values().next().unwrap();
+        assert_eq!(stored.status, "interrupted");
     }
 
     #[test]
