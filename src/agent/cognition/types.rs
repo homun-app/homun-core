@@ -282,21 +282,24 @@ impl CognitionResult {
         }
     }
 
-    /// Build a full-context fallback when cognition LLM call fails.
+    /// Build a targeted fallback when the cognition LLM call fails.
     ///
-    /// Returns ALL tools from the registry so the execution loop has
-    /// maximum capabilities. Analyzes the user prompt with heuristics
-    /// to produce intent_type, constraints, and a meaningful understanding
-    /// so that downstream components (ExecutionPlan, BrowserTaskPlan)
-    /// can still classify and track the task correctly.
+    /// Instead of dumping ALL tools (71+) into the context — which
+    /// overwhelms the model — selects the most relevant tools via keyword
+    /// matching on the user prompt, plus always-available tools.
+    /// Analyzes the user prompt with heuristics to produce intent_type,
+    /// constraints, and a meaningful understanding so that downstream
+    /// components (ExecutionPlan, BrowserTaskPlan) can still classify and
+    /// track the task correctly.
     ///
     /// Used only when `run_cognition()` errors.
     pub fn fallback_full(all_tool_names: Vec<String>, user_prompt: &str) -> Self {
-        let tools = all_tool_names
+        let selected = select_tools_by_keywords(user_prompt, &all_tool_names);
+        let tools = selected
             .into_iter()
             .map(|name| DiscoveredTool {
                 description: String::new(),
-                reason: "Cognition unavailable — full tool set provided".to_string(),
+                reason: "Cognition unavailable — keyword-selected fallback".to_string(),
                 name,
             })
             .collect();
@@ -482,8 +485,192 @@ fn plan_execution_schema() -> serde_json::Value {
                 "description": "Column names for structured data collection. Set when the task involves gathering, comparing, or listing multiple items. E.g. ['name', 'city', 'address', 'phone'] for a store listing task. Omit for non-data-collection tasks."
             }
         },
-        "required": ["understanding", "complexity", "answer_directly", "intent_type", "success_criteria"]
+        "required": ["understanding", "complexity"]
     })
+}
+
+// ── Keyword-based tool selection for fallback ─────────────────────
+
+/// Maximum number of tools to include in a keyword-based fallback.
+const FALLBACK_MAX_TOOLS: usize = 15;
+
+/// Tools that are always included in any fallback (must be available for
+/// basic agent operation: communication, memory, approval, secrets).
+const ALWAYS_AVAILABLE: &[&str] = &[
+    "send_message",
+    "send_file",
+    "view_file",
+    "remember",
+    "approval",
+    "vault",
+];
+
+/// Keyword → tool name mappings for fallback selection.
+///
+/// Each entry is `(keywords, tool_names)`: if any keyword matches the
+/// user prompt, all listed tools are included. Order matters — earlier
+/// entries have priority when approaching `FALLBACK_MAX_TOOLS`.
+const KEYWORD_TOOL_MAP: &[(&[&str], &[&str])] = &[
+    // Email
+    (
+        &["email", "mail", "inbox", "posta"],
+        &["read_email_inbox", "send_message"],
+    ),
+    // Web browsing / interactive sites
+    (
+        &[
+            "browser", "naviga", "navigate", "sito", "site", "login", "form", "prenota", "book",
+            "compra", "buy", "checkout", "mappa", "map",
+        ],
+        &["browser", "web_fetch", "web_search"],
+    ),
+    // Web search / information lookup
+    (
+        &[
+            "cerca", "search", "find", "trova", "google", "web", "ricerca", "look up",
+        ],
+        &["web_search", "web_fetch"],
+    ),
+    // Files
+    (
+        &[
+            "file", "csv", "json", "write", "read", "scrivi", "leggi", "documento", "document",
+        ],
+        &[
+            "write_file",
+            "read_file",
+            "view_file",
+            "send_file",
+            "list_files",
+            "edit_file",
+        ],
+    ),
+    // Shell / code execution
+    (
+        &[
+            "shell",
+            "command",
+            "comando",
+            "terminal",
+            "esegui",
+            "execute",
+            "run",
+            "script",
+            "pip",
+            "npm",
+        ],
+        &["shell"],
+    ),
+    // Knowledge / RAG
+    (
+        &[
+            "knowledge",
+            "conoscenza",
+            "documenti",
+            "documents",
+            "rag",
+            "sapere",
+        ],
+        &["knowledge"],
+    ),
+    // Memory
+    (
+        &["memory", "ricorda", "remember", "memoria"],
+        &["remember"],
+    ),
+    // Vault / secrets
+    (
+        &["vault", "secret", "segreto", "password", "token", "api key"],
+        &["vault"],
+    ),
+    // Contacts
+    (
+        &["contact", "contatt", "rubrica"],
+        &["contacts"],
+    ),
+    // Automation / workflow
+    (
+        &[
+            "automation",
+            "automazione",
+            "workflow",
+            "cron",
+            "schedule",
+            "pianifica",
+        ],
+        &["automation", "workflow"],
+    ),
+    // Spawn / background
+    (
+        &["background", "spawn", "parallel", "sfondo"],
+        &["spawn"],
+    ),
+    // MCP
+    (
+        &["mcp", "server", "integration"],
+        &["mcp"],
+    ),
+];
+
+/// Select the most relevant tools for a user prompt via keyword matching.
+///
+/// Returns a deduplicated list of tool names (max `FALLBACK_MAX_TOOLS`),
+/// consisting of always-available tools + keyword-matched tools.
+/// If no keywords match, returns all tools (full fallback).
+fn select_tools_by_keywords(user_prompt: &str, all_tool_names: &[String]) -> Vec<String> {
+    let lower = user_prompt.to_ascii_lowercase();
+
+    let mut selected: Vec<String> = Vec::with_capacity(FALLBACK_MAX_TOOLS);
+
+    // Always-available tools first (only if they exist in the registry)
+    for &name in ALWAYS_AVAILABLE {
+        if all_tool_names.iter().any(|t| t == name) && !selected.contains(&name.to_string()) {
+            selected.push(name.to_string());
+        }
+    }
+
+    // Match keywords and add corresponding tools
+    let mut any_keyword_matched = false;
+    for (keywords, tool_names) in KEYWORD_TOOL_MAP {
+        if keywords.iter().any(|kw| lower.contains(kw)) {
+            any_keyword_matched = true;
+            for &tool_name in *tool_names {
+                if selected.len() >= FALLBACK_MAX_TOOLS {
+                    break;
+                }
+                if all_tool_names.iter().any(|t| t == tool_name)
+                    && !selected.contains(&tool_name.to_string())
+                {
+                    selected.push(tool_name.to_string());
+                }
+            }
+        }
+    }
+
+    // Also include MCP tools that match keywords in their name
+    // (e.g., "google-workspace__gmail_send_email" for "email")
+    for tool_name in all_tool_names {
+        if selected.len() >= FALLBACK_MAX_TOOLS {
+            break;
+        }
+        if tool_name.contains("__") && !selected.contains(tool_name) {
+            let tool_lower = tool_name.to_ascii_lowercase();
+            if lower
+                .split_whitespace()
+                .any(|word| word.len() >= 3 && tool_lower.contains(word))
+            {
+                selected.push(tool_name.clone());
+            }
+        }
+    }
+
+    // If no keywords matched at all, this is an unknown intent — fall back
+    // to all tools so the model has maximum capabilities.
+    if !any_keyword_matched {
+        return all_tool_names.to_vec();
+    }
+
+    selected
 }
 
 // ── Fallback heuristic helpers ─────────────────────────────────────
@@ -799,11 +986,14 @@ mod tests {
         assert!(props.get("plan").is_some());
         assert!(props.get("intent_type").is_some());
         assert!(props.get("success_criteria").is_some());
-        // Both must be required
+        // Only understanding + complexity are required (reduced for weaker models).
+        // Other fields (answer_directly, intent_type, success_criteria) are optional
+        // with serde defaults to lower the barrier for models with mediocre tool calling.
         let required = def.function.parameters.get("required").unwrap();
         let required: Vec<String> = serde_json::from_value(required.clone()).unwrap();
-        assert!(required.contains(&"intent_type".to_string()));
-        assert!(required.contains(&"success_criteria".to_string()));
+        assert!(required.contains(&"understanding".to_string()));
+        assert!(required.contains(&"complexity".to_string()));
+        assert_eq!(required.len(), 2, "only 2 fields should be required");
     }
 
     #[test]
@@ -886,15 +1076,39 @@ mod tests {
     }
 
     #[test]
-    fn fallback_full_preserves_all_tools() {
+    fn fallback_full_selects_relevant_tools() {
         let tools = vec![
             "browser".to_string(),
             "web_search".to_string(),
+            "web_fetch".to_string(),
             "send_message".to_string(),
+            "shell".to_string(),
+            "read_email_inbox".to_string(),
+            "remember".to_string(),
+            "approval".to_string(),
+            "vault".to_string(),
         ];
         let result = CognitionResult::fallback_full(tools, "riprova aprendo il browser");
-        assert_eq!(result.tools.len(), 3);
+        // "browser" keyword matches → browser, web_fetch, web_search selected
+        // + always_available (send_message, remember, approval, vault)
         assert!(result.tools.iter().any(|t| t.name == "browser"));
+        assert!(result.tools.iter().any(|t| t.name == "web_fetch"));
+        assert!(result.tools.iter().any(|t| t.name == "send_message"));
+        // shell and read_email_inbox should NOT be selected (no keyword match)
+        assert!(!result.tools.iter().any(|t| t.name == "shell"));
+        assert!(!result.tools.iter().any(|t| t.name == "read_email_inbox"));
+    }
+
+    #[test]
+    fn fallback_full_unknown_intent_returns_all_tools() {
+        let tools = vec![
+            "browser".to_string(),
+            "web_search".to_string(),
+            "shell".to_string(),
+        ];
+        // No keywords match → returns all tools as full fallback
+        let result = CognitionResult::fallback_full(tools, "xyzzy plugh");
+        assert_eq!(result.tools.len(), 3);
     }
 
     #[test]

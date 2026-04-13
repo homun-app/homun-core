@@ -433,7 +433,9 @@ pub struct AgentConfig {
     /// Maximum iterations for the cognition mini-loop. Default: 4.
     #[serde(default)]
     pub cognition_max_iterations: u32,
-    /// Timeout in seconds for the entire cognition phase. Default: 15.
+    /// Timeout in seconds for a single cognition LLM call.
+    /// 0 (default) = auto-detect based on model: 120s for local/ollama, 60s for cloud.
+    /// Any non-zero value overrides the auto-detection.
     #[serde(default)]
     pub cognition_timeout_secs: u64,
     /// Enable 3-level context compression (micro-compact, LLM summary, emergency).
@@ -577,7 +579,7 @@ impl Default for AgentConfig {
             orchestrator_enabled: true,
             cognition_model: String::new(),
             cognition_max_iterations: 4,
-            cognition_timeout_secs: 15,
+            cognition_timeout_secs: 0,
             context_compression_v2: true,
             retry_on_overflow: true,
             data_buffer_enabled: true,

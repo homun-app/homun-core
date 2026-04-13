@@ -14,6 +14,7 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route("/v1/status", get(status))
         .route("/v1/config", get(get_config))
         .route("/v1/config", axum::routing::patch(patch_config))
+        .route("/v1/cognition/metrics", get(cognition_metrics))
 }
 
 // --- Status ---
@@ -180,6 +181,58 @@ async fn patch_config(
         }
     }
     Ok(Json(serde_json::json!({"ok": true, "key": patch.key})))
+}
+
+// --- Cognition metrics ---
+
+/// Aggregated cognition success/failure metrics per model.
+///
+/// Query param: `?days=7` to filter to last N days (default: all time).
+async fn cognition_metrics(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<CognitionMetricsQuery>,
+) -> Result<Json<Vec<CognitionMetricResponse>>, StatusCode> {
+    let db = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let rows = db
+        .query_cognition_metrics(params.days)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let response: Vec<CognitionMetricResponse> = rows
+        .into_iter()
+        .map(|r| {
+            let success_rate = if r.total_calls > 0 {
+                (r.successes as f64 / r.total_calls as f64 * 100.0).round()
+            } else {
+                0.0
+            };
+            CognitionMetricResponse {
+                model: r.model,
+                total_calls: r.total_calls,
+                successes: r.successes,
+                failures: r.total_calls - r.successes,
+                success_rate,
+                avg_elapsed_ms: r.avg_elapsed_ms,
+            }
+        })
+        .collect();
+
+    Ok(Json(response))
+}
+
+#[derive(serde::Deserialize)]
+struct CognitionMetricsQuery {
+    days: Option<u32>,
+}
+
+#[derive(Serialize)]
+struct CognitionMetricResponse {
+    model: String,
+    total_calls: i64,
+    successes: i64,
+    failures: i64,
+    success_rate: f64,
+    avg_elapsed_ms: i64,
 }
 
 // section_for_dotpath is in crate::config::section_for_dotpath

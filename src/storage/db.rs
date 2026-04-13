@@ -2593,6 +2593,68 @@ impl Database {
         .with_context(|| format!("Failed to write settings section '{section}'"))?;
         Ok(())
     }
+
+    // ── Cognition metrics ──────────────────────────────────────────
+
+    /// Record one cognition phase run (success or failure).
+    pub async fn insert_cognition_metric(
+        &self,
+        model: &str,
+        success: bool,
+        elapsed_ms: u64,
+        failure_reason: Option<&str>,
+        tool_count: usize,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO cognition_metrics (model, success, elapsed_ms, failure_reason, tool_count)
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(model)
+        .bind(success as i32)
+        .bind(elapsed_ms as i64)
+        .bind(failure_reason)
+        .bind(tool_count as i64)
+        .execute(&self.pool)
+        .await
+        .context("Failed to insert cognition metric")?;
+        Ok(())
+    }
+
+    /// Query aggregated cognition metrics per model.
+    ///
+    /// Returns `(model, total_calls, successes, avg_elapsed_ms)` rows,
+    /// optionally filtered to the last N days.
+    pub async fn query_cognition_metrics(
+        &self,
+        last_days: Option<u32>,
+    ) -> Result<Vec<CognitionMetricAggRow>> {
+        let sql = if let Some(days) = last_days {
+            format!(
+                "SELECT model,
+                        COUNT(*) as total_calls,
+                        SUM(success) as successes,
+                        CAST(AVG(elapsed_ms) AS INTEGER) as avg_elapsed_ms
+                 FROM cognition_metrics
+                 WHERE timestamp >= datetime('now', '-{days} days')
+                 GROUP BY model
+                 ORDER BY total_calls DESC"
+            )
+        } else {
+            "SELECT model,
+                    COUNT(*) as total_calls,
+                    SUM(success) as successes,
+                    CAST(AVG(elapsed_ms) AS INTEGER) as avg_elapsed_ms
+             FROM cognition_metrics
+             GROUP BY model
+             ORDER BY total_calls DESC"
+                .to_string()
+        };
+        let rows = sqlx::query_as::<_, CognitionMetricAggRow>(&sql)
+            .fetch_all(&self.pool)
+            .await
+            .context("Failed to query cognition metrics")?;
+        Ok(rows)
+    }
 }
 
 /// Skill audit log row.
@@ -2617,6 +2679,15 @@ pub struct VaultAccessLogRow {
     pub source: String,
     pub success: i64,
     pub user_agent: Option<String>,
+}
+
+/// Aggregated cognition metric row (per model).
+#[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
+pub struct CognitionMetricAggRow {
+    pub model: String,
+    pub total_calls: i64,
+    pub successes: i64,
+    pub avg_elapsed_ms: i64,
 }
 
 /// Result of memory cleanup operation.

@@ -30,6 +30,11 @@ const PER_CALL_TIMEOUT_SECS: u64 = 60;
 /// Higher per-call timeout for local/slow providers (Ollama, etc.).
 const PER_CALL_TIMEOUT_LOCAL_SECS: u64 = 120;
 
+/// Global budget for the entire cognition phase (seconds).
+/// Retries are only attempted if enough budget remains. Prevents the
+/// worst case of `MAX_CALL_RETRIES × per_call_timeout` (e.g. 3×120s = 6min).
+const COGNITION_BUDGET_SECS: u64 = 90;
+
 /// How many recent messages to include for conversational context.
 const COGNITION_HISTORY_TAIL: usize = 10;
 
@@ -146,11 +151,46 @@ pub async fn run_cognition(mut params: CognitionParams<'_>) -> Result<CognitionR
 
     // Single-call with retry: send messages + plan_execution tool,
     // retry on transient failures (network, timeout), up to max_retries.
+    // On retry after text-instead-of-tool, inject corrective feedback so
+    // the model knows it must call plan_execution (not respond in prose).
     let mut cognition_result: Option<CognitionResult> = None;
     let mut failure_reason: Option<String> = None;
+    // Whether the last attempt failed because the model responded with text
+    // instead of calling plan_execution. Used to inject corrective feedback.
+    let mut last_was_text_response = false;
+
+    let budget = std::time::Duration::from_secs(COGNITION_BUDGET_SECS);
 
     for attempt in 1..=max_retries {
+        // Budget check: skip retry if not enough time remains for a meaningful call.
+        // We need at least 5s to get any response.
+        if attempt > 1 {
+            let elapsed = started.elapsed();
+            let remaining = budget.saturating_sub(elapsed);
+            if remaining.as_secs() < 5 {
+                tracing::info!(
+                    elapsed_ms = elapsed.as_millis(),
+                    budget_secs = COGNITION_BUDGET_SECS,
+                    "Cognition budget exhausted — skipping retry {attempt}"
+                );
+                break;
+            }
+        }
+
         tracing::debug!(attempt, model = %model, "Cognition plan-first call");
+
+        // On retry after a text response, inject corrective feedback so the
+        // model understands it MUST call the plan_execution tool.
+        if last_was_text_response && attempt > 1 {
+            messages.push(ChatMessage::assistant(
+                "I'll analyze the request and provide my plan.",
+            ));
+            messages.push(ChatMessage::user(
+                "You MUST call the plan_execution tool. Do NOT respond with text. \
+                 Call plan_execution now with your analysis.",
+            ));
+            last_was_text_response = false;
+        }
 
         let request = ChatRequest {
             messages: messages.clone(),
@@ -185,6 +225,7 @@ pub async fn run_cognition(mut params: CognitionParams<'_>) -> Result<CognitionR
                 failure_reason = Some(format!(
                     "LLM call timed out (attempt {attempt}/{max_retries}), model '{model}'"
                 ));
+                // Timeout = latency issue, not comprehension. No feedback needed.
                 continue;
             }
         };
@@ -243,6 +284,8 @@ pub async fn run_cognition(mut params: CognitionParams<'_>) -> Result<CognitionR
                 failure_reason = Some(format!(
                     "model responded with text instead of plan_execution, model '{model}'"
                 ));
+                // Mark for corrective feedback on next retry
+                last_was_text_response = true;
             }
         }
 
@@ -251,6 +294,8 @@ pub async fn run_cognition(mut params: CognitionParams<'_>) -> Result<CognitionR
             break;
         }
     }
+
+    let elapsed_ms = started.elapsed().as_millis() as u64;
 
     // Validate and return
     match cognition_result {
@@ -276,17 +321,21 @@ pub async fn run_cognition(mut params: CognitionParams<'_>) -> Result<CognitionR
             let summary = format_result_summary(&result);
             emit_status(params.stream_tx, "cognition_result", &summary).await;
 
+            let tool_count = result.tools.len();
             tracing::info!(
                 understanding = %result.understanding,
                 intent = ?result.intent_type,
                 success_criteria = ?result.success_criteria,
-                tools = result.tools.len(),
+                tools = tool_count,
                 plan_steps = result.plan.len(),
                 constraints = ?result.constraints,
                 plan = ?result.plan,
-                elapsed_ms = started.elapsed().as_millis(),
+                elapsed_ms,
                 "Cognition phase complete"
             );
+
+            // Record success metric (fire-and-forget)
+            record_cognition_metric(params.db, model, true, elapsed_ms, None, tool_count).await;
 
             Ok(result)
         }
@@ -295,7 +344,7 @@ pub async fn run_cognition(mut params: CognitionParams<'_>) -> Result<CognitionR
                 format!("no plan_execution produced after {max_retries} attempts, model '{model}'")
             });
             tracing::warn!(
-                elapsed_ms = started.elapsed().as_millis(),
+                elapsed_ms,
                 reason = %reason,
                 "Cognition phase produced no result — falling back to full tool set"
             );
@@ -305,7 +354,33 @@ pub async fn run_cognition(mut params: CognitionParams<'_>) -> Result<CognitionR
                 "Cognition skipped — using full capabilities",
             )
             .await;
+
+            // Record failure metric (fire-and-forget)
+            record_cognition_metric(params.db, model, false, elapsed_ms, Some(&reason), 0).await;
+
             Err(reason)
+        }
+    }
+}
+
+/// Record a cognition metric to the database (fire-and-forget).
+///
+/// Errors are logged but never propagated — metrics are observability,
+/// not critical path.
+async fn record_cognition_metric(
+    db: Option<&crate::storage::Database>,
+    model: &str,
+    success: bool,
+    elapsed_ms: u64,
+    failure_reason: Option<&str>,
+    tool_count: usize,
+) {
+    if let Some(db) = db {
+        if let Err(e) = db
+            .insert_cognition_metric(model, success, elapsed_ms, failure_reason, tool_count)
+            .await
+        {
+            tracing::debug!(error = %e, "Failed to record cognition metric (non-critical)");
         }
     }
 }
