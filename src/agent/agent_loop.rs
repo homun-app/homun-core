@@ -471,6 +471,43 @@ impl AgentLoop {
         thinking_override: Option<bool>,
         gateway_id_hint: Option<i64>,
     ) -> Result<String> {
+        // OBS-1: wrap the whole message processing in a metric observation.
+        // Placed here (rather than inside process_message_inner) so retries are
+        // counted as a single logical request from the user's perspective.
+        let result = self
+            .process_message_with_retry_inner(
+                content,
+                session_key,
+                channel,
+                chat_id,
+                stream_tx,
+                blocked_tools,
+                thinking_override,
+                gateway_id_hint,
+            )
+            .await;
+
+        let status = if result.is_ok() { "ok" } else { "error" };
+        crate::metrics::counter_inc(
+            "homun_requests_total",
+            &[("channel", channel), ("status", status)],
+            1,
+        );
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn process_message_with_retry_inner(
+        &self,
+        content: &str,
+        session_key: &str,
+        channel: &str,
+        chat_id: &str,
+        stream_tx: Option<mpsc::Sender<crate::provider::StreamChunk>>,
+        blocked_tools: &[&str],
+        thinking_override: Option<bool>,
+        gateway_id_hint: Option<i64>,
+    ) -> Result<String> {
         let retry_enabled = self.config.read().await.agent.retry_on_overflow;
 
         if !retry_enabled {

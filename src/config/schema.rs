@@ -20,6 +20,7 @@ pub struct Config {
     pub security: SecurityConfig,
     pub browser: BrowserConfig,
     pub ui: UiConfig,
+    pub metrics: MetricsConfig,
     pub skills: SkillsConfig,
     /// Named agent definitions.
     /// Parsed from `[agents.<id>]` TOML sections.
@@ -2466,6 +2467,52 @@ impl Default for UiConfig {
             theme: "system".to_string(),
             language: "system".to_string(),
             accent: "moss".to_string(),
+        }
+    }
+}
+
+/// Observability / Prometheus metrics configuration.
+///
+/// Controls the `/metrics` endpoint exposed by the gateway and hot-path
+/// instrumentation. When `enabled = false`, no metric is collected (all
+/// instrumentation hooks become no-ops via unregistered-family silent drop)
+/// and the `/metrics` endpoint returns 404.
+///
+/// When `enabled = true`:
+/// - `/api/v1/metrics` is always available behind web auth (for the Homun
+///   dashboard UI to render live metrics tiles)
+/// - `/metrics` on the root path is registered ONLY if `public = true`
+///   (standard Prometheus scrape pattern — the endpoint is then reachable
+///   without auth, suitable for internal monitoring infrastructure)
+///
+/// # Fabio's TODO — extend with the fields you want users to tune.
+///
+/// Candidate fields to consider (pick what matches Homun's UX):
+///
+/// | Field | Purpose | Trade-off |
+/// |---|---|---|
+/// | `enabled: bool` | Master on/off | Simple — already below |
+/// | `public: bool` | Expose root `/metrics` unauthenticated | Simple — already below |
+/// | `bind_path: String` | Custom path (e.g. `/prometheus`) | Flexibility vs "convention beats config" |
+/// | `include_system: bool` | Emit also OS/process metrics (mem, cpu) | Useful for ops, but needs `sysinfo` dep |
+/// | `histogram_buckets: Vec<f64>` | Override default latency buckets | Advanced users only |
+/// | `default_labels: HashMap<String, String>` | Static labels on every series | Useful for multi-instance (e.g. `instance="home"`) |
+/// | `scrape_token: Option<String>` | Require a bearer token even if `public = true` | Middle ground between "full open" and "full auth" |
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MetricsConfig {
+    /// Master switch. If false, no metrics are collected and `/metrics` is not exposed.
+    pub enabled: bool,
+    /// Expose `/metrics` on the root path without authentication (Prometheus scrape pattern).
+    /// The authenticated `/api/v1/metrics` is always available when `enabled = true`.
+    pub public: bool,
+}
+
+impl Default for MetricsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            public: false,
         }
     }
 }

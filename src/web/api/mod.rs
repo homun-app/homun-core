@@ -18,6 +18,7 @@ mod logs;
 mod maintenance;
 mod mcp;
 mod memory;
+mod metrics;
 mod mobile;
 mod onboarding;
 mod openai;
@@ -40,6 +41,7 @@ pub(crate) use chat::{
     web_session_key, ChatUploadCleanupStats,
 };
 pub use health::{health, webhook_ingress};
+pub(crate) use metrics::metrics_handler;
 
 use std::sync::Arc;
 
@@ -53,6 +55,7 @@ pub fn router() -> Router<Arc<AppState>> {
         // Note: /health and /v1/webhook/{token} are registered as public routes in server.rs
         .merge(logs::routes())
         .merge(status::routes())
+        .merge(metrics::routes())
         .merge(skills::routes())
         .merge(providers::routes())
         .merge(mcp::routes())

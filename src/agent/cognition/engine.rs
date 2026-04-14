@@ -337,6 +337,13 @@ pub async fn run_cognition(mut params: CognitionParams<'_>) -> Result<CognitionR
             // Record success metric (fire-and-forget)
             record_cognition_metric(params.db, model, true, elapsed_ms, None, tool_count).await;
 
+            // OBS-1: Prometheus histogram observation (outcome="success")
+            crate::metrics::histogram_observe(
+                "homun_cognition_latency_seconds",
+                &[("outcome", "success")],
+                (elapsed_ms as f64) / 1000.0,
+            );
+
             Ok(result)
         }
         None => {
@@ -357,6 +364,13 @@ pub async fn run_cognition(mut params: CognitionParams<'_>) -> Result<CognitionR
 
             // Record failure metric (fire-and-forget)
             record_cognition_metric(params.db, model, false, elapsed_ms, Some(&reason), 0).await;
+
+            // OBS-1: Prometheus histogram observation (outcome="fallback")
+            crate::metrics::histogram_observe(
+                "homun_cognition_latency_seconds",
+                &[("outcome", "fallback")],
+                (elapsed_ms as f64) / 1000.0,
+            );
 
             Err(reason)
         }

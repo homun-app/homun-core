@@ -150,27 +150,59 @@ impl ToolRegistry {
 
     /// Execute a tool by name with the given arguments.
     /// Returns error as ToolResult (not Err) for graceful LLM handling.
+    ///
+    /// Instrumented with two Prometheus metrics: `homun_tool_calls_total{tool,status}`
+    /// and `homun_tool_execution_latency_seconds{tool}`. Instrumentation is
+    /// lock-free on the hot path and cannot fail — observability never interferes
+    /// with the business flow.
     pub async fn execute(&self, name: &str, args: Value, ctx: &ToolContext) -> ToolResult {
         let tool = match self.tools.get(name) {
             Some(t) => t,
             None => {
+                crate::metrics::counter_inc(
+                    "homun_tool_calls_total",
+                    &[("tool", name), ("status", "unknown")],
+                    1,
+                );
                 return ToolResult::error(format!("Unknown tool: {name}"));
             }
         };
 
         tracing::debug!(tool = %name, args = %args, "Executing tool");
+        let t0 = std::time::Instant::now();
 
-        match tool.execute(args, ctx).await {
+        let outcome = tool.execute(args, ctx).await;
+        let elapsed = t0.elapsed().as_secs_f64();
+
+        crate::metrics::histogram_observe(
+            "homun_tool_execution_latency_seconds",
+            &[("tool", name)],
+            elapsed,
+        );
+
+        match outcome {
             Ok(result) => {
+                let status = if result.is_error { "error" } else { "ok" };
+                crate::metrics::counter_inc(
+                    "homun_tool_calls_total",
+                    &[("tool", name), ("status", status)],
+                    1,
+                );
                 tracing::debug!(
                     tool = %name,
                     is_error = result.is_error,
                     output_len = result.output.len(),
+                    elapsed_ms = elapsed * 1000.0,
                     "Tool execution complete"
                 );
                 result
             }
             Err(e) => {
+                crate::metrics::counter_inc(
+                    "homun_tool_calls_total",
+                    &[("tool", name), ("status", "failed")],
+                    1,
+                );
                 tracing::warn!(tool = %name, error = %e, "Tool execution failed");
                 ToolResult::error(format!("Tool error: {e}"))
             }

@@ -318,6 +318,8 @@ impl WebServer {
             auto_tls,
             session_ttl,
             tunnel_config,
+            metrics_enabled,
+            metrics_public,
         ) = {
             let cfg = self.config.read().await;
             (
@@ -331,6 +333,8 @@ impl WebServer {
                 cfg.channels.web.auto_tls,
                 cfg.channels.web.session_ttl_secs,
                 cfg.channels.web.tunnel.clone(),
+                cfg.metrics.enabled,
+                cfg.metrics.public,
             )
         };
 
@@ -590,7 +594,7 @@ impl WebServer {
             ));
 
         // Public routes — no auth required
-        let public = Router::new()
+        let mut public = Router::new()
             .route("/login", axum::routing::get(pages::login_page))
             .route(
                 "/setup-wizard",
@@ -604,6 +608,19 @@ impl WebServer {
             .merge(api::public_router())
             .merge(static_assets())
             .merge(auth_routes);
+
+        // Prometheus scrape endpoint on the root path — only exposed unauthenticated
+        // when [metrics] enabled = true AND [metrics] public = true. The authenticated
+        // /api/v1/metrics is always registered inside the protected router below.
+        if metrics_enabled && metrics_public {
+            public = public.route(
+                "/metrics",
+                axum::routing::get(api::metrics_handler).with_state(state.clone()),
+            );
+            tracing::info!(
+                "Prometheus metrics endpoint exposed publicly on /metrics (no auth)"
+            );
+        }
 
         // Protected routes — require auth (SEC-1 middleware + SEC-3 API rate limit)
         let protected = Router::new()

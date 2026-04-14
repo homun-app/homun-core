@@ -43,6 +43,7 @@ mod contacts;
 mod gateways;
 mod logs;
 mod mcp_setup;
+mod metrics;
 mod profiles;
 mod provider;
 mod queue;
@@ -996,6 +997,15 @@ async fn main() -> Result<()> {
                 elapsed_ms = startup_t0.elapsed().as_millis(),
                 "⏱ config loaded"
             );
+
+            // Register Prometheus metrics families before any instrumentation fires.
+            // Idempotent, cheap, always safe even if [metrics] enabled = false
+            // (unregistered-family observations silently no-op in that case via the
+            // separate enabled check at scrape time — but families still exist).
+            if config.metrics.enabled {
+                crate::metrics::register_homun_metrics();
+                tracing::info!("⏱ metrics registry initialized");
+            }
 
             // Open DB BEFORE wrapping config in Arc so we can apply
             // the DB settings overlay (DB overrides TOML for security/

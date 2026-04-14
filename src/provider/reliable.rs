@@ -161,9 +161,36 @@ impl Provider for ReliableProvider {
                 let t0 = std::time::Instant::now();
                 match entry.provider.chat(req).await {
                     Ok(response) => {
+                        let elapsed = t0.elapsed();
                         if let Some(ref h) = self.health {
-                            h.record_success(&entry.name, t0.elapsed());
+                            h.record_success(&entry.name, elapsed);
                         }
+                        // OBS-1: latency histogram + token counters for this provider call.
+                        // Labels: (provider, model) for histogram, (provider, direction) for tokens.
+                        crate::metrics::histogram_observe(
+                            "homun_llm_latency_seconds",
+                            &[
+                                ("provider", entry.name.as_str()),
+                                ("model", entry.model.as_str()),
+                            ],
+                            elapsed.as_secs_f64(),
+                        );
+                        crate::metrics::counter_inc(
+                            "homun_llm_tokens_total",
+                            &[
+                                ("provider", entry.name.as_str()),
+                                ("direction", "prompt"),
+                            ],
+                            response.usage.prompt_tokens as u64,
+                        );
+                        crate::metrics::counter_inc(
+                            "homun_llm_tokens_total",
+                            &[
+                                ("provider", entry.name.as_str()),
+                                ("direction", "completion"),
+                            ],
+                            response.usage.completion_tokens as u64,
+                        );
                         if attempt > 0 || offset > 0 {
                             tracing::info!(
                                 provider = %entry.name,
