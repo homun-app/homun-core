@@ -9,7 +9,7 @@
 >
 > **Aggiornamento**: a ogni sprint completato → marca come ✅, aggiorna le metriche, aggiungi nuovi sprint scoperti.
 >
-> **Ultimo aggiornamento**: 2026-04-13
+> **Ultimo aggiornamento**: 2026-04-14
 
 ---
 
@@ -17,8 +17,8 @@
 
 | Asse | Stato | Dettaglio |
 |---|---|---|
-| **Codebase** | ✅ stabile | 953 test, 0 warning clippy, 121K LOC Rust |
-| **Reality Audit** | 🟡 8/16 domini | 6✅ + 1⚠️ + 1🔧 (canali 4/7 con bug tracciabili); 8 domini ❓ non auditati |
+| **Codebase** | ✅ stabile | 942 test, 0 warning clippy, 121K LOC Rust |
+| **Reality Audit** | 🟡 13/16 domini | Sprint 2+3+4+5 completati; 37 bug tracciati (4🔴+25🟡+8🟢), 4 🔴 invariati (#10, #11, #18, #26). 3 domini ❓ rimanenti (Automazioni, Osservabilità, Mobile/APP-2/Condivisione) |
 | **Strategy roadmap** | ✅ Fase 1+2 done | Hardening + Apertura completate. Fase 3 (Consumer) parziale |
 | **Distribuzione** | ❌ blocco | Nessun installer nativo. Solo build-from-source o Docker |
 | **Mobile app** | 🚧 in progress | APP-1 done, APP-2 (block widgets, approvals) in progress |
@@ -269,36 +269,53 @@ Lo scope è scritto in modo che una **nuova sessione Claude** possa iniziare da 
 
 ---
 
-### Sprint 5 — Audit Skills + MCP + Contatti M 🔲
+### Sprint 5 — Audit Skills + MCP + Contatti + Profili M ✅ 2026-04-14
 
-**Obiettivo**: chiudere la copertura dei domini "estensibilità" e "multi-utente".
+**Obiettivo**: chiudere la copertura dei domini "estensibilità" (Skills + MCP) e "multi-utente" (Contatti + Profili). Cross-check ISO-3 cross-subsystem (Sprint 3 aveva verificato solo memoria+RAG).
 
-**Scope**:
-- **Skills**:
-  - Install da GitHub: `homun skills add owner/repo`
-  - Pre-install security scan (verificare che blocchi script malevoli)
-  - Hot-reload watcher
-  - Eligibility check (bins, env vars)
-- **MCP**:
-  - Install di una recipe (es. github)
-  - OAuth flow + token refresh runtime (post RCP-FN1)
-  - Tool calling end-to-end
-- **Contatti**:
-  - Auto-association: nuovo sender → suggest contact
-  - Identity resolution cross-channel (stesso utente su Telegram + Email)
-  - Perimeter enforcement (tools_denied, knowledge_namespaces)
-  - Audit Wizard memory visibility
+**Risultato**:
+- 3 domini (Skills + MCP + Contatti + Profili) auditati via **static code-analysis** (~15.5K LOC Rust totali — più grande audit Sprint finora)
+- Parallelizzato con 3 Explore agent (Batch A Skills, Batch B MCP, Batch C Contatti + Profili), 16 assi totali (SK1-SK6 + M1-M4 + C1-C6)
+- **14 nuovi bug tracciati (0 🔴 + 11 🟡 + 3 🟢)**: #39-#56 — tutti coverage/hardening gaps, nessuna rottura funzionale
+- **8 falsi positivi corretti** in verification read (record Sprint 5, vs 1 Sprint 3 + 2 Sprint 4): 4 su C3 perimeter enforcement (agent_loop.rs:844/858/1031/888 prova tutto), C5-2 vault profile scoping (vault.rs:36), C5-3 skills profile scoping (loader.rs:72), Skills trust model #34, MCP M3-5 error propagation
+- **ISO-3 cross-subsystem verified**: 5/7 sottosistemi profile-scoped correttamente (memoria + RAG + vault + skills + contact perimeter). Gap: MCP #55 singleton globale, gateway overrides #56 no cross-profile validation
+- **Pattern architetturali confermati**:
+  - **Agent confidence ≠ correctness**: verification read è non-opzionale per i 🔴
+  - **ISO-3 pattern consolidato**: `*_for_profile()` + `scan_*_with_profile()` + `load_perimeter()` è lo schema replicabile
+  - **Single call site fragile** (cross Sprint 4 #31): #44 conferma, skill executor output bypassa redact
+  - **Silent unsafe default** (cross Sprint 4 #35): #42 conferma, creator smoke test unsandboxed
+  - **Vault key hardcoded asymmetry**: #47 preset MCP collidono per multi-instance vs skills profile-scoped
+- Dominio "Skills + MCP" passa da ❓ a ⚠️ in REALITY-AUDIT overview
+- Dominio "Contatti + Profili" passa da ❓ a ⚠️ in REALITY-AUDIT overview
+- 13/16 domini coperti (verso target 16/16 per v1.0)
+- Totale bug aperti: 23 → 37 (+14 Sprint 5), 4 🔴 totali invariati (#10, #11, #18, #26)
+- 942 test pass, clippy produzione clean (nessuna modifica codice in questo sprint)
+- 1 commit doc-only pulito
 
-**File chiave**:
-- `src/skills/`, `src/tools/mcp.rs`
-- `src/contacts/`
-- `docs/features/05-skills-mcp.md`, `10-contatti-profili.md`
+**Scope originale (eseguito)**:
+- **Skills** (6 assi SK1-SK6): SK1 install GitHub, SK2 pre-install security scan, SK3 hot-reload watcher, SK4 eligibility + invocation policy, SK5 LLM creator, SK6 adapter legacy manifest
+- **MCP** (4 assi M1-M4): M1 install recipe + OAuth init, M2 token refresh runtime, M3 tool calling end-to-end, M4 server lifecycle
+- **Contatti + Profili** (6 assi C1-C6): C1 auto-association, C2 identity resolution, C3 perimeter enforcement, C4 context injection, C5 ISO-3 cross-subsystem, C6 wizard memory visibility
+
+**File auditati**:
+- Skills: `src/skills/*.rs` (11 file), `src/tools/skill_create.rs`, `src/agent/skill_activator.rs`
+- MCP: `src/tools/mcp.rs`, `src/tools/mcp_token_refresh.rs`, `src/mcp_setup.rs`, `src/skills/mcp_registry.rs`, `src/web/api/mcp/*.rs` (6 file)
+- Contatti + Profili: `src/contacts/*.rs`, `src/profiles/*.rs`, `src/gateways/*.rs`, `src/agent/profile_resolver.rs`, `src/web/api/contacts.rs`, `profiles.rs`
+- Cross-check: `src/agent/agent_loop.rs` (call sites perimeter/redact), `src/tools/vault.rs`
 
 **Definition of Done**:
-- [ ] Recipe Skills + MCP + Contacts eseguite
-- [ ] REALITY-AUDIT.md: 13/16 domini coperti
+- [x] 16 assi auditati (SK1-SK6 + M1-M4 + C1-C6)
+- [x] Tabelle "Verified Skills" + "Verified MCP" + "Verified Contacts + Profiles" in REALITY-AUDIT.md
+- [x] 14 bug tracciati come #39-#56 con severity + location + fix proposto
+- [x] 8 falsi positivi corretti in verification read + documentati per metodo
+- [x] Cross-check findings Sprint 4 (#31, #32, #34, #35, #37, S8) completato
+- [x] ISO-3 cross-subsystem table finale (5/7 verified + 2 gap documentati)
+- [x] REALITY-AUDIT.md aggiornato (overview Skills+MCP e Contatti+Profili ❓→⚠️, Recipe K, 14 issue + 8 FP, cronologia)
+- [x] PRODUCTION-ROADMAP.md Sprint 5 ✅ + Summary + cronologia
+- [x] SESSION-PRIMER.md aggiornato (13/16 domini, 37 bug)
+- [x] cargo test pass (942 baseline invariata) + clippy produzione clean
 
-**Rischio**: BASSO. Aree relativamente self-contained.
+**Rischio**: si è verificato **BASSO**. 0 bug 🔴 in Sprint 5. I 11 🟡 sono tutti coverage + defense-in-depth + design gap. Gli 8 FP sono il segnale più importante: il metodo "agent parallelo" è potente ma non sufficiente senza verification read. Pattern consolidato → addendum in CLAUDE.md.
 
 ---
 
@@ -473,7 +490,7 @@ Lo scope è scritto in modo che una **nuova sessione Claude** possa iniziare da 
 | 2 — Audit Canali | audit | L | ⛔ | ✅ 2026-04-14 (5 bug tracciati, no fix) |
 | 3 — Audit Memoria + RAG | audit | M | ⛔ | ✅ 2026-04-14 (9 bug tracciati, 2🔴+7🟡, no fix) |
 | 4 — Audit Sicurezza | audit | M | ⛔ | ✅ 2026-04-14 (9 bug tracciati, 7🟡+2🟢, 0 🔴, 2 FP corretti, no fix) |
-| 5 — Audit Skills + MCP + Contatti | audit | M | 🟡 | 🔲 |
+| 5 — Audit Skills + MCP + Contatti + Profili | audit | M | 🟡 | ✅ 2026-04-14 (14 bug tracciati, 0🔴+11🟡+3🟢, 8 FP corretti, ISO-3 5/7 verified, no fix) |
 | 6 — Audit Automazioni + Workflow | audit | M | 🟡 | 🔲 |
 | 7 — Mobile APP-2 | feature | L | 🟡 | 🔲 |
 | 8 — Installer Nativi | release | L | ⛔ | 🔲 |
@@ -539,6 +556,7 @@ Ogni sprint è **self-contained** per essere eseguito in una sessione Claude sep
 | 2026-04-14 | Sprint 2 ✅ — Audit Canali: 7/7 canali code-audited (~4.2K LOC), 3 ✅ (CLI/Discord/Web) + 4 ⚠️ (Telegram/WhatsApp/Slack/Email). 5 bug tracciati (#10-#14), nessun fix implementato (raccogli+prioritizza). Pattern emergenti: health tracking opt-in adottato solo da Discord, capability table non auditata. Dominio Canali ❓→⚠️. 8/10 sprint rimanenti |
 | 2026-04-14 | Sprint 3 ✅ — Audit Memoria + RAG: 16 assi coperti (M1-M8 + R1-R8) via 2 Explore agent paralleli, ~5.7K LOC. 11/16 ✅ puliti, 5/16 con bug. 9 nuovi bug tracciati (#15-#18 + #25-#29): **2 🔴** (#18 path traversal in `remember`, #26 DoS RAG file size), 7 🟡. 1 falso positivo corretto tramite verification read (#27 downgrade 🔴→🟡 — `detect_injection` è usato da `context_compactor.rs` per SEC-13). Pattern emergenti: (1) post-fetch scoping cross-subsistema, (2) detect_injection on-tool-use vs on-ingest, (3) importance 1-5 sotto-enforced, (4) file I/O senza bounds, (5) orphan HNSW side-effects. ISO-3/ISO-4 ✅ da code review. Dominio Memoria+RAG ❓→⚠️. Nessun fix (2 🔴 candidati Sprint 4). 7/10 sprint rimanenti |
 | 2026-04-14 | Sprint 4 ✅ — Audit Sicurezza End-to-End: 15 assi coperti (S1-S15) via 3 Explore agent paralleli, ~4K LOC. **10/15 ✅ puliti** (safety prompt, cross-channel labeling, web auth+rate+CSRF, 2FA chain post-fix #1, e-stop propagation, trusted devices, sandbox backend enforcement core). 5/15 con gap. 9 nuovi bug tracciati (**0 🔴** + 7 🟡 + 2 🟢): #30 exfiltration PII IT mancanti + dual registry, #31 exfiltration single call site, #32 context_compactor short-bypass, #33 vault_leak resolve no key validation, #34 remember bypassa check_path_permission (second-line per #18), #35 sandbox silent fallback None, #36 Seatbelt allow_paths no symlink canonicalize, #37 pairing HashMap unbounded DoS, #38 dual redact_vault_values definitions. **2 falsi positivi corretti** in verification read: (1) CSPRNG claim smentito (rand 0.8 thread_rng IS crypto-safe ChaCha12+OsRng), (2) pairing cleanup claim smentito (auto-scheduled in gateway.rs:579). Pattern emergenti: (1) single-call-site defenses fragile, (2) dual pattern registries divergenti, (3) skip-on-short bypass, (4) second-line missing, (5) silent fallback (stesso pattern di Sprint 2 #10 capability drift). Cross-check Sprint 3: #18 aggravato + #34, #26 confermato (no `DefaultBodyLimit` trovato), #27 confermato design + nuovo gap #32. Dominio Sicurezza ✅→⚠️. Nessun fix implementato (raccogli e prioritizza). Attacker model live scenari rimandati a "Sprint Fix Sicurezza". 942 test pass, 0 warning clippy. 6/10 sprint rimanenti |
+| 2026-04-14 | Sprint 5 ✅ — Audit Skills + MCP + Contatti + Profili: 16 assi coperti (SK1-SK6 + M1-M4 + C1-C6) via 3 Explore agent paralleli, **~15.5K LOC** (più grande audit Sprint finora). **14 nuovi bug tracciati (0 🔴 + 11 🟡 + 3 🟢)**: Skills (#39-#44) pattern bypass whitespace + cumulative threshold + TOCTOU scan + creator smoke test unsandboxed + adapter YAML escape + executor output no redact; MCP (#45-#52) OAuth state + redirect_uri + vault_key collision + refresh contention + non-atomic rotation + unbounded image + subprocess env + lifecycle gaps; Contatti+Profili (#53-#56) sender_id injection + bio/notes self-surface + MCP no profile scoping + gateway overrides no cross-profile validation. **8 falsi positivi corretti** in verification read (record Sprint 5, vs 1 Sprint 3 + 2 Sprint 4): 4 su C3 perimeter enforcement (agent_loop.rs:844/858/1031/888 prova che il perimeter è loaded + tool filter + privacy constraint + namespace filter tutti enforced), C5-2 vault profile scoping (vault.rs:36 vault_prefix_for_profile), C5-3 skills profile scoping (loader.rs:72 profile_slug + scan_directory_with_profile), Skills trust model #34 (check_path_permission è layer sbagliato per skill executor pre-trusted), MCP M3-5 auto-smentito (bail! catchato da Result). **ISO-3 cross-subsystem verified**: 5/7 sottosistemi profile-scoped (memoria + RAG + vault + skills + contact perimeter), 2 gap (#55 MCP singleton globale, #56 gateway overrides). **Pattern consolidato "agent confidence ≠ correctness"** — verification read è non opzionale. Cross-check Sprint 4: #31 aggravato (#44 skill output no redact), #35 confermato (#42 smoke test default unsafe), #37 ProfileRegistry bounded ✅, S8 aggravato (#52b MCP shutdown no per-peer timeout). Dominio "Skills + MCP" ❓→⚠️, "Contatti + Profili" ❓→⚠️. **13/16 domini coperti**. Totale bug: 23→37, 4 🔴 invariati. 942 test pass, 0 warning clippy. 5/10 sprint rimanenti |
 
 ---
 

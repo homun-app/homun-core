@@ -1,7 +1,16 @@
 # Homun — Claude Code Instructions
 
-> **Reference docs**: `docs/UNIFIED-ROADMAP.md` (roadmap & status), `docs/PROJECT.md` (vision), `docs/services/` (per-domain architecture)
-> This file contains the technical guidelines for writing code in this codebase.
+> **🚀 START HERE for new sessions**: read [`docs/SESSION-PRIMER.md`](./docs/SESSION-PRIMER.md) first — it's a < 200-line hub that points you to the right doc for any task.
+>
+> **Doc layers** (3 levels of granularity):
+> - **Tactical (current sprint)** → [`docs/PRODUCTION-ROADMAP.md`](./docs/PRODUCTION-ROADMAP.md) — 10 sprint per v1.0 production
+> - **Bug tracking** → [`docs/REALITY-AUDIT.md`](./docs/REALITY-AUDIT.md) — what's broken/works, evidence-based
+> - **Strategic (12+ months)** → [`docs/UNIFIED-ROADMAP.md`](./docs/UNIFIED-ROADMAP.md) — 4 phases, positioning
+> - **Vision** → [`docs/PROJECT.md`](./docs/PROJECT.md) — why Homun exists
+> - **Per-domain spec** → [`docs/features/INDEX.md`](./docs/features/INDEX.md) — 17 functional specs
+> - **Per-service architecture** → [`docs/services/`](./docs/services/) — 17 internal architecture docs
+>
+> This file (`CLAUDE.md`) contains the **technical guidelines for writing code** — conventions, patterns, what NOT to do.
 
 ## What is Homun
 
@@ -9,7 +18,9 @@ Homun is a personal AI assistant written in Rust — a digital homunculus that l
 
 **Core philosophy**: single binary, local-first, privacy-focused, skill-powered.
 
-**Scale**: ~121K LOC Rust, ~29K LOC JS, 245 source files, 45 JS files, 53 SQLite migrations, 952 tests, 11-check CI pipeline.
+**Scale**: ~121K LOC Rust, ~29K LOC JS, 245 source files, 45 JS files, 53 SQLite migrations, 953 tests, 11-check CI pipeline.
+
+**Current production status**: Alpha v0.2 → roadmap to v1.0 in [`docs/PRODUCTION-ROADMAP.md`](./docs/PRODUCTION-ROADMAP.md). Reality Audit covered 7/16 domains as of 2026-04-13.
 
 ## Architecture Overview
 
@@ -679,14 +690,32 @@ Prima di dichiarare una feature completa, verifica:
 - [ ] Il file non supera 500 righe — se si, hai pianificato lo split?
 - [ ] La logica e gia presente altrove nel codebase? (DRY check)
 - [ ] I nomi di funzioni/struct/variabili rispettano le naming conventions?
-- [ ] `docs/UNIFIED-ROADMAP.md` aggiornato con le task completate
+- [ ] Doc tracking aggiornati (vedi "Roadmap Tracking — 3 layers" sotto):
+  - `docs/PRODUCTION-ROADMAP.md` se hai completato uno sprint item
+  - `docs/REALITY-AUDIT.md` se hai fixato un bug o auditato un dominio
+  - `docs/UNIFIED-ROADMAP.md` SOLO se cambia uno status di fase macro
 
-### Roadmap Tracking
-- **After completing a feature or significant change**, update `docs/UNIFIED-ROADMAP.md`:
-  - Mark relevant tasks as done with date
-  - Update "Stato Attuale" metrics table if numbers changed
-  - Add new tasks discovered during implementation
-- `docs/UNIFIED-ROADMAP.md` is the **single source of truth** for project status and planning.
+### Roadmap Tracking — 3 layers
+
+**Tactical (current sprint)** → [`docs/PRODUCTION-ROADMAP.md`](./docs/PRODUCTION-ROADMAP.md):
+- After completing an item in the active sprint, mark it ✅ with date
+- After completing an entire sprint, update the "Sprint Summary" table at the top
+- New tasks discovered → add to the appropriate sprint or open a new sprint
+
+**Bug tracking** → [`docs/REALITY-AUDIT.md`](./docs/REALITY-AUDIT.md):
+- New bug found → add as `#N` entry with severity 🔴/🟡/🟢, root cause, fix proposal
+- Bug fixed → mark as ✅ FIXATO with sprint/commit reference
+- Domain audited → add row to "Conferme" with date and what was verified
+
+**Strategic (long-term)** → [`docs/UNIFIED-ROADMAP.md`](./docs/UNIFIED-ROADMAP.md):
+- Update only when phase status changes (Fase 1/2/3/4 progress)
+- Update "Stato Attuale" metrics table monthly or on major releases
+- This is **strategic positioning**, not day-to-day task tracking
+
+**Single source of truth depends on the question**:
+- "Cosa devo fare adesso?" → PRODUCTION-ROADMAP.md
+- "Funziona X?" → REALITY-AUDIT.md
+- "Dove andiamo nei prossimi 6 mesi?" → UNIFIED-ROADMAP.md
 
 ### UX Conventions
 - **Quality gate**: every UI change must pass `docs/design/ui-quality-gate.md` checklist.
@@ -695,6 +724,14 @@ Prima di dichiarare una feature completa, verifica:
 - **Progressive disclosure**: hide advanced options behind expandable sections.
 - **CSS tokens only**: use `var(--accent)`, `var(--surface-*)`, `var(--text-*)` etc. Never hardcode values.
 - Use `/ux-review` and `/new-screen` commands for UI work.
+
+### Audit Methodology — verification read è obbligatoria sui 🔴
+
+Negli audit Sprint 2-5 il metodo "3 Explore agent in parallelo + synthesis" ha scoperto molti bug reali, ma ha anche prodotto **11 falsi positivi con severity 🔴** su 4 sprint (Sprint 3: 1, Sprint 4: 2, Sprint 5: 8). Gli agent tendono a leggere parzialmente i file chiave e dichiarare "feature X non è enforced" quando in realtà lo è, 500 righe più in basso nel file chiamante.
+
+**Regola**: prima di committare un bug 🔴 alla cronologia di `docs/REALITY-AUDIT.md`, leggere direttamente il/i file target con Read/Grep per confermare la claim. Esempio da Sprint 5: l'agent ha dichiarato "perimeter never loaded in agent_loop.rs" — verification read ha trovato `load_perimeter(...)` a `agent_loop.rs:844` e hard filter a 1030-1056. Sarebbero stati 4 bug 🔴 fantasma.
+
+Tempo speso: ~5 min per bug. ROI: alto (evita bug-fix inutili e disinformazione nel doc layer bug tracking). Pattern consolidato: **agent confidence ≠ correctness**.
 
 ---
 
