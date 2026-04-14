@@ -1,0 +1,12 @@
+{
+  "block_type": "status",
+  "id": "blk_status_01",
+  "title": "Prenotazione FR9630",
+  "status": "active",
+  "fields": [
+    {"label": "Partenza", "value": "Roma Termini · 14:30"},
+    {"label": "Arrivo", "value": "Milano Centrale · 17:45"},
+    {"label": "Carrozza", "value": "4 · posto 7A"},
+    {"label": "PNR", "value": "XY7A9K"}
+  ]
+}

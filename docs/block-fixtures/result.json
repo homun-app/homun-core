@@ -1,0 +1,14 @@
+{
+  "block_type": "result",
+  "id": "blk_result_01",
+  "title": "Biglietto FR9630",
+  "icon": "ticket",
+  "fields": [
+    {"label": "PNR", "value": "XY7A9K"},
+    {"label": "Passeggero", "value": "Mario Rossi"},
+    {"label": "Partenza", "value": "Roma Termini · 14:30"},
+    {"label": "Arrivo", "value": "Milano Centrale · 17:45"},
+    {"label": "Carrozza", "value": "4 · posto 7A"},
+    {"label": "Totale", "value": "€89.90"}
+  ]
+}

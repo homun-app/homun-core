@@ -1,0 +1,38 @@
+{
+  "block_type": "choice",
+  "id": "blk_choice_01",
+  "title": "Treni Roma → Milano",
+  "subtitle": "3 opzioni disponibili oggi",
+  "options": [
+    {
+      "id": "opt_1",
+      "label": "Frecciarossa 9630 · 14:30 → 17:45",
+      "subtitle": "€89.90 · 1a classe",
+      "icon": "train",
+      "metadata": {
+        "provider": "trenitalia",
+        "train_id": "FR9630",
+        "duration_min": 195
+      }
+    },
+    {
+      "id": "opt_2",
+      "label": "Italo 9988 · 14:45 → 17:55",
+      "subtitle": "€79.00 · Smart",
+      "icon": "train",
+      "metadata": {
+        "provider": "italo",
+        "train_id": "NTV9988",
+        "duration_min": 190
+      }
+    },
+    {
+      "id": "opt_3",
+      "label": "Frecciarossa 9634 · 15:00 → 18:10",
+      "metadata": {
+        "provider": "trenitalia",
+        "train_id": "FR9634"
+      }
+    }
+  ]
+}

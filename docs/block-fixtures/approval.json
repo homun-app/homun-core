@@ -1,0 +1,14 @@
+{
+  "block_type": "approval",
+  "id": "blk_approve_01",
+  "title": "Conferma prenotazione",
+  "description": "Frecciarossa 9630, 1a classe, €89.90. Partenza Roma Termini 14:30.",
+  "approve_label": "Prenota ora",
+  "deny_label": "Annulla",
+  "metadata": {
+    "booking_provider": "trenitalia",
+    "train_id": "FR9630",
+    "price_eur": 89.90,
+    "requires_2fa": false
+  }
+}

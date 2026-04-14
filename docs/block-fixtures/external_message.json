@@ -1,0 +1,13 @@
+{
+  "block_type": "external_message",
+  "id": "blk_ext_01",
+  "source": "email",
+  "sender": "booking@trenitalia.it",
+  "subject": "Conferma prenotazione FR9630",
+  "preview": "Gentile cliente, confermiamo la tua prenotazione per il treno Frecciarossa 9630 del 15/04/2026. PNR: XY7A9K. Carrozza 4, posto 7A.",
+  "metadata": {
+    "email_id": "msg_12345",
+    "received_at": "2026-04-14T12:34:56Z",
+    "has_attachment": true
+  }
+}

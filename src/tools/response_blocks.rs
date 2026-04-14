@@ -826,4 +826,148 @@ Poi fai quest'altro"#;
         assert_eq!(strip_leading_emoji("No emoji here"), "No emoji here");
         assert_eq!(strip_leading_emoji("✅ Done"), "Done");
     }
+
+    // ─── Cross-stack fixture parity ─────────────────────────────
+    //
+    // These tests lock the JSON contract shared with the Flutter client.
+    // The fixtures in docs/block-fixtures/ are the source of truth and
+    // are byte-duplicated in homun-app/test/fixtures/blocks/.
+    //
+    // If a schema change breaks roundtrip here, the Flutter parse test
+    // in chat_message_block_test.dart will also break — both stacks
+    // need a coordinated update plus a fixture edit.
+
+    const FIXTURE_CHOICE: &str = include_str!("../../docs/block-fixtures/choice.json");
+    const FIXTURE_APPROVAL: &str = include_str!("../../docs/block-fixtures/approval.json");
+    const FIXTURE_STATUS: &str = include_str!("../../docs/block-fixtures/status.json");
+    const FIXTURE_RESULT: &str = include_str!("../../docs/block-fixtures/result.json");
+    const FIXTURE_EXTERNAL: &str =
+        include_str!("../../docs/block-fixtures/external_message.json");
+
+    #[test]
+    fn fixture_choice_roundtrip() {
+        let block: ResponseBlock = serde_json::from_str(FIXTURE_CHOICE)
+            .expect("choice fixture must deserialize");
+        match &block {
+            ResponseBlock::Choice(c) => {
+                assert_eq!(c.id, "blk_choice_01");
+                assert_eq!(c.options.len(), 3);
+                assert_eq!(c.options[0].id, "opt_1");
+                // The third option intentionally omits subtitle + icon
+                // to exercise the optional-field contract.
+                assert!(c.options[2].subtitle.is_none());
+                assert!(c.options[2].icon.is_none());
+                assert!(c.options[0].metadata.is_some());
+            }
+            other => panic!("expected Choice, got {:?}", other.block_type_name()),
+        }
+        let reserialized = serde_json::to_value(&block).unwrap();
+        let original: serde_json::Value = serde_json::from_str(FIXTURE_CHOICE).unwrap();
+        assert_eq!(reserialized, original, "choice must roundtrip byte-stable");
+    }
+
+    #[test]
+    fn fixture_approval_roundtrip() {
+        let block: ResponseBlock = serde_json::from_str(FIXTURE_APPROVAL)
+            .expect("approval fixture must deserialize");
+        match &block {
+            ResponseBlock::Approval(a) => {
+                assert_eq!(a.id, "blk_approve_01");
+                assert_eq!(a.approve_label, "Prenota ora");
+                assert_eq!(a.deny_label, "Annulla");
+                assert!(a.description.is_some());
+                assert!(a.metadata.is_some());
+            }
+            other => panic!("expected Approval, got {:?}", other.block_type_name()),
+        }
+        let reserialized = serde_json::to_value(&block).unwrap();
+        let original: serde_json::Value = serde_json::from_str(FIXTURE_APPROVAL).unwrap();
+        assert_eq!(reserialized, original);
+    }
+
+    #[test]
+    fn fixture_status_roundtrip() {
+        let block: ResponseBlock = serde_json::from_str(FIXTURE_STATUS)
+            .expect("status fixture must deserialize");
+        match &block {
+            ResponseBlock::Status(s) => {
+                assert_eq!(s.id, "blk_status_01");
+                assert_eq!(s.status, BlockStatus::Active);
+                assert_eq!(s.fields.len(), 4);
+                assert_eq!(s.fields[0].label, "Partenza");
+            }
+            other => panic!("expected Status, got {:?}", other.block_type_name()),
+        }
+        let reserialized = serde_json::to_value(&block).unwrap();
+        let original: serde_json::Value = serde_json::from_str(FIXTURE_STATUS).unwrap();
+        assert_eq!(reserialized, original);
+    }
+
+    #[test]
+    fn fixture_result_roundtrip() {
+        let block: ResponseBlock = serde_json::from_str(FIXTURE_RESULT)
+            .expect("result fixture must deserialize");
+        match &block {
+            ResponseBlock::Result(r) => {
+                assert_eq!(r.id, "blk_result_01");
+                assert_eq!(r.icon.as_deref(), Some("ticket"));
+                assert_eq!(r.fields.len(), 6);
+            }
+            other => panic!("expected Result, got {:?}", other.block_type_name()),
+        }
+        let reserialized = serde_json::to_value(&block).unwrap();
+        let original: serde_json::Value = serde_json::from_str(FIXTURE_RESULT).unwrap();
+        assert_eq!(reserialized, original);
+    }
+
+    #[test]
+    fn fixture_external_message_roundtrip() {
+        let block: ResponseBlock = serde_json::from_str(FIXTURE_EXTERNAL)
+            .expect("external_message fixture must deserialize");
+        match &block {
+            ResponseBlock::ExternalMessage(e) => {
+                assert_eq!(e.id, "blk_ext_01");
+                assert_eq!(e.source, "email");
+                assert_eq!(e.sender.as_deref(), Some("booking@trenitalia.it"));
+                assert!(e.subject.is_some());
+                assert!(e.preview.contains("9630"));
+                assert!(e.metadata.is_some());
+            }
+            other => panic!(
+                "expected ExternalMessage, got {:?}",
+                other.block_type_name()
+            ),
+        }
+        let reserialized = serde_json::to_value(&block).unwrap();
+        let original: serde_json::Value = serde_json::from_str(FIXTURE_EXTERNAL).unwrap();
+        assert_eq!(reserialized, original);
+    }
+
+    #[test]
+    fn fixture_block_type_names_cover_all_variants() {
+        // Defensive check: if a new variant is added to ResponseBlock
+        // without a corresponding fixture, this test will fail to
+        // exhaustively cover all variants.
+        let fixtures: Vec<&str> = vec![
+            "choice",
+            "approval",
+            "status",
+            "result",
+            "external_message",
+        ];
+        let parsed: Vec<ResponseBlock> = vec![
+            serde_json::from_str(FIXTURE_CHOICE).unwrap(),
+            serde_json::from_str(FIXTURE_APPROVAL).unwrap(),
+            serde_json::from_str(FIXTURE_STATUS).unwrap(),
+            serde_json::from_str(FIXTURE_RESULT).unwrap(),
+            serde_json::from_str(FIXTURE_EXTERNAL).unwrap(),
+        ];
+        for (expected, actual) in fixtures.iter().zip(parsed.iter()) {
+            assert_eq!(
+                *expected,
+                actual.block_type_name(),
+                "fixture order must match block_type_name"
+            );
+        }
+    }
 }
