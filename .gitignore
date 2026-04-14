@@ -48,5 +48,11 @@ TASKS.md
 # Build output / screenshots
 output/
 
+# Packaging build artifacts (Sprint 8 — native installers)
+packaging/macos/build/
+packaging/macos/homun.icns
+packaging/windows/build/
+packaging/linux/build/
+
 # Mobile app (prototype, not part of main binary)
 mobile-app/

@@ -1,0 +1,62 @@
+#!/bin/bash
+# Homun .app launcher — thin wrapper around `homun gateway`.
+#
+# What this script does on double-click of Homun.app:
+#   1. Resolve the real `homun` binary next to this script inside the bundle.
+#   2. Spawn `homun gateway` in the background (detached from the bundle
+#      process, so the Dock icon doesn't stick around forever).
+#   3. Wait for the Web UI to respond on localhost:8777.
+#   4. Open the Web UI in the default browser.
+#
+# On subsequent double-clicks, the gateway is already running and step 3
+# will find the port immediately — we just re-open the browser.
+#
+# This script intentionally leaves stdout/stderr going to
+# ~/.homun/logs/daemon.log so the user can tail it if things go wrong.
+
+set -euo pipefail
+
+BUNDLE_DIR="$(cd "$(dirname "$0")" && pwd)"
+HOMUN_BIN="${BUNDLE_DIR}/homun"
+HOMUN_DATA="${HOME}/.homun"
+LOG_DIR="${HOMUN_DATA}/logs"
+LOG_FILE="${LOG_DIR}/daemon.log"
+PID_FILE="${HOMUN_DATA}/gateway.pid"
+WEB_URL="http://localhost:8777"
+
+mkdir -p "${HOMUN_DATA}" "${LOG_DIR}"
+
+# Check if gateway is already running via PID file
+gateway_running() {
+    if [ -f "${PID_FILE}" ]; then
+        local pid
+        pid=$(cat "${PID_FILE}" 2>/dev/null || echo "")
+        if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
+if ! gateway_running; then
+    # Launch gateway detached. nohup + & + disown so the launcher can exit
+    # without killing the gateway.
+    nohup "${HOMUN_BIN}" gateway >>"${LOG_FILE}" 2>&1 &
+    GATEWAY_PID=$!
+    echo "${GATEWAY_PID}" > "${PID_FILE}"
+    disown "${GATEWAY_PID}" 2>/dev/null || true
+
+    # Wait up to 15s for the Web UI to respond
+    for i in $(seq 1 30); do
+        if curl -sf "${WEB_URL}/healthz" >/dev/null 2>&1 \
+           || curl -sf "${WEB_URL}/" >/dev/null 2>&1; then
+            break
+        fi
+        sleep 0.5
+    done
+fi
+
+# Open the browser — this is the only user-visible action per launch
+open "${WEB_URL}"
+
+exit 0
