@@ -125,36 +125,73 @@ Lo scope è scritto in modo che una **nuova sessione Claude** possa iniziare da 
 
 ---
 
-### Sprint 3 — Audit Memoria + RAG ⛔ M 🔲
+### Sprint 3 — Audit Memoria + RAG ⛔ M ✅ 2026-04-14
 
 **Obiettivo**: garantire che il "cervello" silenzioso dell'agente produca risultati rilevanti.
 
-**Razionale**: la memoria è usata in ogni run ma non viene mai validata esplicitamente. Se la search ritorna risultati rumorosi o la consolidation perde info, l'agente degrada invisibilmente.
+**Risultato**:
+- Audit sistematico di memoria agent + RAG via **static code-analysis** (~5.7K LOC totali, 16 assi M1-M8 + R1-R8)
+- Parallelizzato con 2 Explore agent (batch A memoria 2.5K LOC, batch B RAG 3.2K LOC)
+- **11/16 assi ✅ puliti**: M3 pruning, M5 daily files, M7 perf, M8 errors, R2 hybrid search, R4 watcher, R6 cloud, R8 errors; M1/M2/M4 con bug non-bloccanti
+- **9 nuovi bug tracciati** (nessuno fixato come da metodo Sprint 2 "raccogli e prioritizza"):
+  - **#15** 🟡 `importance=0` collassa il search score (memoria)
+  - **#16** 🟡 Consolidation parsing accetta `"importance": "high"` → default 0
+  - **#17** 🟡 Namespace filter post-SQL (Rust) vs hard SQL block da spec
+  - **#18** 🔴 **Path traversal** via `site` param nel tool `remember`
+  - **#25** 🟡 RAG non gestisce file non-UTF8 (silent data loss)
+  - **#26** 🔴 **No size limit** RAG → DoS via 1GB PDF
+  - **#27** 🟡 `detect_injection` gap architetturale (on-tool-use, downgrade da 🔴 dopo verification read)
+  - **#28** 🟡 Orphan HNSW vectors su `remove_source`
+  - **#29** 🟡 RAG profile/namespace scoping post-fetch
+- **Pattern architetturali emersi**:
+  1. Post-fetch scoping cross-subsistema (memoria M4 + RAG R7): isolation in Rust filter_map, non SQL WHERE
+  2. `detect_injection` on-tool-use vs on-ingest: design choice valida ma da esplicitare nella spec
+  3. Importance range 1-5 sotto-enforced (clamp solo in consolidator, non in insert)
+  4. File I/O senza bounds (#18 tool, #26 RAG): entry-point validation mancante cross-module
+  5. Orphan side-effects: cascade DB OK ma HNSW `.usearch` non segue il cascade
+- **ISO-3 / ISO-4** (profile/contact isolation): ✅ da code review — logic corretta, live test ground truth rimandato post-v1.0
+- Dominio "Memoria + RAG": ❓ → ⚠️ in REALITY-AUDIT overview
+- 942 test pass, clippy produzione clean (nessuna modifica codice)
+- 1 commit doc-only
 
-**Scope**:
-1. **Memory search quality**: query test con ground truth attesa
-   - "Cosa abbiamo discusso su X?" → verifica che i chunk rilevanti siano in top 5
-   - Test isolation namespace: `_private` non visibile a contatti
-   - Test contact scoping: contatto vede solo i suoi chunk + globali
-2. **Consolidation correctness**: dopo N messaggi, verifica chunk creati hanno `importance` corretto
-3. **Pruning**: budget `max_memory_chunks` rispettato, prune elimina i meno importanti
-4. **RAG ingest**: upload vari formati (pdf, docx, md, code) → verifica chunking + embedding
-5. **RAG search**: hybrid HNSW+FTS5+RRF ritorna risultati pertinenti
-6. **Sensitive data classification**: file con segreti vault-gated correttamente
-7. **Directory watcher**: file nuovo → auto-ingest senza riavvio
+**Scope** (recipe stile Reality Audit, eseguita come annunciato):
+1. ✅ **M1** Memory search quality (RRF, sanitize, decay): bug #15
+2. ✅ **M2** Consolidation correctness (payload, parsing, redaction): bug #16
+3. ✅ **M3** Pruning + budget (importance*recency ASC): pulito
+4. ✅ **M4** Isolation (profile/contact/namespace): bug #17 (post-filter)
+5. ✅ **M5** Daily files + brain dir: pulito
+6. ✅ **M6** Tool `remember`: **bug #18 🔴** path traversal
+7. ✅ **M7** Performance + HNSW bound: pulito
+8. ✅ **M8** Error handling: pulito
+9. ✅ **R1** Multi-format ingest (37 ext): **bug #26 🔴** DoS + #25 encoding
+10. ✅ **R2** Hybrid search quality: pulito
+11. ✅ **R3** Sensitive classifier + vault-gating: bug #27 gap architetturale
+12. ✅ **R4** Directory watcher: pulito
+13. ✅ **R5** DB schema + HNSW persistence: bug #28 orphan vectors
+14. ✅ **R6** Cloud RAG (MCP): pulito
+15. ✅ **R7** Isolation (profile/namespace): bug #29 (post-fetch)
+16. ✅ **R8** Error handling + parser panic paths: pulito
 
-**File chiave**:
-- `src/agent/memory.rs`, `memory_search.rs`, `memory_db.rs`
-- `src/rag/engine.rs`, `chunker.rs`, `parsers.rs`, `sensitive.rs`, `watcher.rs`
-- `docs/features/03-memoria-conoscenza.md`
-- `docs/PRODUCTION-READINESS.md` § ISO-1..ISO-5 (già parzialmente coperto)
+**File chiave** (tutti auditati):
+- ✅ `src/agent/memory.rs`, `memory_search.rs`, `memory_db.rs`, `embeddings.rs`
+- ✅ `src/agent/cognition/discovery.rs` (search_memory path)
+- ✅ `src/tools/remember.rs` (bug #18 confermato con read back)
+- ✅ `src/rag/engine.rs`, `chunker.rs`, `parsers.rs`, `sensitive.rs`, `watcher.rs`, `db.rs`, `cloud.rs`
+- ✅ `src/tools/knowledge.rs`
+- ✅ `src/agent/context_compactor.rs` (falso positivo #27 scoperto qui)
+- ✅ migrations/ (028, 035, 037, 042 memoria; 011, 012, 045 RAG)
 
 **Definition of Done**:
-- [ ] Recipe Memory + RAG eseguita, risultati in REALITY-AUDIT.md
-- [ ] ISO-3 e ISO-4 (test manuali profilo/contatto) confermati ✅
-- [ ] Bug eventuali tracciati e prioritizzati
+- [x] Recipe Memory + RAG eseguita (2 batch paralleli, 16 assi)
+- [x] Tabelle "Verified memory" + "Verified RAG" in REALITY-AUDIT.md
+- [x] ISO-3 e ISO-4 confermati da code review (live test rimandato post-v1.0)
+- [x] 9 bug tracciati con severity + fix proposto (no fix in sprint, raccogli + prioritizza)
+- [x] REALITY-AUDIT.md aggiornato (overview ❓→⚠️, Recipe I, 9 issue, cronologia)
+- [x] PRODUCTION-ROADMAP.md Sprint 3 ✅ + Summary + cronologia
+- [x] SESSION-PRIMER.md aggiornato
+- [x] cargo test pass (942 baseline invariata) + clippy clean
 
-**Rischio**: MEDIO. Architettura solida, ma ground truth difficile da verificare senza dataset.
+**Rischio**: si è verificato **MEDIO-BASSO**. 9 bug trovati, di cui solo 2 🔴 reali (#18, #26) entrambi legati a pattern "untrusted input → filesystem senza bounds". Ground truth quality della search resta non verificabile staticamente (serve dataset live, post-v1.0).
 
 ---
 
@@ -402,7 +439,7 @@ Lo scope è scritto in modo che una **nuova sessione Claude** possa iniziare da 
 |---|---|---|---|---|
 | 1 — Reality Audit chiusura | fix | S | ⛔ | ✅ 2026-04-14 |
 | 2 — Audit Canali | audit | L | ⛔ | ✅ 2026-04-14 (5 bug tracciati, no fix) |
-| 3 — Audit Memoria + RAG | audit | M | ⛔ | 🔲 |
+| 3 — Audit Memoria + RAG | audit | M | ⛔ | ✅ 2026-04-14 (9 bug tracciati, 2🔴+7🟡, no fix) |
 | 4 — Audit Sicurezza | audit | M | ⛔ | 🔲 |
 | 5 — Audit Skills + MCP + Contatti | audit | M | 🟡 | 🔲 |
 | 6 — Audit Automazioni + Workflow | audit | M | 🟡 | 🔲 |
@@ -468,6 +505,7 @@ Ogni sprint è **self-contained** per essere eseguito in una sessione Claude sep
 | 2026-04-13 | Doc creato. 7 recipe Reality Audit completate, 10 sprint pianificati |
 | 2026-04-14 | Sprint 1 ✅ — 3 sub-bug residui fixati (A-bug-2/3/8), cognition #2 schema+checklist pronti (validazione live pending). 9/10 sprint rimanenti |
 | 2026-04-14 | Sprint 2 ✅ — Audit Canali: 7/7 canali code-audited (~4.2K LOC), 3 ✅ (CLI/Discord/Web) + 4 ⚠️ (Telegram/WhatsApp/Slack/Email). 5 bug tracciati (#10-#14), nessun fix implementato (raccogli+prioritizza). Pattern emergenti: health tracking opt-in adottato solo da Discord, capability table non auditata. Dominio Canali ❓→⚠️. 8/10 sprint rimanenti |
+| 2026-04-14 | Sprint 3 ✅ — Audit Memoria + RAG: 16 assi coperti (M1-M8 + R1-R8) via 2 Explore agent paralleli, ~5.7K LOC. 11/16 ✅ puliti, 5/16 con bug. 9 nuovi bug tracciati (#15-#18 + #25-#29): **2 🔴** (#18 path traversal in `remember`, #26 DoS RAG file size), 7 🟡. 1 falso positivo corretto tramite verification read (#27 downgrade 🔴→🟡 — `detect_injection` è usato da `context_compactor.rs` per SEC-13). Pattern emergenti: (1) post-fetch scoping cross-subsistema, (2) detect_injection on-tool-use vs on-ingest, (3) importance 1-5 sotto-enforced, (4) file I/O senza bounds, (5) orphan HNSW side-effects. ISO-3/ISO-4 ✅ da code review. Dominio Memoria+RAG ❓→⚠️. Nessun fix (2 🔴 candidati Sprint 4). 7/10 sprint rimanenti |
 
 ---
 

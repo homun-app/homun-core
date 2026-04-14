@@ -21,9 +21,9 @@ Homun è un **assistente AI personale in single binary Rust** (~121K LOC, 953 te
 | Asse | Stato | Note |
 |---|---|---|
 | Codebase | ✅ stabile | 942 test, 0 clippy warnings (prod), 121K LOC Rust |
-| Reality Audit | 🟡 8/16 domini, 5 bug aperti | 6✅ + 1⚠️ canali + 1🔧 cognition; 8 domini ❓. 5 nuovi bug #10-#14 da Sprint 2 (2×🔴 + 3×🟡) da prioritizzare |
+| Reality Audit | 🟡 9/16 domini, 14 bug aperti | 6✅ + 2⚠️ (canali + memoria/RAG) + 1🔧 cognition; 7 domini ❓. Bug: 5 canali (#10-#14, 2🔴+3🟡) + 9 memoria/RAG (#15-#18+#25-#29, 2🔴+7🟡). 4 🔴 totali da prioritizzare |
 | Strategy roadmap | ✅ Fase 1+2 done | Hardening + Apertura completate |
-| Production roadmap | 🚚 Sprint 1+2 ✅, Sprint 3 next | 8/10 sprint rimanenti per v1.0 |
+| Production roadmap | 🚚 Sprint 1+2+3 ✅, Sprint 4 next | 7/10 sprint rimanenti per v1.0 |
 | Production blocker | ⛔ Installer nativi assenti | Solo build-from-source o Docker |
 | Last update | 2026-04-14 | |
 
@@ -130,6 +130,7 @@ Questi doc descrivono decisioni passate o blueprint mai implementati. **Non sono
 |---|---|
 | 2026-04-14 | Production Sprint 1 ✅ — A-bug-2/3/8 fixati, cognition #2 checklist pronta (live validation pending). 0 bug aperti |
 | 2026-04-14 | Production Sprint 2 ✅ — Audit Canali: 7/7 code-audited (~4.2K LOC via 3 Explore agent paralleli), 3 ✅ (CLI/Discord/Web) + 4 ⚠️ (Telegram/WhatsApp/Slack/Email), 5 bug tracciati #10-#14 (no fix, raccogli+prioritizza). Dominio Canali ❓→⚠️ |
+| 2026-04-14 | Production Sprint 3 ✅ — Audit Memoria + RAG: 16 assi M1-M8 + R1-R8 via 2 Explore agent paralleli (~5.7K LOC), 11/16 ✅ puliti, 5/16 con bug. 9 bug nuovi #15-#18 + #25-#29 (2🔴+7🟡), 1 falso positivo corretto (#27). Pattern: post-fetch scoping cross-subsistema, detect_injection on-tool-use, importance 1-5 sotto-enforced, file I/O senza bounds, orphan HNSW. ISO-3/ISO-4 ✅ da code review. Dominio Memoria+RAG ❓→⚠️. 2 🔴 (#18 path traversal, #26 DoS) candidati Sprint 4 |
 | 2026-04-13 | Reality Audit completato (7 recipe), 9/11 bug fixati. PRODUCTION-ROADMAP creato con 10 sprint per v1.0 |
 | 2026-04-10 | Sprint cleanup: rimossa Business feature dead code |
 | 2026-03-25 | UNIFIED-ROADMAP Fase 1+2 marked complete |

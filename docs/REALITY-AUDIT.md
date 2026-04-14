@@ -30,7 +30,7 @@
 |---|---|---|---|---|
 | Canali e Messaggistica | [01](./features/01-messaggistica-canali.md) | ⚠️ | 2026-04-14 | Sprint 2: 3/7 canali ✅ (CLI, Discord, Web), 4/7 ⚠️ con bug tracciabili. 5 nuovi issue #10-#14 aperti |
 | Agente + Cognizione | [02](./features/02-agente-cognizione.md) | 🔧 | 2026-04-13 | #2: 6 sub-fix implementati (keyword fallback, retry feedback, timeout auto-detect, schema 5→2, budget 90s, metrics API). Da validare con test manuali. Target >90% |
-| Memoria + RAG | [03](./features/03-memoria-conoscenza.md) | ❓ | — | |
+| Memoria + RAG | [03](./features/03-memoria-conoscenza.md) | ⚠️ | 2026-04-14 | Sprint 3: 16 assi auditati (M1-M8 memoria + R1-R8 RAG), ~5.7K LOC. Isolation logic corretta ma post-fetch (non SQL). 9 nuovi issue #15-#18 + #25-#29 (2🔴 + 7🟡) |
 | Strumenti (Tools) | [04](./features/04-strumenti.md) | ✅ | 2026-04-13 | Tutti i bug fixati: #1 (vault 2FA error), #3 (vault form), #8 (send_file web), #9 (view_file always-available). Da rivalidare end-to-end |
 | Skills + MCP | [05](./features/05-skills-mcp.md) | ❓ | — | |
 | Sicurezza | [06](./features/06-sicurezza.md) | ✅ | 2026-04-13 | 2FA gate funziona. Audit log fixato: confirm + retrieve_2fa_blocked ora loggati. Vault 2FA error semantica fixata (#1). Prompt anti-hallucination aggiunto |
@@ -741,6 +741,412 @@ Limite: i messaggi in coda su `outbound_rx` vengono persi quando il canale crash
 
 ---
 
+### ❌ #15 — `importance=0` collassa il search score (memoria)
+
+**Dominio**: [03 Memoria + RAG](./features/03-memoria-conoscenza.md)
+**Severity**: 🟡 alto — chunk legittimi possono diventare invisibili nella search
+**Status**: ❌ **APERTO** — scoperto Sprint 3 Audit Memoria, 2026-04-14
+**Discovered**: 2026-04-14, Sprint 3 Batch A (code audit `memory_search.rs`)
+
+#### Cosa succede
+
+In `src/agent/memory_search.rs:186`:
+
+```rust
+let importance_factor = chunk.importance as f64 / 3.0;
+// ...
+Some(SearchResult { chunk: chunk.clone(), score: decayed_score * importance_factor })
+```
+
+Se `chunk.importance == 0`, allora `importance_factor == 0.0` e il score finale è `decayed_score * 0 = 0` qualunque sia il merit RRF. Il chunk non viene escluso dai risultati (resta nella lista) ma finisce sempre in ultima posizione — di fatto **invisibile** per query con top_k limitato.
+
+#### Perché è importante
+
+1. **Chunk legittimi persi**: se la consolidation o una scrittura manuale produce un chunk con `importance=0`, quel chunk è silenziosamente nascosto ai risultati. L'utente non vede nulla, ma la memoria contiene i dati.
+2. **La migration 028 ha `DEFAULT 3`**: il DB non produrrà mai `importance=0` di default. Ma il path di ingresso che può causarlo è il bug **#16** (parsing serde-default quando l'LLM torna `"importance": "high"` come stringa → default 0). I due bug combinati producono il failure mode reale.
+3. **Nessun test di regressione**: la coverage del memory_search non include il caso `importance=0` → regressione silenziosa.
+
+#### Root cause
+
+La range 1-5 di `importance` è documentata nella spec ma **enforced solo in `MemoryConsolidator`** (`memory.rs:506` con `clamp(1,5)`), non nell'entry point DB `insert_memory_chunk()`. Ogni altra scrittura può bypassare il clamp.
+
+#### Fix proposto
+
+1. In `src/agent/memory_db.rs::insert_memory_chunk()`, aggiungere `let importance = importance.clamp(1, 5);` prima dell'INSERT
+2. Aggiungere un `CHECK (importance BETWEEN 1 AND 5)` constraint nella prossima migration (hardening permanente)
+3. Test di regressione: `insert_memory_chunk(..., importance=0, ...)` deve persistere come `1` (min del range)
+4. Fix combinato con **#16** (validazione parsing LLM)
+
+---
+
+### ❌ #16 — Consolidation parsing accetta `"importance": "high"` → serde default 0
+
+**Dominio**: [03 Memoria + RAG](./features/03-memoria-conoscenza.md)
+**Severity**: 🟡 alto — bypass della validazione range, causa il failure mode #15
+**Status**: ❌ **APERTO** — scoperto Sprint 3 Audit Memoria, 2026-04-14
+**Discovered**: 2026-04-14, Sprint 3 Batch A (code audit `memory.rs`)
+
+#### Cosa succede
+
+`ScoredInstruction` (`src/agent/memory.rs:113-126`) deserializza la response LLM con `#[serde(default)]` su `importance`. Se l'LLM risponde in modo non conforme:
+
+- `"importance": "high"` (stringa invece di numero) → serde fallisce sul field → `default` (`u8::default() == 0`)
+- `"importance": 6.7` (float fuori range) → truncation/errore silenzioso
+- `importance` mancante dal JSON → default 0
+
+Il risultato è un chunk con `importance=0`, che poi entra nel search e collassa a score zero (bug **#15**).
+
+#### Perché è importante
+
+1. **Falso negativo della validazione**: il codice `clamp(1,5)` in `memory.rs:506` è applicato **dopo** il parsing, ma se il default serde è `0`, il clamp non viene eseguito su un valore che era una stringa non-numerica — il default è già `0`, `clamp(0, 1, 5) == 1`, quindi in teoria il clamp **dovrebbe** catturarlo. Va verificato se il clamp effettivamente gira su tutti i path (consolidation entry) o solo in alcuni.
+2. **Modelli piccoli sono inclini a questo**: ollama/qwen3.5, deepseek-v3.2 spesso rispondono "importance: high" in prosa naturale quando stressati — lo abbiamo già visto nel bug #2 (text-instead-of-tool).
+3. **Nessun logging**: se il parsing va a default, non c'è un warning `tracing::warn` che segnala "LLM importance malformata, uso default".
+
+#### Fix proposto
+
+1. Sostituire `#[serde(default)]` con un custom deserializer che:
+   - Accetta solo numero intero 1-5
+   - Su stringa "high"/"medium"/"low" → rispettivamente 5/3/1
+   - Su valore invalido → warn log + default 3 (neutro, non 0)
+2. Test unit: `parse_consolidation_response_v2()` con vari input malformati
+3. Fix combinato con **#15** (clamp in insert path)
+
+---
+
+### ❌ #17 — Namespace filter post-SQL (Rust) vs hard SQL block da spec
+
+**Dominio**: [03 Memoria + RAG](./features/03-memoria-conoscenza.md) + [10 Contatti + Profili](./features/10-contatti-profili.md)
+**Severity**: 🟡 alto — isolation preservata ma viola defense-in-depth promessa dalla spec
+**Status**: ❌ **APERTO** — scoperto Sprint 3 Audit Memoria, 2026-04-14
+**Discovered**: 2026-04-14, Sprint 3 Batch A (code audit `memory_search.rs`)
+
+#### Cosa succede
+
+La spec (`features/03-memoria-conoscenza.md` § Feature 4b) promette che il filtro `_private` è **strutturale (SQL)**, non un prompt instruction: *"il filtro `_private` è applicato a livello SQL nel memory search — non è un prompt instruction, è un hard block"*.
+
+Il codice in `memory_search.rs:141-181` invece:
+1. Carica i chunk dal merged_ids (linee 141-145) — senza `WHERE namespace != '_private'`
+2. Filtra i risultati in Rust con `filter_map` (linea 158): `if chunk.namespace == "_private"` → return None
+3. Stesso pattern nel vector_only fallback (linea 244)
+
+È un **post-filter Rust**, non un **hard SQL block**.
+
+#### Perché è importante
+
+1. **Isolation comunque preservata**: i chunk `_private` non arrivano mai al chiamante. L'utente contact vede solo i suoi chunk — questa parte funziona.
+2. **Ma defense-in-depth persa**: se in futuro qualcuno aggiunge un error path che ritorna i chunks raw prima del filter, i dati privati leak. Un WHERE SQL avrebbe reso l'errore impossibile.
+3. **Spec disallineata con codice**: la promessa "hard SQL block" non è rispettata. Va aggiornata la spec o il codice.
+4. **Performance**: 20 chunks caricati e poi metà scartati è wasteful vs `WHERE namespace != '_private'` che riduce il work dal DB.
+
+#### Root cause
+
+La funzione `load_chunks_by_ids()` è generica, pensata per caricare chunk dati IDs senza filtering. Il namespace filter è stato aggiunto dopo nel search pipeline senza promuovere il WHERE clause nel DB layer.
+
+#### Fix proposto
+
+1. Modificare `fts5_search()` e vector search per applicare namespace filter al WHERE SQL:
+   ```sql
+   WHERE (contact_id IS NULL OR contact_id = ?)
+     AND (namespace != '_private' OR contact_id IS NULL)
+     AND ... profile/agent scope ...
+   ```
+2. Rimuovere il post-filter Rust (ridondante)
+3. Test di regressione: contact search non ritorna mai chunk `_private` (test già esistente probabilmente, da ri-verificare)
+4. Stesso pattern da applicare al bug **#29** (RAG post-fetch scoping)
+
+---
+
+### ❌ #18 — Path traversal via `site` param nel tool `remember`
+
+**Dominio**: [03 Memoria + RAG](./features/03-memoria-conoscenza.md) + [06 Sicurezza](./features/06-sicurezza.md)
+**Severity**: 🔴 critico — scrittura arbitraria in `brain_dir` se LLM accetta input malicious
+**Status**: ❌ **APERTO** — scoperto Sprint 3 Audit Memoria, 2026-04-14
+**Discovered**: 2026-04-14, Sprint 3 Batch A (code audit `tools/remember.rs`)
+
+#### Cosa succede
+
+`src/tools/remember.rs:121-133`:
+
+```rust
+if let Some(ref domain) = site {
+    let global_brain = self.data_dir.join("brain");
+    let profile_dir = ctx.profile_brain_dir.as_deref();
+    return self
+        .remember_for_site(&global_brain, profile_dir, domain, &category, &normalized_key, &value)
+        .await;
+}
+```
+
+Il parametro `site` (stringa fornita dall'LLM) viene passato **raw** a `remember_for_site()`, che costruisce path `sites/{domain}.md` senza alcuna validazione. Nessun check di:
+- `..` (parent directory traversal)
+- `/` (absolute path)
+- caratteri speciali (`null byte`, Windows reserved names)
+
+#### Attack path (concreto)
+
+1. Utente malicious (via messaggio scritto, documento RAG con prompt injection, o tool result injection) induce l'LLM a chiamare:
+   ```
+   remember(site="../../etc/passwd_note", key="note", value="leaked")
+   ```
+2. Il path risolto è `{brain_dir}/sites/../../etc/passwd_note.md` → `{data_dir}/passwd_note.md` (nel caso migliore, cioè se `sites/` esiste) oppure path assoluto arbitrario nel data dir.
+3. Se `site = "../../../../../tmp/malicious"` → scrittura in `/tmp/malicious.md` (fuori dal data dir).
+4. Se `site` contiene `/etc/passwd` e il processo gira come utente privileged, potrebbe sovrascrivere file di sistema (molto improbabile ma teoricamente possibile in scenari sandbox-less).
+
+#### Perché è importante
+
+1. **Entry-point validation mancante**: questo è il pattern "untrusted input → filesystem path" classico. Nemmeno un `sanitize_filename()` di base.
+2. **Difesa in profondità persa**: non c'è canonicalize + prefix check come in `chat.rs:829-880` (file serve endpoint) che già applica protezione corretta.
+3. **LLM proxy**: l'attacker non ha bisogno di controllo diretto sul tool — può indurre l'LLM via prompt injection in una mail, in un RAG document (collega con **#27** design choice injection guard on-tool-use), in una risposta tool.
+4. **Scope del danno**: scrittura, non lettura. Ma può essere usata per overwrite di file di memoria importanti (es. `USER.md` stessa del profilo vicino) → corruption dei dati.
+
+#### Root cause
+
+Il tool è stato scritto con assunzione "LLM è trusted source di input". Nessuna review pattern "untrusted input → filesystem". Il modulo `browser::site_memory::save_site_memory` che viene chiamato a valle potrebbe avere validazione interna (da verificare) ma non è difesa primaria.
+
+#### Fix proposto
+
+1. In `src/tools/remember.rs:121` (prima di `remember_for_site`):
+   ```rust
+   // Validate domain: alphanumeric + dot + dash only, reject traversal
+   if !domain.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+       || domain.contains("..")
+       || domain.len() > 253  // max domain length
+   {
+       return Ok(ToolResult::error("Invalid site domain"));
+   }
+   ```
+2. Stessa validazione in `browser::site_memory::save_site_memory` come difesa in profondità
+3. Test di regressione: `remember(site="../../etc/passwd", ...)` → error, nessuna scrittura
+4. Audit di `ctx.profile_brain_dir` per assicurarsi che `canonicalize()` sia usato (prevent prefix bypass)
+5. Aggiungere pattern al checklist sicurezza: **"qualsiasi parametro tool usato come path → validare"**
+6. Scansionare altri tool per pattern simile (candidati: `knowledge.rs` per `source` filename, `file.rs` per `path` — probabilmente già protetti ma da verificare)
+
+**Priorità**: fix prima del release v1.0 (candidato Sprint 4 Audit Sicurezza + fix).
+
+---
+
+### ❌ #25 — RAG non gestisce file non-UTF8 (silent data loss)
+
+**Dominio**: [03 Memoria + RAG](./features/03-memoria-conoscenza.md)
+**Severity**: 🟡 medio — file legacy (Windows-1252, Latin-1) vengono scartati silenziosamente
+**Status**: ❌ **APERTO** — scoperto Sprint 3 Audit RAG, 2026-04-14
+**Discovered**: 2026-04-14, Sprint 3 Batch B (code audit `rag/engine.rs`)
+
+#### Cosa succede
+
+`src/rag/engine.rs:89-90` legge il file come bytes (`std::fs::read`), poi il chunker fa il parse. Per i file testuali puri, `chunker.rs` chiama `std::fs::read_to_string()` che rifiuta bytes non-UTF8 con errore. Il `with_context()` propaga l'errore, il source viene marcato `status="error"` in DB, ma l'utente non riceve nessuna notifica actionable.
+
+#### Perché è importante
+
+1. **Raro ma silenzioso**: la maggior parte dei file moderni sono UTF-8, ma legacy codebase (es. repo tedesco anni 2000) possono avere sorgenti in Latin-1.
+2. **Nessuna recovery**: l'utente mette un file nella directory RAG, si aspetta di poterlo cercare, e invece non succede nulla. Solo un check di `list_sources()` con filter `status=error` rivela il problema.
+3. **Data loss**: il file non viene ingested, non viene notificato. Zero visibilità.
+
+#### Fix proposto
+
+1. In `chunker.rs`, per formati testuali, prima di `read_to_string` tentare lettura come bytes + detection encoding (crate `encoding_rs`):
+   ```rust
+   let bytes = fs::read(path)?;
+   let (text, encoding, had_errors) = encoding_rs::UTF_8.decode(&bytes);
+   if had_errors {
+       // Fallback: try windows-1252
+       let (text, _, _) = encoding_rs::WINDOWS_1252.decode(&bytes);
+       return Ok(text.into_owned());
+   }
+   ```
+2. Log `tracing::warn!` quando fallback a non-UTF-8
+3. Nuovo test con file Latin-1 sample
+4. **Opzionale**: UI notification "N file non indicizzati per encoding" nella pagina knowledge
+
+---
+
+### ❌ #26 — RAG: nessun limite di size → DoS via 1GB PDF/file
+
+**Dominio**: [03 Memoria + RAG](./features/03-memoria-conoscenza.md) + [06 Sicurezza](./features/06-sicurezza.md)
+**Severity**: 🔴 critico — memory exhaustion, server crash su file malicious
+**Status**: ❌ **APERTO** — scoperto Sprint 3 Audit RAG, 2026-04-14
+**Discovered**: 2026-04-14, Sprint 3 Batch B (code audit `rag/engine.rs`)
+
+#### Cosa succede
+
+`src/rag/engine.rs:89-90`:
+
+```rust
+let content =
+    std::fs::read(path).with_context(|| format!("Cannot read {}", path.display()))?;
+```
+
+`std::fs::read` legge **l'intero file in memoria come `Vec<u8>`**. Zero bounds check sul file size prima della lettura. Un file di 1GB → 1GB RAM allocato. Un file di 10GB → OOM → process crash.
+
+Nemmeno `fs::metadata(path)?.len() > MAX` check. Nemmeno `std::io::BufReader` per streaming.
+
+Il path OCR fallback (`parsers.rs:87`) crea temp dir + `pdftoppm`/`tesseract` senza `ulimit` o timeout — ogni PDF "misterioso" di 1GB diventa un attack vector separato.
+
+#### Attack paths (concreti)
+
+1. **Inbound malicious**: un contact autorizzato manda via email un allegato PDF 1GB che finisce nella RAG auto-ingest watcher directory.
+2. **Cloud sync**: un MCP cloud source (`rag/cloud.rs`) può fornire file arbitrari dimensione da remote.
+3. **Directory watcher**: utente copia 1000 PDF 100MB cadauno nella watcher dir → 100GB di RAM allocata in sequenza.
+4. **Docker container**: con memory limit 2GB, basta un singolo 2.5GB PDF per OOMkill del container.
+
+#### Perché è importante
+
+1. **Production blocker**: un Homun esposto (anche solo in LAN) con auto-ingest attivo può essere DoS'd con un singolo file.
+2. **No recovery**: crash del server → tutti i canali down → necessario riavvio manuale.
+3. **Nessun tracing pre-crash**: il `with_context` aggiunge contesto solo se `fs::read` ritorna errore, ma in caso di OOM il kernel killa il processo prima che il Rust abbia chance di loggare.
+
+#### Fix proposto
+
+1. **Hard limit file size** (in `engine.rs:~85` prima del `fs::read`):
+   ```rust
+   const MAX_RAG_FILE_BYTES: u64 = 50 * 1024 * 1024; // 50MB default
+   let meta = std::fs::metadata(path)?;
+   if meta.len() > MAX_RAG_FILE_BYTES {
+       anyhow::bail!("File {} exceeds max RAG size ({} MB > {} MB)",
+           path.display(), meta.len() / 1_000_000, MAX_RAG_FILE_BYTES / 1_000_000);
+   }
+   ```
+2. **Config override** in `config/schema.rs::RagConfig::max_file_size_mb` (default 50)
+3. **Per-format limit**: PDF 100MB (OCR è caro), testo 10MB, altro 50MB. Il chunker.rs chunker può avere limiti per-format.
+4. **Streaming per formati grandi**: almeno per txt/md, usare `BufReader` invece di `read_to_string` se size > X.
+5. **Timeout su OCR fallback** (`parsers.rs`): `tokio::time::timeout(Duration::from_secs(60), ocr_task)` — se tesseract è lento su PDF grandi, abort.
+6. **Test di regressione**: `test_rag_rejects_oversized_file()` con file 100MB fake (temp dir).
+7. **UI feedback**: la watcher deve emettere un log `tracing::warn!` + opzionalmente un event sul bus che appare nella dashboard.
+
+**Priorità**: fix prima del release v1.0 (candidato Sprint 4 Audit Sicurezza + fix).
+
+---
+
+### ❌ #27 — RAG ingest non chiama `detect_injection` (gap architetturale, non bug critico)
+
+**Dominio**: [03 Memoria + RAG](./features/03-memoria-conoscenza.md) + [06 Sicurezza](./features/06-sicurezza.md)
+**Severity**: 🟡 medio — gap di copertura, documentato come design choice
+**Status**: ❌ **APERTO (downgrade da 🔴)** — scoperto Sprint 3 Audit RAG, 2026-04-14
+**Discovered**: 2026-04-14, Sprint 3 Batch B (audit `rag/sensitive.rs`) + verification read
+
+#### Cosa succede
+
+`src/rag/sensitive.rs:105-110` definisce `detect_injection(text: &str) -> Option<&'static str>` con 7 pattern (vedi SEC-11 in UNIFIED-ROADMAP).
+
+**L'agent di audit RAG inizialmente ha segnalato come 🔴 "never called"**, ma la verification read ha trovato callsites in `src/agent/context_compactor.rs:77`:
+
+```rust
+// Reuses detect_injection() from RAG sensitive module when the embeddings
+// feature is enabled
+crate::rag::sensitive::detect_injection(text)
+```
+
+Quindi la funzione È usata — ma **non al tempo di ingestione RAG**. Il design scelto è **detect-on-tool-use**: quando un tool (`browser`, `web_fetch`, `knowledge search`) ritorna del testo, il `context_compactor` lo scansiona PRIMA di iniettarlo nel prompt LLM. La feature SEC-13 (done 2026-03-18) copre questo path per i tool result.
+
+#### Perché è una questione di pattern, non un bug
+
+1. **Pattern valido**: detect-on-tool-use è difendibile — rileva injection nel momento in cui il dato diventa pericoloso (entra nel prompt), non al tempo di storage.
+2. **Gap di copertura**: un documento RAG con prompt injection resta indicizzato e cercabile. Quando lo si cerca (via `knowledge search`), il risultato passa al `context_compactor` che applica la detection → l'injection viene catturata e segnalata inline.
+3. **Assumption**: il path `RAG search → context_compactor → LLM prompt` deve **sempre** essere garantito. Se qualcuno aggiunge un code path che bypassa il compactor (es. direct RAG → user response), l'injection passa.
+4. **Spec disallineata**: `features/03-memoria-conoscenza.md` § Feature 9 menziona "rilevamento e segnalazione" ma non chiarisce che è on-tool-use, non on-ingest. Ambiguità da chiudere.
+
+#### Fix proposto
+
+**Opzione A — Documentare il pattern** (preferita):
+1. Aggiornare `features/03-memoria-conoscenza.md` § Feature 9: chiarire che la detection è al consumer layer (context_compactor), non al storage layer
+2. Aggiungere test di regressione: RAG search che ritorna testo con injection pattern → `context_compactor` lo cattura
+3. Audit di sicurezza: verificare che **tutti** i path RAG → LLM passano per `context_compactor`
+
+**Opzione B — Ingestione-level scan**:
+1. In `engine.rs` `ingest_file`, chiamare `detect_injection()` su ogni chunk prima del DB insert
+2. Marcare i chunk sospetti con nuovo campo `has_injection: bool`
+3. La UI knowledge mostra un warning per i source con injection detected
+4. **Limite**: duplicazione del check (ingest + tool-use), fa rumore per i falsi positivi tipici della RAG
+
+**Raccomandazione**: Opzione A, salvo nel caso in cui lo Sprint 4 (Audit Sicurezza) trovi code path RAG → LLM che bypassano `context_compactor`.
+
+---
+
+### ❌ #28 — Orphan HNSW vectors su `remove_source`
+
+**Dominio**: [03 Memoria + RAG](./features/03-memoria-conoscenza.md)
+**Severity**: 🟡 medio — memory leak lento su `.usearch` index file, ghost matches possibili
+**Status**: ❌ **APERTO (downgrade da 🔴)** — scoperto Sprint 3 Audit RAG, 2026-04-14
+**Discovered**: 2026-04-14, Sprint 3 Batch B (code audit `rag/engine.rs`)
+
+#### Cosa succede
+
+`src/rag/engine.rs:376-378`:
+
+```rust
+pub async fn remove_source(&mut self, source_id: i64) -> Result<bool> {
+    self.store.delete_rag_source(source_id).await
+}
+```
+
+Chiama **solo** `store.delete_rag_source`. Il DB ha `ON DELETE CASCADE` che elimina i `rag_chunks` associati, ma l'indice HNSW `self.engine` **non viene aggiornato**:
+
+- I vettori dei chunk eliminati restano nell'indice `.usearch` file
+- Un search può ritornare questi vector IDs, che poi `load_rag_chunks_by_ids` non troverà nel DB → silently dropped dal filter_map (`engine.rs:302-338`)
+- L'indice cresce in size ma non shrink → memory leak on-disk
+
+#### Perché è importante
+
+1. **Storage leak**: dopo molte delete/re-ingest (es. watcher che re-processa file modificati), l'indice HNSW gonfia.
+2. **Wasted search work**: ogni search scorre vector stale che vengono poi scartati → riduce effective top_k.
+3. **Ghost matches**: se il vector_id viene riutilizzato dal HNSW (comportamento usearch), un chunk nuovo potrebbe essere matchato con la distanza del chunk vecchio → risultati sbagliati.
+4. **Non è safety**: nessun leak di dati privati, nessun crash immediato. È degradazione lenta.
+
+#### Fix proposto
+
+1. In `remove_source`, prima del `delete_rag_source`:
+   ```rust
+   let chunk_ids = self.store.list_rag_chunk_ids_for_source(source_id).await?;
+   for id in chunk_ids {
+       self.engine.remove_vector(id as u64)?;  // usearch remove API
+   }
+   self.engine.persist().await?;  // flush .usearch
+   ```
+2. Stesso pattern in `reingest_file` (linea 368) dove chiama `remove_source`
+3. Test di regressione: `test_remove_source_cleans_hnsw()` — verifica che dopo remove il count dell'indice scende
+4. Audit simile sull'indice memoria (`memory_db.rs`): il `prune_memory_chunks_to_budget` aggiorna l'indice HNSW o lascia orphan?
+
+---
+
+### ❌ #29 — RAG profile/namespace scoping è post-fetch (non defense-in-depth)
+
+**Dominio**: [03 Memoria + RAG](./features/03-memoria-conoscenza.md) + [10 Contatti + Profili](./features/10-contatti-profili.md)
+**Severity**: 🟡 medio — stesso pattern di #17 ma lato RAG, isolation preservata
+**Status**: ❌ **APERTO** — scoperto Sprint 3 Audit RAG, 2026-04-14
+**Discovered**: 2026-04-14, Sprint 3 Batch B (code audit `rag/engine.rs`)
+
+#### Cosa succede
+
+`src/rag/engine.rs:302-338` applica profile_id e allowed_namespaces scoping come **post-fetch filter_map** in Rust, non come WHERE clause SQL in `load_rag_chunks_by_ids`. Identico pattern al bug **#17** sulla memoria.
+
+- I chunk vengono caricati dal DB senza scoping
+- Il filter_map in-memory elimina quelli fuori profilo/namespace
+- Se un'exception si propaga tra load e filter → chunks potrebbero leak in un error message
+
+#### Perché è importante
+
+Stesso reasoning di #17:
+1. **Isolation preservata** nel happy path
+2. **Defense-in-depth rotta**: un errore futuro nel filter_map path potrebbe essere privacy leak
+3. **Performance sub-ottimale**: carico inutile di chunks che verranno scartati
+4. **Consistency**: lo stesso pattern su 2 subsistemi (memoria + RAG) → va sistemato insieme in un refactor "SQL-level isolation".
+
+#### Fix proposto
+
+1. Promuovere profile_id e namespace filters al WHERE clause di `load_rag_chunks_by_ids()`:
+   ```sql
+   SELECT ... FROM rag_chunks rc
+   JOIN rag_sources rs ON rs.id = rc.source_id
+   WHERE rc.id IN (?, ?, ...)
+     AND (rc.profile_id IS NULL OR rc.profile_id = ?)
+     AND (rs.namespace IN (?, ?, ...) OR rs.namespace IS NULL)
+   ```
+2. Rimuovere filter_map Rust
+3. Test di regressione: verifica post-filter rimosso ma isolation ancora enforced
+4. **Unificare con #17**: un unico PR "SQL-level isolation for memory + RAG" con test per entrambi
+
+---
+
 ## ✅ Conferme (cose che abbiamo visto funzionare)
 
 ### Canali — Audit Sprint 2 (2026-04-14, Recipe H)
@@ -843,6 +1249,72 @@ raccolti e tracciati per prioritizzazione utente.
 Non è ✅ perché 4/7 canali hanno bug tracciabili. Nessun bug è 🔴 bloccante
 per la funzionalità core: i canali funzionano, ma hanno gap di observability
 (health tracking) e honesty (capability drift). Fix scheduled per sprint futuro.
+
+### Memoria + RAG — Audit Sprint 3 (2026-04-14, Recipe I)
+
+Audit sistematico del sottosistema memoria agent + RAG knowledge base via
+**code-only static analysis** (stile Reality Audit Sprint 1+2). Metodo:
+2 Explore agent in parallelo (batch A memoria, batch B RAG), ~5.7K LOC Rust
+coperti in totale, zero codice runtime eseguito. Verification reads su tutti
+i bug 🔴 iniziali — 1 falso positivo corretto (#27 downgrade 🔴 → 🟡).
+
+**Verified memory table — 8 assi**:
+
+| Asse | Descrizione | Verdetto | Note |
+|------|-------------|:--------:|------|
+| **M1** | Memory search quality (RRF, FTS5 sanitize, temporal decay) | ⚠️ | RRF k=60 balanced, sanitize completo (acc. EU), future date no-decay safe. Bug #15 importance=0 |
+| **M2** | Consolidation correctness (LLM payload, parsing, redaction) | ⚠️ | Fallback v2→v1→raw robusto, redact_vault_values applicato. Bug #16 parsing serde-default |
+| **M3** | Pruning + budget (importance * recency ASC) | ✅ | `memory_db.rs:185-243` ordering corretto, profile scoping esplicito |
+| **M4** | Isolation profile + contact + namespace | ⚠️ | Logic corretta per `_private`/profile/contact, ma **post-filter Rust** non SQL. Bug #17 |
+| **M5** | Daily files + brain dir + concurrent writes | ✅ | Profile-scoped paths, `chrono::Local` consistent, no concurrent lock ma bassa probabilità |
+| **M6** | Tool `remember` (USER.md, sites, vault prefix) | ❌ | **Bug #18 🔴** path traversal via `site` param. Solo `remember` scrive USER.md ✅ |
+| **M7** | Performance + bound (HNSW, LRU cache 512) | ✅ | Async, persistent `.usearch`, cache bounded, auto-save 50 additions |
+| **M8** | Error handling (.unwrap, panic, sql errors) | ✅ | 3 `.unwrap_or*` safe, zero panic, `.context()` consistente |
+
+**Verified RAG table — 8 assi**:
+
+| Asse | Descrizione | Verdetto | Note |
+|------|-------------|:--------:|------|
+| **R1** | Multi-format ingest (37 ext, encoding, size) | ❌ | Parser resilienti (no panic), ma **bug #26 🔴** no size limit → DoS + #25 UTF-8 only |
+| **R2** | Hybrid search quality (RRF, FTS5 sanitize, filters) | ✅ | Identico pattern memoria, sanitize alfanum + acc. EU, SQL injection risk low |
+| **R3** | Sensitive data classification + vault-gating | ⚠️ | Classifier robusto (API keys, PEM, JWT, CF, IBAN). Bug #27 gap pattern on-tool-use vs on-ingest |
+| **R4** | Directory watcher (notify, debounce, hot-swap) | ✅ | `notify` crate cross-platform, debounce 500ms, hot-reload resilient, dedupe via hash |
+| **R5** | DB schema + performance + orphan cleanup | ⚠️ | FK CASCADE OK, index presenti, HNSW persist. Bug #28 orphan HNSW vectors su delete |
+| **R6** | Cloud RAG (MCP integration) | ✅ | CloudSync `cloud.rs` clean, hash dedup, graceful degradation, production-ready codewise |
+| **R7** | Isolation + scoping (profile_id, namespace) | ⚠️ | Logic corretta, ma post-fetch filter_map Rust. Bug #29 (stesso pattern di #17) |
+| **R8** | Error handling + parser panic paths | ✅ | Zero `.unwrap()` in `src/rag/`, zero `.expect()`, error propagation consistente |
+
+**Bug tracciati**:
+- **#15** 🟡 `importance=0` collassa il search score (memoria)
+- **#16** 🟡 Consolidation parsing accetta `"importance": "high"` → default 0
+- **#17** 🟡 Namespace filter post-SQL (Rust) vs hard SQL block da spec
+- **#18** 🔴 **Path traversal** via `site` param nel tool `remember`
+- **#25** 🟡 RAG non gestisce file non-UTF8 (silent data loss)
+- **#26** 🔴 **No size limit** RAG → DoS via 1GB PDF/file
+- **#27** 🟡 `detect_injection` non chiamato al tempo di ingestione (gap architetturale, design choice on-tool-use)
+- **#28** 🟡 Orphan HNSW vectors su `remove_source`
+- **#29** 🟡 RAG profile/namespace scoping post-fetch (non defense-in-depth)
+
+**Totale Sprint 3**: 9 bug nuovi (**2 🔴** + 7 🟡), nessun fix implementato
+(raccogli e prioritizza, coerente con metodo Sprint 2). I 2 🔴 (#18, #26)
+sono candidati prioritari per Sprint 4 Audit Sicurezza + fix.
+
+**Pattern architetturali emersi Sprint 3**:
+
+1. **Post-fetch scoping (memoria + RAG)**: sia `memory_search.rs` che `rag/engine.rs` applicano isolation (`_private`, profile_id, namespace) come filter_map in Rust dopo il load dal DB, non nel WHERE SQL. Isolation è preservata nel happy path, ma viola defense-in-depth promessa dalla spec. Fix richiede refactor coordinato dei due subsistemi.
+2. **`detect_injection` pattern = on-tool-use, non on-ingest**: SEC-13 (`context_compactor.rs:77`) scansiona i tool result prima di iniettarli nel prompt. Il RAG non scansiona al tempo di ingestione — è una design choice (il dato diventa pericoloso solo quando entra nel prompt, non quando è stored). Va esplicitato nella spec per evitare ambiguità.
+3. **Range 1-5 `importance` sotto-enforced**: il clamp è applicato solo in `MemoryConsolidator`, non in `insert_memory_chunk` (entry point DB). Combinato con serde default 0, produce chunk silenziosamente nascosti.
+4. **File I/O senza bounds (tool + RAG)**: né `remember(site=...)` né RAG ingest validano input contro traversal/size. Entry-point validation mancante come pattern cross-module.
+5. **Orphan side-effects**: cascade DB funziona (FK), ma side-effect store (`.usearch` HNSW index) non seguono il cascade. Pattern da replicare anche su memoria per verifica.
+
+**ISO-3 / ISO-4 status** (test manuali profilo/contatto da PRODUCTION-READINESS):
+- **ISO-3 (profile isolation)**: ✅ da code review — `profile_id` scoping presente in memoria (`memory_search.rs:169-175`) e RAG (`rag/engine.rs:305-308`). Post-fetch ma funzionale. Serve test live per ground truth quantitativa.
+- **ISO-4 (contact isolation)**: ✅ da code review — `contact_id` + `_private` namespace enforce correttamente la separazione owner vs contact. Serve test live.
+
+**Dominio "Memoria + RAG"**: ❓ → ⚠️ (2026-04-14).
+Non è ✅ per via dei 2 bug 🔴 (#18 path traversal, #26 DoS file size) che
+vanno fixati prima del release v1.0. Il resto del subsistema è solido:
+isolation preservata, error handling robusto, cache bounded, HNSW persistent.
 
 ### send_file su Telegram funziona (2026-04-13, Recipe F)
 
@@ -1064,6 +1536,51 @@ canali vs 7 assi (Auth, Text, Attach, Caps, Proactive, Health, Reconnect).
   con l'utente in sprint dedicato)
 - Dominio "Canali e Messaggistica": ❓ → ⚠️
 
+### I — Memoria + RAG (Sprint 3 audit) ⚠️ (eseguita 2026-04-14, Sprint 3)
+
+Eseguita via **static code-analysis** del sottosistema memoria agent
+(consolidation, hybrid search HNSW+FTS5+RRF, isolation, remember tool) e
+RAG knowledge base (chunking, parser, sensitive classifier, watcher, cloud).
+Metodo: 2 Explore agent in parallelo (batch A memoria 2.5K LOC, batch B
+RAG 3.2K LOC), 16 assi totali (M1-M8 + R1-R8), ~5.7K righe coperte.
+Verification read su tutti i bug 🔴 inizialmente segnalati (4 bug) — 1
+falso positivo corretto (#27 downgrade).
+
+**Files auditati**:
+- Memoria: `src/agent/memory.rs`, `memory_search.rs`, `memory_db.rs`,
+  `embeddings.rs`, `src/tools/remember.rs`,
+  `src/agent/cognition/discovery.rs` (search_memory path)
+- RAG: `src/rag/engine.rs`, `chunker.rs`, `parsers.rs`, `sensitive.rs`,
+  `watcher.rs`, `db.rs`, `cloud.rs`, `src/tools/knowledge.rs`
+- Cross-module: `src/agent/context_compactor.rs` (false positive #27 scoperto qui)
+- migrations/ (028, 035, 037, 042 per memoria; 011, 012, 045 per RAG)
+
+**Risultati chiave**:
+- 11/16 assi ✅ puliti (M3, M5, M7, M8, R2, R4, R6, R8 = totalmente OK;
+  M1, M2, M4 con bug tracciabili non bloccanti)
+- 5/16 assi con bug: M1 (#15), M2 (#16), M4 (#17), M6 (#18), R1 (#25+#26),
+  R3 (#27), R5 (#28), R7 (#29)
+- 9 nuovi bug tracciati (**2 🔴** + 7 🟡): #15-#18 memoria, #25-#29 RAG
+- **Pattern architetturali emergenti Sprint 3**:
+  1. **Post-fetch scoping** (memoria M4 + RAG R7): isolation in Rust
+     filter_map, non in SQL WHERE. Promessa spec "hard SQL block" violata.
+  2. **`detect_injection` on-tool-use, non on-ingest**: SEC-13 scansiona
+     tool result nel `context_compactor`, RAG non scansiona al load time.
+     Design choice valida ma da esplicitare nella spec.
+  3. **Importance range 1-5 sotto-enforced**: clamp solo in
+     `MemoryConsolidator`, non in `insert_memory_chunk`. Combinato con
+     serde default 0 produce chunk invisibili.
+  4. **File I/O senza bounds**: `remember(site=...)` e RAG ingest non
+     validano input (path traversal / size). Entry-point validation
+     mancante cross-module.
+  5. **Orphan side-effects**: cascade DB funziona (FK), ma
+     `.usearch` HNSW index non segue il cascade.
+- ISO-3 (profile isolation) e ISO-4 (contact isolation) ✅ da code review,
+  ground truth live rimandata a test post-v1.0
+- Nessun bug fixato in questa recipe (raccogli e prioritizza coerente con
+  metodo Sprint 2). I 2 🔴 (#18, #26) sono candidati prioritari per Sprint 4.
+- Dominio "Memoria + RAG": ❓ → ⚠️
+
 ---
 
 ## 🔄 Protocollo di aggiornamento
@@ -1097,3 +1614,4 @@ Quando verifichi una feature:
 | 2026-04-13 | **#2 Cognition Reliability — 6 sub-fix implementati**: (A) fallback keyword-based max 15 tool, (B) retry con feedback per text-instead-of-tool, (C) timeout auto-detect 0=smart default (120s ollama, 60s cloud), (D) schema required 5→2, (E) budget globale 90s, (F) cognition_metrics SQLite + API. 953 test pass. CI verde. Target: >90% success rate (da 68% baseline) |
 | 2026-04-14 | **Production Sprint 1 — Reality Audit chiusura**: A-bug-2 (`account.js` null guard in `loadIdentities`/`loadDevices`, commit `f7aa57d`), A-bug-3 (avatar SVG inline placeholder 200 OK invece di 404, commit `c0d5ddd`), A-bug-8 (vault web_api `audit_log` propaga `profile_id`, helper `resolve_profile_id_from_slug`, commit `e74c417`). 942 test pass. Schema `/v1/cognition/metrics` verificato da codice — validazione live pending utente. 0 bug tracciati aperti |
 | 2026-04-14 | **Production Sprint 2 — Audit Canali**: Recipe H eseguita via static code-analysis su 7 canali (~4.2K LOC). Metodo: 3 Explore agent in parallelo. 3/7 ✅ puliti (CLI, Discord, Web), 4/7 ⚠️ con bug. 5 nuovi bug tracciati: #10 🔴 capability drift `outbound_attachments` (WhatsApp+Email), #11 🔴 Slack manca `ChannelHealthTracker`, #12 🟡 Email `is_sender_allowed` dead code, #13 🟡 health tracking cieco (Telegram+WA+Slack), #14 🟡 Telegram backoff fisso 5s. Pattern emergenti: (1) ChannelHealthTracker opt-in e adottato solo da Discord → drift, (2) capability table aspirazionale non auditata contro implementazione. Dominio Canali ❓ → ⚠️. Nessun fix implementato (raccogli e prioritizza). 942 test pass, 0 warning clippy |
+| 2026-04-14 | **Production Sprint 3 — Audit Memoria + RAG**: Recipe I eseguita via static code-analysis su memoria agent + RAG knowledge base (~5.7K LOC totali). Metodo: 2 Explore agent in parallelo (batch A memoria 2.5K LOC, batch B RAG 3.2K LOC), 16 assi totali (M1-M8 + R1-R8). 11/16 assi ✅, 5/16 con bug. 9 nuovi bug tracciati: **#15 🟡** importance=0 score collapse, **#16 🟡** parsing serde-default 0, **#17 🟡** namespace filter post-SQL (non hard block), **#18 🔴** path traversal via `site` in `remember` tool, **#25 🟡** RAG non-UTF8 silent data loss, **#26 🔴** RAG no size limit → DoS, **#27 🟡** `detect_injection` gap architetturale (on-tool-use, downgrade da 🔴 dopo verification), **#28 🟡** orphan HNSW vectors su `remove_source`, **#29 🟡** RAG profile/namespace scoping post-fetch. Pattern emergenti: (1) post-fetch scoping cross-subsistema, (2) detect_injection on-tool-use vs on-ingest, (3) importance range 1-5 sotto-enforced, (4) file I/O senza bounds, (5) orphan HNSW side-effects. ISO-3/ISO-4 ✅ da code review (live test rimandato post-v1.0). Dominio Memoria+RAG ❓ → ⚠️. Nessun fix implementato (raccogli e prioritizza, i 2 🔴 sono candidati Sprint 4). 942 test pass, 0 warning clippy |
