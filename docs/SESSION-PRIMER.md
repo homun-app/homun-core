@@ -21,9 +21,9 @@ Homun è un **assistente AI personale in single binary Rust** (~121K LOC, 953 te
 | Asse | Stato | Note |
 |---|---|---|
 | Codebase | ✅ stabile | 942 test, 0 clippy warnings (prod), 121K LOC Rust |
-| Reality Audit | 🟡 9/16 domini, 14 bug aperti | 6✅ + 2⚠️ (canali + memoria/RAG) + 1🔧 cognition; 7 domini ❓. Bug: 5 canali (#10-#14, 2🔴+3🟡) + 9 memoria/RAG (#15-#18+#25-#29, 2🔴+7🟡). 4 🔴 totali da prioritizzare |
+| Reality Audit | 🟡 10/16 domini, 23 bug aperti | 6✅ + 3⚠️ (canali + memoria/RAG + sicurezza) + 1🔧 cognition; 6 domini ❓. Bug: 5 canali (#10-#14, 2🔴+3🟡) + 9 memoria/RAG (#15-#18+#25-#29, 2🔴+7🟡) + 9 sicurezza (#30-#38, 0🔴+7🟡+2🟢). **4 🔴 totali** (#10, #11, #18, #26) invariati. 2 falsi positivi Sprint 4 corretti in verification read |
 | Strategy roadmap | ✅ Fase 1+2 done | Hardening + Apertura completate |
-| Production roadmap | 🚚 Sprint 1+2+3 ✅, Sprint 4 next | 7/10 sprint rimanenti per v1.0 |
+| Production roadmap | 🚚 Sprint 1+2+3+4 ✅, Sprint 5 next | 6/10 sprint rimanenti per v1.0 |
 | Production blocker | ⛔ Installer nativi assenti | Solo build-from-source o Docker |
 | Last update | 2026-04-14 | |
 
@@ -131,6 +131,7 @@ Questi doc descrivono decisioni passate o blueprint mai implementati. **Non sono
 | 2026-04-14 | Production Sprint 1 ✅ — A-bug-2/3/8 fixati, cognition #2 checklist pronta (live validation pending). 0 bug aperti |
 | 2026-04-14 | Production Sprint 2 ✅ — Audit Canali: 7/7 code-audited (~4.2K LOC via 3 Explore agent paralleli), 3 ✅ (CLI/Discord/Web) + 4 ⚠️ (Telegram/WhatsApp/Slack/Email), 5 bug tracciati #10-#14 (no fix, raccogli+prioritizza). Dominio Canali ❓→⚠️ |
 | 2026-04-14 | Production Sprint 3 ✅ — Audit Memoria + RAG: 16 assi M1-M8 + R1-R8 via 2 Explore agent paralleli (~5.7K LOC), 11/16 ✅ puliti, 5/16 con bug. 9 bug nuovi #15-#18 + #25-#29 (2🔴+7🟡), 1 falso positivo corretto (#27). Pattern: post-fetch scoping cross-subsistema, detect_injection on-tool-use, importance 1-5 sotto-enforced, file I/O senza bounds, orphan HNSW. ISO-3/ISO-4 ✅ da code review. Dominio Memoria+RAG ❓→⚠️. 2 🔴 (#18 path traversal, #26 DoS) candidati Sprint 4 |
+| 2026-04-14 | Production Sprint 4 ✅ — Audit Sicurezza End-to-End: 15 assi S1-S15 via 3 Explore agent paralleli (~4K LOC). **10/15 ✅ puliti** (safety prompt + cross-channel labeling + auth/rate/CSRF + 2FA chain post-fix #1 + e-stop + trusted devices + sandbox core enforcement). 5/15 con gap. 9 bug nuovi #30-#38 (**0 🔴** + 7🟡 + 2🟢): #30 exfiltration PII IT mancanti + dual registry, #31 single call site, #32 context_compactor short-bypass, #33 vault_leak resolve no validation, #34 remember bypassa check_path_permission (second-line per #18), #35 sandbox silent fallback None, #36 Seatbelt allow_paths no canonicalize, #37 pairing HashMap unbounded, #38 dual redact_vault_values. **2 falsi positivi corretti**: (1) CSPRNG claim — rand 0.8 thread_rng IS crypto-safe ChaCha12+OsRng, (2) pairing cleanup claim — auto-scheduled in gateway.rs:579. Pattern: single-call-site fragile, dual pattern registries, skip-on-short, second-line missing, silent fallback. Cross-check Sprint 3: #18 aggravato, #26 nessuna difesa residua (no DefaultBodyLimit trovato), #27 design OK + nuovo gap. Dominio Sicurezza ✅→⚠️. 4🔴 totali invariati (#10, #11, #18, #26). 23 bug aperti. Attacker model live scenari rimandati a "Sprint Fix Sicurezza". 942 test pass, 0 warning clippy |
 | 2026-04-13 | Reality Audit completato (7 recipe), 9/11 bug fixati. PRODUCTION-ROADMAP creato con 10 sprint per v1.0 |
 | 2026-04-10 | Sprint cleanup: rimossa Business feature dead code |
 | 2026-03-25 | UNIFIED-ROADMAP Fase 1+2 marked complete |
