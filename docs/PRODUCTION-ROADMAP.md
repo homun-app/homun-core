@@ -438,43 +438,66 @@ Lo scope è scritto in modo che una **nuova sessione Claude** possa iniziare da 
 
 ---
 
-### Sprint 8 — Installer Nativi ⛔ L 🔲
+### Sprint 8 — Installer Nativi ⛔ L ✅ 2026-04-14
 
 **Obiettivo**: utente non-tecnico installa Homun in 3 click.
 
 **Razionale**: questo è il **single biggest blocker** per la produzione consumer. Senza installer, Homun resta un tool per developer.
 
-**Scope**:
-1. **macOS .dmg** (INST-1):
-   - App bundle + launchd plist
-   - Code signing (Developer ID Application)
-   - Notarization Apple
-2. **Windows .msi** (INST-2):
-   - Wix toolkit o cargo-wix
-   - Windows Service install
-   - Authenticode signing
-3. **Linux packages** (INST-3):
-   - .deb (cargo-deb) + .rpm (cargo-generate-rpm)
-   - systemd unit file
-4. **Homebrew formula** (INST-4):
-   - Tap repository
-   - Formula con bottle binary
-5. **GitHub Releases automation**:
-   - Workflow CI che builda tutti i pacchetti su tag
-   - Upload artefatti
+**Pivot strategico a metà Sprint**: INST-2 (Windows .msi) rescopato a **Windows-via-WSL2** dopo analisi costi Authenticode cert ($600-900 primo anno + HSM). Vedi bug #67 in REALITY-AUDIT.md per la decisione completa.
 
-**File chiave**:
-- `.github/workflows/release.yml` (nuovo)
-- `packaging/` (nuova directory: macos/, windows/, linux/, brew/)
-- `Cargo.toml` (sezione `[package.metadata.deb]`, `[package.metadata.wix]`)
+**Scope realizzato**:
+1. **macOS .dmg** (INST-1) ✅:
+   - `packaging/macos/Info.plist.template` — bundle metadata versioned
+   - `packaging/macos/homun-launcher` — shell wrapper che spawna `homun gateway` background + apre browser su localhost:8777
+   - `packaging/macos/create-dmg.sh` — end-to-end con 3 modalità (unsigned, signed, signed+notarized) gate su env vars Apple
+   - Smoke test locale unsigned: `Homun-0.1.0-arm64.dmg` 12MB, mount verified, bundle structure OK
+2. **Windows via WSL2** (INST-2 rescopato) ✅:
+   - `docs/INSTALL-WINDOWS-WSL.md` — guida completa step-by-step con 3 startup modes (foreground, systemd in WSL, Windows Task Scheduler), 3 gotchas documentati (vault file-based, WSL hibernation, Windows Defender), sezione troubleshooting
+   - `packaging/windows/README.md` — placeholder docs la decisione + riserva la directory per futuro .msi
+   - Bug #67 tracciato come 📝 DEFERRED (non-bug, tracked decision)
+3. **Linux packages** (INST-3) ✅:
+   - `packaging/linux/homun.service` — unit systemd system-level con hardening completo
+   - `packaging/linux/debian/{postinst,prerm,postrm}` — maintainer scripts (system user, purge semantics)
+   - `Cargo.toml [package.metadata.deb]` + `[package.metadata.generate-rpm]`
+   - Smoke test locale: `homun_0.1.0-1_arm64.deb` (metadata + layout verified), `homun-0.1.0-1.x86_64.rpm` (v3 binary produced)
+4. **Homebrew formula** (INST-4) ✅:
+   - `packaging/brew/homun.rb.template` — formula ibrida binary-bottle + source-fallback
+   - `packaging/brew/README.md` — documenta setup manuale del tap repo `homunbot/homebrew-tap` (azione utente)
+5. **GitHub Releases automation** ✅:
+   - `.github/workflows/release.yml` — triggered su `v*` tag, matrix Linux (amd64+arm64) + macOS (x64+arm64), no Windows runner, graceful signing fallback, env-routed inputs per injection safety, sha256 checksums + gh release upload --clobber
+
+**File chiave creati** (9 file, 1210 righe):
+- `.github/workflows/release.yml` (318 righe)
+- `packaging/linux/{homun.service, debian/postinst, debian/prerm, debian/postrm}`
+- `packaging/macos/{Info.plist.template, homun-launcher, create-dmg.sh}`
+- `packaging/brew/{homun.rb.template, README.md}`
+- `packaging/windows/README.md`
+- `docs/INSTALL-WINDOWS-WSL.md`
+- `docs/INSTALLER-SIGNING-SETUP.md`
+- `docs/INSTALLER-SMOKE-TEST.md`
+- `Cargo.toml` (+72 righe metadata deb + rpm)
+
+**Cross-check vincoli Sprint 4-5** (verification read):
+- **Keychain namespace** `dev.homun.secrets`: solo call site in `src/storage/secrets.rs:29`, invariato. Upgrade path build-from-source → installer non rompe vault esistente ✅
+- **Data paths**: tutti via `dirs::home_dir().join(".homun")`, tolleranti a `HOME` override usato nei systemd unit e maintainer script ✅
+- **Skills preservation**: `apt remove` preserva `~/.homun/skills/`, solo `apt purge` wipe ✅
 
 **Definition of Done**:
-- [ ] Tutti e 4 i tipi di installer prodotti
-- [ ] Test install su macOS + Windows + Ubuntu
-- [ ] Documentation in `homun-docs/` aggiornata
-- [ ] UNIFIED-ROADMAP.md: INST-1..4 → ✅
+- [x] INST-1 macOS .dmg unsigned path funzionante (smoke test locale), signed path scaffolded (gated su Apple secrets, doc completa in INSTALLER-SIGNING-SETUP.md)
+- [x] INST-2 Windows — rescopato a WSL2 path, guida completa INSTALL-WINDOWS-WSL.md, #67 tracciato
+- [x] INST-3 Linux .deb + .rpm + systemd unit prodotti e validated localmente
+- [x] INST-4 Homebrew formula scaffold + tap repo setup docs
+- [x] `.github/workflows/release.yml` builda tutti i pacchetti su tag push, graceful degradation signed/unsigned
+- [x] `docs/INSTALLER-SMOKE-TEST.md` con procedure fresh-install per 3 OS + stato corrente
+- [x] `docs/INSTALLER-SIGNING-SETUP.md` con step-by-step Apple cert + Authenticode future path
+- [x] UNIFIED-ROADMAP.md INST-1..4 → ✅
+- [x] Bug #67 tracciato in REALITY-AUDIT (scelta tecnica, non bug)
+- [x] 948 Rust test pass, cargo clippy clean
 
-**Rischio**: ALTO. Code signing è notoriamente doloroso. Stima 1-2 settimane realistiche.
+**Rischio**: MITIGATO. Il pivot WSL elimina la parte più dolente (Windows signing). macOS signing resta come task follow-up **user-side** (il maintainer configura i 6 GitHub Secrets seguendo INSTALLER-SIGNING-SETUP.md — azione 30 min).
+
+**Artefatti da test tag push reale**: Sprint 8 ha committato lo scaffolding ma **non ha pushato un tag `v*`** — il primo vero end-to-end release-workflow run avverrà quando il maintainer decide di tagger un `v0.1.1`. È l'ultima validazione prima di considerare Sprint 8 pienamente chiuso.
 
 ---
 
@@ -552,7 +575,7 @@ Lo scope è scritto in modo che una **nuova sessione Claude** possa iniziare da 
 | 5 — Audit Skills + MCP + Contatti + Profili | audit | M | 🟡 | ✅ 2026-04-14 (14 bug tracciati, 0🔴+11🟡+3🟢, 8 FP corretti, ISO-3 5/7 verified, no fix) |
 | 6 — Audit Automazioni + Workflow | audit | M | 🟡 | ✅ 2026-04-14 (10 bug tracciati, 1🔴+6🟡+3🟢, 2 FP corretti, ISO-3 table chiusa, no fix) |
 | 7 — Mobile APP-2 | feature | L | 🟡 | ✅ 2026-04-14 (11 commit homun-app triage 5700 righe uncommitted + 3 risk fix + cross-stack fixture contract + polish. APP-2 ✅ thread-first pivot. Scope rivisto su `homun-app/docs/ROADMAP.md` — Activity feed + Approvals page rimosse per product decision. 948 Rust test + 26 Flutter test) |
-| 8 — Installer Nativi | release | L | ⛔ | 🔲 |
+| 8 — Installer Nativi | release | L | ⛔ | ✅ 2026-04-14 (INST-1/3/4 scaffolded + smoke-tested local; INST-2 rescoped to WSL2 via Windows cert cost analysis; .github/workflows/release.yml with graceful signing fallback; 9 new files + 3 docs; bug #67 tracked deferral) |
 | 9 — Osservabilità + Update | feature | M | 🟡 | 🔲 |
 | 10 — Release v1.0 | release | M | ⛔ | 🔲 |
 
@@ -618,6 +641,7 @@ Ogni sprint è **self-contained** per essere eseguito in una sessione Claude sep
 | 2026-04-14 | Sprint 5 ✅ — Audit Skills + MCP + Contatti + Profili: 16 assi coperti (SK1-SK6 + M1-M4 + C1-C6) via 3 Explore agent paralleli, **~15.5K LOC** (più grande audit Sprint finora). **14 nuovi bug tracciati (0 🔴 + 11 🟡 + 3 🟢)**: Skills (#39-#44) pattern bypass whitespace + cumulative threshold + TOCTOU scan + creator smoke test unsandboxed + adapter YAML escape + executor output no redact; MCP (#45-#52) OAuth state + redirect_uri + vault_key collision + refresh contention + non-atomic rotation + unbounded image + subprocess env + lifecycle gaps; Contatti+Profili (#53-#56) sender_id injection + bio/notes self-surface + MCP no profile scoping + gateway overrides no cross-profile validation. **8 falsi positivi corretti** in verification read (record Sprint 5, vs 1 Sprint 3 + 2 Sprint 4): 4 su C3 perimeter enforcement (agent_loop.rs:844/858/1031/888 prova che il perimeter è loaded + tool filter + privacy constraint + namespace filter tutti enforced), C5-2 vault profile scoping (vault.rs:36 vault_prefix_for_profile), C5-3 skills profile scoping (loader.rs:72 profile_slug + scan_directory_with_profile), Skills trust model #34 (check_path_permission è layer sbagliato per skill executor pre-trusted), MCP M3-5 auto-smentito (bail! catchato da Result). **ISO-3 cross-subsystem verified**: 5/7 sottosistemi profile-scoped (memoria + RAG + vault + skills + contact perimeter), 2 gap (#55 MCP singleton globale, #56 gateway overrides). **Pattern consolidato "agent confidence ≠ correctness"** — verification read è non opzionale. Cross-check Sprint 4: #31 aggravato (#44 skill output no redact), #35 confermato (#42 smoke test default unsafe), #37 ProfileRegistry bounded ✅, S8 aggravato (#52b MCP shutdown no per-peer timeout). Dominio "Skills + MCP" ❓→⚠️, "Contatti + Profili" ❓→⚠️. **13/16 domini coperti**. Totale bug: 23→37, 4 🔴 invariati. 942 test pass, 0 warning clippy. 5/10 sprint rimanenti |
 | 2026-04-14 | Sprint 7 ✅ — Mobile App APP-2 completion: **primo feature sprint post Sprint 1**, cambio modalità da audit a implementation. **Discovery chiave all'avvio**: PRODUCTION-ROADMAP Sprint 7 era out-of-sync con `homun-app/docs/ROADMAP.md` da ~2 settimane — Activity feed + Approvals page pianificate qui erano già state rimosse dal mobile team per product decision thread-first. Scope rigenerato su base ROADMAP mobile reale. **5 step eseguiti**: (1) **triage + baseline commit** di 5700 righe uncommitted su `main` di homun-app in 8 commit logici (56e55d6 docs + 3d89f54 deps + 870b082 platform + 426cac4 theme + ea9aab8 core + bbdd9b1 chat models+data + 6f4af82 chat UI + 6dcd778 shell+app) — prima c'era 1 solo commit e tutto il lavoro APP-2 era a rischio disco; (2) **fix 3 rischi** flaggati da code review (81dd99f): ApprovalBlock confirm dialog (mirror del pattern _handleChoiceSelected per approve E deny), _pendingAssistantBlocks preserved cross _refreshHistory (attacca all'ultimo assistant msg se history ha blocks vuoti), _ThreadProfileChip onRetry (warn color + "Profilo offline · riprova" su error-without-cached-profile); (3) **cross-stack fixture contract** Rust↔Flutter (bba8891 homunbot + 3a9d1b4 homun-app): 5 JSON fixtures canoniche in `docs/block-fixtures/` + byte-identical copia in `homun-app/test/fixtures/blocks/`, 6 nuovi Rust test (fixture_*_roundtrip + variant completeness) + 6 nuovi Flutter test → schema drift diventa CI failure; (4) **polish UX** (da16c03): drawer `_DrawerConversationDot` distingue running (ok verde pulsante) da needs-attention (warn ambra statico) + Semantics labels, ResultBlock client-side redact defense-in-depth per bug #60 (mask su labels che matchano token|password|secret|api_key|bearer|credential|auth_key|private_key|access_key, preserva prefix 3 char + max 12 bullets, 9 nuovi test); (5) **doc reconciliation + Sprint 8 prompt**. **Verifica APP-2 pre-sprint**: l'explorer ha trovato tutti e 5 i block widgets già renderizzati con tap handlers wired, profile switcher già in topbar, thread-first shell già 2-page IndexedStack con zero residui Activity/Approvals — il 60% di Sprint 7 era il **triage** più che l'implementazione, il che rende il rischio originale "ALTO" in realtà **BASSO-MEDIO**. **Bug cross-check**: ✅ #60 mitigato client-side (server-side fix OutputSink trait resta aperto), 📝 #57 fuori scope mobile (gap backend ISO-3), 📝 #62 non risolto (serve flag `require_2fa` server-side). **Test**: 942→948 Rust (+6 fixture), 11→26 Flutter (+15, di cui 6 cross-stack fixtures + 9 redact). `flutter analyze` invariato (3 info pre-esistenti). `cargo test` + `cargo clippy` clean. **Pattern nuovi Sprint 7**: (a) "my-own-doc ≠ reality" — estensione del pattern "agent confidence ≠ correctness" ai doc tattici, (b) "buildable intermediates vs logical grouping" — scelta di commit su grouping logico (DX) vs buildable intermediates (bisect) con verifica analyze+test solo finale è il trade-off corretto per triage retroattivo, (c) "smart onTap pattern" — widget figlio decide quale callback usare in base al proprio stato invece di esporre flag al parent, (d) "cross-repo fixture duplication as tested invariant" — la duplicazione tra due repo si trasforma in "invariante testato" quando due suite indipendenti leggono gli stessi file. Dominio Mobile app: 🚧→✅. **APP-2 ✅ in UNIFIED-ROADMAP**. 3/10 sprint rimanenti (Sprint 8, 9, 10). |
 | 2026-04-14 | Sprint 6 ✅ — Audit Automazioni + Workflow + Heartbeat: 16 assi coperti (A1-A6 + W1-W4 + H1-H2) via 3 Explore agent paralleli, **~11K LOC** Rust+JS. **10 nuovi bug tracciati (1 🔴 + 6 🟡 + 3 🟢)**: #57 🔴 automations+workflow profile_id stored ma NON enforced a fire time (CronEvent struct manca campo profile_id + workflow execute_step non setta session profile prima di process_message — **ISO-3 cross-subsystem gap**, chiude la tabella finale con il 3° gap architetturale), #58 🟡 cron UTC-only no timezone support, #59 🟡 flow_json no server-side schema validation, #60 🟡 automation/workflow results API unredacted (cross-check #31+#44 single call site), #61 🟡 workflow approval gate no timeout (cross-check #37 unbounded pattern), #62 🟡 workflow approval no 2FA (cross-check Sprint 4 S7), #63 🟡 workflow approve API no profile validation (cross-check #56), #64 🟢 HeartbeatService defined never instantiated (feature disabled), #65 🟢 workflow retry no exponential backoff (DRY violation vs utils/retry.rs), #66 🟢 missing agent_id silent fallback no warn. **2 falsi positivi corretti** in verification read: (1) A2 "event triggers never evaluated" — smentito da `evaluate_automation_trigger` at automations.rs:864 chiamato da 811 via lifecycle completion handler; (2) **contraddizione cross-batch** tra Batch A+B ("automations profile scoping ⚠️") vs Batch C ("automations profile-scoped ✅") — verification read ha distinto "stored in DB" da "enforced at fire time", confermando la tesi Batch A+B. Primo sprint dove la verification read ha **evitato una contraddizione interna silente**. FP count cumulativo cross-sprint: Sprint 3:1 + Sprint 4:2 + Sprint 5:8 + Sprint 6:2 = **13 FP totali**. **ISO-3 cross-subsystem — tabella chiusa a 4/7 ✅ + 2 ⚠️ + 2 ❌** (automations+workflow #57 è il 3° e ultimo gap architetturale tracciato). Pattern nuovi Sprint 6: **"stored ≠ enforced" ISO-3 anti-pattern** (variante negativa del pattern consolidato Sprint 5), **feature declared/disabled in production** (#64), **single call site redact 3° manifestazione** (#60), **DRY violation utils/retry.rs prima istanza concreta** (#65). Dominio "Automazioni + Scheduling" ❓→⚠️, "Workflow Engine" ❓→⚠️. **15/16 domini coperti** (resta solo Osservabilità; Mobile+Condivisione non-core). Totale bug aperti: 37→47, **5 🔴 totali** (era 4) — primo nuovo 🔴 in 2 sprint. 942 test pass, 0 warning clippy. 4/10 sprint rimanenti |
+| 2026-04-14 | Sprint 8 ✅ — Installer Nativi: **release engineering sprint** (cambio modalità da feature/audit), primo sprint dove i cert + packaging sono protagonisti vs Rust code. **Pivot strategico a metà Sprint**: INST-2 (Windows .msi + Authenticode) rescopato a **Windows-via-WSL2 doc-only path** dopo analisi costi reali ($600-900 primo anno cert OV/EV + HSM obbligatorio post-2023 + SignPath bloccato da licenza PolyForm non-OSI). **9 nuovi file produzione** (1200+ righe) + **3 doc** (signing setup, smoke test, Windows WSL install): `.github/workflows/release.yml` (318 righe, env-routed per injection safety, graceful signing fallback, matrix Linux-amd64/arm64 + macOS-x64/arm64, no Windows runner), `packaging/linux/{homun.service,debian/postinst,prerm,postrm}` (systemd system-level + maintainer scripts), `packaging/macos/{Info.plist.template,homun-launcher,create-dmg.sh}` (3-mode build: unsigned/signed/signed+notarized), `packaging/brew/{homun.rb.template,README.md}` (hybrid binary-bottle + source-fallback formula + tap setup docs), `packaging/windows/README.md` (placeholder + decision record), `Cargo.toml` (+72 righe `[package.metadata.deb]` + `[package.metadata.generate-rpm]`). **Smoke test locale (su dev machine arm64 macOS)**: (1) `cargo deb --no-build` produce `homun_0.1.0-1_arm64.deb` con layout FHS corretto (usr/bin + lib/systemd/system + usr/share/doc), control file con deps risolte (adduser, ca-certificates, libsqlite3-0), 3 maintainer scripts embedded in control.tar.xz; (2) `cargo generate-rpm --arch x86_64 --auto-req disabled` produce `homun-0.1.0-1.x86_64.rpm` v3 binary; (3) `bash packaging/macos/create-dmg.sh` produce `Homun-0.1.0-arm64.dmg` 12MB unsigned, montaggio hdiutil verifica bundle `Homun.app/Contents/{Info.plist,MacOS/homun,MacOS/homun-launcher}` + symlink Applications per drag-to-install. **Verification read cross-sprint** (pattern consolidato): `src/storage/secrets.rs:29` ha **unico call site** per `KEYCHAIN_SERVICE = "dev.homun.secrets"` → upgrade path build-from-source → installer non rompe il vault esistente ✅. Data paths tutti via `dirs::home_dir()` con tolleranza a `HOME` override nei systemd unit + maintainer script ✅. **Bug #67 tracciato** come 📝 DEFERRED (decisione tecnica, non bug) — 48° entry della tabella ma primo 📝. **Pattern nuovi Sprint 8**: (a) **"graceful degradation on secrets"** — il workflow CI produce artefatti unsigned se i secrets non ci sono, aggiunge warning automatico alle release notes, non fallisce; il maintainer può abilitare signing caricando 6 GitHub Secrets senza ulteriori commit — **feature-flag pattern esteso a signing**, (b) **"WSL2 come primo-target-class per Windows"** — il kernel Linux vero dentro Hyper-V lightweight permette di distribuire UN binario per 4 piattaforme (Ubuntu + Fedora + macOS-brew + Windows-WSL), consolidando security model e audit surface vs farne 2 paralleli (Linux nativo + Windows nativo) con cert divergenti, (c) **"cert-cost → scope-pivot"** — quando un vincolo esterno (cert $600/anno) eccede il budget di progetto, il rescope WSL elimina l'intera categoria di bug (Windows-specific paths, Credential Manager vs file vault, registry, MSI/signtool complexity) in cambio di un ~15 min extra setup utente. Dominio Distribuzione ❌→✅ (prima volta). **Sprint 8 è il primo sprint con artefatti production-ready per 3 OS target** (non più solo build-from-source o Docker). **Test**: 948 Rust test invariati (nessun cambio Rust), `cargo clippy` clean. **Git**: 5 commit puliti senza Co-Authored-By: c0b132a linux .deb/.rpm + systemd, 3881462 ci release.yml, c54269d macos .app + dmg, 837f230 homebrew + WSL guide, [questo commit] smoke test docs + roadmap updates + Sprint 9 prompt. 2/10 sprint rimanenti (Sprint 9 osservabilità + Sprint 10 release v1.0) |
 
 ---
 

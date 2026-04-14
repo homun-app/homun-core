@@ -2188,6 +2188,56 @@ Se uno step referenzia `agent_id = "researcher"` ma l'agent "researcher" è stat
 
 ---
 
+### 📝 #67 — Windows native installer deferred post-v1.0 (tracked decision, non-bug)
+
+**Dominio**: Packaging / Distribuzione (implicito, non esiste ancora come feature doc)
+**Severity**: 🟢 tracked decision — non è un bug, è una scelta di scope documentata
+**Status**: 📝 **DEFERRED** — decisione Sprint 8, 2026-04-14
+
+#### Contesto
+
+Sprint 8 doveva produrre 4 installer nativi (macOS .dmg, Windows .msi, Linux .deb/.rpm, Homebrew). Per Windows la strada richiedeva **Authenticode code signing** con le seguenti spese:
+
+- Cert OV $200-400/anno oppure cert EV $400-600/anno
+- HSM hardware token ~$100-200 una tantum (obbligatorio CA/Browser Forum baseline post-2023)
+- OPPURE Azure Key Vault cloud signing ~$100/mese
+- Tempo onboarding cert: 3-10 giorni lavorativi (verifica identità della CA)
+
+**SignPath Foundation** offre signing gratuito per OSS, ma richiede licenza OSI-approved — Homun usa `PolyForm-Noncommercial-1.0.0` che **non è OSI-approved**, quindi SignPath non è disponibile senza relicensing.
+
+Senza cert, un installer `.msi` unsigned causa:
+- SmartScreen warning bloccante (UX killer per utenti consumer)
+- UAC prompt "Unknown publisher" in rosso
+- Windows Defender reputation bassa → possibile quarantena
+
+#### Decisione Sprint 8
+
+Invece di produrre un `.msi` unsigned con UX penalizzata, **Sprint 8 adotta WSL2 come path ufficiale per Windows v1.0**: gli utenti Windows installano Homun dentro Ubuntu-WSL2 usando il pacchetto `.deb` Linux prodotto da INST-3. Lo stesso binario Linux gira dentro WSL2 (kernel vero, zero overhead), il loopback `localhost:8777` è forwardato automaticamente al browser Windows, il vault cade sul fallback file-based (`master.key` con chmod 0600) perché WSL non ha Secret Service di default.
+
+Documentazione completa in [`INSTALL-WINDOWS-WSL.md`](./INSTALL-WINDOWS-WSL.md).
+
+#### Costi evitati
+
+- **Oggi**: $0 in licenze + nessuna infrastruttura HSM + nessun rallentamento CI per signing Windows
+- **Debt tecnico accumulato**: zero — lo scaffolding `packaging/windows/` è pronto per un futuro `.msi` quando si decidesse di investire, `.github/workflows/release.yml` è strutturato per aggiungere il `package-windows` job in un singolo commit
+
+#### Quando riaprire
+
+Quando uno di questi diventa vero:
+1. Homun ha utenti Windows paganti che giustificano il costo cert
+2. Uno sponsor offre di finanziare cert + HSM
+3. La licenza viene cambiata in una OSI-approved e SignPath Foundation accetta il progetto
+
+A quel punto seguire la sezione "Windows — Authenticode signing" di [`INSTALLER-SIGNING-SETUP.md`](./INSTALLER-SIGNING-SETUP.md).
+
+#### Cross-check con altri vincoli
+
+- **Vault upgrade path** (Sprint 5 keychain namespace): ✅ confermato. `src/storage/secrets.rs:29` usa `const KEYCHAIN_SERVICE = "dev.homun.secrets"` ed è il **solo call site**. Il binario Linux dentro WSL usa `linux-native` → Secret Service → fallback file-based. Upgrade da build-from-source a .deb installer preserva il vault perché il service namespace non cambia.
+- **Skills preservation** (Sprint 5 trust model): ✅ le skills installate in `~/.homun/skills/` vivono sotto la home dir che nei maintainer script sopravvive a `apt remove` (wipe solo su `apt purge`).
+- **Data paths** (Sprint 1 fix): ✅ tutti i path sono costruiti via `dirs::home_dir().join(".homun")` → su Linux nativo = `/home/user/.homun`, su WSL = `/home/user/.homun`, su sistema con `HOME=/var/lib/homun` (packaging deb maintainer script) = `/var/lib/homun/.homun`. Nessun hardcoded path da riscrivere.
+
+---
+
 ## ✅ Conferme (cose che abbiamo visto funzionare)
 
 ### Canali — Audit Sprint 2 (2026-04-14, Recipe H)
