@@ -95,7 +95,8 @@ async fn list_vault_keys(
     State(state): State<Arc<AppState>>,
     Query(q): Query<VaultProfileQuery>,
 ) -> Result<Json<VaultKeysResponse>, StatusCode> {
-    audit_log(&state, "*", "list", true);
+    let profile_id = resolve_profile_id_from_slug(&state, q.profile.as_deref()).await;
+    audit_log(&state, "*", "list", true, profile_id);
     let secrets =
         crate::storage::global_secrets().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let all = secrets
@@ -148,7 +149,8 @@ async fn set_vault_secret(
         .set(&secret_key, &req.value)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    audit_log(&state, &req.key, "store", true);
+    let profile_id = resolve_profile_id_from_slug(&state, req.profile.as_deref()).await;
+    audit_log(&state, &req.key, "store", true, profile_id);
 
     Ok(Json(OkResponse {
         ok: true,
@@ -187,13 +189,15 @@ async fn reveal_vault_secret(
 ) -> Result<Json<RevealResponse>, StatusCode> {
     use crate::security::{global_session_manager, TotpManager, TwoFactorStorage};
 
+    let profile_id = resolve_profile_id_from_slug(&state, req.profile.as_deref()).await;
+
     // Check if 2FA is enabled
     let storage = match TwoFactorStorage::new() {
         Ok(s) => s,
         Err(_) => {
             // If we can't load 2FA config, allow access (fail open for availability)
             tracing::warn!("Could not load 2FA config, allowing vault access");
-            audit_log(&state, &key, "reveal", true);
+            audit_log(&state, &key, "reveal", true, profile_id);
             return do_reveal_secret(&key, req.profile.as_deref()).await;
         }
     };
@@ -202,14 +206,14 @@ async fn reveal_vault_secret(
         Ok(c) => c,
         Err(_) => {
             tracing::warn!("Could not load 2FA config, allowing vault access");
-            audit_log(&state, &key, "reveal", true);
+            audit_log(&state, &key, "reveal", true, profile_id);
             return do_reveal_secret(&key, req.profile.as_deref()).await;
         }
     };
 
     if !config.enabled {
         // 2FA not enabled, allow access
-        audit_log(&state, &key, "reveal", true);
+        audit_log(&state, &key, "reveal", true, profile_id);
         return do_reveal_secret(&key, req.profile.as_deref()).await;
     }
 
@@ -230,7 +234,7 @@ async fn reveal_vault_secret(
     };
 
     if !authenticated {
-        audit_log(&state, &key, "reveal", false);
+        audit_log(&state, &key, "reveal", false, profile_id);
         return Ok(Json(RevealResponse {
             ok: false,
             key: key.clone(),
@@ -242,7 +246,7 @@ async fn reveal_vault_secret(
         }));
     }
 
-    audit_log(&state, &key, "reveal", true);
+    audit_log(&state, &key, "reveal", true, profile_id);
     do_reveal_secret(&key, req.profile.as_deref()).await
 }
 
@@ -253,7 +257,8 @@ async fn reveal_vault_secret(
     Json(req): Json<RevealRequest>,
 ) -> Result<Json<RevealResponse>, StatusCode> {
     // 2FA feature not enabled, allow direct access
-    audit_log(&state, &key, "reveal", true);
+    let profile_id = resolve_profile_id_from_slug(&state, req.profile.as_deref()).await;
+    audit_log(&state, &key, "reveal", true, profile_id);
     do_reveal_secret(&key, req.profile.as_deref()).await
 }
 
@@ -301,7 +306,8 @@ async fn delete_vault_secret(
         .delete(&secret_key)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    audit_log(&state, &key, "delete", true);
+    let profile_id = resolve_profile_id_from_slug(&state, q.profile.as_deref()).await;
+    audit_log(&state, &key, "delete", true, profile_id);
 
     Ok(Json(OkResponse {
         ok: true,
@@ -311,15 +317,49 @@ async fn delete_vault_secret(
 
 // ─── VLT-4: Vault Audit Logging ─────────────────────────────────
 
+/// Resolve a vault profile slug from a request query/body into its numeric id.
+///
+/// Returns `None` when the slug is absent, empty, or matches the reserved
+/// `"default"` sentinel — the default profile is represented as `NULL` in the
+/// audit log so "no explicit profile" is distinguishable from "explicit profile
+/// with id N". Also returns `None` when the DB is unavailable or the slug does
+/// not resolve to a known profile.
+///
+/// See A-bug-8: before this helper, `audit_log()` hardcoded `profile_id=NULL`
+/// for every web_api operation, producing audit rows inconsistent with the
+/// tool-side audit rows (which propagate `ctx.profile_id` correctly).
+async fn resolve_profile_id_from_slug(state: &Arc<AppState>, slug: Option<&str>) -> Option<i64> {
+    let slug = slug?;
+    if slug.is_empty() || slug == "default" {
+        return None;
+    }
+    let db = state.db.as_ref()?;
+    crate::profiles::db::load_profile_by_slug(db.pool(), slug)
+        .await
+        .ok()
+        .flatten()
+        .map(|p| p.id)
+}
+
 /// Fire-and-forget audit log for web API vault operations.
-fn audit_log(state: &Arc<AppState>, key: &str, action: &str, success: bool) {
+///
+/// `profile_id` should be resolved via [`resolve_profile_id_from_slug`] from
+/// the request's profile slug (query string or JSON body). `None` means the
+/// operation targets the default profile or has no explicit profile context.
+fn audit_log(
+    state: &Arc<AppState>,
+    key: &str,
+    action: &str,
+    success: bool,
+    profile_id: Option<i64>,
+) {
     if let Some(db) = &state.db {
         let db = db.clone();
         let key = key.to_string();
         let action = action.to_string();
         tokio::spawn(async move {
             if let Err(e) = db
-                .insert_vault_access(&key, &action, "web_api", success, None, None)
+                .insert_vault_access(&key, &action, "web_api", success, None, profile_id)
                 .await
             {
                 tracing::warn!(error = ?e, "Failed to write vault audit log");
@@ -344,20 +384,8 @@ async fn get_vault_audit_log(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(q): axum::extract::Query<AuditQuery>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
+    let profile_id = resolve_profile_id_from_slug(&state, q.profile.as_deref()).await;
     let db = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
-    let profile_id = if let Some(ref slug) = q.profile {
-        if !slug.is_empty() {
-            crate::profiles::db::load_profile_by_slug(db.pool(), slug)
-                .await
-                .ok()
-                .flatten()
-                .map(|p| p.id)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
     let rows = db
         .list_vault_access_log(q.limit, profile_id)
         .await
