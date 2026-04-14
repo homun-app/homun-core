@@ -1,8 +1,15 @@
-# Homun — Unified Roadmap
+# Homun — Unified Roadmap (Strategic)
 
-> Last updated: 2026-03-25
+> Last updated: 2026-04-13
 > Consolidamento di: ROADMAP.md, IMPLEMENTATION-GAPS.md, openclaw-connections-vs-homun-detailed.md
-> Obiettivo: piano unico orientato a **prodotto industriale**, sicurezza-first, senza legacy o feature completate.
+> Obiettivo: piano **strategico** orientato a prodotto industriale, sicurezza-first, senza legacy o feature completate.
+>
+> **⚠️ Questo è il livello strategico (12+ mesi, 4 fasi macro)**.
+> - Per il **piano tattico "vai in produzione"** (10 sprint per v1.0) → [`PRODUCTION-ROADMAP.md`](./PRODUCTION-ROADMAP.md)
+> - Per **bug tracking e cosa è verificato** → [`REALITY-AUDIT.md`](./REALITY-AUDIT.md)
+> - Per **start session** (nuove sessioni Claude) → [`SESSION-PRIMER.md`](./SESSION-PRIMER.md)
+>
+> **Regola di update**: aggiorna questo doc solo quando cambia uno status di **fase macro** (Fase 1/2/3/4) o quando si aggiungono/rimuovono linee strategiche. Per task day-to-day usa PRODUCTION-ROADMAP.md.
 
 ---
 
@@ -10,18 +17,19 @@
 
 | Metrica | Valore |
 |---------|--------|
-| LOC Rust | ~107,400 |
-| LOC Frontend | ~25,500 (JS) + ~22,100 (CSS) |
-| Source files | 236 Rust, 43 JS |
-| Test | 807 passing |
+| LOC Rust | ~121,300 |
+| LOC Frontend | ~29,200 (JS) + ~22,100 (CSS) |
+| Source files | 245 Rust, 45 JS |
+| Test | 953 passing |
 | Clippy warnings | 0 |
 | Canali | 7 (CLI, Telegram✅, Discord✅, WhatsApp✅, Slack✅, Email✅, Web✅) |
-| Tool built-in | 20 |
+| Tool built-in | 23 |
 | Web UI Pages | 30 |
 | API endpoints | ~113 REST |
-| SQLite migrations | 45 |
+| SQLite migrations | 54 |
 | MCP Recipes bundled | 17 (github, google-workspace, google-maps, notion, slack, gitlab, linear, jira, reddit, brave-search, spotify, stripe, twitter, sentry, todoist, home-assistant, wordpress) |
 | Provider LLM | 14 |
+| Reality Audit | 7 recipe completate, 9/11 bug fixati — vedi [`REALITY-AUDIT.md`](./REALITY-AUDIT.md) |
 | Release | Alpha v0.2 (REL-1..12 tutti ✅ DONE) |
 
 *✅ = production-ready (Fase 1 hardening completa)*
@@ -266,7 +274,7 @@ Target: **17 verified recipes bundled** — all done. Google services consolidat
 | # | Task | Effort | Note |
 |---|------|--------|------|
 | APP-1 | Fondazioni: pairing sicuro + channel "app" + chat base | 3-4 settimane | ✅ DONE (2026-03) — QR pairing (claim+poll+bootstrap), bearer auth, multi-conversation chat, WebSocket streaming (delta/blocks/tool_call), markdown rendering, file/image attachments (multipart upload), voice dictation, drawer+bottom nav (4 tab) |
-| APP-2 | Esperienza ricca: approval inline + activity feed + settings + block rendering | 2-3 settimane | ⏳ IN PROGRESS — Message block model completo (choice/approval/status/result/external_message), widget rendering incompleto. Activity feed e Approvals scaffoldati con mock data, nessuna API backend collegata. Settings page minimale |
+| APP-2 | Esperienza ricca: approval inline + block rendering + thread-first UX | 2-3 settimane | ✅ DONE 2026-04-14 (Sprint 7) — Pivot **thread-first** completata: Activity feed + Approvals page separate rimosse per product decision del team mobile (vedere `homun-app/docs/ROADMAP.md`), le azioni vivono **inline nel thread**. Tutti e 5 i block widget renderizzano con tap handlers wired. Thread-level profile switcher in topbar. ApprovalBlock confirmation sheet. Cross-stack fixture contract Rust↔Flutter (6+6 test). ResultBlock client-side redact (defense-in-depth per bug #60). Triage ha portato 5700 righe uncommitted in 11 commit granulari (il repo mobile aveva 1 solo commit pre-sprint). 948 Rust test + 26 Flutter test pass |
 | APP-3 | Polish: offline cache + biometric lock + widget + push notifications | 2 settimane | ⏳ PARTIAL — Biometric lock ✅ DONE (local_auth + grace period 2min + secure storage). Push notifications, offline queue, message search: TODO |
 | APP-4 | Store publishing (App Store + Play Store) | 1 settimana | |
 

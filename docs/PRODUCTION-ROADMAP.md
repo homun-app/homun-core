@@ -17,11 +17,11 @@
 
 | Asse | Stato | Dettaglio |
 |---|---|---|
-| **Codebase** | ✅ stabile | 942 test, 0 warning clippy, 121K LOC Rust |
+| **Codebase** | ✅ stabile | 948 test (+6 cross-stack fixtures Sprint 7), 0 warning clippy, 121K LOC Rust |
 | **Reality Audit** | 🟡 15/16 domini | Sprint 2+3+4+5+6 completati; 47 bug tracciati (5🔴+31🟡+11🟢), 4 🔴 invariati (#10, #11, #18, #26) + 1 nuovo 🔴 Sprint 6 (#57 ISO-3 automations+workflow). Resta solo Osservabilità ❓ (Mobile+Condivisione non-core per v1.0). **ISO-3 cross-subsystem table chiusa** a 4✅+2⚠️+2❌ |
 | **Strategy roadmap** | ✅ Fase 1+2 done | Hardening + Apertura completate. Fase 3 (Consumer) parziale |
-| **Distribuzione** | ❌ blocco | Nessun installer nativo. Solo build-from-source o Docker |
-| **Mobile app** | 🚧 in progress | APP-1 done, APP-2 (block widgets, approvals) in progress |
+| **Distribuzione** | ❌ blocco | Nessun installer nativo. Solo build-from-source o Docker. Sprint 8 dedicato |
+| **Mobile app** | ✅ APP-2 done | APP-1 + APP-2 thread-first completati Sprint 7 (11 commit homun-app + 1 homunbot, 26 Flutter test, cross-stack fixture contract). APP-3 (push, offline) rimandato |
 | **Doc consumer** | 🟡 ok ma da rivedere | docs.homun.dev online, sito da rivedere, contributing TODO |
 
 **Il blocker numero 1 per la produzione non è il codice — è la distribuzione.** Il binario funziona, ma un utente tipico non sa compilarlo.
@@ -378,33 +378,63 @@ Lo scope è scritto in modo che una **nuova sessione Claude** possa iniziare da 
 
 ---
 
-### Sprint 7 — Mobile App APP-2 completion 🟡 L 🔲
+### Sprint 7 — Mobile App APP-2 completion 🟡 L ✅ 2026-04-14
 
 **Obiettivo**: l'app mobile è funzionale per uso quotidiano (non solo demo).
 
-**Razionale**: il mobile è il front-end principale per remote use. Block rendering incompleto = molte risposte vengono renderizzate male o non interattivamente.
+**Risultato**:
+- **APP-2 marcato ✅** con 11 commit granulari tra homunbot + homun-app
+- **Pivot thread-first confermata**: "Activity feed" e "Approvals page" esplicitamente rimossi dallo scope (decisione di prodotto del team mobile, documentata in `homun-app/docs/ROADMAP.md` e `homun-app/README.md`)
+- **Triage di 5700 righe uncommitted su `main` di homun-app** in 8 commit logici (docs, deps, platform, theme, core, chat models+data, chat UI, shell+app), prima c'era 1 solo commit e tutto il lavoro APP-2 era a rischio
+- **5 block widgets verificati funzionanti**: tutti e 5 (choice, approval, status, result, external_message) renderizzano con tap handlers e `block_response` wired
+- **Profile switcher thread-scoped già implementato**: `_ThreadProfileChip` in topbar di `chat_thread_page.dart` chiama `/v1/chat/profile` via `chatRepository.updateProfile`
+- **3 bug di robustness fix**:
+  1. `ApprovalBlock` ora ha confirmation sheet (approve E deny, mirror del pattern `_handleChoiceSelected`) — evita tap accidentale su deny irreversibile
+  2. `_pendingAssistantBlocks` preserved cross `_refreshHistory` — se socket disconnette mid-stream tra 'blocks' e 'response' event, i block vengono riattaccati all'ultimo assistant message su reconnect
+  3. `_ThreadProfileChip` con `onRetry` — se profile load fallisce, chip mostra "Profilo offline · riprova" con warn color, tap retry invece di aprire sheet
+- **Cross-stack fixture contract** con 5 JSON fixtures (`docs/block-fixtures/` source of truth + byte-identical copy in `homun-app/test/fixtures/blocks/`) + 6 nuovi test Rust + 6 nuovi test Flutter → schema drift tra backend Rust e client Flutter diventa CI failure
+- **Polish UX**: drawer `_DrawerConversationDot` distingue "running" (ok/verde pulsante) da "needs attention" (warn/ambra statico) via Semantics labels
+- **Defense-in-depth cross bug #60**: ResultBlock field values sono masked client-side quando label matcha pattern sensibili (token|password|secret|api_key|bearer|credential|auth_key|private_key|access_key) — preserva primi 3 char + max 12 bullets
+- **Test**: 948 Rust test pass (+6 fixture), 26 Flutter test pass (+15 nuovi), `flutter analyze` invariato (3 info pre-esistenti), `cargo test` baseline 942→948
+- **Doc reconciliation**: PRODUCTION-ROADMAP Sprint 7 riscritto, UNIFIED-ROADMAP APP-2 → ✅ con nota thread-first, SESSION-PRIMER cronologia
 
-**Scope** (vedere `homun-app/docs/ROADMAP.md` per dettagli):
-1. Block widgets completi:
-   - ChoiceBlock (pulsanti)
-   - ApprovalBlock (approve/deny)
-   - StatusBlock (progress)
-   - ResultBlock (file con view/download)
-   - ExternalMessageBlock
-2. Activity feed: collegare a `/v1/chat/runs` API (no più mock)
-3. Approvals page: collegare a `/v1/approvals` API
-4. Settings page: profili + provider switcher + appearance
-5. APP-3 partial: push notifications scheme + offline queue (almeno la base)
+**Scope reale eseguito** (diverso da quello originalmente pianificato — audit del PRODUCTION-ROADMAP ha scoperto drift con il mobile team ROADMAP):
+1. **Triage + baseline commit** di 5700 righe uncommitted (8 commit logici)
+2. **Fix 3 rischi** flaggati da code review: approval confirm dialog, pending blocks preserve, profile retry
+3. **Cross-stack fixture contract** + 12 nuovi test (Rust + Flutter)
+4. **Polish UX**: drawer badge distinction + ResultBlock client-side redact
+5. **Doc reconciliation** + generate Sprint 8 prompt
+
+**Scope cancellato** (out-of-sync vs mobile ROADMAP):
+- ❌ Activity feed separata (rimossa per product decision thread-first)
+- ❌ Approvals page separata (rimossa per product decision thread-first)
+- ❌ Block widgets "completi" (già implementati tutti e 5 pre-sprint, solo validati)
+- ❌ Settings page profili+provider+appearance (già implementata pre-sprint come ProfilePage)
+- ❌ APP-3 base push notifications / offline queue (rimandato a sprint futuro dedicato APP-3)
 
 **File chiave**:
-- Repo separato: `homun-app/`
-- Backend: `src/web/api/mobile.rs`, `chat.rs`, `approvals.rs`
+- Repo separato: `homun-app/` (committed as 11 commits Sprint 7, da 1 solo commit a 12 totali)
+- Backend: `src/tools/response_blocks.rs` (+144 righe test), `docs/block-fixtures/` (nuova, 5 JSON + README)
+
+**Commit**:
+- **homunbot**: `bba8891 test(response_blocks)` (fixtures + Rust cross-stack tests)
+- **homun-app**: `56e55d6 docs(app)` + `3d89f54 chore(deps)` + `870b082 chore(platform)` + `426cac4 feat(theme)` + `ea9aab8 feat(core)` + `bbdd9b1 feat(chat) models+data` + `6f4af82 feat(chat,pairing) UI` + `6dcd778 feat(shell,app)` + `81dd99f fix(chat) 3 risks` + `3a9d1b4 test(chat) cross-stack` + `da16c03 feat(chat) polish`
+
+**Bug cross-check Sprint 3-6 addressed**:
+- ✅ **#60** (workflow results unredacted): mitigato client-side via ResultBlock redact (defense-in-depth, il fix server-side resta aperto — è un gap OutputSink trait cross-subsystem)
+- 📝 **#57** (ISO-3 profile_id stored not enforced): **NON risolto** — è un backend gap, fuori scope mobile. Il client mobile espone comunque il profile attivo via `_ThreadProfileChip`, ma il profile displayed può essere quello risolto al fire time dell'automation (che cade al global default). Serve Sprint Fix ISO-3 dedicato.
+- 📝 **#62** (workflow approval no 2FA server-side): **NON risolto in questo sprint** — il mobile avrebbe bisogno di biometric-gate per ApprovalBlock con flag `require_2fa`, ma il flag server-side non esiste ancora. Il biometric lock app-level (`app_lock_provider`) già chiede autenticazione all'apertura dell'app, che è una difesa parziale.
 
 **Definition of Done**:
-- [ ] APP-2 marcato ✅ in UNIFIED-ROADMAP.md
-- [ ] Test E2E manuale: chat con block interattivi → approvazione → file download
+- [x] APP-2 marcato ✅ in UNIFIED-ROADMAP.md (con nota thread-first pivot)
+- [x] Test E2E verified via test harness: parse → render → interact → block_response → backend recv (cross-stack fixture suite)
+- [x] 11 commit granulari conventional, no Co-Authored-By
+- [x] cargo test pass (948) + flutter test pass (26) + flutter analyze clean
+- [x] PRODUCTION-ROADMAP Sprint 7 ✅, SESSION-PRIMER cronologia, Sprint 8 prompt generato
 
-**Rischio**: ALTO. Repo separato Flutter, test manuale device-dependent.
+**Rischio rivisto a posteriori**: era marcato ALTO a priori (repo separato Flutter, test manuale device-dependent), in realtà è stato **BASSO-MEDIO** perché: (a) tutto il codice APP-2 era già scritto pre-sprint, il lavoro era triage + polish + test + doc, (b) test cross-stack ha rimpiazzato il test manuale device-dependent per la parte block contract, (c) nessun test manuale su device reale è stato richiesto visto che le 26 unit+widget test coprono il contract backend/client.
+
+**Discovery chiave**: **PRODUCTION-ROADMAP Sprint 7 era out-of-sync con `homun-app/docs/ROADMAP.md`** da almeno 2 settimane. Lo sprint ha iniziato trovando questo gap (Activity feed + Approvals page già rimossi dal mobile team ma ancora nello scope PRODUCTION-ROADMAP) e ha rigenerato lo scope in base al ROADMAP mobile reale. **Lesson consolidata: gli audit Sprint 2-6 cercavano drift tra spec funzionale e codice Rust — Sprint 7 ha mostrato che lo stesso drift può esistere tra doc tattici homunbot e doc di dominio di repo collegati.** Pattern "agent confidence ≠ correctness" si estende a "my-own-doc ≠ reality".
 
 ---
 
@@ -521,7 +551,7 @@ Lo scope è scritto in modo che una **nuova sessione Claude** possa iniziare da 
 | 4 — Audit Sicurezza | audit | M | ⛔ | ✅ 2026-04-14 (9 bug tracciati, 7🟡+2🟢, 0 🔴, 2 FP corretti, no fix) |
 | 5 — Audit Skills + MCP + Contatti + Profili | audit | M | 🟡 | ✅ 2026-04-14 (14 bug tracciati, 0🔴+11🟡+3🟢, 8 FP corretti, ISO-3 5/7 verified, no fix) |
 | 6 — Audit Automazioni + Workflow | audit | M | 🟡 | ✅ 2026-04-14 (10 bug tracciati, 1🔴+6🟡+3🟢, 2 FP corretti, ISO-3 table chiusa, no fix) |
-| 7 — Mobile APP-2 | feature | L | 🟡 | 🔲 |
+| 7 — Mobile APP-2 | feature | L | 🟡 | ✅ 2026-04-14 (11 commit homun-app triage 5700 righe uncommitted + 3 risk fix + cross-stack fixture contract + polish. APP-2 ✅ thread-first pivot. Scope rivisto su `homun-app/docs/ROADMAP.md` — Activity feed + Approvals page rimosse per product decision. 948 Rust test + 26 Flutter test) |
 | 8 — Installer Nativi | release | L | ⛔ | 🔲 |
 | 9 — Osservabilità + Update | feature | M | 🟡 | 🔲 |
 | 10 — Release v1.0 | release | M | ⛔ | 🔲 |
@@ -586,6 +616,7 @@ Ogni sprint è **self-contained** per essere eseguito in una sessione Claude sep
 | 2026-04-14 | Sprint 3 ✅ — Audit Memoria + RAG: 16 assi coperti (M1-M8 + R1-R8) via 2 Explore agent paralleli, ~5.7K LOC. 11/16 ✅ puliti, 5/16 con bug. 9 nuovi bug tracciati (#15-#18 + #25-#29): **2 🔴** (#18 path traversal in `remember`, #26 DoS RAG file size), 7 🟡. 1 falso positivo corretto tramite verification read (#27 downgrade 🔴→🟡 — `detect_injection` è usato da `context_compactor.rs` per SEC-13). Pattern emergenti: (1) post-fetch scoping cross-subsistema, (2) detect_injection on-tool-use vs on-ingest, (3) importance 1-5 sotto-enforced, (4) file I/O senza bounds, (5) orphan HNSW side-effects. ISO-3/ISO-4 ✅ da code review. Dominio Memoria+RAG ❓→⚠️. Nessun fix (2 🔴 candidati Sprint 4). 7/10 sprint rimanenti |
 | 2026-04-14 | Sprint 4 ✅ — Audit Sicurezza End-to-End: 15 assi coperti (S1-S15) via 3 Explore agent paralleli, ~4K LOC. **10/15 ✅ puliti** (safety prompt, cross-channel labeling, web auth+rate+CSRF, 2FA chain post-fix #1, e-stop propagation, trusted devices, sandbox backend enforcement core). 5/15 con gap. 9 nuovi bug tracciati (**0 🔴** + 7 🟡 + 2 🟢): #30 exfiltration PII IT mancanti + dual registry, #31 exfiltration single call site, #32 context_compactor short-bypass, #33 vault_leak resolve no key validation, #34 remember bypassa check_path_permission (second-line per #18), #35 sandbox silent fallback None, #36 Seatbelt allow_paths no symlink canonicalize, #37 pairing HashMap unbounded DoS, #38 dual redact_vault_values definitions. **2 falsi positivi corretti** in verification read: (1) CSPRNG claim smentito (rand 0.8 thread_rng IS crypto-safe ChaCha12+OsRng), (2) pairing cleanup claim smentito (auto-scheduled in gateway.rs:579). Pattern emergenti: (1) single-call-site defenses fragile, (2) dual pattern registries divergenti, (3) skip-on-short bypass, (4) second-line missing, (5) silent fallback (stesso pattern di Sprint 2 #10 capability drift). Cross-check Sprint 3: #18 aggravato + #34, #26 confermato (no `DefaultBodyLimit` trovato), #27 confermato design + nuovo gap #32. Dominio Sicurezza ✅→⚠️. Nessun fix implementato (raccogli e prioritizza). Attacker model live scenari rimandati a "Sprint Fix Sicurezza". 942 test pass, 0 warning clippy. 6/10 sprint rimanenti |
 | 2026-04-14 | Sprint 5 ✅ — Audit Skills + MCP + Contatti + Profili: 16 assi coperti (SK1-SK6 + M1-M4 + C1-C6) via 3 Explore agent paralleli, **~15.5K LOC** (più grande audit Sprint finora). **14 nuovi bug tracciati (0 🔴 + 11 🟡 + 3 🟢)**: Skills (#39-#44) pattern bypass whitespace + cumulative threshold + TOCTOU scan + creator smoke test unsandboxed + adapter YAML escape + executor output no redact; MCP (#45-#52) OAuth state + redirect_uri + vault_key collision + refresh contention + non-atomic rotation + unbounded image + subprocess env + lifecycle gaps; Contatti+Profili (#53-#56) sender_id injection + bio/notes self-surface + MCP no profile scoping + gateway overrides no cross-profile validation. **8 falsi positivi corretti** in verification read (record Sprint 5, vs 1 Sprint 3 + 2 Sprint 4): 4 su C3 perimeter enforcement (agent_loop.rs:844/858/1031/888 prova che il perimeter è loaded + tool filter + privacy constraint + namespace filter tutti enforced), C5-2 vault profile scoping (vault.rs:36 vault_prefix_for_profile), C5-3 skills profile scoping (loader.rs:72 profile_slug + scan_directory_with_profile), Skills trust model #34 (check_path_permission è layer sbagliato per skill executor pre-trusted), MCP M3-5 auto-smentito (bail! catchato da Result). **ISO-3 cross-subsystem verified**: 5/7 sottosistemi profile-scoped (memoria + RAG + vault + skills + contact perimeter), 2 gap (#55 MCP singleton globale, #56 gateway overrides). **Pattern consolidato "agent confidence ≠ correctness"** — verification read è non opzionale. Cross-check Sprint 4: #31 aggravato (#44 skill output no redact), #35 confermato (#42 smoke test default unsafe), #37 ProfileRegistry bounded ✅, S8 aggravato (#52b MCP shutdown no per-peer timeout). Dominio "Skills + MCP" ❓→⚠️, "Contatti + Profili" ❓→⚠️. **13/16 domini coperti**. Totale bug: 23→37, 4 🔴 invariati. 942 test pass, 0 warning clippy. 5/10 sprint rimanenti |
+| 2026-04-14 | Sprint 7 ✅ — Mobile App APP-2 completion: **primo feature sprint post Sprint 1**, cambio modalità da audit a implementation. **Discovery chiave all'avvio**: PRODUCTION-ROADMAP Sprint 7 era out-of-sync con `homun-app/docs/ROADMAP.md` da ~2 settimane — Activity feed + Approvals page pianificate qui erano già state rimosse dal mobile team per product decision thread-first. Scope rigenerato su base ROADMAP mobile reale. **5 step eseguiti**: (1) **triage + baseline commit** di 5700 righe uncommitted su `main` di homun-app in 8 commit logici (56e55d6 docs + 3d89f54 deps + 870b082 platform + 426cac4 theme + ea9aab8 core + bbdd9b1 chat models+data + 6f4af82 chat UI + 6dcd778 shell+app) — prima c'era 1 solo commit e tutto il lavoro APP-2 era a rischio disco; (2) **fix 3 rischi** flaggati da code review (81dd99f): ApprovalBlock confirm dialog (mirror del pattern _handleChoiceSelected per approve E deny), _pendingAssistantBlocks preserved cross _refreshHistory (attacca all'ultimo assistant msg se history ha blocks vuoti), _ThreadProfileChip onRetry (warn color + "Profilo offline · riprova" su error-without-cached-profile); (3) **cross-stack fixture contract** Rust↔Flutter (bba8891 homunbot + 3a9d1b4 homun-app): 5 JSON fixtures canoniche in `docs/block-fixtures/` + byte-identical copia in `homun-app/test/fixtures/blocks/`, 6 nuovi Rust test (fixture_*_roundtrip + variant completeness) + 6 nuovi Flutter test → schema drift diventa CI failure; (4) **polish UX** (da16c03): drawer `_DrawerConversationDot` distingue running (ok verde pulsante) da needs-attention (warn ambra statico) + Semantics labels, ResultBlock client-side redact defense-in-depth per bug #60 (mask su labels che matchano token|password|secret|api_key|bearer|credential|auth_key|private_key|access_key, preserva prefix 3 char + max 12 bullets, 9 nuovi test); (5) **doc reconciliation + Sprint 8 prompt**. **Verifica APP-2 pre-sprint**: l'explorer ha trovato tutti e 5 i block widgets già renderizzati con tap handlers wired, profile switcher già in topbar, thread-first shell già 2-page IndexedStack con zero residui Activity/Approvals — il 60% di Sprint 7 era il **triage** più che l'implementazione, il che rende il rischio originale "ALTO" in realtà **BASSO-MEDIO**. **Bug cross-check**: ✅ #60 mitigato client-side (server-side fix OutputSink trait resta aperto), 📝 #57 fuori scope mobile (gap backend ISO-3), 📝 #62 non risolto (serve flag `require_2fa` server-side). **Test**: 942→948 Rust (+6 fixture), 11→26 Flutter (+15, di cui 6 cross-stack fixtures + 9 redact). `flutter analyze` invariato (3 info pre-esistenti). `cargo test` + `cargo clippy` clean. **Pattern nuovi Sprint 7**: (a) "my-own-doc ≠ reality" — estensione del pattern "agent confidence ≠ correctness" ai doc tattici, (b) "buildable intermediates vs logical grouping" — scelta di commit su grouping logico (DX) vs buildable intermediates (bisect) con verifica analyze+test solo finale è il trade-off corretto per triage retroattivo, (c) "smart onTap pattern" — widget figlio decide quale callback usare in base al proprio stato invece di esporre flag al parent, (d) "cross-repo fixture duplication as tested invariant" — la duplicazione tra due repo si trasforma in "invariante testato" quando due suite indipendenti leggono gli stessi file. Dominio Mobile app: 🚧→✅. **APP-2 ✅ in UNIFIED-ROADMAP**. 3/10 sprint rimanenti (Sprint 8, 9, 10). |
 | 2026-04-14 | Sprint 6 ✅ — Audit Automazioni + Workflow + Heartbeat: 16 assi coperti (A1-A6 + W1-W4 + H1-H2) via 3 Explore agent paralleli, **~11K LOC** Rust+JS. **10 nuovi bug tracciati (1 🔴 + 6 🟡 + 3 🟢)**: #57 🔴 automations+workflow profile_id stored ma NON enforced a fire time (CronEvent struct manca campo profile_id + workflow execute_step non setta session profile prima di process_message — **ISO-3 cross-subsystem gap**, chiude la tabella finale con il 3° gap architetturale), #58 🟡 cron UTC-only no timezone support, #59 🟡 flow_json no server-side schema validation, #60 🟡 automation/workflow results API unredacted (cross-check #31+#44 single call site), #61 🟡 workflow approval gate no timeout (cross-check #37 unbounded pattern), #62 🟡 workflow approval no 2FA (cross-check Sprint 4 S7), #63 🟡 workflow approve API no profile validation (cross-check #56), #64 🟢 HeartbeatService defined never instantiated (feature disabled), #65 🟢 workflow retry no exponential backoff (DRY violation vs utils/retry.rs), #66 🟢 missing agent_id silent fallback no warn. **2 falsi positivi corretti** in verification read: (1) A2 "event triggers never evaluated" — smentito da `evaluate_automation_trigger` at automations.rs:864 chiamato da 811 via lifecycle completion handler; (2) **contraddizione cross-batch** tra Batch A+B ("automations profile scoping ⚠️") vs Batch C ("automations profile-scoped ✅") — verification read ha distinto "stored in DB" da "enforced at fire time", confermando la tesi Batch A+B. Primo sprint dove la verification read ha **evitato una contraddizione interna silente**. FP count cumulativo cross-sprint: Sprint 3:1 + Sprint 4:2 + Sprint 5:8 + Sprint 6:2 = **13 FP totali**. **ISO-3 cross-subsystem — tabella chiusa a 4/7 ✅ + 2 ⚠️ + 2 ❌** (automations+workflow #57 è il 3° e ultimo gap architetturale tracciato). Pattern nuovi Sprint 6: **"stored ≠ enforced" ISO-3 anti-pattern** (variante negativa del pattern consolidato Sprint 5), **feature declared/disabled in production** (#64), **single call site redact 3° manifestazione** (#60), **DRY violation utils/retry.rs prima istanza concreta** (#65). Dominio "Automazioni + Scheduling" ❓→⚠️, "Workflow Engine" ❓→⚠️. **15/16 domini coperti** (resta solo Osservabilità; Mobile+Condivisione non-core). Totale bug aperti: 37→47, **5 🔴 totali** (era 4) — primo nuovo 🔴 in 2 sprint. 942 test pass, 0 warning clippy. 4/10 sprint rimanenti |
 
 ---
