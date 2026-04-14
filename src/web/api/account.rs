@@ -31,7 +31,12 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
 
 // ─── Avatar ─────────────────────────────────────────────────────
 
-/// Serve the user's avatar image, or 404 if none uploaded.
+/// Inline SVG placeholder served when no avatar file is uploaded.
+/// Keeps the `<img>` tag happy with a 200 OK response, avoiding
+/// 404s in the browser console while still letting CSS fallback styling work.
+const PLACEHOLDER_AVATAR_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="32" fill="#e0e0e0"/><circle cx="32" cy="26" r="10" fill="#9e9e9e"/><path d="M12 56 Q32 38 52 56 Z" fill="#9e9e9e"/></svg>"##;
+
+/// Serve the user's avatar image, or an inline SVG placeholder if none uploaded.
 async fn get_avatar(State(_state): State<Arc<AppState>>) -> axum::response::Response {
     let data_dir = crate::config::Config::data_dir();
     // Try common extensions
@@ -60,7 +65,16 @@ async fn get_avatar(State(_state): State<Arc<AppState>>) -> axum::response::Resp
             }
         }
     }
-    StatusCode::NOT_FOUND.into_response()
+    // Fallback: inline SVG placeholder, 200 OK — avoids console 404 noise.
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "image/svg+xml"),
+            (header::CACHE_CONTROL, "max-age=3600"),
+        ],
+        PLACEHOLDER_AVATAR_SVG,
+    )
+        .into_response()
 }
 
 /// Upload a new avatar image (multipart form).
