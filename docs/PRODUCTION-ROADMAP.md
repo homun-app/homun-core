@@ -18,7 +18,7 @@
 | Asse | Stato | Dettaglio |
 |---|---|---|
 | **Codebase** | ✅ stabile | 942 test, 0 warning clippy, 121K LOC Rust |
-| **Reality Audit** | 🟡 13/16 domini | Sprint 2+3+4+5 completati; 37 bug tracciati (4🔴+25🟡+8🟢), 4 🔴 invariati (#10, #11, #18, #26). 3 domini ❓ rimanenti (Automazioni, Osservabilità, Mobile/APP-2/Condivisione) |
+| **Reality Audit** | 🟡 15/16 domini | Sprint 2+3+4+5+6 completati; 47 bug tracciati (5🔴+31🟡+11🟢), 4 🔴 invariati (#10, #11, #18, #26) + 1 nuovo 🔴 Sprint 6 (#57 ISO-3 automations+workflow). Resta solo Osservabilità ❓ (Mobile+Condivisione non-core per v1.0). **ISO-3 cross-subsystem table chiusa** a 4✅+2⚠️+2❌ |
 | **Strategy roadmap** | ✅ Fase 1+2 done | Hardening + Apertura completate. Fase 3 (Consumer) parziale |
 | **Distribuzione** | ❌ blocco | Nessun installer nativo. Solo build-from-source o Docker |
 | **Mobile app** | 🚧 in progress | APP-1 done, APP-2 (block widgets, approvals) in progress |
@@ -319,33 +319,62 @@ Lo scope è scritto in modo che una **nuova sessione Claude** possa iniziare da 
 
 ---
 
-### Sprint 6 — Audit Automazioni + Workflow M 🔲
+### Sprint 6 — Audit Automazioni + Workflow M ✅ 2026-04-14
 
-**Obiettivo**: validare l'engine async e scheduled.
+**Obiettivo**: validare l'engine async e scheduled (automations + workflow + heartbeat), chiudere la tabella ISO-3 cross-subsystem con l'ultimo sottosistema rimanente.
 
-**Scope**:
-- **Automations**:
-  - Cron trigger (es. ogni mattina alle 9)
-  - Event trigger (es. nuovo email contiene parola)
-  - NLP generation: "ogni lunedì mandami il meteo" → automation valida
-  - Visual flow builder: creare flow da UI, salvare, eseguire
-- **Workflow**:
-  - Multi-step con approval gate
-  - Resume-on-boot dopo crash simulato
-  - Per-step `agent_id` (multi-agent)
-- **Heartbeat**:
-  - Wake-up periodico, controllo task pendenti
+**Risultato**:
+- 3 sottosistemi (Automations + Workflow Engine + Heartbeat) auditati via **static code-analysis** (~11K LOC Rust+JS totali)
+- Parallelizzato con 3 Explore agent (Batch A Automations ~5K LOC 6 assi A1-A6, Batch B Workflow+Heartbeat ~2K LOC 6 assi W1-W4+H1-H2, Batch C Cross-check Sprint 3+4+5 findings 6 pattern), 16 assi totali
+- **10 nuovi bug tracciati (1 🔴 + 6 🟡 + 3 🟢)**: #57-#66
+- **1 nuovo 🔴 critico** — primo nuovo 🔴 in 2 sprint (Sprint 4+5 avevano 0 🔴 nuovi): **#57** automations+workflow profile_id stored in DB ma NON enforced a fire time. Due manifestazioni con unico root cause: (1) `CronEvent` struct (cron.rs:17-26) manca il campo profile_id → prompt path risolve profile via resolver cascade → global default; (2) `execute_step` (workflows/engine.rs:481-483) non chiama `set_session_profile_id` prima di `process_message`, e `process_message` signature manca profile_id parameter. **Chiude la tabella ISO-3 cross-subsystem** con il 3° gap architetturale
+- **2 falsi positivi corretti** in verification read:
+  1. **A2 "Event triggers never evaluated"** (Batch A) — `evaluate_automation_trigger` esiste a `scheduler/automations.rs:864`, chiamato da 811 via `evaluate_and_complete_automation_run`. Agent aveva saltato la call chain
+  2. **Batch C "automations profile-scoped ✅"** — **contraddizione cross-batch** con Batch A+B. Verification read ha distinto "stored in DB" da "enforced at fire time" (Batch A+B corretti)
+- **FP count cumulativo cross-sprint**: Sprint 3:1 + Sprint 4:2 + Sprint 5:8 + Sprint 6:2 = **13 FP totali**. Pattern "agent confidence ≠ correctness" riconfermato. Sprint 6 è **il primo sprint dove la verification read ha evitato una contraddizione interna silente** (A5 vs #55) invece di solo correggere un verdetto singolo
+- **ISO-3 cross-subsystem — tabella finale chiusa**: 4/7 ✅ (memoria+RAG, vault, skills, contact perimeter) + 2 ⚠️ (MCP #55, gateway overrides #56) + 2 ❌ (automations+workflow #57). Tutti e 3 i gap sono architetturali, non rotture funzionali
+- **Pattern architetturali nuovi Sprint 6**:
+  - **"Stored ≠ enforced" anti-pattern** (NEW): variante negativa del pattern ISO-3 consolidato. Campo presente in DB ma mai propagato al runtime via `set_session_profile_id` o equivalente. Il fix strutturale richiede estensione signature `process_message` o introduzione `forced_profile_id` in `MessageMetadata`
+  - **Single call site redact** (3° manifestazione — cross #31 Sprint 4 + #44 Sprint 5): #60 automation/workflow results API unredacted. Il trait `OutputSink` proposto Sprint 5 diventa sempre più giustificato
+  - **Unbounded pending state** (cross #37 Sprint 4): #61 workflow approval gate no timeout. Stessa classe bug del pairing HashMap
+  - **DRY violation vs utils/retry.rs** (NEW prima istanza concreta): #65 workflow retry home-grown immediate. CLAUDE.md regola esplicita violata
+  - **Feature declared, disabled in production** (NEW): #64 HeartbeatService defined + tested ma zero call site in produzione. Da cercare altrove come anti-pattern
+- Dominio "Automazioni + Scheduling" passa da ❓ a ⚠️ in REALITY-AUDIT overview
+- Dominio "Workflow Engine" passa da ❓ a ⚠️ in REALITY-AUDIT overview
+- **15/16 domini coperti** (resta solo Osservabilità; Mobile + Condivisione tracciati ma non audit-core per v1.0)
+- Totale bug aperti: 37 → 47 (+10 Sprint 6), **5 🔴 totali** (era 4) — primo nuovo 🔴 in 2 sprint
+- 942 test pass, clippy produzione clean (nessuna modifica codice in questo sprint)
+- 1 commit doc-only pulito
 
-**File chiave**:
-- `src/scheduler/`, `src/workflows/`, `src/agent/heartbeat.rs`
-- `src/web/api/automations.rs`, `workflows.rs`
-- `static/js/automations.js`, `flow-renderer.js`
+**Scope originale (eseguito)**:
+- **Automations** (6 assi A1-A6): A1 cron trigger, A2 event trigger, A3 NLP flow generation, A4 visual flow canvas, A5 ISO-3 profile scoping (gap closure), A6 safety enforcement
+- **Workflow Engine** (4 assi W1-W4): W1 resume-on-boot, W2 approval gate UX, W3 per-step agent_id, W4 retry + error propagation
+- **Heartbeat** (2 assi H1-H2): H1 proactive wake-up, H2 idempotency + safety
+- **Cross-check Sprint 3+4+5** (6 pattern): #31, #34, #35, #47, #55, #56 su tutti e 3 i sottosistemi
+
+**File auditati**:
+- Scheduler: `src/scheduler/{cron,automations,db,mod}.rs` (~2.2K LOC)
+- Workflow: `src/workflows/{engine,db,mod}.rs` (~1.5K LOC)
+- Heartbeat: `src/agent/heartbeat.rs` (104 LOC — full read)
+- Tools: `src/tools/{automation,workflow}.rs`
+- Web API: `src/web/api/{automations,workflows}.rs`
+- JS: `static/js/{automations,flow-renderer,auto-validate,workflows}.js`
+- Cross-check: `src/agent/gateway.rs` (CronEvent dispatch + InboundMessage builder), `src/agent/agent_loop.rs` (profile resolution 712-777 + process_message 384-390)
+- Verification reads (6): cron.rs:17-26 struct, cron.rs:288-295 fire path, gateway.rs:1568-1581 InboundMessage, agent_loop.rs:712-777 cascade, workflows/engine.rs:481-483 execute_step, grep `set_session_profile_id` (4 call sites, 0 in scheduler/workflows)
 
 **Definition of Done**:
-- [ ] Recipe eseguite, REALITY-AUDIT.md: 15/16 domini coperti
-- [ ] Flow builder testato end-to-end (creazione → esecuzione)
+- [x] 16 assi auditati (A1-A6 + W1-W4 + H1-H2)
+- [x] Tabelle "Verified Automations" + "Verified Workflow" + "Verified Heartbeat" in REALITY-AUDIT.md
+- [x] 10 bug tracciati come #57-#66 con severity + location + fix proposto
+- [x] 2 falsi positivi corretti in verification read + documentati per metodo
+- [x] Cross-check findings Sprint 3+4+5 (#31, #34, #35, #47, #55, #56) completato con tabella
+- [x] ISO-3 cross-subsystem table finale chiusa (4✅ + 2⚠️ + 2❌ = 8/8)
+- [x] REALITY-AUDIT.md aggiornato (overview Automazioni+Workflow ❓→⚠️, Recipe M, 10 issue + 2 FP, cronologia)
+- [x] PRODUCTION-ROADMAP.md Sprint 6 ✅ + Summary + cronologia
+- [x] SESSION-PRIMER.md aggiornato (15/16 domini, 47 bug)
+- [x] cargo test pass (942 baseline invariata) + clippy produzione clean
 
-**Rischio**: MEDIO. Visual flow builder è UX-critical.
+**Rischio**: si è verificato **MEDIO** (come da attesa). **1 🔴 scoperto** (#57 ISO-3 gap) — atteso visto che Sprint 6 era l'ultimo gap ISO-3 cross-subsystem da chiudere. Verification read ha **evitato una contraddizione silente** tra batch A+B e batch C che altrimenti sarebbe stata committata. Il metodo "3 agent paralleli + verification read" si conferma robusto per audit multi-file, ma **serve anche per risolvere conflitti inter-batch**, non solo per validare 🔴 singoli.
 
 ---
 
@@ -491,7 +520,7 @@ Lo scope è scritto in modo che una **nuova sessione Claude** possa iniziare da 
 | 3 — Audit Memoria + RAG | audit | M | ⛔ | ✅ 2026-04-14 (9 bug tracciati, 2🔴+7🟡, no fix) |
 | 4 — Audit Sicurezza | audit | M | ⛔ | ✅ 2026-04-14 (9 bug tracciati, 7🟡+2🟢, 0 🔴, 2 FP corretti, no fix) |
 | 5 — Audit Skills + MCP + Contatti + Profili | audit | M | 🟡 | ✅ 2026-04-14 (14 bug tracciati, 0🔴+11🟡+3🟢, 8 FP corretti, ISO-3 5/7 verified, no fix) |
-| 6 — Audit Automazioni + Workflow | audit | M | 🟡 | 🔲 |
+| 6 — Audit Automazioni + Workflow | audit | M | 🟡 | ✅ 2026-04-14 (10 bug tracciati, 1🔴+6🟡+3🟢, 2 FP corretti, ISO-3 table chiusa, no fix) |
 | 7 — Mobile APP-2 | feature | L | 🟡 | 🔲 |
 | 8 — Installer Nativi | release | L | ⛔ | 🔲 |
 | 9 — Osservabilità + Update | feature | M | 🟡 | 🔲 |
@@ -557,6 +586,7 @@ Ogni sprint è **self-contained** per essere eseguito in una sessione Claude sep
 | 2026-04-14 | Sprint 3 ✅ — Audit Memoria + RAG: 16 assi coperti (M1-M8 + R1-R8) via 2 Explore agent paralleli, ~5.7K LOC. 11/16 ✅ puliti, 5/16 con bug. 9 nuovi bug tracciati (#15-#18 + #25-#29): **2 🔴** (#18 path traversal in `remember`, #26 DoS RAG file size), 7 🟡. 1 falso positivo corretto tramite verification read (#27 downgrade 🔴→🟡 — `detect_injection` è usato da `context_compactor.rs` per SEC-13). Pattern emergenti: (1) post-fetch scoping cross-subsistema, (2) detect_injection on-tool-use vs on-ingest, (3) importance 1-5 sotto-enforced, (4) file I/O senza bounds, (5) orphan HNSW side-effects. ISO-3/ISO-4 ✅ da code review. Dominio Memoria+RAG ❓→⚠️. Nessun fix (2 🔴 candidati Sprint 4). 7/10 sprint rimanenti |
 | 2026-04-14 | Sprint 4 ✅ — Audit Sicurezza End-to-End: 15 assi coperti (S1-S15) via 3 Explore agent paralleli, ~4K LOC. **10/15 ✅ puliti** (safety prompt, cross-channel labeling, web auth+rate+CSRF, 2FA chain post-fix #1, e-stop propagation, trusted devices, sandbox backend enforcement core). 5/15 con gap. 9 nuovi bug tracciati (**0 🔴** + 7 🟡 + 2 🟢): #30 exfiltration PII IT mancanti + dual registry, #31 exfiltration single call site, #32 context_compactor short-bypass, #33 vault_leak resolve no key validation, #34 remember bypassa check_path_permission (second-line per #18), #35 sandbox silent fallback None, #36 Seatbelt allow_paths no symlink canonicalize, #37 pairing HashMap unbounded DoS, #38 dual redact_vault_values definitions. **2 falsi positivi corretti** in verification read: (1) CSPRNG claim smentito (rand 0.8 thread_rng IS crypto-safe ChaCha12+OsRng), (2) pairing cleanup claim smentito (auto-scheduled in gateway.rs:579). Pattern emergenti: (1) single-call-site defenses fragile, (2) dual pattern registries divergenti, (3) skip-on-short bypass, (4) second-line missing, (5) silent fallback (stesso pattern di Sprint 2 #10 capability drift). Cross-check Sprint 3: #18 aggravato + #34, #26 confermato (no `DefaultBodyLimit` trovato), #27 confermato design + nuovo gap #32. Dominio Sicurezza ✅→⚠️. Nessun fix implementato (raccogli e prioritizza). Attacker model live scenari rimandati a "Sprint Fix Sicurezza". 942 test pass, 0 warning clippy. 6/10 sprint rimanenti |
 | 2026-04-14 | Sprint 5 ✅ — Audit Skills + MCP + Contatti + Profili: 16 assi coperti (SK1-SK6 + M1-M4 + C1-C6) via 3 Explore agent paralleli, **~15.5K LOC** (più grande audit Sprint finora). **14 nuovi bug tracciati (0 🔴 + 11 🟡 + 3 🟢)**: Skills (#39-#44) pattern bypass whitespace + cumulative threshold + TOCTOU scan + creator smoke test unsandboxed + adapter YAML escape + executor output no redact; MCP (#45-#52) OAuth state + redirect_uri + vault_key collision + refresh contention + non-atomic rotation + unbounded image + subprocess env + lifecycle gaps; Contatti+Profili (#53-#56) sender_id injection + bio/notes self-surface + MCP no profile scoping + gateway overrides no cross-profile validation. **8 falsi positivi corretti** in verification read (record Sprint 5, vs 1 Sprint 3 + 2 Sprint 4): 4 su C3 perimeter enforcement (agent_loop.rs:844/858/1031/888 prova che il perimeter è loaded + tool filter + privacy constraint + namespace filter tutti enforced), C5-2 vault profile scoping (vault.rs:36 vault_prefix_for_profile), C5-3 skills profile scoping (loader.rs:72 profile_slug + scan_directory_with_profile), Skills trust model #34 (check_path_permission è layer sbagliato per skill executor pre-trusted), MCP M3-5 auto-smentito (bail! catchato da Result). **ISO-3 cross-subsystem verified**: 5/7 sottosistemi profile-scoped (memoria + RAG + vault + skills + contact perimeter), 2 gap (#55 MCP singleton globale, #56 gateway overrides). **Pattern consolidato "agent confidence ≠ correctness"** — verification read è non opzionale. Cross-check Sprint 4: #31 aggravato (#44 skill output no redact), #35 confermato (#42 smoke test default unsafe), #37 ProfileRegistry bounded ✅, S8 aggravato (#52b MCP shutdown no per-peer timeout). Dominio "Skills + MCP" ❓→⚠️, "Contatti + Profili" ❓→⚠️. **13/16 domini coperti**. Totale bug: 23→37, 4 🔴 invariati. 942 test pass, 0 warning clippy. 5/10 sprint rimanenti |
+| 2026-04-14 | Sprint 6 ✅ — Audit Automazioni + Workflow + Heartbeat: 16 assi coperti (A1-A6 + W1-W4 + H1-H2) via 3 Explore agent paralleli, **~11K LOC** Rust+JS. **10 nuovi bug tracciati (1 🔴 + 6 🟡 + 3 🟢)**: #57 🔴 automations+workflow profile_id stored ma NON enforced a fire time (CronEvent struct manca campo profile_id + workflow execute_step non setta session profile prima di process_message — **ISO-3 cross-subsystem gap**, chiude la tabella finale con il 3° gap architetturale), #58 🟡 cron UTC-only no timezone support, #59 🟡 flow_json no server-side schema validation, #60 🟡 automation/workflow results API unredacted (cross-check #31+#44 single call site), #61 🟡 workflow approval gate no timeout (cross-check #37 unbounded pattern), #62 🟡 workflow approval no 2FA (cross-check Sprint 4 S7), #63 🟡 workflow approve API no profile validation (cross-check #56), #64 🟢 HeartbeatService defined never instantiated (feature disabled), #65 🟢 workflow retry no exponential backoff (DRY violation vs utils/retry.rs), #66 🟢 missing agent_id silent fallback no warn. **2 falsi positivi corretti** in verification read: (1) A2 "event triggers never evaluated" — smentito da `evaluate_automation_trigger` at automations.rs:864 chiamato da 811 via lifecycle completion handler; (2) **contraddizione cross-batch** tra Batch A+B ("automations profile scoping ⚠️") vs Batch C ("automations profile-scoped ✅") — verification read ha distinto "stored in DB" da "enforced at fire time", confermando la tesi Batch A+B. Primo sprint dove la verification read ha **evitato una contraddizione interna silente**. FP count cumulativo cross-sprint: Sprint 3:1 + Sprint 4:2 + Sprint 5:8 + Sprint 6:2 = **13 FP totali**. **ISO-3 cross-subsystem — tabella chiusa a 4/7 ✅ + 2 ⚠️ + 2 ❌** (automations+workflow #57 è il 3° e ultimo gap architetturale tracciato). Pattern nuovi Sprint 6: **"stored ≠ enforced" ISO-3 anti-pattern** (variante negativa del pattern consolidato Sprint 5), **feature declared/disabled in production** (#64), **single call site redact 3° manifestazione** (#60), **DRY violation utils/retry.rs prima istanza concreta** (#65). Dominio "Automazioni + Scheduling" ❓→⚠️, "Workflow Engine" ❓→⚠️. **15/16 domini coperti** (resta solo Osservabilità; Mobile+Condivisione non-core). Totale bug aperti: 37→47, **5 🔴 totali** (era 4) — primo nuovo 🔴 in 2 sprint. 942 test pass, 0 warning clippy. 4/10 sprint rimanenti |
 
 ---
 

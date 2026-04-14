@@ -34,8 +34,8 @@
 | Strumenti (Tools) | [04](./features/04-strumenti.md) | ✅ | 2026-04-13 | Tutti i bug fixati: #1 (vault 2FA error), #3 (vault form), #8 (send_file web), #9 (view_file always-available). Da rivalidare end-to-end |
 | Skills + MCP | [05](./features/05-skills-mcp.md) | ⚠️ | 2026-04-14 | Sprint 5: 10 assi auditati (6 Skills + 4 MCP) via 3 Explore agent paralleli (~11.5K LOC). Skills ✅ ma con pattern-bypass whitespace + creator smoke-test unsandboxed + TOCTOU scan. MCP ⚠️ con OAuth state+redirect_uri hardening, vault_key collision multi-instance, refresh contention, lifecycle gaps (stderr+shutdown+health). 14 issue #39-#52 (0🔴 + 11🟡 + 3🟢) |
 | Sicurezza | [06](./features/06-sicurezza.md) | ⚠️ | 2026-04-14 | Sprint 4: 15 assi auditati (S1-S15) via 3 Explore agent paralleli (~4K LOC). 10/15 ✅ (auth+rate limit+2FA+e-stop+pairing core+trusted devices+S1 safety prompt). 5/15 con gap: exfiltration coverage, context_compactor skip-on-short, single-call-site defenses, remember no ACL, sandbox silent fallback. 9 nuovi issue #30-#38 (7🟡 + 2🟢), 2 falsi positivi corretti (CSPRNG + pairing cleanup) |
-| Automazioni + Scheduling | [07](./features/07-automazioni-scheduling.md) | ❓ | — | |
-| Workflow Engine | [08](./features/08-workflow.md) | ❓ | — | |
+| Automazioni + Scheduling | [07](./features/07-automazioni-scheduling.md) | ⚠️ | 2026-04-14 | Sprint 6: 6 assi auditati (A1-A6) via Explore agent batch A (~5K LOC Rust+JS). Cron scheduler + automation run lifecycle + trigger evaluation (`evaluate_automation_trigger` on_change/contains OK) confermati solidi. **Gap ISO-3 #57 🔴**: profile_id salvato in DB ma NON forwardato a fire time — `CronEvent` struct manca `profile_id`, prompt path risolve profile via resolver cascade → global default. 4 nuovi issue #57🔴 + #58🟡 (cron UTC only) + #59🟡 (flow_json no server-side validation) + #60🟡 (results API unredacted). 1 FP corretto (A2 event triggers `evaluate_automation_trigger` esiste a 864) |
+| Workflow Engine | [08](./features/08-workflow.md) | ⚠️ | 2026-04-14 | Sprint 6: 4 assi W1-W4 + 2 H1-H2 via Explore agent batch B (~2K LOC). Resume-on-boot ✅, multi-step persistence ✅, per-step agent_id routing ✅. Gap: **#57 🔴** stesso root cause automations (`execute_step` non setta session profile prima di `process_message`), #61🟡 approval gate no timeout (cross-check #37), #62🟡 approval no 2FA (cross-check S7 Sprint 4), #63🟡 approve API no profile validation (cross-check #56), #64🟢 HeartbeatService mai instantiated in produzione, #65🟢 retry no exponential backoff (DRY violation vs utils/retry.rs), #66🟢 missing agent_id silent fallback |
 | Contatti + Profili | [10](./features/10-contatti-profili.md) | ⚠️ | 2026-04-14 | Sprint 5: 6 assi auditati (C1-C6), ~4K LOC. **Perimeter loading + enforcement confermati** (`agent_loop.rs:844`, tool filter linea 1031, namespace filter 888/1243, privacy constraint 858). Vault + Skills confermati **profile-scoped** (`vault.rs:36`, `loader.rs:72`). Gap: MCP servers non profile-scoped (#55), contact_gateway_overrides no cross-profile validation (#56), sender_id + bio prompt injection self-surface (#53+#54). **8 falsi positivi 🔴 Batch C corretti in verification read** — record Sprint 5 |
 | Interfaccia Web | [11](./features/11-interfaccia-web.md) | ✅ | 2026-04-14 | Tutti i bug fixati: #3 (vault form re-attach), #4 (expire→DB persist), #6 (syntax HL 27 ext), #7 (binary guard), #8 (send_file web ResultBlock), A-bug-2 (account.js null guard), A-bug-3 (avatar SVG placeholder) |
 | Browser Automation | [12](./features/12-browser-automation.md) | ✅ | 2026-04-13 | Auto-escalate fixato: ora copre JS-required + HTTP 403/503/52x via `[HINT:]` check (#5). 3/3 escalation riuscite pre-fix |
@@ -1884,6 +1884,310 @@ può creare un override che assegna il contatto #5 (nel profilo `personal` = 1) 
 
 ---
 
+### ❌ #57 — Automations + Workflow: `profile_id` salvato ma NON enforced a fire time (ISO-3 gap)
+
+**Dominio**: [07 Automazioni](./features/07-automazioni-scheduling.md) + [08 Workflow](./features/08-workflow.md) + [10 Contatti + Profili](./features/10-contatti-profili.md)
+**Severity**: 🔴 critico — ISO-3 profile isolation gap, chiude la tabella cross-subsystem con l'ultimo gap scoperto
+**Status**: ❌ **APERTO** — scoperto Sprint 6 Audit Automazioni + Workflow, 2026-04-14
+
+#### Cosa succede
+
+Il `profile_id` di un'automation/workflow è correttamente salvato in DB (verificato in `storage/db.rs:2937` AutomationRow.profile_id + `workflows/db.rs:27` workflow.profile_id), ma **non viene forwardato al fire time** al momento dell'esecuzione dell'agente. Due manifestazioni con root cause unico (session profile non set prima di `process_message`).
+
+**Manifestazione 1 — prompt-based automation**: `src/scheduler/cron.rs:17-26`:
+
+```rust
+pub struct CronEvent {
+    pub kind: ScheduledKind,
+    pub job_id: String,
+    pub job_name: String,
+    pub message: String,
+    pub deliver_to: Option<String>,
+    pub automation_run_id: Option<String>,
+    // ❌ NO profile_id field
+}
+```
+
+A riga `cron.rs:288-295`, quando la cron fa fire dell'automation prompt, `CronEvent` è creato senza `profile_id`. Il gateway (`gateway.rs:1568-1581`) costruisce `InboundMessage` con `metadata: MessageMetadata { is_system: true, scheduler_kind: "automation", ..Default::default() }` — niente profile. Arrivato ad `agent_loop.rs:712-777`, la profile resolution gira:
+
+1. `get_session_profile_id(session_key)` → None (session mai vista prima)
+2. Fallback al **resolver cascade**: contact=None → channel default (spesso "") → `config.profiles.default`
+3. **Risultato**: l'automation gira **sempre nel profilo default globale**, indipendentemente da `automation.profile_id`
+
+**Manifestazione 2 — workflow engine execute_step**: `src/workflows/engine.rs:481-483`:
+
+```rust
+agent
+    .process_message(&prompt, &session_key, "workflow", &workflow.id)
+    .await
+```
+
+`session_key` è `"workflow:{workflow_id}:step:{idx}"`, mai associato a `workflow.profile_id` via `set_session_profile_id`. Il 4° parametro è `workflow.id` (usato come chat_id, non profile). `process_message` signature (`agent_loop.rs:384-390`) NON accetta profile_id. La resolution cascade produce lo stesso fallback al profile default globale.
+
+**Cross-check con manifestazione 2 via grep**: `set_session_profile_id` è chiamato solo da `handle_profile_command` (gateway.rs:2825, il built-in `/profile` command) e `chat.rs` (chat session API). Né il cron scheduler né il workflow engine la chiamano prima di `process_message`.
+
+#### Verification read (CONFIRMED real)
+
+Letti direttamente:
+1. `cron.rs:17-26 CronEvent struct` — confermato no profile_id field
+2. `cron.rs:288-295 fire path` — confermato CronEvent costruito senza profile_id (solo workflow path a 217-224 passa `automation.profile_id` a `engine.create_and_start`, ma vedi manifestazione 2)
+3. `gateway.rs:1568-1581 InboundMessage` — confermato MessageMetadata senza profile_id
+4. `agent_loop.rs:712-777 profile resolution` — confermato cascade ordinata session_override → contact → channel default → global default, nessun check per automation/workflow context
+5. `workflows/engine.rs:481-483 execute_step` — confermato process_message chiamata senza profile_id
+6. `agent_loop.rs:384-390 process_message` — confermato signature senza profile_id
+7. `grep set_session_profile_id` — confermato 4 call sites, nessuno in scheduler/workflows
+
+**Pattern Sprint 5 rispettato**: Batch C aveva erroneamente marcato #55 come ✅ ("automations profile-scoped"), vedendo solo che `profile_id` esisteva come campo nello struct. Verification read ha distinto tra "stored" e "enforced", riallineando con il verdetto corretto di Batch A + Batch B.
+
+#### Impatto
+
+Scenario: utente con profili `Personal` (id=5) + `Work` (id=42, default globale).
+1. Crea automation "every 9am check my personal email" in profilo `Personal` → row salvata con `profile_id=5`
+2. Switch a profilo `Work`
+3. Alle 9am la cron fire
+4. Automation runs **nel profilo Work** (default globale), vede Work vault/memoria/RAG/skills
+5. Personal credentials non accessibili → l'automation fallisce o (peggio) accede a dati di Work
+6. **ISO-3 broken by design per Automations + Workflow**
+
+Secondo scenario (Workflow): chat in profilo `Personal` crea un workflow con 3 step tramite `workflow_tool`. Il workflow è salvato con `profile_id=5`. Ogni step viene eseguito in `session_key="workflow:{id}:step:{idx}"` con cascade → default globale = `Work`. Lo step può accedere a memoria/vault Work anche se l'utente voleva il contesto Personal.
+
+#### Fix proposto
+
+Strutturale — segue il pattern consolidato ISO-3 (`vault_prefix_for_profile`, `scan_directory_with_profile`, `load_perimeter`):
+
+**Parte 1 (cron/automation prompt path)**:
+1. Aggiungere `profile_id: Option<i64>` al struct `CronEvent` (cron.rs:17-26)
+2. Popolarlo da `automation.profile_id` quando si crea CronEvent (cron.rs:288-295)
+3. Estendere `MessageMetadata` con `forced_profile_id: Option<i64>` (o equivalente)
+4. Gateway passa `event.profile_id` in metadata quando costruisce InboundMessage (gateway.rs:1568-1581)
+5. `agent_loop.rs:712-777` — aggiungere check **prima del resolver cascade**: `if let Some(forced) = metadata.forced_profile_id { use forced }`
+
+**Parte 2 (workflow engine execute_step)**:
+1. In `run_workflow_loop()` (o `execute_step`), chiamare `db.set_session_profile_id(&session_key, workflow.profile_id).await` prima di `agent.process_message`
+2. Alternativa più pulita: estendere `process_message` signature con `profile_id: Option<i64>` parameter e propagarlo come override nel profile resolution
+3. La prima opzione richiede meno cambiamenti di signature; la seconda è più esplicita
+
+**Parte 3 (test regressione)**:
+1. Test: creare automation in profilo A (non-default), far fire, verificare che la memoria dell'automation sia scritta nel namespace A
+2. Test: creare workflow in profilo A, eseguire step, verificare che il vault retrieve use il prefix del profilo A
+
+**Sprint target**: "Sprint Fix ISO-3" (raccolta con #55, #56, #57 tutti ISO-3 correlati) — candidato priorità alta post-Sprint 8 (Installer).
+
+---
+
+### ❌ #58 — Cron expressions evaluate in UTC only (no local timezone support)
+
+**Dominio**: [07 Automazioni](./features/07-automazioni-scheduling.md)
+**Severity**: 🟡 medio — user-facing correctness, non safety
+**Status**: ❌ **APERTO** — scoperto Sprint 6, 2026-04-14
+
+#### Cosa succede
+
+`src/scheduler/cron.rs:487-509` — `cron_matches_now(expr, &now)` riceve `now: chrono::DateTime<chrono::Utc>` da `check_and_fire_automations` (riga 97) e formatta via `%H/%M/%d/%m/%u` che restituiscono componenti UTC. Non c'è nessuna conversione a timezone locale, né supporto per un timezone per-automation.
+
+**Scenario**: utente in Pacific Time (UTC-8) crea automation "every day at 9am" (si aspetta 9am Pacific). Cron expression = `"0 9 * * *"`. Il matching fire alle 9am UTC = 1am Pacific. L'automation gira al momento sbagliato.
+
+#### Fix proposto
+
+1. Aggiungere `timezone: Option<String>` (IANA tz) al row Automation, default `UTC`
+2. In `cron_matches_now`, convertire `now.with_timezone(&tz)` prima di estrarre i componenti
+3. UI flow builder: dropdown timezone selector con default = timezone di sistema
+4. Migration: backfill `timezone = 'UTC'` per automation esistenti
+
+---
+
+### ❌ #59 — `flow_json` accettato senza schema validation server-side
+
+**Dominio**: [07 Automazioni](./features/07-automazioni-scheduling.md)
+**Severity**: 🟡 medio — defense-in-depth gap, non safety-critical (client valida, ma client può essere bypassato)
+**Status**: ❌ **APERTO** — scoperto Sprint 6, 2026-04-14
+
+#### Cosa succede
+
+`src/web/api/automations.rs:50,71,457,568` — `flow_json` accettato come `Option<String>` nelle request POST/PATCH e salvato via `update.flow_json = Some(Some(fj))` senza alcun parsing o validazione della struttura. Il client (`static/js/auto-validate.js:107-296`) valida i node kinds e required fields, ma un POST diretto all'API bypassa completamente la validazione.
+
+Node kinds conosciuti dal server (LLM prompt `automations.rs:908`): 13 (trigger, tool, skill, mcp, llm, condition, parallel, subprocess, loop, transform, approve, require_2fa, deliver). Ma nessuna whitelist applicata alle POST.
+
+Un POST con `{"flow_json": "{\"nodes\": [{\"kind\": \"arbitrary_malicious_kind\", \"params\": {...}}]}"}` viene salvato senza errore. Alla prossima lettura/rendering, il flow canvas JS ignora i nodi sconosciuti o può generare errori di rendering.
+
+#### Fix proposto
+
+1. Definire un `FlowGraph` struct server-side con `#[derive(Deserialize)]` che ha `kind: FlowNodeKind` enum (13 varianti)
+2. In POST/PATCH handler: `serde_json::from_str::<FlowGraph>(&flow_json)?` → reject con 400 se non parsa
+3. Validare anche `required_fields` per kind (port del client `auto-validate.js`)
+4. Test: fuzz API con flow_json invalidi, verificare 400 response
+
+---
+
+### ❌ #60 — Automation/workflow results API return unredacted (defense-in-depth gap)
+
+**Dominio**: [06 Sicurezza](./features/06-sicurezza.md) + [07 Automazioni](./features/07-automazioni-scheduling.md) + [08 Workflow](./features/08-workflow.md)
+**Severity**: 🟡 medio — cross-check pattern #31 (Sprint 4) + #44 (Sprint 5) single-call-site
+**Status**: ❌ **APERTO** — scoperto Sprint 6, 2026-04-14
+
+#### Cosa succede
+
+`src/scheduler/db.rs:302 complete_automation_run` salva il result raw in `AutomationRunRow.result` (no redact). `src/workflows/db.rs:236 update_step_status` salva step result raw. Le rispettive API (`web/api/automations.rs`, `web/api/workflows.rs`) NON importano `redact_vault_values` né `ExfiltrationGuard` — grep conferma 0 match in entrambi i file. I results vengono serializzati e restituiti ai client HTTP senza filtro.
+
+**Pattern match**: questo è la terza manifestazione del pattern "single call site redact" (Sprint 4 #31 exfiltration guard + Sprint 5 #44 skill executor output). Ogni nuovo code path che emette output deve ricordarsi di chiamare redact. **Un trait `OutputSink` risolverebbe strutturalmente** come proposto in Sprint 5 pattern section.
+
+**Impatto**: un tool chiamato dentro un'automation che emette un API token/password come parte dell'output, quel token finisce in `automation_runs.result` plaintext, e `GET /api/v1/automations/{id}/history` lo restituisce al client. La exfiltration guard protegge la response diretta al chat channel (via `agent_loop.rs:3107`) ma bypassa le API endpoint di lettura storica.
+
+#### Fix proposto
+
+1. Applicare `redact_vault_values(&result)` in `get_automation_history` handler prima della serializzazione
+2. Applicare la stessa cosa nei workflow GET handler
+3. Lungo termine: refactor verso un trait `OutputSink` che applica redact in un singolo call site comune a tutti gli emitter (chat response + API history + logs)
+4. Test: storage.test `automation_runs` con mock vault value, verifica API response redacted
+
+---
+
+### ❌ #61 — Workflow approval gate: nessun timeout (paused forever risk)
+
+**Dominio**: [08 Workflow](./features/08-workflow.md)
+**Severity**: 🟡 medio — UX + data accumulation (cross-check #37 unbounded HashMap pattern)
+**Status**: ❌ **APERTO** — scoperto Sprint 6, 2026-04-14
+
+#### Cosa succede
+
+`src/workflows/engine.rs:333-358` — quando uno step richiede approval, il workflow è marked `Paused` e l'engine emette `WorkflowEvent::ApprovalNeeded`, poi `return Ok(())`. Non c'è nessun timer che riattiva il workflow dopo N ore o che notifica l'utente del timeout pendente. Il workflow resta paused finché qualcuno non chiama `approve_and_resume` o `cancel`.
+
+**Pattern**: simile a #37 (Sprint 4 pairing HashMap unbounded). Se un utente avvia molti workflow con approval gate e non li risolve, il DB accumula righe paused. Non c'è cleanup automatico.
+
+#### Fix proposto
+
+1. Aggiungere `approval_timeout_secs: Option<u64>` al `Workflow` struct (default 86400 = 24h)
+2. Registrare `paused_at: DateTime<Utc>` quando si passa a Paused
+3. Background task in `WorkflowEngine` che esegue ogni N minuti: `SELECT * FROM workflows WHERE status='paused' AND paused_at + timeout < NOW()`
+4. Auto-fail dello step con error `"Approval timeout"` + `WorkflowEvent::WorkflowFailed`
+5. UI: dashboard con paused-workflow-list + "approvals pending oldest-first"
+
+---
+
+### ❌ #62 — Workflow approval richiede solo `require_write()`, no 2FA per sensitive steps
+
+**Dominio**: [06 Sicurezza](./features/06-sicurezza.md) + [08 Workflow](./features/08-workflow.md)
+**Severity**: 🟡 medio — gap UX + compliance (cross-check Sprint 4 S7 2FA chain)
+**Status**: ❌ **APERTO** — scoperto Sprint 6, 2026-04-14
+
+#### Cosa succede
+
+`src/web/api/workflows.rs:159-173 approve_workflow_api` chiama solo `require_write(&headers, &db)?` (linea 164). Nessun check 2FA. Un workflow che eseguirà azioni sensibili (es. "delete contacts in profilo X", "revoke OAuth tokens", "send mass email") viene approvato con una session cookie valida senza secondo fattore.
+
+**Cross-check Sprint 4 S7**: il 2FA chain è stato confermato solido per vault (tools/vault.rs:318, `2FA_REQUIRED` gate) e TOTP login, ma i workflow approval gate bypassano completamente il 2FA chain.
+
+#### Fix proposto
+
+1. Aggiungere `approval_requires_2fa: bool` al `Workflow` struct (default false)
+2. Quando si crea un workflow via `workflow_tool`, auto-flaggare true se qualsiasi step ha `approval_required = true` AND usa tool in tool_sensitivity_high list
+3. In `approve_workflow_api`: se `workflow.approval_requires_2fa`, richiedere `X-2FA-Code` header + verificare via `TOTPVerifier`
+4. Test: crea sensitive workflow, tenta approve senza 2FA → 401, con 2FA → 200
+
+---
+
+### ❌ #63 — Workflow approve/cancel/restart API no profile validation
+
+**Dominio**: [08 Workflow](./features/08-workflow.md) + [10 Contatti + Profili](./features/10-contatti-profili.md)
+**Severity**: 🟡 medio — cross-check pattern #56 (cross-profile validation)
+**Status**: ❌ **APERTO** — scoperto Sprint 6, 2026-04-14
+
+#### Cosa succede
+
+`src/web/api/workflows.rs:159-206` — gli endpoint approve/cancel/delete prendono solo `workflow_id` come path parameter. Non c'è check che `workflow.profile_id` corrisponda al profilo attivo dell'utente. Se utente in profilo A conosce/indovina un workflow_id che appartiene al profilo B (workflow_id è uuid v4 8-char prefix, non strettamente UUID 128-bit), può chiamare `POST /v1/workflows/{id}/approve` e far ripartire il workflow del profilo B.
+
+**Pattern match**: stesso problema di #56 (`contact_gateway_overrides` no cross-profile validation).
+
+**Impatto concreto**: l'impatto è limitato perché richiede conoscere workflow_id, ma è **defense-in-depth** consistente con il pattern ISO-3. Per workflow con #62 non risolto, basta sapere l'ID per approvare un workflow sensitive del profilo altrui.
+
+#### Fix proposto
+
+1. In `approve_workflow_api`, `cancel_workflow_api`, `delete_workflow_api`: caricare `workflow.profile_id` + validare che corrisponda al profilo attivo dalla session
+2. Se non corrisponde: 404 (non 403, per non disclose esistenza)
+3. Stesso pattern per list workflows (`GET /v1/workflows`): filtrare per profile_id sempre
+4. Migration test: creare workflow in profilo A, tentare approve da session profilo B → 404
+
+---
+
+### ❌ #64 — `HeartbeatService` definito ma mai instantiated in produzione (dead code)
+
+**Dominio**: [02 Agente](./features/02-agente-cognizione.md)
+**Severity**: 🟢 basso — feature disabilitata, non safety issue
+**Status**: ❌ **APERTO** — scoperto Sprint 6, 2026-04-14
+
+#### Cosa succede
+
+`src/agent/heartbeat.rs` (104 LOC) definisce `HeartbeatService` con `start()` / `run_loop()` pronti, ma grep conferma che **l'unico call site è il test** (`heartbeat.rs:88 #[cfg(test)] test_heartbeat_sends_message`). Né `main.rs`, né `gateway.rs`, né alcun altro bootstrap path instanzia il servizio. La feature "proactive wake-up" dichiarata nella documentazione è code-presente ma **production-disabled**.
+
+Se l'intento era superseded da `scheduler/automations.rs` (cron-based triggers), il codice dovrebbe essere rimosso. Se l'intento era mantenerlo come opzionale, va wirato nel gateway con un flag di config.
+
+#### Fix proposto
+
+Decisione design first, poi esecuzione:
+
+**Opzione A** — superseded definitively:
+1. Rimuovere `src/agent/heartbeat.rs` + `pub use heartbeat::HeartbeatService` da `agent/mod.rs`
+2. Rimuovere check `scheduler_kind.as_deref() == Some("cron")` da `gateway.rs:2293` (era per heartbeat)
+3. Eliminare il test
+
+**Opzione B** — abilita opt-in:
+1. Aggiungere `heartbeat: HeartbeatConfig { enabled: bool, interval_secs: u64 }` a `config/schema.rs`
+2. In `gateway.rs` startup: se enabled, `HeartbeatService::new(interval, inbound_tx).start()`
+3. Design ISO-3: heartbeat è per-profile o globale? Per-profile richiede redesign InboundMessage con profile_id hint (cross-check con fix #57)
+4. Test integration: abilita + verifica fire message + agent processa
+
+---
+
+### ❌ #65 — Workflow retry senza exponential backoff (DRY violation vs `utils/retry.rs`)
+
+**Dominio**: [08 Workflow](./features/08-workflow.md)
+**Severity**: 🟢 basso — UX/robustness, non safety
+**Status**: ❌ **APERTO** — scoperto Sprint 6, 2026-04-14
+
+#### Cosa succede
+
+`src/workflows/engine.rs:417-434` — retry logic home-grown: `if step.retry_count < step.max_retries { increment_step_retry(); loop }`. Nessun delay, nessun backoff, nessun jitter. Retry immediato a 0ms.
+
+`src/utils/retry.rs` esiste e fornisce `retry_with_backoff()` + exponential strategy + network state detection. Non viene riusato. **DRY violation** confermata dal CLAUDE.md regola esplicita "utils/retry.rs → qualsiasi operazione di rete che richiede retry (mai scrivere loop retry custom)".
+
+**Impatto**: step con failure transient (es. LLM provider rate-limit, network hiccup) vengono retryati immediately 3×, aumentando il rate-limit pressure e fallendo comunque. Backoff exponential ridurrebbe la pressure e aumenterebbe il recovery rate.
+
+#### Fix proposto
+
+1. Import `use crate::utils::retry::{RetryConfig, retry_with_backoff}`
+2. In `run_workflow_loop` step execution: wrappare `execute_step()` con `retry_with_backoff(RetryConfig::workflow_default(), || execute_step(...))`
+3. `RetryConfig::workflow_default()` = base 1s, max 30s, jitter 20%, 3 attempts (configurable per-step via step.max_retries)
+4. Test: mock flaky step, verifica che 2° retry parte almeno 1s dopo il primo
+
+---
+
+### ❌ #66 — Workflow missing `agent_id` silent fallback a `default_agent` (no audit)
+
+**Dominio**: [08 Workflow](./features/08-workflow.md)
+**Severity**: 🟢 basso — observability gap
+**Status**: ❌ **APERTO** — scoperto Sprint 6, 2026-04-14
+
+#### Cosa succede
+
+`src/workflows/engine.rs:465-467`:
+
+```rust
+let agent = registry
+    .get(&step.agent_id)
+    .unwrap_or_else(|| registry.default_agent());
+```
+
+Se uno step referenzia `agent_id = "researcher"` ma l'agent "researcher" è stato cancellato dopo la creazione del workflow, `registry.get()` ritorna None e il codice usa `default_agent()` **silentemente**. Nessun `tracing::warn!`, nessun error persistito nel step, nessun audit trail.
+
+**Impatto**: se il default agent ha capability diverse da "researcher", lo step potrebbe produrre risultato inatteso. L'utente non ha modo di sapere che c'è stata una sostituzione.
+
+#### Fix proposto
+
+1. Aggiungere `tracing::warn!(workflow_id=%workflow.id, step_idx=step.idx, requested=%step.agent_id, "Agent not found, falling back to default")` al call site
+2. Opzionale: registrare la sostituzione in step.error (o un nuovo step.notes field) per UI surface
+3. Test: cancella agent, esegui workflow con step che lo referenzia, verifica log warn
+
+---
+
 ## ✅ Conferme (cose che abbiamo visto funzionare)
 
 ### Canali — Audit Sprint 2 (2026-04-14, Recipe H)
@@ -2271,7 +2575,7 @@ Questi 8 falsi positivi sarebbero stati tracciati come 4 🔴 + 4 🟡 (più bug
 | **Contact perimeter** | ✅ (Sprint 5) | `agent_loop.rs:844 load_perimeter` + 858+ privacy + 1031+ tool filter + 888,1243 namespaces |
 | **MCP servers** | ❌ (Sprint 5 gap #55) | Singleton globale `config.mcp.servers: HashMap`, no profile scoping |
 | **Gateway overrides** | ⚠️ (Sprint 5 gap #56) | `upsert_gateway_override` no cross-profile validation |
-| Automations | ❓ (rimandato a Sprint 6) | — |
+| **Automations + Workflow** | ⚠️ (Sprint 6 gap #57) | `profile_id` salvato in `AutomationRow`/`Workflow` ma **non enforced a fire time**: `cron.rs:17 CronEvent` manca profile_id, `workflows/engine.rs:481 process_message` chiamato senza profile override, resolver cascade → global default |
 
 **Verdetto ISO-3**: 5/7 sottosistemi isolati correttamente, 2 gap tracciabili. **Netto miglioramento** rispetto alla percezione iniziale degli agent Batch C che vedevano 8 sottosistemi rotti.
 
@@ -2280,6 +2584,97 @@ Le 14 issue (0 🔴 + 11 🟡 + 3 🟢) sono tutte coverage/hardening gaps, non 
 
 **Dominio "Contatti + Profili"**: ❓ → ⚠️ (2026-04-14).
 Perimeter + Vault + Skills profile scoping confermati funzionanti. 4 gap tracciabili (#53-#56) sono tutti coverage/defense-in-depth, non safety-critical. Il rischio maggiore è il gap ISO-3 MCP (#55) — design gap, non urgenza.
+
+### Automazioni + Workflow + Heartbeat — Audit Sprint 6 (2026-04-14, Recipe M)
+
+Audit sistematico dei 3 sottosistemi async/scheduled rimanenti via **code-only
+static analysis** (stile Reality Audit Sprint 1-5). Metodo: 3 Explore agent in
+parallelo — Batch A Automations (~5K LOC Rust+JS, 6 assi A1-A6), Batch B
+Workflow Engine + Heartbeat (~2K LOC, 6 assi W1-W4 + H1-H2), Batch C
+Cross-check Sprint 3+4+5 findings (6 pattern). Totale **~11K LOC coperti**.
+**Verification read obbligatoria sui 🔴** (regola consolidata CLAUDE.md).
+
+**Verified Automations table — 6 assi**:
+
+| Asse | Descrizione                                              | Verdetto | Note |
+|------|----------------------------------------------------------|:--------:|------|
+| **A1** | Cron trigger (tokio-cron-scheduler)                     | ⚠️ | Scheduler + reload-on-boot + `is_schedule_overdue` catch-up + 30s tick OK. Bug #58 cron evaluation UTC-only senza supporto timezone locale |
+| **A2** | Event trigger (on_change / contains)                    | ✅ | `evaluate_automation_trigger` (automations.rs:864) chiamato da `evaluate_and_complete_automation_run` a 811 — on_change + contains + always OK. **Batch A falso positivo corretto** — aveva dichiarato "never evaluated" |
+| **A3** | NLP flow generation (`generate_automation_flow`)        | ⚠️ | LLM prompt hardcoded a 906 in `api/automations.rs`, non usa `one_shot.rs`. Bug #59 flow_json no server-side schema validation |
+| **A4** | Visual flow canvas (11 kinds + client validation)       | ⚠️ | Client-side validation OK (`auto-validate.js:107-296`), 13 node kinds noti al LLM prompt. Bug #59 stesso: server accetta flow_json come opaque string |
+| **A5** | **ISO-3 profile scoping** ⭐ GAP CLOSURE                 | ⚠️ | **Bug #57 🔴**: `profile_id` salvato in DB ma `CronEvent` struct (cron.rs:17-26) manca il campo → prompt path risolve profile via cascade. Workflow path preserva profile_id verso `engine.create_and_start` a cron.rs:222 ma vedi W3 (stesso issue manifesto in workflow execute_step) |
+| **A6** | Safety (perimeter + e-stop + sandbox)                   | ⚠️ | Downstream effect di A5: quando il profile è sbagliato, il perimeter caricato è sbagliato. `evaluate_automation_trigger` filter OK, automation tool blocked per prevenire recursion |
+
+**Verified Workflow Engine table — 4 assi**:
+
+| Asse | Descrizione                                              | Verdetto | Note |
+|------|----------------------------------------------------------|:--------:|------|
+| **W1** | Resume-on-boot + persistenza multi-step                | ✅ | `db.rs:131 load_resumable_workflows`, `engine.rs:273 resume_on_startup` chiamato da gateway.rs, state machine transitions consistenti (pending→running→[paused|completed|failed|cancelled]), idempotency at-least-once (step crashato re-esegue completo). Context passing via `context_json` append-only, truncated 2000 chars/step |
+| **W2** | Approval gate UX                                       | ⚠️ | Pause + emit `ApprovalNeeded` + return OK funzionante. Bug #61 no timeout (unbounded pausa), #62 approval richiede solo require_write() no 2FA, #63 approve API no profile validation (cross-check #56), no deny semantics (solo cancel workflow intero), no audit log approvazioni |
+| **W3** | Per-step `agent_id` (multi-agent orchestration)        | ⚠️ | Session key `workflow:{id}:step:{idx}` isola context via db session state. Agent routing via `registry.get(&step.agent_id)` OK. **Bug #57 🔴**: `execute_step` (engine.rs:481) non chiama `set_session_profile_id` prima di `process_message`, e `process_message` signature manca profile_id. Missing agent silent fallback #66 🟢 |
+| **W4** | Retry + error propagation                              | ✅ | Retry lineare `max_retries` configurabile per-step, persistito in DB (`db.rs:276 increment_step_retry`), error sink via `event_tx` + `workflow_steps.error`. Bug #65 🟢 no exponential backoff (DRY vs `utils/retry.rs`) |
+
+**Verified Heartbeat table — 2 assi**:
+
+| Asse | Descrizione                                              | Verdetto | Note |
+|------|----------------------------------------------------------|:--------:|------|
+| **H1** | Proactive wake-up service                              | ⚠️ | **Bug #64 🟢**: `HeartbeatService` (heartbeat.rs, 104 LOC) definito con `new`/`start`/`run_loop` + HEARTBEAT_PROMPT, ma l'unico call site è il test `#[cfg(test)]`. Mai instantiated in produzione. Feature declared, effectively disabled |
+| **H2** | Idempotency + safety during fires                      | ✅ | N/A se non abilitato. Design analysis: ogni fire ha `channel="heartbeat", chat_id="system"`, nessuno stato condiviso, no race con user message. Profile context è il default globale (non per-profile design) |
+
+**Bug tracciati Sprint 6**:
+
+- **Automations (4)**: #57 🔴 profile_id not enforced (manifestazione 1), #58 🟡 cron UTC-only, #59 🟡 flow_json no server validation, #60 🟡 results API no redact
+- **Workflow (5)**: #57 🔴 profile_id not enforced (manifestazione 2, stesso root cause), #61 🟡 approval no timeout, #62 🟡 approval no 2FA, #63 🟡 approve API no profile validation, #65 🟢 no exponential backoff, #66 🟢 missing agent silent fallback
+- **Heartbeat (1)**: #64 🟢 never instantiated
+
+**Totale Sprint 6**: **10 bug nuovi (1 🔴 + 6 🟡 + 3 🟢)**, nessun fix implementato (raccogli+prioritizza). Il 🔴 #57 è il primo 🔴 nuovo in 2 sprint (Sprint 4+5 avevano 0 🔴 nuovi).
+
+**Falsi positivi corretti in verification read (2)**:
+
+1. **A2 "Event triggers never evaluated"** (Batch A) — **SMENTITO**. `evaluate_automation_trigger(trigger_kind, trigger_value, previous_result, current_result)` esiste a `scheduler/automations.rs:864` e supporta always/on_change/contains/changed (normalizzato via `normalize_for_trigger_compare`). Chiamato da `evaluate_and_complete_automation_run` a riga 811. Batch A l'ha saltato perché non ha seguito la catena fino al lifecycle completion handler.
+
+2. **Batch C #55 "automations ARE profile-scoped ✅"** (Batch C cross-check) — **SMENTITO**. Batch C ha concluso "no gap" perché `CreateAutomationRequest.profile_id` esiste (api/automations.rs:52) e `insert_automation_with_plan` accetta il campo. Ma Batch C ha omesso di tracciare il `fire time`: `CronEvent` struct manca profile_id e profile resolution cade nel resolver cascade. Batch A + Batch B erano corretti su questo. **Contraddizione inter-batch** risolta via verification read che ha distinto "stored" da "enforced".
+
+**Pattern Sprint 5 riconfermato ("agent confidence ≠ correctness")**: record FP cumulativo cross-sprint → Sprint 3: 1 FP, Sprint 4: 2 FP, Sprint 5: 8 FP, Sprint 6: 2 FP. Il metodo "read-back diretto prima di committare 🔴 o ✅ cross-subsystem" rimane il single più importante ROI dell'audit methodology. **Sprint 6 ha evitato una contraddizione interna silente** (A5 vs #55) solo grazie alla verification read.
+
+**Pattern nuovi + cross-check Sprint 6**:
+
+1. **ISO-3 "stored ≠ enforced"** (NEW cross-sprint): Sprint 5 aveva consolidato il pattern `*_for_profile()` + `scan_*_with_profile()` + `load_perimeter()`. Sprint 6 mostra la **versione anti-pattern**: profile_id è **salvato** (DB), ma mai **applicato** al fire time perché il CronEvent/session_key non trasporta l'info. Il fix è strutturale: serve un campo `forced_profile_id` in `MessageMetadata` o signature extension di `process_message`.
+2. **Single call site redact** (cross-check #31 Sprint 4 + #44 Sprint 5): Sprint 6 conferma terza manifestazione con #60 (automation+workflow API results unredacted). Il trait `OutputSink` proposto in Sprint 5 diventa sempre più giustificato.
+3. **Unbounded pending state** (cross-check #37 Sprint 4): Sprint 6 conferma pattern con #61 (workflow approval no timeout). Stessa classe di bug — un gate che accumula stato senza scadenza.
+4. **DRY violation vs `utils/retry.rs`** (NEW): Sprint 6 scopre prima istanza concreta con #65. `utils/retry.rs` esiste e il CLAUDE.md lo cita come "MAI scrivere retry custom", ma il workflow engine ha retry home-grown.
+5. **Feature declared, disabled in production** (NEW): Sprint 6 scopre con #64 HeartbeatService. Codice + test presenti ma zero call site produttivi. Pattern da cercare anche altrove (forse altre feature stub come l'heartbeat?).
+
+**ISO-3 cross-subsystem — tabella finale (aggiornata Sprint 6)**:
+
+La tabella è chiusa a **6/7 sottosistemi enforcement-verified** (era 5/7 post-Sprint 5):
+
+| Sottosistema | Profile isolation | Evidence |
+|---|---|---|
+| Memoria + RAG | ✅ | `agent_loop.rs:1243 allowed_namespaces`, `memory_search.rs` post-fetch |
+| Vault | ✅ | `tools/vault.rs:36 vault_prefix_for_profile` + `log_access(..., ctx.profile_id)` |
+| Skills | ✅ | `skills/loader.rs:72 profile_slug` + `scan_directory_with_profile` + discovery filter |
+| Contact perimeter | ✅ | `agent_loop.rs:844 load_perimeter` + 858+ privacy + 1031+ tool filter + 888,1243 namespaces |
+| MCP servers | ❌ | Gap #55 — Singleton globale `config.mcp.servers: HashMap`, no profile scoping |
+| Gateway overrides | ⚠️ | Gap #56 — `upsert_gateway_override` no cross-profile validation |
+| **Automations + Workflow** | ❌ | **Gap #57 (Sprint 6)** — `profile_id` stored in DB ma mai enforced a fire time (CronEvent manca campo, execute_step non setta session profile) |
+
+**Verdetto ISO-3 finale**: **4/7 ✅, 2 ⚠️, 2 ❌** — tabella chiusa, 3 gap tracciabili (#55 MCP, #56 gateway overrides, #57 automations+workflow). Tutti e 3 sono architetturali (design gap), non rotture funzionali. Il pattern consolidato `*_for_profile() + load_perimeter()` risolverebbe strutturalmente tutti e 3 se applicato.
+
+**Cross-check Sprint 3+4+5 (6 pattern)**:
+
+| Pattern | Automations | Workflow | Heartbeat |
+|---|---|---|---|
+| #31 single call site redact | ⚠️ (→ #60) | ⚠️ (→ #60) | N/A (no output) |
+| #34 check_path_permission bypass | ✅ (via tool layer) | ✅ (via tool layer) | N/A |
+| #35 sandbox silent fallback | ✅ (no sandbox in scheduler layer) | ✅ | N/A |
+| #47 vault_key collision | ✅ (no hardcoded keys) | ✅ | N/A |
+| #55 profile scoping | ❌ (→ #57) | ❌ (→ #57) | N/A (global design) |
+| #56 cross-profile validation | ⚠️ (POST/PATCH ma no profile_id change) | ⚠️ (→ #63) | N/A |
+
+**Dominio "Automazioni + Scheduling"**: ❓ → ⚠️ (2026-04-14). Cron scheduler solido, event trigger funzionante, NLP generation via LLM prompt diretto (non `one_shot.rs`). Gap principale: ISO-3 (#57) + cron UTC-only (#58) + flow_json validation (#59) + results redact (#60).
+
+**Dominio "Workflow Engine"**: ❓ → ⚠️ (2026-04-14). Resume-on-boot + multi-step + retry + per-step agent routing tutti solidi. Gap principali: #57 ISO-3 (stesso root cause di automations) + approval gate completeness (#61 timeout, #62 2FA, #63 profile, no deny) + #65 backoff + #66 silent fallback.
 
 ### send_file su Telegram funziona (2026-04-13, Recipe F)
 
@@ -2643,6 +3038,52 @@ Sprint 5.
 - Dominio "Contatti + Profili": ❓ → ⚠️
 - **13/16 domini auditati** (verso target 16/16 per v1.0 release)
 
+### M — Automazioni + Workflow + Heartbeat (Sprint 6 audit) ⚠️ (eseguita 2026-04-14, Sprint 6)
+
+Eseguita via **static code-analysis** sui 3 sottosistemi async/scheduled rimanenti
+(Automazioni, Workflow Engine, Heartbeat). Metodo: 3 Explore agent in parallelo
+(Batch A Automations ~5K LOC Rust+JS 6 assi A1-A6, Batch B Workflow+Heartbeat
+~2K LOC 6 assi W1-W4+H1-H2, Batch C Cross-check Sprint 3+4+5 findings), ~11K LOC
+totali. Verification read obbligatoria sui 🔴 candidati (regola CLAUDE.md
+consolidata post-Sprint 5) — **2 falsi positivi corretti**, incluso un
+conflitto cross-batch (Batch A+B vs Batch C su ISO-3).
+
+**Files auditati**:
+- Automations: `src/scheduler/{cron,automations,db,mod}.rs` (~2.2K LOC), `src/tools/automation.rs`, `src/web/api/automations.rs`
+- JS: `static/js/automations.js` (partial), `auto-validate.js`, `flow-renderer.js` (skim)
+- Workflow: `src/workflows/{engine,db,mod}.rs` (~1.5K LOC), `src/tools/workflow.rs`, `src/web/api/workflows.rs`
+- Heartbeat: `src/agent/heartbeat.rs` (104 LOC — full read)
+- Cross-check: `src/agent/gateway.rs` (CronEvent dispatch), `src/agent/agent_loop.rs` (profile resolution 712-777 + process_message 384-390)
+- Verification reads: `cron.rs:17-26,288-295` CronEvent struct, `gateway.rs:1568-1581` InboundMessage builder, `workflows/engine.rs:481-483` execute_step, `scheduler/automations.rs:864,811` trigger evaluation, `grep set_session_profile_id`
+
+**Risultati chiave**:
+- 12/16 verdetti ✅ o ⚠️ (no ❌). W1 (resume) + W4 (retry core) + A2 (event triggers) + H2 (design) tutti ✅
+- **10 nuovi bug tracciati (1 🔴 + 6 🟡 + 3 🟢)**: #57-#66
+- **1 🔴 critico**: #57 ISO-3 gap — `profile_id` salvato in DB ma non enforced a fire time (due manifestazioni con stesso root cause)
+- **2 falsi positivi corretti** in verification read:
+  1. **A2 "Event triggers never evaluated"** (Batch A) — `evaluate_automation_trigger` esiste a automations.rs:864, chiamato da 811. Agent aveva saltato call chain.
+  2. **#55 "automations profile-scoped ✅"** (Batch C cross-check) — smentito da verification read che ha distinto "stored in DB" da "enforced at fire time". Cross-batch contradiction risolta a favore di Batch A+B.
+- **ISO-3 cross-subsystem — tabella finale chiusa**: 4/7 ✅ (memoria+RAG, vault, skills, contact perimeter) + 2 ⚠️ (MCP #55, gateway overrides #56) + 2 ❌ (automations+workflow #57). 3 gap totali tutti architetturali.
+- **Pattern architetturali emersi Sprint 6**:
+  1. **"Stored ≠ enforced" anti-pattern** (NEW): profile_id è salvato in struct ma mai propagato al runtime. Variante negativa del pattern ISO-3 `*_for_profile()` consolidato Sprint 5.
+  2. **Single call site redact** (cross Sprint 4 #31 + Sprint 5 #44): terza manifestazione con #60 automation/workflow results API no redact.
+  3. **Unbounded pending state** (cross Sprint 4 #37): #61 workflow approval gate no timeout — stesso pattern del pairing HashMap.
+  4. **DRY violation utils/retry.rs** (NEW): #65 workflow retry home-grown immediate. Prima istanza concreta della regola "mai scrivere retry custom".
+  5. **Feature declared, disabled in production** (NEW): #64 HeartbeatService defined + tested ma mai instantiated. Da cercare altrove.
+- **Cross-check Sprint 3+4+5** tabella:
+  | Pattern | Automations | Workflow | Heartbeat |
+  |---|---|---|---|
+  | #31 single call site | ⚠️ (→#60) | ⚠️ (→#60) | N/A |
+  | #34 ACL bypass | ✅ | ✅ | N/A |
+  | #35 sandbox fallback | ✅ (no sandbox usage) | ✅ | N/A |
+  | #47 vault_key | ✅ | ✅ | N/A |
+  | #55 profile scoping | ❌ (→#57) | ❌ (→#57) | N/A (global design) |
+  | #56 cross-profile | ⚠️ | ⚠️ (→#63) | N/A |
+- Nessun bug fixato in questa recipe (raccogli+prioritizza). **1 nuovo 🔴** — primo nuovo 🔴 in 2 sprint. Totale 🔴 aperti: 4 → 5. Totale bug aperti: 37 → 47 (+10 Sprint 6).
+- Dominio "Automazioni + Scheduling": ❓ → ⚠️
+- Dominio "Workflow Engine": ❓ → ⚠️
+- **15/16 domini auditati** (resta solo Osservabilità; Mobile + Condivisione tracciati ma non audit-core per v1.0)
+
 ---
 
 ## 🔄 Protocollo di aggiornamento
@@ -2679,3 +3120,4 @@ Quando verifichi una feature:
 | 2026-04-14 | **Production Sprint 3 — Audit Memoria + RAG**: Recipe I eseguita via static code-analysis su memoria agent + RAG knowledge base (~5.7K LOC totali). Metodo: 2 Explore agent in parallelo (batch A memoria 2.5K LOC, batch B RAG 3.2K LOC), 16 assi totali (M1-M8 + R1-R8). 11/16 assi ✅, 5/16 con bug. 9 nuovi bug tracciati: **#15 🟡** importance=0 score collapse, **#16 🟡** parsing serde-default 0, **#17 🟡** namespace filter post-SQL (non hard block), **#18 🔴** path traversal via `site` in `remember` tool, **#25 🟡** RAG non-UTF8 silent data loss, **#26 🔴** RAG no size limit → DoS, **#27 🟡** `detect_injection` gap architetturale (on-tool-use, downgrade da 🔴 dopo verification), **#28 🟡** orphan HNSW vectors su `remove_source`, **#29 🟡** RAG profile/namespace scoping post-fetch. Pattern emergenti: (1) post-fetch scoping cross-subsistema, (2) detect_injection on-tool-use vs on-ingest, (3) importance range 1-5 sotto-enforced, (4) file I/O senza bounds, (5) orphan HNSW side-effects. ISO-3/ISO-4 ✅ da code review (live test rimandato post-v1.0). Dominio Memoria+RAG ❓ → ⚠️. Nessun fix implementato (raccogli e prioritizza, i 2 🔴 sono candidati Sprint 4). 942 test pass, 0 warning clippy |
 | 2026-04-14 | **Production Sprint 4 — Audit Sicurezza End-to-End**: Recipe J eseguita via static code-analysis su 15 assi (S1-S15) coprendo vault, exfiltration guard, detect_injection, vault leak, web auth+rate limit+CSRF, 2FA TOTP, e-stop, pairing, trusted devices, sandbox 5 backend, FS ACL, cross-check Sprint 3 findings. Metodo: 3 Explore agent in parallelo (~4K LOC coperti). **10/15 assi ✅ puliti**, 5/15 con gap. 9 nuovi bug tracciati (**0 🔴** + 7 🟡 + 2 🟢): **#30 🟡** exfiltration PII IT mancanti + dual registry, **#31 🟡** exfiltration single call site, **#32 🟡** context_compactor skip-on-short bypassa injection detect, **#33 🟡** vault_leak resolve non valida key, **#34 🟡** remember bypassa check_path_permission (second-line per Sprint 3 #18), **#35 🟡** sandbox silent fallback a None, **#36 🟢** Seatbelt allow_paths no symlink canonicalize, **#37 🟡** pairing HashMap unbounded DoS, **#38 🟢** dual redact_vault_values definitions. **2 falsi positivi corretti** in verification read: (1) "CSPRNG weakness in pairing" smentito (rand 0.8 thread_rng IS crypto-safe ChaCha12+OsRng), (2) "pairing cleanup non auto-scheduled" smentito (gateway.rs:579 spawna periodic task). Pattern emergenti: (1) single-call-site defenses fragile, (2) dual pattern registries divergenti, (3) skip-on-short bypass, (4) second-line missing (ACL non consultato da remember), (5) silent fallback. Cross-check Sprint 3: #18 aggravato + #34, #26 confermato nessuna difesa residua (no DefaultBodyLimit), #27 confermato design OK + nuovo gap #32. Dominio Sicurezza ✅ → ⚠️. Nessun fix implementato (raccogli e prioritizza). Attacker model scenari live rimandati a futuro "Sprint Fix Sicurezza". 942 test pass, 0 warning clippy |
 | 2026-04-14 | **Production Sprint 5 — Audit Skills + MCP + Contatti + Profili**: Recipe K eseguita via static code-analysis sui 3 domini rimanenti in ❓ (estensibilità Skills+MCP + multi-utente Contatti+Profili). Metodo: 3 Explore agent in parallelo organizzati in batch (A Skills ~7K LOC 6 assi SK1-SK6, B MCP ~4.5K LOC 4 assi M1-M4, C Contatti+Profili ~4K LOC 6 assi C1-C6), **~15.5K LOC coperti** (più grande audit Sprint finora). **14 nuovi bug tracciati (0 🔴 + 11 🟡 + 3 🟢)**: **#39 🟡** pattern bypass whitespace (skills security), **#40 🟢** risk threshold cumulative, **#41 🟡** TOCTOU pre/post scan, **#42 🟡** creator smoke test unsandboxed, **#43 🟡** adapter YAML escape, **#44 🟢** skill output no redact, **#45 🟡** OAuth state no server validation, **#46 🟡** redirect_uri no whitelist, **#47 🟡** vault_key collision multi-instance, **#48 🟡** refresh contention, **#49 🟡** non-atomic Notion rotation, **#50 🟡** unbounded base64 image, **#51 🟡** subprocess env inheritance, **#52 🟡** MCP lifecycle gaps (stderr+shutdown+health), **#53 🟡** sender_id raw-injected, **#54 🟢** bio/notes self-surface injection, **#55 🟡** MCP no profile scoping (design gap ISO-3), **#56 🟡** gateway overrides no cross-profile validation. **8 falsi positivi corretti** in verification read (record Sprint 5, vs 1 Sprint 3 + 2 Sprint 4): C3 perimeter loading/enforcement (4 FP — agent_loop.rs:844/858/1031/888 prova tutto), C5-2 vault profile scoping (vault.rs:36), C5-3 skills profile scoping (loader.rs:72), Skills trust model #34 (check_path_permission è layer sbagliato), MCP M3-5 error propagation (auto-smentito). Pattern consolidato: **agent confidence ≠ correctness**, verification read non opzionale. **ISO-3 cross-subsystem verified**: 5/7 sottosistemi profile-scoped correttamente (memoria + RAG + vault + skills + contact perimeter), 2 gap (MCP singleton + gateway overrides). Dominio "Skills + MCP" ❓→⚠️, "Contatti + Profili" ❓→⚠️. **13/16 domini coperti**. Totale bug aperti: 23 → 37 (+14 Sprint 5), 4 🔴 totali invariati. 942 test pass, 0 warning clippy |
+| 2026-04-14 | **Production Sprint 6 — Audit Automazioni + Workflow + Heartbeat**: Recipe M eseguita via static code-analysis sui 3 sottosistemi async/scheduled rimanenti. Metodo: 3 Explore agent in parallelo organizzati in batch (A Automations ~5K LOC Rust+JS 6 assi A1-A6, B Workflow+Heartbeat ~2K LOC 6 assi W1-W4+H1-H2, C Cross-check Sprint 3+4+5 findings 6 pattern), **~11K LOC coperti**. **10 nuovi bug tracciati (1 🔴 + 6 🟡 + 3 🟢)**: **#57 🔴** automations+workflow `profile_id` stored in DB ma NON enforced at fire time (CronEvent struct manca profile_id field + workflow engine execute_step non setta session profile prima di process_message — ISO-3 cross-subsystem gap, chiude la tabella finale), **#58 🟡** cron expressions evaluate UTC only no timezone support, **#59 🟡** flow_json accettato senza server-side schema validation (client-side OK), **#60 🟡** automation/workflow results API return unredacted (cross-check #31+#44 single-call-site), **#61 🟡** workflow approval gate no timeout (cross-check #37 unbounded pattern), **#62 🟡** workflow approval no 2FA (cross-check Sprint 4 S7), **#63 🟡** workflow approve API no profile validation (cross-check #56), **#64 🟢** HeartbeatService defined never instantiated (dead code feature), **#65 🟢** workflow retry no exponential backoff DRY vs utils/retry.rs, **#66 🟢** missing agent_id silent fallback no warn. **2 falsi positivi corretti** in verification read: (1) Batch A "event triggers never evaluated" smentito (`evaluate_automation_trigger` at automations.rs:864, called from 811 via `evaluate_and_complete_automation_run`), (2) Batch C "automations profile-scoped ✅" smentito — era la contraddizione cross-batch (Batch A+B vs C). Verification read distinto "stored" da "enforced". FP count cumulativo cross-sprint: Sprint 3:1 + Sprint 4:2 + Sprint 5:8 + Sprint 6:2 = 13 FP totali. Pattern consolidato "agent confidence ≠ correctness" nuovamente confermato. Pattern NEW Sprint 6: **"stored ≠ enforced" ISO-3 anti-pattern** (campo presente in DB ma mai propagato a fire-time), **feature declared/disabled in production** (#64). Pattern cross-check #31 terza manifestazione (#60), #37 pattern confermato (#61), DRY utils/retry.rs violation prima istanza concreta (#65). **ISO-3 cross-subsystem — tabella chiusa a 4/7 ✅ + 2 ⚠️ + 2 ❌** (era 5/7 ✅ + 2 gap post-Sprint 5; Sprint 6 ha aggiunto Automations+Workflow come nuovo gap ❌). Dominio "Automazioni + Scheduling" ❓→⚠️, "Workflow Engine" ❓→⚠️. **15/16 domini coperti** (resta solo Osservabilità + Mobile/Condivisione non-core). Totale bug aperti: 37 → 47 (+10 Sprint 6), **5 🔴 totali** (era 4) — primo nuovo 🔴 in 2 sprint (Sprint 4+5 avevano 0 🔴 nuovi). 942 test pass, 0 warning clippy |
