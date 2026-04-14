@@ -1,0 +1,318 @@
+name: Release Packaging
+
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Builds native installers for tagged releases and uploads them as
+# GitHub Release assets, alongside the raw binaries produced by ci.yml.
+#
+# Triggered on tag push (v*) only. For regular pushes/PRs, only ci.yml
+# runs (which handles cross-compile + tests + raw binaries).
+#
+# Sprint 8 INST-1 through INST-4 — native installer infrastructure.
+#
+# Artifacts produced per tag:
+#   - homun_<ver>-1_amd64.deb    (Ubuntu/Debian, via cargo-deb)
+#   - homun-<ver>-1.x86_64.rpm   (Fedora/RHEL, via cargo-generate-rpm)
+#   - Homun-<ver>.dmg            (macOS universal, signed+notarized if secrets set)
+#   - homun.rb                   (Homebrew formula update — uploaded for review, tap push is manual)
+#
+# Windows: no artifact produced. Windows users install via WSL2 using the
+# .deb package. See docs/INSTALL-WINDOWS-WSL.md for details.
+#
+# =============================================================================
+# SECURITY NOTE — GitHub Actions injection
+# =============================================================================
+# All dynamic values referenced inside `run:` blocks are routed through
+# `env:` rather than inlined via `${{ ... }}`. This is the mitigation
+# recommended by GitHub for workflow injection vulnerabilities, even when
+# the source is trusted (matrix, step outputs) — consistent hygiene.
+# See: https://github.blog/security/vulnerability-research/how-to-catch-github-actions-workflow-injections-before-attackers-do/
+# =============================================================================
+
+on:
+  push:
+    tags:
+      - 'v*'
+  # Manual trigger for testing the workflow on demand (artifacts uploaded
+  # to a workflow run, not to a GitHub Release).
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+permissions:
+  contents: write  # Needed to upload assets to the GitHub Release
+
+jobs:
+  # ===========================================================================
+  # LINUX — .deb and .rpm packages
+  # ===========================================================================
+  package-linux:
+    name: Package Linux
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            target: x86_64-unknown-linux-gnu
+            rpm_arch: x86_64
+          - arch: arm64
+            target: aarch64-unknown-linux-gnu
+            rpm_arch: aarch64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation toolchain (arm64)
+        if: matrix.arch == 'arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Install cargo-deb and cargo-generate-rpm
+        run: |
+          cargo install --locked cargo-deb
+          cargo install --locked cargo-generate-rpm
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-packaging-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-packaging-
+
+      - name: Build release binary
+        env:
+          CARGO_TARGET: ${{ matrix.target }}
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build --release --target "$CARGO_TARGET"
+
+      - name: Build .deb
+        env:
+          CARGO_TARGET: ${{ matrix.target }}
+        run: |
+          cargo deb --no-build --target "$CARGO_TARGET"
+          ls -la "target/${CARGO_TARGET}/debian/"
+
+      - name: Build .rpm
+        env:
+          CARGO_TARGET: ${{ matrix.target }}
+          RPM_ARCH: ${{ matrix.rpm_arch }}
+        run: |
+          cargo generate-rpm --target "$CARGO_TARGET" --arch "$RPM_ARCH" --auto-req disabled
+          ls -la "target/${CARGO_TARGET}/generate-rpm/"
+
+      - name: Collect artifacts
+        env:
+          CARGO_TARGET: ${{ matrix.target }}
+        run: |
+          mkdir -p artifacts
+          cp "target/${CARGO_TARGET}/debian/"*.deb artifacts/
+          cp "target/${CARGO_TARGET}/generate-rpm/"*.rpm artifacts/
+          ls -la artifacts/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: artifacts/*
+          retention-days: 14
+
+  # ===========================================================================
+  # MACOS — .app bundle and .dmg (signed + notarized if secrets available)
+  # ===========================================================================
+  package-macos:
+    name: Package macOS
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            target: x86_64-apple-darwin
+          - arch: arm64
+            target: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-packaging-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-packaging-
+
+      - name: Build release binary
+        env:
+          CARGO_TARGET: ${{ matrix.target }}
+        run: cargo build --release --target "$CARGO_TARGET"
+
+      # ----- Signing path (only when secrets are configured) ------------------
+      # The workflow degrades gracefully when no signing secrets are set:
+      # it produces an unsigned .dmg and a warning is emitted in the release
+      # notes. Configure these secrets to enable signing + notarization:
+      #   APPLE_CERTIFICATE_P12         base64-encoded Developer ID cert
+      #   APPLE_CERTIFICATE_PASSWORD    password for the .p12
+      #   APPLE_SIGNING_IDENTITY        e.g. "Developer ID Application: Name (TEAMID)"
+      #   APPLE_TEAM_ID                 10-char Team ID
+      #   APPLE_ID                      Apple ID email for notarytool
+      #   APPLE_APP_SPECIFIC_PASSWORD   app-specific password from appleid.apple.com
+      # See docs/INSTALLER-SIGNING-SETUP.md for how to obtain and configure these.
+
+      - name: Import signing certificate
+        if: ${{ secrets.APPLE_CERTIFICATE_P12 != '' }}
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          # Create a temporary keychain and import the certificate for
+          # the duration of the runner session. The keychain is destroyed
+          # when the runner terminates.
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          security create-keychain -p temp-pw "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p temp-pw "$KEYCHAIN"
+          echo "$APPLE_CERTIFICATE_P12" | base64 --decode > /tmp/cert.p12
+          security import /tmp/cert.p12 -k "$KEYCHAIN" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security list-keychain -d user -s "$KEYCHAIN" login.keychain
+          security set-key-partition-list -S apple-tool:,apple: -s -k temp-pw "$KEYCHAIN"
+          rm /tmp/cert.p12
+
+      - name: Build .app bundle and .dmg
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          CARGO_TARGET: ${{ matrix.target }}
+          HOMUN_ARCH: ${{ matrix.arch }}
+        run: |
+          export HOMUN_BINARY="target/${CARGO_TARGET}/release/homun"
+          bash packaging/macos/create-dmg.sh
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: packaging/macos/build/*.dmg
+          retention-days: 14
+
+  # ===========================================================================
+  # HOMEBREW — formula template (actual tap push is manual)
+  # ===========================================================================
+  homebrew-formula:
+    name: Generate Homebrew Formula
+    needs: [package-macos]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Render formula with version
+        env:
+          GIT_REF: ${{ github.ref }}
+        run: |
+          # Strip refs/tags/v prefix safely from the env var (not inlined ${{ }})
+          VERSION="${GIT_REF#refs/tags/v}"
+          mkdir -p artifacts
+          sed "s|@@VERSION@@|${VERSION}|g" \
+              packaging/brew/homun.rb.template > artifacts/homun.rb
+          cat artifacts/homun.rb
+
+      - name: Upload formula
+        uses: actions/upload-artifact@v4
+        with:
+          name: homebrew-formula
+          path: artifacts/homun.rb
+          retention-days: 14
+
+  # ===========================================================================
+  # RELEASE — upload everything to the existing GitHub Release
+  # ===========================================================================
+  upload-release-assets:
+    name: Upload Release Assets
+    needs: [package-linux, package-macos, homebrew-formula]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten and checksum
+        run: |
+          mkdir -p release-assets
+          find artifacts -type f \( -name "*.deb" -o -name "*.rpm" -o -name "*.dmg" -o -name "homun.rb" \) \
+              -exec cp {} release-assets/ \;
+          cd release-assets
+          sha256sum * > installers-checksums.sha256
+          ls -la
+          cat installers-checksums.sha256
+
+      - name: Upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GIT_REF: ${{ github.ref }}
+        run: |
+          TAG="${GIT_REF#refs/tags/}"
+          cd release-assets
+          for f in *; do
+            gh release upload "$TAG" "$f" --clobber
+          done
+
+      - name: Emit unsigned warning (if applicable)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          GIT_REF: ${{ github.ref }}
+        run: |
+          TAG="${GIT_REF#refs/tags/}"
+          if [ -z "$APPLE_CERTIFICATE_P12" ]; then
+            cat > release-notes-append.md <<'EOF'
+
+---
+
+## ⚠️ Unsigned macOS Build
+
+This release was built **without Apple Developer ID code signing**. The
+`.dmg` installer will trigger a Gatekeeper warning on first launch. To
+open it anyway:
+
+1. Right-click the Homun.app → Open (instead of double-clicking)
+2. Click "Open" in the dialog that appears
+3. After the first successful launch, subsequent launches work normally
+
+Signed + notarized builds will be available from the next release.
+
+## 🪟 Windows Users
+
+No native Windows installer is provided in this release. Windows users
+should install via **WSL2** using the `.deb` package — see
+[INSTALL-WINDOWS-WSL.md](https://github.com/homunbot/homun/blob/main/docs/INSTALL-WINDOWS-WSL.md)
+for a step-by-step guide.
+EOF
+            gh release edit "$TAG" --notes-file release-notes-append.md --append-to-notes || true
+          fi
