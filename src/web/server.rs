@@ -644,6 +644,13 @@ impl WebServer {
         let app = Router::new()
             .merge(public)
             .merge(protected)
+            // OBS-2: trace ID propagation — must be the OUTERMOST layer so every
+            // request (including ones that will be rejected by auth, CORS, or
+            // rate-limit middlewares below) is tagged with a trace ID that can
+            // be surfaced in error logs and the response header.
+            .layer(axum::middleware::from_fn(
+                super::trace::trace_id_middleware,
+            ))
             .layer(TraceLayer::new_for_http())
             .layer(
                 CorsLayer::new()

@@ -42,6 +42,7 @@ async fn stream_logs() -> Sse<impl futures::Stream<Item = Result<Event, Infallib
                     fields: Vec::new(),
                     profile_id: None,
                     user_id: None,
+                    trace_id: None,
                 };
                 let payload =
                     serde_json::to_string(&lag_record).unwrap_or_else(|_| "{}".to_string());

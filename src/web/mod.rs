@@ -5,6 +5,7 @@ pub mod pages;
 pub mod run_state;
 pub mod server;
 pub mod tls_pem;
+pub mod trace;
 pub mod tunnel;
 pub mod ws;
 

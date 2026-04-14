@@ -1905,6 +1905,41 @@ async fn dispatch_to_agent(
     known_chat_ids: KnownChatIds,
     config: Config,
 ) {
+    // OBS-2: enter a trace ID scope for this message's entire processing.
+    // For the Web channel, the HTTP middleware has already set a trace ID
+    // on the task-local, but bus dispatch runs in a new tokio::spawn task
+    // (see inbound_rx loop) — task-locals do NOT propagate across spawn
+    // boundaries, so the new task inherits no trace context and we'd fall
+    // back to a fresh ID here. That's the correct behavior: it means each
+    // distinct inbound message from any channel (Web/Telegram/Discord/...)
+    // gets its own unique trace ID, and since non-web channels never had
+    // an HTTP request, this is where their trace lifecycle begins.
+    let trace_id = crate::logs::new_trace_id();
+    crate::logs::TASK_TRACE_ID
+        .scope(trace_id, dispatch_to_agent_inner(
+            prepared,
+            agent,
+            senders,
+            stream_tx,
+            task_db,
+            session_locks,
+            known_chat_ids,
+            config,
+        ))
+        .await;
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn dispatch_to_agent_inner(
+    prepared: PreparedMessage,
+    agent: Arc<AgentLoop>,
+    senders: SharedOutboundSenders,
+    stream_tx: Option<mpsc::Sender<StreamMessage>>,
+    task_db: Database,
+    session_locks: SessionLocks,
+    known_chat_ids: KnownChatIds,
+    config: Config,
+) {
     // Per-session serialisation: wait if another batch is still processing.
     let lock = get_session_lock(&session_locks, &prepared.session_key);
     let _guard = lock.lock().await;

@@ -25,11 +25,43 @@ tokio::task_local! {
     /// Task-local profile scope. Survives `.await` and thread migration —
     /// tied to the tokio task, not the OS thread.
     pub static TASK_PROFILE_SCOPE: ProfileScope;
+    /// Task-local trace ID (OBS-2). Set by the HTTP middleware from the
+    /// `X-Request-ID` header (or freshly generated), and by each non-HTTP
+    /// channel (CLI/Telegram/Discord/Slack/WhatsApp/Email) when it dispatches
+    /// a message to the agent gateway. Survives `.await` and thread migration.
+    ///
+    /// Read by [`SseLogLayer`] to populate `LogRecord::trace_id`, and by
+    /// [`crate::agent::request_trace::RequestTracer`] to unify the tracer ID
+    /// with the HTTP-visible trace ID.
+    pub static TASK_TRACE_ID: String;
 }
 
 /// Read the current profile scope (if any) from the task-local.
 fn current_profile_scope() -> Option<ProfileScope> {
     TASK_PROFILE_SCOPE.try_with(|s| s.clone()).ok()
+}
+
+/// Read the current trace ID (if any) from the task-local.
+///
+/// Returns `None` when called outside a `TASK_TRACE_ID.scope(...)` context —
+/// e.g. during gateway startup, background cron ticks, or tests without
+/// explicit scoping. Callers that need a trace ID should generate their own
+/// fallback if this returns `None`.
+pub fn current_trace_id() -> Option<String> {
+    TASK_TRACE_ID.try_with(|s| s.clone()).ok()
+}
+
+/// Generate a new short trace ID: 8 hex chars from a random UUID.
+///
+/// Short enough to fit comfortably in HTTP headers, JSON log fields, and UI
+/// tooltips while still carrying ~10^9 bits of entropy — safe for any single
+/// Homun instance across its lifetime.
+pub fn new_trace_id() -> String {
+    uuid::Uuid::new_v4()
+        .to_string()
+        .chars()
+        .take(8)
+        .collect::<String>()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +87,13 @@ pub struct LogRecord {
     /// User scoping — populated when log originates from an authenticated context.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_id: Option<String>,
+    /// Trace ID for the request that produced this log (OBS-2).
+    ///
+    /// Populated from [`TASK_TRACE_ID`] when the log is emitted inside a
+    /// scoped context. Allows UI timeline + API clients to correlate all
+    /// log records for a single user request end-to-end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
 }
 
 static LOG_STREAM: OnceLock<broadcast::Sender<LogRecord>> = OnceLock::new();
@@ -223,8 +262,10 @@ where
             message = metadata.name().to_string();
         }
 
-        // Read profile/user context from thread-local (set by agent loop).
+        // Read profile/user context and trace ID from task-locals (set by the
+        // HTTP middleware, channel dispatchers, and the agent loop).
         let scope = current_profile_scope();
+        let trace_id = current_trace_id();
 
         let record = LogRecord {
             timestamp: chrono::Utc::now().to_rfc3339(),
@@ -237,6 +278,7 @@ where
             fields: visitor.extra_fields,
             profile_id: scope.as_ref().and_then(|s| s.profile_id),
             user_id: scope.and_then(|s| s.user_id),
+            trace_id,
         };
 
         persist_record(&record);
@@ -309,6 +351,39 @@ impl Visit for LogFieldVisitor {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn trace_id_scope_round_trip() {
+        // Outside any scope, current_trace_id returns None.
+        assert_eq!(current_trace_id(), None);
+
+        // Inside a scope, current_trace_id returns the scoped value.
+        let result = TASK_TRACE_ID
+            .scope("abc12345".to_string(), async {
+                let inner = current_trace_id();
+                // Survives .await yield
+                tokio::task::yield_now().await;
+                let after_yield = current_trace_id();
+                (inner, after_yield)
+            })
+            .await;
+        assert_eq!(result.0.as_deref(), Some("abc12345"));
+        assert_eq!(result.1.as_deref(), Some("abc12345"));
+
+        // Outside again — task-local is dropped.
+        assert_eq!(current_trace_id(), None);
+    }
+
+    #[test]
+    fn new_trace_id_is_short_and_unique() {
+        let a = new_trace_id();
+        let b = new_trace_id();
+        assert_eq!(a.len(), 8);
+        assert_eq!(b.len(), 8);
+        assert_ne!(a, b, "trace IDs should not collide across two calls");
+        // All hex chars
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit() || c == '-'));
+    }
+
     #[test]
     fn recent_logs_round_trip_from_custom_dir() {
         let temp = tempfile::tempdir().expect("tempdir");
@@ -328,6 +403,7 @@ mod tests {
             }],
             profile_id: None,
             user_id: None,
+            trace_id: None,
         });
 
         let records = recent(10);

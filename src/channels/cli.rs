@@ -25,11 +25,23 @@ impl CliChannel {
         }
     }
 
-    /// One-shot mode: send a message and return the response
+    /// One-shot mode: send a message and return the response.
+    ///
+    /// OBS-2: wrapped in a trace-ID scope so every log emitted during this
+    /// message's processing shares a single correlation ID, printed below
+    /// the response for copy-paste into bug reports.
     pub async fn one_shot(&self, message: &str) -> Result<String> {
-        self.agent
-            .process_message(message, &self.session_key, "cli", "local")
-            .await
+        let trace_id = crate::logs::new_trace_id();
+        let trace_id_for_print = trace_id.clone();
+        let result = crate::logs::TASK_TRACE_ID
+            .scope(trace_id, async {
+                self.agent
+                    .process_message(message, &self.session_key, "cli", "local")
+                    .await
+            })
+            .await;
+        tracing::debug!(trace_id = %trace_id_for_print, "cli one_shot complete");
+        result
     }
 
     /// Interactive REPL mode
@@ -78,12 +90,18 @@ impl CliChannel {
                 continue;
             }
 
-            // Process message
-            match self
-                .agent
-                .process_message(input, &self.session_key, "cli", "local")
-                .await
-            {
+            // Process message inside a fresh trace-ID scope (OBS-2).
+            // Each interactive turn gets its own trace ID — if something
+            // goes wrong, the user can scroll up to find the matching logs.
+            let trace_id = crate::logs::new_trace_id();
+            let result = crate::logs::TASK_TRACE_ID
+                .scope(trace_id, async {
+                    self.agent
+                        .process_message(input, &self.session_key, "cli", "local")
+                        .await
+                })
+                .await;
+            match result {
                 Ok(response) => {
                     println!("\nhomun> {}\n", response);
                 }

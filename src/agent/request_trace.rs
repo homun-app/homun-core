@@ -137,12 +137,15 @@ pub struct RequestTracer {
 
 impl RequestTracer {
     /// Create a new tracer at request start.
+    ///
+    /// OBS-2: if a trace ID has already been set on the task-local by the
+    /// HTTP middleware or a non-HTTP channel dispatcher, reuse it so that
+    /// `RequestTrace.id` == `X-Request-ID` response header == `trace_id`
+    /// in all log records — one identifier from request entry to trace file.
+    /// Falls back to a fresh ID when called outside a scoped context (e.g.
+    /// background cron, autonomous subagent, gateway boot).
     pub fn new(channel: &str, session_key: &str, request: &str) -> Self {
-        let id = uuid::Uuid::new_v4()
-            .to_string()
-            .chars()
-            .take(8)
-            .collect::<String>();
+        let id = crate::logs::current_trace_id().unwrap_or_else(crate::logs::new_trace_id);
         let trace = RequestTrace {
             id,
             started_at: chrono::Utc::now().to_rfc3339(),
