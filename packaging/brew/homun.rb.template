@@ -1,0 +1,80 @@
+#
+# Homebrew formula for Homun — personal AI assistant
+#
+# This file is a TEMPLATE. The release CI pipeline substitutes @@VERSION@@
+# with the actual tag version and computes SHA256 for the archive URLs
+# before publishing the rendered formula to the homunbot/homebrew-tap repo.
+#
+# Users install via:
+#   brew tap homunbot/tap
+#   brew install homun
+#
+# Or directly:
+#   brew install homunbot/tap/homun
+#
+# Build-from-source fallback for users without a signed bottle:
+#   brew install --build-from-source homunbot/tap/homun
+#
+class Homun < Formula
+  desc "Ultra-lightweight personal AI assistant — a digital homunculus"
+  homepage "https://homun.dev"
+  license "PolyForm-Noncommercial-1.0.0"
+  version "@@VERSION@@"
+
+  # =========================================================================
+  # Binary bottle (preferred path — signed + notarized artifacts from CI)
+  # =========================================================================
+  # The release CI replaces the sha256 placeholders with computed hashes.
+  # If the CI step is skipped (e.g. local testing), users can still use
+  # --build-from-source which ignores these URLs.
+  on_macos do
+    on_arm do
+      url "https://github.com/homunbot/homun/releases/download/v@@VERSION@@/Homun-@@VERSION@@-arm64.dmg"
+      sha256 "@@SHA256_MACOS_ARM64@@"
+    end
+    on_intel do
+      url "https://github.com/homunbot/homun/releases/download/v@@VERSION@@/Homun-@@VERSION@@-x64.dmg"
+      sha256 "@@SHA256_MACOS_X64@@"
+    end
+  end
+
+  # =========================================================================
+  # Source build (fallback + Linux support via brew on Linux)
+  # =========================================================================
+  head "https://github.com/homunbot/homun.git", branch: "main"
+
+  depends_on "rust" => :build
+  # Runtime deps: rustls statically links ring, so no openssl needed
+
+  def install
+    if build.bottle? && OS.mac?
+      # Extract homun binary from the downloaded .dmg
+      system "hdiutil", "attach", "-nobrowse", "-mountpoint", "/tmp/homun-brew-mount", cached_download
+      cp "/tmp/homun-brew-mount/Homun.app/Contents/MacOS/homun", bin/"homun"
+      system "hdiutil", "detach", "/tmp/homun-brew-mount"
+    else
+      # Source build (from head or --build-from-source)
+      system "cargo", "install", *std_cargo_args
+    end
+  end
+
+  def caveats
+    <<~EOS
+      Homun stores its data in ~/.homun/ (config, database, vault, memory).
+
+      To start Homun:
+          homun gateway                # foreground
+          homun config                 # setup wizard
+
+      Web UI:  http://localhost:8777
+
+      For auto-start at login, install the launchd user agent:
+          homun service install
+    EOS
+  end
+
+  test do
+    # Just verify the binary runs and reports a version
+    assert_match "homun", shell_output("#{bin}/homun --version")
+  end
+end
