@@ -62,13 +62,16 @@ async function loadOwner() {
 
 // ─── Identities ───
 async function loadIdentities() {
+    // Guard: identities UI only exists on /account — skip if loaded elsewhere
+    // (e.g. /vault settings modal where account.js is bundled but identities DOM is absent).
+    const countBadge = document.getElementById('identities-count');
+    const list = document.getElementById('identities-list');
+    const empty = document.getElementById('identities-empty');
+    if (!countBadge || !list || !empty) return;
+
     try {
         const resp = await fetch('/api/v1/account/identities');
         identities = await resp.json();
-
-        const countBadge = document.getElementById('identities-count');
-        const list = document.getElementById('identities-list');
-        const empty = document.getElementById('identities-empty');
 
         countBadge.textContent = identities.length;
 
@@ -401,7 +404,7 @@ async function loadDevices() {
         var list = document.getElementById('devices-list');
         var empty = document.getElementById('devices-empty');
         var badge = document.getElementById('devices-count');
-        if (!list) return;
+        if (!list || !badge) return;
         badge.textContent = devices.length;
         if (devices.length === 0) {
             // safe: static HTML, no user content
