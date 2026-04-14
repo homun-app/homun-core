@@ -28,7 +28,7 @@
 
 | Dominio | Doc spec | Stato | Ultimo check | Note |
 |---|---|---|---|---|
-| Canali e Messaggistica | [01](./features/01-messaggistica-canali.md) | ❓ | — | Non ancora testato |
+| Canali e Messaggistica | [01](./features/01-messaggistica-canali.md) | ⚠️ | 2026-04-14 | Sprint 2: 3/7 canali ✅ (CLI, Discord, Web), 4/7 ⚠️ con bug tracciabili. 5 nuovi issue #10-#14 aperti |
 | Agente + Cognizione | [02](./features/02-agente-cognizione.md) | 🔧 | 2026-04-13 | #2: 6 sub-fix implementati (keyword fallback, retry feedback, timeout auto-detect, schema 5→2, budget 90s, metrics API). Da validare con test manuali. Target >90% |
 | Memoria + RAG | [03](./features/03-memoria-conoscenza.md) | ❓ | — | |
 | Strumenti (Tools) | [04](./features/04-strumenti.md) | ✅ | 2026-04-13 | Tutti i bug fixati: #1 (vault 2FA error), #3 (vault form), #8 (send_file web), #9 (view_file always-available). Da rivalidare end-to-end |
@@ -465,7 +465,384 @@ In pratica, il send_file su web è un **no-op funzionale** — il file "arriva" 
 
 ---
 
+### ❌ #10 — Capability drift `outbound_attachments` (WhatsApp + Email)
+
+**Dominio**: [01 Messaggistica e Canali](./features/01-messaggistica-canali.md)
+**Severity**: 🔴 critico — il sistema mente all'LLM sulle capability reali → invii file falliscono silenziosamente
+**Status**: ❌ **APERTO** — scoperto Sprint 2 Audit Canali, 2026-04-14
+**Discovered**: 2026-04-14, Sprint 2 Recipe Canali (code audit telegram/whatsapp + email)
+
+#### Cosa succede
+
+Due canali dichiarano nella capability table di supportare l'invio di allegati in uscita:
+
+- `capabilities.rs:138` — WhatsApp: `outbound_attachments: true`
+- `capabilities.rs:151` — Email: `outbound_attachments: true`
+
+Ma nessuno dei due ha implementato il path di upload:
+
+- **WhatsApp** (`whatsapp.rs:269-310`): l'outbound loop costruisce `wa::Message { conversation: Some(chunk), ..Default::default() }` — solo il campo `conversation` (testo). Nessun check di `msg.file_path`, nessuna chiamata a media/document sending di `wa-rs`.
+- **Email** (`email.rs:897-964`): `send_email_account()` usa `lettre::message::SinglePart::plain()` — è una mail plain-text a parte singola. Nessuna logica multipart, nessuna lettura di `msg.file_path`.
+
+#### Perché è importante
+
+1. **LLM decisioning**: `build_capabilities_prompt()` (`capabilities.rs:191`) inietta queste capability nel system prompt. L'LLM vede "email: attachments out" e "whatsapp: attachments out" → può chiamare `send_file` su quei canali, aspettandosi che funzioni.
+2. **Failure mode**: il messaggio raggiunge l'outbound loop, il loop manda solo la caption/testo e **ignora `msg.file_path`**. L'utente riceve un messaggio senza il file, identico al bug #8 già fixato sul canale web (ma quel fix non è stato propagato qui).
+3. **Pattern ripetuto**: è esattamente lo stesso difetto di #8 (`send_file su web channel ignora file_path`) — il file_path viene silenziosamente droppato.
+
+#### Root cause
+
+Drift tra capability table aspirazionale (scritta pensando al "supporto possibile") e implementazione effettiva. Nessun test unit verifica la coerenza statica vs runtime. Non c'è un `#[test] fn outbound_attachments_matches_impl()` che farebbe saltare il build.
+
+#### Fix proposto
+
+**Opzione A — Quick & onest** (raccomandata per il prossimo sprint di fix):
+
+1. `capabilities.rs:138` → `outbound_attachments: false` (WhatsApp)
+2. `capabilities.rs:151` → `outbound_attachments: false` (Email)
+3. Aggiornare `docs/features/01-messaggistica-canali.md` tabella capability (riga ~514-515)
+4. Aggiornare test `test_telegram_capabilities` e simili se toccano il campo
+5. Aggiungere un test meta (`tests/channel_capabilities_coherence.rs`) che verifica: "se `outbound_attachments=true`, il canale deve avere un outbound handler che legge `msg.file_path`"
+
+**Opzione B — Implementare davvero l'upload**:
+
+1. **WhatsApp**: usare `wa::Message::Document { .. }` (vedi API `wa-rs`), leggere bytes da `msg.file_path`, fallback a text-only se read fails
+2. **Email**: passare a `MultiPart::mixed()` in `send_email_account`, allegare `lettre::Attachment::new(...)` se `msg.file_path.is_some()`
+3. Test integration (richiede account di test)
+
+**Raccomandazione**: Opzione A ora (1 commit, ~15 righe di diff + test), Opzione B come feature-dev separato in Sprint 6 o successivo.
+
+---
+
+### ❌ #11 — Slack manca integrazione `ChannelHealthTracker`
+
+**Dominio**: [01 Messaggistica e Canali](./features/01-messaggistica-canali.md) + [14 Osservabilità](./features/14-osservabilita.md)
+**Severity**: 🔴 critico — circuit breaker del gateway cieco a Slack, `MAX_CHANNEL_RESTARTS` non affidabile
+**Status**: ❌ **APERTO** — scoperto Sprint 2 Audit Canali, 2026-04-14
+**Discovered**: 2026-04-14, Sprint 2 Recipe Canali (code audit slack.rs vs discord.rs)
+
+#### Cosa succede
+
+`DiscordChannel` ha il pattern corretto per integrarsi con `ChannelHealthTracker`:
+
+```rust
+// src/channels/discord.rs:23
+pub struct DiscordChannel {
+    config: DiscordConfig,
+    health: Option<Arc<ChannelHealthTracker>>,
+}
+```
+
+E chiama `health.record_message()` nel message handler (`discord.rs:205-207`) + `health` nel resume event (`discord.rs:280-282`).
+
+**`SlackChannel` non ha il campo `health`**. Nello struct (`slack.rs:23-25`) c'è solo `config` e `client`. Il gateway spawna Slack via `spawn_monitored_channel(&health, ...)` ma il tracker **non raggiunge mai il canale**: solo il gateway chiama `health.mark_started()` / `mark_stopped()` attorno al task boundary, niente record_message/record_error al ricevimento o in outbound.
+
+#### Perché è importante
+
+1. **Circuit breaker non funziona**: la soglia Degraded (50% error rate) e Down (80%) non si attiveranno mai per Slack — il tracker non riceve outcome.
+2. **`MAX_CHANNEL_RESTARTS = 10`** (`gateway.rs:50`) conta solo i restart, non gli errori durante la session. Se Slack processa 100 messaggi e ne sbaglia 80 prima di crashare, il gateway lo riavvierà fino al limite, consumando retry budget senza alcun segnale precoce.
+3. **Observability**: il `/v1/channel-health` endpoint (se esiste) mostrerà Slack come "Healthy" anche se è di fatto non-funzionante. Impossibile diagnosticare problemi Slack dalla dashboard.
+4. **Incoerenza architetturale**: 4 canali su 7 (Telegram, WhatsApp, Slack, Email) non usano il pattern health-aware. Solo Discord è "osservato" correttamente.
+
+#### Root cause
+
+Drift di implementazione: il `ChannelHealthTracker` è stato introdotto dopo i canali originali e propagato solo a Discord. Non esiste un trait che obblighi i canali a ricevere un `Arc<ChannelHealthTracker>` nel loro constructor, quindi il pattern è opt-in silenzioso e facile da dimenticare.
+
+#### Fix proposto
+
+**Short-term (Slack specifico)**:
+
+1. Aggiungere campo `health: Option<Arc<ChannelHealthTracker>>` a `SlackChannel`
+2. Aggiungere setter `pub fn with_health(mut self, h: Arc<ChannelHealthTracker>) -> Self`
+3. Nel gateway (`start_channels_from_db_or_toml` ~line 2300), chiamare `.with_health(health.clone())` quando spawna Slack (mirror di come fa per Discord)
+4. Nei loop inbound (Socket Mode `slack.rs:~288`, polling `~490`): chiamare `health.record_message()` dopo ogni `inbound_tx.send()` riuscito, `health.record_error()` su send failure
+5. Nell'outbound loop (`slack.rs:549-567`): sostituire il `tracing::warn` per errori con `tracing::warn + health.record_error()`
+
+**Long-term (systemic fix)**:
+
+Aggiungere un **metodo nel trait `Channel`**:
+
+```rust
+pub trait Channel: Send + Sync {
+    async fn start(...) -> Result<()>;
+    fn name(&self) -> &str;
+    /// Optional — channels that track health implement this
+    fn set_health(&mut self, _health: Arc<ChannelHealthTracker>) {}
+}
+```
+
+Oppure meglio: **centralizzare il tracking nel gateway** contando i `inbound_tx.send()` successes e gli `OutboundMessage` errors lato gateway, così i canali restano trasparenti e non devono ricordarsi di chiamare il tracker. Richiede di sapere se un outbound è "arrivato" o no — probabilmente via ack channel.
+
+**Raccomandazione**: short-term fix in un commit separato (unblocka l'observability per v1.0), long-term systemic fix come issue di refactor per dopo Sprint 10.
+
+---
+
+### ❌ #12 — Email `is_sender_allowed()` è dead code
+
+**Dominio**: [01 Messaggistica e Canali](./features/01-messaggistica-canali.md) + [06 Sicurezza](./features/06-sicurezza.md)
+**Severity**: 🟡 alto — `allow_from` config nei canali email ignorato (defense-in-depth disattivata; gateway fa comunque il check principale via `check_authorization`)
+**Status**: ❌ **APERTO** — scoperto Sprint 2 Audit Canali, 2026-04-14
+**Discovered**: 2026-04-14, Sprint 2 Recipe Canali (code audit email.rs)
+
+#### Cosa succede
+
+`email.rs:81-98` definisce:
+
+```rust
+fn is_sender_allowed(sender: &str, allow_from: &[String]) -> bool {
+    // ... logic: wildcard "*", exact match, domain suffix match
+}
+```
+
+Ma questa funzione **non è mai chiamata** in `process_unseen_account()` (`email.rs:~656-810`) né altrove nel file. Un `rg "is_sender_allowed" src/` lo conferma.
+
+L'intento originale era probabilmente: "se `config.channels.email.accounts[x].allow_from` contiene `["@example.com"]`, scarta a livello canale tutti i mittenti che non matchano, senza nemmeno forwardarli al gateway."
+
+#### Perché è importante
+
+1. **Defense-in-depth persa**: il canale dovrebbe essere la prima linea di difesa (filtro rapido, no load sul gateway/agent). Con il dead code attivo, tutte le email (tranne quelle con `noreply/mailer-daemon`) finiscono al gateway.
+2. **Non è un auth bypass completo**: il gateway poi applica `check_authorization` (`auth.rs:28` → `gateway.rs:892`), che ha la stessa logica di wildcard+domain match (`auth.rs:41-57`). Quindi gli email non autorizzati vengono comunque rejected/paired dal gateway.
+3. **Impatto pratico**: l'utente configura `allow_from` nell'account email aspettandosi che blocchi, ma il check effettivo avviene una fase dopo. Confonde le aspettative e, se il gateway fallisce nel merge `contact_identities`, il safety net scompare.
+4. **Dead code**: la funzione ha 18 righe + test, occupa space nel file da 1155 righe. O la si usa o la si rimuove.
+
+#### Root cause
+
+Refactor dimenticato: la funzione è stata probabilmente scritta durante la transizione "canali transport-only" (quando l'auth è stata centralizzata nel gateway) e non è stata rimossa o re-wired. Il compilatore Rust non segnala `fn is_sender_allowed` come dead code perché è un modulo visibile (`pub`? no, `fn` privata) — in realtà `cargo clippy` dovrebbe segnalare `dead_code` se è `pub(crate)` e non chiamato. Da verificare.
+
+#### Fix proposto
+
+**Opzione A — Rimuovere il dead code**:
+
+1. Eliminare `is_sender_allowed()` da `email.rs:81-98` + relativi test
+2. Documentare in `docs/features/01-messaggistica-canali.md` che "il filtro `allow_from` per email è applicato dal gateway, non dal canale"
+
+**Opzione B — Wire it up (defense-in-depth)**:
+
+1. In `process_unseen_account()` (~line 668), prima di creare `InboundMessage`, chiamare `is_sender_allowed(&parsed.from, &account_config.allow_from)` e se `false` → skip (log `tracing::debug!`)
+2. Aggiungere test di integrazione: mail da `user@blocked.com` con `allow_from=["@allowed.com"]` → non arriva al gateway
+3. Documentare che questa è una difesa-in-profondità, non l'auth primario
+
+**Raccomandazione**: Opzione B — dead code rimosso in un path di sicurezza è sospetto (potrebbe re-introdurre bug futuri), meglio wiring + test.
+
+---
+
+### ❌ #13 — Health tracking cieco agli intra-channel events (Telegram + WhatsApp + Slack)
+
+**Dominio**: [01 Messaggistica e Canali](./features/01-messaggistica-canali.md) + [14 Osservabilità](./features/14-osservabilita.md)
+**Severity**: 🟡 alto — il circuit breaker non degrada mai i canali legacy; solo Discord è monitorato correttamente
+**Status**: ❌ **APERTO** — scoperto Sprint 2 Audit Canali, 2026-04-14
+**Discovered**: 2026-04-14, Sprint 2 Recipe Canali (code audit cross-channel)
+
+#### Cosa succede
+
+Il `ChannelHealthTracker` ha 4 API di event-recording:
+
+- `mark_started(channel)` — task avviato
+- `record_message(channel)` — un messaggio processato correttamente
+- `record_error(channel, msg)` — errore (chiamato dall'error handler del task)
+- `mark_stopped(channel, err)` — task terminato
+
+Il gateway chiama `mark_started` e `mark_stopped` automaticamente via `spawn_monitored_channel` (`gateway.rs:96, 135, 141`). Ma `record_message` e `record_error` **devono essere chiamati dal canale stesso** dentro il message handler.
+
+**Solo Discord** lo fa correttamente:
+- `discord.rs:205-207` → `health.record_message()` dopo inbound send
+- `discord.rs:280-282` → tracciamento di resume event
+
+**Telegram, WhatsApp, Slack non chiamano mai record_*.** Search result: `rg "record_message\|record_error" src/channels/` restituisce solo `discord.rs`.
+
+#### Perché è importante
+
+1. **Circuit breaker inutile**: le soglie `DEGRADED_THRESHOLD = 0.5` e `DOWN_THRESHOLD = 0.8` (`health.rs:16-18`) non si attivano mai per 3 canali su 7. Il `status()` di Telegram/WA/Slack sarà sempre `Healthy` o `Stopped`, mai `Degraded`/`Down`.
+2. **Restart budget wasted**: il gateway riavvia fino a 10 volte un canale rotto senza accorgersi che è rotto (finché non supera MAX_CHANNEL_RESTARTS).
+3. **Observability**: il dashboard operativo (`/dashboard` page) mostrerà i canali come healthy. Nessun alert, nessuna visibilità sui fallimenti di processing interno.
+4. **Correlazione con #11**: Slack ha l'issue più grave (non ha nemmeno il tracker nel struct — vedi #11). Telegram e WhatsApp hanno il tracker raggiungibile via altro path ma non lo usano.
+
+#### Root cause
+
+Pattern architetturale aspirazionale non propagato: `record_message`/`record_error` sono opt-in. Il trait `Channel` non impone di chiamarli. Discord è stato implementato correttamente come esempio, ma il back-port agli altri canali non è mai stato fatto.
+
+#### Fix proposto
+
+**Opzione A — Per-channel wiring (mirror di Discord)**:
+
+Per ognuno di Telegram/WhatsApp/Slack:
+
+1. Aggiungere campo `health: Option<Arc<ChannelHealthTracker>>` allo struct
+2. Aggiungere setter `with_health()`
+3. Nel gateway, passare l'Arc al costruttore
+4. Nel message handler (sync point dopo `inbound_tx.send`): `if let Some(h) = &health { h.record_message(name); }`
+5. Negli error path: `if let Some(h) = &health { h.record_error(name, &err_str); }`
+
+Stimato: ~20 righe di diff per canale, ~60 righe totali. Richiede test di regressione.
+
+**Opzione B — Centralizzare nel gateway**:
+
+Il gateway conosce `inbound_tx` per ogni canale. Potrebbe wrap it in un `TrackedSender` che chiama `health.record_message(channel)` a ogni `send()` successo, `health.record_error()` a ogni `send()` Err. I canali restano trasparenti.
+
+Limite: non cattura gli errori pre-send (es. Telegram fallisce a parsare un update del bot API) — quelli restano invisibili.
+
+**Raccomandazione**: Opzione A prima (richiede meno refactor, è il fix minimo per v1.0), Opzione B come refactor di follow-up durante Sprint 9 (Osservabilità).
+
+---
+
+### ❌ #14 — Telegram backoff fisso 5s (non exponential)
+
+**Dominio**: [01 Messaggistica e Canali](./features/01-messaggistica-canali.md)
+**Severity**: 🟡 alto — su errori di rete transient, il canale spreca restart attempts e può cascading-fail
+**Status**: ❌ **APERTO** — scoperto Sprint 2 Audit Canali, 2026-04-14
+**Discovered**: 2026-04-14, Sprint 2 Recipe Canali (code audit telegram.rs)
+
+#### Cosa succede
+
+Il long-polling loop di Telegram (`telegram.rs:88-107`) ha due rami di gestione errori:
+
+```rust
+// Timeout = normale, riprova subito
+if err is timeout { continue; }
+// Altri errori = warn + sleep fisso 5s
+tracing::warn!("Telegram poll error: {:?}", err);
+tokio::time::sleep(Duration::from_secs(5)).await;
+```
+
+Questo è un **backoff fisso**, non exponential. Il `spawn_monitored_channel` del gateway (`gateway.rs:92 retry_config.patient()`, `gateway.rs:154 delay_for_attempt()`) applica exponential backoff, ma **solo al livello del task**, cioè dopo che `start()` ha restituito `Err`.
+
+Nel caso di Telegram, `start()` non ritorna mai: l'inner loop gestisce gli errori e riprova localmente ogni 5 secondi per sempre (finché non c'è un error fatale tipo token invalid che propaga fuori).
+
+#### Perché è importante
+
+1. **Restart attempts sprecati non applicabile qui** (contrario a #11): il gateway non entra mai nel retry path finché Telegram non crasha davvero. Il problema è che **Telegram non crasha mai** — continua a ritentare in loop interno.
+2. **Cascading 5s retry loop**: se Telegram server ha un'outage di 30 minuti, Telegram fa 360 chiamate API (una ogni 5s) prima che il problema si risolva. Spam ai log, spam al rate-limit API Telegram.
+3. **Incoerenza con gli altri canali**: WhatsApp fa il backoff exponential correttamente (`whatsapp.rs:100-102`, 2s → 120s cap). Email fa backoff esponenziale (`email.rs:298-327`). Solo Telegram ha backoff fisso.
+4. **Non è urgentissimo**: 5s backoff non è catastrofico, solo non ottimale. `cargo clippy` non lo flagga perché è logicamente corretto.
+
+#### Root cause
+
+Codice antico: il long-polling loop è stato uno dei primi canali implementati e il pattern `tokio::time::sleep(Duration::from_secs(5))` è stato scelto pragmaticamente prima che il progetto avesse `utils/retry.rs`. Non è mai stato rivisto.
+
+#### Fix proposto
+
+**Opzione A — Usare `utils/retry.rs`**:
+
+1. Importare `use crate::utils::retry::{RetryConfig, delay_for_attempt};`
+2. Mantenere un contatore di errori consecutivi nella func loop
+3. Su errore: `let delay = delay_for_attempt(attempt, &RetryConfig::patient()); sleep(delay).await;`
+4. Reset contatore a 0 su successo (get_updates ritorna OK con ≥0 updates)
+5. Test unit che verifica che backoff cresce (mock clock)
+
+Diff stimato: ~10 righe.
+
+**Opzione B — Far crashare e affidarsi al gateway**:
+
+Invece di gestire gli errori internamente, fare `return Err(...)` quando ci sono N errori consecutivi (es. 3). Il gateway farà restart con exponential backoff centralizzato.
+
+Limite: i messaggi in coda su `outbound_rx` vengono persi quando il canale crasha e restarta.
+
+**Raccomandazione**: Opzione A — riusa `utils/retry.rs` (DRY) e mantiene il canale long-running.
+
+---
+
 ## ✅ Conferme (cose che abbiamo visto funzionare)
+
+### Canali — Audit Sprint 2 (2026-04-14, Recipe H)
+
+Audit sistematico dei 7 canali di messaggistica via **code-only static analysis**
+(stile Reality Audit Sprint 1). Ogni canale verificato su 7 assi: Auth, Text,
+Attach, Capabilities, Proactive, Health, Reconnect. Infrastruttura comune
+(`gateway.rs`, `capabilities.rs`, `health.rs`, `auth.rs`) verificata una volta
+sola — ogni agent ha auditato solo lo specifico del canale.
+
+**Verified channels table**:
+
+| Canale   | Auth | Text | Attach | Caps | Proactive | Health | Reconnect | Overall |
+|----------|:----:|:----:|:------:|:----:|:---------:|:------:|:---------:|:-------:|
+| CLI      | ✅   | ✅   | ✅     | ✅   | ✅        | N/A    | N/A       | **✅**  |
+| Telegram | ✅   | ✅   | ⚠️    | ✅   | ✅        | ⚠️    | ⚠️       | **⚠️** |
+| WhatsApp | ✅   | ✅   | ⚠️    | ⚠️  | ✅        | ⚠️    | ✅        | **⚠️** |
+| Discord  | ✅   | ✅   | ✅     | ✅   | ✅        | ✅     | ✅        | **✅**  |
+| Slack    | ✅   | ⚠️  | ✅     | ✅   | ✅        | ❌     | ⚠️       | **⚠️** |
+| Email    | ⚠️  | ✅   | ⚠️    | ⚠️  | ⚠️       | ✅     | ✅        | **⚠️** |
+| Web      | ✅   | ✅   | ✅     | ✅   | ✅        | N/A    | N/A       | **✅**  |
+
+**Risultati chiave**:
+- ✅ **3/7 canali puliti**: CLI (`cli.rs` 100 righe, trivial e corretto), Discord (`discord.rs` 422 righe, è l'unico che implementa health tracking correttamente), Web (`ws.rs` 492 righe, virtual channel per sessione WS con re-stream dei pending block su reconnect).
+- ✅ **Tutti i 7 canali sono "transport-only"**: nessuno filtra sender localmente (eccetto mention-gating su gruppi), tutti delegano auth a `check_authorization` nel gateway (`auth.rs:28` chiamato da `gateway.rs:892`). Il modello centralizzato è rispettato.
+- ✅ **Capability detection allineata per 5/7 canali** (CLI, Telegram, Discord, Slack, Web): `capabilities_for(name)` coerente con quello che il codice fa davvero.
+- ⚠️ **Capability drift su 2 canali** (WhatsApp `capabilities.rs:138`, Email `capabilities.rs:151`): entrambi dichiarano `outbound_attachments: true` ma nessuno dei due implementa il path di upload. Vedi **bug #10**.
+- ⚠️ **Health tracking adottato solo da Discord**: 3 canali (Telegram, WhatsApp, Slack) non chiamano mai `record_message`/`record_error`. Il circuit breaker non si attiva mai per loro — vedi **bug #11 + #13**.
+- ⚠️ **Telegram backoff fisso** (`telegram.rs:103-104`, 5s hardcoded) vs WhatsApp/Email che fanno exponential — vedi **bug #14**.
+- ⚠️ **Email defense-in-depth rotta**: `is_sender_allowed()` (`email.rs:81-98`) è dead code, mai chiamata. Il gateway comunque blocca gli unknown sender, ma il safety net pre-forward è assente — vedi **bug #12**.
+
+**Per-canale — evidenze chiave**:
+
+**CLI** (`cli.rs` 100 righe): request-response model, bypass diretto del bus (`AgentLoop::process_message("cli:default", "cli", "local")`), nessuna necessità di health/reconnect. Capability 100% accurate. Zero bug.
+
+**Telegram** (`telegram.rs` 615 righe):
+- ✅ Transport-only (`telegram.rs:126` commento esplicito)
+- ✅ Typing state (`telegram.rs:201 send_typing → SendChatActionParams`)
+- ✅ Markdown→HTML conversion (`telegram.rs:326-343`)
+- ✅ `send_document` con `FileUpload` per outbound attachments (`telegram.rs:296-318`, già confermato in Recipe F Sprint 1)
+- ⚠️ Attachment download silent failure (`telegram.rs:142-144`) — il messaggio procede come text-only senza notificare l'utente che l'allegato è stato droppato
+- ⚠️ Health tracking non invocato dal canale (bug #13)
+- ⚠️ Backoff fisso 5s sull'inner loop (bug #14)
+
+**WhatsApp** (`whatsapp.rs` 665 righe):
+- ✅ Grace period post-connect (`whatsapp.rs:189-204`, 10s) per ignorare messaggi queued offline — pattern smart
+- ✅ Exponential backoff 2s→4s→...→120s cap (`whatsapp.rs:100-102`)
+- ✅ Sent IDs circular buffer anti-echo (`whatsapp.rs:153, 296-298`, max 500 IDs con cleanup)
+- ✅ `LoggedOut` event triggers clean exit → gateway non ricomincia (`whatsapp.rs:206-211, 323`) — corretto
+- ❌ Outbound loop (`whatsapp.rs:269-310`) costruisce solo `wa::Message { conversation: Some(text), ..Default::default() }` — **nessun supporto per invio file** (bug #10)
+- ⚠️ Health tracking non invocato (bug #13)
+
+**Discord** (`discord.rs` 422 righe):
+- ✅ Transport-only (`discord.rs:122`)
+- ✅ Struct ha `health: Option<Arc<ChannelHealthTracker>>` (`discord.rs:23`)
+- ✅ `health.record_message()` chiamato nel message handler (`discord.rs:205-207`)
+- ✅ Thread routing via `metadata.thread_id` preservato (`discord.rs:317-322`)
+- ✅ Mention stripping robusto: check duplice `<@bot_id>` e `<@!bot_id>` (`discord.rs:166-168`)
+- ✅ Outbound spawned in `on_ready` una sola volta via `guard.take()` (`discord.rs:272-273`) — no duplicate loop
+- ✅ Resume event tracking (`discord.rs:278-282`)
+- ℹ️ Serenity gestisce il WebSocket reconnect automaticamente — nessun inner backoff custom
+
+**Slack** (`slack.rs` 721 righe):
+- ✅ Socket Mode con ACK ≤3s (`slack.rs:178-185`) — rispetta il protocollo Slack
+- ✅ Dual-mode: Socket Mode se `app_token` presente, altrimenti polling `conversations.history` con cache invalidation 60s (`slack.rs:302-363, 383`)
+- ✅ Thread routing via `thread_ts` preservato in tutti i path: Socket Mode (`slack.rs:267-271`), polling (`slack.rs:470-473`), outbound (`slack.rs:551-552`)
+- ✅ `list_accessible_channels()` con pagination support
+- ❌ **Manca il campo `health`** nello struct (`slack.rs:23-25`) — differisce da DiscordChannel (bug #11)
+- ⚠️ Outbound error (`slack.rs:563`) loggato solo come `tracing::warn`, nessuna notifica al tracker
+- 🟢 Minor: `thread_ts` fallback a empty string se `ts.is_empty()` (`slack.rs:267`) — thread routing può rompersi silenziosamente
+
+**Email** (`email.rs` 1155 righe, il più grande):
+- ✅ IMAP IDLE con keepalive NOOP ogni 5 cicli (`email.rs:485-490`)
+- ✅ Password vault: risoluzione via `global_secrets()` con re-resolve a runtime (`email.rs:136-156`)
+- ✅ Per-account reconnect con backoff esponenziale 1s→60s (`email.rs:298-327`)
+- ✅ Seen messages cache pruning a 5000 (`email.rs:316-322`)
+- ✅ `In-Reply-To` + `References` threading (`email.rs:923-926`)
+- ✅ `ManualInterrupt` → logout graceful (`email.rs:536-538`)
+- ❌ `send_email_account()` (`email.rs:897-964`) usa solo `SinglePart::plain` — **no multipart, no attachment upload** (bug #10)
+- ❌ `is_sender_allowed()` definita ma mai chiamata (bug #12)
+- ⚠️ `proactive_send: true` dichiarato ma nessun handler per invio proattivo non-trigger — supporta solo reply (🟢 minor)
+
+**Web WebSocket** (`ws.rs` 492 righe):
+- ✅ Auth gate: `check_write(&auth)` → 403 se non autorizzato (`ws.rs:50`)
+- ✅ Conversation access check prima dell'upgrade (`ws.rs:62-64`)
+- ✅ Dual outbound channel: `response_tx` full messages + `stream_tx` chunks (`ws.rs:179-260`)
+- ✅ **Pending approval blocks re-stream su reconnect** (`ws.rs:118-177`) — il client non perde lo stato dopo drop connessione
+- ✅ **Task resume feature** (`ws.rs:323-392`): choice block per riprendere task interrotti
+- ✅ Run snapshot persistence in DB (`ws.rs:36-41`)
+- ✅ Session cleanup on disconnect (`ws.rs:480-488`)
+- ✅ **blocks event per file attachments** (`ws.rs:219-226`, fix #8 Sprint 2) — il file_path non viene più droppato
+
+**Bug tracciati**: #10 🔴 capability drift outbound_attachments (WhatsApp+Email),
+#11 🔴 Slack manca `ChannelHealthTracker` integration, #12 🟡 Email
+`is_sender_allowed()` dead code, #13 🟡 Health tracking cieco (Telegram+WA+Slack),
+#14 🟡 Telegram backoff fisso 5s. **Nessun bug viene fixato in Sprint 2** —
+raccolti e tracciati per prioritizzazione utente.
+
+**Dominio "Canali e Messaggistica"**: ❓ → ⚠️ (2026-04-14).
+Non è ✅ perché 4/7 canali hanno bug tracciabili. Nessun bug è 🔴 bloccante
+per la funzionalità core: i canali funzionano, ma hanno gap di observability
+(health tracking) e honesty (capability drift). Fix scheduled per sprint futuro.
 
 ### send_file su Telegram funziona (2026-04-13, Recipe F)
 
@@ -654,6 +1031,39 @@ Risultati chiave:
 - Difesa in profondità: cognition routing + tool_veto + auto-escalation
 - Next: test live per verificare Cloudflare/WAF escalation con fix #5
 
+### H — Canali (7 channels audit) ⚠️ (eseguita 2026-04-14, Sprint 2)
+
+Eseguita via **static code-analysis** dei 7 canali + infrastruttura comune.
+Metodo: 3 Explore agent in parallelo (batch A/B/C), ognuno audita i propri
+canali vs 7 assi (Auth, Text, Attach, Caps, Proactive, Health, Reconnect).
+~4.2K righe di Rust coperte, zero codice runtime eseguito.
+
+**Files auditati**:
+- `src/channels/cli.rs` (100), `telegram.rs` (615), `whatsapp.rs` (665),
+  `discord.rs` (422), `slack.rs` (721), `email.rs` (1155)
+- `src/web/ws.rs` (492)
+- Infrastruttura (già letta nel scoping): `traits.rs`, `capabilities.rs`,
+  `health.rs`, `agent/auth.rs`, spot-check `gateway.rs`
+
+**Risultati chiave**:
+- 3/7 canali ✅ puliti: CLI (100 righe, trivial corretto), Discord
+  (l'unico con health tracking corretto), Web (virtual channel WS con
+  re-stream di approval blocks su reconnect)
+- 4/7 canali ⚠️ con bug tracciabili: Telegram, WhatsApp, Slack, Email
+- 5 nuovi bug aperti: #10 🔴 capability drift (WhatsApp+Email),
+  #11 🔴 Slack health integration missing, #12 🟡 Email `is_sender_allowed`
+  dead code, #13 🟡 health tracking cieco (Telegram+WA+Slack),
+  #14 🟡 Telegram backoff fisso 5s
+- **Pattern architetturale emergente**: `ChannelHealthTracker` è opt-in
+  e solo Discord lo usa. Il trait `Channel` non obbliga i canali a
+  tracciare gli outcome → drift silenzioso tra canali.
+- **Pattern emergente #2**: capability table (`capabilities.rs`) è
+  aspirazionale, non auditata contro l'implementazione. Manca un test
+  meta che verifichi coerenza statica vs runtime.
+- Nessun bug fixato in questa recipe (decisione: raccogli e prioritizza
+  con l'utente in sprint dedicato)
+- Dominio "Canali e Messaggistica": ❓ → ⚠️
+
 ---
 
 ## 🔄 Protocollo di aggiornamento
@@ -686,3 +1096,4 @@ Quando verifichi una feature:
 | 2026-04-13 | **Sprint 3 fix implementati**: #1 (vault 2FA success→error + prompt anti-hallucination rule + retrieve_2fa_blocked audit log), A-bug-7 (confirm action audit log). 952 test pass |
 | 2026-04-13 | **#2 Cognition Reliability — 6 sub-fix implementati**: (A) fallback keyword-based max 15 tool, (B) retry con feedback per text-instead-of-tool, (C) timeout auto-detect 0=smart default (120s ollama, 60s cloud), (D) schema required 5→2, (E) budget globale 90s, (F) cognition_metrics SQLite + API. 953 test pass. CI verde. Target: >90% success rate (da 68% baseline) |
 | 2026-04-14 | **Production Sprint 1 — Reality Audit chiusura**: A-bug-2 (`account.js` null guard in `loadIdentities`/`loadDevices`, commit `f7aa57d`), A-bug-3 (avatar SVG inline placeholder 200 OK invece di 404, commit `c0d5ddd`), A-bug-8 (vault web_api `audit_log` propaga `profile_id`, helper `resolve_profile_id_from_slug`, commit `e74c417`). 942 test pass. Schema `/v1/cognition/metrics` verificato da codice — validazione live pending utente. 0 bug tracciati aperti |
+| 2026-04-14 | **Production Sprint 2 — Audit Canali**: Recipe H eseguita via static code-analysis su 7 canali (~4.2K LOC). Metodo: 3 Explore agent in parallelo. 3/7 ✅ puliti (CLI, Discord, Web), 4/7 ⚠️ con bug. 5 nuovi bug tracciati: #10 🔴 capability drift `outbound_attachments` (WhatsApp+Email), #11 🔴 Slack manca `ChannelHealthTracker`, #12 🟡 Email `is_sender_allowed` dead code, #13 🟡 health tracking cieco (Telegram+WA+Slack), #14 🟡 Telegram backoff fisso 5s. Pattern emergenti: (1) ChannelHealthTracker opt-in e adottato solo da Discord → drift, (2) capability table aspirazionale non auditata contro implementazione. Dominio Canali ❓ → ⚠️. Nessun fix implementato (raccogli e prioritizza). 942 test pass, 0 warning clippy |

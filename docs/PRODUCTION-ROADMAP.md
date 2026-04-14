@@ -18,7 +18,7 @@
 | Asse | Stato | Dettaglio |
 |---|---|---|
 | **Codebase** | ✅ stabile | 953 test, 0 warning clippy, 121K LOC Rust |
-| **Reality Audit** | 🟡 7/16 domini | 5✅ + 1🔧 + bug residui minori; 8 domini ❓ non auditati |
+| **Reality Audit** | 🟡 8/16 domini | 6✅ + 1⚠️ + 1🔧 (canali 4/7 con bug tracciabili); 8 domini ❓ non auditati |
 | **Strategy roadmap** | ✅ Fase 1+2 done | Hardening + Apertura completate. Fase 3 (Consumer) parziale |
 | **Distribuzione** | ❌ blocco | Nessun installer nativo. Solo build-from-source o Docker |
 | **Mobile app** | 🚧 in progress | APP-1 done, APP-2 (block widgets, approvals) in progress |
@@ -75,43 +75,53 @@ Lo scope è scritto in modo che una **nuova sessione Claude** possa iniziare da 
 
 ---
 
-### Sprint 2 — Audit Canali ⛔ L 🔲
+### Sprint 2 — Audit Canali ⛔ L ✅ 2026-04-14
 
 **Obiettivo**: garantire che i 7 canali funzionino end-to-end senza regressioni note.
 
-**Razionale**: i canali sono la superficie utente principale e l'**area a rischio più alto non auditata**. Un bug su Telegram/WhatsApp impatta gli utenti direttamente e spesso silenziosamente.
+**Risultato**:
+- 7/7 canali auditati via **static code-analysis** (metodo Reality Audit stile Sprint 1, ~4.2K LOC Rust coperti)
+- Parallelizzato con 3 Explore agent (batch A: Telegram+WhatsApp, batch B: Discord+Slack, batch C: Email+CLI+Web)
+- **3 canali ✅ puliti**: CLI, Discord, Web
+- **4 canali ⚠️ con bug tracciabili**: Telegram, WhatsApp, Slack, Email
+- **5 nuovi bug aperti** (tutti tracciati in REALITY-AUDIT.md, nessuno fixato in Sprint 2 come da accordo "raccogli e prioritizza"):
+  - #10 🔴 Capability drift `outbound_attachments` (WhatsApp+Email dichiarano support ma non implementano upload)
+  - #11 🔴 Slack manca integrazione `ChannelHealthTracker` (circuit breaker cieco)
+  - #12 🟡 Email `is_sender_allowed()` è dead code (defense-in-depth rotta)
+  - #13 🟡 Health tracking cieco intra-channel (Telegram+WhatsApp+Slack non chiamano record_message/error)
+  - #14 🟡 Telegram backoff fisso 5s (non exponential, spreca restart budget)
+- **Pattern architetturali emersi**:
+  - `ChannelHealthTracker` è opt-in e solo Discord lo usa correttamente → drift silenzioso tra canali
+  - Capability table (`capabilities.rs`) aspirazionale, non auditata contro l'implementazione runtime
+- Dominio "Canali e Messaggistica" passa da ❓ a ⚠️ in REALITY-AUDIT overview
+- 942 test pass, clippy produzione clean (nessuna modifica codice in questo sprint)
+- 1 commit doc-only pulito
 
-**Scope** (recipe stile Reality Audit):
-1. **Telegram**: send/receive testo, allegati (foto, documento), proactive messaging, debouncing batch
-2. **WhatsApp**: pairing flow (re-pairing da gateway), send/receive, allegati, presence indicators
-3. **Discord**: reconnect robusto (resume/cache_ready), thread routing, proactive
-4. **Slack**: Socket Mode vs polling fallback, `chat.postMessage` proactive
-5. **Email**: IMAP IDLE keepalive, SMTP send, allegati, response modes (assisted/automatic/silent)
-6. **CLI**: REPL + one-shot (-m), markdown rendering
-7. **Web (WebSocket)**: stream events, tool timeline, blocks, reconnect, send_file (post-fix #8)
+**Scope** (recipe stile Reality Audit, eseguita come annunciato):
+1. ✅ **Telegram**: ⚠️ 2 bug (#13 health, #14 backoff) + minor silent attachment
+2. ✅ **WhatsApp**: ⚠️ 2 bug (#10 capability drift, #13 health), grace period + exp backoff OK
+3. ✅ **Discord**: tutti 7 assi ✅ — unico canale con health tracking corretto
+4. ✅ **Slack**: ⚠️ 2 bug (#11 health struct, #13 health calls), Socket Mode + polling fallback OK
+5. ✅ **Email**: ⚠️ 3 bug (#10 capability, #12 dead code + minor proactive claim), IMAP IDLE + vault OK
+6. ✅ **CLI**: tutti 7 assi ✅ (dove applicabile) — capability 100% accurate, zero bug
+7. ✅ **Web (WebSocket)**: tutti 7 assi ✅ — fix #8 (send_file ResultBlock) confermato in `ws.rs:219-226`
 
-**Per ogni canale verifica**:
-- ✓ Connessione + auth (pairing OTP funziona)
-- ✓ Send/receive testo
-- ✓ Allegati (upload + download)
-- ✓ Capability detection corretta (`channel_capabilities`)
-- ✓ Proactive messaging (se supportato)
-- ✓ Audit log delle operazioni
-- ✓ Health monitoring (circuit breaker, reconnect)
-
-**File chiave**:
-- `src/channels/{telegram,whatsapp,discord,slack,email,cli}.rs`
-- `src/channels/capabilities.rs`
-- `src/agent/auth.rs`
-- `src/web/ws.rs`
-- `docs/features/01-messaggistica-canali.md`
+**File chiave** (tutti auditati):
+- ✅ `src/channels/{cli,telegram,whatsapp,discord,slack,email}.rs`
+- ✅ `src/channels/capabilities.rs`, `traits.rs`, `health.rs`
+- ✅ `src/agent/auth.rs`, spot-check `gateway.rs`
+- ✅ `src/web/ws.rs`
+- ✅ `docs/features/01-messaggistica-canali.md` (spec confermata coerente)
 
 **Definition of Done**:
-- [ ] Tabella `Verified channels` in REALITY-AUDIT.md con stato per ogni canale
-- [ ] Tutti i canali ✅ o documentati con bug ⚠️
-- [ ] REALITY-AUDIT.md aggiornato
+- [x] Tabella `Verified channels` in REALITY-AUDIT.md con stato 7×9 (Auth, Text, Attach, Caps, Proactive, Health, Reconnect, Overall) per ogni canale
+- [x] Tutti i canali auditati: 3 ✅ puliti + 4 ⚠️ con bug documentati
+- [x] REALITY-AUDIT.md aggiornato (overview row ❓→⚠️, nuova Recipe H in Conferme, 5 nuovi issue #10-#14, cronologia)
+- [x] PRODUCTION-ROADMAP.md: Sprint 2 ✅ + Sprint Summary table aggiornata + cronologia
+- [x] SESSION-PRIMER.md cronologia aggiornata
+- [x] cargo test pass (942, baseline invariata) + clippy clean
 
-**Rischio**: ALTO. Probabilmente trovi bug. Stima 1 settimana per audit + 1-3 giorni di fix.
+**Rischio**: Si è verificato come previsto ALTO — **5 bug trovati** come stimato. Niente fix implementato in questo sprint (decisione architetturale: raccogli + prioritizza). Fix a prioritizzare in sprint dedicato (probabile candidato Sprint 4 o 5).
 
 ---
 
@@ -391,7 +401,7 @@ Lo scope è scritto in modo che una **nuova sessione Claude** possa iniziare da 
 | Sprint | Tipo | Effort | Blocker | Stato |
 |---|---|---|---|---|
 | 1 — Reality Audit chiusura | fix | S | ⛔ | ✅ 2026-04-14 |
-| 2 — Audit Canali | audit | L | ⛔ | 🔲 |
+| 2 — Audit Canali | audit | L | ⛔ | ✅ 2026-04-14 (5 bug tracciati, no fix) |
 | 3 — Audit Memoria + RAG | audit | M | ⛔ | 🔲 |
 | 4 — Audit Sicurezza | audit | M | ⛔ | 🔲 |
 | 5 — Audit Skills + MCP + Contatti | audit | M | 🟡 | 🔲 |
@@ -457,6 +467,7 @@ Ogni sprint è **self-contained** per essere eseguito in una sessione Claude sep
 |---|---|
 | 2026-04-13 | Doc creato. 7 recipe Reality Audit completate, 10 sprint pianificati |
 | 2026-04-14 | Sprint 1 ✅ — 3 sub-bug residui fixati (A-bug-2/3/8), cognition #2 schema+checklist pronti (validazione live pending). 9/10 sprint rimanenti |
+| 2026-04-14 | Sprint 2 ✅ — Audit Canali: 7/7 canali code-audited (~4.2K LOC), 3 ✅ (CLI/Discord/Web) + 4 ⚠️ (Telegram/WhatsApp/Slack/Email). 5 bug tracciati (#10-#14), nessun fix implementato (raccogli+prioritizza). Pattern emergenti: health tracking opt-in adottato solo da Discord, capability table non auditata. Dominio Canali ❓→⚠️. 8/10 sprint rimanenti |
 
 ---
 
