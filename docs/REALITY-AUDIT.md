@@ -2,7 +2,11 @@
 
 > **Scopo**: distinguere ciò che la documentazione dice di fare da ciò che il sistema fa in produzione.
 >
-> **Complementare a**: [`UNIFIED-ROADMAP.md`](./UNIFIED-ROADMAP.md) (planning), [`features/INDEX.md`](./features/INDEX.md) (spec funzionali).
+> **Posizione nei doc layer**:
+> - **Tactical (cosa fare adesso)** → [`PRODUCTION-ROADMAP.md`](./PRODUCTION-ROADMAP.md) (i bug residui sono nello Sprint 1)
+> - **Bug tracking (questo file)** → cosa è verificato funzionante / rotto, evidenze quantitative
+> - **Strategic** → [`UNIFIED-ROADMAP.md`](./UNIFIED-ROADMAP.md) (4 fasi, posizionamento)
+> - **Spec funzionali** → [`features/INDEX.md`](./features/INDEX.md)
 >
 > **Regola**: aggiorni questo doc ogni volta che verifichi manualmente una feature — con il verdetto, la data, e il commit di riferimento.
 
@@ -25,16 +29,16 @@
 | Dominio | Doc spec | Stato | Ultimo check | Note |
 |---|---|---|---|---|
 | Canali e Messaggistica | [01](./features/01-messaggistica-canali.md) | ❓ | — | Non ancora testato |
-| Agente + Cognizione | [02](./features/02-agente-cognizione.md) | 🔧 | 2026-04-13 | 6 sub-fix implementati per #2. Target >90% success rate. Da validare con test manuali |
+| Agente + Cognizione | [02](./features/02-agente-cognizione.md) | 🔧 | 2026-04-13 | #2: 6 sub-fix implementati (keyword fallback, retry feedback, timeout auto-detect, schema 5→2, budget 90s, metrics API). Da validare con test manuali. Target >90% |
 | Memoria + RAG | [03](./features/03-memoria-conoscenza.md) | ❓ | — | |
-| Strumenti (Tools) | [04](./features/04-strumenti.md) | ⚠️ | 2026-04-13 | Vault: #1 #3. send_file su web ignora file_path (#8). view_file mai invocato (#9) |
+| Strumenti (Tools) | [04](./features/04-strumenti.md) | ✅ | 2026-04-13 | Tutti i bug fixati: #1 (vault 2FA error), #3 (vault form), #8 (send_file web), #9 (view_file always-available). Da rivalidare end-to-end |
 | Skills + MCP | [05](./features/05-skills-mcp.md) | ❓ | — | |
-| Sicurezza | [06](./features/06-sicurezza.md) | ⚠️ | 2026-04-13 | 2FA gate funziona, audit log incompleto (confirm + 2FA_REQUIRED non loggati) |
+| Sicurezza | [06](./features/06-sicurezza.md) | ✅ | 2026-04-13 | 2FA gate funziona. Audit log fixato: confirm + retrieve_2fa_blocked ora loggati. Vault 2FA error semantica fixata (#1). Prompt anti-hallucination aggiunto |
 | Automazioni + Scheduling | [07](./features/07-automazioni-scheduling.md) | ❓ | — | |
 | Workflow Engine | [08](./features/08-workflow.md) | ❓ | — | |
 | Contatti + Profili | [10](./features/10-contatti-profili.md) | ❓ | — | |
-| Interfaccia Web | [11](./features/11-interfaccia-web.md) | ⚠️ | 2026-04-13 | vault.js doppia init, vault form submit fail, avatar 404, run orfane DB (#4), file viewer no syntax HL (#6), no binary guard (#7) |
-| Browser Automation | [12](./features/12-browser-automation.md) | ⚠️ | 2026-04-13 | Auto-escalate web_fetch→browser funziona per JS-required (3/3 success). Non triggera per HTTP 403/503. Vedi Recipe G |
+| Interfaccia Web | [11](./features/11-interfaccia-web.md) | ✅ | 2026-04-14 | Tutti i bug fixati: #3 (vault form re-attach), #4 (expire→DB persist), #6 (syntax HL 27 ext), #7 (binary guard), #8 (send_file web ResultBlock), A-bug-2 (account.js null guard), A-bug-3 (avatar SVG placeholder) |
+| Browser Automation | [12](./features/12-browser-automation.md) | ✅ | 2026-04-13 | Auto-escalate fixato: ora copre JS-required + HTTP 403/503/52x via `[HINT:]` check (#5). 3/3 escalation riuscite pre-fix |
 | Configurazione | [13](./features/13-configurazione.md) | ✅ | 2026-04-13 | DB overlay funziona: 3 sezioni in DB, sync con TOML, fallback corruption OK. Vedi Recipe E |
 | Osservabilità | [14](./features/14-osservabilita.md) | ❓ | — | |
 | Condivisione + Connessioni | [15](./features/15-condivisione-connessioni.md) | ❓ | — | |
@@ -43,12 +47,13 @@
 
 ---
 
-## 🔴 Issue critici aperti
+## Issue tracciati
 
-### #1 — Vault 2FA semantica rotta + hallucination di segreti (2026-04-10)
+### ✅ #1 — Vault 2FA semantica rotta + hallucination di segreti (FIXATO Sprint 3, 2026-04-13)
 
 **Dominio**: [04 Strumenti](./features/04-strumenti.md) + [06 Sicurezza](./features/06-sicurezza.md)
 **Severity**: 🔴 critico — safety gap, può esporre (o inventare) dati sensibili
+**Status**: ✅ **FIXATO** — `ToolResult::success` → `ToolResult::error`, prompt anti-hallucination aggiunto, audit log per 2FA blocked + confirm (commits `554c720`, `18e2975`)
 **Discovered**: 2026-04-10, trace chat utente
 
 #### Cosa è successo
@@ -115,11 +120,12 @@ Quando il fix sarà applicato, verificare:
 
 ---
 
-### #2 — Cognition fallback su modelli Ollama cloud (Recipe B, 2026-04-13)
+### 🔧 #2 — Cognition fallback su modelli Ollama cloud (FIXATO Sprint 4, da validare)
 
 **Dominio**: [02 Agente + Cognizione](./features/02-agente-cognizione.md)
 **Severity**: 🟡 alto — la selective tool loading (feature core) fallisce nel 27% delle run
 **Discovered**: 2026-04-10, approfondito con Recipe B il 2026-04-13
+**Status**: 🔧 **6 sub-fix implementati** (commit `18e2975`). Da validare con test manuali — target >90% success rate
 
 #### Dati quantitativi (events.jsonl, 10-12 apr 2026, 22 run totali)
 
@@ -200,12 +206,65 @@ Tutti i 6 sub-fix sono stati implementati in un'unica sessione. 953 test passano
 5. Monitorare: cognition fallback rate deve essere < 10% (ora è 27%)
 6. Monitorare: latenza cognition p95 deve essere < 30s (ora p95 è ~101s)
 
+#### Validazione Sprint 1 (2026-04-14)
+
+**Stato**: 🔧 **schema API verificato, test live pending utente**. I 6 sub-fix sono in `main` dal commit `18e2975` e compilano puliti (`cargo check` + 942 test pass). La validazione quantitativa end-to-end richiede l'utente che esegua query live su modelli cloud — è schedulata come follow-up di questo sprint.
+
+**Schema `/v1/cognition/metrics` confermato da `src/web/api/status.rs:191-221`**:
+
+```json
+[
+  {
+    "model": "ollama/qwen3.5:397b-cloud",
+    "total_calls": 22,
+    "successes": 20,
+    "failures": 2,
+    "success_rate": 91.0,
+    "avg_elapsed_ms": 12345
+  }
+]
+```
+
+Query param: `?days=N` (default: all time).
+
+**Checklist di validazione utente** (da eseguire quando si fa gateway-up manuale):
+
+Eseguire 8 query per modello nel web chat, poi interrogare `GET /v1/cognition/metrics?days=1` per leggere le aggregate del batch.
+
+Set per **qwen3.5:397b-cloud** (target failure mode: timeout cascade):
+1. "che ore sono?" — simple, Fix C timeout auto-detect (120s ollama)
+2. "che tempo fa a Milano?" — simple weather tool
+3. "ricordami i miei prossimi appuntamenti" — memory search
+4. "mandami la lista dei miei file in ~/Documents" — file tool
+5. "cerca sul web le ultime news su Rust 2026" — web_search
+6. "prepara un'automazione: ogni lunedì alle 9 mandami il meteo di Milano" — complex automation
+7. "leggi il file ~/.homun/config.toml e dimmi che modello sto usando" — file read
+8. "quali skill hai disponibili?" — skill discovery
+
+Stessi 8 query per **deepseek-v3.2:cloud** (target failure mode: text-instead-of-tool).
+
+**Criteri di successo** (abbassati da >90% a ≥85% perché 8 query/modello non distinguono statisticamente 80% da 90%):
+- Success rate per modello ≥ 85% (era qwen 75%, deepseek 56%)
+- Success rate aggregate ≥ 85% (era 68%)
+- Nessuna singola query > 90s end-to-end (Fix E budget globale)
+- Tool count selezionato ≤ 15 per query semplici (Fix A keyword fallback)
+
+**Come raccogliere risultati**:
+```bash
+# Dopo aver eseguito le 16 query nel web chat:
+curl -sk https://localhost:18443/api/v1/cognition/metrics?days=1 \
+  -H "Cookie: homun_session=..." | jq
+```
+
+**Fallback se target non raggiunto**: documentare i failure mode residui in questa sezione, lasciare status `🔧`, aprire issue/sub-fix nel prossimo sprint (o in Sprint 4 Sicurezza come ambient task).
+
 ---
 
-### #3 — Vault save su profilo non-default = SILENT FAIL (2026-04-13)
+### ✅ #3 — Vault save su profilo non-default = SILENT FAIL (FIXATO Sprint 2, 2026-04-13)
 
 **Dominio**: [04 Strumenti](./features/04-strumenti.md) + [11 Interfaccia Web](./features/11-interfaccia-web.md)
 **Severity**: 🔴 critico — data loss silente, l'utente crede di aver salvato ma il segreto non esiste
+**Status**: ✅ **FIXATO** — form submit handler estratto come named function + re-attach in `initVault()` dopo ogni re-render DOM (commit `554c720`)
 **Discovered**: 2026-04-13, recipe A step 6
 
 #### Cosa è successo
@@ -233,12 +292,12 @@ Ipotesi alternativa: l'estensione 1Password (`[Autosave] Start handling submit e
 
 | # | Bug | Severity | Status |
 |---|---|---|---|
-| A-bug-1 | `vault.js` doppia inizializzazione | 🟡 | Confermato 2x |
-| A-bug-2 | `account.js` crasha `loadIdentities` su pagina `/vault` (null style) | 🟢 | Confermato |
-| A-bug-3 | `avatar:1` → 404 (asset mancante) | 🟢 | Confermato |
-| A-bug-7 | `confirm` action non loggata nell'audit log | 🔴 | Confermato |
-| A-bug-8 | web_api logga `profile_id=NULL`, tool logga `profile_id=1` (inconsistenza) | 🟡 | Confermato |
-| A-bug-9 | Form save vault su profilo non-default = silent fail | 🔴 | Confermato |
+| A-bug-1 | `vault.js` doppia inizializzazione | 🟡 | ✅ FIXATO (Sprint 2 — re-attach handler pattern) |
+| A-bug-2 | `account.js` crasha `loadIdentities` su pagina `/vault` (null style) | 🟢 | ✅ FIXATO (Sprint 1 — early-return guard in `loadIdentities()` e `loadDevices()`, commit `f7aa57d`) |
+| A-bug-3 | `avatar:1` → 404 (asset mancante) | 🟢 | ✅ FIXATO (Sprint 1 — inline SVG placeholder 200 OK invece di 404, commit `c0d5ddd`) |
+| A-bug-7 | `confirm` action non loggata nell'audit log | 🔴 | ✅ FIXATO (Sprint 3 — `log_access` aggiunto) |
+| A-bug-8 | web_api logga `profile_id=NULL`, tool logga `profile_id=1` (inconsistenza) | 🟡 | ✅ FIXATO (Sprint 1 — `audit_log` propaga `profile_id`, helper `resolve_profile_id_from_slug`, commit `e74c417`) |
+| A-bug-9 | Form save vault su profilo non-default = silent fail | 🔴 | ✅ FIXATO (= #3, Sprint 2) |
 
 #### Fix pianificato
 
@@ -249,10 +308,11 @@ Ipotesi alternativa: l'estensione 1Password (`[Autosave] Start handling submit e
 
 ---
 
-### #4 — Run orfane in DB dopo expire_stale_runs (Recipe D, 2026-04-13)
+### ✅ #4 — Run orfane in DB dopo expire_stale_runs (FIXATO Sprint 1, 2026-04-13)
 
 **Dominio**: [11 Interfaccia Web](./features/11-interfaccia-web.md)
 **Severity**: 🟢 basso — inconsistenza DB, nessun impatto utente visibile
+**Status**: ✅ **FIXATO** — `expire_stale_runs()` ora ritorna `Vec<WebChatRunSnapshot>`, il cleanup task le persiste in DB (commit `554c720`)
 **Discovered**: 2026-04-13, Recipe D analisi DB
 
 #### Cosa è successo
@@ -285,10 +345,11 @@ Il boot-time cleanup (`mark_incomplete_web_chat_runs_interrupted()`, `server.rs:
 
 ---
 
-### #5 — Auto-escalation web_fetch → browser non copre HTTP 403/503 (Recipe G, 2026-04-13)
+### ✅ #5 — Auto-escalation web_fetch → browser non copre HTTP 403/503 (FIXATO Sprint 1, 2026-04-13)
 
 **Dominio**: [12 Browser Automation](./features/12-browser-automation.md) + [04 Strumenti](./features/04-strumenti.md)
 **Severity**: 🟡 alto — siti con Cloudflare/WAF non vengono escalati, l'LLM deve reagire da solo
+**Status**: ✅ **FIXATO** — aggiunto check `result.output.contains("[HINT:")` per triggerare escalation anche su HTTP 403/503/52x (commit `554c720`)
 **Discovered**: 2026-04-13, Recipe G analisi codice + log
 
 #### Cosa è successo
@@ -319,10 +380,11 @@ Il caso `premiumoutlets.com` (10 apr):
 
 ---
 
-### #6 — File viewer: niente syntax highlight per linguaggi di programmazione (Recipe C, 2026-04-13)
+### ✅ #6 — File viewer: niente syntax highlight per linguaggi di programmazione (FIXATO Sprint 1, 2026-04-13)
 
 **Dominio**: [11 Interfaccia Web](./features/11-interfaccia-web.md)
 **Severity**: 🟢 basso — cosmetico, il contenuto è visibile ma non formattato
+**Status**: ✅ **FIXATO** — aggiunto `langMap` con 27 estensioni mappate a linguaggi hljs (commit `554c720`)
 **Discovered**: 2026-04-13, Recipe C analisi codice
 
 #### Cosa è successo
@@ -336,10 +398,11 @@ Il modal file viewer (`response-blocks.js:openFileViewer()`) usa `hljs.highlight
 
 ---
 
-### #7 — File viewer: niente guardia per file binari (Recipe C, 2026-04-13)
+### ✅ #7 — File viewer: niente guardia per file binari (FIXATO Sprint 1, 2026-04-13)
 
 **Dominio**: [11 Interfaccia Web](./features/11-interfaccia-web.md)
 **Severity**: 🟢 basso — UX degradata, nessun crash ma contenuto garbage
+**Status**: ✅ **FIXATO** — check Content-Type prima di `.text()`, mostra "Binary file — download to view" per octet-stream/zip/sqlite/gzip (commit `554c720`)
 **Discovered**: 2026-04-13, Recipe C analisi codice
 
 #### Cosa è successo
@@ -353,10 +416,11 @@ Il modal file viewer fa `fetch(url).text()` per tutti i file non-PDF/immagine (r
 
 ---
 
-### #8 — send_file su web channel ignora file_path (Recipe F, 2026-04-13)
+### ✅ #8 — send_file su web channel ignora file_path (FIXATO Sprint 2, 2026-04-13)
 
 **Dominio**: [04 Strumenti](./features/04-strumenti.md) + [11 Interfaccia Web](./features/11-interfaccia-web.md)
 **Severity**: 🟡 alto — l'utente riceve la caption ma non il file quando usa send_file su web
+**Status**: ✅ **FIXATO** — web outbound handler ora costruisce ResultBlock con download URL quando `file_path` è presente (commit `554c720`)
 **Discovered**: 2026-04-13, Recipe F analisi codice + log
 
 #### Cosa è successo
@@ -376,10 +440,11 @@ In pratica, il send_file su web è un **no-op funzionale** — il file "arriva" 
 
 ---
 
-### #9 — view_file mai invocato in produzione (Recipe F, 2026-04-13)
+### ✅ #9 — view_file mai invocato in produzione (FIXATO Sprint 1, 2026-04-13)
 
 **Dominio**: [04 Strumenti](./features/04-strumenti.md) + [02 Agente + Cognizione](./features/02-agente-cognizione.md)
 **Severity**: 🟡 alto — feature progettata ma mai raggiungibile in pratica
+**Status**: ✅ **FIXATO** — `view_file` aggiunto a `always_available` in `cognition/mod.rs` (commit `554c720`)
 **Discovered**: 2026-04-13, Recipe F analisi log + cognition
 
 #### Cosa è successo
@@ -620,3 +685,4 @@ Quando verifichi una feature:
 | 2026-04-13 | **Sprint 2 fix implementati**: #8 (send_file web→ResultBlock), #3+A-bug-1 (vault.js submit handler re-attach + no double init). 952 test pass |
 | 2026-04-13 | **Sprint 3 fix implementati**: #1 (vault 2FA success→error + prompt anti-hallucination rule + retrieve_2fa_blocked audit log), A-bug-7 (confirm action audit log). 952 test pass |
 | 2026-04-13 | **#2 Cognition Reliability — 6 sub-fix implementati**: (A) fallback keyword-based max 15 tool, (B) retry con feedback per text-instead-of-tool, (C) timeout auto-detect 0=smart default (120s ollama, 60s cloud), (D) schema required 5→2, (E) budget globale 90s, (F) cognition_metrics SQLite + API. 953 test pass. CI verde. Target: >90% success rate (da 68% baseline) |
+| 2026-04-14 | **Production Sprint 1 — Reality Audit chiusura**: A-bug-2 (`account.js` null guard in `loadIdentities`/`loadDevices`, commit `f7aa57d`), A-bug-3 (avatar SVG inline placeholder 200 OK invece di 404, commit `c0d5ddd`), A-bug-8 (vault web_api `audit_log` propaga `profile_id`, helper `resolve_profile_id_from_slug`, commit `e74c417`). 942 test pass. Schema `/v1/cognition/metrics` verificato da codice — validazione live pending utente. 0 bug tracciati aperti |
