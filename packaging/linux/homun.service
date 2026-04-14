@@ -1,0 +1,44 @@
+[Unit]
+Description=Homun — Personal AI Assistant
+Documentation=https://homun.dev https://github.com/homunbot/homun
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=homun
+Group=homun
+ExecStart=/usr/bin/homun gateway
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+
+# Working directory + environment
+WorkingDirectory=/var/lib/homun
+Environment=HOME=/var/lib/homun
+Environment=RUST_LOG=info
+Environment=HOMUN_DATA_DIR=/var/lib/homun/.homun
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+PrivateTmp=true
+PrivateDevices=true
+
+# Writable paths
+ReadWritePaths=/var/lib/homun
+
+# Resource limits
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

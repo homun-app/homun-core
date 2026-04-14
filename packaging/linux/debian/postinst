@@ -1,0 +1,78 @@
+#!/bin/sh
+# Post-install script for homun .deb package
+#
+# Responsibilities:
+#   1. Create a dedicated system user `homun` (home: /var/lib/homun)
+#   2. Create the data directory with correct ownership
+#   3. Reload systemd so the shipped unit becomes visible
+#   4. Print a friendly post-install message (NOT auto-start — user opts in)
+#
+# This script is idempotent and safe to re-run.
+
+set -e
+
+HOMUN_USER="homun"
+HOMUN_HOME="/var/lib/homun"
+HOMUN_DATA="${HOMUN_HOME}/.homun"
+
+case "$1" in
+    configure)
+        # Create system user if missing
+        if ! getent passwd "${HOMUN_USER}" >/dev/null 2>&1; then
+            adduser --system --group \
+                    --home "${HOMUN_HOME}" \
+                    --shell /usr/sbin/nologin \
+                    --gecos "Homun AI assistant" \
+                    "${HOMUN_USER}" >/dev/null
+        fi
+
+        # Create data dir with correct ownership (survives reinstall)
+        if [ ! -d "${HOMUN_HOME}" ]; then
+            mkdir -p "${HOMUN_HOME}"
+        fi
+        if [ ! -d "${HOMUN_DATA}" ]; then
+            mkdir -p "${HOMUN_DATA}"
+        fi
+        chown -R "${HOMUN_USER}:${HOMUN_USER}" "${HOMUN_HOME}"
+        chmod 750 "${HOMUN_HOME}"
+
+        # Reload systemd so homun.service is picked up
+        if [ -x /bin/systemctl ] || [ -x /usr/bin/systemctl ]; then
+            systemctl daemon-reload || true
+        fi
+
+        # Friendly post-install message
+        cat <<'EOF'
+
+╔══════════════════════════════════════════════════════════════╗
+║  Homun installed successfully! 🎉                            ║
+╠══════════════════════════════════════════════════════════════╣
+║                                                              ║
+║  Next steps:                                                 ║
+║    1. Configure:                                             ║
+║         sudo -u homun homun config                           ║
+║    2. Start as a service (auto-start at boot):               ║
+║         sudo systemctl enable --now homun                    ║
+║    3. Or run interactively:                                  ║
+║         sudo -u homun homun gateway                          ║
+║                                                              ║
+║  Web UI:        http://localhost:8777                        ║
+║  Data dir:      /var/lib/homun/.homun                        ║
+║  Logs:          journalctl -u homun -f                       ║
+║  Docs:          https://homun.dev                            ║
+║                                                              ║
+╚══════════════════════════════════════════════════════════════╝
+
+EOF
+        ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+
+    *)
+        echo "postinst called with unknown argument: $1" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

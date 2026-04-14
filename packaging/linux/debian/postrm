@@ -1,0 +1,49 @@
+#!/bin/sh
+# Post-removal script for homun .deb package
+#
+# On `apt remove`: reload systemd, keep user data intact.
+# On `apt purge`:  remove the homun system user + /var/lib/homun (including vault + db).
+#
+# Rationale: users installing via .deb expect `apt purge` to wipe everything,
+# while `apt remove` should be safe for reinstall without data loss.
+
+set -e
+
+HOMUN_USER="homun"
+HOMUN_HOME="/var/lib/homun"
+
+case "$1" in
+    remove)
+        if [ -x /bin/systemctl ] || [ -x /usr/bin/systemctl ]; then
+            systemctl daemon-reload 2>/dev/null || true
+        fi
+        ;;
+
+    purge)
+        # Wipe data directory (contains vault, db, memory — make this loud)
+        if [ -d "${HOMUN_HOME}" ]; then
+            rm -rf "${HOMUN_HOME}"
+        fi
+
+        # Remove the system user (requires deluser from adduser pkg)
+        if getent passwd "${HOMUN_USER}" >/dev/null 2>&1; then
+            if command -v deluser >/dev/null 2>&1; then
+                deluser --system "${HOMUN_USER}" >/dev/null 2>&1 || true
+            fi
+        fi
+
+        if [ -x /bin/systemctl ] || [ -x /usr/bin/systemctl ]; then
+            systemctl daemon-reload 2>/dev/null || true
+        fi
+        ;;
+
+    upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+        ;;
+
+    *)
+        echo "postrm called with unknown argument: $1" >&2
+        exit 1
+        ;;
+esac
+
+exit 0
