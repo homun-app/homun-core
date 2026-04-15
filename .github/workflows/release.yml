@@ -179,11 +179,17 @@ jobs:
       #   APPLE_APP_SPECIFIC_PASSWORD   app-specific password from appleid.apple.com
       # See docs/INSTALLER-SIGNING-SETUP.md for how to obtain and configure these.
 
+      # NOTE: GitHub Actions does NOT expose the `secrets` context in step-level
+      # `if:` conditions (it is only available in `env:` and `with:`). To gate
+      # this step on whether the cert secret is populated, we copy it into a
+      # step env var first, then check `env.APPLE_CERTIFICATE_P12 != ''` in if.
+      # Field ordering inside a step is irrelevant — GitHub parses all keys
+      # before evaluating any of them.
       - name: Import signing certificate
-        if: ${{ secrets.APPLE_CERTIFICATE_P12 != '' }}
         env:
           APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        if: env.APPLE_CERTIFICATE_P12 != ''
         run: |
           # Create a temporary keychain and import the certificate for
           # the duration of the runner session. The keychain is destroyed
