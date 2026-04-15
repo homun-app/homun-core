@@ -6107,7 +6107,7 @@ dependencies = [
 [[package]]
 name = "wa-rs"
 version = "0.2.0"
-source = "git+https://github.com/homunbot/wa-rs?rev=d369582#d3695821e8cc435d14768188bc39bcfaffb96f1f"
+source = "git+https://github.com/homun-app/wa-rs?rev=d369582#d3695821e8cc435d14768188bc39bcfaffb96f1f"
 dependencies = [
  "anyhow",
  "async-channel 2.5.0",
@@ -6139,7 +6139,7 @@ dependencies = [
 [[package]]
 name = "wa-rs-appstate"
 version = "0.2.0"
-source = "git+https://github.com/homunbot/wa-rs?rev=d369582#d3695821e8cc435d14768188bc39bcfaffb96f1f"
+source = "git+https://github.com/homun-app/wa-rs?rev=d369582#d3695821e8cc435d14768188bc39bcfaffb96f1f"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -6160,7 +6160,7 @@ dependencies = [
 [[package]]
 name = "wa-rs-binary"
 version = "0.2.0"
-source = "git+https://github.com/homunbot/wa-rs?rev=d369582#d3695821e8cc435d14768188bc39bcfaffb96f1f"
+source = "git+https://github.com/homun-app/wa-rs?rev=d369582#d3695821e8cc435d14768188bc39bcfaffb96f1f"
 dependencies = [
  "flate2",
  "phf 0.13.1",
@@ -6172,7 +6172,7 @@ dependencies = [
 [[package]]
 name = "wa-rs-core"
 version = "0.2.0"
-source = "git+https://github.com/homunbot/wa-rs?rev=d369582#d3695821e8cc435d14768188bc39bcfaffb96f1f"
+source = "git+https://github.com/homun-app/wa-rs?rev=d369582#d3695821e8cc435d14768188bc39bcfaffb96f1f"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -6212,7 +6212,7 @@ dependencies = [
 [[package]]
 name = "wa-rs-derive"
 version = "0.2.0"
-source = "git+https://github.com/homunbot/wa-rs?rev=d369582#d3695821e8cc435d14768188bc39bcfaffb96f1f"
+source = "git+https://github.com/homun-app/wa-rs?rev=d369582#d3695821e8cc435d14768188bc39bcfaffb96f1f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6222,7 +6222,7 @@ dependencies = [
 [[package]]
 name = "wa-rs-libsignal"
 version = "0.2.0"
-source = "git+https://github.com/homunbot/wa-rs?rev=d369582#d3695821e8cc435d14768188bc39bcfaffb96f1f"
+source = "git+https://github.com/homun-app/wa-rs?rev=d369582#d3695821e8cc435d14768188bc39bcfaffb96f1f"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -6255,7 +6255,7 @@ dependencies = [
 [[package]]
 name = "wa-rs-noise"
 version = "0.2.0"
-source = "git+https://github.com/homunbot/wa-rs?rev=d369582#d3695821e8cc435d14768188bc39bcfaffb96f1f"
+source = "git+https://github.com/homun-app/wa-rs?rev=d369582#d3695821e8cc435d14768188bc39bcfaffb96f1f"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -6275,7 +6275,7 @@ dependencies = [
 [[package]]
 name = "wa-rs-proto"
 version = "0.2.0"
-source = "git+https://github.com/homunbot/wa-rs?rev=d369582#d3695821e8cc435d14768188bc39bcfaffb96f1f"
+source = "git+https://github.com/homun-app/wa-rs?rev=d369582#d3695821e8cc435d14768188bc39bcfaffb96f1f"
 dependencies = [
  "prost",
  "prost-build",
@@ -6285,7 +6285,7 @@ dependencies = [
 [[package]]
 name = "wa-rs-sqlite-storage"
 version = "0.2.0"
-source = "git+https://github.com/homunbot/wa-rs?rev=d369582#d3695821e8cc435d14768188bc39bcfaffb96f1f"
+source = "git+https://github.com/homun-app/wa-rs?rev=d369582#d3695821e8cc435d14768188bc39bcfaffb96f1f"
 dependencies = [
  "async-trait",
  "bincode",
@@ -6303,7 +6303,7 @@ dependencies = [
 [[package]]
 name = "wa-rs-tokio-transport"
 version = "0.2.0"
-source = "git+https://github.com/homunbot/wa-rs?rev=d369582#d3695821e8cc435d14768188bc39bcfaffb96f1f"
+source = "git+https://github.com/homun-app/wa-rs?rev=d369582#d3695821e8cc435d14768188bc39bcfaffb96f1f"
 dependencies = [
  "anyhow",
  "async-channel 2.5.0",
@@ -6323,7 +6323,7 @@ dependencies = [
 [[package]]
 name = "wa-rs-ureq-http"
 version = "0.2.0"
-source = "git+https://github.com/homunbot/wa-rs?rev=d369582#d3695821e8cc435d14768188bc39bcfaffb96f1f"
+source = "git+https://github.com/homun-app/wa-rs?rev=d369582#d3695821e8cc435d14768188bc39bcfaffb96f1f"
 dependencies = [
  "anyhow",
  "async-trait",

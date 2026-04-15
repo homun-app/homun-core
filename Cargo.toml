@@ -161,12 +161,12 @@ frankenstein = { version = "0.49", default-features = false, features = ["client
 serenity = { version = "0.12", default-features = false, features = ["client", "gateway", "model", "cache", "rustls_backend"], optional = true }
 
 # --- WhatsApp channel ---
-wa-rs = { git = "https://github.com/homunbot/wa-rs", rev = "d369582", optional = true }
-wa-rs-sqlite-storage = { git = "https://github.com/homunbot/wa-rs", rev = "d369582", optional = true }
-wa-rs-tokio-transport = { git = "https://github.com/homunbot/wa-rs", rev = "d369582", optional = true }
-wa-rs-ureq-http = { git = "https://github.com/homunbot/wa-rs", rev = "d369582", optional = true }
-wa-rs-core = { git = "https://github.com/homunbot/wa-rs", rev = "d369582", optional = true }
-wa-rs-proto = { git = "https://github.com/homunbot/wa-rs", rev = "d369582", optional = true }
+wa-rs = { git = "https://github.com/homun-app/wa-rs", rev = "d369582", optional = true }
+wa-rs-sqlite-storage = { git = "https://github.com/homun-app/wa-rs", rev = "d369582", optional = true }
+wa-rs-tokio-transport = { git = "https://github.com/homun-app/wa-rs", rev = "d369582", optional = true }
+wa-rs-ureq-http = { git = "https://github.com/homun-app/wa-rs", rev = "d369582", optional = true }
+wa-rs-core = { git = "https://github.com/homun-app/wa-rs", rev = "d369582", optional = true }
+wa-rs-proto = { git = "https://github.com/homun-app/wa-rs", rev = "d369582", optional = true }
 futures-util = { version = "0.3", optional = true }
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
 
