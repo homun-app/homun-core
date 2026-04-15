@@ -213,7 +213,13 @@ jobs:
           CARGO_TARGET: ${{ matrix.target }}
           HOMUN_ARCH: ${{ matrix.arch }}
         run: |
-          export HOMUN_BINARY="target/${CARGO_TARGET}/release/homun"
+          # IMPORTANT: HOMUN_BINARY must be an ABSOLUTE path. The
+          # create-dmg.sh script does cd "$(dirname "$0")" early, which
+          # changes working dir to packaging/macos/. A relative path here
+          # would then resolve to packaging/macos/target/... and fail.
+          # Use $GITHUB_WORKSPACE which is the absolute path to the
+          # checkout root on the runner.
+          export HOMUN_BINARY="${GITHUB_WORKSPACE}/target/${CARGO_TARGET}/release/homun"
           bash packaging/macos/create-dmg.sh
 
       - name: Upload artifacts
