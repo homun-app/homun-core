@@ -57,7 +57,7 @@ Use the **quoted string** (everything inside the quotes) as `APPLE_SIGNING_IDENT
 
 ### 5. Configure GitHub Secrets
 
-Go to `github.com/homunbot/homun` → Settings → Secrets and variables → Actions → New repository secret.
+Go to `github.com/homun-app/homun-core` → Settings → Secrets and variables → Actions → New repository secret. (Secrets live on the **private** repo where CI runs; the `release.yml` workflow will publish signed artifacts to `homun-app/homun` via the cross-repo PAT — see `docs/MIGRATION-SPLIT-REPO.md` Phase 5-6.)
 
 Add these 6 secrets:
 
@@ -92,7 +92,7 @@ Expected output includes:
 - `✓ Bundle signed`
 - `--- Notarizing ---`
 - `✓ Notarized + stapled`
-- Output DMG in `packaging/macos/build/Homun-0.1.0-arm64.dmg`
+- Output DMG in `packaging/macos/build/Homun-1.0.0-arm64.dmg`
 
 Verify the result:
 
@@ -111,7 +111,7 @@ git tag -a v0.1.1 -m "First signed release"
 git push origin v0.1.1
 ```
 
-The `release.yml` workflow kicks in. Watch it at `github.com/homunbot/homun/actions`. The `package-macos` job should complete in ~8-15 minutes (binary build + sign + notarize + staple).
+The `release.yml` workflow kicks in. Watch it at `github.com/homun-app/homun-core/actions`. The `package-macos` job should complete in ~8-15 minutes (binary build + sign + notarize + staple).
 
 If the "unsigned warning" is appended to the release notes after the workflow finishes, something in the secrets is misconfigured — check that `APPLE_CERTIFICATE_P12` is set (and not empty) and re-run the workflow from the Actions tab.
 

@@ -1,7 +1,7 @@
 # Homebrew packaging
 
 This directory contains the template for the Homebrew formula that publishes
-Homun to the `homunbot/homebrew-tap` tap.
+Homun to the `homun-app/homebrew-tap` tap.
 
 ## Files
 
@@ -11,24 +11,24 @@ Homun to the `homunbot/homebrew-tap` tap.
 
 ## One-time manual setup (not yet done)
 
-The Homebrew tap repository `github.com/homunbot/homebrew-tap` must be
+The Homebrew tap repository `github.com/homun-app/homebrew-tap` must be
 created **manually** — Claude cannot create repos on behalf of the user.
 
 Steps to set up the tap the first time:
 
-1. Create a new public repo at `github.com/homunbot/homebrew-tap` (empty, no README)
+1. Create a new public repo at `github.com/homun-app/homebrew-tap` (empty, no README)
 2. Clone it locally
 3. Create a directory `Formula/`
 4. Copy the first release's rendered `homun.rb` from the `homebrew-formula`
    release artifact into `Formula/homun.rb`
 5. Commit and push
-6. Users can now `brew tap homunbot/tap && brew install homun`
+6. Users can now `brew tap homun-app/tap && brew install homun`
 
 ## Automated update flow (future, not implemented yet)
 
 Once the tap repo exists, add a step to `release.yml` that:
 
-1. Clones `homunbot/homebrew-tap`
+1. Clones `homun-app/homebrew-tap`
 2. Downloads the rendered `homun.rb` from the current release artifact
 3. Commits + pushes the updated formula to the tap repo
 
@@ -44,5 +44,5 @@ on the tap repo. Not configured in Sprint 8 — tracked for post-v1.0.
 
 Homun currently uses `PolyForm-Noncommercial-1.0.0` which is **not** OSI-approved,
 so `homebrew-core` is not an option until the license is changed (if ever). A
-self-hosted tap (`homunbot/homebrew-tap`) has none of these requirements and is
+self-hosted tap (`homun-app/homebrew-tap`) has none of these requirements and is
 the standard path for commercial OSS projects.

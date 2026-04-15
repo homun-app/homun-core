@@ -311,7 +311,7 @@ Signed + notarized builds will be available from the next release.
 
 No native Windows installer is provided in this release. Windows users
 should install via **WSL2** using the `.deb` package — see
-[INSTALL-WINDOWS-WSL.md](https://github.com/homunbot/homun/blob/main/docs/INSTALL-WINDOWS-WSL.md)
+[INSTALL-WINDOWS-WSL.md](https://github.com/homun-app/homun/blob/main/docs/INSTALL-WINDOWS-WSL.md)
 for a step-by-step guide.
 EOF
             gh release edit "$TAG" --notes-file release-notes-append.md --append-to-notes || true

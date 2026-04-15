@@ -167,7 +167,7 @@ The `feature-test` job verifies builds with:
 gh run list
 
 # Via web
-https://github.com/homunbot/homun/actions
+https://github.com/homun-app/homun/actions
 ```
 
 ## Installing Pre-built Binaries
@@ -176,41 +176,41 @@ https://github.com/homunbot/homun/actions
 
 ```bash
 # macOS (Apple Silicon)
-curl -sL https://github.com/homunbot/homun/releases/latest/download/homun-macos-arm64 -o homun
+curl -sL https://github.com/homun-app/homun/releases/latest/download/homun-macos-arm64 -o homun
 chmod +x homun
 sudo mv homun /usr/local/bin/
 
 # macOS (Intel)
-curl -sL https://github.com/homunbot/homun/releases/latest/download/homun-macos-x64 -o homun
+curl -sL https://github.com/homun-app/homun/releases/latest/download/homun-macos-x64 -o homun
 chmod +x homun
 sudo mv homun /usr/local/bin/
 
 # Linux (x64)
-curl -sL https://github.com/homunbot/homun/releases/latest/download/homun-linux-x64 -o homun
+curl -sL https://github.com/homun-app/homun/releases/latest/download/homun-linux-x64 -o homun
 chmod +x homun
 sudo mv homun /usr/local/bin/
 
 # Linux (ARM64)
-curl -sL https://github.com/homunbot/homun/releases/latest/download/homun-linux-arm64 -o homun
+curl -sL https://github.com/homun-app/homun/releases/latest/download/homun-linux-arm64 -o homun
 chmod +x homun
 sudo mv homun /usr/local/bin/
 
 # Windows (PowerShell)
-Invoke-WebRequest -Uri https://github.com/homunbot/homun/releases/latest/download/homun-windows-x64.exe -OutFile homun.exe
+Invoke-WebRequest -Uri https://github.com/homun-app/homun/releases/latest/download/homun-windows-x64.exe -OutFile homun.exe
 ```
 
 ### Install Script
 
 ```bash
 # One-liner install (macOS/Linux)
-curl -sL https://raw.githubusercontent.com/homunbot/homun/main/scripts/install.sh | bash
+curl -sL https://raw.githubusercontent.com/homun-app/homun/main/scripts/install.sh | bash
 ```
 
 ### From Source
 
 ```bash
 # Clone and build
-git clone https://github.com/homunbot/homun.git
+git clone https://github.com/homun-app/homun.git
 cd homun
 cargo build --release
 

@@ -233,7 +233,7 @@ Target: **17 verified recipes bundled** — all done. Google services consolidat
 | INST-1 | **macOS .dmg** | ✅ DONE 2026-04-14 | `packaging/macos/` — .app bundle + launchd + create-dmg.sh con 3 mode (unsigned/signed/signed+notarized). Signing gate su 6 GitHub Secrets documentati in `docs/INSTALLER-SIGNING-SETUP.md`. Scaffold fine, Apple cert enable è one-time maintainer task |
 | INST-2 | **Windows via WSL2** | ✅ DONE 2026-04-14 (rescopato) | Pivot strategico: invece di .msi + Authenticode ($600-900/anno + HSM), doc completa `docs/INSTALL-WINDOWS-WSL.md` che usa il .deb Linux inside WSL2. Native .msi deferred post-v1.0 → bug #67 in REALITY-AUDIT |
 | INST-3 | **Linux packages** | ✅ DONE 2026-04-14 | `packaging/linux/` — .deb (cargo-deb) + .rpm (cargo-generate-rpm) + systemd system-level unit. Maintainer scripts canonici. Smoke test locale OK |
-| INST-4 | **Homebrew formula** | ✅ DONE 2026-04-14 | `packaging/brew/homun.rb.template` — hybrid binary-bottle + source-fallback. Tap repo `homunbot/homebrew-tap` setup manuale (documentato in `packaging/brew/README.md`) |
+| INST-4 | **Homebrew formula** | ✅ DONE 2026-04-14 | `packaging/brew/homun.rb.template` — hybrid binary-bottle + source-fallback. Tap repo `homun-app/homebrew-tap` setup manuale (documentato in `packaging/brew/README.md`) |
 
 ---
 

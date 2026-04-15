@@ -16,7 +16,7 @@ Three reasons, in order of weight:
 2. **Code signing cost**: a Windows-native MSI installer requires Microsoft Authenticode code signing with an EV certificate ($400–600/year) **plus** a hardware security module for the CA/Browser Forum baseline compliance (post-2023). We'd rather invest that budget into shipping features until we have paying users who need a native Windows UX.
 3. **Performance is actually fine**: WSL2 is not an emulator. It's a real Linux kernel in a lightweight Hyper-V VM, and I/O-bound tools like Homun see no measurable overhead. The localhost loopback is forwarded automatically.
 
-If you prefer a native Windows binary anyway, one is built by CI for every release (`homun-windows-x64.exe`) and available as a raw asset on the [GitHub Releases page](https://github.com/homunbot/homun/releases). It's **unsupported for v1.0** — you'll get Windows SmartScreen warnings on first run. Use at your own risk.
+If you prefer a native Windows binary anyway, one is built by CI for every release (`homun-windows-x64.exe`) and available as a raw asset on the [GitHub Releases page](https://github.com/homun-app/homun/releases). It's **unsupported for v1.0** — you'll get Windows SmartScreen warnings on first run. Use at your own risk.
 
 ---
 
@@ -68,11 +68,11 @@ WSL2 is a hard requirement — WSL1 is a translation layer that lacks the full L
 Open an Ubuntu terminal (Start menu → Ubuntu, or `wsl` in PowerShell). Then:
 
 ```bash
-# Download the latest .deb from GitHub Releases (substitute v0.1.0 with the current version)
-wget https://github.com/homunbot/homun/releases/latest/download/homun_0.1.0-1_amd64.deb
+# Download the latest .deb from GitHub Releases (substitute v1.0.0 with the current version)
+wget https://github.com/homun-app/homun/releases/latest/download/homun_1.0.0-1_amd64.deb
 
 # Install it — dpkg resolves deps via apt
-sudo apt install ./homun_0.1.0-1_amd64.deb
+sudo apt install ./homun_1.0.0-1_amd64.deb
 ```
 
 The installer will:
@@ -267,12 +267,12 @@ You're on a very minimal WSL image. Install the missing deps first:
 ```bash
 sudo apt update
 sudo apt install adduser ca-certificates libsqlite3-0
-sudo apt install ./homun_0.1.0-1_amd64.deb
+sudo apt install ./homun_1.0.0-1_amd64.deb
 ```
 
 ### Upgrade broke my vault
 
-Shouldn't happen, but if it does: the vault is stored at `~/.homun/secrets.enc` and the master key at `~/.homun/master.key`. Both survive `apt remove`/`apt install` of a new version. Only `apt purge` wipes them. Report an issue at github.com/homunbot/homun if you see data loss.
+Shouldn't happen, but if it does: the vault is stored at `~/.homun/secrets.enc` and the master key at `~/.homun/master.key`. Both survive `apt remove`/`apt install` of a new version. Only `apt purge` wipes them. Report an issue at github.com/homun-app/homun if you see data loss.
 
 ---
 

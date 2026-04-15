@@ -13,7 +13,7 @@ Choose one method:
 ### Option A: Docker (recommended)
 
 ```bash
-git clone https://github.com/homunbot/homun.git
+git clone https://github.com/homun-app/homun.git
 cd homun
 cp .env.example .env
 docker compose up -d
@@ -26,14 +26,14 @@ Homun is now running at **https://localhost**.
 Requires Rust 1.75+.
 
 ```bash
-git clone https://github.com/homunbot/homun.git
+git clone https://github.com/homun-app/homun.git
 cd homun
 cargo install --path . --features full
 ```
 
 ### Option C: Pre-built binary
 
-Download from [GitHub Releases](https://github.com/homunbot/homun/releases), verify the SHA256 checksum, and place the binary in your PATH.
+Download from [GitHub Releases](https://github.com/homun-app/homun/releases), verify the SHA256 checksum, and place the binary in your PATH.
 
 ---
 

@@ -3,17 +3,17 @@
 #
 # This file is a TEMPLATE. The release CI pipeline substitutes @@VERSION@@
 # with the actual tag version and computes SHA256 for the archive URLs
-# before publishing the rendered formula to the homunbot/homebrew-tap repo.
+# before publishing the rendered formula to the homun-app/homebrew-tap repo.
 #
 # Users install via:
-#   brew tap homunbot/tap
+#   brew tap homun-app/tap
 #   brew install homun
 #
 # Or directly:
-#   brew install homunbot/tap/homun
+#   brew install homun-app/tap/homun
 #
 # Build-from-source fallback for users without a signed bottle:
-#   brew install --build-from-source homunbot/tap/homun
+#   brew install --build-from-source homun-app/tap/homun
 #
 class Homun < Formula
   desc "Ultra-lightweight personal AI assistant — a digital homunculus"
@@ -29,11 +29,11 @@ class Homun < Formula
   # --build-from-source which ignores these URLs.
   on_macos do
     on_arm do
-      url "https://github.com/homunbot/homun/releases/download/v@@VERSION@@/Homun-@@VERSION@@-arm64.dmg"
+      url "https://github.com/homun-app/homun/releases/download/v@@VERSION@@/Homun-@@VERSION@@-arm64.dmg"
       sha256 "@@SHA256_MACOS_ARM64@@"
     end
     on_intel do
-      url "https://github.com/homunbot/homun/releases/download/v@@VERSION@@/Homun-@@VERSION@@-x64.dmg"
+      url "https://github.com/homun-app/homun/releases/download/v@@VERSION@@/Homun-@@VERSION@@-x64.dmg"
       sha256 "@@SHA256_MACOS_X64@@"
     end
   end
@@ -41,7 +41,7 @@ class Homun < Formula
   # =========================================================================
   # Source build (fallback + Linux support via brew on Linux)
   # =========================================================================
-  head "https://github.com/homunbot/homun.git", branch: "main"
+  head "https://github.com/homun-app/homun.git", branch: "main"
 
   depends_on "rust" => :build
   # Runtime deps: rustls statically links ring, so no openssl needed
