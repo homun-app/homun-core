@@ -74,6 +74,10 @@ pub struct AppState {
     /// Signal the RAG watcher to reload its watch list from DB.
     #[cfg(feature = "embeddings")]
     pub watch_update_tx: Option<mpsc::Sender<crate::rag::watcher::WatchUpdate>>,
+    /// Cached update checker result (UPD-1, Sprint 9).
+    /// Refreshed once per day by the background poller spawned in `Commands::Gateway`.
+    /// `None` until the first poll completes (or always None if `[updates] check_enabled = false`).
+    pub update_status: Arc<tokio::sync::RwLock<Option<crate::updates::UpdateInfo>>>,
 }
 
 impl AppState {
@@ -433,7 +437,16 @@ impl WebServer {
             channel_cmd_tx: self.channel_cmd_tx,
             #[cfg(feature = "embeddings")]
             watch_update_tx: self.watch_update_tx,
+            // UPD-1: starts None; the background poller (spawned just below)
+            // writes the first UpdateInfo after INITIAL_DELAY seconds.
+            update_status: Arc::new(tokio::sync::RwLock::new(None)),
         });
+
+        // UPD-1: spawn the daily update checker.
+        // Reads [updates] check_enabled at boot — runtime config flips do not
+        // restart the poller (acceptable: the user opting out mid-session can
+        // simply ignore the topbar chip for the rest of the session).
+        spawn_update_checker(state.clone());
 
         // If we have outbound messages, spawn task to route them to WebSocket sessions
         if let Some(mut outbound_rx) = self.outbound_rx {
@@ -1159,6 +1172,77 @@ fn static_assets() -> Router<Arc<AppState>> {
     }
 
     Router::new().route("/static/{*path}", axum::routing::get(serve_static))
+}
+
+/// Spawn the daily update-checker background task (UPD-1).
+///
+/// Reads `[updates] check_enabled` from the AppState config at startup. If
+/// disabled, the task exits immediately without polling. Otherwise it sleeps
+/// for `INITIAL_DELAY` (60s — gateway settles before hitting GitHub), then
+/// loops on `DEFAULT_POLL_INTERVAL` (24h). On each poll, it reads the current
+/// `support.public_repo` (so a config change to point at a fork is picked up
+/// next cycle) and writes the result through `state.update_status`.
+///
+/// Failures are logged at debug level and silently retried — a 24h sleep
+/// followed by a 5xx is normal for newly created public repos that don't
+/// have a release yet.
+fn spawn_update_checker(state: Arc<AppState>) {
+    tokio::spawn(async move {
+        let enabled = state.config.read().await.updates.check_enabled;
+        if !enabled {
+            tracing::debug!("Update checker disabled by config");
+            return;
+        }
+
+        // Build a single reusable HTTP client — reqwest reuses connections
+        // internally so a long-lived client is the right pattern even for
+        // a 1-req/day poller.
+        let client = match reqwest::Client::builder()
+            .timeout(Duration::from_secs(15))
+            .build()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to build update checker HTTP client");
+                return;
+            }
+        };
+
+        // Initial settle delay before first poll.
+        tokio::time::sleep(crate::updates::INITIAL_DELAY).await;
+
+        let current_version = env!("CARGO_PKG_VERSION");
+
+        loop {
+            let repo = state.config.read().await.support.public_repo.clone();
+            if repo.is_empty() {
+                tracing::debug!("Update checker: support.public_repo is empty, skipping poll");
+            } else {
+                match crate::updates::check_for_update(&client, &repo, current_version).await {
+                    Ok(info) => {
+                        if info.available {
+                            tracing::info!(
+                                current = %info.current,
+                                latest = %info.latest,
+                                "New Homun version available"
+                            );
+                        } else {
+                            tracing::debug!(
+                                current = %info.current,
+                                latest = %info.latest,
+                                "Homun is up to date"
+                            );
+                        }
+                        *state.update_status.write().await = Some(info);
+                    }
+                    Err(e) => {
+                        tracing::debug!(repo = %repo, error = %e, "Update check failed (will retry next cycle)");
+                    }
+                }
+            }
+            tokio::time::sleep(crate::updates::DEFAULT_POLL_INTERVAL).await;
+        }
+    });
 }
 
 #[cfg(test)]

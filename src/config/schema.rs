@@ -22,6 +22,7 @@ pub struct Config {
     pub ui: UiConfig,
     pub metrics: MetricsConfig,
     pub support: SupportConfig,
+    pub updates: UpdatesConfig,
     pub skills: SkillsConfig,
     /// Named agent definitions.
     /// Parsed from `[agents.<id>]` TOML sections.
@@ -2572,6 +2573,29 @@ impl Default for SupportConfig {
             crash_submit_github: false,
             // Default OFF until an email is configured.
             crash_submit_email: false,
+        }
+    }
+}
+
+/// Update checker configuration (UPD-1).
+///
+/// Controls the daily background task that polls GitHub Releases for a
+/// newer version of Homun. The checker is a **notifier**, not an
+/// auto-updater — it surfaces a UI chip and a platform hint (apt/dnf/brew)
+/// but never replaces the binary. Opt-out via `check_enabled = false`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UpdatesConfig {
+    /// Master switch for the update checker. Default: true.
+    /// When false, no background task runs and the API reports
+    /// `{ check_enabled: false }`.
+    pub check_enabled: bool,
+}
+
+impl Default for UpdatesConfig {
+    fn default() -> Self {
+        Self {
+            check_enabled: true,
         }
     }
 }

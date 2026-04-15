@@ -33,6 +33,7 @@ mod sharing;
 mod skills;
 mod status;
 mod traces;
+mod updates;
 mod usage;
 mod vault;
 mod workflows;
@@ -98,7 +99,8 @@ pub fn router() -> Router<Arc<AppState>> {
         .merge(openai::routes())
         .merge(sessions::routes())
         .merge(settings::routes())
-        .merge(traces::routes());
+        .merge(traces::routes())
+        .merge(updates::routes());
 
     // --- Knowledge Base (RAG) ---
     #[cfg(feature = "embeddings")]

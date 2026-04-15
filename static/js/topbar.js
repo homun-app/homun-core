@@ -316,4 +316,77 @@
         btn.appendChild(document.createTextNode(label));
         return btn;
     }
+
+    /* ═══ UPD-1 — Update available chip ═══
+       Polls /api/v1/updates/status every 5 minutes (cheap — backend cache).
+       Renders a non-dismissable chip in the topbar when an update exists,
+       with the latest version, the platform-aware upgrade hint, and a link
+       to the GitHub release page. Hidden when check_enabled = false or no
+       update is available. */
+
+    var UPDATE_POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+    var updateChipEl = null;
+
+    async function pollUpdateStatus() {
+        try {
+            var resp = await fetch('/api/v1/updates/status', { credentials: 'same-origin' });
+            if (!resp.ok) return;
+            var data = await resp.json();
+            renderUpdateChip(data);
+        } catch (e) {
+            // Silent fail — don't pollute console for a passive notifier.
+        }
+    }
+
+    function renderUpdateChip(status) {
+        // Find or create the chip container in the topbar (left of the avatar).
+        var topbar = document.querySelector('.topbar') || document.querySelector('header');
+        if (!topbar) return;
+
+        if (!status || !status.check_enabled || !status.info || !status.info.available) {
+            // No update or checks disabled — hide if previously shown.
+            if (updateChipEl && updateChipEl.parentNode) {
+                updateChipEl.parentNode.removeChild(updateChipEl);
+                updateChipEl = null;
+            }
+            return;
+        }
+
+        var info = status.info;
+        if (!updateChipEl) {
+            updateChipEl = document.createElement('a');
+            updateChipEl.id = 'update-available-chip';
+            updateChipEl.className = 'update-chip';
+            updateChipEl.target = '_blank';
+            updateChipEl.rel = 'noopener noreferrer';
+            updateChipEl.style.cssText = [
+                'display:inline-flex',
+                'align-items:center',
+                'gap:6px',
+                'padding:4px 10px',
+                'margin-right:12px',
+                'border-radius:12px',
+                'background:var(--accent-soft, rgba(120,160,80,0.15))',
+                'color:var(--accent, #6a8a3c)',
+                'font-size:12px',
+                'font-weight:500',
+                'text-decoration:none',
+                'cursor:pointer',
+            ].join(';');
+            // Insert as the FIRST child of topbar (leftmost position) — least
+            // intrusive while still visible.
+            topbar.insertBefore(updateChipEl, topbar.firstChild);
+        }
+        updateChipEl.href = info.release_url;
+        updateChipEl.title = info.platform_hint
+            ? 'Per aggiornare: ' + info.platform_hint
+            : 'Apri release notes';
+        updateChipEl.textContent = '↑ Aggiornamento disponibile: v' + info.latest;
+    }
+
+    // Initial poll immediately, then on the interval.
+    if (typeof fetch === 'function') {
+        pollUpdateStatus();
+        setInterval(pollUpdateStatus, UPDATE_POLL_INTERVAL_MS);
+    }
 })();

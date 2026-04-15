@@ -60,6 +60,7 @@ mod storage;
 mod tools;
 #[cfg(feature = "cli")]
 mod tui;
+mod updates;
 mod user;
 mod utils;
 #[cfg(feature = "web-ui")]

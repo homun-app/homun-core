@@ -98,6 +98,11 @@ qrcodegen = "1.8"
 # UUID for session/message IDs
 uuid = { version = "1", features = ["v4"] }
 
+# Semver parsing for update checker (UPD-1, Sprint 9)
+# Already transitively present in the dep tree — declaring as a direct dep
+# makes the usage explicit and allows `use semver::Version` in our code.
+semver = "1"
+
 # Directories
 dirs = "6"
 
