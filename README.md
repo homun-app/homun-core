@@ -4,7 +4,7 @@
 
 Homun is a digital homunculus that lives on your machine and works 24/7. Manage it from Telegram, WhatsApp, Discord, Slack, Email, a Web dashboard, or the CLI. It learns from you, runs automations while you sleep, browses the web, and extends via the open Agent Skills ecosystem.
 
-> Version **1.0.0** — first production release · [Changelog](./CHANGELOG.md) · [homun.dev](https://homun.dev)
+> Version **1.0.0** — first production release · [Changelog](./CHANGELOG.md) · [homun.app](https://homun.app)
 
 ---
 
@@ -115,7 +115,7 @@ homun service install    # Install as OS service (launchd / systemd)
 - **[Changelog](./CHANGELOG.md)** — all notable changes
 - **[Contributing](./CONTRIBUTING.md)** — how to report bugs and propose features
 - **[Windows via WSL2](./docs/INSTALL-WINDOWS-WSL.md)** — full install walkthrough for Windows 11 users
-- **[homun.dev](https://homun.dev)** — project website with screenshots, guides, and community
+- **[homun.app](https://homun.app)** — project website with screenshots, guides, and community
 - **Source code** — lives in the private `homun-app/homun-core` repository under the [PolyForm Noncommercial License](./LICENSE). Security audit access available on request (see [Contributing](./CONTRIBUTING.md)).
 
 ---

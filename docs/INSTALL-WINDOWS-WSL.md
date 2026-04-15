@@ -282,4 +282,4 @@ A **native Windows installer** (`.msi` via cargo-wix + Authenticode signing) is 
 
 We track this in [REALITY-AUDIT.md](./REALITY-AUDIT.md) as issue #67 — "Windows native installer deferred post-v1.0".
 
-If you're interested in sponsoring Windows code signing for the project, [get in touch](mailto:hello@homun.dev).
+If you're interested in sponsoring Windows code signing for the project, [get in touch](mailto:hello@homun.app).

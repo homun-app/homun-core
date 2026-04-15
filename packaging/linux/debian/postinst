@@ -59,7 +59,7 @@ case "$1" in
 ║  Web UI:        http://localhost:8777                        ║
 ║  Data dir:      /var/lib/homun/.homun                        ║
 ║  Logs:          journalctl -u homun -f                       ║
-║  Docs:          https://homun.dev                            ║
+║  Docs:          https://homun.app                            ║
 ║                                                              ║
 ╚══════════════════════════════════════════════════════════════╝
 

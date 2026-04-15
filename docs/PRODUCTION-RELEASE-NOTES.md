@@ -50,7 +50,7 @@ See [`../CHANGELOG.md`](../CHANGELOG.md) for the exhaustive per-domain list. Hig
 | Multi-user isolation (`MU-1/2/3`) | ⏸️ v3 feature | v1.0 is single-user. Profile isolation at the feature level works but `~/.homun/` is not partitioned by OS user. |
 | Voice / telephony channels | ❌ excluded | Per UNIFIED-ROADMAP strategic exclusion. |
 | i18n (`I18N-1/2`) | ⏸️ post-v1.0 | UI is bilingual-friendly, system locale works, but string catalog is deferred. |
-| Fully rebranded public site | ⏸️ refresh only | `homun.dev` gets screenshot + install-section refresh, not a ground-up rebuild. |
+| Fully rebranded public site | ⏸️ refresh only | `homun.app` gets screenshot + install-section refresh, not a ground-up rebuild. |
 | Cognition refactor to v2 (`AGENT-ARCHITECTURE-V2`) | ⏸️ blueprint only | The 6 sub-fixes in Sprint 1 brought cognition to ~90% quality. Full refactor is premature optimization. |
 
 ---
@@ -245,7 +245,7 @@ Before declaring Sprint 10 ✅ and tagging `v1.0.0`:
 - [ ] `~/.homun/config.toml` flipped: `[support] crash_submit_github = true`
 - [ ] Apple Developer cert + 6 GitHub Secrets configured (optional — release ships unsigned as graceful fallback)
 - [ ] 4 smoke tests executed fresh-install per `docs/INSTALLER-SMOKE-TEST.md` (Ubuntu .deb + Fedora .rpm + macOS .dmg + Windows WSL2), evidence tarballs attached to the release
-- [ ] `homun.dev` (repo `homun-app/docs`) refreshed with v1.0 screenshots, GIFs, install section, "What's new"
+- [ ] `homun.app` (repo `homun-app/docs`) refreshed with v1.0 screenshots, GIFs, install section, "What's new"
 - [ ] `git tag -a v1.0.0 -m "Homun 1.0.0"` pushed to `homun-app/homun-core`
 - [ ] GitHub Release visible on `homun-app/homun` with all 6 artifacts + SHA256 checksums
 - [ ] Homebrew formula updated on `homun-app/homebrew-tap`

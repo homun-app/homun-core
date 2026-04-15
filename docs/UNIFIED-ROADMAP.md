@@ -299,13 +299,13 @@ Il dettaglio tattico di questa fase steady-state sta nelle **Ad-interim Ops Note
 | WEB-1 | Landing page (hero, features, CTA download) | 1 settimana | ⚠️ Esiste (Vite + Tailwind, repo `website/`) — da rivedere |
 | WEB-2 | Pagina download (detect OS, link per piattaforma) | 3 giorni | ⚠️ Da rivedere |
 | WEB-3 | Pagina features (screenshot/GIF per macro-feature) | 1 settimana | ⚠️ Da rivedere |
-| WEB-7 | Dominio + hosting (homun.dev, Cloudflare Pages) | 1 giorno | ✅ DONE |
+| WEB-7 | Dominio + hosting (homun.app, Cloudflare Pages) | 1 giorno | ✅ DONE |
 
 #### 3B. Docs Site
 
 | # | Task | Effort | Note |
 |---|------|--------|------|
-| DOC-1 | Infrastruttura (Next.js, docs.homun.dev) | 2 giorni | ✅ DONE — repo `homun-docs/`, Next.js + MDX, Dockerized |
+| DOC-1 | Infrastruttura (Next.js, docs.homun.app) | 2 giorni | ✅ DONE — repo `homun-docs/`, Next.js + MDX, Dockerized |
 | DOC-2 | Guida installazione per piattaforma | 3 giorni | ✅ DONE — source.mdx, docker.mdx, service.mdx |
 | DOC-3 | Guida configurazione (ogni sezione config.toml) | 3 giorni | ✅ DONE — providers.mdx, security.mdx, remote-access.mdx |
 | DOC-4 | Guida canali (setup per ogni canale con screenshot) | 1 settimana | ✅ DONE — 7 canali documentati (telegram, discord, slack, whatsapp, email, web, cli) |

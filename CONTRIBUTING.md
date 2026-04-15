@@ -138,4 +138,4 @@ For the record: the maintainer is **one person**. Response times can vary. The g
 
 If you're reading this far — thanks. A single-maintainer privacy-first local-first AI assistant is an unusual project, and the community of issue reporters, crash submitters, and early users is the reason v1.0 exists. Every well-written bug report saves hours of debugging. Keep them coming.
 
-— Fabio ([homun.dev](https://homun.dev))
+— Fabio ([homun.app](https://homun.app))

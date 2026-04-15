@@ -17,7 +17,7 @@
 #
 class Homun < Formula
   desc "Ultra-lightweight personal AI assistant — a digital homunculus"
-  homepage "https://homun.dev"
+  homepage "https://homun.app"
   license "PolyForm-Noncommercial-1.0.0"
   version "@@VERSION@@"
 

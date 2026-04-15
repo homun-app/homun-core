@@ -209,7 +209,7 @@ Additionally:
 
 ### Links
 
-- Documentation: [homun.dev](https://homun.dev)
+- Documentation: [homun.app](https://homun.app)
 - Issues: [homun-app/homun/issues](https://github.com/homun-app/homun/issues)
 - Security policy: [SECURITY.md](https://github.com/homun-app/homun/blob/main/SECURITY.md)
 - License: [PolyForm Noncommercial 1.0.0](./LICENSE)

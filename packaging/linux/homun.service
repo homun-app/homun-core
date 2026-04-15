@@ -1,6 +1,6 @@
 [Unit]
 Description=Homun — Personal AI Assistant
-Documentation=https://homun.dev https://github.com/homun-app/homun
+Documentation=https://homun.app https://github.com/homun-app/homun
 After=network-online.target
 Wants=network-online.target
 

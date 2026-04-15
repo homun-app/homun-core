@@ -339,7 +339,7 @@ jobs:
           cat > release-body.md <<EOF
           **Homun ${TAG}** — personal AI assistant. Single binary. Privacy-first. Local-first.
 
-          📋 [Full changelog](https://github.com/homun-app/homun/blob/main/CHANGELOG.md) · 🌐 [homun.dev](https://homun.dev) · 🐛 [Report a bug](https://github.com/homun-app/homun/issues/new/choose)
+          📋 [Full changelog](https://github.com/homun-app/homun/blob/main/CHANGELOG.md) · 🌐 [homun.app](https://homun.app) · 🐛 [Report a bug](https://github.com/homun-app/homun/issues/new/choose)
 
           ## Install
 

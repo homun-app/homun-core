@@ -255,8 +255,8 @@ debug = "line-tables-only"  # Minimal debug info, faster linking
 # `homun` system user with home dir at /var/lib/homun (see postinst).
 [package.metadata.deb]
 name = "homun"
-maintainer = "Homun Maintainers <hello@homun.dev>"
-copyright = "2026, Homun Maintainers <hello@homun.dev>"
+maintainer = "Homun Maintainers <hello@homun.app>"
+copyright = "2026, Homun Maintainers <hello@homun.app>"
 license-file = ["LICENSE", "0"]
 extended-description = """
 Homun is a personal AI assistant that lives on your machine and works
