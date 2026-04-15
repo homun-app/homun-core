@@ -311,3 +311,152 @@ I dati di osservabilita vivono su tre supporti: file system (`~/.homun/logs/`, `
 
 - Dipende da: `agent::request_trace` (list_traces, read_trace, traces_dir, RequestTrace, TraceStatus), `utils::text::truncate_str`
 - Dipendono da questa feature: pagina Trace Viewer (`static/js/traces.js`)
+
+---
+
+### 9. Prometheus Metrics Endpoint (Sprint 9 OBS-1)
+
+#### Comportamento Atteso
+
+- Espone un endpoint `/metrics` in formato testo Prometheus (versione 0.0.4) con counter, gauge e histogram per le hot path principali del sistema.
+- L'endpoint esiste in **due varianti**:
+  - `GET /api/v1/metrics` — sempre dietro web auth, usato dalla dashboard UI per renderizzare tile metriche live.
+  - `GET /metrics` — esposto sul root path **solo** quando `[metrics] public = true`. Patterns Prometheus scrape standard.
+- Il registry è registrato al boot del Gateway via `register_homun_metrics()` e popolato in tempo reale dalle hot path instrumentate.
+- Quando `[metrics] enabled = false`, entrambi gli endpoint restituiscono 404 e tutte le `counter_inc/gauge_set/histogram_observe` diventano no-op silenti.
+
+#### Metriche esposte
+
+| Metrica | Tipo | Labels | Sorgente |
+|---|---|---|---|
+| `homun_requests_total` | counter | `channel`, `status` | `AgentLoop::process_message_with_retry` |
+| `homun_tool_calls_total` | counter | `tool`, `status` | `ToolRegistry::execute` |
+| `homun_llm_tokens_total` | counter | `provider`, `direction` | `ReliableProvider::chat` |
+| `homun_active_sessions` | gauge | — | (TBD: SessionManager) |
+| `homun_memory_chunks_total` | gauge | — | (TBD: memory_db) |
+| `homun_vault_entries_total` | gauge | — | (TBD: vault) |
+| `homun_rag_documents_total` | gauge | — | (TBD: rag engine) |
+| `homun_uptime_seconds` | gauge | — | scrape time da AppState.started_at |
+| `homun_heartbeat_last_fire_timestamp` | gauge | — | (TBD: HeartbeatService — surface bug #64) |
+| `homun_cognition_latency_seconds` | histogram | `outcome` | `run_cognition` Ok/Err branch |
+| `homun_tool_execution_latency_seconds` | histogram | `tool` | `ToolRegistry::execute` |
+| `homun_llm_latency_seconds` | histogram | `provider`, `model` | `ReliableProvider::chat` |
+
+#### Dettagli Tecnici
+
+- **Moduli/file**: `src/metrics.rs` (registry zero-deps), `src/web/api/metrics.rs` (handler axum)
+- **Design**: `OnceLock<MetricsRegistry>` per il singleton, `RwLock<BTreeMap<String, *Family>>` interno con fast path read-lock + slow path write-lock per nuove (label set) coppie. Counter/Gauge usano `Arc<AtomicU64>`, Gauge stora `f64` come `to_bits()` per atomicità lock-free, Histogram usa CAS loop sul `sum_bits` e `Vec<(f64, AtomicU64)>` per i bucket cumulative.
+- **Output Prometheus text format** con escape RFC-compliant (backslash, quote, newline), label sorting deterministico, integer float elision.
+- **Auth gating**: `/api/v1/metrics` usa il middleware standard `auth_middleware` come ogni altro `/v1/*`. Il `/metrics` root è registrato condizionalmente in `WebServer::start()` dentro il sub-tree `public` (no auth) solo se `metrics_public == true`.
+
+#### Configurazione
+
+- `[metrics] enabled = true` (default) — master switch
+- `[metrics] public = false` (default) — opt-in per scrape Prometheus standard
+
+#### Dipendenze
+
+- Dipende da: tracing (per il `tracing::info!` di registrazione), `chrono` (per `homun_uptime_seconds` rendering), nessuna dep nuova
+- Dipendono da questa feature: hot path instrumentation in `agent_loop.rs`, `cognition/engine.rs`, `tools/registry.rs`, `provider/reliable.rs`
+
+---
+
+### 10. End-to-End Trace ID Propagation (Sprint 9 OBS-2)
+
+#### Comportamento Atteso
+
+- Ogni richiesta utente (HTTP o non-HTTP) riceve un **trace ID** univoco di 8 caratteri esadecimali.
+- Per richieste HTTP: il middleware `trace_id_middleware` legge l'header `X-Request-ID` se presente (validato tramite whitelist `[a-zA-Z0-9_-]{4,128}`) o ne genera uno fresco. L'ID viene echoed nell'header di risposta.
+- Per richieste non-HTTP (CLI, Telegram, Discord, Slack, WhatsApp, Email, Web-via-bus): `dispatch_to_agent` (gateway message bus) wrappa il processing in `TASK_TRACE_ID.scope(new_trace_id(), ...)`.
+- L'ID è disponibile via `crate::logs::current_trace_id()` da qualsiasi punto del codice — sopravvive a `.await` yields e thread migration grazie a `tokio::task_local!`.
+- Tutti i `LogRecord` emessi dentro uno scope vengono automaticamente taggati con il `trace_id` via `SseLogLayer::on_event`.
+- `RequestTracer::new` legge `current_trace_id()` per unificare l'ID del trace file con il `X-Request-ID` HTTP — un singolo identificatore end-to-end.
+
+#### Dettagli Tecnici
+
+- **Moduli/file**: `src/logs.rs` (task-local + `current_trace_id()` + `new_trace_id()`), `src/web/trace.rs` (HTTP middleware), `src/agent/gateway.rs` (`dispatch_to_agent` wrap), `src/channels/cli.rs` (CLI wrap), `src/agent/request_trace.rs` (RequestTracer unification)
+- **`is_well_formed`** valida inbound `X-Request-ID`: rifiuta lunghezze fuori da [4, 128], rifiuta tutto ciò che non è ASCII alfanumerico o `-_`. Difensiva contro log injection, JSON escape, SQL-ish, path traversal, non-ASCII.
+- **Anti-pattern evitati**: thread_local (rotto da `.await`), trace span con `info_span!` (overhead, ridondante con il task-local approach), header scaffolding manuale (axum `from_fn` middleware è il pattern idiomatico).
+
+#### Dipendenze
+
+- Dipende da: `tokio::task_local!`, `uuid` (per la generazione), `serde` (per il LogRecord field)
+- Dipendono da questa feature: `SseLogLayer`, `RequestTracer`, le `dispatch_to_agent_inner` + i 7 canali, la chat UI che renderizza il trace_id nel timeline tool
+
+---
+
+### 11. Crash Reporting (Sprint 9 OBS-3)
+
+#### Comportamento Atteso
+
+- Un panic handler globale installato come **prima riga** di `async fn main()` cattura ogni panic — sia di runtime che di boot (rustls init, CLI parse, config load, DB open) — e ne salva un report JSON in `~/.homun/crashes/YYYY-MM-DD_HH-MM-SS_<trace_id>.json`.
+- Il report contiene: timestamp, trace_id (dal task-local o "unscoped"), version, OS/arch, panic message, location, backtrace force-captured, gli ultimi 200 record di log dal ring buffer in-memory.
+- Il contenuto JSON viene **redatto** via `crate::security::redact` prima di essere scritto su disco, eliminando PII tramite i pattern dell'exfiltration guard.
+- Un anti-loop guard (`AtomicBool CRASH_IN_PROGRESS`) impedisce il panic-during-panic — un secondo panic durante l'handler salta direttamente al default chained hook.
+- Il default hook viene preservato via `take_hook()` e ri-chiamato dopo, mantenendo l'output stderr familiare per il dev loop.
+
+#### Submission flow (4-channel)
+
+L'utente decide come segnalare un crash via UI (`/v1/crashes/{id}/formats`):
+
+1. **Copy to clipboard** — sempre attivo, copia il markdown del report
+2. **Download JSON** — sempre attivo, scarica il file raw
+3. **Open GitHub Issue** — gated su `crash_submit_github + public_repo` non vuoto, apre un issue pre-filled su `homun-app/homun`
+4. **Email maintainer** — gated su `crash_submit_email + email` non vuoto, apre un `mailto:` con subject e body pre-filled
+
+L'utente vede sempre cosa sta inviando prima di confermare. Nessun crash report parte automaticamente.
+
+#### Dettagli Tecnici
+
+- **Moduli/file**: `src/crash_reporter.rs` (panic hook + persistence), `src/web/api/crashes.rs` (CRUD API + format builder), config in `[support]`
+- **Endpoint API**:
+  - `GET /api/v1/crashes` — lista crash con preview metadata
+  - `GET /api/v1/crashes/{id}` — full report
+  - `DELETE /api/v1/crashes/{id}` — rimozione
+  - `GET /api/v1/crashes/{id}/formats` — 4 URL gated dalla config
+- **Path traversal defense**: `read_crash` e `delete_crash` rifiutano qualsiasi filename contenente `/` o `..`, doppio check oltre alla validazione dell'axum Path extractor
+- **`percent_encode` inline** (10 righe, RFC 3986) per costruire GitHub issue URL e mailto URL — evita di aggiungere `urlencoding` come dep
+
+#### Configurazione
+
+- `[support] public_repo = "homun-app/homun"` (default)
+- `[support] source_repo = ""` (vuoto = no "view source" link)
+- `[support] email = ""`
+- `[support] crash_submit_clipboard = true`
+- `[support] crash_submit_download = true`
+- `[support] crash_submit_github = false` (default off finché il repo non viene creato)
+- `[support] crash_submit_email = false` (default off finché email non è configurata)
+
+---
+
+### 12. Update Checker (Sprint 9 UPD-1)
+
+#### Comportamento Atteso
+
+- Un task tokio in background, spawn-ato in `WebServer::start()`, polla `https://api.github.com/repos/{public_repo}/releases/latest` una volta al giorno (default: `[updates] check_enabled = true`).
+- Confronta il `tag_name` (stripped del leading `v`) con `env!("CARGO_PKG_VERSION")` via `semver::Version` — gestisce correttamente prerelease (1.0.0 > 1.0.0-rc1 per spec semver).
+- Se `available = true`, scrive il risultato in `AppState.update_status: Arc<RwLock<Option<UpdateInfo>>>`.
+- Drafts e prereleases vengono ignorati — il maintainer può tagger pre-release senza che gli utenti vedano subito "new version!".
+- L'endpoint `GET /api/v1/updates/status` espone la cache senza polling diretto a GitHub, permettendo alla UI di pollare ogni 5 min senza preoccupazioni di rate limit.
+- La UI topbar (`static/js/topbar.js`) renderizza un chip non-dismissable quando un update è disponibile, con il latest version, il platform hint come tooltip, e link a `release_url`.
+
+#### Platform hints
+
+`detect_platform_hint()` ispeziona `std::env::consts::OS`:
+
+- **Linux**: parsa `/etc/os-release` per distinguere Debian-family (`apt upgrade homun`) da Red Hat-family (`dnf upgrade homun`). Fallback generico per altre distro.
+- **macOS**: `brew upgrade homun`
+- **Windows** (WSL): `Open your WSL terminal and run: sudo apt upgrade homun`
+
+#### Dettagli Tecnici
+
+- **Moduli/file**: `src/updates.rs` (`check_for_update` + `is_newer` + `detect_platform_hint`), `src/web/api/updates.rs` (handler), `src/web/server.rs` (`spawn_update_checker`)
+- **HTTP client**: reqwest con timeout 15s, User-Agent `homun/{version} update-checker`, header `Accept: application/vnd.github+json`
+- **Initial delay 60s**: dà tempo al gateway di settle prima del primo poll, evita thundering herd verso GitHub
+- **Notifier only**: NON è un auto-updater. Il binary viene aggiornato solo via apt/dnf/brew/manual download. Auto-update è UPD-2, post-v1.0
+- **Cache lifecycle**: `Arc<RwLock<Option<UpdateInfo>>>` legato al lifetime dell'AppState; alla `WebServer::start()` reboot, riparte da `None` e attende il primo poll
+
+#### Configurazione
+
+- `[updates] check_enabled = true` (default)
+- `[support] public_repo` viene riusato per puntare al repo da pollare

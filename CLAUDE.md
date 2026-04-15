@@ -26,9 +26,12 @@ Homun is a personal AI assistant written in Rust — a digital homunculus that l
 
 ```
 src/
-├── main.rs                          # Entry point, CLI (clap)
-├── logs.rs                          # Structured logging + SSE streaming
+├── main.rs                          # Entry point, CLI (clap), panic hook install (Sprint 9 OBS-3)
+├── logs.rs                          # Structured logging + SSE streaming + TASK_TRACE_ID task-local (Sprint 9 OBS-2)
 ├── mcp_setup.rs                     # MCP server auto-setup
+├── metrics.rs                       # Lean Prometheus metrics registry, zero-deps (Sprint 9 OBS-1)
+├── crash_reporter.rs                # Panic handler + crash report persistence (Sprint 9 OBS-3)
+├── updates.rs                       # GitHub Releases polling + platform hints (Sprint 9 UPD-1)
 │
 ├── agent/                           # Core agent loop (44 files)
 │   ├── agent_loop.rs                # ReAct loop (reason → act → observe)
@@ -209,8 +212,12 @@ src/
 │   ├── ws.rs                        # WebSocket chat channel
 │   ├── chat_attachments.rs          # File upload handling
 │   ├── run_state.rs                 # Run state tracking
+│   ├── trace.rs                     # HTTP X-Request-ID middleware (Sprint 9 OBS-2)
 │   └── api/                         # 70+ REST endpoints
 │       ├── mod.rs                   # Router + re-exports
+│       ├── metrics.rs               # Prometheus /metrics endpoint (Sprint 9 OBS-1)
+│       ├── crashes.rs               # Crash report CRUD + 4-channel submission API (Sprint 9 OBS-3)
+│       ├── updates.rs               # Update checker status API (Sprint 9 UPD-1)
 │       ├── mcp/                     # MCP catalog, OAuth, install, CRUD (6 files)
 │       ├── knowledge/               # Knowledge API + watchers (2 files)
 │       └── {domain}.rs              # 30+ domain files (account, chat, skills, etc.)
