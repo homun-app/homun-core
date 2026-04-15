@@ -1,68 +1,79 @@
 # Homun
 
-**Your personal AI agent that lives on your machine and works 24/7.**
+**Your personal AI assistant. Single binary. Privacy-first. Local-first. Multi-channel.**
 
-Homun is a single-binary, local-first AI assistant written in Rust. Manage it from Telegram, WhatsApp, Discord, Slack, Email, a Web dashboard, or the CLI. It learns from you, runs automations while you sleep, browses the web, and extends via the open Agent Skills ecosystem.
+Homun is a digital homunculus that lives on your machine and works 24/7. Manage it from Telegram, WhatsApp, Discord, Slack, Email, a Web dashboard, or the CLI. It learns from you, runs automations while you sleep, browses the web, and extends via the open Agent Skills ecosystem.
 
-## Features
+> Version **1.0.0** — first production release · [Changelog](./CHANGELOG.md) · [homun.dev](https://homun.dev)
 
-- **Multi-channel** -- talk to Homun from Telegram, WhatsApp, Discord, Slack, Email, Web UI, or CLI
-- **14 LLM providers** -- Anthropic, OpenAI, Ollama (local), OpenRouter, DeepSeek, Groq, Gemini, and more
-- **Long-term memory** -- remembers you across sessions, with searchable vector + full-text hybrid retrieval
-- **Knowledge base** -- ingest PDFs, docs, code, spreadsheets (30+ formats) and search them via RAG
-- **20+ built-in tools** -- shell, files, web search, browser automation, vault, email, scheduling, workflows
-- **Automations** -- visual flow builder with triggers, retries, approval gates, and NLP generation
-- **Browser automation** -- Playwright-powered headless browser with stealth and vision
-- **Skills** -- extend Homun with community skills from GitHub, ClawHub, or create your own
-- **MCP servers** -- connect external services (Google Workspace, GitHub, etc.) via Model Context Protocol
-- **Security** -- encrypted vault, 2FA, sandboxed execution, exfiltration guard, emergency kill switch
-- **Web dashboard** -- 20 pages: chat, dashboard, automations, workflows, skills, memory, knowledge, vault, and more
+---
 
-## Quick Start
+## Quick install
 
-### Docker (recommended)
+### macOS
+
+Download the latest `.dmg` from [GitHub Releases](https://github.com/homun-app/homun/releases/latest), drag `Homun.app` onto `Applications`, launch. The web dashboard opens at `http://localhost:8777`.
+
+Or via **Homebrew**:
 
 ```bash
-git clone https://github.com/homunbot/homun.git
-cd homun
-cp .env.example .env
-docker compose up -d
+brew install homun-app/tap/homun
+homun gateway
 ```
 
-Open **https://localhost** and complete the setup wizard.
-
-Want free local embeddings? Add Ollama:
+### Linux (Debian / Ubuntu)
 
 ```bash
-docker compose --profile with-ollama up -d
+curl -LO https://github.com/homun-app/homun/releases/latest/download/homun_1.0.0-1_amd64.deb
+sudo apt install ./homun_1.0.0-1_amd64.deb
+
+# Start as the dedicated homun user (or install the systemd unit)
+sudo -u homun homun gateway &
 ```
 
-### From source
+Arm64 also available — substitute `amd64` with `arm64` in the URL.
 
-Requires Rust 1.75+ and optionally Node.js (for browser automation / MCP servers).
+### Linux (Fedora / RHEL / Rocky)
 
 ```bash
-cargo install --path . --features full
-homun config        # Initialize configuration
-homun gateway       # Start all services + web UI
+sudo dnf install https://github.com/homun-app/homun/releases/latest/download/homun-1.0.0-1.x86_64.rpm
+sudo -u homun homun gateway &
 ```
 
-Open **https://localhost** or use the CLI:
+### Windows (via WSL2)
 
-```bash
-homun chat                            # Interactive chat
-homun chat -m "What's on my calendar" # One-shot message
-```
+Windows is supported via Windows Subsystem for Linux 2. Full walkthrough in **[docs/INSTALL-WINDOWS-WSL.md](./docs/INSTALL-WINDOWS-WSL.md)** (~15 minutes). You get the same Linux `.deb` package running inside a WSL Ubuntu distro.
 
-### Pre-built binaries
+> A native Windows `.msi` installer is not provided in v1.0 — see [`#67`](./docs/REALITY-AUDIT.md) for the cost-driven rescope.
 
-Download from [GitHub Releases](https://github.com/homunbot/homun/releases) for macOS (x64/ARM), Linux (x64/ARM), and Windows. SHA256 checksums included for verification.
+Once installed, open **http://localhost:8777** in your browser and complete the setup wizard.
+
+---
+
+## What you get
+
+- **Multi-channel** — 7 channels: CLI, Telegram, WhatsApp, Discord, Slack, Email, Web WebSocket.
+- **14+ LLM providers** — Anthropic, OpenAI, Ollama (local), OpenRouter, DeepSeek, Groq, Gemini, Mistral, Together, Fireworks, and more.
+- **Long-term memory** — short-term session + long-term LLM-consolidated summaries, hybrid HNSW + FTS5 + RRF search.
+- **Knowledge base (RAG)** — ingest 30+ formats (PDF, DOCX, XLSX, markdown, code, …) with vault-gating for sensitive data.
+- **23+ built-in tools** — shell, files, web search, browser automation, vault, email, scheduling, workflows, contacts.
+- **Automations** — visual flow builder (n8n-style SVG canvas), NLP flow generation, resume-on-boot.
+- **Workflow engine** — persistent multi-step workflows with approval gates and retry logic.
+- **Browser automation** — Playwright-powered headless browser, stealth injection, 21 unified actions.
+- **Skills ecosystem** — open Agent Skills standard, GitHub install, ClawHub marketplace, LLM-driven skill generation.
+- **MCP integration** — connect external services (Google Workspace, GitHub, …) via Model Context Protocol, with OAuth and vault-resolved credentials.
+- **Security** — AES-256-GCM vault, OS keychain master key, PBKDF2 600k auth, 2FA TOTP, sandboxed execution (5 backends), exfiltration guard, emergency kill switch.
+- **Mobile app** — Flutter thread-first UX with inline approval/result blocks, biometric lock, cross-stack fixture contract. See [`homun-app/homun-mobile`](https://github.com/homun-app/homun-mobile).
+- **Observability** — `/metrics` Prometheus endpoint, end-to-end X-Request-ID tracing, panic handler with redacted crash reports, 4-channel consensual submission (clipboard / download / GitHub issue / mailto), daily update checker.
+- **Web dashboard** — 29 pages: chat, automations, workflows, skills, mcp, agents, contacts, profiles, memory, knowledge, vault, sandbox, approvals, logs, traces, and more.
+
+---
 
 ## Configuration
 
-Homun stores all data in `~/.homun/`. Configuration lives in `~/.homun/config.toml`.
+Homun stores all data in `~/.homun/` (or `/var/lib/homun/.homun/` for the systemd service on Linux). Configuration lives in `~/.homun/config.toml`.
 
-The fastest way to configure is through the **web setup wizard** (launches on first boot). You can also edit the config directly:
+The fastest way to configure is through the **web setup wizard** that launches on first boot. You can also edit the config directly:
 
 ```toml
 [agent]
@@ -79,7 +90,70 @@ token = "123456:ABC..."
 
 At minimum, you need **one LLM provider API key** (or Ollama running locally).
 
-## Build Profiles
+---
+
+## CLI commands
+
+```
+homun                    # Interactive chat (default)
+homun chat               # Interactive chat
+homun chat -m "message"  # One-shot message
+homun gateway            # Start gateway (channels + cron + heartbeat + web UI)
+homun config             # Initialize or edit configuration
+homun status             # Show system status
+homun skills list        # List installed skills
+homun skills add owner/repo  # Install skill from GitHub
+homun cron list          # List scheduled jobs
+homun service install    # Install as OS service (launchd / systemd)
+```
+
+---
+
+## Documentation
+
+- **[Getting Started](./docs/GETTING-STARTED.md)** — step-by-step from install to first automation
+- **[Changelog](./CHANGELOG.md)** — all notable changes
+- **[Contributing](./CONTRIBUTING.md)** — how to report bugs and propose features
+- **[Windows via WSL2](./docs/INSTALL-WINDOWS-WSL.md)** — full install walkthrough for Windows 11 users
+- **[homun.dev](https://homun.dev)** — project website with screenshots, guides, and community
+- **Source code** — lives in the private `homun-app/homun-core` repository under the [PolyForm Noncommercial License](./LICENSE). Security audit access available on request (see [Contributing](./CONTRIBUTING.md)).
+
+---
+
+## Advanced installation
+
+### Docker
+
+If you already run a self-host stack with Docker, you can use the containerized build. Not the default happy path for v1.0 — the native installers above are recommended — but fully supported.
+
+```bash
+git clone https://github.com/homun-app/homun.git
+cd homun
+cp .env.example .env
+docker compose up -d
+```
+
+Open **https://localhost** (note: HTTPS with self-signed cert inside Docker).
+
+Add Ollama for free local embeddings:
+
+```bash
+docker compose --profile with-ollama up -d
+```
+
+### Build from source
+
+Requires Rust 1.85+ and Node.js (for browser automation via MCP Playwright). The source tree is the private `homun-app/homun-core` repository — contact the maintainer for access if you need to build locally.
+
+```bash
+git clone https://github.com/homun-app/homun-core.git  # requires access
+cd homun-core
+cargo install --path . --features full
+homun config        # Initialize configuration
+homun gateway       # Start all services + web UI
+```
+
+### Build profiles
 
 | Profile | Command | What you get |
 |---------|---------|-------------|
@@ -87,34 +161,21 @@ At minimum, you need **one LLM provider API key** (or Ollama running locally).
 | Gateway | `--features gateway` | + multi-channel + local embeddings/RAG + email |
 | Full | `--features full` | + browser automation + vault 2FA |
 
-## CLI Commands
-
-```
-homun chat           Interactive chat (or one-shot with -m)
-homun gateway        Start gateway (channels + web UI + cron + heartbeat)
-homun config         Initialize or edit configuration
-homun status         Show system status
-homun skills         List, add, or remove skills
-homun cron           Manage scheduled jobs
-homun service        Install as OS service (launchd / systemd)
-```
-
-## Documentation
-
-- [Getting Started Guide](docs/GETTING-STARTED.md) -- step-by-step from install to first automation
-- [Changelog](CHANGELOG.md) -- all notable changes
-- [Roadmap](docs/UNIFIED-ROADMAP.md) -- milestone plan and current status
-- [Architecture](docs/services/README.md) -- subsystem documentation for contributors
+---
 
 ## Requirements
 
-| Dependency | Required | For |
-|-----------|----------|-----|
-| Rust 1.75+ | Build from source | Compilation |
-| Docker | Docker install | Containerized deployment |
-| Node.js / npx | Optional | Browser automation, MCP servers |
-| Ollama | Optional | Free local LLMs and embeddings |
+| Dependency | Required for | Notes |
+|-----------|-------------|-------|
+| Linux / macOS / Windows 11 + WSL2 | Binary installs | Native `.deb` / `.rpm` / `.dmg` / WSL2 walkthrough |
+| Node.js / `npx` | Browser automation | Optional — only if you enable browser tools |
+| Ollama | Local LLMs and embeddings | Optional — for fully offline operation |
+| Rust 1.85+ | Build from source | Optional — installers already ship a compiled binary |
+
+---
 
 ## License
 
-[PolyForm Noncommercial License 1.0.0](LICENSE) -- free for personal and noncommercial use.
+[PolyForm Noncommercial License 1.0.0](./LICENSE) — free for personal and noncommercial use.
+
+Homun is **source-private, user-visible**: you can run, configure, inspect data, and submit issues, but the Rust source code lives in a private repository under a noncommercial license. If you need audit access for security research, email `security@homun.app` with the reason.
