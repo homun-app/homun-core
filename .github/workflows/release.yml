@@ -88,9 +88,14 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-${{ matrix.target }}-packaging-${{ hashFiles('**/Cargo.lock') }}
+          # Cache key includes the runner image to avoid restoring incompatible
+          # binary artifacts when the runner image changes. runner.os is too
+          # coarse — both ubuntu-latest and ubuntu-22.04 report 'Linux', but the
+          # binary cache from one is not usable on the other due to GLIBC.
+          # The 'v2' suffix forces a fresh cache after the GLIBC pinning fix.
+          key: v2-${{ matrix.target }}-${{ runner.arch }}-packaging-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-${{ matrix.target }}-packaging-
+            v2-${{ matrix.target }}-${{ runner.arch }}-packaging-
 
       - name: Build release binary
         env:
@@ -158,9 +163,14 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-${{ matrix.target }}-packaging-${{ hashFiles('**/Cargo.lock') }}
+          # Cache key includes the runner image to avoid restoring incompatible
+          # binary artifacts when the runner image changes. runner.os is too
+          # coarse — both ubuntu-latest and ubuntu-22.04 report 'Linux', but the
+          # binary cache from one is not usable on the other due to GLIBC.
+          # The 'v2' suffix forces a fresh cache after the GLIBC pinning fix.
+          key: v2-${{ matrix.target }}-${{ runner.arch }}-packaging-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-${{ matrix.target }}-packaging-
+            v2-${{ matrix.target }}-${{ runner.arch }}-packaging-
 
       - name: Build release binary
         env:
