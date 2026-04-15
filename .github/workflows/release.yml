@@ -238,7 +238,13 @@ jobs:
         env:
           GIT_REF: ${{ github.ref }}
         run: |
-          # Strip refs/tags/v prefix safely from the env var (not inlined ${{ }})
+          # Strip the refs/tags/v prefix safely from the env var.
+          # GitHub Actions preprocesses run: blocks and treats any literal
+          # GitHub expression delimiters (dollar-double-brace open + close)
+          # as expressions to evaluate, even inside bash comments. So this
+          # comment must NEVER contain those delimiters in literal form,
+          # otherwise the workflow fails to parse with "An expression was
+          # expected". Use env vars and bash parameter expansion instead.
           VERSION="${GIT_REF#refs/tags/v}"
           mkdir -p artifacts
           sed "s|@@VERSION@@|${VERSION}|g" \
