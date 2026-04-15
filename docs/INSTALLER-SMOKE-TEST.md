@@ -2,7 +2,7 @@
 
 > **Purpose**: verify that each Homun installer works end-to-end on a genuinely clean machine (or VM / container), not just on the maintainer's dev box where Rust, cargo, and Homun's dependencies are already present.
 >
-> **When to run**: before cutting a tagged release (v0.1.1, v0.2.0, v1.0.0...). Every installer that passes the checklist gets ✅ in the release notes; any that fails blocks the release.
+> **When to run**: before cutting a tagged release (v1.0.0, v1.0.1, v1.1.0…). Every installer that passes the checklist gets ✅ in the release notes; any that fails blocks the release.
 >
 > **Scope**: this is a manual procedure. The pipeline in `.github/workflows/release.yml` validates that the artifacts *build* cleanly, but only a human can verify that a non-technical user can *install and use* them.
 
@@ -10,7 +10,9 @@
 
 ## Common checklist (per installer)
 
-Each installer must pass these 7 checks before the release is cut:
+Each installer must pass these **11 checks** before the release is cut:
+
+**Basic install path (checks 1-7)**
 
 1. **Install succeeds** without any error output
 2. **Binary is on PATH** or launchable from the UI
@@ -20,7 +22,19 @@ Each installer must pass these 7 checks before the release is cut:
 6. **Vault stores a secret** (via setup wizard's API key entry for any LLM provider)
 7. **Uninstall + reinstall preserves data** (apt remove → apt install does NOT wipe `/var/lib/homun/.homun/`)
 
-For upgrades (not fresh installs): add check 8 — **existing vault survives the upgrade** (run homun once on the old version, note a memory/secret, upgrade, verify it's still there).
+**Sprint 9 observability path (checks 8-11 — new for v1.0)**
+
+8. **Crash reporter captures panics**: trigger a controlled panic (inject `panic!("smoke test panic")` behind a debug route, or SIGSEGV via `kill -SEGV <pid>` — though `kill -SEGV` is not a Rust panic and won't trigger the hook, so prefer an explicit panic route on a debug build). Verify:
+   - A JSON file appears in `~/.homun/crashes/YYYY-MM-DD_HH-MM-SS_<trace_id>.json`
+   - `curl -s http://localhost:8777/api/v1/crashes | jq '.crashes | length'` returns ≥ 1
+   - File is redacted (no vault-looking secrets or file contents from `~/.homun/` in the JSON)
+9. **Prometheus `/metrics` endpoint is reachable**: `curl -s http://localhost:8777/api/v1/metrics | head -20` returns Prometheus text format with at least one `homun_*` metric (requests_total, tool_calls_total, llm_tokens_total). If `[metrics] public = true`, also `curl -s http://localhost:8777/metrics` works unauthenticated.
+10. **X-Request-ID trace propagation end-to-end**: `curl -H "X-Request-ID: smoke-test-abc123" http://localhost:8777/healthz -i | grep -i x-request-id` echoes the exact value in the response. Grep `~/.homun/logs/` or `journalctl -u homun` for `trace_id=smoke-test-abc123` to confirm log propagation.
+11. **Update checker chip surfaces new releases**: temporarily create a dummy release tag `v99.0.0` on the public repo (or override `api.github.com` via `/etc/hosts` + local HTTP mock) and verify the topbar chip in the dashboard shows the "update available" notification within 60 seconds. Remove the dummy tag afterwards.
+
+For upgrades (not fresh installs): add check 12 — **existing vault survives the upgrade** (run homun once on the old version, note a memory/secret, upgrade, verify it's still there).
+
+> **Evidence tarball**: for each installer tested, save `~/.homun/logs/*.log` + `~/.homun/crashes/*.json` + `curl /api/v1/metrics` output into `smoke-evidence-<target>-<date>.tgz` and attach it to the GitHub Release as "Smoke test evidence".
 
 ---
 
@@ -60,15 +74,15 @@ apt update
 apt install -y wget adduser sudo
 
 # Step 2: download the .deb from the GitHub Release
-wget https://github.com/homunbot/homun/releases/latest/download/homun_0.1.0-1_amd64.deb
+wget https://github.com/homun-app/homun/releases/latest/download/homun_1.0.0-1_amd64.deb
 
 # Step 3: install
-apt install -y ./homun_0.1.0-1_amd64.deb
+apt install -y ./homun_1.0.0-1_amd64.deb
 # Expected: post-install message printed, no errors
 
 # Step 4: verify binary + layout
 which homun                          # → /usr/bin/homun
-homun --version                      # → homun 0.1.0
+homun --version                      # → homun 1.0.0
 ls /lib/systemd/system/homun.service # → exists
 id homun                             # → uid=xxx(homun) gid=xxx(homun)
 ls -la /var/lib/homun                # → owned by homun:homun, mode 750
@@ -92,7 +106,7 @@ ls -la /var/lib/homun/.homun/master.key    # → exists, mode 0600
 kill %1
 
 # Step 9: upgrade test (requires a second .deb from a newer tag)
-apt install -y ./homun_0.1.1-1_amd64.deb   # → "upgraded homun from 0.1.0 to 0.1.1"
+apt install -y ./homun_1.0.1-1_amd64.deb   # → "upgraded homun from 1.0.0 to 1.0.1"
 sudo -u homun homun gateway &
 sleep 3
 # Verify the vault is still decryptable (the setup wizard shows saved API key)
@@ -101,7 +115,7 @@ kill %1
 # Step 10: apt remove (keep data)
 apt remove -y homun
 ls -la /var/lib/homun/.homun/        # → still present
-apt install -y ./homun_0.1.1-1_amd64.deb
+apt install -y ./homun_1.0.0-1_amd64.deb
 # Re-install, verify data still there
 
 # Step 11: apt purge (wipe data)
@@ -127,8 +141,8 @@ Same shape as the `.deb` test but with `dnf` or `rpm` commands:
 docker run --rm -it fedora:40 bash
 
 dnf install -y wget
-wget https://github.com/homunbot/homun/releases/latest/download/homun-0.1.0-1.x86_64.rpm
-dnf install -y ./homun-0.1.0-1.x86_64.rpm
+wget https://github.com/homun-app/homun/releases/latest/download/homun-1.0.0-1.x86_64.rpm
+dnf install -y ./homun-1.0.0-1.x86_64.rpm
 # Same verification as above, but paths:
 #   /usr/lib/systemd/system/homun.service  (RPM convention)
 #   /var/lib/homun/                        (same)
@@ -154,7 +168,7 @@ security delete-generic-password -s dev.homun.secrets 2>/dev/null || true
 
 ### Steps
 
-1. **Download**: Safari → github.com/homunbot/homun/releases → click `Homun-0.1.0-arm64.dmg` → save to Downloads
+1. **Download**: Safari → github.com/homun-app/homun/releases → click `Homun-1.0.0-arm64.dmg` → save to Downloads
 2. **Mount**: double-click the downloaded file → Finder opens the mounted DMG showing `Homun.app` and an `Applications` symlink
 3. **Install**: drag `Homun.app` onto `Applications`
 4. **Eject**: Finder → right-click mounted volume → Eject
@@ -203,32 +217,55 @@ Critical checks unique to the WSL path:
 
 ## Smoke test runbook per release
 
-For a v1.0 release, I'd run these in parallel over 1-2 hours:
+For a v1.0 release, run these **in parallel** across 4 VM/container environments over ~2 hours of focused attention. Each lane runs the 11-step common checklist plus any OS-specific steps.
 
-| Hour | Activity |
-|---|---|
-| 00:00 | Kick off smoke test VMs/containers for Ubuntu 22.04 amd64, Fedora 40, Windows 11 WSL, macOS signed |
-| 00:15 | Wait for wsl --install + Ubuntu setup |
-| 00:30 | Execute the 11-step Linux `.deb` test on Ubuntu |
-| 00:45 | Execute the `.rpm` test on Fedora |
-| 01:00 | Execute the macOS signed test on a fresh user account |
-| 01:15 | Execute the Windows WSL test (end-to-end walkthrough of INSTALL-WINDOWS-WSL.md) |
-| 01:30 | Consolidate findings, note any ⚠️ in release notes |
+| Hour | Lane A — Ubuntu 22.04 `.deb` | Lane B — Fedora 40 `.rpm` | Lane C — macOS signed `.dmg` | Lane D — Windows 11 WSL2 |
+|---|---|---|---|---|
+| 00:00 | Spin up `ubuntu:22.04` container or Multipass VM | Spin up `fedora:40` container | Fresh macOS user account or VM snapshot | Boot Windows 11 VM, start `wsl --install -d Ubuntu` |
+| 00:15 | `apt install ./homun_1.0.0-1_amd64.deb` | `dnf install ./homun-1.0.0-1.x86_64.rpm` | Double-click `Homun-1.0.0-arm64.dmg`, drag to Applications | Wait for WSL + Ubuntu bootstrap |
+| 00:30 | Run 11-step checklist | Run 11-step checklist | Launch `Homun.app`, run 11-step checklist | Start WSL Ubuntu, `apt install ./homun_*.deb` |
+| 00:45 | Save `smoke-evidence-ubuntu-amd64.tgz` | Save `smoke-evidence-fedora.tgz` | `codesign -dv`, `spctl --assess`, save `smoke-evidence-macos-signed.tgz` | Run 11-step checklist + WSL-specific checks |
+| 01:00 | Run 11-step checklist on arm64 variant | — | Test `.dmg` x64 on Intel Mac if available | `http://localhost:8777` from Windows Edge |
+| 01:15 | — | — | — | Save `smoke-evidence-wsl.tgz` |
+| 01:30 | Consolidate: attach all 4 tarballs to the GitHub Release, note any ⚠️ in release notes, decide GO / NO-GO |
+
+### Decision tree on failure
+
+- **1 lane fails, error is transient** (network flake, VM boot issue): retry the lane once. If it passes, proceed.
+- **1 lane fails, error is reproducible**: the failing target gets `❌ blocked` in release notes. The release does **not** ship until fixed.
+- **2+ lanes fail**: stop, triage the root cause, cut a patch, re-run all 4 lanes after the fix.
 
 **Any failure → release is blocked**. Don't ship with "minor issue, will fix in next" on the installer path — installer bugs are uniquely painful because users hit them before anything else works.
 
+### Sprint 9 observability verification — required for every lane
+
+The 4 new checks (8-11) are **non-negotiable for v1.0**. They verify that the Sprint 9 observability work actually lands in production:
+
+- Check 8 proves the panic handler was installed as the first line of `main()` (crash reports reach disk).
+- Check 9 proves the `/metrics` endpoint is mounted both on the auth path and (conditionally) the public path.
+- Check 10 proves the `X-Request-ID` middleware runs on every HTTP request and the `tokio::task_local!` `TASK_TRACE_ID` survives across async boundaries.
+- Check 11 proves the daily `spawn_update_checker` task is running and the topbar chip reads from `AppState.update_status` correctly.
+
+Skipping any of these means the release ships without evidence that the observability plumbing works end-to-end.
+
 ---
 
-## Current smoke test status (Sprint 8 snapshot)
+## Current smoke test status (v1.0 release target)
+
+At the moment this doc was written, the artifacts are ready for maintainer VM execution. Every row below is blocked on "run on a clean VM", which Claude cannot do in-session.
 
 | Target | Status | Notes |
 |---|---|---|
-| Ubuntu 22.04 `.deb` amd64 | 🟡 local metadata validated | cargo-deb produces well-formed package on macOS; full install test deferred to first tag push on CI |
-| Ubuntu 22.04 `.deb` arm64 | 🟡 local metadata validated | same as amd64 |
-| Fedora 40 `.rpm` x86_64 | 🟡 local metadata validated | cargo-generate-rpm produces RPM v3 binary cleanly; installation test deferred to CI |
-| macOS `.dmg` arm64 (unsigned) | ✅ local smoke test | built on dev machine, mounted, bundle structure verified |
-| macOS `.dmg` arm64 (signed + notarized) | ⏸️ pending | requires maintainer to complete INSTALLER-SIGNING-SETUP.md |
-| macOS `.dmg` x64 (unsigned) | 🟡 CI-only | not tested locally (dev machine is arm64) |
-| Windows via WSL2 | ⏸️ pending | requires Windows 11 VM — deferred to first actual user installation |
+| Ubuntu 22.04 `.deb` amd64 | ⏸️ maintainer VM pending | `cargo-deb` metadata validated on dev machine Sprint 8. Awaits clean Ubuntu VM run pre-release |
+| Ubuntu 22.04 `.deb` arm64 | ⏸️ maintainer VM pending | same as amd64, arm64 VM required |
+| Ubuntu 24.04 `.deb` amd64 | ⏸️ maintainer VM pending | sanity check on newer LTS |
+| Debian 12 `.deb` amd64 | ⏸️ maintainer VM pending | expected to pass (same package) |
+| Fedora 40 `.rpm` x86_64 | ⏸️ maintainer VM pending | `cargo-generate-rpm` metadata validated Sprint 8 |
+| RHEL 9 / Rocky Linux 9 `.rpm` x86_64 | ⏸️ maintainer VM pending | expected to pass |
+| macOS `.dmg` arm64 (unsigned) | ✅ Sprint 8 local smoke | bundle structure verified, DMG mounted, `codesign -dv` expected without signing |
+| macOS `.dmg` arm64 (signed + notarized) | ⏸️ Apple cert pending | requires maintainer to complete `docs/INSTALLER-SIGNING-SETUP.md` — 6 GitHub Secrets on `homun-app/homun-core` |
+| macOS `.dmg` x64 (unsigned + signed) | ⏸️ maintainer VM pending | not tested locally (dev machine is arm64) |
+| Windows 11 via WSL2 | ⏸️ maintainer VM pending | requires clean Windows 11 VM — full walkthrough of `docs/INSTALL-WINDOWS-WSL.md` |
+| Sprint 9 checks 8-11 (all targets) | ⏸️ maintainer VM pending | crash reporter, `/metrics`, X-Request-ID, update checker chip — newly introduced for v1.0 |
 
-Status will be updated on each real release.
+Status will be updated immediately after the maintainer runs the VM lanes pre-tag.
