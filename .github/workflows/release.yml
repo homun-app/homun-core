@@ -313,6 +313,14 @@ jobs:
         run: |
           set -e
           TAG="${GIT_REF#refs/tags/}"
+          # Read the actual binary version from Cargo.toml. This is what
+          # cargo-deb / cargo-generate-rpm / create-dmg.sh use as the
+          # filename suffix. For real releases the tag and Cargo version
+          # match (v1.0.0 / 1.0.0), but for test tags like v0.1.1-test
+          # the binary still says 1.0.0 because Cargo.toml is not bumped.
+          # Reading from Cargo.toml ensures install commands in the body
+          # always reference filenames that exist as release assets.
+          BINARY_VERSION=$(grep -E '^version = ' "${GITHUB_WORKSPACE}/Cargo.toml" | head -1 | sed 's/.*"\(.*\)".*/\1/')
           cd release-assets
 
           # Build the release body. Starts with install summary + link
@@ -326,8 +334,8 @@ jobs:
           ## Install
 
           - **macOS**: download the \`.dmg\` below, or \`brew install homun-app/tap/homun\`
-          - **Ubuntu / Debian**: \`sudo apt install ./homun_${TAG#v}-1_amd64.deb\` (also available for arm64)
-          - **Fedora / RHEL / Rocky**: \`sudo dnf install ./homun-${TAG#v}-1.x86_64.rpm\`
+          - **Ubuntu / Debian**: \`sudo apt install ./homun_${BINARY_VERSION}-1_amd64.deb\` (also available for arm64)
+          - **Fedora / RHEL / Rocky**: \`sudo dnf install ./homun-${BINARY_VERSION}-1.x86_64.rpm\`
           - **Windows**: via WSL2 — see [INSTALL-WINDOWS-WSL.md](https://github.com/homun-app/homun/blob/main/docs/INSTALL-WINDOWS-WSL.md) (~15 min)
 
           ## Verify
