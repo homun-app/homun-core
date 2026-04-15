@@ -40,6 +40,7 @@ mod channels;
 mod config;
 mod connections;
 mod contacts;
+mod crash_reporter;
 mod gateways;
 mod logs;
 mod mcp_setup;
@@ -724,6 +725,11 @@ fn print_install_security_summary(report: Option<&crate::skills::SecurityReport>
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // OBS-3: install the panic handler FIRST, before any other init.
+    // This way any panic during rustls provider setup, CLI parsing, config
+    // load, or database open is captured into ~/.homun/crashes/.
+    crash_reporter::install_panic_hook();
+
     // Install rustls CryptoProvider before any TLS usage.
     // Multiple transitive deps enable both `ring` and `aws-lc-rs` features on rustls,
     // so we must pick one explicitly to avoid the auto-detection panic.

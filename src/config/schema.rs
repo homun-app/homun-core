@@ -21,6 +21,7 @@ pub struct Config {
     pub browser: BrowserConfig,
     pub ui: UiConfig,
     pub metrics: MetricsConfig,
+    pub support: SupportConfig,
     pub skills: SkillsConfig,
     /// Named agent definitions.
     /// Parsed from `[agents.<id>]` TOML sections.
@@ -2513,6 +2514,64 @@ impl Default for MetricsConfig {
         Self {
             enabled: true,
             public: false,
+        }
+    }
+}
+
+/// Support / crash report submission configuration (OBS-3 + UPD-1).
+///
+/// Controls where crash reports can be submitted from and where the update
+/// checker polls for new releases. Decoupled from the code-visibility
+/// decision: the public repo here is where users file issues, the source
+/// repo (optional) is where the code lives. The two can be the same, can
+/// be the split pattern described in `docs/MIGRATION-SPLIT-REPO.md`, or
+/// can be completely unrelated.
+///
+/// # Sprint 9 defaults
+///
+/// Points at `homun-app/homun` (the planned public issues+releases repo
+/// under the new org) but with GitHub submission disabled for v1.0 — the
+/// repo doesn't exist yet, so we keep the flag off until the maintainer
+/// flips it post-migration. Clipboard + download always work regardless.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SupportConfig {
+    /// Public repo for issues + GitHub Releases (used by crash report
+    /// "Open GitHub issue" submission and by the update checker).
+    pub public_repo: String,
+    /// Source repo (optional, may be private). Empty = don't show a
+    /// "view source" link anywhere in the UI.
+    pub source_repo: String,
+    /// Maintainer email for "Email crash report" submission (empty = off).
+    pub email: String,
+    /// Allow the UI to show a "Copy to clipboard" button for crash reports.
+    /// Always safe — pure local, no network.
+    pub crash_submit_clipboard: bool,
+    /// Allow the UI to show a "Download JSON" button for crash reports.
+    /// Always safe — pure local, no network.
+    pub crash_submit_download: bool,
+    /// Allow the UI to show an "Open GitHub issue" button that opens a
+    /// pre-filled issue URL on `public_repo`. Requires the repo to be
+    /// publicly reachable and accept issues from any GitHub account.
+    pub crash_submit_github: bool,
+    /// Allow the UI to show an "Email maintainer" button that opens a
+    /// `mailto:` link to `email`. Requires `email` to be set.
+    pub crash_submit_email: bool,
+}
+
+impl Default for SupportConfig {
+    fn default() -> Self {
+        Self {
+            public_repo: "homun-app/homun".to_string(),
+            source_repo: String::new(),
+            email: String::new(),
+            crash_submit_clipboard: true,
+            crash_submit_download: true,
+            // Default OFF until the public repo is created during the
+            // split-repo migration (tracked in docs/MIGRATION-SPLIT-REPO.md).
+            crash_submit_github: false,
+            // Default OFF until an email is configured.
+            crash_submit_email: false,
         }
     }
 }

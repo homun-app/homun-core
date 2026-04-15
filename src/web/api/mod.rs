@@ -8,6 +8,7 @@ mod channels;
 mod chat;
 mod connections;
 mod contacts;
+mod crashes;
 mod devices;
 mod email_accounts;
 mod embeddings;
@@ -56,6 +57,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .merge(logs::routes())
         .merge(status::routes())
         .merge(metrics::routes())
+        .merge(crashes::routes())
         .merge(skills::routes())
         .merge(providers::routes())
         .merge(mcp::routes())
