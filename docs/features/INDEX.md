@@ -1,7 +1,7 @@
 # Homun — Indice Specifiche Funzionali
 
-> **Aggiornato**: 2026-04-10
-> **Versione codebase**: ~121K LOC Rust, ~29K LOC JS, 245 source files, 45 file JS, 952 test, 53 migrazioni SQLite
+> **Aggiornato**: 2026-04-15 — v1.0.0 pre-tag state
+> **Versione codebase**: ~121K LOC Rust, ~29K LOC JS, 245 source files, 45 file JS, **982 test**, **53 migrazioni SQLite**, **16/16 domini auditati** (core v1.0)
 
 Questo indice raccoglie le specifiche funzionali di tutti i domini di Homun.
 Ogni documento copre: comportamento atteso (prospettiva utente) + dettagli tecnici (struct, tabelle DB, endpoint API) + dipendenze.
@@ -242,21 +242,28 @@ La Web UI (pagina `/memory`) include una sezione "Visibility Audit" per gestire 
 
 | Metrica | Valore |
 |---------|--------|
+| Versione | **1.0.0** (pre-tag, Sprint 10 Fase A completa) |
 | Linee di codice Rust | ~121K LOC |
 | Linee di codice JavaScript | ~29K LOC |
 | File sorgente Rust | 245 |
 | File JavaScript | 45 |
 | Migrazioni SQLite | 53 |
-| Test totali | 952 |
+| **Test totali Rust** | **982** (Sprint 9 +34: 12 OBS-1 + 5 OBS-2 + 12 OBS-3 + 5 UPD-1) |
+| Test cross-stack Flutter↔Rust | 6 fixture + 26 Flutter totali |
 | Canali supportati | 7 (CLI, Telegram, WhatsApp, Discord, Slack, Email, Web) |
 | Pagine Web UI | 29 |
 | REST API endpoints | 70+ |
-| Built-in tools | 20+ |
+| Built-in tools | 23+ |
 | Browser actions | 21 |
 | Sandbox backends | 5 |
 | Skill bundled | 5 |
 | Formato ingestione RAG | 37+ estensioni |
-| MCP preset curati | 7 |
+| MCP preset curati | 17 (bundled recipes) |
+| LLM provider supportati | 14+ (Tier A/B/C classification in PRODUCTION-RELEASE-NOTES.md) |
+| Domini auditati | **16/16** (core v1.0) — Condivisione + Permission UX audit deferred post-v1.0 |
+| Bug aperti tracciati | 47 (5 🔴 + 31 🟡 + 11 🟢) + 1 deferred (#67) |
+| Metriche Prometheus registrate | 12 (6 live instrumentate, 6 gauge owner-written) |
+| Installer nativi | 4 target (Linux .deb+.rpm, macOS .dmg, Homebrew tap, Windows WSL2 guide) |
 
 ---
 

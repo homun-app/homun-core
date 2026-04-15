@@ -18,9 +18,9 @@ Homun is a personal AI assistant written in Rust — a digital homunculus that l
 
 **Core philosophy**: single binary, local-first, privacy-focused, skill-powered.
 
-**Scale**: ~121K LOC Rust, ~29K LOC JS, 245 source files, 45 JS files, 53 SQLite migrations, 953 tests, 11-check CI pipeline.
+**Scale**: ~121K LOC Rust, ~29K LOC JS, 245 source files, 45 JS files, 53 SQLite migrations, 982 tests (Sprint 9 +34), 11-check CI pipeline.
 
-**Current production status**: Alpha v0.2 → roadmap to v1.0 in [`docs/PRODUCTION-ROADMAP.md`](./docs/PRODUCTION-ROADMAP.md). Reality Audit covered 7/16 domains as of 2026-04-13.
+**Current production status**: **v1.0.0 pre-tag** (Sprint 10 Fase A closed 2026-04-15). Reality Audit covered **16/16 core v1.0 domains** (Sprint 2-9). Fase B (maintainer): split repo migration + tag push + smoke test VM + sito refresh + announcement — see [`docs/PRODUCTION-RELEASE-NOTES.md`](./docs/PRODUCTION-RELEASE-NOTES.md) "Handoff checklist".
 
 ## Architecture Overview
 

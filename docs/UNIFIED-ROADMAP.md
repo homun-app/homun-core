@@ -1,6 +1,6 @@
 # Homun — Unified Roadmap (Strategic)
 
-> Last updated: 2026-04-13
+> Last updated: 2026-04-15 — **Sprint 10 Fase A ✅, v1.0.0 pre-tag state**
 > Consolidamento di: ROADMAP.md, IMPLEMENTATION-GAPS.md, openclaw-connections-vs-homun-detailed.md
 > Obiettivo: piano **strategico** orientato a prodotto industriale, sicurezza-first, senza legacy o feature completate.
 >
@@ -20,19 +20,21 @@
 | LOC Rust | ~121,300 |
 | LOC Frontend | ~29,200 (JS) + ~22,100 (CSS) |
 | Source files | 245 Rust, 45 JS |
-| Test | 953 passing |
-| Clippy warnings | 0 |
+| Test | **982 passing** (+34 Sprint 9 OBS + UPD) |
+| Clippy warnings | 0 new (16 pre-existing unchanged since Sprint 8) |
 | Canali | 7 (CLI, Telegram✅, Discord✅, WhatsApp✅, Slack✅, Email✅, Web✅) |
 | Tool built-in | 23 |
 | Web UI Pages | 30 |
 | API endpoints | ~113 REST |
 | SQLite migrations | 54 |
 | MCP Recipes bundled | 17 (github, google-workspace, google-maps, notion, slack, gitlab, linear, jira, reddit, brave-search, spotify, stripe, twitter, sentry, todoist, home-assistant, wordpress) |
-| Provider LLM | 14 |
-| Reality Audit | 7 recipe completate, 9/11 bug fixati — vedi [`REALITY-AUDIT.md`](./REALITY-AUDIT.md) |
-| Release | Alpha v0.2 (REL-1..12 tutti ✅ DONE) |
+| Provider LLM | 14+ |
+| Reality Audit | **16/16 domini** (Sprint 2-6 audit + Sprint 7 Mobile + Sprint 9 Osservabilità), 47 bug tracciati (5 🔴 + 31 🟡 + 11 🟢) — vedi [`REALITY-AUDIT.md`](./REALITY-AUDIT.md) |
+| Installer | ✅ Linux .deb+.rpm, macOS .dmg, Homebrew tap, Windows WSL2 guide — Sprint 8 |
+| Observability | ✅ /metrics Prometheus, X-Request-ID trace ID, panic handler + crash reports + 4-channel submission, daily update checker — Sprint 9 |
+| Release | **v1.0.0 pre-tag** — Sprint 10 Fase A (Claude doc prep) ✅, Fase B (maintainer tag push + smoke test VM + sito refresh) ⏸️ pending |
 
-*✅ = production-ready (Fase 1 hardening completa)*
+*✅ = production-ready (Fase 1 hardening + Fase 2 apertura + release engineering completi)*
 
 ---
 
@@ -162,10 +164,12 @@ Stato: SEC-6/7/8/11/12/13/14/15 tutti ✅ DONE. Scudo anti-injection completo.
 
 ---
 
-### Fase 2: Apertura al Mondo Esterno (8-12 settimane)
+### Fase 2: Apertura al Mondo Esterno (8-12 settimane) — ✅ **COMPLETATA 2026-04-15**
 
 > Obiettivo: Homun non è più solo localhost. È raggiungibile, usabile come backend, con trust model chiaro.
 > Criterio: un utente può usare Homun da remoto in modo sicuro e documentato.
+>
+> **Stato finale Fase 2**: REM-1..4 ✅ + API-1..3 ✅ + TRS-1..2 ✅ + AAM-1..5 ✅ + RCP-1..15 + RCP-V1 + RCP-UX1/2 + RCP-FN1 ✅ + **INST-1..4 ✅** (Sprint 8) + **OBS-1..3 ✅** (Sprint 9) + **UPD-1 ✅** (Sprint 9) + **APP-1..2 ✅** (Sprint 7). Tutta la Fase 2 chiusa. Fase A Sprint 10 (doc polish + release prep) completata 2026-04-15; Fase B (maintainer-side: split repo migration + tag push + smoke test VM + sito refresh + announcement) resta pending.
 
 #### 2A. Remote Access (P0)
 
@@ -237,10 +241,56 @@ Target: **17 verified recipes bundled** — all done. Google services consolidat
 
 ---
 
-### Fase 3: Prodotto Consumer-Ready (12-16 settimane)
+### 🎯 Post-v1.0 Steady State — Gate per Fase 3
+
+> **Cambio di modalità**: con v1.0 released, la fase "tactical sprint" finisce. Inizia la fase "steady-state operations" — **wait-for-demand** invece di build-ahead-of-demand. Fase 3 non inizia in automatico: richiede evidenza di user demand prima di investire.
+
+**Criteri gate per iniziare Fase 3 (tutti e 4 necessari):**
+1. **100+ utenti attivi stabili** — signal che c'è una community reale e non solo early curiosity
+2. **Zero 🔴 bug aperti da > 30 giorni** — il backlog critical è gestito, non accumulato
+3. **Feedback user-driven incorporato** — minimo 3 feature requests tracciate con RFC (`docs/rfcs/RFC-NNN-<slug>.md`) e triaged
+4. **Scope Fase 3 ri-definito in base al feedback reale** — non è il blueprint attuale (12-16 settimane di assumptions)
+
+**Cadenza release steady-state:**
+- **Hotfix on-demand** (v1.0.x): security issues, crash-for-all-users. Nessuna schedule. Tipicamente 1 day fix + 1 day smoke test.
+- **Minor release** (v1.x.0): ogni 4-6 settimane. Feature incrementali da RFC triaged. Regression test obbligatorio.
+- **Major release** (v2.0.0): ogni 12-18 mesi. Post-Fase 4 se Fase 3 avviene.
+
+**Ruolo del maintainer post-v1.0:**
+- **Triage GitHub issue** (non solo code fix) — issue inbox è il primary input
+- **Fix crash report reali** prima delle feature — reality first, roadmap second
+- **Decidere scope minor release** — nessun feature random, ogni addition richiede RFC
+- **No auto-update binary** — UPD-2 resta decisione post-v1.0 solo se user feedback lo chiede
+
+**Monitoring signals (prime 4 settimane post-tag):**
+- GitHub issue rate (soft alert > 10/day primi 3 giorni)
+- Crash reports submitted (soft alert > 5/day)
+- `/metrics` baseline per self-hosted users che condividono
+- Update checker uptake (chi ha già v1.0.0, chi è stuck a v0.x)
+- Homebrew formula traffic
+
+**Red lines inviolabili post-v1.0:**
+- **Privacy-first**: no telemetria SaaS, no dial-home, crash report opt-in per default post-migration
+- **Single binary**: no additional runtime (Python/Node) nel core (tool-level OK)
+- **PolyForm-Noncommercial**: source privato, issue/discussion pubblici, no open source pivot senza license change deliberato
+- **Local-first**: data in `~/.homun/`, nessun cloud backing store di default
+
+**Cosa NON fare post-v1.0 (lezioni Sprint 1-10):**
+- Non lanciare Fase 3 "perché il piano dice così" — aspettare segnale di demand
+- Non aggiungere LLM providers "per completezza" — l'utente vuole pochi provider che funzionano, non tanti che fanno regressione
+- Non rebuild del sito per "look professionale" — basta il refresh Sprint 10 Fase B finché il sito non diventa un bottleneck
+- Non pubblicare su HN/Reddit senza smoke test 4/4 pass — un bug reported nelle prime 24h di launch è difficile da recuperare reputazionalmente
+
+Il dettaglio tattico di questa fase steady-state sta nelle **Ad-interim Ops Notes** che Claude ha generato alla chiusura di Sprint 10 Fase A.
+
+---
+
+### Fase 3: Prodotto Consumer-Ready (12-16 settimane) — ⏸️ **wait-for-demand**
 
 > Obiettivo: utente non-tecnico può installare e usare senza assistenza.
 > Criterio: one-click install, docs complete, app mobile base, sito web.
+>
+> **Status**: NON avviata automaticamente post-v1.0. Richiede i 4 criteri gate sopra. Lo scope sotto è il blueprint scritto pre-v1.0 — andrà ri-definito al momento reale di avvio in base al feedback utente.
 
 #### 3A. Sito Web Prodotto
 
