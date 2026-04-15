@@ -272,47 +272,89 @@ jobs:
           ls -la
           cat installers-checksums.sha256
 
-      - name: Upload to GitHub Release
+      # ---------------------------------------------------------------------
+      # CROSS-REPO PUBLISH
+      # ---------------------------------------------------------------------
+      # CI runs on homun-app/homun-core (private, source code). Binaries
+      # are published on homun-app/homun (public, user-facing). This
+      # decoupling keeps source private under PolyForm while users find
+      # releases, issues, and docs on a single public landing.
+      #
+      # Authentication: PUBLIC_REPO_TOKEN is a fine-grained PAT scoped to
+      # homun-app/homun only (Contents read+write). Set via Phase 5 of
+      # docs/MIGRATION-SPLIT-REPO.md. Rotate every ~90 days.
+      #
+      # Idempotency: on re-run (e.g. workflow_dispatch of same tag), the
+      # release may already exist. This step detects that case and
+      # uploads with --clobber rather than failing.
+      - name: Publish release to public repo
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GIT_REF: ${{ github.ref }}
-        run: |
-          TAG="${GIT_REF#refs/tags/}"
-          cd release-assets
-          for f in *; do
-            gh release upload "$TAG" "$f" --clobber
-          done
-
-      - name: Emit unsigned warning (if applicable)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
           APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
           GIT_REF: ${{ github.ref }}
         run: |
+          set -e
           TAG="${GIT_REF#refs/tags/}"
+          cd release-assets
+
+          # Build the release body. Starts with install summary + link
+          # to the full CHANGELOG; appends unsigned-macOS warning if the
+          # Apple signing cert was not available during this build.
+          cat > release-body.md <<EOF
+          **Homun ${TAG}** — personal AI assistant. Single binary. Privacy-first. Local-first.
+
+          📋 [Full changelog](https://github.com/homun-app/homun/blob/main/CHANGELOG.md) · 🌐 [homun.dev](https://homun.dev) · 🐛 [Report a bug](https://github.com/homun-app/homun/issues/new/choose)
+
+          ## Install
+
+          - **macOS**: download the \`.dmg\` below, or \`brew install homun-app/tap/homun\`
+          - **Ubuntu / Debian**: \`sudo apt install ./homun_${TAG#v}-1_amd64.deb\` (also available for arm64)
+          - **Fedora / RHEL / Rocky**: \`sudo dnf install ./homun-${TAG#v}-1.x86_64.rpm\`
+          - **Windows**: via WSL2 — see [INSTALL-WINDOWS-WSL.md](https://github.com/homun-app/homun/blob/main/docs/INSTALL-WINDOWS-WSL.md) (~15 min)
+
+          ## Verify
+
+          SHA-256 checksums for every asset are in \`installers-checksums.sha256\` below. Verify with:
+
+          \`\`\`bash
+          sha256sum -c installers-checksums.sha256
+          \`\`\`
+          EOF
+
           if [ -z "$APPLE_CERTIFICATE_P12" ]; then
-            cat > release-notes-append.md <<'EOF'
+            cat >> release-body.md <<'UNSIGNED_EOF'
 
----
+          ---
 
-## ⚠️ Unsigned macOS Build
+          ## ⚠️ Unsigned macOS Build
 
-This release was built **without Apple Developer ID code signing**. The
-`.dmg` installer will trigger a Gatekeeper warning on first launch. To
-open it anyway:
+          This release was built **without Apple Developer ID code signing**. The
+          `.dmg` installer will trigger a Gatekeeper warning on first launch. To
+          open it anyway:
 
-1. Right-click the Homun.app → Open (instead of double-clicking)
-2. Click "Open" in the dialog that appears
-3. After the first successful launch, subsequent launches work normally
+          1. Right-click the Homun.app → Open (instead of double-clicking)
+          2. Click "Open" in the dialog that appears
+          3. After the first successful launch, subsequent launches work normally
 
-Signed + notarized builds will be available from the next release.
+          Signed + notarized builds will be available from the next release.
+          UNSIGNED_EOF
+          fi
 
-## 🪟 Windows Users
-
-No native Windows installer is provided in this release. Windows users
-should install via **WSL2** using the `.deb` package — see
-[INSTALL-WINDOWS-WSL.md](https://github.com/homun-app/homun/blob/main/docs/INSTALL-WINDOWS-WSL.md)
-for a step-by-step guide.
-EOF
-            gh release edit "$TAG" --notes-file release-notes-append.md --append-to-notes || true
+          # Idempotent create-or-update: if the release already exists on
+          # the public repo (e.g. a re-run), upload assets with --clobber
+          # and update the notes. Otherwise create the release from scratch.
+          if gh release view "$TAG" --repo homun-app/homun >/dev/null 2>&1; then
+            echo "Release $TAG already exists on homun-app/homun — updating assets + notes"
+            for f in $(find . -maxdepth 1 -type f ! -name 'release-body.md'); do
+              gh release upload "$TAG" --repo homun-app/homun --clobber "$f"
+            done
+            gh release edit "$TAG" --repo homun-app/homun --notes-file release-body.md
+          else
+            echo "Creating new release $TAG on homun-app/homun"
+            ASSETS=$(find . -maxdepth 1 -type f ! -name 'release-body.md')
+            gh release create "$TAG" \
+              --repo homun-app/homun \
+              --title "$TAG" \
+              --notes-file release-body.md \
+              $ASSETS
           fi
