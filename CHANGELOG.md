@@ -7,6 +7,24 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.1] — 2026-04-16
+
+Security hotfix + health tracking fix. Shipped before public announcement.
+
+### Fixed
+
+- **#18 🔴 Security**: blocked path traversal in the `remember` tool's `site` parameter. A malicious domain like `../../etc/cron.d/evil` could write outside the `~/.homun/brain/sites/` directory. Two-layer fix: input validation (rejects `/`, `\`, `..`, empty) + defense-in-depth path sanitization via `Path::file_name()` stripping in `resolve_site_memory_path()`.
+- **#26 🔴 Security**: enforced 100 MB file size limit on RAG ingestion. Previously, ingesting a very large file (e.g. 2 GB) would read it entirely into memory via `std::fs::read()`, causing OOM. Fix adds `MAX_INGEST_BYTES` guard in `ingest_file()` + `reingest_file()` (covers all 3 ingest paths: API upload, directory watcher, CLI), plus `DefaultBodyLimit` on the HTTP upload route.
+- **#11 🔴 Functional**: added `ChannelHealthTracker` to the Slack channel. Previously Slack was the only channel without health monitoring — the circuit breaker was blind to Slack connection issues. Mirrors the Discord pattern: `record_message()` on successful inbound, `record_error()` on WebSocket disconnect, wired via `with_health()` builder in gateway.
+
+### Changed
+
+- Domain references corrected from `homun.dev` to `homun.app` across 14 files + release body + Homebrew formula (carried over from v1.0.0 post-tag fix).
+
+[1.0.1]: https://github.com/homun-app/homun/releases/tag/v1.0.1
+
+---
+
 ## [1.0.0] — 2026-04-15
 
 First production release. Single-binary Rust personal AI assistant, privacy-first, local-first, multi-channel.
