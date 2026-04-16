@@ -63,12 +63,29 @@ pub enum FingerprintStatus {
 ///
 /// Checks profile-scoped path first, then global. Returns the first
 /// existing path, or the profile path as default for new files.
+///
+/// # Security
+///
+/// The `domain` parameter is sanitized: only the filename component is kept
+/// (stripping any directory traversal like `../../etc/`), and leading dots
+/// are rejected to prevent hidden-file creation. This is a defense-in-depth
+/// layer — the caller (`remember_for_site`) also validates the domain.
 pub fn resolve_site_memory_path(
     brain_dir: &Path,
     profile_brain_dir: Option<&Path>,
     domain: &str,
 ) -> PathBuf {
-    let filename = format!("{domain}.md");
+    // Defense-in-depth: extract only the filename component from domain,
+    // stripping any path separators or traversal sequences. This ensures
+    // that even if the caller forgets to validate, the filename can only
+    // be a bare name inside the sites/ directory.
+    let safe_domain = std::path::Path::new(domain)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .filter(|n| !n.is_empty() && !n.starts_with('.'))
+        .unwrap_or("_invalid_domain");
+
+    let filename = format!("{safe_domain}.md");
 
     // Profile-scoped path takes priority
     if let Some(profile_dir) = profile_brain_dir {

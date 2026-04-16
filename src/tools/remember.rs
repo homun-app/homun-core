@@ -184,6 +184,20 @@ impl RememberTool {
     ) -> Result<ToolResult> {
         use crate::browser::site_memory;
 
+        // Security: reject domains with path traversal components (#18).
+        // A domain like "../../etc/cron.d/evil" would escape the sites/ directory
+        // because PathBuf::join traverses with ".." components. No valid domain
+        // contains "/" or "\\" or "..", so this has zero false positives.
+        if domain.contains('/')
+            || domain.contains('\\')
+            || domain.contains("..")
+            || domain.is_empty()
+        {
+            return Ok(ToolResult::error(format!(
+                "Invalid site domain: '{domain}'. Must be a bare hostname (e.g., 'trenitalia.com')."
+            )));
+        }
+
         // Load existing site memory (checks profile first, then global)
         let mut memory = site_memory::load_site_memory(global_brain_dir, profile_brain_dir, domain)
             .await
@@ -495,5 +509,58 @@ mod tests {
         assert!(result.contains("## Identity"));
         assert!(result.contains("## Work"));
         assert!(result.contains("- company: ACME"));
+    }
+
+    // ── Path traversal regression tests (#18) ──────────────────────
+
+    /// Verify that resolve_site_memory_path strips traversal from domain.
+    #[test]
+    fn test_site_memory_path_traversal_stripped() {
+        use crate::browser::site_memory;
+        let brain = std::path::PathBuf::from("/tmp/brain");
+
+        // Normal domain → sites/trenitalia.com.md
+        let normal = site_memory::resolve_site_memory_path(&brain, None, "trenitalia.com");
+        assert!(
+            normal.to_str().unwrap().ends_with("sites/trenitalia.com.md"),
+            "normal domain: {normal:?}"
+        );
+
+        // Traversal domain → stripped to just the filename component
+        let evil = site_memory::resolve_site_memory_path(&brain, None, "../../etc/passwd");
+        assert!(
+            !evil.to_str().unwrap().contains(".."),
+            "traversal not stripped: {evil:?}"
+        );
+        assert!(
+            evil.to_str().unwrap().contains("sites/"),
+            "should stay in sites/: {evil:?}"
+        );
+    }
+
+    /// Verify that leading-dot domains are rejected (prevent hidden files).
+    #[test]
+    fn test_site_memory_path_hidden_file_rejected() {
+        use crate::browser::site_memory;
+        let brain = std::path::PathBuf::from("/tmp/brain");
+
+        let hidden = site_memory::resolve_site_memory_path(&brain, None, ".evil");
+        assert!(
+            hidden.to_str().unwrap().contains("_invalid_domain"),
+            "leading dot should be rejected: {hidden:?}"
+        );
+    }
+
+    /// Verify that empty domains are handled safely.
+    #[test]
+    fn test_site_memory_path_empty_domain() {
+        use crate::browser::site_memory;
+        let brain = std::path::PathBuf::from("/tmp/brain");
+
+        let empty = site_memory::resolve_site_memory_path(&brain, None, "");
+        assert!(
+            empty.to_str().unwrap().contains("_invalid_domain"),
+            "empty domain should be rejected: {empty:?}"
+        );
     }
 }
