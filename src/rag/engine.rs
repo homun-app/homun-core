@@ -69,6 +69,13 @@ impl RagEngine {
     ///
     /// `profile_id` and `user_id` scope the source and its chunks to a specific profile/user.
     /// Pass `None` for global (unscoped) ingestion.
+    /// Maximum file size for RAG ingestion (100 MB).
+    ///
+    /// Files larger than this are rejected before reading into memory to
+    /// prevent OOM on very large documents (#26). This limit applies to all
+    /// ingest paths: API upload, directory watcher, and CLI ingest.
+    pub const MAX_INGEST_BYTES: u64 = 100 * 1024 * 1024;
+
     pub async fn ingest_file(
         &mut self,
         path: &Path,
@@ -83,6 +90,21 @@ impl RagEngine {
                 path.extension()
                     .and_then(|e| e.to_str())
                     .unwrap_or("(none)")
+            );
+        }
+
+        // Guard against OOM: check file size before reading into memory (#26).
+        // Covers all 3 ingest paths (API upload, watcher, directory ingest)
+        // with a single chokepoint.
+        let file_size = std::fs::metadata(path)
+            .with_context(|| format!("Cannot stat {}", path.display()))?
+            .len();
+        if file_size > Self::MAX_INGEST_BYTES {
+            anyhow::bail!(
+                "File too large for ingestion: {} MB (max {} MB). Path: {}",
+                file_size / (1024 * 1024),
+                Self::MAX_INGEST_BYTES / (1024 * 1024),
+                path.display()
             );
         }
 
@@ -351,6 +373,19 @@ impl RagEngine {
         user_id: Option<&str>,
         namespace: Option<&str>,
     ) -> Result<Option<i64>> {
+        // Same OOM guard as ingest_file (#26)
+        let file_size = std::fs::metadata(path)
+            .with_context(|| format!("Cannot stat {}", path.display()))?
+            .len();
+        if file_size > Self::MAX_INGEST_BYTES {
+            anyhow::bail!(
+                "File too large for re-ingestion: {} MB (max {} MB). Path: {}",
+                file_size / (1024 * 1024),
+                Self::MAX_INGEST_BYTES / (1024 * 1024),
+                path.display()
+            );
+        }
+
         let content =
             std::fs::read(path).with_context(|| format!("Cannot read {}", path.display()))?;
         let new_hash = hex_sha256(&content);
