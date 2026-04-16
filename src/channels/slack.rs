@@ -17,12 +17,14 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 use super::traits::Channel;
 use crate::bus::{InboundMessage, MessageMetadata, OutboundMessage};
+use crate::channels::ChannelHealthTracker;
 use crate::config::SlackConfig;
 
 /// Slack channel implementation — Socket Mode (preferred) or HTTP polling (fallback).
 pub struct SlackChannel {
     config: SlackConfig,
     client: Client,
+    health: Option<std::sync::Arc<ChannelHealthTracker>>,
 }
 
 impl SlackChannel {
@@ -31,7 +33,17 @@ impl SlackChannel {
             .timeout(Duration::from_secs(30))
             .build()
             .expect("Failed to create HTTP client");
-        Self { config, client }
+        Self {
+            config,
+            client,
+            health: None,
+        }
+    }
+
+    /// Attach a health tracker for circuit breaker monitoring (#11).
+    pub fn with_health(mut self, health: std::sync::Arc<ChannelHealthTracker>) -> Self {
+        self.health = Some(health);
+        self
     }
 
     /// Whether Socket Mode is available (app_token configured).
@@ -289,8 +301,17 @@ impl SlackChannel {
                     tracing::info!("Slack: inbound channel closed");
                     return Ok(());
                 }
+
+                // Record successful message for health tracking (#11)
+                if let Some(ref health) = self.health {
+                    health.record_message("slack");
+                }
             }
 
+            // WebSocket loop exited — treat as degraded signal
+            if let Some(ref health) = self.health {
+                health.record_error("slack", "Socket Mode WebSocket disconnected");
+            }
             tracing::warn!("Slack Socket Mode: reconnecting in 3s...");
             tokio::time::sleep(Duration::from_secs(3)).await;
         }
@@ -490,6 +511,11 @@ impl SlackChannel {
                         if inbound_tx.send(inbound).await.is_err() {
                             tracing::info!("Slack: inbound channel closed");
                             return Ok(());
+                        }
+
+                        // Record successful message for health tracking (#11)
+                        if let Some(ref health) = self.health {
+                            health.record_message("slack");
                         }
                     }
                 }

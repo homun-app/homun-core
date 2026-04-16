@@ -2418,11 +2418,16 @@ fn start_channel_by_name(
             if cfg.token.is_empty() || cfg.token == "***ENCRYPTED***" {
                 return None;
             }
+            let health_for_slack = health.clone();
             Some(spawn_monitored_channel(
                 "slack",
                 health,
                 inbound_tx,
-                move || Box::new(SlackChannel::new(cfg.clone())),
+                move || {
+                    Box::new(
+                        SlackChannel::new(cfg.clone()).with_health(health_for_slack.clone()),
+                    )
+                },
             ))
         }
         name if name.starts_with("mcp:") => {
@@ -2553,11 +2558,16 @@ fn start_gateway_from_db(
                 tracing::error!(id = gw_id, "Gateway token not found, skipping");
                 return None;
             }
+            let health_for_slack = health.clone();
             Some(spawn_monitored_channel(
                 "slack",
                 health,
                 inbound_tx,
-                move || Box::new(SlackChannel::new(cfg.clone())),
+                move || {
+                    Box::new(
+                        SlackChannel::new(cfg.clone()).with_health(health_for_slack.clone()),
+                    )
+                },
             ))
         }
         #[cfg(feature = "channel-email")]
