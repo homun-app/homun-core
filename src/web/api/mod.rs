@@ -106,9 +106,8 @@ pub fn router() -> Router<Arc<AppState>> {
     // DefaultBodyLimit: cap file upload to 100 MB to prevent OOM on large
     // ingestion requests (#26). This matches RagEngine::MAX_INGEST_BYTES.
     #[cfg(feature = "embeddings")]
-    let api_router = api_router.merge(
-        knowledge::routes().layer(axum::extract::DefaultBodyLimit::max(100 * 1024 * 1024)),
-    );
+    let api_router = api_router
+        .merge(knowledge::routes().layer(axum::extract::DefaultBodyLimit::max(100 * 1024 * 1024)));
 
     // --- Embedding Index Management ---
     #[cfg(feature = "embeddings")]

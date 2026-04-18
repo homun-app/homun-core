@@ -3034,11 +3034,18 @@ api_key = "sk-or-test"
         config.providers.ollama.api_base = Some("http://localhost:11434/v1".to_string());
         config.providers.ollama_cloud.api_key = "sk-test".to_string();
 
-        let (local_name, _) = config.resolve_provider("ollama/qwen3.5:397b-cloud").unwrap();
+        let (local_name, _) = config
+            .resolve_provider("ollama/qwen3.5:397b-cloud")
+            .unwrap();
         assert_eq!(local_name, "ollama", "explicit ollama/ prefix must win");
 
-        let (cloud_name, _) = config.resolve_provider("ollama_cloud/qwen3.5:397b").unwrap();
-        assert_eq!(cloud_name, "ollama_cloud", "explicit ollama_cloud/ prefix routes to cloud");
+        let (cloud_name, _) = config
+            .resolve_provider("ollama_cloud/qwen3.5:397b")
+            .unwrap();
+        assert_eq!(
+            cloud_name, "ollama_cloud",
+            "explicit ollama_cloud/ prefix routes to cloud"
+        );
     }
 
     #[test]

@@ -630,9 +630,7 @@ impl WebServer {
                 "/metrics",
                 axum::routing::get(api::metrics_handler).with_state(state.clone()),
             );
-            tracing::info!(
-                "Prometheus metrics endpoint exposed publicly on /metrics (no auth)"
-            );
+            tracing::info!("Prometheus metrics endpoint exposed publicly on /metrics (no auth)");
         }
 
         // Protected routes — require auth (SEC-1 middleware + SEC-3 API rate limit)
@@ -661,9 +659,7 @@ impl WebServer {
             // request (including ones that will be rejected by auth, CORS, or
             // rate-limit middlewares below) is tagged with a trace ID that can
             // be surfaced in error logs and the response header.
-            .layer(axum::middleware::from_fn(
-                super::trace::trace_id_middleware,
-            ))
+            .layer(axum::middleware::from_fn(super::trace::trace_id_middleware))
             .layer(TraceLayer::new_for_http())
             .layer(
                 CorsLayer::new()

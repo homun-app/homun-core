@@ -522,7 +522,10 @@ mod tests {
         // Normal domain → sites/trenitalia.com.md
         let normal = site_memory::resolve_site_memory_path(&brain, None, "trenitalia.com");
         assert!(
-            normal.to_str().unwrap().ends_with("sites/trenitalia.com.md"),
+            normal
+                .to_str()
+                .unwrap()
+                .ends_with("sites/trenitalia.com.md"),
             "normal domain: {normal:?}"
         );
 

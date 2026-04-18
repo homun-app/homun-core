@@ -177,10 +177,7 @@ impl Provider for ReliableProvider {
                         );
                         crate::metrics::counter_inc(
                             "homun_llm_tokens_total",
-                            &[
-                                ("provider", entry.name.as_str()),
-                                ("direction", "prompt"),
-                            ],
+                            &[("provider", entry.name.as_str()), ("direction", "prompt")],
                             response.usage.prompt_tokens as u64,
                         );
                         crate::metrics::counter_inc(

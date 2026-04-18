@@ -78,10 +78,7 @@ pub fn register_homun_metrics() {
         "homun_rag_documents_total",
         "Current number of RAG knowledge base documents.",
     );
-    r.register_gauge(
-        "homun_uptime_seconds",
-        "Seconds since the gateway started.",
-    );
+    r.register_gauge("homun_uptime_seconds", "Seconds since the gateway started.");
     r.register_gauge(
         "homun_heartbeat_last_fire_timestamp",
         "Unix timestamp of the last heartbeat fire (0 if never fired — surfaces bug #64).",
@@ -517,7 +514,11 @@ fn format_f64(v: f64) -> String {
         return "NaN".to_string();
     }
     if v.is_infinite() {
-        return if v > 0.0 { "+Inf".to_string() } else { "-Inf".to_string() };
+        return if v > 0.0 {
+            "+Inf".to_string()
+        } else {
+            "-Inf".to_string()
+        };
     }
     if v.fract() == 0.0 && v.abs() < 1e15 {
         format!("{}", v as i64)
@@ -615,11 +616,7 @@ mod tests {
     fn label_value_escaping() {
         let r = fresh_registry();
         r.register_counter("homun_test_total", "Escape test.");
-        r.counter_inc(
-            "homun_test_total",
-            &[("path", "/hello\"world\n")],
-            1,
-        );
+        r.counter_inc("homun_test_total", &[("path", "/hello\"world\n")], 1);
         let out = r.render();
         // Backslash, quote, and newline must be escaped per Prometheus spec.
         assert!(out.contains(r#"path="/hello\"world\n""#));
@@ -664,9 +661,21 @@ mod tests {
     fn multiple_series_in_same_family() {
         let r = fresh_registry();
         r.register_counter("homun_requests_total", "Requests.");
-        r.counter_inc("homun_requests_total", &[("channel", "web"), ("status", "ok")], 10);
-        r.counter_inc("homun_requests_total", &[("channel", "telegram"), ("status", "ok")], 5);
-        r.counter_inc("homun_requests_total", &[("channel", "web"), ("status", "error")], 2);
+        r.counter_inc(
+            "homun_requests_total",
+            &[("channel", "web"), ("status", "ok")],
+            10,
+        );
+        r.counter_inc(
+            "homun_requests_total",
+            &[("channel", "telegram"), ("status", "ok")],
+            5,
+        );
+        r.counter_inc(
+            "homun_requests_total",
+            &[("channel", "web"), ("status", "error")],
+            2,
+        );
         let out = r.render();
         assert!(out.contains("homun_requests_total{channel=\"web\",status=\"ok\"} 10"));
         assert!(out.contains("homun_requests_total{channel=\"telegram\",status=\"ok\"} 5"));

@@ -142,7 +142,11 @@ async fn prepare_submission_formats(
     };
 
     let github_issue_url = if support.crash_submit_github && !support.public_repo.is_empty() {
-        Some(build_github_issue_url(&support.public_repo, &report, &markdown))
+        Some(build_github_issue_url(
+            &support.public_repo,
+            &report,
+            &markdown,
+        ))
     } else {
         None
     };

@@ -841,13 +841,12 @@ Poi fai quest'altro"#;
     const FIXTURE_APPROVAL: &str = include_str!("../../docs/block-fixtures/approval.json");
     const FIXTURE_STATUS: &str = include_str!("../../docs/block-fixtures/status.json");
     const FIXTURE_RESULT: &str = include_str!("../../docs/block-fixtures/result.json");
-    const FIXTURE_EXTERNAL: &str =
-        include_str!("../../docs/block-fixtures/external_message.json");
+    const FIXTURE_EXTERNAL: &str = include_str!("../../docs/block-fixtures/external_message.json");
 
     #[test]
     fn fixture_choice_roundtrip() {
-        let block: ResponseBlock = serde_json::from_str(FIXTURE_CHOICE)
-            .expect("choice fixture must deserialize");
+        let block: ResponseBlock =
+            serde_json::from_str(FIXTURE_CHOICE).expect("choice fixture must deserialize");
         match &block {
             ResponseBlock::Choice(c) => {
                 assert_eq!(c.id, "blk_choice_01");
@@ -868,8 +867,8 @@ Poi fai quest'altro"#;
 
     #[test]
     fn fixture_approval_roundtrip() {
-        let block: ResponseBlock = serde_json::from_str(FIXTURE_APPROVAL)
-            .expect("approval fixture must deserialize");
+        let block: ResponseBlock =
+            serde_json::from_str(FIXTURE_APPROVAL).expect("approval fixture must deserialize");
         match &block {
             ResponseBlock::Approval(a) => {
                 assert_eq!(a.id, "blk_approve_01");
@@ -887,8 +886,8 @@ Poi fai quest'altro"#;
 
     #[test]
     fn fixture_status_roundtrip() {
-        let block: ResponseBlock = serde_json::from_str(FIXTURE_STATUS)
-            .expect("status fixture must deserialize");
+        let block: ResponseBlock =
+            serde_json::from_str(FIXTURE_STATUS).expect("status fixture must deserialize");
         match &block {
             ResponseBlock::Status(s) => {
                 assert_eq!(s.id, "blk_status_01");
@@ -905,8 +904,8 @@ Poi fai quest'altro"#;
 
     #[test]
     fn fixture_result_roundtrip() {
-        let block: ResponseBlock = serde_json::from_str(FIXTURE_RESULT)
-            .expect("result fixture must deserialize");
+        let block: ResponseBlock =
+            serde_json::from_str(FIXTURE_RESULT).expect("result fixture must deserialize");
         match &block {
             ResponseBlock::Result(r) => {
                 assert_eq!(r.id, "blk_result_01");
@@ -948,13 +947,8 @@ Poi fai quest'altro"#;
         // Defensive check: if a new variant is added to ResponseBlock
         // without a corresponding fixture, this test will fail to
         // exhaustively cover all variants.
-        let fixtures: Vec<&str> = vec![
-            "choice",
-            "approval",
-            "status",
-            "result",
-            "external_message",
-        ];
+        let fixtures: Vec<&str> =
+            vec!["choice", "approval", "status", "result", "external_message"];
         let parsed: Vec<ResponseBlock> = vec![
             serde_json::from_str(FIXTURE_CHOICE).unwrap(),
             serde_json::from_str(FIXTURE_APPROVAL).unwrap(),
