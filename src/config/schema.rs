@@ -35,6 +35,11 @@ pub struct Config {
     /// Profile system configuration.
     #[serde(default)]
     pub profiles: ProfilesConfig,
+    /// User-curated favorite models (cross-provider).
+    /// Surfaced in UI dropdowns at the top via the ⭐ Favorites group.
+    /// Empty by default — each user builds their own set.
+    #[serde(default)]
+    pub favorites: FavoritesConfig,
 }
 
 impl Config {
@@ -526,6 +531,22 @@ impl Default for ProfilesConfig {
             default: "default".to_string(),
         }
     }
+}
+
+/// User-curated favorite models (cross-provider).
+///
+/// Surfaced at the top of every model dropdown via the ⭐ Favorites group,
+/// so users can quickly switch between models they've validated for their
+/// use cases (language, prompt style, domain). Empty by default — each
+/// user builds their own set via the inline star toggle in the UI.
+///
+/// Stored as full provider-prefixed model IDs (e.g.
+/// `"ollama/qwen3.5:397b-cloud"`, `"anthropic/claude-sonnet-4-6"`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FavoritesConfig {
+    /// Model IDs marked as favorite, full provider-prefixed form.
+    pub models: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]

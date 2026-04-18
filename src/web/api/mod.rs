@@ -12,6 +12,7 @@ mod crashes;
 mod devices;
 mod email_accounts;
 mod embeddings;
+mod favorites;
 mod gateways;
 mod health;
 mod knowledge;
@@ -93,6 +94,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .merge(sharing::routes())
         .merge(onboarding::routes())
         .merge(agents::routes())
+        .merge(favorites::routes())
         .merge(devices::routes())
         .merge(mobile::routes())
         // --- OpenAI-compatible API ---

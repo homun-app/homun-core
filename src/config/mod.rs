@@ -25,6 +25,7 @@ pub const SECTION_STORAGE: &str = "storage";
 pub const SECTION_UI: &str = "ui";
 pub const SECTION_AGENTS: &str = "agents";
 pub const SECTION_ROUTING: &str = "routing";
+pub const SECTION_FAVORITES: &str = "favorites";
 
 /// Overlay DB-stored settings on top of the TOML-loaded config.
 ///
@@ -92,6 +93,8 @@ pub async fn overlay_db_settings(config: &mut Config, db: &crate::storage::Datab
     overlay_section!(SECTION_AGENTS, std::collections::HashMap<String, AgentDefinitionConfig>, config.agents);
     // Routing
     overlay_section!(SECTION_ROUTING, RoutingConfig, config.routing);
+    // User-curated favorite models (cross-provider)
+    overlay_section!(SECTION_FAVORITES, FavoritesConfig, config.favorites);
 
     if applied.is_empty() {
         tracing::debug!("DB settings overlay: no sections found in DB, using TOML defaults");
@@ -133,6 +136,7 @@ pub async fn cli_save_section(config: &Config, section: &str) {
         SECTION_UI => serde_json::to_string(&config.ui),
         SECTION_AGENTS => serde_json::to_string(&config.agents),
         SECTION_ROUTING => serde_json::to_string(&config.routing),
+        SECTION_FAVORITES => serde_json::to_string(&config.favorites),
         _ => {
             eprintln!("Warning: unknown section '{section}', DB write skipped");
             return;
@@ -184,6 +188,7 @@ pub fn section_for_dotpath(key: &str) -> Option<&'static str> {
         ("agents", SECTION_AGENTS),
         ("routing", SECTION_ROUTING),
         ("permissions", SECTION_PERMISSIONS),
+        ("favorites", SECTION_FAVORITES),
     ];
 
     for (prefix, section) in prefixes {

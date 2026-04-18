@@ -1030,25 +1030,14 @@ struct OllamaCloudModel {
     owned_by: String,
 }
 
-/// Ollama Cloud model allowlist — only models with verified "Tools" tag on ollama.com.
-/// Models without native tool calling produce free-text instead of structured tool calls.
-/// Source: https://ollama.com/search?c=cloud (check "Tools" tag)
-fn is_ollama_cloud_supported(model_name: &str) -> bool {
-    // Extract base name: "qwen3.5:397b" → "qwen3.5", "nemotron-3-super:latest" → "nemotron-3-super"
-    let base = model_name.split(':').next().unwrap_or(model_name);
-    matches!(
-        base,
-        "qwen3.5"
-            | "qwen3-coder-next"
-            | "qwen3-next"
-            | "nemotron-3-super"
-            | "nemotron-3-nano"
-            | "devstral-small-2"
-            | "devstral-2"
-            | "ministral-3"
-            | "rnj-1"
-    )
-}
+// NOTE: Cloud model filtering uses the same `is_embedding_model(name, &[])` helper
+// defined further below for local Ollama. We pass an empty `families` slice
+// because the Ollama Cloud /api/tags response doesn't expose family metadata.
+//
+// Less-is-more philosophy (since we removed the previous tools-supported allowlist):
+// only filter out embedding/retrieval models that clearly can't power chat.
+// Everything else is shown — users mark their personal favorites via the ⭐
+// inline toggle in the UI.
 
 async fn list_ollama_cloud_models(
     State(state): State<Arc<AppState>>,
@@ -1147,7 +1136,7 @@ async fn list_ollama_cloud_models(
                     let models = data
                         .models
                         .into_iter()
-                        .filter(|m| is_ollama_cloud_supported(&m.name))
+                        .filter(|m| !is_embedding_model(&m.name, &[]))
                         .map(|m| OllamaCloudModel {
                             id: m.name,
                             owned_by: "ollama".to_string(),
