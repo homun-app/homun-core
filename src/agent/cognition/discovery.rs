@@ -103,7 +103,7 @@ pub(super) async fn discover_tools(query: &str, tool_registry: &RwLock<ToolRegis
         })
         .collect();
 
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    scored.sort_by_key(|s| std::cmp::Reverse(s.0));
     scored.truncate(7);
 
     if scored.is_empty() {
@@ -197,7 +197,7 @@ pub(super) async fn discover_skills(
         })
         .collect();
 
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    scored.sort_by_key(|s| std::cmp::Reverse(s.0));
     scored.truncate(5);
 
     let results: Vec<&SkillEntry> = scored.iter().map(|(_, e)| e).collect();

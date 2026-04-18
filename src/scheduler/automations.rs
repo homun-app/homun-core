@@ -427,15 +427,11 @@ fn validate_dependencies(
     let mut errors = Vec::new();
     for dep in dependencies {
         match dep.kind.as_str() {
-            "skill" => {
-                if !installed_skills.contains(&dep.name.to_ascii_lowercase()) {
-                    errors.push(format!("Missing skill dependency: {}", dep.name));
-                }
+            "skill" if !installed_skills.contains(&dep.name.to_ascii_lowercase()) => {
+                errors.push(format!("Missing skill dependency: {}", dep.name));
             }
-            "mcp" => {
-                if !enabled_mcp.contains(&dep.name.to_ascii_lowercase()) {
-                    errors.push(format!("Missing or disabled MCP dependency: {}", dep.name));
-                }
+            "mcp" if !enabled_mcp.contains(&dep.name.to_ascii_lowercase()) => {
+                errors.push(format!("Missing or disabled MCP dependency: {}", dep.name));
             }
             _ => {}
         }

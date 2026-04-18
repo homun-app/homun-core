@@ -165,7 +165,9 @@ pub fn detect_platform_hint() -> String {
             match detect_linux_family() {
                 LinuxFamily::Debian => "sudo apt update && sudo apt upgrade homun".to_string(),
                 LinuxFamily::RedHat => "sudo dnf upgrade homun".to_string(),
-                LinuxFamily::Unknown => "Download the .deb or .rpm from GitHub Releases and reinstall.".to_string(),
+                LinuxFamily::Unknown => {
+                    "Download the .deb or .rpm from GitHub Releases and reinstall.".to_string()
+                }
             }
         }
         "macos" => "brew upgrade homun".to_string(),
@@ -174,7 +176,10 @@ pub fn detect_platform_hint() -> String {
             // on native Windows isn't in our supported surface area.
             "Open your WSL terminal and run: sudo apt upgrade homun".to_string()
         }
-        other => format!("Download the latest binary from GitHub Releases for {}", other),
+        other => format!(
+            "Download the latest binary from GitHub Releases for {}",
+            other
+        ),
     }
 }
 

@@ -1,102 +1,79 @@
 name: CI
 
 # =============================================================================
-# COST OPTIMIZATION (Sprint 10 post-v1.0.1)
+# Self-hosted CI (Sprint 10 post-v1.0.1 — billing-free setup)
 # =============================================================================
-# Push to main: only check + test (~15 min Linux, not ~297 min with builds)
-# Pull requests: check + test + feature-test (~47 min Linux)
-# Tags: handled by release.yml only (not this workflow)
-# Build matrix + release job: REMOVED (release.yml does packaging)
+# Runs on a Docker self-hosted runner (myoung34/github-runner) on the dev Mac.
+# Cost: €0/month. Always-on while Docker Desktop is up.
+#
+# Workspace at ~/.homun-runner/work persists between jobs → target/ cache
+# survives without needing actions/cache (faster than GitHub-hosted setup).
+#
+# Heavy workflows (sandbox-validation, e2e cross-OS, release builds) live in
+# release.yml + workflow_dispatch — they don't run on every PR.
+#
+# Skip CI for doc-only changes via paths-ignore.
 # =============================================================================
 
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - '.gitignore'
+      - 'LICENSE*'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - '.gitignore'
+      - 'LICENSE*'
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
 jobs:
-  # =============================================================================
-  # CHECK & TEST
-  # =============================================================================
   check:
     name: Check & Lint
-    runs-on: ubuntu-22.04
+    runs-on: [self-hosted, linux]
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
-      
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-check-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-check-
-      
+
       - name: Check formatting
         run: cargo fmt --all -- --check
-      
+
       - name: Clippy (default features)
         run: cargo clippy -- -D warnings
-      
+
       - name: Clippy (all features)
         run: cargo clippy --all-features -- -D warnings
 
   test:
     name: Test
-    runs-on: ubuntu-22.04
+    runs-on: [self-hosted, linux]
+    needs: check
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-      
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-test-
-      
+
       - name: Run tests (all features)
         run: cargo test --all-features --verbose
 
-  # =============================================================================
-  # BUILD MATRIX — REMOVED (cost optimization)
-  # =============================================================================
-  # The 5-target cross-platform build matrix (macOS x2 + Linux x2 + Windows)
-  # was removed from ci.yml to save GitHub Actions minutes. macOS runners
-  # cost 10x, Windows 2x — a single push to main was burning ~297 min.
-  #
-  # Release builds are now ONLY produced by release.yml when a v* tag is
-  # pushed. That workflow outputs .deb, .rpm, signed .dmg, and homebrew
-  # formula — proper release assets instead of raw binaries.
-  #
-  # If you need to verify a build compiles for a specific target without
-  # tagging, use: gh workflow run release.yml --ref main
-  # =============================================================================
-  # FEATURE FLAGS TEST — PR only (skip on push to main to save minutes)
-  # =============================================================================
   feature-test:
     name: Test Features
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-22.04
+    runs-on: [self-hosted, linux]
+    needs: check
     strategy:
       fail-fast: false
       matrix:
@@ -105,36 +82,29 @@ jobs:
           - "gateway"
           - "full"
           - "default"
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-      
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-features-${{ matrix.features }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-features-
-      
+
       - name: Build with features
+        env:
+          FEATURES: ${{ matrix.features }}
         run: |
-          if [ "${{ matrix.features }}" = "default" ]; then
+          if [ "$FEATURES" = "default" ]; then
             cargo build --release
           else
-            cargo build --release --no-default-features --features "${{ matrix.features }}"
+            cargo build --release --no-default-features --features "$FEATURES"
           fi
-      
+
       - name: Check binary size
+        env:
+          FEATURES: ${{ matrix.features }}
         shell: bash
         run: |
           if [ -f target/release/homun ]; then
             SIZE=$(ls -lh target/release/homun | awk '{print $5}')
-            echo "Binary size with features '${{ matrix.features }}': $SIZE"
+            echo "Binary size with features '$FEATURES': $SIZE"
           fi

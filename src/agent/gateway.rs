@@ -1916,16 +1916,19 @@ async fn dispatch_to_agent(
     // an HTTP request, this is where their trace lifecycle begins.
     let trace_id = crate::logs::new_trace_id();
     crate::logs::TASK_TRACE_ID
-        .scope(trace_id, dispatch_to_agent_inner(
-            prepared,
-            agent,
-            senders,
-            stream_tx,
-            task_db,
-            session_locks,
-            known_chat_ids,
-            config,
-        ))
+        .scope(
+            trace_id,
+            dispatch_to_agent_inner(
+                prepared,
+                agent,
+                senders,
+                stream_tx,
+                task_db,
+                session_locks,
+                known_chat_ids,
+                config,
+            ),
+        )
         .await;
 }
 
@@ -2424,9 +2427,7 @@ fn start_channel_by_name(
                 health,
                 inbound_tx,
                 move || {
-                    Box::new(
-                        SlackChannel::new(cfg.clone()).with_health(health_for_slack.clone()),
-                    )
+                    Box::new(SlackChannel::new(cfg.clone()).with_health(health_for_slack.clone()))
                 },
             ))
         }
@@ -2564,9 +2565,7 @@ fn start_gateway_from_db(
                 health,
                 inbound_tx,
                 move || {
-                    Box::new(
-                        SlackChannel::new(cfg.clone()).with_health(health_for_slack.clone()),
-                    )
+                    Box::new(SlackChannel::new(cfg.clone()).with_health(health_for_slack.clone()))
                 },
             ))
         }

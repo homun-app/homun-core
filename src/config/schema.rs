@@ -315,10 +315,9 @@ impl Config {
         // --- 2. Local/cloud providers — explicit prefix always wins ---
         // These have unambiguous prefixes so they must match before gateways
         if m.starts_with("ollama/") {
-            // Check if ollama_cloud is configured (for Ollama cloud), otherwise use local
-            if self.is_provider_configured("ollama_cloud") {
-                return Some(("ollama_cloud", &self.providers.ollama_cloud));
-            }
+            // Explicit prefix always wins: "ollama/" → local Ollama, even if
+            // ollama_cloud is also configured. To target Ollama Cloud directly,
+            // use the explicit "ollama_cloud/" prefix instead.
             return Some(("ollama", &self.providers.ollama));
         }
         if m.starts_with("ollama_cloud/") {
@@ -3023,14 +3022,29 @@ api_key = "sk-or-test"
     fn test_resolve_provider_ollama() {
         let mut config = Config::default();
         config.providers.ollama.api_base = Some("http://localhost:11434/v1".to_string());
-        // Use canonical "ollama/model" prefix — bare model names fall through
-        // to gateways (Step 3), which is correct when OpenRouter is configured.
-        // Accept both "ollama" and "ollama_cloud" since global_secrets() may find
-        // keyring entries that influence resolution ordering.
         let (name, _) = config.resolve_provider("ollama/llama3").unwrap();
-        assert!(
-            name.starts_with("ollama"),
-            "Expected an Ollama provider, got '{name}'"
+        assert_eq!(name, "ollama", "ollama/ prefix must route to local");
+    }
+
+    #[test]
+    fn test_resolve_provider_ollama_prefix_wins_over_cloud() {
+        // Regression: "ollama/" prefix must route to local even when
+        // ollama_cloud is also configured. To target cloud, use "ollama_cloud/".
+        let mut config = Config::default();
+        config.providers.ollama.api_base = Some("http://localhost:11434/v1".to_string());
+        config.providers.ollama_cloud.api_key = "sk-test".to_string();
+
+        let (local_name, _) = config
+            .resolve_provider("ollama/qwen3.5:397b-cloud")
+            .unwrap();
+        assert_eq!(local_name, "ollama", "explicit ollama/ prefix must win");
+
+        let (cloud_name, _) = config
+            .resolve_provider("ollama_cloud/qwen3.5:397b")
+            .unwrap();
+        assert_eq!(
+            cloud_name, "ollama_cloud",
+            "explicit ollama_cloud/ prefix routes to cloud"
         );
     }
 

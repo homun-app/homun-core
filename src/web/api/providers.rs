@@ -761,9 +761,9 @@ async fn list_all_models(State(state): State<Arc<AppState>>) -> Json<AllModelsRe
         capability_models.insert(model.clone());
     }
     let model_capabilities =
-        build_model_capabilities_map(&config, capability_models.clone().into_iter(), false);
+        build_model_capabilities_map(&config, capability_models.clone(), false);
     let effective_model_capabilities =
-        build_model_capabilities_map(&config, capability_models.into_iter(), true);
+        build_model_capabilities_map(&config, capability_models, true);
 
     Json(AllModelsResponse {
         ok: true,
@@ -832,7 +832,7 @@ async fn resolve_model_capabilities(
         ok: true,
         model_capabilities: build_model_capabilities_map(
             &config,
-            payload.models.into_iter(),
+            payload.models,
             payload.apply_overrides,
         ),
     })
