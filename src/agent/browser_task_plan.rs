@@ -461,12 +461,8 @@ impl BrowserTaskPlanState {
 
         self.stuck_level = match prev {
             0 => 1,
-            1 => {
-                if can_switch_visible && !self.is_visible {
-                    2 // Will trigger auto-switch to visible
-                } else {
-                    3 // Already visible or not auto mode → give up
-                }
+            1 if can_switch_visible && !self.is_visible => {
+                2 // Will trigger auto-switch to visible
             }
             2 => 3,
             _ => 3,

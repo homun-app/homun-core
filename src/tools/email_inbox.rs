@@ -172,7 +172,7 @@ fn select_account(
     if active.is_empty() {
         bail!("No enabled and configured email accounts found");
     }
-    active.sort_by(|(a, _), (b, _)| a.cmp(b));
+    active.sort_by_key(|(a, _)| *a);
     let (name, acc) = active[0];
     Ok((name.clone(), acc.clone()))
 }

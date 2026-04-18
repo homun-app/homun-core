@@ -111,7 +111,7 @@ impl RagWatcher {
         }
 
         // Sort longest-path-first for prefix matching
-        contexts.sort_by(|a, b| b.path.as_os_str().len().cmp(&a.path.as_os_str().len()));
+        contexts.sort_by_key(|c| std::cmp::Reverse(c.path.as_os_str().len()));
         contexts
     }
 

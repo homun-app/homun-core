@@ -294,10 +294,10 @@ async fn list_automation_targets(
 
     if let Some(cli_idx) = targets.iter().position(|t| t.value == "cli:default") {
         let cli = targets.remove(cli_idx);
-        targets.sort_by(|a, b| a.label.to_lowercase().cmp(&b.label.to_lowercase()));
+        targets.sort_by_key(|a| a.label.to_lowercase());
         targets.insert(0, cli);
     } else {
-        targets.sort_by(|a, b| a.label.to_lowercase().cmp(&b.label.to_lowercase()));
+        targets.sort_by_key(|a| a.label.to_lowercase());
     }
 
     Json(targets)

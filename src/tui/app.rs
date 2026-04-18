@@ -874,28 +874,26 @@ impl App {
                     }
                 }
             }
-            KeyCode::Char('e') | KeyCode::Enter => {
+            KeyCode::Char('e') | KeyCode::Enter
                 // Edit phone number (only when Phone is focused and not pairing)
                 if self.whatsapp_state.focused_field == WhatsAppField::Phone
                     && !matches!(
                         self.whatsapp_state.status,
                         WhatsAppStatus::Connecting | WhatsAppStatus::WaitingForCode { .. }
                     )
-                {
+                => {
                     self.whatsapp_state.input_mode = WhatsAppEditMode::EditingPhone;
                 }
-            }
             KeyCode::Char('a') => {
                 // Add a new allow_from number
                 self.whatsapp_state.add_number_buffer.clear();
                 self.whatsapp_state.input_mode = WhatsAppEditMode::AddingNumber;
             }
-            KeyCode::Char('d') => {
+            KeyCode::Char('d')
                 // Delete selected allow_from number
-                if self.whatsapp_state.focused_field == WhatsAppField::AllowFrom {
+                if self.whatsapp_state.focused_field == WhatsAppField::AllowFrom => {
                     self.remove_selected_allow_from();
                 }
-            }
             KeyCode::Char('p') => {
                 #[cfg(feature = "channel-whatsapp")]
                 self.start_whatsapp_pairing();
@@ -1159,15 +1157,14 @@ impl App {
                     }
                 }
             }
-            KeyCode::Down => {
+            KeyCode::Down
                 // Move focus to the list if there are items
-                if !self.skills_state.current_list().is_empty() {
+                if !self.skills_state.current_list().is_empty() => {
                     self.skills_state.focus = SkillsFocus::List;
                     if self.skills_state.list_state.selected().is_none() {
                         self.skills_state.list_state.select(Some(0));
                     }
                 }
-            }
             KeyCode::Backspace => {
                 self.skills_state.search_buffer.pop();
             }
@@ -1208,10 +1205,8 @@ impl App {
                 self.skills_state.focus = SkillsFocus::SearchBar;
             }
             // 'd' to remove selected installed skill
-            KeyCode::Char('d') => {
-                if self.skills_state.view == SkillsView::Installed {
-                    self.remove_selected_skill();
-                }
+            KeyCode::Char('d') if self.skills_state.view == SkillsView::Installed => {
+                self.remove_selected_skill();
             }
             // '1'/'2' to switch views
             KeyCode::Char('1') => {
