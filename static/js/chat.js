@@ -3333,18 +3333,41 @@ async function openModelPicker() {
         const q = (filter || '').toLowerCase();
         const providerNames = window.ModelLoader ? ModelLoader.PROVIDER_NAMES : {};
         const recent = getRecentModels();
+        const favorites = (window.ModelLoader && window.ModelLoader._favorites) || new Set();
         let totalRendered = 0;
 
-        // Recently used section
-        if (recent.length > 0 && !q) {
+        // ⭐ Favorites section (always at top, even when filtering)
+        const favList = [];
+        favorites.forEach(modelId => {
+            // Match against any group's labels for filter
+            if (!q) { favList.push(modelId); return; }
+            const lbl = (modelId.split('/').pop() || modelId).toLowerCase();
+            if (lbl.includes(q) || modelId.toLowerCase().includes(q)) favList.push(modelId);
+        });
+        if (favList.length > 0) {
             const label = document.createElement('div');
             label.className = 'chat-model-group-label';
-            label.textContent = 'Recently Used';
+            label.textContent = '\u2b50 Favorites';
             body.appendChild(label);
-            recent.forEach(modelId => {
+            favList.forEach(modelId => {
                 body.appendChild(buildModelOption(modelId, modelId.split('/').pop() || modelId));
                 totalRendered++;
             });
+        }
+
+        // Recently used section (skip ids already shown in Favorites)
+        if (recent.length > 0 && !q) {
+            const recentNotFav = recent.filter(id => !favorites.has(id));
+            if (recentNotFav.length > 0) {
+                const label = document.createElement('div');
+                label.className = 'chat-model-group-label';
+                label.textContent = 'Recently Used';
+                body.appendChild(label);
+                recentNotFav.forEach(modelId => {
+                    body.appendChild(buildModelOption(modelId, modelId.split('/').pop() || modelId));
+                    totalRendered++;
+                });
+            }
         }
 
         // Provider groups
@@ -3380,6 +3403,27 @@ async function openModelPicker() {
         btn.className = 'chat-model-option';
         if (modelId === currentModel) btn.classList.add('is-current');
 
+        // ⭐ Star toggle (left of name) — click toggles favorite without selecting model
+        const favorites = (window.ModelLoader && window.ModelLoader._favorites) || new Set();
+        const star = document.createElement('button');
+        star.type = 'button';
+        star.className = 'chat-model-option-star';
+        const isFav = favorites.has(modelId);
+        if (isFav) star.classList.add('is-favorite');
+        star.textContent = isFav ? '\u2605' : '\u2606';   // filled / outline
+        star.title = isFav ? 'Remove from favorites' : 'Add to favorites';
+        star.setAttribute('aria-label', star.title);
+        star.addEventListener('click', async (e) => {
+            e.stopPropagation();   // don't trigger selectModel on the parent button
+            try {
+                await window.ModelLoader.toggleFavorite(modelId);
+                renderList(searchInput.value);   // re-render to reflect new state
+            } catch (err) {
+                console.error('Failed to toggle favorite:', err);
+            }
+        });
+        btn.appendChild(star);
+
         const nameSpan = document.createElement('span');
         nameSpan.className = 'chat-model-option-name';
         nameSpan.textContent = label;
@@ -3406,7 +3450,12 @@ async function openModelPicker() {
         return btn;
     }
 
-    renderList('');
+    // Ensure favorites are loaded before first render so stars reflect real state
+    if (window.ModelLoader && typeof window.ModelLoader.getFavorites === 'function') {
+        window.ModelLoader.getFavorites().then(() => renderList(''));
+    } else {
+        renderList('');
+    }
     searchInput.focus();
 
     searchInput.addEventListener('input', () => renderList(searchInput.value));

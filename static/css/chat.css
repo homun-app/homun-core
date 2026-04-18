@@ -3037,6 +3037,36 @@
     color: var(--accent);
 }
 
+/* ⭐ Favorite toggle — inline star, click toggles without selecting model */
+.chat-model-option-star {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--t4);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    transition: color var(--fast), background var(--fast), transform var(--fast);
+}
+
+.chat-model-option-star:hover {
+    color: var(--accent);
+    background: rgba(var(--accent-rgb, 99, 102, 241), 0.08);
+    transform: scale(1.15);
+}
+
+.chat-model-option-star.is-favorite {
+    color: #f5b80a;   /* warm amber, distinct from accent so it pops in any theme */
+}
+
+.chat-model-option-star.is-favorite:hover {
+    color: #d99c08;
+}
+
 .chat-model-picker-empty {
     padding: 24px 0;
     text-align: center;
