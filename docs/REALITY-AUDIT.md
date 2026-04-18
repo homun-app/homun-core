@@ -2238,6 +2238,73 @@ A quel punto seguire la sezione "Windows — Authenticode signing" di [`INSTALLE
 
 ---
 
+### ✅ #68 — Provider routing: `ollama/` prefix dirottato a `ollama_cloud` quando entrambi configurati (FIXATO 2026-04-18)
+
+**Dominio**: [02 Agente + Cognizione](./features/02-agente-cognizione.md) — provider factory
+**Severity**: 🟡 alto — funzionalità core rotta (l'agente non risponde) per chiunque abbia entrambi i provider Ollama configurati
+**Status**: ✅ **FIXATO** — `resolve_provider` ora rispetta sempre il prefix esplicito `ollama/` → local
+**Discovered**: 2026-04-18, debug session su gateway in setup mode
+
+#### Cosa è successo
+
+Utente con entrambi `[providers.ollama]` (locale a `localhost:11434`) e `[providers.ollama_cloud]` (con API key) configurati. `agent.model = "ollama/qwen3.5:397b-cloud"` (modello cloud-aliased pullato via `ollama pull qwen3.5:397b-cloud`, gestito dal daemon locale come riferimento al cloud).
+
+Comportamento atteso: prefix `ollama/` → routing al daemon locale, che proxy autenticato verso ollama.com per i `:cloud`/`-cloud` aliases.
+
+Comportamento osservato: ogni chat falliva con `HTTP 401 Unauthorized` o timeout. La cognition phase a volte riusciva (response degenere `finish_reason=length` con `content=''`), il main loop falliva sempre.
+
+#### Root cause
+
+`src/config/schema.rs:317-323` (pre-fix):
+
+```rust
+if m.starts_with("ollama/") {
+    // Check if ollama_cloud is configured (for Ollama cloud), otherwise use local
+    if self.is_provider_configured("ollama_cloud") {
+        return Some(("ollama_cloud", &self.providers.ollama_cloud));  // hijack
+    }
+    return Some(("ollama", &self.providers.ollama));
+}
+```
+
+Il routing **scavalcava il prefix esplicito** dell'utente: con `ollama_cloud` configurato, ogni `ollama/*` veniva dirottato direttamente all'API cloud (`https://ollama.com/v1/chat/completions`). Ma:
+
+- I nomi `qwen3.5:397b-cloud`, `kimi-k2.5:cloud`, ecc. **non esistono nell'API cloud diretta** (`/v1/models` restituisce solo `qwen3.5:397b`, `kimi-k2.5`, ecc.)
+- Ollama Cloud risponde male a modelli inesistenti: a volte 401, a volte 200 con response vuota e `finish_reason=length`, a volte timeout
+- Il daemon locale invece **conosce gli aliases `:cloud`** e li proxy correttamente, normalizzando il nome (es. `qwen3.5:397b-cloud` → `qwen3.5:397b`) usando la sessione `ollama` autenticata
+
+Anti-pattern: "smart auto-routing" che scavalca l'intent esplicito dell'utente perdendo informazione semantica.
+
+#### Fix applicato
+
+`src/config/schema.rs:317-322`:
+
+```rust
+if m.starts_with("ollama/") {
+    // Explicit prefix always wins: "ollama/" → local Ollama, even if
+    // ollama_cloud is also configured. To target Ollama Cloud directly,
+    // use the explicit "ollama_cloud/" prefix instead.
+    return Some(("ollama", &self.providers.ollama));
+}
+```
+
+Più test di regressione `test_resolve_provider_ollama_prefix_wins_over_cloud` che impedisce il ritorno al comportamento "smart".
+
+#### Cross-check
+
+- **Coerenza con commento esistente** ([schema.rs:315](../src/config/schema.rs:315)): "Local/cloud providers — explicit prefix always wins" → il commento ora descrive il codice
+- **Whitelist obsoleta `is_ollama_cloud_supported`** ([providers.rs:1036](../src/web/api/providers.rs:1036)): bug correlato, NON fixato in questa PR — molti modelli recenti (`qwen3-coder:480b`, `glm-4.6`/`5`, `deepseek-v3.x`, `kimi-k2.5`, `gpt-oss`, `qwen3-vl:235b`, ecc.) sono filtrati via dal dropdown UI. Da tracciare come bug separato
+
+#### Test di regressione
+
+Eseguire dopo fix:
+1. Configurare sia `[providers.ollama]` (locale) che `[providers.ollama_cloud]` (con API key valida)
+2. Settare `agent.model = "ollama/qwen3.5:397b-cloud"` (qualsiasi alias `:cloud` o `-cloud`)
+3. Inviare un messaggio chat — verificare nei log: `Creating LLM provider provider="ollama"` (NON `ollama_cloud`) e URL `http://localhost:11434/v1/chat/completions`
+4. Risposta in 2-5s, no 401/timeout
+
+---
+
 ## ✅ Conferme (cose che abbiamo visto funzionare)
 
 ### Canali — Audit Sprint 2 (2026-04-14, Recipe H)
