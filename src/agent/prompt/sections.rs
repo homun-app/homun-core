@@ -344,7 +344,8 @@ impl PromptSection for SkillsSection {
         prompt.push_str("- If exactly one skill clearly applies: call it as a tool to activate its instructions.\n");
         prompt.push_str("- If multiple could apply: choose the most specific one.\n");
         prompt.push_str("- If none clearly apply: do not activate any skill.\n");
-        prompt.push_str("- Users can invoke skills directly with `/skill-name arguments`.\n\n");
+        prompt.push_str("- Users can invoke skills directly with `/skill-name arguments`.\n");
+        prompt.push_str("- **One activation per query**: each skill activates ONCE per user turn. After activation, follow its instructions using the actual tools (`web_fetch`, `send_message`, `shell`, `browser`, etc.). Calling the same skill again with the same query returns a redirect — that's a signal you should be using the real tools instead.\n\n");
         prompt.push_str(ctx.skills_summary);
 
         Ok(prompt)
