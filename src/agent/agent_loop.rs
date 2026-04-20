@@ -101,6 +101,23 @@ pub struct AgentLoop {
 // ToolExecutionSummary, IterationBudgetState → iteration_budget.rs
 // ActivatedSkill, check_required_bins_sync → skill_activator.rs
 
+/// Loop guard: returns `true` if a skill activation request should be
+/// redirected to a no-op (the same `(skill_name, query)` was already
+/// activated in this turn). Different query → returns `false`, allowing
+/// legitimate re-activation (e.g. weather skill called for two cities).
+///
+/// Extracted as a helper for unit-test coverage; the inline call site
+/// in the agent loop body uses this same logic.
+fn should_redirect_skill_activation(
+    activated_skills: &HashMap<String, String>,
+    skill_name: &str,
+    query: &str,
+) -> bool {
+    activated_skills
+        .get(skill_name)
+        .is_some_and(|prev| prev == query)
+}
+
 async fn emit_plan_update(
     stream_tx: Option<&mpsc::Sender<crate::provider::StreamChunk>>,
     plan: &ExecutionPlanSnapshot,
@@ -1302,6 +1319,12 @@ impl AgentLoop {
 
         let mut final_content: Option<String> = None;
         let mut tools_used: Vec<String> = Vec::new();
+        // Track skills already activated this turn, mapped to their last query.
+        // Prevents skill activation loops (where the LLM keeps "calling" the
+        // same skill name and re-injecting its 16K body on every iteration)
+        // while still allowing legitimate re-activation with a different query
+        // (e.g. weather skill called once for city A, then again for city B).
+        let mut activated_skills: HashMap<String, String> = HashMap::new();
         let mut response_blocks: Vec<crate::tools::ResponseBlock> = Vec::new();
         // Track vault keys retrieved in this turn so the vault-leak filter
         // doesn't redact values the user explicitly asked for (with 2FA).
@@ -2047,6 +2070,33 @@ impl AgentLoop {
                             .get("query")
                             .and_then(|v| v.as_str())
                             .unwrap_or("");
+
+                        // Loop guard: if this exact (skill, query) was already
+                        // activated this turn, return a soft redirect instead of
+                        // re-injecting the (often >10K char) skill body. The body
+                        // is already in the message history above; the LLM should
+                        // be calling the actual tools the skill described.
+                        // Different query → falls through to full re-activation.
+                        if should_redirect_skill_activation(
+                            &activated_skills,
+                            &tool_call.name,
+                            query,
+                        ) {
+                            tracing::warn!(
+                                skill = %tool_call.name,
+                                "Skill re-activation suppressed (same query already activated this turn) — returning redirect"
+                            );
+                            crate::tools::ToolResult::error(format!(
+                                "Skill '{0}' was already activated with this query in this turn. \
+                                 Its instructions are in the conversation above. \
+                                 Stop calling '{0}' — use the actual tools it described \
+                                 (e.g. web_fetch, send_message, shell, browser) to fulfill the request. \
+                                 If you genuinely need fresh instructions for a different query, \
+                                 call '{0}' again with a distinct `query` argument.",
+                                tool_call.name
+                            ))
+                        } else {
+                        activated_skills.insert(tool_call.name.clone(), query.to_string());
                         tracing::info!(
                             skill = %tool_call.name,
                             body_len = activated.body.len(),
@@ -2121,6 +2171,7 @@ impl AgentLoop {
                             is_error: false,
                             blocks: Vec::new(),
                         }
+                        } // close else (loop guard)
                     } else if skill_allowed_tools
                         .as_ref()
                         .is_some_and(|allowed| !allowed.contains(&tool_call.name))
@@ -3703,6 +3754,51 @@ mod tests {
         let mut m = ChatMessage::user(content);
         m.role = "tool".to_string();
         m
+    }
+
+    #[test]
+    fn skill_loop_guard_redirects_same_query_only() {
+        use std::collections::HashMap;
+
+        let mut activated: HashMap<String, String> = HashMap::new();
+
+        // 1. Empty map → no skill ever activated → never redirect
+        assert!(
+            !super::should_redirect_skill_activation(&activated, "weather", "Roma oggi"),
+            "first activation must NOT redirect"
+        );
+
+        // Simulate the post-activation insert that happens in the agent loop
+        activated.insert("weather".to_string(), "Roma oggi".to_string());
+
+        // 2. Same skill + same query → redirect (loop guard kicks in)
+        assert!(
+            super::should_redirect_skill_activation(&activated, "weather", "Roma oggi"),
+            "same skill + same query must redirect (loop guard)"
+        );
+
+        // 3. Same skill + DIFFERENT query → no redirect (legit re-activation)
+        assert!(
+            !super::should_redirect_skill_activation(&activated, "weather", "Milano oggi"),
+            "same skill + different query must allow re-activation"
+        );
+
+        // 4. Different skill entirely → no redirect
+        assert!(
+            !super::should_redirect_skill_activation(&activated, "translate", "Roma oggi"),
+            "different skill must never redirect"
+        );
+
+        // 5. Empty query strings — exact match still redirects
+        activated.insert("idle".to_string(), String::new());
+        assert!(
+            super::should_redirect_skill_activation(&activated, "idle", ""),
+            "empty query, same skill, must redirect (exact match)"
+        );
+        assert!(
+            !super::should_redirect_skill_activation(&activated, "idle", "x"),
+            "empty stored vs non-empty new query must NOT redirect"
+        );
     }
 
     #[test]
