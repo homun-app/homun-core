@@ -169,14 +169,76 @@ function renderConversationList(listEl, conversations, options) {
     });
 }
 
+function buildConversationDropdown(conversation, actions) {
+    var icRename = '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15.2 5.2l-1.8-1.8a2.5 2.5 0 00-3.5 0L3.5 9.9V14.5h4.6l6.4-6.4a2.5 2.5 0 000-3.5z"/></svg>';
+    var icArchive = '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="14" height="3" rx="1"/><path d="M3 6v8a1 1 0 001 1h10a1 1 0 001-1V6"/><path d="M7 10h4"/></svg>';
+    var icDelete = '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h12"/><path d="M7 5V3h4v2"/><path d="M5 5v10a1 1 0 001 1h6a1 1 0 001-1V5"/></svg>';
+    var icSelect = '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="12" height="12" rx="2"/><path d="M6 9l2 2 4-4"/></svg>';
+
+    const menu = document.createElement('div');
+    menu.className = 'chat-conv-dropdown';
+
+    function addItem(icon, label, cls, handler) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'chat-conv-dropdown-item' + (cls ? ' ' + cls : '');
+        btn.appendChild(parseSvg(icon));
+        const span = document.createElement('span');
+        span.textContent = label;
+        btn.appendChild(span);
+        btn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            handler();
+        });
+        menu.appendChild(btn);
+    }
+
+    addItem(icRename, 'Rename', '', () => actions.rename(conversation));
+    addItem(icArchive, conversation.archived ? 'Restore' : 'Archive', '', () => actions.setArchived(conversation, !conversation.archived));
+
+    const sep = document.createElement('div');
+    sep.className = 'chat-conv-dropdown-sep';
+    menu.appendChild(sep);
+
+    addItem(icDelete, 'Delete', 'is-danger', () => actions.delete(conversation));
+
+    const sep2 = document.createElement('div');
+    sep2.className = 'chat-conv-dropdown-sep';
+    menu.appendChild(sep2);
+
+    addItem(icSelect, 'Select', '', () => {
+        actions.close();
+        actions.enterMultiSelectMode(conversation.conversation_id);
+    });
+
+    return menu;
+}
+
+function positionConversationDropdown(menu, anchorEl) {
+    requestAnimationFrame(() => {
+        const liveAnchor = document.querySelector('.chat-conv-more-btn.is-open') || anchorEl;
+        const rect = liveAnchor.getBoundingClientRect();
+        let top = rect.bottom + 4;
+        let left = rect.right - menu.offsetWidth;
+        if (left < 8) left = 8;
+        if (top + menu.offsetHeight > window.innerHeight - 8) {
+            top = rect.top - menu.offsetHeight - 4;
+        }
+        menu.style.top = top + 'px';
+        menu.style.left = left + 'px';
+    });
+}
+
 window.HomunChatConversations = {
     buildConversationItem,
+    buildConversationDropdown,
     capitalizeFirst,
     conversationApi,
     conversationResourceUrl,
     formatConversationTimestamp,
     groupConversationsByDate,
     parseSvg,
+    positionConversationDropdown,
     renderConversationList,
     setConversationUrl,
     truncateConversationText,
