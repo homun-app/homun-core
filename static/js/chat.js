@@ -134,13 +134,12 @@ let activeRunId = null;
 
 const { escapeHtml, renderContent } = window.HomunChatRendering;
 const {
-    buildConversationItem: buildConversationItemElement,
     capitalizeFirst,
     conversationApi: conversationApiForId,
     conversationResourceUrl,
     formatConversationTimestamp,
-    groupConversationsByDate,
     parseSvg,
+    renderConversationList: renderConversationListElement,
     setConversationUrl,
     truncateConversationText,
 } = window.HomunChatConversations;
@@ -352,33 +351,12 @@ function updateConversationSummary(mutator) {
 }
 
 function renderConversationList() {
-    if (!conversationListEl) return;
-    if (conversations.length === 0) {
-        conversationListEl.textContent = '';
-        const empty = document.createElement('div');
-        empty.className = 'chat-conversation-empty';
-        empty.textContent = 'No conversations yet.';
-        conversationListEl.appendChild(empty);
-        return;
-    }
-
-    conversationListEl.textContent = '';
-    const groups = groupConversationsByDate(conversations);
-    groups.forEach((group) => {
-        const header = document.createElement('div');
-        header.className = 'chat-date-group';
-        header.textContent = group.label;
-        conversationListEl.appendChild(header);
-
-        group.items.forEach((conversation) => {
-            conversationListEl.appendChild(buildConversationItem(conversation));
-        });
-    });
+    renderConversationListElement(conversationListEl, conversations, conversationListOptions());
     syncBulkActions();
 }
 
-function buildConversationItem(conversation) {
-    return buildConversationItemElement(conversation, {
+function conversationListOptions() {
+    return {
         state: {
             currentConversationId,
             multiSelectMode,
@@ -391,7 +369,7 @@ function buildConversationItem(conversation) {
             selectConversation,
             toggleConversationSelection,
         },
-    });
+    };
 }
 
 async function refreshConversationList() {

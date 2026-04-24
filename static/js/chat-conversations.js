@@ -144,6 +144,31 @@ function buildConversationItem(conversation, options) {
     return item;
 }
 
+function renderConversationList(listEl, conversations, options) {
+    if (!listEl) return;
+    if (conversations.length === 0) {
+        listEl.textContent = '';
+        const empty = document.createElement('div');
+        empty.className = 'chat-conversation-empty';
+        empty.textContent = 'No conversations yet.';
+        listEl.appendChild(empty);
+        return;
+    }
+
+    listEl.textContent = '';
+    const groups = groupConversationsByDate(conversations);
+    groups.forEach((group) => {
+        const header = document.createElement('div');
+        header.className = 'chat-date-group';
+        header.textContent = group.label;
+        listEl.appendChild(header);
+
+        group.items.forEach((conversation) => {
+            listEl.appendChild(buildConversationItem(conversation, options));
+        });
+    });
+}
+
 window.HomunChatConversations = {
     buildConversationItem,
     capitalizeFirst,
@@ -152,6 +177,7 @@ window.HomunChatConversations = {
     formatConversationTimestamp,
     groupConversationsByDate,
     parseSvg,
+    renderConversationList,
     setConversationUrl,
     truncateConversationText,
 };
