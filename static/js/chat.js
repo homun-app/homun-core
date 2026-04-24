@@ -132,18 +132,6 @@ let browserScreenshots = [];
 let isProcessing = false;
 let activeRunId = null;
 
-var escapeHtml = window.HomunChatRendering.escapeHtml;
-var renderContent = window.HomunChatRendering.renderContent;
-var buildConversationDropdown = window.HomunChatConversations.buildConversationDropdown;
-var conversationApiForId = window.HomunChatConversations.conversationApi;
-var conversationResourceUrl = window.HomunChatConversations.conversationResourceUrl;
-var positionConversationDropdown = window.HomunChatConversations.positionConversationDropdown;
-var renderConversationListElement = window.HomunChatConversations.renderConversationList;
-var renderSearchResultsElement = window.HomunChatConversations.renderSearchResults;
-var searchConversations = window.HomunChatConversations.searchConversations;
-var setConversationUrl = window.HomunChatConversations.setConversationUrl;
-var truncateConversationText = window.HomunChatConversations.truncateConversationText;
-
 // ─── Textarea auto-resize ────────────────────────────────────────
 
 /** Auto-resize textarea to fit content, up to a max height. */
@@ -221,7 +209,7 @@ function syncScrollBtn() {
 // ─── Chat history ──────────────────────────────────────────────
 
 function conversationApi(path) {
-    return conversationApiForId(path, currentConversationId);
+    return window.HomunChatConversations.conversationApi(path, currentConversationId);
 }
 
 function syncConversationHeader() {
@@ -252,7 +240,7 @@ function openConversationDropdown(conversation, anchorEl) {
     openConversationMenuId = conversation.conversation_id;
     renderConversationList();
 
-    const menu = buildConversationDropdown(conversation, {
+    const menu = window.HomunChatConversations.buildConversationDropdown(conversation, {
         close: closeConversationMenu,
         delete: deleteConversation,
         enterMultiSelectMode,
@@ -260,7 +248,7 @@ function openConversationDropdown(conversation, anchorEl) {
         setArchived: setConversationArchived,
     });
     document.body.appendChild(menu);
-    positionConversationDropdown(menu, anchorEl);
+    window.HomunChatConversations.positionConversationDropdown(menu, anchorEl);
 }
 
 function openModal({ title, copy, confirmLabel = 'Confirm', destructive = false, inputValue, inputPlaceholder, onConfirm }) {
@@ -303,7 +291,7 @@ function updateConversationSummary(mutator) {
 }
 
 function renderConversationList() {
-    renderConversationListElement(conversationListEl, conversations, conversationListOptions());
+    window.HomunChatConversations.renderConversationList(conversationListEl, conversations, conversationListOptions());
     syncBulkActions();
 }
 
@@ -388,14 +376,14 @@ async function ensureConversationSelected() {
 
     if (currentConversationId) {
         window.localStorage.setItem('homun.chat.currentConversation', currentConversationId);
-        setConversationUrl(currentConversationId);
+        window.HomunChatConversations.setConversationUrl(currentConversationId);
         renderConversationList();
         syncConversationHeader();
     }
 }
 
 async function updateConversation(conversationId, payload) {
-    const res = await fetch(conversationResourceUrl(conversationId), {
+    const res = await fetch(window.HomunChatConversations.conversationResourceUrl(conversationId), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -472,7 +460,7 @@ async function ensureConversationSelectedAfterRemoval(removedId) {
     conversations = [created];
     currentConversationId = created.conversation_id;
     window.localStorage.setItem('homun.chat.currentConversation', currentConversationId);
-    setConversationUrl(currentConversationId);
+    window.HomunChatConversations.setConversationUrl(currentConversationId);
     renderConversationList();
     syncConversationHeader();
     disconnectSocket();
@@ -488,7 +476,7 @@ async function deleteConversation(conversation) {
         destructive: true,
         onConfirm: async () => {
             try {
-                const res = await fetch(conversationResourceUrl(conversation.conversation_id), { method: 'DELETE' });
+                const res = await fetch(window.HomunChatConversations.conversationResourceUrl(conversation.conversation_id), { method: 'DELETE' });
                 const data = await res.json();
                 if (!data.ok) throw new Error(data.message || 'Delete failed');
                 if (conversation.conversation_id === currentConversationId) {
@@ -956,7 +944,7 @@ async function selectConversation(conversationId) {
     currentConversationId = conversationId;
     dismissDropdown();
     window.localStorage.setItem('homun.chat.currentConversation', conversationId);
-    setConversationUrl(conversationId);
+    window.HomunChatConversations.setConversationUrl(conversationId);
     syncConversationHeader();
     renderConversationList();
     resetConversationView();
@@ -996,13 +984,13 @@ async function performSearch() {
     const q = chatSearchInput?.value.trim() || '';
     const inclArchived = chatSearchIncludeArchived?.checked || false;
     try {
-        const results = await searchConversations({ query: q, includeArchived: inclArchived });
+        const results = await window.HomunChatConversations.searchConversations({ query: q, includeArchived: inclArchived });
         if (!results) return;
         renderSearchResults(results);
     } catch (_) { /* ignore */ }
 }
 function renderSearchResults(results) {
-    renderSearchResultsElement(chatSearchResults, results, {
+    window.HomunChatConversations.renderSearchResults(chatSearchResults, results, {
         open: (conversation) => {
             closeSearchModal();
             if (conversation.archived) {
@@ -1419,8 +1407,8 @@ function addToolCallCard(toolCallData) {
 
     const description = describeToolCall(toolCallData);
     card.innerHTML = '<div class="chat-tool-call-compact">' +
-        '<span class="chat-tool-call-name">' + escapeHtml(description.label) + '</span>' +
-        (description.detail ? '<span class="chat-tool-summary">' + escapeHtml(description.detail) + '</span>' : '') +
+        '<span class="chat-tool-call-name">' + window.HomunChatRendering.escapeHtml(description.label) + '</span>' +
+        (description.detail ? '<span class="chat-tool-summary">' + window.HomunChatRendering.escapeHtml(description.detail) + '</span>' : '') +
         '<span class="chat-tool-call-meta">Running</span>' +
         '</div>';
 
@@ -1934,8 +1922,8 @@ function renderMcpPickerList() {
         }
         button.innerHTML = `
             <span class="chat-mcp-option-main">
-                <span class="chat-mcp-option-name">${escapeHtml(server.name)}</span>
-                <span class="chat-mcp-option-meta">${escapeHtml(server.transport || 'stdio')}</span>
+                <span class="chat-mcp-option-name">${window.HomunChatRendering.escapeHtml(server.name)}</span>
+                <span class="chat-mcp-option-meta">${window.HomunChatRendering.escapeHtml(server.transport || 'stdio')}</span>
             </span>
             <span class="chat-mcp-option-check">${pendingMcpServers.some((entry) => entry.name === server.name) ? 'Selected' : 'Use'}</span>
         `;
@@ -2242,7 +2230,7 @@ function settleLiveArtifacts() {
     if (streamingEl) {
         if (streamingContent.trim()) {
             const bodyEl = streamingEl.querySelector('.chat-msg-body') || streamingEl;
-            renderContent(bodyEl, streamingContent, 'assistant');
+            window.HomunChatRendering.renderContent(bodyEl, streamingContent, 'assistant');
             streamingEl.classList.remove('streaming');
         } else {
             streamingEl.remove();
@@ -2285,7 +2273,7 @@ function finalizeStream(content) {
     if (streamingEl) {
         // Final render into the body child (or fallback to streamingEl)
         const bodyEl = streamingEl.querySelector('.chat-msg-body') || streamingEl;
-        renderContent(bodyEl, content, 'assistant');
+        window.HomunChatRendering.renderContent(bodyEl, content, 'assistant');
         // Render rich blocks if any were received before the response
         if (pendingBlocks && pendingBlocks.length && typeof renderBlocks === 'function') {
             renderBlocks(pendingBlocks, bodyEl, sendBlockResponse);
@@ -2303,7 +2291,7 @@ function finalizeStream(content) {
     setProcessing(false);
     syncEmptyState();
     updateConversationSummary((conversation) => {
-        conversation.preview = truncateConversationText(content);
+        conversation.preview = window.HomunChatConversations.truncateConversationText(content);
         conversation.updated_at = new Date().toISOString();
         conversation.message_count = (conversation.message_count || 0) + 1;
     });
@@ -2500,7 +2488,7 @@ function addMessage(role, content, toolsUsed, options = {}) {
     if (content) {
         const contentEl = document.createElement('div');
         contentEl.className = 'chat-msg-body';
-        renderContent(contentEl, content, role);
+        window.HomunChatRendering.renderContent(contentEl, content, role);
         // Render rich blocks (from history — non-interactive since gates are gone)
         const blocks = options.blocks || null;
         if (blocks && blocks.length && typeof renderBlocks === 'function') {
@@ -2524,7 +2512,7 @@ function addMessage(role, content, toolsUsed, options = {}) {
         const headerHtml = '<div class="chat-reasoning-header" onclick="toggleReasoning(this)">' +
             '<span class="chat-reasoning-summary">' +
             '' +
-            '<span class="chat-reasoning-label">' + escapeHtml(label) + '</span>' +
+            '<span class="chat-reasoning-label">' + window.HomunChatRendering.escapeHtml(label) + '</span>' +
             '<span class="chat-reasoning-count">' + toolsUsed.length + '</span>' +
             '</span>' +
             '<span class="chat-reasoning-toggle">\u203a</span>' +
@@ -2621,12 +2609,12 @@ function sendCurrentMessage() {
     } catch (_) { }
     updateConversationSummary((conversation) => {
         if (!conversation.message_count) {
-            conversation.title = truncateConversationText(text)
+            conversation.title = window.HomunChatConversations.truncateConversationText(text)
                 || attachments[0]?.name
                 || mcpServers[0]?.name
                 || 'New conversation';
         }
-        conversation.preview = truncateConversationText(text)
+        conversation.preview = window.HomunChatConversations.truncateConversationText(text)
             || (attachments.length ? `${attachments.length} file${attachments.length === 1 ? '' : 's'}` : '')
             || (mcpServers.length ? `${mcpServers.length} MCP server${mcpServers.length === 1 ? '' : 's'}` : '');
         conversation.updated_at = new Date().toISOString();
