@@ -7,7 +7,7 @@ use crate::scheduler::CronScheduler;
 use crate::session::SessionManager;
 use crate::storage::Database;
 use crate::tools::bootstrap::create_tool_registry;
-use crate::tools::{MessageTool, WorkflowTool};
+use crate::tools::{MessageTool, ToolRegistry, WorkflowTool};
 use crate::{agent, gateway_process, profiles, provider, skills, tools, workflows};
 
 #[cfg(feature = "mcp")]
@@ -16,16 +16,30 @@ use crate::tools::McpManager;
 #[cfg(feature = "embeddings")]
 use crate::rag;
 
-pub async fn run_gateway() -> Result<()> {
-    let pid_file = gateway_process::prepare_pid_file()?;
+struct RuntimeSetup {
+    config: Config,
+    db: Database,
+    shared_config: Arc<tokio::sync::RwLock<Config>>,
+    health_tracker: Arc<provider::ProviderHealthTracker>,
+    provider: Option<Arc<dyn provider::Provider>>,
+}
 
-    let startup_t0 = std::time::Instant::now();
+struct GatewayToolSetup {
+    registry: ToolRegistry,
+    spawn_manager_cell: Arc<tokio::sync::OnceCell<Arc<agent::SubagentManager>>>,
+    workflow_engine_cell: Arc<tokio::sync::OnceCell<Arc<workflows::engine::WorkflowEngine>>>,
+}
 
+async fn load_runtime_setup(startup_t0: std::time::Instant) -> Result<RuntimeSetup> {
     let mut config = Config::load()?;
 
+    // Kill any orphaned Playwright processes from previous sessions
+    // (e.g. after SIGKILL or crash where graceful shutdown didn't run)
     #[cfg(feature = "browser")]
     crate::browser::cleanup_orphan_playwright_processes();
 
+    // Inject browser MCP server into config BEFORE wrapping in Arc<RwLock>,
+    // so runtime_config lookups in McpClientTool::execute() can find it.
     #[cfg(feature = "mcp")]
     if let Some(browser_mcp) = crate::browser::browser_mcp_server_config(&config.browser) {
         config.mcp.servers.insert(
@@ -44,6 +58,8 @@ pub async fn run_gateway() -> Result<()> {
         tracing::info!("⏱ metrics registry initialized");
     }
 
+    // Open DB BEFORE wrapping config in Arc so we can apply the DB settings
+    // overlay (DB overrides TOML for security/permissions sections).
     let db = Database::open(&config.storage.resolved_path()).await?;
     tracing::info!(
         elapsed_ms = startup_t0.elapsed().as_millis(),
@@ -52,7 +68,9 @@ pub async fn run_gateway() -> Result<()> {
 
     crate::config::overlay_db_settings(&mut config, &db).await;
 
+    // Shared config: web UI writes -> agent reads on next request (hot-reload).
     let shared_config = Arc::new(tokio::sync::RwLock::new(config));
+    // Snapshot for one-time startup operations (provider, tools, channels, etc.).
     let config = shared_config.read().await.clone();
 
     let data_dir = Config::data_dir();
@@ -82,6 +100,50 @@ pub async fn run_gateway() -> Result<()> {
         "⏱ provider created"
     );
 
+    Ok(RuntimeSetup {
+        config,
+        db,
+        shared_config,
+        health_tracker,
+        provider,
+    })
+}
+
+fn build_gateway_tool_registry(
+    config: &Config,
+    db: Database,
+    shared_config: Arc<tokio::sync::RwLock<Config>>,
+) -> GatewayToolSetup {
+    let mut registry = create_tool_registry(config, db, Some(shared_config));
+    registry.register(Box::new(MessageTool::new()));
+    registry.register(Box::new(tools::send_file::SendFileTool::new()));
+    registry.register(Box::new(tools::view_file::ViewFileTool::new()));
+
+    let spawn_manager_cell = Arc::new(tokio::sync::OnceCell::new());
+    registry.register(Box::new(tools::SpawnTool::new(spawn_manager_cell.clone())));
+
+    let workflow_engine_cell = Arc::new(tokio::sync::OnceCell::new());
+    registry.register(Box::new(WorkflowTool::new(workflow_engine_cell.clone())));
+
+    GatewayToolSetup {
+        registry,
+        spawn_manager_cell,
+        workflow_engine_cell,
+    }
+}
+
+pub async fn run_gateway() -> Result<()> {
+    let pid_file = gateway_process::prepare_pid_file()?;
+
+    let startup_t0 = std::time::Instant::now();
+    let RuntimeSetup {
+        config,
+        db,
+        shared_config,
+        health_tracker,
+        provider,
+    } = load_runtime_setup(startup_t0).await?;
+
     let session_manager = SessionManager::new(db.clone());
 
     let (cron_event_tx, cron_event_rx) = tokio::sync::mpsc::channel(50);
@@ -94,16 +156,11 @@ pub async fn run_gateway() -> Result<()> {
         contact_event_tx,
     );
 
-    let mut tool_registry = create_tool_registry(&config, db.clone(), Some(shared_config.clone()));
-    tool_registry.register(Box::new(MessageTool::new()));
-    tool_registry.register(Box::new(tools::send_file::SendFileTool::new()));
-    tool_registry.register(Box::new(tools::view_file::ViewFileTool::new()));
-
-    let spawn_manager_cell = Arc::new(tokio::sync::OnceCell::new());
-    tool_registry.register(Box::new(tools::SpawnTool::new(spawn_manager_cell.clone())));
-
-    let workflow_engine_cell = Arc::new(tokio::sync::OnceCell::new());
-    tool_registry.register(Box::new(WorkflowTool::new(workflow_engine_cell.clone())));
+    let GatewayToolSetup {
+        registry: mut tool_registry,
+        spawn_manager_cell,
+        workflow_engine_cell,
+    } = build_gateway_tool_registry(&config, db.clone(), shared_config.clone());
 
     #[cfg(feature = "mcp")]
     let mcp_servers_config = config.mcp.servers.clone();
