@@ -135,12 +135,11 @@ let activeRunId = null;
 const { escapeHtml, renderContent } = window.HomunChatRendering;
 const {
     buildConversationDropdown,
-    capitalizeFirst,
     conversationApi: conversationApiForId,
     conversationResourceUrl,
-    formatConversationTimestamp,
     positionConversationDropdown,
     renderConversationList: renderConversationListElement,
+    renderSearchResults: renderSearchResultsElement,
     setConversationUrl,
     truncateConversationText,
 } = window.HomunChatConversations;
@@ -1008,66 +1007,26 @@ async function performSearch() {
     } catch (_) { /* ignore */ }
 }
 function renderSearchResults(results) {
-    if (!chatSearchResults) return;
-    chatSearchResults.textContent = '';
-    if (results.length === 0) {
-        const empty = document.createElement('div');
-        empty.className = 'chat-search-result-empty';
-        empty.textContent = 'No results found.';
-        chatSearchResults.appendChild(empty);
-        return;
-    }
-    results.forEach((c) => {
-        const el = document.createElement('button');
-        el.type = 'button';
-        el.className = 'chat-search-result-item';
-        if (c.archived) el.classList.add('is-archived');
-
-        const name = document.createElement('span');
-        name.className = 'chat-search-result-name';
-        name.textContent = capitalizeFirst(c.title) || 'New conversation';
-        el.appendChild(name);
-
-        if (c.archived) {
-            const badge = document.createElement('span');
-            badge.className = 'chat-search-result-badge';
-            badge.textContent = 'Archived';
-            el.appendChild(badge);
-
-            const restoreBtn = document.createElement('button');
-            restoreBtn.type = 'button';
-            restoreBtn.className = 'chat-search-restore-btn';
-            restoreBtn.textContent = 'Restore';
-            restoreBtn.addEventListener('click', async (e) => {
-                e.stopPropagation();
-                try {
-                    await updateConversation(c.conversation_id, { archived: false });
-                    showToast('Conversation restored', 'success');
-                    closeSearchModal();
-                    selectConversation(c.conversation_id);
-                } catch (_) {
-                    showToast('Failed to restore conversation', 'error');
-                }
-            });
-            el.appendChild(restoreBtn);
-        }
-
-        const date = document.createElement('span');
-        date.className = 'chat-search-result-date';
-        date.textContent = formatConversationTimestamp(c.updated_at);
-        el.appendChild(date);
-
-        el.addEventListener('click', () => {
+    renderSearchResultsElement(chatSearchResults, results, {
+        open: (conversation) => {
             closeSearchModal();
-            // Auto-restore archived conversations when opened
-            if (c.archived) {
-                updateConversation(c.conversation_id, { archived: false }).then(() => {
+            if (conversation.archived) {
+                updateConversation(conversation.conversation_id, { archived: false }).then(() => {
                     refreshConversationList();
                 }).catch(() => { });
             }
-            selectConversation(c.conversation_id);
-        });
-        chatSearchResults.appendChild(el);
+            selectConversation(conversation.conversation_id);
+        },
+        restore: async (conversation) => {
+            try {
+                await updateConversation(conversation.conversation_id, { archived: false });
+                showToast('Conversation restored', 'success');
+                closeSearchModal();
+                selectConversation(conversation.conversation_id);
+            } catch (_) {
+                showToast('Failed to restore conversation', 'error');
+            }
+        },
     });
 }
 

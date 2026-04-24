@@ -229,6 +229,55 @@ function positionConversationDropdown(menu, anchorEl) {
     });
 }
 
+function renderSearchResults(resultsEl, results, actions) {
+    if (!resultsEl) return;
+    resultsEl.textContent = '';
+    if (results.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'chat-search-result-empty';
+        empty.textContent = 'No results found.';
+        resultsEl.appendChild(empty);
+        return;
+    }
+
+    results.forEach((conversation) => {
+        const el = document.createElement('button');
+        el.type = 'button';
+        el.className = 'chat-search-result-item';
+        if (conversation.archived) el.classList.add('is-archived');
+
+        const name = document.createElement('span');
+        name.className = 'chat-search-result-name';
+        name.textContent = capitalizeFirst(conversation.title) || 'New conversation';
+        el.appendChild(name);
+
+        if (conversation.archived) {
+            const badge = document.createElement('span');
+            badge.className = 'chat-search-result-badge';
+            badge.textContent = 'Archived';
+            el.appendChild(badge);
+
+            const restoreBtn = document.createElement('button');
+            restoreBtn.type = 'button';
+            restoreBtn.className = 'chat-search-restore-btn';
+            restoreBtn.textContent = 'Restore';
+            restoreBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                await actions.restore(conversation);
+            });
+            el.appendChild(restoreBtn);
+        }
+
+        const date = document.createElement('span');
+        date.className = 'chat-search-result-date';
+        date.textContent = formatConversationTimestamp(conversation.updated_at);
+        el.appendChild(date);
+
+        el.addEventListener('click', () => actions.open(conversation));
+        resultsEl.appendChild(el);
+    });
+}
+
 window.HomunChatConversations = {
     buildConversationItem,
     buildConversationDropdown,
@@ -240,6 +289,7 @@ window.HomunChatConversations = {
     parseSvg,
     positionConversationDropdown,
     renderConversationList,
+    renderSearchResults,
     setConversationUrl,
     truncateConversationText,
 };
