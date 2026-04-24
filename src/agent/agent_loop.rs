@@ -33,13 +33,13 @@ use super::loop_control::{
     count_sigkill_diagnostics, is_context_overflow_error, should_redirect_skill_activation,
 };
 use super::memory::MemoryConsolidator;
-use super::memory_maintenance::{maybe_consolidate, ConsolidationInputs};
 use super::plan_events::{emit_plan_update, merged_execution_snapshot};
 use super::session_control::{
     handle_profile_command, is_owner_session, resolve_contact_from_session,
 };
 use super::skill_activator;
 use super::tool_veto;
+use super::turn_finalization::{finalize_response_turn, FinalizeTurnInputs};
 use super::verifier::{verify_actions, VerificationResult};
 
 // Conditional memory searcher type - dummy when feature not enabled
@@ -3191,133 +3191,43 @@ impl AgentLoop {
             }
         }
 
-        // Extract any ```blocks fences from LLM output (LLM-driven blocks).
-        // These are merged with tool-driven blocks already in response_blocks.
-        let (safe_response, llm_blocks) =
-            crate::tools::response_blocks::extract_blocks(&safe_response);
-        if !llm_blocks.is_empty() {
-            tracing::info!(count = llm_blocks.len(), "Extracted blocks from LLM response");
-            response_blocks.extend(llm_blocks);
-        }
-
-        // Persist conversation to SQLite
-        self.session_manager
-            .add_message(session_key, "user", content)
-            .await?;
-
-        // Encode rich blocks into the stored content (alongside text) so they
-        // appear in REST history. The LLM never sees blocks — content_for_model strips them.
-        let stored_response = if response_blocks.is_empty() {
-            safe_response.clone()
-        } else {
-            crate::web::chat_attachments::encode_inline_context(
-                &safe_response, &[], &[], &response_blocks,
-            )
-            .unwrap_or_else(|| safe_response.clone())
-        };
-        self.session_manager
-            .add_message_with_tools(session_key, "assistant", &stored_response, &tools_used)
-            .await?;
-
-        if !tools_used.is_empty() {
-            tracing::info!(
-                tools_used = ?tools_used,
-                "Agent completed with tool usage"
-            );
-        }
-
         // NOTE: we do NOT close the browser tab here — multi-turn workflows
         // (e.g. "find train → user picks → proceed to booking") need the tab to
         // survive between agent runs. The idle cleanup in `close_idle_tabs(300s)`
         // at the start of each run handles resource management.
 
-        // Record token usage (fire-and-forget)
-        if total_usage.total_tokens > 0 {
-            let db = self.db.clone();
-            let sk = session_key.to_string();
-            let model = selected_model.clone();
-            let prov = provider.name().to_string();
-            tokio::spawn(async move {
-                if let Err(e) = db
-                    .insert_token_usage(
-                        &sk,
-                        &model,
-                        &prov,
-                        total_usage.prompt_tokens,
-                        total_usage.completion_tokens,
-                        total_usage.total_tokens,
-                    )
-                    .await
-                {
-                    tracing::warn!(error = %e, "Failed to record token usage");
-                }
-            });
-        }
-
-        // Emit rich blocks via stream channel so WebSocket clients receive them
-        // before the final response. Blocks are also persisted in the stored_response above.
-        if !response_blocks.is_empty() {
-            tracing::info!(
-                total = response_blocks.len(),
-                types = %response_blocks.iter()
-                    .map(|b| b.block_type_name())
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                "Sending response blocks to client"
-            );
-            if let Some(ref tx) = stream_tx {
-                let blocks_json = serde_json::to_string(&response_blocks).unwrap_or_default();
-                let _ = tx
-                    .send(crate::provider::StreamChunk {
-                        delta: blocks_json,
-                        done: false,
-                        event_type: Some("blocks".to_string()),
-                        tool_call_data: None,
-                    })
-                    .await;
-            }
-        }
-
-        // Clean up task checkpoint on successful completion.
-        // The checkpoint is no longer needed since the task finished.
-        if let Err(e) = self.db.delete_task_checkpoint_by_session(session_key).await {
-            tracing::debug!(error = %e, "Failed to cleanup task checkpoint (may not exist)");
-        }
-
-        // Check if memory consolidation is needed (non-blocking background task)
         #[cfg(feature = "embeddings")]
         let searcher = self.memory_searcher.clone();
         #[cfg(not(feature = "embeddings"))]
         let searcher: super::memory_maintenance::MemoryIndexHandle = ();
 
-        maybe_consolidate(
-            ConsolidationInputs {
+        let safe_response = finalize_response_turn(
+            FinalizeTurnInputs {
+                session_manager: &self.session_manager,
+                db: self.db.clone(),
                 memory: self.memory.clone(),
                 config: self.config.clone(),
-                provider: self.provider.read().await.clone(),
-                db: self.db.clone(),
+                provider_for_memory: self.provider.read().await.clone(),
+                provider_name: provider.name().to_string(),
                 agent_id: self.agent_id.clone(),
                 searcher,
+                stream_tx: stream_tx.as_ref(),
+                tracer,
+                traces_max_files: config.agent.traces_max_files,
+                selected_model: selected_model.clone(),
+                total_usage,
+                iteration,
+                active_profile_id,
+                active_profile_brain_dir,
+                active_profile_slug,
             },
+            content,
             session_key,
-            active_profile_brain_dir,
-            Some(active_profile_id),
-            active_profile_slug,
+            safe_response,
+            response_blocks,
+            tools_used,
         )
-        .await;
-
-        // Finalize and write request trace (fire-and-forget to avoid blocking response)
-        if let Some(mut t) = tracer {
-            let cancelled = crate::agent::stop::is_stop_requested();
-            t.finalize(
-                &safe_response,
-                iteration.saturating_sub(1),
-                total_usage.total_tokens,
-                cancelled,
-            );
-            let max_files = config.agent.traces_max_files;
-            tokio::spawn(async move { t.write_to_disk(max_files) });
-        }
+        .await?;
 
         Ok(safe_response)
 

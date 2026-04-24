@@ -33,6 +33,7 @@ pub mod stop;
 pub mod subagent; // Make public so spawn.rs can access it
 mod tool_builder;
 mod tool_veto;
+mod turn_finalization;
 mod verifier;
 
 #[cfg(feature = "embeddings")]
