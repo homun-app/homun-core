@@ -149,7 +149,7 @@ impl EmailChannel {
             }
             warn!(
                 account = account_name,
-                "Email password marked as encrypted but not found in vault"
+                "Email account password is marked as encrypted in DB-backed settings but the vault entry is missing; re-enter the account password in the Web UI"
             );
         }
         config.password.clone()

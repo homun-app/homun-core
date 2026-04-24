@@ -2597,13 +2597,23 @@ fn start_gateway_from_db(
         #[cfg(feature = "channel-email")]
         "email" => {
             // Email gateway: config_json contains EmailAccountConfig
-            let cfg: crate::config::EmailAccountConfig =
+            let mut cfg: crate::config::EmailAccountConfig =
                 serde_json::from_str(&gw.config_json).ok()?;
-            let mut accounts = std::collections::HashMap::new();
             let account_key = gateway_channel_name(gw)
                 .strip_prefix("email:")
                 .unwrap_or(&gw.name)
                 .to_string();
+            if cfg.password == "***ENCRYPTED***" || cfg.password.is_empty() {
+                cfg.password = resolve_gw_token(gw_id, &cfg.password);
+                if cfg.password.is_empty() {
+                    tracing::warn!(
+                        id = gw_id,
+                        account = %account_key,
+                        "Email gateway password is encrypted in DB settings but missing from gateway vault key; update the gateway password in the Web UI"
+                    );
+                }
+            }
+            let mut accounts = std::collections::HashMap::new();
             accounts.insert(account_key, cfg);
             Some(spawn_monitored_channel(
                 "email",
