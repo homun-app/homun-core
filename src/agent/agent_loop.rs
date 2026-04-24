@@ -33,6 +33,7 @@ use super::loop_control::{
     count_sigkill_diagnostics, is_context_overflow_error, should_redirect_skill_activation,
 };
 use super::memory::MemoryConsolidator;
+use super::memory_maintenance::finish_consolidation;
 use super::plan_events::{emit_plan_update, merged_execution_snapshot};
 use super::session_control::{
     handle_profile_command, is_owner_session, resolve_contact_from_session, try_compact,
@@ -3342,6 +3343,8 @@ impl AgentLoop {
         let session_key = session_key.to_string();
         #[cfg(feature = "embeddings")]
         let searcher = self.memory_searcher.clone();
+        #[cfg(not(feature = "embeddings"))]
+        let searcher: super::memory_maintenance::MemoryIndexHandle = ();
 
         // Resolve contact_id from session_key (format: "channel:chat_id")
         let contact_id = resolve_contact_from_session(&self.db, &session_key).await;
@@ -3372,125 +3375,18 @@ impl AgentLoop {
                         .await
                     {
                         Ok(result) => {
-                            tracing::info!(
-                                session = %session_key,
-                                messages_processed = result.messages_processed,
-                                memory_updated = result.memory_updated,
-                                instructions = result.instructions_learned,
-                                secrets = result.secrets_stored,
-                                new_chunks = result.new_chunks.len(),
-                                "Background memory consolidation complete"
-                            );
-
-                            // Index new chunks in HNSW vector index (with deduplication)
-                            // Only available with embeddings feature
-                            #[cfg(feature = "embeddings")]
-                            if !result.new_chunks.is_empty() {
-                                if let Some(ref searcher_mutex) = searcher {
-                                    let mut s = searcher_mutex.lock().await;
-                                    let mut indexed = 0;
-                                    let mut skipped = 0;
-
-                                    for (chunk_id, text) in &result.new_chunks {
-                                        // Check for duplicates before indexing
-                                        // Distance threshold 0.15 ≈ 85% cosine similarity
-                                        match s.engine_mut().find_similar(text, 0.15).await {
-                                            Ok(Some((existing_id, distance))) => {
-                                                tracing::debug!(
-                                                    chunk_id,
-                                                    existing_id,
-                                                    distance = format!("{:.3}", distance),
-                                                    "Skipping duplicate memory chunk"
-                                                );
-                                                skipped += 1;
-                                                continue;
-                                            }
-                                            Ok(None) => {} // No duplicate, proceed
-                                            Err(e) => {
-                                                tracing::warn!(
-                                                    chunk_id,
-                                                    error = %e,
-                                                    "Failed to check for duplicates, indexing anyway"
-                                                );
-                                            }
-                                        }
-
-                                        if let Err(e) =
-                                            s.engine_mut().index_chunk(*chunk_id, text).await
-                                        {
-                                            tracing::warn!(
-                                                chunk_id,
-                                                error = %e,
-                                                "Failed to index chunk in HNSW"
-                                            );
-                                        } else {
-                                            indexed += 1;
-                                        }
-                                    }
-
-                                    if let Err(e) = s.save_index() {
-                                        tracing::warn!(error = %e, "Failed to save HNSW index");
-                                    }
-                                    tracing::info!(
-                                        total = result.new_chunks.len(),
-                                        indexed,
-                                        skipped,
-                                        "Indexed memory chunks in HNSW (duplicates skipped)"
-                                    );
-                                }
-                            }
-
-                            // Budget pruning: remove low-value chunks if over limit
-                            if max_memory_chunks > 0 {
-                                match memory
-                                    .prune_if_over_budget(max_memory_chunks, profile_id)
-                                    .await
-                                {
-                                    Ok(pruned_ids) if !pruned_ids.is_empty() => {
-                                        tracing::info!(
-                                            pruned = pruned_ids.len(),
-                                            budget = max_memory_chunks,
-                                            "Pruned memory chunks to stay within budget"
-                                        );
-                                        // Remove pruned chunks from HNSW index
-                                        #[cfg(feature = "embeddings")]
-                                        if let Some(ref searcher_mutex) = searcher {
-                                            let mut s = searcher_mutex.lock().await;
-                                            for id in &pruned_ids {
-                                                s.engine_mut().remove(*id);
-                                            }
-                                            let _ = s.save_index();
-                                        }
-                                    }
-                                    Err(e) => {
-                                        tracing::warn!(error = %e, "Memory pruning failed");
-                                    }
-                                    _ => {}
-                                }
-                            }
-
-                            // Hierarchical summarization: create weekly/monthly digests
-                            if let Err(e) = memory
-                                .maybe_summarize_period(
-                                    provider.as_ref(),
-                                    &model,
-                                    contact_id,
-                                    agent_id.as_deref(),
-                                    profile_id,
-                                    Some(crate::user::DEFAULT_ADMIN_USER_ID),
-                                )
-                                .await
-                            {
-                                tracing::warn!(error = %e, "Period summarization failed");
-                            }
-
-                            // Session compaction: prune old messages after consolidation
-                            try_compact(
+                            finish_consolidation(
                                 &memory,
-                                &session_key,
-                                memory_window,
-                                provider.as_ref(),
+                                provider.clone(),
                                 &model,
+                                &session_key,
+                                result,
+                                searcher,
+                                max_memory_chunks,
+                                memory_window,
+                                contact_id,
+                                agent_id.as_deref(),
+                                profile_id,
                             )
                             .await;
                         }

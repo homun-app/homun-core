@@ -20,6 +20,7 @@ mod llm_caller;
 mod loop_control;
 pub mod memory;
 mod memory_db;
+mod memory_maintenance;
 pub mod orchestrator;
 mod plan_events;
 pub(crate) mod profile_resolver;
