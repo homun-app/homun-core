@@ -26,6 +26,7 @@ pub(crate) mod profile_resolver;
 pub mod prompt; // New modular prompt system
 pub mod registry;
 pub mod request_trace;
+mod session_control;
 mod skill_activator;
 pub mod stop;
 pub mod subagent; // Make public so spawn.rs can access it

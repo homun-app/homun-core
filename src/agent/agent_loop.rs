@@ -34,6 +34,9 @@ use super::loop_control::{
 };
 use super::memory::MemoryConsolidator;
 use super::plan_events::{emit_plan_update, merged_execution_snapshot};
+use super::session_control::{
+    handle_profile_command, is_owner_session, resolve_contact_from_session, try_compact,
+};
 use super::skill_activator;
 use super::tool_veto;
 use super::verifier::{verify_actions, VerificationResult};
@@ -569,7 +572,7 @@ impl AgentLoop {
         crate::agent::stop::clear_stop();
 
         // Built-in /profile command: switch active profile for this session
-        if let Some(response) = self.handle_profile_command(content).await {
+        if let Some(response) = handle_profile_command(&self.db, &self.config, content).await {
             return Ok(response);
         }
 
@@ -847,11 +850,11 @@ impl AgentLoop {
         // A mini-agent analyzes the user's intent and discovers relevant
         // tools/memory/RAG before the execution loop. On failure, falls
         // back to a full-context result with all tools available.
-        let memory_contact_id = self.resolve_contact_from_session(session_key).await;
+        let memory_contact_id = resolve_contact_from_session(&self.db, session_key).await;
 
         // Load contact perimeter for isolation (None = owner, no restrictions)
         let contact_perimeter = if let Some(cid) = memory_contact_id {
-            if !self.is_owner_session(session_key).await {
+            if !is_owner_session(session_key) {
                 crate::contacts::perimeter::load_perimeter(self.db.pool(), cid)
                     .await
                     .ok()
@@ -3317,56 +3320,6 @@ impl AgentLoop {
     /// - `/profile list` → list all available profiles
     ///
     /// Returns `Some(response)` if the command was handled, `None` otherwise.
-    async fn handle_profile_command(&self, content: &str) -> Option<String> {
-        let trimmed = content.trim();
-        if !trimmed.starts_with("/profile") {
-            return None;
-        }
-        // Only match "/profile" exactly or "/profile <arg>"
-        let rest = trimmed.strip_prefix("/profile")?.trim();
-
-        // "/profile list" — show all profiles
-        if rest == "list" {
-            match crate::profiles::db::load_all_profiles(self.db.pool()).await {
-                Ok(profiles) => {
-                    let lines: Vec<String> = profiles
-                        .iter()
-                        .map(|p| {
-                            let badge = if p.is_default != 0 { " (default)" } else { "" };
-                            format!(
-                                "{} **{}**{} — {}",
-                                p.avatar_emoji, p.slug, badge, p.display_name
-                            )
-                        })
-                        .collect();
-                    return Some(format!("Available profiles:\n{}", lines.join("\n")));
-                }
-                Err(e) => return Some(format!("Failed to list profiles: {e}")),
-            }
-        }
-
-        // "/profile" (no arg) — show current profile info
-        if rest.is_empty() {
-            let config = self.config.read().await;
-            let default_slug = &config.profiles.default;
-            return Some(format!("Current default profile: **{default_slug}**\nUse `/profile <slug>` to switch, or `/profile list` to see all."));
-        }
-
-        // "/profile <slug>" — switch profile
-        let slug = rest;
-        match crate::profiles::db::load_profile_by_slug(self.db.pool(), slug).await {
-            Ok(Some(profile)) => Some(format!(
-                "{} Switched to profile **{}** ({})",
-                profile.avatar_emoji, profile.slug, profile.display_name
-            )),
-            Ok(None) => Some(format!(
-                "Profile '{}' not found. Use `/profile list` to see available profiles.",
-                slug
-            )),
-            Err(e) => Some(format!("Failed to load profile: {e}")),
-        }
-    }
-
     /// Trigger memory consolidation and session compaction if thresholds exceeded.
     /// Runs in background via `tokio::spawn` — never blocks the response.
     /// After consolidation, new chunks are indexed in the HNSW vector index,
@@ -3391,7 +3344,7 @@ impl AgentLoop {
         let searcher = self.memory_searcher.clone();
 
         // Resolve contact_id from session_key (format: "channel:chat_id")
-        let contact_id = self.resolve_contact_from_session(&session_key).await;
+        let contact_id = resolve_contact_from_session(&self.db, &session_key).await;
         let agent_id = self.agent_id.clone();
 
         // Check if consolidation is needed (quick DB query)
@@ -3532,7 +3485,7 @@ impl AgentLoop {
                             }
 
                             // Session compaction: prune old messages after consolidation
-                            Self::try_compact(
+                            try_compact(
                                 &memory,
                                 &session_key,
                                 memory_window,
@@ -3559,81 +3512,11 @@ impl AgentLoop {
                 let prov = provider.clone();
                 let m = model.clone();
                 tokio::spawn(async move {
-                    Self::try_compact(&memory_c, &sk, memory_window, prov.as_ref(), &m).await;
+                    try_compact(&memory_c, &sk, memory_window, prov.as_ref(), &m).await;
                 });
             }
             Err(e) => {
                 tracing::warn!(error = %e, "Failed to check consolidation status");
-            }
-        }
-    }
-
-    /// Resolve contact_id from a session key (format: "channel:chat_id").
-    ///
-    /// Parses the session key into channel + sender_id, then looks up the
-    /// contact in the database. Returns `None` if parsing fails or no contact found.
-    async fn resolve_contact_from_session(&self, session_key: &str) -> Option<i64> {
-        let (channel, chat_id) = session_key.split_once(':')?;
-        // Normalize email channel keys (e.g. "email:inbox@foo" → "email")
-        let channel_key = if channel.starts_with("email") {
-            "email"
-        } else {
-            channel
-        };
-        self.db
-            .find_contact_by_identity(channel_key, chat_id)
-            .await
-            .ok()
-            .flatten()
-            .map(|c| c.id)
-    }
-
-    /// Check if the session belongs to the owner (not an external contact).
-    ///
-    /// Web UI and CLI sessions are always owner. For other channels,
-    /// the session is owner if the sender matches an `allow_from` entry.
-    async fn is_owner_session(&self, session_key: &str) -> bool {
-        let Some((channel, _)) = session_key.split_once(':') else {
-            return true; // Unknown format → treat as owner
-        };
-        // Web and CLI are always the owner (authenticated via login)
-        matches!(channel, "web" | "cli")
-    }
-
-    /// Try to compact session if message count exceeds memory_window.
-    async fn try_compact(
-        memory: &MemoryConsolidator,
-        session_key: &str,
-        memory_window: u32,
-        provider: &dyn Provider,
-        model: &str,
-    ) {
-        match memory.should_compact(session_key, memory_window).await {
-            Ok(true) => {
-                match memory
-                    .compact_session(session_key, memory_window, provider, model)
-                    .await
-                {
-                    Ok(r) => {
-                        tracing::info!(
-                            session = %session_key,
-                            messages_removed = r.messages_removed,
-                            summary_inserted = r.summary_inserted,
-                            "Background session compaction complete"
-                        );
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            session = %session_key,
-                            error = %e,
-                            "Background session compaction failed"
-                        );
-                    }
-                }
-            }
-            Ok(false) => {}
-            Err(e) => {
-                tracing::warn!(error = %e, "Failed to check compaction status");
             }
         }
     }
