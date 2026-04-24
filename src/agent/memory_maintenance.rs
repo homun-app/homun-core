@@ -1,10 +1,16 @@
 use std::sync::Arc;
 
+use std::path::PathBuf;
+
+use tokio::sync::RwLock;
+
+use crate::config::Config;
 use crate::provider::Provider;
+use crate::storage::Database;
 use crate::user::DEFAULT_ADMIN_USER_ID;
 
 use super::memory::{ConsolidationResult, MemoryConsolidator};
-use super::session_control::try_compact;
+use super::session_control::{resolve_contact_from_session, try_compact};
 
 #[cfg(feature = "embeddings")]
 use super::memory_search::MemorySearcher;
@@ -15,8 +21,101 @@ pub(super) type MemoryIndexHandle = Option<Arc<tokio::sync::Mutex<MemorySearcher
 #[cfg(not(feature = "embeddings"))]
 pub(super) type MemoryIndexHandle = ();
 
+pub(super) struct ConsolidationInputs {
+    pub memory: Arc<MemoryConsolidator>,
+    pub config: Arc<RwLock<Config>>,
+    pub provider: Arc<dyn Provider>,
+    pub db: Database,
+    pub agent_id: Option<String>,
+    pub searcher: MemoryIndexHandle,
+}
+
+pub(super) async fn maybe_consolidate(
+    inputs: ConsolidationInputs,
+    session_key: &str,
+    profile_brain_dir: Option<PathBuf>,
+    profile_id: Option<i64>,
+    profile_slug: Option<String>,
+) {
+    let cfg = inputs.config.read().await;
+    let window = cfg.agent.consolidation_threshold;
+    let memory_window = cfg.agent.memory_window;
+    let max_memory_chunks = cfg.agent.max_memory_chunks;
+    let model = cfg.agent.model.clone();
+    drop(cfg);
+
+    let provider = inputs.provider.clone();
+    let session_key = session_key.to_string();
+    let contact_id = resolve_contact_from_session(&inputs.db, &session_key).await;
+    let agent_id = inputs.agent_id;
+
+    match inputs.memory.should_consolidate(&session_key, window).await {
+        Ok(true) => {
+            tracing::info!(
+                session = %session_key,
+                ?contact_id,
+                ?agent_id,
+                "Memory consolidation threshold reached, spawning background task"
+            );
+            tokio::spawn(async move {
+                match inputs
+                    .memory
+                    .consolidate(
+                        &session_key,
+                        window,
+                        provider.as_ref(),
+                        &model,
+                        contact_id,
+                        agent_id.as_deref(),
+                        profile_brain_dir,
+                        profile_id,
+                        profile_slug,
+                    )
+                    .await
+                {
+                    Ok(result) => {
+                        finish_consolidation(
+                            &inputs.memory,
+                            provider.clone(),
+                            &model,
+                            &session_key,
+                            result,
+                            inputs.searcher,
+                            max_memory_chunks,
+                            memory_window,
+                            contact_id,
+                            agent_id.as_deref(),
+                            profile_id,
+                        )
+                        .await;
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            session = %session_key,
+                            error = %e,
+                            "Background memory consolidation failed"
+                        );
+                    }
+                }
+            });
+        }
+        Ok(false) => {
+            let memory = inputs.memory.clone();
+            let sk = session_key.clone();
+            let prov = provider.clone();
+            let m = model.clone();
+            tokio::spawn(async move {
+                try_compact(&memory, &sk, memory_window, prov.as_ref(), &m).await;
+            });
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "Failed to check consolidation status");
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
-pub(super) async fn finish_consolidation(
+async fn finish_consolidation(
     memory: &Arc<MemoryConsolidator>,
     provider: Arc<dyn Provider>,
     model: &str,

@@ -33,10 +33,10 @@ use super::loop_control::{
     count_sigkill_diagnostics, is_context_overflow_error, should_redirect_skill_activation,
 };
 use super::memory::MemoryConsolidator;
-use super::memory_maintenance::finish_consolidation;
+use super::memory_maintenance::{maybe_consolidate, ConsolidationInputs};
 use super::plan_events::{emit_plan_update, merged_execution_snapshot};
 use super::session_control::{
-    handle_profile_command, is_owner_session, resolve_contact_from_session, try_compact,
+    handle_profile_command, is_owner_session, resolve_contact_from_session,
 };
 use super::skill_activator;
 use super::tool_veto;
@@ -3285,7 +3285,20 @@ impl AgentLoop {
         }
 
         // Check if memory consolidation is needed (non-blocking background task)
-        self.maybe_consolidate(
+        #[cfg(feature = "embeddings")]
+        let searcher = self.memory_searcher.clone();
+        #[cfg(not(feature = "embeddings"))]
+        let searcher: super::memory_maintenance::MemoryIndexHandle = ();
+
+        maybe_consolidate(
+            ConsolidationInputs {
+                memory: self.memory.clone(),
+                config: self.config.clone(),
+                provider: self.provider.read().await.clone(),
+                db: self.db.clone(),
+                agent_id: self.agent_id.clone(),
+                searcher,
+            },
             session_key,
             active_profile_brain_dir,
             Some(active_profile_id),
@@ -3313,109 +3326,6 @@ impl AgentLoop {
 
     // try_activate_skill → skill_activator.rs
     // try_resolve_slash_command → skill_activator.rs
-
-    /// Handle the `/profile` built-in command.
-    ///
-    /// - `/profile` → show current profile
-    /// - `/profile <slug>` → switch to the named profile
-    /// - `/profile list` → list all available profiles
-    ///
-    /// Returns `Some(response)` if the command was handled, `None` otherwise.
-    /// Trigger memory consolidation and session compaction if thresholds exceeded.
-    /// Runs in background via `tokio::spawn` — never blocks the response.
-    /// After consolidation, new chunks are indexed in the HNSW vector index,
-    /// then session compaction prunes old messages and inserts a summary.
-    async fn maybe_consolidate(
-        &self,
-        session_key: &str,
-        profile_brain_dir: Option<std::path::PathBuf>,
-        profile_id: Option<i64>,
-        profile_slug: Option<String>,
-    ) {
-        let memory = self.memory.clone();
-        let cfg = self.config.read().await;
-        let window = cfg.agent.consolidation_threshold;
-        let memory_window = cfg.agent.memory_window;
-        let max_memory_chunks = cfg.agent.max_memory_chunks;
-        let model = cfg.agent.model.clone();
-        drop(cfg);
-        let provider = self.provider.read().await.clone();
-        let session_key = session_key.to_string();
-        #[cfg(feature = "embeddings")]
-        let searcher = self.memory_searcher.clone();
-        #[cfg(not(feature = "embeddings"))]
-        let searcher: super::memory_maintenance::MemoryIndexHandle = ();
-
-        // Resolve contact_id from session_key (format: "channel:chat_id")
-        let contact_id = resolve_contact_from_session(&self.db, &session_key).await;
-        let agent_id = self.agent_id.clone();
-
-        // Check if consolidation is needed (quick DB query)
-        match memory.should_consolidate(&session_key, window).await {
-            Ok(true) => {
-                tracing::info!(
-                    session = %session_key,
-                    ?contact_id,
-                    ?agent_id,
-                    "Memory consolidation threshold reached, spawning background task"
-                );
-                tokio::spawn(async move {
-                    match memory
-                        .consolidate(
-                            &session_key,
-                            window,
-                            provider.as_ref(),
-                            &model,
-                            contact_id,
-                            agent_id.as_deref(),
-                            profile_brain_dir,
-                            profile_id,
-                            profile_slug,
-                        )
-                        .await
-                    {
-                        Ok(result) => {
-                            finish_consolidation(
-                                &memory,
-                                provider.clone(),
-                                &model,
-                                &session_key,
-                                result,
-                                searcher,
-                                max_memory_chunks,
-                                memory_window,
-                                contact_id,
-                                agent_id.as_deref(),
-                                profile_id,
-                            )
-                            .await;
-                        }
-                        Err(e) => {
-                            tracing::error!(
-                                session = %session_key,
-                                error = %e,
-                                "Background memory consolidation failed"
-                            );
-                        }
-                    }
-                });
-            }
-            Ok(false) => {
-                // Consolidation not needed, but compaction might be
-                // (e.g., many messages accumulated but consolidation already ran)
-                let memory_c = memory.clone();
-                let sk = session_key.clone();
-                let prov = provider.clone();
-                let m = model.clone();
-                tokio::spawn(async move {
-                    try_compact(&memory_c, &sk, memory_window, prov.as_ref(), &m).await;
-                });
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "Failed to check consolidation status");
-            }
-        }
-    }
 }
 
 // tool_call_signature, maybe_extend_iteration_budget, detect_cycle,
