@@ -8,6 +8,7 @@ use crate::session::SessionManager;
 use crate::storage::Database;
 use crate::tools::bootstrap::create_tool_registry;
 use crate::tools::{MessageTool, ToolRegistry, WorkflowTool};
+use crate::utils::watcher::WatcherHandle;
 use crate::{agent, gateway_process, profiles, provider, skills, tools, workflows};
 
 #[cfg(feature = "mcp")]
@@ -40,6 +41,33 @@ struct AgentRegistryContext<'a> {
     db_for_searcher: Database,
     #[cfg(feature = "embeddings")]
     rag_engine: Option<Arc<tokio::sync::Mutex<rag::RagEngine>>>,
+}
+
+struct RuntimeServicesContext<'a> {
+    config: &'a Config,
+    db_for_web: Database,
+    registry: agent::AgentRegistry,
+    cron_scheduler: Arc<CronScheduler>,
+    spawn_manager_cell: Arc<tokio::sync::OnceCell<Arc<agent::SubagentManager>>>,
+    workflow_engine_cell: Arc<tokio::sync::OnceCell<Arc<workflows::engine::WorkflowEngine>>>,
+    #[cfg(feature = "embeddings")]
+    rag_engine: Option<Arc<tokio::sync::Mutex<rag::RagEngine>>>,
+    #[cfg(feature = "embeddings")]
+    db_for_watcher: Database,
+}
+
+struct RuntimeServices {
+    registry: Arc<agent::AgentRegistry>,
+    agent: Arc<agent::AgentLoop>,
+    subagent_manager_for_estop: Arc<agent::SubagentManager>,
+    workflow_engine: Arc<workflows::engine::WorkflowEngine>,
+    workflow_event_rx: tokio::sync::mpsc::Receiver<workflows::WorkflowEvent>,
+    _skill_watcher_handle: WatcherHandle,
+    _bootstrap_watcher_handle: WatcherHandle,
+    #[cfg(feature = "embeddings")]
+    watch_update_tx: Option<tokio::sync::mpsc::Sender<rag::watcher::WatchUpdate>>,
+    #[cfg(feature = "embeddings")]
+    _rag_watcher_handle: Option<WatcherHandle>,
 }
 
 async fn load_runtime_setup(startup_t0: std::time::Instant) -> Result<RuntimeSetup> {
@@ -224,6 +252,98 @@ async fn configure_agent_registry(
     }
 }
 
+fn start_runtime_services(context: RuntimeServicesContext<'_>) -> RuntimeServices {
+    let default_agent = context.registry.default_agent();
+    let skills_summary_handle = default_agent.skills_summary_handle();
+    let (bootstrap_content_handle, bootstrap_files_handle) = default_agent.bootstrap_handles();
+
+    let registry = Arc::new(context.registry);
+    let agent = registry.default_agent().clone();
+
+    let (subagent_result_tx, _subagent_result_rx) = tokio::sync::mpsc::channel(50);
+    let subagent_manager = Arc::new(agent::SubagentManager::new(
+        agent.clone(),
+        subagent_result_tx,
+    ));
+    let subagent_manager_for_estop = subagent_manager.clone();
+    if context.spawn_manager_cell.set(subagent_manager).is_err() {
+        tracing::error!("SpawnTool OnceCell was already initialized — this is a bug");
+    }
+
+    tracing::info!("Subagent manager initialized (SpawnTool registered)");
+
+    let (workflow_event_tx, workflow_event_rx) = tokio::sync::mpsc::channel(50);
+    let workflow_engine = Arc::new(workflows::engine::WorkflowEngine::new(
+        context.db_for_web.clone(),
+        registry.clone(),
+        workflow_event_tx,
+    ));
+    if context
+        .workflow_engine_cell
+        .set(workflow_engine.clone())
+        .is_err()
+    {
+        tracing::error!("WorkflowTool OnceCell was already initialized — this is a bug");
+    }
+    tracing::info!("Workflow engine initialized (WorkflowTool registered)");
+
+    context
+        .cron_scheduler
+        .set_workflow_engine(workflow_engine.clone());
+
+    let skills_dir = config::Config::data_dir().join("skills");
+    let skill_watcher = skills::SkillWatcher::new(skills_summary_handle, skills_dir);
+    let skill_watcher_handle = skill_watcher.start();
+
+    let data_dir = config::Config::data_dir();
+    let bootstrap_watcher =
+        agent::BootstrapWatcher::new(bootstrap_content_handle, bootstrap_files_handle, data_dir);
+    let bootstrap_watcher_handle = bootstrap_watcher.start();
+
+    #[cfg(feature = "embeddings")]
+    let (watch_update_tx, rag_watcher_handle) = {
+        if let Some(ref rag) = context.rag_engine {
+            let legacy_dirs: Vec<std::path::PathBuf> = context
+                .config
+                .knowledge
+                .watch_dirs
+                .iter()
+                .filter_map(|d| {
+                    if d.starts_with("~/") {
+                        dirs::home_dir().map(|h| h.join(&d[2..]))
+                    } else {
+                        Some(std::path::PathBuf::from(d))
+                    }
+                })
+                .collect();
+            let (tx, rx) = tokio::sync::mpsc::channel(16);
+            let w = rag::watcher::RagWatcher::new(
+                rag.clone(),
+                context.db_for_watcher.clone(),
+                legacy_dirs,
+                rx,
+            );
+            (Some(tx), Some(w.start()))
+        } else {
+            (None, None)
+        }
+    };
+
+    RuntimeServices {
+        registry,
+        agent,
+        subagent_manager_for_estop,
+        workflow_engine,
+        workflow_event_rx,
+        _skill_watcher_handle: skill_watcher_handle,
+        _bootstrap_watcher_handle: bootstrap_watcher_handle,
+        #[cfg(feature = "embeddings")]
+        watch_update_tx,
+        #[cfg(feature = "embeddings")]
+        _rag_watcher_handle: rag_watcher_handle,
+    }
+}
+
 pub async fn run_gateway() -> Result<()> {
     let pid_file = gateway_process::prepare_pid_file()?;
 
@@ -361,72 +481,30 @@ pub async fn run_gateway() -> Result<()> {
         }
     };
 
-    let default_agent = registry.default_agent();
-    let skills_summary_handle = default_agent.skills_summary_handle();
-    let (bootstrap_content_handle, bootstrap_files_handle) = default_agent.bootstrap_handles();
-
-    let registry = Arc::new(registry);
-    let agent = registry.default_agent().clone();
-
-    let (subagent_result_tx, _subagent_result_rx) = tokio::sync::mpsc::channel(50);
-    let subagent_manager = Arc::new(agent::SubagentManager::new(
-        agent.clone(),
-        subagent_result_tx,
-    ));
-    let subagent_manager_for_estop = subagent_manager.clone();
-    if spawn_manager_cell.set(subagent_manager).is_err() {
-        tracing::error!("SpawnTool OnceCell was already initialized — this is a bug");
-    }
-
-    tracing::info!("Subagent manager initialized (SpawnTool registered)");
-
-    let (workflow_event_tx, workflow_event_rx) = tokio::sync::mpsc::channel(50);
-    let workflow_engine = Arc::new(workflows::engine::WorkflowEngine::new(
-        db_for_web.clone(),
-        registry.clone(),
-        workflow_event_tx,
-    ));
-    if workflow_engine_cell.set(workflow_engine.clone()).is_err() {
-        tracing::error!("WorkflowTool OnceCell was already initialized — this is a bug");
-    }
-    tracing::info!("Workflow engine initialized (WorkflowTool registered)");
-
-    cron_scheduler.set_workflow_engine(workflow_engine.clone());
-
-    let skills_dir = config::Config::data_dir().join("skills");
-    let skill_watcher = skills::SkillWatcher::new(skills_summary_handle, skills_dir);
-    let _watcher_handle = skill_watcher.start();
-
-    let data_dir = config::Config::data_dir();
-    let bootstrap_watcher =
-        agent::BootstrapWatcher::new(bootstrap_content_handle, bootstrap_files_handle, data_dir);
-    let _bootstrap_watcher_handle = bootstrap_watcher.start();
-
-    #[cfg(feature = "embeddings")]
-    let (watch_update_tx, _rag_watcher_handle) = {
-        if let Some(ref rag) = rag_engine {
-            let legacy_dirs: Vec<std::path::PathBuf> = config
-                .knowledge
-                .watch_dirs
-                .iter()
-                .filter_map(|d| {
-                    if d.starts_with("~/") {
-                        dirs::home_dir().map(|h| h.join(&d[2..]))
-                    } else {
-                        Some(std::path::PathBuf::from(d))
-                    }
-                })
-                .collect();
-            let (tx, rx) = tokio::sync::mpsc::channel(16);
-            let w =
-                rag::watcher::RagWatcher::new(rag.clone(), db_for_watcher.clone(), legacy_dirs, rx);
-            (Some(tx), Some(w.start()))
-        } else {
-            (None, None)
-        }
-    };
-    #[cfg(not(feature = "embeddings"))]
-    let _watch_update_tx: Option<tokio::sync::mpsc::Sender<()>> = None;
+    let RuntimeServices {
+        registry,
+        agent,
+        subagent_manager_for_estop,
+        workflow_engine,
+        workflow_event_rx,
+        _skill_watcher_handle,
+        _bootstrap_watcher_handle,
+        #[cfg(feature = "embeddings")]
+        watch_update_tx,
+        #[cfg(feature = "embeddings")]
+        _rag_watcher_handle,
+    } = start_runtime_services(RuntimeServicesContext {
+        config: &config,
+        db_for_web: db_for_web.clone(),
+        registry,
+        cron_scheduler: cron_scheduler.clone(),
+        spawn_manager_cell,
+        workflow_engine_cell,
+        #[cfg(feature = "embeddings")]
+        rag_engine: rag_engine.clone(),
+        #[cfg(feature = "embeddings")]
+        db_for_watcher,
+    });
 
     #[cfg(feature = "mcp")]
     let agent_for_mcp_deferred = agent.clone();
