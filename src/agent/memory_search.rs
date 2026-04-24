@@ -409,6 +409,84 @@ fn apply_temporal_decay(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
+    use tempfile::TempDir;
+
+    struct TestEmbeddingProvider;
+
+    #[async_trait]
+    impl super::super::embeddings::EmbeddingProvider for TestEmbeddingProvider {
+        async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+            Ok(texts.iter().map(|text| test_embedding(text)).collect())
+        }
+
+        fn dimensions(&self) -> usize {
+            4
+        }
+
+        fn name(&self) -> &str {
+            "test"
+        }
+
+        fn model_name(&self) -> &str {
+            "deterministic"
+        }
+    }
+
+    fn test_embedding(text: &str) -> Vec<f32> {
+        let mut vector = vec![0.0_f32; 4];
+        for (idx, byte) in text.bytes().enumerate() {
+            vector[idx % 4] += byte as f32 / 255.0;
+        }
+        let norm = vector.iter().map(|v| v * v).sum::<f32>().sqrt();
+        if norm > 0.0 {
+            for value in &mut vector {
+                *value /= norm;
+            }
+        }
+        vector
+    }
+
+    async fn test_searcher() -> (MemorySearcher, Database, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("test.db");
+        let index_path = dir.path().join("memory.usearch");
+        let db = Database::open(&db_path).await.unwrap();
+        let engine =
+            EmbeddingEngine::with_provider_and_path(Box::new(TestEmbeddingProvider), index_path)
+                .unwrap();
+        let searcher = MemorySearcher::new(db.clone(), engine);
+        (searcher, db, dir)
+    }
+
+    async fn insert_and_index(
+        searcher: &mut MemorySearcher,
+        db: &Database,
+        content: &str,
+        contact_id: Option<i64>,
+        profile_id: Option<i64>,
+    ) -> i64 {
+        let id = db
+            .insert_memory_chunk(
+                "2026-04-24",
+                "test",
+                "Test",
+                content,
+                "history",
+                contact_id,
+                None,
+                3,
+                profile_id,
+            )
+            .await
+            .unwrap();
+        searcher
+            .engine_mut()
+            .index_chunk(id, content)
+            .await
+            .unwrap();
+        id
+    }
 
     #[test]
     fn test_rrf_merge_both_sources() {
@@ -553,5 +631,108 @@ mod tests {
             .to_string();
         let score = apply_temporal_decay(1.0, &tomorrow, now, 30.0);
         assert_eq!(score, 1.0, "Future date should not decay");
+    }
+
+    #[tokio::test]
+    async fn search_scoped_full_includes_visible_profiles_and_excludes_others() {
+        let (mut searcher, db, _dir) = test_searcher().await;
+        let work_profile = crate::profiles::db::insert_profile(
+            db.pool(),
+            "work-memory",
+            "Work Memory",
+            "W",
+            "#111111",
+            "{}",
+            None,
+        )
+        .await
+        .unwrap();
+        let family_profile = crate::profiles::db::insert_profile(
+            db.pool(),
+            "family-memory",
+            "Family Memory",
+            "F",
+            "#222222",
+            "{}",
+            None,
+        )
+        .await
+        .unwrap();
+
+        insert_and_index(&mut searcher, &db, "alpha global memory", None, None).await;
+        insert_and_index(
+            &mut searcher,
+            &db,
+            "alpha work scoped memory",
+            None,
+            Some(work_profile),
+        )
+        .await;
+        insert_and_index(
+            &mut searcher,
+            &db,
+            "alpha family scoped memory",
+            None,
+            Some(family_profile),
+        )
+        .await;
+
+        let results = searcher
+            .search_scoped_full("alpha", 10, None, None, &[work_profile], &[])
+            .await
+            .unwrap();
+        let contents: Vec<&str> = results
+            .iter()
+            .map(|result| result.chunk.content.as_str())
+            .collect();
+
+        assert!(contents.contains(&"alpha global memory"));
+        assert!(contents.contains(&"alpha work scoped memory"));
+        assert!(!contents.contains(&"alpha family scoped memory"));
+    }
+
+    #[tokio::test]
+    async fn contact_scoped_search_respects_contact_and_namespace_boundaries() {
+        let (mut searcher, db, _dir) = test_searcher().await;
+        let alice = db
+            .insert_contact(
+                "Alice", None, None, None, None, None, None, None, None, None,
+            )
+            .await
+            .unwrap();
+        let bob = db
+            .insert_contact("Bob", None, None, None, None, None, None, None, None, None)
+            .await
+            .unwrap();
+
+        insert_and_index(&mut searcher, &db, "alpha owner private memory", None, None).await;
+        insert_and_index(
+            &mut searcher,
+            &db,
+            "alpha alice public memory",
+            Some(alice),
+            None,
+        )
+        .await;
+        insert_and_index(
+            &mut searcher,
+            &db,
+            "alpha bob public memory",
+            Some(bob),
+            None,
+        )
+        .await;
+
+        let allowed = vec!["_public".to_string(), format!("contact_{alice}")];
+        let results = searcher
+            .search_scoped_full("alpha", 10, Some(alice), None, &[], &allowed)
+            .await
+            .unwrap();
+        let contents: Vec<&str> = results
+            .iter()
+            .map(|result| result.chunk.content.as_str())
+            .collect();
+
+        assert_eq!(contents, vec!["alpha alice public memory"]);
     }
 }

@@ -64,7 +64,7 @@ impl Database {
 
         let placeholders: Vec<String> = ids.iter().map(|_| "?".to_string()).collect();
         let query = format!(
-            "SELECT id, date, source, heading, content, memory_type, created_at, contact_id, agent_id, importance, profile_id, profile_id
+            "SELECT id, date, source, heading, content, memory_type, created_at, contact_id, agent_id, importance, profile_id, namespace
              FROM memory_chunks WHERE id IN ({})
              ORDER BY created_at DESC",
             placeholders.join(",")
@@ -136,7 +136,7 @@ impl Database {
         let rows = match profile_id {
             Some(pid) => {
                 sqlx::query_as::<_, MemoryChunkRow>(
-                    "SELECT id, date, source, heading, content, memory_type, created_at, contact_id, agent_id, importance, profile_id \
+                    "SELECT id, date, source, heading, content, memory_type, created_at, contact_id, agent_id, importance, profile_id, namespace \
                      FROM memory_chunks \
                      WHERE memory_type = 'history' AND (profile_id IS NULL OR profile_id = ?) \
                      ORDER BY created_at DESC LIMIT ? OFFSET ?",
@@ -150,7 +150,7 @@ impl Database {
             }
             None => {
                 sqlx::query_as::<_, MemoryChunkRow>(
-                    "SELECT id, date, source, heading, content, memory_type, created_at, contact_id, agent_id, importance, profile_id \
+                    "SELECT id, date, source, heading, content, memory_type, created_at, contact_id, agent_id, importance, profile_id, namespace \
                      FROM memory_chunks WHERE memory_type = 'history' \
                      ORDER BY created_at DESC LIMIT ? OFFSET ?",
                 )
@@ -167,7 +167,7 @@ impl Database {
     /// Load all memory chunks (for re-embedding after model change).
     pub async fn load_all_memory_chunks(&self) -> Result<Vec<MemoryChunkRow>> {
         let rows = sqlx::query_as::<_, MemoryChunkRow>(
-            "SELECT id, date, source, heading, content, memory_type, created_at, contact_id, agent_id, importance, profile_id
+            "SELECT id, date, source, heading, content, memory_type, created_at, contact_id, agent_id, importance, profile_id, namespace
              FROM memory_chunks ORDER BY id",
         )
         .fetch_all(self.pool())
@@ -295,7 +295,7 @@ impl Database {
         end_date: &str,
     ) -> Result<Vec<MemoryChunkRow>> {
         let rows = sqlx::query_as::<_, MemoryChunkRow>(
-            "SELECT id, date, source, heading, content, memory_type, created_at, contact_id, agent_id, importance, profile_id
+            "SELECT id, date, source, heading, content, memory_type, created_at, contact_id, agent_id, importance, profile_id, namespace
              FROM memory_chunks WHERE date >= ? AND date <= ?
              ORDER BY date ASC, created_at ASC",
         )
