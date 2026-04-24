@@ -131,12 +131,18 @@ pub async fn resolve_session_profile(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
-    #[test]
-    fn contact_profile_id_takes_priority() {
-        // Contact with profile_id = 42 → resolve should return 42 without DB
-        let contact = Contact {
-            id: 1,
+    async fn test_db() -> (Database, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("test.db");
+        let db = Database::open(&db_path).await.unwrap();
+        (db, dir)
+    }
+
+    fn test_contact(id: i64, profile_id: Option<i64>) -> Contact {
+        Contact {
+            id,
             name: "Test".into(),
             nickname: None,
             bio: String::new(),
@@ -153,10 +159,154 @@ mod tests {
             persona_override: None,
             persona_instructions: String::new(),
             agent_override: None,
-            profile_id: Some(42),
-        };
+            profile_id,
+        }
+    }
+
+    #[test]
+    fn contact_profile_id_takes_priority() {
+        // Contact with profile_id = 42 → resolve should return 42 without DB
+        let contact = test_contact(1, Some(42));
 
         // When contact has profile_id, it's returned immediately (no async needed)
         assert_eq!(contact.profile_id, Some(42));
+    }
+
+    #[tokio::test]
+    async fn gateway_override_wins_over_contact_profile_and_channel_default() {
+        let (db, _dir) = test_db().await;
+
+        let contact_profile = profiles::db::insert_profile(
+            db.pool(),
+            "contact-profile",
+            "Contact Profile",
+            "C",
+            "#111111",
+            "{}",
+            None,
+        )
+        .await
+        .unwrap();
+        let channel_profile = profiles::db::insert_profile(
+            db.pool(),
+            "channel-profile",
+            "Channel Profile",
+            "T",
+            "#222222",
+            "{}",
+            None,
+        )
+        .await
+        .unwrap();
+        let override_profile = profiles::db::insert_profile(
+            db.pool(),
+            "override-profile",
+            "Override Profile",
+            "O",
+            "#333333",
+            "{}",
+            None,
+        )
+        .await
+        .unwrap();
+        let gateway_id = crate::gateways::db::insert_gateway(
+            db.pool(),
+            "Telegram",
+            "telegram",
+            "{}",
+            "channel-profile",
+            "",
+            "automatic",
+            None,
+        )
+        .await
+        .unwrap();
+        let contact_id = db
+            .insert_contact(
+                "Gateway Override Contact",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        db.update_contact(
+            contact_id,
+            &crate::contacts::db::ContactUpdate {
+                profile_id: Some(contact_profile),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let contact = db.load_contact(contact_id).await.unwrap().unwrap();
+        crate::gateways::db::upsert_gateway_override(
+            db.pool(),
+            contact.id,
+            gateway_id,
+            override_profile,
+        )
+        .await
+        .unwrap();
+
+        let resolved = resolve_profile_id_from_values(
+            Some(&contact),
+            "channel-profile",
+            "default",
+            &db,
+            Some(gateway_id),
+        )
+        .await;
+
+        assert_eq!(resolved, override_profile);
+        assert_ne!(resolved, contact_profile);
+        assert_ne!(resolved, channel_profile);
+    }
+
+    #[tokio::test]
+    async fn channel_default_profile_is_used_when_contact_has_no_override() {
+        let (db, _dir) = test_db().await;
+
+        let channel_profile = profiles::db::insert_profile(
+            db.pool(),
+            "client-work",
+            "Client Work",
+            "W",
+            "#444444",
+            "{}",
+            None,
+        )
+        .await
+        .unwrap();
+        let contact = test_contact(100, None);
+
+        let resolved =
+            resolve_profile_id_from_values(Some(&contact), "client-work", "default", &db, None)
+                .await;
+
+        assert_eq!(resolved, channel_profile);
+    }
+
+    #[tokio::test]
+    async fn invalid_channel_and_global_profiles_fall_back_to_db_default() {
+        let (db, _dir) = test_db().await;
+        let default_profile = profiles::db::get_default_profile(db.pool()).await.unwrap();
+
+        let resolved = resolve_profile_id_from_values(
+            None,
+            "missing-channel-profile",
+            "missing-global-profile",
+            &db,
+            None,
+        )
+        .await;
+
+        assert_eq!(resolved, default_profile.id);
     }
 }

@@ -691,6 +691,127 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn list_contacts_scopes_profile_contacts_without_cross_profile_leakage() {
+        let (db, _dir) = test_db().await;
+        let work_profile = crate::profiles::db::insert_profile(
+            db.pool(),
+            "work",
+            "Work",
+            "W",
+            "#111111",
+            "{}",
+            None,
+        )
+        .await
+        .unwrap();
+        let family_profile = crate::profiles::db::insert_profile(
+            db.pool(),
+            "family",
+            "Family",
+            "F",
+            "#222222",
+            "{}",
+            None,
+        )
+        .await
+        .unwrap();
+
+        let global = db
+            .insert_contact(
+                "Global Contact",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let work = db
+            .insert_contact(
+                "Work Contact",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let family = db
+            .insert_contact(
+                "Family Contact",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        db.update_contact(
+            work,
+            &ContactUpdate {
+                profile_id: Some(work_profile),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        db.update_contact(
+            family,
+            &ContactUpdate {
+                profile_id: Some(family_profile),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let work_names: Vec<String> = db
+            .list_contacts(None, Some(work_profile))
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|c| c.name)
+            .collect();
+        assert_eq!(work_names, vec!["Global Contact", "Work Contact"]);
+
+        let family_names: Vec<String> = db
+            .list_contacts(None, Some(family_profile))
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|c| c.name)
+            .collect();
+        assert_eq!(family_names, vec!["Family Contact", "Global Contact"]);
+
+        let unscoped_ids: Vec<i64> = db
+            .list_contacts(None, None)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+        assert!(unscoped_ids.contains(&global));
+        assert!(unscoped_ids.contains(&work));
+        assert!(unscoped_ids.contains(&family));
+    }
+
+    #[tokio::test]
     async fn test_identities() {
         let (db, _dir) = test_db().await;
         let cid = db
