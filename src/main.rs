@@ -41,6 +41,7 @@ mod config;
 mod connections;
 mod contacts;
 mod crash_reporter;
+mod gateway_process;
 mod gateways;
 mod logs;
 mod mcp_setup;
@@ -499,97 +500,6 @@ fn try_create_rag_engine(
     }
 }
 
-/// Check if a process is alive by PID string.
-#[cfg(unix)]
-fn is_process_alive(pid_str: &str) -> bool {
-    pid_str
-        .parse::<u32>()
-        .ok()
-        .map(|pid| {
-            std::process::Command::new("kill")
-                .args(["-0", &pid.to_string()])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false)
-        })
-        .unwrap_or(false)
-}
-
-#[cfg(not(unix))]
-fn is_process_alive(_pid_str: &str) -> bool {
-    // On Windows, assume alive if PID file exists (conservative)
-    true
-}
-
-/// Stop the running gateway via PID file. Returns true if a running process was stopped.
-fn stop_gateway() -> Result<bool> {
-    let pid_file = Config::data_dir().join("homun.pid");
-
-    let pid_str = match std::fs::read_to_string(&pid_file) {
-        Ok(s) => s,
-        Err(_) => {
-            eprintln!("No gateway running (PID file not found)");
-            return Ok(false);
-        }
-    };
-
-    let pid = pid_str.trim();
-
-    if !is_process_alive(pid) {
-        eprintln!("Process {pid} not found (stale PID file). Cleaning up.");
-        let _ = std::fs::remove_file(&pid_file);
-        return Ok(false);
-    }
-
-    #[cfg(unix)]
-    {
-        let status = std::process::Command::new("kill")
-            .args(["-TERM", pid])
-            .status();
-        match status {
-            Ok(s) if s.success() => {
-                println!("Sent stop signal to gateway (PID {pid})");
-                // Wait for process to exit (poll for PID file removal, max 5s)
-                for _ in 0..50 {
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                    if !pid_file.exists() {
-                        println!("Gateway stopped.");
-                        return Ok(true);
-                    }
-                }
-                println!("Gateway may still be stopping (PID file not yet removed).");
-                Ok(true)
-            }
-            _ => {
-                eprintln!("Failed to stop process {pid}. Cleaning up stale PID file.");
-                let _ = std::fs::remove_file(&pid_file);
-                Ok(false)
-            }
-        }
-    }
-
-    #[cfg(not(unix))]
-    {
-        let status = std::process::Command::new("taskkill")
-            .args(["/PID", pid, "/F"])
-            .status();
-        match status {
-            Ok(s) if s.success() => {
-                println!("Gateway stopped (PID {pid}).");
-                let _ = std::fs::remove_file(&pid_file);
-                Ok(true)
-            }
-            _ => {
-                eprintln!("Failed to stop process {pid}. Cleaning up stale PID file.");
-                let _ = std::fs::remove_file(&pid_file);
-                Ok(false)
-            }
-        }
-    }
-}
-
 fn print_install_security_summary(report: Option<&crate::skills::SecurityReport>, forced: bool) {
     let Some(report) = report else {
         return;
@@ -832,62 +742,7 @@ async fn main() -> Result<()> {
             use crate::scheduler::CronScheduler;
             use std::sync::Arc;
 
-            // PID file management: kill existing instance if running
-            let pid_file = Config::data_dir().join("homun.pid");
-
-            // Check if PID file exists and try to kill existing process
-            if pid_file.exists() {
-                if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
-                    if let Ok(old_pid) = pid_str.trim().parse::<u32>() {
-                        // Check if process is still running
-                        #[cfg(unix)]
-                        {
-                            use std::process::Command;
-                            // Send SIGTERM to the old process
-                            let _ = Command::new("kill")
-                                .arg("-TERM")
-                                .arg(old_pid.to_string())
-                                .output();
-
-                            tracing::info!(
-                                "Sent TERM signal to existing instance (PID {})",
-                                old_pid
-                            );
-
-                            // Wait for process to die (up to 5 seconds)
-                            for i in 1..=10 {
-                                std::thread::sleep(std::time::Duration::from_millis(500));
-                                // Check if process still exists
-                                let check = Command::new("kill")
-                                    .arg("-0")
-                                    .arg(old_pid.to_string())
-                                    .output();
-                                if check.is_err()
-                                    || check.map(|o| !o.status.success()).unwrap_or(true)
-                                {
-                                    tracing::info!(
-                                        "Previous instance terminated after {}ms",
-                                        i * 500
-                                    );
-                                    break;
-                                }
-                            }
-                        }
-                        #[cfg(windows)]
-                        {
-                            use std::process::Command;
-                            let _ = Command::new("taskkill")
-                                .args(["/PID", &old_pid.to_string(), "/F"])
-                                .output();
-                            tracing::info!("Killed existing instance (PID {})", old_pid);
-                            std::thread::sleep(std::time::Duration::from_secs(1));
-                        }
-                    }
-                }
-            }
-
-            // Write new PID file
-            std::fs::write(&pid_file, std::process::id().to_string())?;
+            let pid_file = gateway_process::prepare_pid_file()?;
 
             let startup_t0 = std::time::Instant::now();
 
@@ -1492,8 +1347,7 @@ async fn main() -> Result<()> {
             );
             let result = gateway.run().await;
 
-            // Clean up PID file
-            let _ = std::fs::remove_file(&pid_file);
+            gateway_process::cleanup_pid_file(&pid_file);
 
             result?;
         }
@@ -1637,18 +1491,16 @@ async fn main() -> Result<()> {
             println!("Config: {}", Config::default_path().display());
             println!("Data: {}", Config::data_dir().display());
 
-            // Check if gateway is running via PID file
-            let pid_file = Config::data_dir().join("homun.pid");
-            if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
-                let pid = pid_str.trim();
-                if is_process_alive(pid) {
+            match gateway_process::status() {
+                gateway_process::GatewayProcessStatus::Running(pid) => {
                     println!("Gateway: running (PID {pid})");
-                } else {
-                    println!("Gateway: not running (stale PID file)");
-                    let _ = std::fs::remove_file(&pid_file);
                 }
-            } else {
-                println!("Gateway: not running");
+                gateway_process::GatewayProcessStatus::Stale => {
+                    println!("Gateway: not running (stale PID file)");
+                }
+                gateway_process::GatewayProcessStatus::NotRunning => {
+                    println!("Gateway: not running");
+                }
             }
         }
         Commands::Skills { command } => match command {
@@ -2830,10 +2682,10 @@ async fn main() -> Result<()> {
             }
         }
         Commands::Stop => {
-            stop_gateway()?;
+            gateway_process::stop_gateway()?;
         }
         Commands::Restart => {
-            let was_running = stop_gateway()?;
+            let was_running = gateway_process::stop_gateway()?;
             if was_running {
                 // Small delay to let the port release
                 std::thread::sleep(std::time::Duration::from_millis(500));
