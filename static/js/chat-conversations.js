@@ -8,6 +8,16 @@ function conversationApi(path, conversationId) {
     return url.pathname + url.search;
 }
 
+async function searchConversations({ query = '', includeArchived = false, limit = 20 } = {}) {
+    const url = new URL('/api/v1/chat/conversations', window.location.origin);
+    url.searchParams.set('limit', String(limit));
+    if (query) url.searchParams.set('q', query);
+    if (includeArchived) url.searchParams.set('include_archived', 'true');
+    const res = await fetch(url.pathname + url.search);
+    if (!res.ok) return null;
+    return await res.json();
+}
+
 function conversationResourceUrl(conversationId) {
     return `/api/v1/chat/conversations/${encodeURIComponent(conversationId)}`;
 }
@@ -290,6 +300,7 @@ window.HomunChatConversations = {
     positionConversationDropdown,
     renderConversationList,
     renderSearchResults,
+    searchConversations,
     setConversationUrl,
     truncateConversationText,
 };

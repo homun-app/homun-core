@@ -140,6 +140,7 @@ const {
     positionConversationDropdown,
     renderConversationList: renderConversationListElement,
     renderSearchResults: renderSearchResultsElement,
+    searchConversations,
     setConversationUrl,
     truncateConversationText,
 } = window.HomunChatConversations;
@@ -995,14 +996,9 @@ function closeSearchModal() {
 async function performSearch() {
     const q = chatSearchInput?.value.trim() || '';
     const inclArchived = chatSearchIncludeArchived?.checked || false;
-    const url = new URL('/api/v1/chat/conversations', window.location.origin);
-    url.searchParams.set('limit', '20');
-    if (q) url.searchParams.set('q', q);
-    if (inclArchived) url.searchParams.set('include_archived', 'true');
     try {
-        const res = await fetch(url.pathname + url.search);
-        if (!res.ok) return;
-        const results = await res.json();
+        const results = await searchConversations({ query: q, includeArchived: inclArchived });
+        if (!results) return;
         renderSearchResults(results);
     } catch (_) { /* ignore */ }
 }
