@@ -4,7 +4,7 @@
 
 Homun is a digital homunculus that lives on your machine and works 24/7. Manage it from Telegram, WhatsApp, Discord, Slack, Email, a Web dashboard, or the CLI. It learns from you, runs automations while you sleep, browses the web, and extends via the open Agent Skills ecosystem.
 
-> Version **1.0.0** — first production release · [Changelog](./CHANGELOG.md) · [homun.app](https://homun.app)
+> Version **1.0.1** — first production release · [Changelog](./CHANGELOG.md) · [homun.app](https://homun.app)
 
 ---
 
@@ -12,7 +12,7 @@ Homun is a digital homunculus that lives on your machine and works 24/7. Manage 
 
 ### macOS
 
-Download the latest `.dmg` from [GitHub Releases](https://github.com/homun-app/homun/releases/latest), drag `Homun.app` onto `Applications`, launch. The web dashboard opens at `http://localhost:8777`.
+Download the latest `.dmg` from [GitHub Releases](https://github.com/homun-app/homun/releases/latest), drag `Homun.app` onto `Applications`, launch. The web dashboard opens at `https://localhost:18443`.
 
 Or via **Homebrew**:
 
@@ -46,7 +46,7 @@ Windows is supported via Windows Subsystem for Linux 2. Full walkthrough in **[d
 
 > A native Windows `.msi` installer is not provided in v1.0 — see [`#67`](./docs/REALITY-AUDIT.md) for the cost-driven rescope.
 
-Once installed, open **http://localhost:8777** in your browser and complete the setup wizard.
+Once installed, open **https://localhost:18443** in your browser and complete the setup wizard.
 
 ---
 

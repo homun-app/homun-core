@@ -99,7 +99,7 @@ sudo -u homun homun config    # one-time: run the setup wizard
 sudo -u homun homun gateway   # start the gateway in foreground
 ```
 
-Open `http://localhost:8777` in your **Windows browser** (not inside WSL). You should see the Web UI. ✨
+Open `https://localhost:18443` in your **Windows browser** (not inside WSL). You should see the Web UI. Accept the local self-signed certificate warning once if your browser asks. ✨
 
 Close the terminal → Homun stops. Re-run to restart.
 
@@ -136,7 +136,7 @@ systemctl status homun       # verify it's running
 journalctl -u homun -f       # tail logs
 ```
 
-Homun now starts automatically whenever you open a WSL session. Your Windows browser can reach `http://localhost:8777` any time.
+Homun now starts automatically whenever you open a WSL session. Your Windows browser can reach `https://localhost:18443` any time.
 
 ### Option C — Advanced: Windows Task Scheduler auto-start
 
@@ -150,7 +150,7 @@ Best if you want Homun to start at Windows login without needing to open a WSL t
 6. **Conditions** tab: uncheck "Start the task only if the computer is on AC power" if you're on a laptop
 7. Save
 
-At next Windows login, Homun starts in the background via WSL. The Web UI is reachable at `http://localhost:8777`. This works even if you never explicitly open a WSL terminal — Windows keeps the WSL VM alive in the background.
+At next Windows login, Homun starts in the background via WSL. The Web UI is reachable at `https://localhost:18443`. This works even if you never explicitly open a WSL terminal — Windows keeps the WSL VM alive in the background.
 
 ---
 
@@ -158,7 +158,7 @@ At next Windows login, Homun starts in the background via WSL. The Web UI is rea
 
 ### Web UI
 
-Open `http://localhost:8777` in **Edge/Chrome/Firefox on Windows** — WSL2 forwards loopback automatically. No firewall rules, no port forwarding, nothing to configure. This just works.
+Open `https://localhost:18443` in **Edge/Chrome/Firefox on Windows** — WSL2 forwards loopback automatically. No firewall rules, no port forwarding, nothing to configure. This just works.
 
 ### Files
 
@@ -247,14 +247,14 @@ Expect 20-30 seconds before the Web UI becomes reachable. Subsequent launches ar
 
 ## Troubleshooting
 
-### `localhost:8777` from Windows browser times out
+### `https://localhost:18443` from Windows browser times out
 
 Check that:
 1. Homun is actually running: `wsl -d Ubuntu -u homun -- pgrep -a homun`
-2. Homun is bound to `127.0.0.1` (not `0.0.0.0` or a specific interface). Check `~/.homun/config.toml` → `[web] bind = "127.0.0.1:8777"`.
+2. Homun is bound to `127.0.0.1` with HTTPS enabled. Check `~/.homun/config.toml` → `[channels.web]`, `host = "127.0.0.1"`, `port = 18443`, `auto_tls = true`.
 3. No Windows firewall rule is blocking localhost-to-WSL traffic. This is rare but happens with some corporate security tools.
 
-Fallback: bind Homun to `0.0.0.0:8777` and use the WSL IP directly. Find it with `wsl -d Ubuntu -- ip addr show eth0 | grep inet`.
+Fallback: bind Homun to `0.0.0.0:18443` and use the WSL IP directly. Find it with `wsl -d Ubuntu -- ip addr show eth0 | grep inet`.
 
 ### `sudo systemctl enable homun` fails with "Failed to connect to bus"
 

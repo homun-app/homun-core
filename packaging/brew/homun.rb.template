@@ -66,7 +66,7 @@ class Homun < Formula
           homun gateway                # foreground
           homun config                 # setup wizard
 
-      Web UI:  http://localhost:8777
+      Web UI:  https://localhost:18443
 
       For auto-start at login, install the launchd user agent:
           homun service install

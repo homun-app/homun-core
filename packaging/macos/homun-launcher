@@ -5,7 +5,7 @@
 #   1. Resolve the real `homun` binary next to this script inside the bundle.
 #   2. Spawn `homun gateway` in the background (detached from the bundle
 #      process, so the Dock icon doesn't stick around forever).
-#   3. Wait for the Web UI to respond on localhost:8777.
+#   3. Wait for the Web UI to respond on localhost:18443 over HTTPS.
 #   4. Open the Web UI in the default browser.
 #
 # On subsequent double-clicks, the gateway is already running and step 3
@@ -22,7 +22,7 @@ HOMUN_DATA="${HOME}/.homun"
 LOG_DIR="${HOMUN_DATA}/logs"
 LOG_FILE="${LOG_DIR}/daemon.log"
 PID_FILE="${HOMUN_DATA}/gateway.pid"
-WEB_URL="http://localhost:8777"
+WEB_URL="https://localhost:18443"
 
 mkdir -p "${HOMUN_DATA}" "${LOG_DIR}"
 
@@ -48,8 +48,8 @@ if ! gateway_running; then
 
     # Wait up to 15s for the Web UI to respond
     for i in $(seq 1 30); do
-        if curl -sf "${WEB_URL}/healthz" >/dev/null 2>&1 \
-           || curl -sf "${WEB_URL}/" >/dev/null 2>&1; then
+        if curl -skf "${WEB_URL}/healthz" >/dev/null 2>&1 \
+           || curl -skf "${WEB_URL}/" >/dev/null 2>&1; then
             break
         fi
         sleep 0.5

@@ -67,6 +67,17 @@ mod utils;
 mod web;
 mod workflows;
 
+fn local_web_ui_url(config: &Config) -> String {
+    let has_explicit_tls = !config.channels.web.tls_cert.trim().is_empty()
+        && !config.channels.web.tls_key.trim().is_empty();
+    let scheme = if config.channels.web.auto_tls || has_explicit_tls {
+        "https"
+    } else {
+        "http"
+    };
+    format!("{scheme}://localhost:{}", config.channels.web.port)
+}
+
 #[cfg(feature = "cli")]
 use crate::channels::CliChannel;
 use crate::config::Config;
@@ -1056,8 +1067,8 @@ async fn main() -> Result<()> {
                         tracing::warn!(
                             error = %e,
                             "No provider configured. Gateway starting in setup mode. \
-                            Configure a provider at http://localhost:{}/setup",
-                            config.channels.web.port
+                            Configure a provider at {}/setup",
+                            local_web_ui_url(&config)
                         );
                         None
                     }
@@ -1253,8 +1264,9 @@ async fn main() -> Result<()> {
                         }
                     });
                     tracing::info!(
+                        url = %local_web_ui_url(&config),
                         port = web_port,
-                        "Web UI available at http://localhost:{web_port}/"
+                        "Web UI available"
                     );
                     tracing::info!(
                         "Gateway running in setup mode. Configure a provider via Web UI."

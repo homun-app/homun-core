@@ -366,7 +366,14 @@ impl Gateway {
                 outbound_tx: web_outbound_tx,
             });
             self.channel_health.mark_started("web");
-            tracing::info!(port = port, "Web UI started at http://localhost:{}", port);
+            let has_explicit_tls = !config.channels.web.tls_cert.trim().is_empty()
+                && !config.channels.web.tls_key.trim().is_empty();
+            let scheme = if config.channels.web.auto_tls || has_explicit_tls {
+                "https"
+            } else {
+                "http"
+            };
+            tracing::info!(port = port, url = %format!("{scheme}://localhost:{port}"), "Web UI started");
         }
 
         // --- Start Cron scheduler (created externally, started here) ---
@@ -437,7 +444,14 @@ impl Gateway {
 
         let active = channels.len();
         let web_url = if config.channels.web.enabled {
-            format!(" Web UI: http://localhost:{}", config.channels.web.port)
+            let has_explicit_tls = !config.channels.web.tls_cert.trim().is_empty()
+                && !config.channels.web.tls_key.trim().is_empty();
+            let scheme = if config.channels.web.auto_tls || has_explicit_tls {
+                "https"
+            } else {
+                "http"
+            };
+            format!(" Web UI: {scheme}://localhost:{}", config.channels.web.port)
         } else {
             String::new()
         };

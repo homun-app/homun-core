@@ -342,7 +342,13 @@ impl WebServer {
             )
         };
 
+        let tls_required = web_tls_required(&tls_cert, &tls_key, auto_tls);
         let tls_config = build_tls_config(&tls_cert, &tls_key, auto_tls, &domain).await;
+        if tls_required && tls_config.is_none() {
+            anyhow::bail!(
+                "Web UI refused to start without HTTPS: TLS is required when auto_tls is enabled or explicit certificate paths are configured"
+            );
+        }
         let local_tunnel_target = if tls_config.is_some() {
             format!("https://localhost:{port}")
         } else {
@@ -766,6 +772,10 @@ impl WebServer {
 
         Ok(())
     }
+}
+
+fn web_tls_required(tls_cert: &str, tls_key: &str, auto_tls: bool) -> bool {
+    auto_tls || (!tls_cert.trim().is_empty() && !tls_key.trim().is_empty())
 }
 
 /// Build a rustls ServerConfig from cert/key paths, or generate self-signed if `auto_tls` is set.
@@ -1335,6 +1345,21 @@ mod tests {
     async fn test_build_tls_config_no_tls() {
         let result = build_tls_config("", "", false, "").await;
         assert!(result.is_none(), "No TLS config when not configured");
+    }
+
+    #[test]
+    fn test_web_tls_required_auto_tls() {
+        assert!(web_tls_required("", "", true));
+    }
+
+    #[test]
+    fn test_web_tls_required_explicit_cert_and_key() {
+        assert!(web_tls_required("/tmp/cert.pem", "/tmp/key.pem", false));
+    }
+
+    #[test]
+    fn test_web_tls_required_reverse_proxy_http_mode() {
+        assert!(!web_tls_required("", "", false));
     }
 
     #[tokio::test]

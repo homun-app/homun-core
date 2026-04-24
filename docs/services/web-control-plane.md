@@ -83,7 +83,7 @@ If the session store cannot be initialized, the server logs the problem; setup-o
 
 ## Deployment Notes
 
-The web server binds to the configured host/port from `[channels.web]`. In Docker, Caddy handles TLS termination and reverse-proxies to Homun on port 18080. For standalone use, the server can auto-generate a self-signed cert (`auto_tls = true`).
+The web server binds to the configured host/port from `[channels.web]`. In Docker, Caddy handles TLS termination and reverse-proxies to Homun on port 18080. For standalone use, the server auto-generates or loads TLS and fails closed if HTTPS cannot be started while `auto_tls = true` or explicit cert/key paths are configured.
 
 ## Manual E2E Coverage
 

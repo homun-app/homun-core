@@ -17,7 +17,7 @@ Each installer must pass these **11 checks** before the release is cut:
 1. **Install succeeds** without any error output
 2. **Binary is on PATH** or launchable from the UI
 3. **First launch creates `~/.homun/`** with expected subdirs (config.toml prompted, db initialized, tls/ created)
-4. **Web UI at `http://localhost:8777`** is reachable in a browser
+4. **Web UI at `https://localhost:18443`** is reachable in a browser
 5. **Setup wizard completes** (provider config, at least one channel test message)
 6. **Vault stores a secret** (via setup wizard's API key entry for any LLM provider)
 7. **Uninstall + reinstall preserves data** (apt remove → apt install does NOT wipe `/var/lib/homun/.homun/`)
@@ -26,10 +26,10 @@ Each installer must pass these **11 checks** before the release is cut:
 
 8. **Crash reporter captures panics**: trigger a controlled panic (inject `panic!("smoke test panic")` behind a debug route, or SIGSEGV via `kill -SEGV <pid>` — though `kill -SEGV` is not a Rust panic and won't trigger the hook, so prefer an explicit panic route on a debug build). Verify:
    - A JSON file appears in `~/.homun/crashes/YYYY-MM-DD_HH-MM-SS_<trace_id>.json`
-   - `curl -s http://localhost:8777/api/v1/crashes | jq '.crashes | length'` returns ≥ 1
+   - `curl -sk https://localhost:18443/api/v1/crashes | jq '.crashes | length'` returns ≥ 1
    - File is redacted (no vault-looking secrets or file contents from `~/.homun/` in the JSON)
-9. **Prometheus `/metrics` endpoint is reachable**: `curl -s http://localhost:8777/api/v1/metrics | head -20` returns Prometheus text format with at least one `homun_*` metric (requests_total, tool_calls_total, llm_tokens_total). If `[metrics] public = true`, also `curl -s http://localhost:8777/metrics` works unauthenticated.
-10. **X-Request-ID trace propagation end-to-end**: `curl -H "X-Request-ID: smoke-test-abc123" http://localhost:8777/healthz -i | grep -i x-request-id` echoes the exact value in the response. Grep `~/.homun/logs/` or `journalctl -u homun` for `trace_id=smoke-test-abc123` to confirm log propagation.
+9. **Prometheus `/metrics` endpoint is reachable**: `curl -sk https://localhost:18443/api/v1/metrics | head -20` returns Prometheus text format with at least one `homun_*` metric (requests_total, tool_calls_total, llm_tokens_total). If `[metrics] public = true`, also `curl -sk https://localhost:18443/metrics` works unauthenticated.
+10. **X-Request-ID trace propagation end-to-end**: `curl -sk -H "X-Request-ID: smoke-test-abc123" https://localhost:18443/healthz -i | grep -i x-request-id` echoes the exact value in the response. Grep `~/.homun/logs/` or `journalctl -u homun` for `trace_id=smoke-test-abc123` to confirm log propagation.
 11. **Update checker chip surfaces new releases**: temporarily create a dummy release tag `v99.0.0` on the public repo (or override `api.github.com` via `/etc/hosts` + local HTTP mock) and verify the topbar chip in the dashboard shows the "update available" notification within 60 seconds. Remove the dummy tag afterwards.
 
 For upgrades (not fresh installs): add check 12 — **existing vault survives the upgrade** (run homun once on the old version, note a memory/secret, upgrade, verify it's still there).
@@ -95,7 +95,7 @@ sudo -u homun homun gateway &        # → starts in background
 sleep 5
 
 # Step 6: reach the Web UI
-curl -s http://localhost:8777/healthz
+curl -sk https://localhost:18443/healthz
 # → expected: JSON status response
 
 # Step 7: verify vault created
@@ -173,7 +173,7 @@ security delete-generic-password -s dev.homun.secrets 2>/dev/null || true
 3. **Install**: drag `Homun.app` onto `Applications`
 4. **Eject**: Finder → right-click mounted volume → Eject
 5. **First launch (signed path)**: double-click `/Applications/Homun.app`
-   - Expected: Homun.app opens silently in the background, terminal window does *not* appear, default browser opens `http://localhost:8777` within 10 seconds
+   - Expected: Homun.app opens silently in the background, terminal window does *not* appear, default browser opens `https://localhost:18443` within 10 seconds
    - Web UI shows the setup wizard
 6. **First launch (unsigned path)**: same, but first attempt shows Gatekeeper warning
    - Right-click Homun.app → Open → click "Open" in the dialog
@@ -209,7 +209,7 @@ Critical checks unique to the WSL path:
 
 - [ ] `wsl --install -d Ubuntu` completes on first try (no pre-existing WSL state)
 - [ ] `apt install ./homun_*.deb` resolves deps from Ubuntu repos (ca-certificates, adduser, libsqlite3-0) without errors
-- [ ] `http://localhost:8777` in Edge/Chrome **reaches the gateway inside WSL** (loopback forwarding works)
+- [ ] `https://localhost:18443` in Edge/Chrome **reaches the gateway inside WSL** (loopback forwarding works)
 - [ ] `\\wsl.localhost\Ubuntu\var\lib\homun\.homun\` is browseable from Windows Explorer
 - [ ] Task Scheduler auto-start (optional Option C path) triggers at next Windows login
 
@@ -225,7 +225,7 @@ For a v1.0 release, run these **in parallel** across 4 VM/container environments
 | 00:15 | `apt install ./homun_1.0.0-1_amd64.deb` | `dnf install ./homun-1.0.0-1.x86_64.rpm` | Double-click `Homun-1.0.0-arm64.dmg`, drag to Applications | Wait for WSL + Ubuntu bootstrap |
 | 00:30 | Run 11-step checklist | Run 11-step checklist | Launch `Homun.app`, run 11-step checklist | Start WSL Ubuntu, `apt install ./homun_*.deb` |
 | 00:45 | Save `smoke-evidence-ubuntu-amd64.tgz` | Save `smoke-evidence-fedora.tgz` | `codesign -dv`, `spctl --assess`, save `smoke-evidence-macos-signed.tgz` | Run 11-step checklist + WSL-specific checks |
-| 01:00 | Run 11-step checklist on arm64 variant | — | Test `.dmg` x64 on Intel Mac if available | `http://localhost:8777` from Windows Edge |
+| 01:00 | Run 11-step checklist on arm64 variant | — | Test `.dmg` x64 on Intel Mac if available | `https://localhost:18443` from Windows Edge |
 | 01:15 | — | — | — | Save `smoke-evidence-wsl.tgz` |
 | 01:30 | Consolidate: attach all 4 tarballs to the GitHub Release, note any ⚠️ in release notes, decide GO / NO-GO |
 
