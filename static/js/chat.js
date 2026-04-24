@@ -134,6 +134,7 @@ let activeRunId = null;
 
 const { escapeHtml, renderContent } = window.HomunChatRendering;
 const {
+    buildConversationItem: buildConversationItemElement,
     capitalizeFirst,
     conversationApi: conversationApiForId,
     conversationResourceUrl,
@@ -377,71 +378,20 @@ function renderConversationList() {
 }
 
 function buildConversationItem(conversation) {
-    var icMore = '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="4" r="1.2"/><circle cx="9" cy="9" r="1.2"/><circle cx="9" cy="14" r="1.2"/></svg>';
-
-    const item = document.createElement('div');
-    item.className = 'chat-conversation-item';
-    if (conversation.conversation_id === currentConversationId) item.classList.add('is-active');
-    if (conversation.active_run && (conversation.active_run.status === 'running' || conversation.active_run.status === 'stopping')) {
-        item.classList.add('is-running');
-    }
-    if (multiSelectMode) {
-        item.classList.add('is-selectable');
-        if (selectedConversations.has(conversation.conversation_id)) item.classList.add('is-selected');
-    }
-    if (openConversationMenuId === conversation.conversation_id) item.classList.add('has-menu-open');
-
-    // Checkbox — only visible in multi-select mode via CSS
-    const checkWrap = document.createElement('div');
-    checkWrap.className = 'chat-conv-check';
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.checked = multiSelectMode && selectedConversations.has(conversation.conversation_id);
-    cb.addEventListener('click', function (e) {
-        e.stopPropagation();
-        toggleConversationSelection(conversation.conversation_id);
+    return buildConversationItemElement(conversation, {
+        state: {
+            currentConversationId,
+            multiSelectMode,
+            openConversationMenuId,
+            selectedConversations,
+        },
+        actions: {
+            closeConversationMenu,
+            openConversationDropdown,
+            selectConversation,
+            toggleConversationSelection,
+        },
     });
-    checkWrap.appendChild(cb);
-    item.appendChild(checkWrap);
-
-    // Name
-    const nameEl = document.createElement('span');
-    nameEl.className = 'chat-conversation-name';
-    nameEl.textContent = capitalizeFirst(conversation.title) || 'New conversation';
-    nameEl.addEventListener('click', function () {
-        if (multiSelectMode) { toggleConversationSelection(conversation.conversation_id); return; }
-        if (conversation.conversation_id !== currentConversationId) selectConversation(conversation.conversation_id);
-    });
-    item.appendChild(nameEl);
-
-    // Trailing: timestamp (default) / 3-dot button (hover)
-    const trailing = document.createElement('div');
-    trailing.className = 'chat-conv-trailing';
-
-    const dateEl = document.createElement('span');
-    dateEl.className = 'chat-conversation-date';
-    dateEl.textContent = formatConversationTimestamp(conversation.updated_at);
-    trailing.appendChild(dateEl);
-    item.appendChild(trailing);
-
-    // 3-dot menu button (appears on hover)
-    const moreBtn = document.createElement('button');
-    moreBtn.type = 'button';
-    moreBtn.className = 'chat-conv-more-btn';
-    if (openConversationMenuId === conversation.conversation_id) moreBtn.classList.add('is-open');
-    moreBtn.title = 'Actions';
-    moreBtn.appendChild(parseSvg(icMore));
-    moreBtn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        if (openConversationMenuId === conversation.conversation_id) {
-            closeConversationMenu();
-        } else {
-            openConversationDropdown(conversation, moreBtn);
-        }
-    });
-    item.appendChild(moreBtn);
-
-    return item;
 }
 
 async function refreshConversationList() {
