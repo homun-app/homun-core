@@ -549,6 +549,7 @@ mod tests {
         // Should not trigger false positive on placeholder
         // (though it might match the generic api_key pattern)
         // The key is that common placeholder patterns should be skipped
+        assert!(!result.has_detections);
     }
 
     #[test]

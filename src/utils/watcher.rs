@@ -71,7 +71,7 @@ mod tests {
         let flag_clone = flag.clone();
 
         let handle = spawn_watched(
-            move |mut stop_rx| async move {
+            move |stop_rx| async move {
                 // Wait for stop signal
                 let _ = stop_rx.await;
                 flag_clone.store(true, std::sync::atomic::Ordering::SeqCst);

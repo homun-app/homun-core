@@ -1086,7 +1086,7 @@ mod tests {
         let workspace = TempDir::new().unwrap();
 
         // Simulate restrict_to_workspace mode
-        let read_tool = ReadFileTool::new(Some(workspace.path().to_path_buf()));
+        let _read_tool = ReadFileTool::new(Some(workspace.path().to_path_buf()));
 
         // brain/ should be allowed even with restrict_to_workspace
         let brain_path = home.join(".homun").join("brain").join("USER.md");
