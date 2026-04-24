@@ -24,7 +24,7 @@ use super::browser_task_plan::BrowserTaskPlanState;
 use super::cognition::{self, CognitionParams, CognitionResult};
 use super::context::ContextBuilder;
 use super::context_compactor;
-use super::execution_plan::{ExecutionPlanSnapshot, ExecutionPlanState};
+use super::execution_plan::ExecutionPlanState;
 use super::iteration_budget::{
     maybe_extend_iteration_budget, tool_call_signature, IterationBudgetState, ToolExecutionSummary,
 };
@@ -33,6 +33,7 @@ use super::loop_control::{
     count_sigkill_diagnostics, is_context_overflow_error, should_redirect_skill_activation,
 };
 use super::memory::MemoryConsolidator;
+use super::plan_events::{emit_plan_update, merged_execution_snapshot};
 use super::skill_activator;
 use super::tool_veto;
 use super::verifier::{verify_actions, VerificationResult};
@@ -103,38 +104,6 @@ pub struct AgentLoop {
 
 // ToolExecutionSummary, IterationBudgetState → iteration_budget.rs
 // ActivatedSkill, check_required_bins_sync → skill_activator.rs
-
-async fn emit_plan_update(
-    stream_tx: Option<&mpsc::Sender<crate::provider::StreamChunk>>,
-    plan: &ExecutionPlanSnapshot,
-    last_payload: &mut Option<String>,
-) {
-    let Some(tx) = stream_tx else {
-        return;
-    };
-    let Ok(payload) = serde_json::to_string(plan) else {
-        return;
-    };
-    if last_payload.as_deref() == Some(payload.as_str()) {
-        return;
-    }
-    *last_payload = Some(payload.clone());
-    let _ = tx
-        .send(crate::provider::StreamChunk {
-            delta: payload,
-            done: false,
-            event_type: Some("plan".to_string()),
-            tool_call_data: None,
-        })
-        .await;
-}
-
-fn merged_execution_snapshot(
-    execution_plan: &ExecutionPlanState,
-    browser_task_plan: &BrowserTaskPlanState,
-) -> ExecutionPlanSnapshot {
-    browser_task_plan.merged_snapshot(execution_plan.snapshot())
-}
 
 impl AgentLoop {
     async fn cancel_browser_tool_if_needed(tool_name: &str, _chat_id: &str) {

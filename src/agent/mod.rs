@@ -21,6 +21,7 @@ mod loop_control;
 pub mod memory;
 mod memory_db;
 pub mod orchestrator;
+mod plan_events;
 pub(crate) mod profile_resolver;
 pub mod prompt; // New modular prompt system
 pub mod registry;
