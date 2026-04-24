@@ -9,7 +9,7 @@ use axum::http::StatusCode;
 use axum::response::Json;
 use axum::routing::{get, post, put};
 use axum::Router;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::super::server::AppState;
@@ -42,6 +42,7 @@ fn not_found(msg: &str) -> ApiErr {
 pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/v1/gateways", get(list_gateways).post(create_gateway))
+        .route("/v1/gateways/diagnostics", get(list_gateway_diagnostics))
         .route(
             "/v1/gateways/{id}",
             get(get_gateway).put(update_gateway).delete(delete_gateway),
@@ -78,6 +79,23 @@ struct UpdateGatewayRequest {
     app_token: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+struct GatewayDiagnostics {
+    id: i64,
+    name: String,
+    channel_type: String,
+    enabled: bool,
+    status: &'static str,
+    configured: bool,
+    issues: Vec<GatewayIssue>,
+}
+
+#[derive(Debug, Serialize)]
+struct GatewayIssue {
+    code: &'static str,
+    message: String,
+}
+
 // ── Handlers ────────────────────────────────────────────────────────
 
 /// List all gateways (tokens masked in config_json).
@@ -92,6 +110,18 @@ async fn list_gateways(
         gw.config_json = mask_tokens_in_json(&gw.config_json);
     }
     Ok(Json(list))
+}
+
+/// List non-sensitive gateway diagnostics derived from DB config + vault presence.
+async fn list_gateway_diagnostics(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<GatewayDiagnostics>>, ApiErr> {
+    let db = require_db(&state)?;
+    let list = gateways::db::load_all_gateways(db.pool())
+        .await
+        .map_err(internal)?;
+    let diagnostics = list.iter().map(build_gateway_diagnostics).collect();
+    Ok(Json(diagnostics))
 }
 
 /// Create a new gateway.
@@ -242,6 +272,184 @@ fn store_token_if_provided(token: &Option<String>, key: SecretKey) {
     }
 }
 
+fn vault_has_secret(key: SecretKey) -> bool {
+    crate::storage::global_secrets()
+        .ok()
+        .and_then(|secrets| secrets.get(&key).ok().flatten())
+        .is_some_and(|value| !value.trim().is_empty())
+}
+
+fn has_gateway_token(gateway_id: i64, raw: &str) -> bool {
+    if raw == "***ENCRYPTED***" || raw.trim().is_empty() {
+        vault_has_secret(SecretKey::gateway_token(gateway_id))
+    } else {
+        true
+    }
+}
+
+fn has_gateway_app_token(gateway_id: i64, raw: &str) -> bool {
+    if raw == "***ENCRYPTED***" || raw.trim().is_empty() {
+        vault_has_secret(SecretKey::gateway_app_token(gateway_id))
+    } else {
+        true
+    }
+}
+
+fn issue(code: &'static str, message: impl Into<String>) -> GatewayIssue {
+    GatewayIssue {
+        code,
+        message: message.into(),
+    }
+}
+
+fn build_gateway_diagnostics(gw: &gateways::Gateway) -> GatewayDiagnostics {
+    let mut issues = Vec::new();
+
+    if !gw.is_enabled() {
+        issues.push(issue("disabled", "Gateway is disabled."));
+    }
+
+    match gw.channel_type.as_str() {
+        "telegram" => {
+            match serde_json::from_str::<crate::config::TelegramConfig>(&gw.config_json) {
+                Ok(cfg) => {
+                    if !has_gateway_token(gw.id, &cfg.token) {
+                        issues.push(issue(
+                            "missing_token",
+                            format!(
+                                "Missing vault secret '{}'.",
+                                SecretKey::gateway_token(gw.id)
+                            ),
+                        ));
+                    }
+                }
+                Err(e) => issues.push(issue("invalid_config_json", e.to_string())),
+            }
+        }
+        "discord" => match serde_json::from_str::<crate::config::DiscordConfig>(&gw.config_json) {
+            Ok(cfg) => {
+                if !has_gateway_token(gw.id, &cfg.token) {
+                    issues.push(issue(
+                        "missing_token",
+                        format!(
+                            "Missing vault secret '{}'.",
+                            SecretKey::gateway_token(gw.id)
+                        ),
+                    ));
+                }
+            }
+            Err(e) => issues.push(issue("invalid_config_json", e.to_string())),
+        },
+        "slack" => match serde_json::from_str::<crate::config::SlackConfig>(&gw.config_json) {
+            Ok(cfg) => {
+                if !has_gateway_token(gw.id, &cfg.token) {
+                    issues.push(issue(
+                        "missing_token",
+                        format!(
+                            "Missing vault secret '{}'.",
+                            SecretKey::gateway_token(gw.id)
+                        ),
+                    ));
+                }
+                if !cfg.app_token.trim().is_empty() && !has_gateway_app_token(gw.id, &cfg.app_token)
+                {
+                    issues.push(issue(
+                        "missing_app_token",
+                        format!(
+                            "Missing vault secret '{}'.",
+                            SecretKey::gateway_app_token(gw.id)
+                        ),
+                    ));
+                }
+            }
+            Err(e) => issues.push(issue("invalid_config_json", e.to_string())),
+        },
+        "email" => {
+            match serde_json::from_str::<crate::config::EmailAccountConfig>(&gw.config_json) {
+                Ok(cfg) => {
+                    let has_password = has_gateway_token(gw.id, &cfg.password);
+                    if !cfg.enabled {
+                        issues.push(issue(
+                            "account_disabled",
+                            "Email account inside this gateway is disabled.",
+                        ));
+                    }
+                    if cfg.imap_host.trim().is_empty() {
+                        issues.push(issue("missing_imap_host", "IMAP host is missing."));
+                    }
+                    if cfg.smtp_host.trim().is_empty() {
+                        issues.push(issue("missing_smtp_host", "SMTP host is missing."));
+                    }
+                    if cfg.username.trim().is_empty() {
+                        issues.push(issue("missing_username", "Email username is missing."));
+                    }
+                    if !has_password {
+                        issues.push(issue(
+                            "missing_password",
+                            format!(
+                                "Missing vault secret '{}'.",
+                                SecretKey::gateway_token(gw.id)
+                            ),
+                        ));
+                    }
+                }
+                Err(e) => issues.push(issue("invalid_config_json", e.to_string())),
+            }
+        }
+        "whatsapp" => {
+            match serde_json::from_str::<crate::config::WhatsAppConfig>(&gw.config_json) {
+                Ok(cfg) => {
+                    if cfg.phone_number.trim().is_empty() {
+                        issues.push(issue(
+                            "pairing_required",
+                            "WhatsApp has no phone number configured; QR/pairing is required.",
+                        ));
+                    }
+                    if !cfg.resolved_db_path().exists() {
+                        issues.push(issue(
+                            "missing_session_db",
+                            format!(
+                                "WhatsApp session DB does not exist at '{}'.",
+                                cfg.resolved_db_path().display()
+                            ),
+                        ));
+                    }
+                }
+                Err(e) => issues.push(issue("invalid_config_json", e.to_string())),
+            }
+        }
+        ct if ct.starts_with("mcp:") => {
+            if gw.config_json.trim().is_empty() || gw.config_json.trim() == "{}" {
+                issues.push(issue("empty_config", "MCP channel config is empty."));
+            }
+        }
+        other => issues.push(issue(
+            "unknown_channel_type",
+            format!("Unknown channel type '{other}'."),
+        )),
+    }
+
+    let actionable_issues = issues.iter().any(|item| item.code != "disabled");
+    let configured = gw.is_enabled() && !actionable_issues;
+    let status = if !gw.is_enabled() {
+        "disabled"
+    } else if configured {
+        "ready"
+    } else {
+        "needs_attention"
+    };
+
+    GatewayDiagnostics {
+        id: gw.id,
+        name: gw.name.clone(),
+        channel_type: gw.channel_type.clone(),
+        enabled: gw.is_enabled(),
+        status,
+        configured,
+        issues,
+    }
+}
+
 /// Mask sensitive fields (token, password, app_token) in a JSON string.
 ///
 /// Replaces values of keys ending with "token" or "password" with masked versions
@@ -281,4 +489,61 @@ fn mask_value(value: &str) -> String {
     }
     let visible = &value[value.len() - 4..];
     format!("{}{visible}", "•".repeat((value.len().min(20)) - 4))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn gateway(id: i64, channel_type: &str, config_json: String) -> gateways::Gateway {
+        gateways::Gateway {
+            id,
+            name: "Test".to_string(),
+            channel_type: channel_type.to_string(),
+            enabled: 1,
+            config_json,
+            default_profile: String::new(),
+            default_agent: String::new(),
+            response_mode: "automatic".to_string(),
+            user_id: None,
+            created_at: String::new(),
+            updated_at: String::new(),
+        }
+    }
+
+    #[test]
+    fn email_diagnostics_report_missing_password() {
+        let mut cfg = crate::config::EmailAccountConfig::default();
+        cfg.enabled = true;
+        cfg.imap_host = "imap.example.com".to_string();
+        cfg.smtp_host = "smtp.example.com".to_string();
+        cfg.username = "bot@example.com".to_string();
+        cfg.password = "***ENCRYPTED***".to_string();
+        let gw = gateway(42, "email", serde_json::to_string(&cfg).unwrap());
+
+        let diag = build_gateway_diagnostics(&gw);
+
+        assert_eq!(diag.status, "needs_attention");
+        assert!(!diag.configured);
+        assert!(diag
+            .issues
+            .iter()
+            .any(|issue| issue.code == "missing_password"));
+    }
+
+    #[test]
+    fn token_gateway_with_plain_token_is_ready() {
+        let cfg = crate::config::TelegramConfig {
+            enabled: true,
+            token: "plain-token".to_string(),
+            ..Default::default()
+        };
+        let gw = gateway(7, "telegram", serde_json::to_string(&cfg).unwrap());
+
+        let diag = build_gateway_diagnostics(&gw);
+
+        assert_eq!(diag.status, "ready");
+        assert!(diag.configured);
+        assert!(diag.issues.is_empty());
+    }
 }
