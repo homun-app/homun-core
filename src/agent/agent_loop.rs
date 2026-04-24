@@ -39,7 +39,10 @@ use super::session_control::{
 };
 use super::skill_activator;
 use super::tool_veto;
-use super::turn_finalization::{finalize_response_turn, FinalizeTurnInputs};
+use super::turn_finalization::{
+    finalize_response_turn, FinalizeTurnInputs, MemoryFinalizationContext, PersistenceContext,
+    TraceContext, UsageContext,
+};
 use super::verifier::{verify_actions, VerificationResult};
 
 // Conditional memory searcher type - dummy when feature not enabled
@@ -3203,23 +3206,32 @@ impl AgentLoop {
 
         let safe_response = finalize_response_turn(
             FinalizeTurnInputs {
-                session_manager: &self.session_manager,
-                db: self.db.clone(),
-                memory: self.memory.clone(),
-                config: self.config.clone(),
-                provider_for_memory: self.provider.read().await.clone(),
-                provider_name: provider.name().to_string(),
-                agent_id: self.agent_id.clone(),
-                searcher,
+                persistence: PersistenceContext {
+                    session_manager: &self.session_manager,
+                    db: self.db.clone(),
+                },
+                usage: UsageContext {
+                    selected_model: selected_model.clone(),
+                    provider_name: provider.name().to_string(),
+                    total_usage,
+                },
+                memory: MemoryFinalizationContext {
+                    memory: self.memory.clone(),
+                    config: self.config.clone(),
+                    provider: self.provider.read().await.clone(),
+                    db: self.db.clone(),
+                    agent_id: self.agent_id.clone(),
+                    searcher,
+                    active_profile_id,
+                    active_profile_brain_dir,
+                    active_profile_slug,
+                },
+                trace: TraceContext {
+                    tracer,
+                    traces_max_files: config.agent.traces_max_files,
+                    iteration,
+                },
                 stream_tx: stream_tx.as_ref(),
-                tracer,
-                traces_max_files: config.agent.traces_max_files,
-                selected_model: selected_model.clone(),
-                total_usage,
-                iteration,
-                active_profile_id,
-                active_profile_brain_dir,
-                active_profile_slug,
             },
             content,
             session_key,

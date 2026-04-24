@@ -15,23 +15,40 @@ use super::memory_maintenance::{maybe_consolidate, ConsolidationInputs, MemoryIn
 use super::request_trace::RequestTracer;
 
 pub(super) struct FinalizeTurnInputs<'a> {
+    pub persistence: PersistenceContext<'a>,
+    pub usage: UsageContext,
+    pub memory: MemoryFinalizationContext,
+    pub trace: TraceContext,
+    pub stream_tx: Option<&'a mpsc::Sender<StreamChunk>>,
+}
+
+pub(super) struct PersistenceContext<'a> {
     pub session_manager: &'a SessionManager,
     pub db: Database,
+}
+
+pub(super) struct UsageContext {
+    pub selected_model: String,
+    pub provider_name: String,
+    pub total_usage: Usage,
+}
+
+pub(super) struct MemoryFinalizationContext {
     pub memory: Arc<MemoryConsolidator>,
     pub config: Arc<tokio::sync::RwLock<Config>>,
-    pub provider_for_memory: Arc<dyn Provider>,
-    pub provider_name: String,
+    pub provider: Arc<dyn Provider>,
+    pub db: Database,
     pub agent_id: Option<String>,
     pub searcher: MemoryIndexHandle,
-    pub stream_tx: Option<&'a mpsc::Sender<StreamChunk>>,
-    pub tracer: Option<RequestTracer>,
-    pub traces_max_files: usize,
-    pub selected_model: String,
-    pub total_usage: Usage,
-    pub iteration: u32,
     pub active_profile_id: i64,
     pub active_profile_brain_dir: Option<PathBuf>,
     pub active_profile_slug: Option<String>,
+}
+
+pub(super) struct TraceContext {
+    pub tracer: Option<RequestTracer>,
+    pub traces_max_files: usize,
+    pub iteration: u32,
 }
 
 pub(super) async fn finalize_response_turn(
@@ -52,6 +69,7 @@ pub(super) async fn finalize_response_turn(
     }
 
     inputs
+        .persistence
         .session_manager
         .add_message(session_key, "user", content)
         .await?;
@@ -68,6 +86,7 @@ pub(super) async fn finalize_response_turn(
         .unwrap_or_else(|| safe_response.clone())
     };
     inputs
+        .persistence
         .session_manager
         .add_message_with_tools(session_key, "assistant", &stored_response, &tools_used)
         .await?;
@@ -80,38 +99,38 @@ pub(super) async fn finalize_response_turn(
     }
 
     record_token_usage(
-        inputs.db.clone(),
+        inputs.persistence.db.clone(),
         session_key,
-        &inputs.selected_model,
-        &inputs.provider_name,
-        inputs.total_usage.clone(),
+        &inputs.usage.selected_model,
+        &inputs.usage.provider_name,
+        inputs.usage.total_usage.clone(),
     );
 
     emit_response_blocks(inputs.stream_tx, &response_blocks).await;
-    cleanup_task_checkpoint(&inputs.db, session_key).await;
+    cleanup_task_checkpoint(&inputs.persistence.db, session_key).await;
 
     maybe_consolidate(
         ConsolidationInputs {
-            memory: inputs.memory,
-            config: inputs.config,
-            provider: inputs.provider_for_memory,
-            db: inputs.db,
-            agent_id: inputs.agent_id,
-            searcher: inputs.searcher,
+            memory: inputs.memory.memory,
+            config: inputs.memory.config,
+            provider: inputs.memory.provider,
+            db: inputs.memory.db,
+            agent_id: inputs.memory.agent_id,
+            searcher: inputs.memory.searcher,
         },
         session_key,
-        inputs.active_profile_brain_dir,
-        Some(inputs.active_profile_id),
-        inputs.active_profile_slug,
+        inputs.memory.active_profile_brain_dir,
+        Some(inputs.memory.active_profile_id),
+        inputs.memory.active_profile_slug,
     )
     .await;
 
     finalize_trace(
-        inputs.tracer,
+        inputs.trace.tracer,
         &safe_response,
-        inputs.iteration,
-        inputs.total_usage.total_tokens,
-        inputs.traces_max_files,
+        inputs.trace.iteration,
+        inputs.usage.total_usage.total_tokens,
+        inputs.trace.traces_max_files,
     );
 
     Ok(safe_response)
