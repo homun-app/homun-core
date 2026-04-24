@@ -29,6 +29,9 @@ use super::iteration_budget::{
     maybe_extend_iteration_budget, tool_call_signature, IterationBudgetState, ToolExecutionSummary,
 };
 use super::llm_caller;
+use super::loop_control::{
+    count_sigkill_diagnostics, is_context_overflow_error, should_redirect_skill_activation,
+};
 use super::memory::MemoryConsolidator;
 use super::skill_activator;
 use super::tool_veto;
@@ -100,23 +103,6 @@ pub struct AgentLoop {
 
 // ToolExecutionSummary, IterationBudgetState → iteration_budget.rs
 // ActivatedSkill, check_required_bins_sync → skill_activator.rs
-
-/// Loop guard: returns `true` if a skill activation request should be
-/// redirected to a no-op (the same `(skill_name, query)` was already
-/// activated in this turn). Different query → returns `false`, allowing
-/// legitimate re-activation (e.g. weather skill called for two cities).
-///
-/// Extracted as a helper for unit-test coverage; the inline call site
-/// in the agent loop body uses this same logic.
-fn should_redirect_skill_activation(
-    activated_skills: &HashMap<String, String>,
-    skill_name: &str,
-    query: &str,
-) -> bool {
-    activated_skills
-        .get(skill_name)
-        .is_some_and(|prev| prev == query)
-}
 
 async fn emit_plan_update(
     stream_tx: Option<&mpsc::Sender<crate::provider::StreamChunk>>,
@@ -3698,41 +3684,6 @@ impl AgentLoop {
 //
 // See those modules for the implementations.
 
-/// Check if an error indicates a context window overflow from the LLM provider.
-///
-/// Matches common error patterns from Anthropic, OpenAI, and OpenRouter APIs
-/// that indicate the request exceeded the model's context window.
-/// Count tool-result messages carrying a shell SIGKILL diagnostic.
-///
-/// The shell tool appends a `[diagnostic] Process killed by signal 9 (SIGKILL)...`
-/// line whenever a child process is terminated by a signal (usually a
-/// silent sandbox denial). We scan the conversation to tell the user how
-/// many of their tool calls were silently killed, so the continuation
-/// block and the fallback fallback message can surface the pattern.
-fn count_sigkill_diagnostics(messages: &[ChatMessage]) -> usize {
-    messages
-        .iter()
-        .filter(|m| m.role == "tool")
-        .filter(|m| {
-            m.content
-                .as_deref()
-                .is_some_and(|c| c.contains("[diagnostic]") && c.contains("signal 9"))
-        })
-        .count()
-}
-
-fn is_context_overflow_error(e: &anyhow::Error) -> bool {
-    let s = e.to_string().to_lowercase();
-    s.contains("context_length_exceeded")
-        || s.contains("context window")
-        || s.contains("request body too large")
-        || s.contains("payload too large")
-        || s.contains("content too large")
-        || s.contains("entity too large")
-        || s.contains("maximum context length")
-        || (s.contains("413") && (s.contains("too large") || s.contains("payload")))
-}
-
 #[cfg(test)]
 mod tests {
     use crate::agent::browser_context::{
@@ -3748,77 +3699,6 @@ mod tests {
     };
     use crate::agent::tool_veto::veto_tool_call;
     use crate::config::ModelCapabilities;
-    use crate::provider::ChatMessage;
-
-    fn tool_msg(content: &str) -> ChatMessage {
-        let mut m = ChatMessage::user(content);
-        m.role = "tool".to_string();
-        m
-    }
-
-    #[test]
-    fn skill_loop_guard_redirects_same_query_only() {
-        use std::collections::HashMap;
-
-        let mut activated: HashMap<String, String> = HashMap::new();
-
-        // 1. Empty map → no skill ever activated → never redirect
-        assert!(
-            !super::should_redirect_skill_activation(&activated, "weather", "Roma oggi"),
-            "first activation must NOT redirect"
-        );
-
-        // Simulate the post-activation insert that happens in the agent loop
-        activated.insert("weather".to_string(), "Roma oggi".to_string());
-
-        // 2. Same skill + same query → redirect (loop guard kicks in)
-        assert!(
-            super::should_redirect_skill_activation(&activated, "weather", "Roma oggi"),
-            "same skill + same query must redirect (loop guard)"
-        );
-
-        // 3. Same skill + DIFFERENT query → no redirect (legit re-activation)
-        assert!(
-            !super::should_redirect_skill_activation(&activated, "weather", "Milano oggi"),
-            "same skill + different query must allow re-activation"
-        );
-
-        // 4. Different skill entirely → no redirect
-        assert!(
-            !super::should_redirect_skill_activation(&activated, "translate", "Roma oggi"),
-            "different skill must never redirect"
-        );
-
-        // 5. Empty query strings — exact match still redirects
-        activated.insert("idle".to_string(), String::new());
-        assert!(
-            super::should_redirect_skill_activation(&activated, "idle", ""),
-            "empty query, same skill, must redirect (exact match)"
-        );
-        assert!(
-            !super::should_redirect_skill_activation(&activated, "idle", "x"),
-            "empty stored vs non-empty new query must NOT redirect"
-        );
-    }
-
-    #[test]
-    fn sigkill_diagnostic_counter_counts_only_tool_role_hits() {
-        let msgs = vec![
-            ChatMessage::user("elimina i csv"),
-            tool_msg("[exit code: -1]\n[diagnostic] Process killed by signal 9 (SIGKILL). Sandbox backend 'macos_seatbelt'..."),
-            tool_msg("ok output, no diagnostic"),
-            tool_msg("[exit code: -1]\n[diagnostic] Process killed by signal 9 (SIGKILL). Sandbox is not active..."),
-            tool_msg("[diagnostic] Process killed by signal 15 (SIGTERM). Sandbox..."), // not signal 9
-            // Same diagnostic string on a non-tool message must NOT be counted.
-            ChatMessage::user("[diagnostic] signal 9 SIGKILL fake from user"),
-        ];
-        assert_eq!(super::count_sigkill_diagnostics(&msgs), 2);
-    }
-
-    #[test]
-    fn sigkill_diagnostic_counter_empty_messages() {
-        assert_eq!(super::count_sigkill_diagnostics(&[]), 0);
-    }
     #[cfg(feature = "browser")]
     use crate::tools::browser::{compact_browser_snapshot, extract_autocomplete_suggestions};
     use std::collections::HashSet;

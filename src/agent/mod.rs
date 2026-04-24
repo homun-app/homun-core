@@ -17,6 +17,7 @@ pub mod gateway;
 pub mod heartbeat;
 mod iteration_budget;
 mod llm_caller;
+mod loop_control;
 pub mod memory;
 mod memory_db;
 pub mod orchestrator;
