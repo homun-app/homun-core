@@ -132,18 +132,17 @@ let browserScreenshots = [];
 let isProcessing = false;
 let activeRunId = null;
 
-const { escapeHtml, renderContent } = window.HomunChatRendering;
-const {
-    buildConversationDropdown,
-    conversationApi: conversationApiForId,
-    conversationResourceUrl,
-    positionConversationDropdown,
-    renderConversationList: renderConversationListElement,
-    renderSearchResults: renderSearchResultsElement,
-    searchConversations,
-    setConversationUrl,
-    truncateConversationText,
-} = window.HomunChatConversations;
+var escapeHtml = window.HomunChatRendering.escapeHtml;
+var renderContent = window.HomunChatRendering.renderContent;
+var buildConversationDropdown = window.HomunChatConversations.buildConversationDropdown;
+var conversationApiForId = window.HomunChatConversations.conversationApi;
+var conversationResourceUrl = window.HomunChatConversations.conversationResourceUrl;
+var positionConversationDropdown = window.HomunChatConversations.positionConversationDropdown;
+var renderConversationListElement = window.HomunChatConversations.renderConversationList;
+var renderSearchResultsElement = window.HomunChatConversations.renderSearchResults;
+var searchConversations = window.HomunChatConversations.searchConversations;
+var setConversationUrl = window.HomunChatConversations.setConversationUrl;
+var truncateConversationText = window.HomunChatConversations.truncateConversationText;
 
 // ─── Textarea auto-resize ────────────────────────────────────────
 
