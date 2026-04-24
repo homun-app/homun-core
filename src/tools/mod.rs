@@ -1,6 +1,7 @@
 pub mod add_data;
 pub mod approval;
 pub mod automation;
+pub mod bootstrap;
 #[cfg(feature = "browser")]
 pub mod browser;
 pub mod contacts;

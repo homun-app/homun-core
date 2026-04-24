@@ -84,18 +84,11 @@ use crate::config::Config;
 
 use crate::session::SessionManager;
 use crate::storage::Database;
-#[cfg(feature = "channel-email")]
-use crate::tools::ReadEmailInboxTool;
-use crate::tools::{
-    AutomationTool, ContactsTool, EditFileTool, ListDirTool, MessageTool, ReadFileTool, ShellTool,
-    SpawnTool, ToolRegistry, VaultTool, WebFetchTool, WebSearchTool, WorkflowTool, WriteFileTool,
-};
+use crate::tools::bootstrap::create_tool_registry;
+use crate::tools::{MessageTool, WorkflowTool};
 
 #[cfg(feature = "mcp")]
 use crate::tools::McpManager;
-
-#[cfg(feature = "embeddings")]
-use crate::tools::RememberTool;
 
 #[cfg(feature = "cli")]
 #[derive(Parser)]
@@ -449,102 +442,6 @@ enum ServiceCommands {
 
 // Provider factory functions are in provider::factory (re-exported as
 // provider::create_provider / provider::create_single_provider).
-
-/// Create and register all tools from config
-fn create_tool_registry(
-    config: &Config,
-    db: Database,
-    shared_config: Option<Arc<tokio::sync::RwLock<Config>>>,
-) -> ToolRegistry {
-    let mut registry = ToolRegistry::new();
-
-    // Workspace directory restriction
-    let allowed_dir = if config.tools.exec.restrict_to_workspace {
-        Some(Config::workspace_dir())
-    } else {
-        None
-    };
-
-    // Prepare permissions config for tools
-    let permissions = std::sync::Arc::new(config.permissions.clone());
-    let shell_permissions = std::sync::Arc::new(config.permissions.shell.clone());
-
-    // Initialize approval manager for command approval workflow
-    tools::init_approval_manager(&config.permissions.approval);
-
-    // Initialize approval gate for pause/resume approval flow
-    crate::agent::approval_gate::init_approval_gate();
-
-    // Shell tool with OS-specific permissions
-    registry.register(Box::new(ShellTool::with_permissions_sandbox_and_config(
-        config.tools.exec.timeout,
-        config.tools.exec.restrict_to_workspace,
-        Some(shell_permissions),
-        Some(config.security.execution_sandbox.clone()),
-        shared_config.clone(),
-    )));
-
-    // File tools with ACL-based permissions
-    registry.register(Box::new(ReadFileTool::with_permissions(
-        allowed_dir.clone(),
-        permissions.clone(),
-    )));
-    registry.register(Box::new(WriteFileTool::with_permissions(
-        allowed_dir.clone(),
-        permissions.clone(),
-    )));
-    registry.register(Box::new(EditFileTool::with_permissions(
-        allowed_dir.clone(),
-        permissions.clone(),
-    )));
-    registry.register(Box::new(ListDirTool::with_permissions(
-        allowed_dir,
-        permissions,
-    )));
-
-    // Web search tool (Brave API) — only register if API key is configured
-    if !config.tools.web_search.api_key.is_empty() {
-        registry.register(Box::new(WebSearchTool::new(
-            &config.tools.web_search.api_key,
-            config.tools.web_search.max_results,
-        )));
-    } else {
-        tracing::debug!("web_search tool not registered: no API key configured");
-    }
-
-    // Web fetch tool
-    registry.register(Box::new(WebFetchTool::new()));
-
-    // Vault tool (encrypted secrets storage, with audit logging via VLT-4)
-    registry.register(Box::new(VaultTool::with_db(db.clone())));
-
-    // Contacts tool (personal CRM: search, resolve, manage contacts + relationships)
-    if let Some(ref sc) = shared_config {
-        registry.register(Box::new(ContactsTool::new(db.clone(), sc.clone())));
-    }
-
-    // Automation management tool (shared storage with scheduler + web API)
-    registry.register(Box::new(AutomationTool::new(db)));
-
-    // Skill creation tool (generates and installs starter skills in ~/.homun/skills)
-    registry.register(Box::new(tools::CreateSkillTool::new()));
-
-    // Email inbox reading tool (IMAP) for proactive automations and chat tasks.
-    #[cfg(feature = "channel-email")]
-    registry.register(Box::new(ReadEmailInboxTool::new()));
-
-    // Remember tool (save personal information - requires embeddings feature)
-    #[cfg(feature = "embeddings")]
-    registry.register(Box::new(tools::RememberTool::new()));
-
-    // Browser automation is now handled by the Playwright MCP server.
-    // The browser MCP config is injected into the MCP servers map before
-    // McpManager::start_with_sandbox() — see inject_browser_mcp_server().
-
-    tracing::info!(tools = registry.len(), "Tool registry initialized");
-
-    registry
-}
 
 /// Try to create a MemorySearcher (embedding engine + vector index).
 ///
