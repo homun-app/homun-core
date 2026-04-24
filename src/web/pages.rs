@@ -800,7 +800,12 @@ async fn chat_page(
         "Chat",
         "chat",
         &body,
-        &["model-loader.js", "response-blocks.js", "chat.js"],
+        &[
+            "model-loader.js",
+            "response-blocks.js",
+            "chat-rendering.js",
+            "chat.js",
+        ],
     ))
 }
 

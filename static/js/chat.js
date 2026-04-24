@@ -132,10 +132,7 @@ let browserScreenshots = [];
 let isProcessing = false;
 let activeRunId = null;
 
-// Configure marked.js for LLM output
-if (typeof marked !== 'undefined') {
-    marked.setOptions({ breaks: true, gfm: true });
-}
+const { escapeHtml, renderContent } = window.HomunChatRendering;
 
 // ─── Textarea auto-resize ────────────────────────────────────────
 
@@ -155,76 +152,6 @@ chatText?.addEventListener('keydown', (e) => {
         chatForm.dispatchEvent(new Event('submit'));
     }
 });
-
-// ─── Markdown rendering ────────────────────────────────────────
-
-/** Render markdown content safely into an element.
- *  User messages stay plain text; assistant messages get markdown.
- *  Uses DOMPurify to sanitize HTML output from marked.js.
- */
-function renderContent(el, content, role) {
-    if (role === 'assistant' && typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
-        // Convert screenshot URLs to inline images before markdown parsing
-        let processedContent = content.replace(
-            /\/api\/v1\/browser\/screenshots\/(\S+\.png)/g,
-            '\n\n![Screenshot](/api/v1/browser/screenshots/$1)\n\n'
-        );
-
-        // File download links are now handled via ResultBlock from write_file tool.
-        // No regex needed — the block is rendered as an interactive card.
-
-        const rawHtml = marked.parse(processedContent);
-        // safe: DOMPurify sanitizes all HTML; ADD_ATTR allows target for new-tab links
-        const sanitized = DOMPurify.sanitize(rawHtml, { ADD_ATTR: ['target'] });
-        el.innerHTML = sanitized; // safe: sanitized by DOMPurify above
-
-        // All links open in new tab
-        el.querySelectorAll('a[href]').forEach(a => {
-            a.setAttribute('target', '_blank');
-            a.setAttribute('rel', 'noopener noreferrer');
-        });
-
-        // Images: click-to-expand lightbox overlay
-        el.querySelectorAll('img').forEach(img => {
-            img.style.cursor = 'zoom-in';
-            img.addEventListener('click', () => openImageLightbox(img.src, img.alt));
-        });
-
-        // Syntax highlighting
-        if (typeof hljs !== 'undefined') {
-            el.querySelectorAll('pre code').forEach(block => {
-                hljs.highlightElement(block);
-            });
-        }
-
-        // Code blocks: add copy button
-        el.querySelectorAll('pre').forEach(pre => {
-            if (pre.querySelector('.chat-code-copy-btn')) return;
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'chat-code-copy-btn';
-            btn.textContent = 'Copy';
-            btn.addEventListener('click', () => {
-                const code = pre.querySelector('code');
-                navigator.clipboard.writeText(code ? code.textContent : pre.textContent);
-                btn.textContent = 'Copied!';
-                setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
-            });
-            pre.style.position = 'relative';
-            pre.appendChild(btn);
-        });
-    } else if (role === 'user' && typeof DOMPurify !== 'undefined') {
-        // User messages: light inline markdown (bold, italic, code) but no block elements
-        let html = escapeHtml(content);
-        html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-        html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-        html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-        // safe: escapeHtml first, then only add known safe tags
-        el.innerHTML = DOMPurify.sanitize(html, { ALLOWED_TAGS: ['code', 'strong', 'em'] });
-    } else {
-        el.textContent = content;
-    }
-}
 
 /** Whether the user is near the bottom of the scroll area. */
 let userNearBottom = true;
@@ -464,25 +391,6 @@ function closeModal() {
     modalState = null;
     if (chatModalBackdrop) chatModalBackdrop.hidden = true;
     if (chatModalInput) { chatModalInput.hidden = true; chatModalInput.value = ''; }
-}
-
-/** Open a full-screen lightbox for an image. */
-function openImageLightbox(src, alt) {
-    // Reuse existing or create overlay
-    let overlay = document.getElementById('chat-lightbox');
-    if (!overlay) {
-        overlay = document.createElement('div');
-        overlay.id = 'chat-lightbox';
-        overlay.className = 'chat-lightbox';
-        overlay.addEventListener('click', () => { overlay.hidden = true; });
-        document.body.appendChild(overlay);
-    }
-    const img = document.createElement('img');
-    img.src = src;
-    img.alt = alt || '';
-    overlay.textContent = '';
-    overlay.appendChild(img);
-    overlay.hidden = false;
 }
 
 function updateConversationSummary(mutator) {
@@ -2057,12 +1965,6 @@ window.toggleThinking = function (headerEl) {
 };
 
 // ─── Utility functions ───────────────────────────────────────────
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
 
 function formatAttachmentSize(sizeBytes) {
     if (!sizeBytes || sizeBytes < 1024) return `${sizeBytes || 0} B`;
