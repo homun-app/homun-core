@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use anyhow::Result;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::bus::{
     build_outbound_meta, InboundMessage, MessageMetadata, OutboundMessage, StreamMessage,
@@ -101,11 +101,21 @@ where
 
             // Relay: forward from stable outbound queue to this attempt's inner_tx.
             // Stops when inner_tx is dropped (channel crashes) or stable_rx is closed.
-            let relay_inner_tx = inner_tx.clone();
+            let (relay_stop_tx, mut relay_stop_rx) = oneshot::channel::<()>();
             let relay_handle = tokio::spawn(async move {
-                while let Some(msg) = stable_rx.recv().await {
-                    if relay_inner_tx.send(msg).await.is_err() {
-                        break; // inner channel gone (crashed), stop relaying
+                loop {
+                    tokio::select! {
+                        _ = &mut relay_stop_rx => {
+                            break;
+                        }
+                        msg = stable_rx.recv() => {
+                            let Some(msg) = msg else {
+                                break;
+                            };
+                            if inner_tx.send(msg).await.is_err() {
+                                break; // inner channel gone (crashed), stop relaying
+                            }
+                        }
                     }
                 }
                 stable_rx // return ownership so the next iteration can reuse it
@@ -115,15 +125,16 @@ where
             let inbound = inbound_tx.clone();
             let result = channel.start(inbound, inner_rx).await;
 
-            // Channel exited — abort relay and reclaim stable_rx
-            relay_handle.abort();
+            // Channel exited — stop relay cooperatively and reclaim stable_rx.
+            let _ = relay_stop_tx.send(());
             match relay_handle.await {
                 Ok(rx) => stable_rx = rx,
-                Err(_) => {
-                    // Relay was aborted, we need a new stable_rx but can't get it back.
-                    // This shouldn't happen in practice, but if it does, we stop.
+                Err(e) => {
                     tracing::error!(channel = %ch_name, "Lost outbound relay — stopping channel");
-                    health.mark_stopped(&ch_name, Some("internal: lost outbound relay"));
+                    health.mark_stopped(
+                        &ch_name,
+                        Some(&format!("internal: lost outbound relay: {e}")),
+                    );
                     break;
                 }
             }
