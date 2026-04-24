@@ -70,6 +70,18 @@ struct RuntimeServices {
     _rag_watcher_handle: Option<WatcherHandle>,
 }
 
+#[cfg(feature = "mcp")]
+struct DeferredMcpContext {
+    agent: Arc<agent::AgentLoop>,
+    estop_arc: Arc<tokio::sync::RwLock<crate::security::EStopHandles>>,
+    startup_t0: std::time::Instant,
+    mcp_servers_config: std::collections::HashMap<String, config::McpServerConfig>,
+    mcp_sandbox_config: config::ExecutionSandboxConfig,
+    mcp_shared_config: Arc<tokio::sync::RwLock<Config>>,
+    #[cfg(feature = "browser")]
+    config_for_pool: Arc<tokio::sync::RwLock<Config>>,
+}
+
 async fn load_runtime_setup(startup_t0: std::time::Instant) -> Result<RuntimeSetup> {
     let mut config = Config::load()?;
 
@@ -344,6 +356,168 @@ fn start_runtime_services(context: RuntimeServicesContext<'_>) -> RuntimeService
     }
 }
 
+#[cfg(feature = "mcp")]
+fn start_deferred_mcp(context: DeferredMcpContext) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let (mut mcp_manager, mcp_tools) = McpManager::start_with_sandbox(
+            &context.mcp_servers_config,
+            Some(context.mcp_sandbox_config.clone()),
+            Some(context.mcp_shared_config),
+        )
+        .await;
+
+        let mut regular_tools: Vec<Box<dyn crate::tools::Tool>> = Vec::new();
+        for tool in mcp_tools {
+            if !crate::browser::is_browser_tool(tool.name()) {
+                regular_tools.push(tool);
+            }
+        }
+
+        context.agent.register_deferred_tools(regular_tools).await;
+
+        #[cfg(feature = "browser")]
+        {
+            let browser_peer = if let Some(peer) = mcp_manager.take_browser_peer() {
+                Some(peer)
+            } else {
+                let browser_name = crate::browser::BROWSER_MCP_SERVER_NAME;
+                if let Some(browser_cfg) = context.mcp_servers_config.get(browser_name) {
+                    tracing::warn!(
+                        "⚠️ Browser MCP failed on first attempt — retrying with backoff"
+                    );
+                    const MAX_RETRIES: u32 = 5;
+                    const DELAYS: [u64; 5] = [10, 20, 40, 60, 120];
+                    let mut connected = None;
+                    for attempt in 0..MAX_RETRIES {
+                        let delay = std::time::Duration::from_secs(DELAYS[attempt as usize]);
+                        tokio::time::sleep(delay).await;
+                        tracing::info!(
+                            attempt = attempt + 1,
+                            delay_secs = delay.as_secs(),
+                            "🔄 Retrying browser MCP connection"
+                        );
+                        match McpManager::connect_peer(
+                            browser_name,
+                            browser_cfg,
+                            &context.mcp_sandbox_config,
+                        )
+                        .await
+                        {
+                            Ok(peer) => {
+                                tracing::info!("✅ Browser MCP connected on retry {}", attempt + 1);
+                                connected = Some(peer);
+                                break;
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    attempt = attempt + 1,
+                                    error = %e,
+                                    "Browser MCP retry failed"
+                                );
+                            }
+                        }
+                    }
+                    connected
+                } else {
+                    None
+                }
+            };
+
+            if let Some(peer) = browser_peer {
+                let browser_pool = std::sync::Arc::new(crate::browser::BrowserPool::new(
+                    context.config_for_pool.clone(),
+                ));
+                browser_pool
+                    .set_default_peer(
+                        &context.config_for_pool.read().await.browser.default_profile,
+                        peer.clone(),
+                    )
+                    .await;
+                let monitor_pool_ref = browser_pool.clone();
+                let browser_tool = crate::tools::BrowserTool::new(peer, Some(browser_pool));
+                let session = browser_tool.session();
+                context
+                    .agent
+                    .register_deferred_tools(vec![Box::new(browser_tool)])
+                    .await;
+                context.agent.set_browser_session(session.clone()).await;
+                context.estop_arc.write().await.browser_session = Some(session.clone());
+
+                let monitor_session = session;
+                let monitor_pool = monitor_pool_ref;
+                let config_for_pool = context.config_for_pool.clone();
+                tokio::spawn(async move {
+                    const CHECK_INTERVAL_SECS: u64 = 60;
+                    const POOL_IDLE_TIMEOUT_SECS: u64 = 600;
+                    let mut last_active: std::collections::HashMap<String, std::time::Instant> =
+                        std::collections::HashMap::new();
+
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_secs(CHECK_INTERVAL_SECS))
+                            .await;
+
+                        monitor_session
+                            .close_idle_tabs(crate::tools::browser::browser_idle_timeout_secs())
+                            .await;
+
+                        let active = monitor_pool.active_profiles().await;
+                        let now = std::time::Instant::now();
+                        let default_profile = {
+                            let config = config_for_pool.read().await;
+                            config.browser.default_profile.clone()
+                        };
+
+                        for name in &active {
+                            if monitor_session.has_any_active().await
+                                || !last_active.contains_key(name)
+                            {
+                                last_active.insert(name.clone(), now);
+                            }
+                        }
+
+                        let idle_threshold = std::time::Duration::from_secs(POOL_IDLE_TIMEOUT_SECS);
+                        let profiles_to_close: Vec<String> = last_active
+                            .iter()
+                            .filter(|(name, last)| {
+                                **name != default_profile
+                                    && now.duration_since(**last) > idle_threshold
+                            })
+                            .map(|(name, _)| name.clone())
+                            .collect();
+
+                        for name in profiles_to_close {
+                            tracing::info!(
+                                profile = %name,
+                                "Shutting down idle browser profile (>10 min inactive)"
+                            );
+                            monitor_pool.shutdown_profile(&name).await;
+                            last_active.remove(&name);
+                        }
+
+                        let active_set: std::collections::HashSet<String> =
+                            active.into_iter().collect();
+                        last_active.retain(|k, _| active_set.contains(k));
+                    }
+                });
+
+                tracing::info!("🌐 Browser tool registered successfully");
+            } else {
+                tracing::warn!(
+                    "⚠️ Browser MCP peer not available after retries — browser tool will NOT be registered. \
+                     Check that @playwright/mcp is installed: npx @playwright/mcp --help"
+                );
+            }
+        }
+
+        context.estop_arc.write().await.mcp_manager = Some(std::sync::Arc::new(mcp_manager));
+
+        tracing::info!(
+            elapsed_ms = context.startup_t0.elapsed().as_millis(),
+            "⏱ MCP servers connected (deferred)"
+        );
+    })
+}
+
 pub async fn run_gateway() -> Result<()> {
     let pid_file = gateway_process::prepare_pid_file()?;
 
@@ -506,8 +680,6 @@ pub async fn run_gateway() -> Result<()> {
         db_for_watcher,
     });
 
-    #[cfg(feature = "mcp")]
-    let agent_for_mcp_deferred = agent.clone();
     let mut gateway = agent::Gateway::new(
         registry,
         shared_config,
@@ -531,171 +703,16 @@ pub async fn run_gateway() -> Result<()> {
     }
 
     #[cfg(feature = "mcp")]
-    let _mcp_handle = {
-        let agent_for_mcp = agent_for_mcp_deferred;
-        let estop_for_mcp = estop_arc.clone();
-        let startup_t0_mcp = startup_t0;
-        tokio::spawn(async move {
-            let (mut mcp_manager, mcp_tools) = McpManager::start_with_sandbox(
-                &mcp_servers_config,
-                Some(mcp_sandbox_config.clone()),
-                Some(mcp_shared_config),
-            )
-            .await;
-
-            let mut regular_tools: Vec<Box<dyn crate::tools::Tool>> = Vec::new();
-            for tool in mcp_tools {
-                if !crate::browser::is_browser_tool(tool.name()) {
-                    regular_tools.push(tool);
-                }
-            }
-
-            agent_for_mcp.register_deferred_tools(regular_tools).await;
-
-            #[cfg(feature = "browser")]
-            {
-                let browser_peer = if let Some(peer) = mcp_manager.take_browser_peer() {
-                    Some(peer)
-                } else {
-                    let browser_name = crate::browser::BROWSER_MCP_SERVER_NAME;
-                    if let Some(browser_cfg) = mcp_servers_config.get(browser_name) {
-                        tracing::warn!(
-                            "⚠️ Browser MCP failed on first attempt — retrying with backoff"
-                        );
-                        const MAX_RETRIES: u32 = 5;
-                        const DELAYS: [u64; 5] = [10, 20, 40, 60, 120];
-                        let mut connected = None;
-                        for attempt in 0..MAX_RETRIES {
-                            let delay = std::time::Duration::from_secs(DELAYS[attempt as usize]);
-                            tokio::time::sleep(delay).await;
-                            tracing::info!(
-                                attempt = attempt + 1,
-                                delay_secs = delay.as_secs(),
-                                "🔄 Retrying browser MCP connection"
-                            );
-                            match McpManager::connect_peer(
-                                browser_name,
-                                browser_cfg,
-                                &mcp_sandbox_config,
-                            )
-                            .await
-                            {
-                                Ok(peer) => {
-                                    tracing::info!(
-                                        "✅ Browser MCP connected on retry {}",
-                                        attempt + 1
-                                    );
-                                    connected = Some(peer);
-                                    break;
-                                }
-                                Err(e) => {
-                                    tracing::warn!(
-                                        attempt = attempt + 1,
-                                        error = %e,
-                                        "Browser MCP retry failed"
-                                    );
-                                }
-                            }
-                        }
-                        connected
-                    } else {
-                        None
-                    }
-                };
-
-                if let Some(peer) = browser_peer {
-                    let browser_pool = std::sync::Arc::new(crate::browser::BrowserPool::new(
-                        config_for_pool.clone(),
-                    ));
-                    browser_pool
-                        .set_default_peer(
-                            &config_for_pool.read().await.browser.default_profile,
-                            peer.clone(),
-                        )
-                        .await;
-                    let monitor_pool_ref = browser_pool.clone();
-                    let browser_tool = crate::tools::BrowserTool::new(peer, Some(browser_pool));
-                    let session = browser_tool.session();
-                    agent_for_mcp
-                        .register_deferred_tools(vec![Box::new(browser_tool)])
-                        .await;
-                    agent_for_mcp.set_browser_session(session.clone()).await;
-                    estop_for_mcp.write().await.browser_session = Some(session.clone());
-
-                    let monitor_session = session;
-                    let monitor_pool = monitor_pool_ref;
-                    tokio::spawn(async move {
-                        const CHECK_INTERVAL_SECS: u64 = 60;
-                        const POOL_IDLE_TIMEOUT_SECS: u64 = 600;
-                        let mut last_active: std::collections::HashMap<String, std::time::Instant> =
-                            std::collections::HashMap::new();
-
-                        loop {
-                            tokio::time::sleep(std::time::Duration::from_secs(CHECK_INTERVAL_SECS))
-                                .await;
-
-                            monitor_session
-                                .close_idle_tabs(crate::tools::browser::browser_idle_timeout_secs())
-                                .await;
-
-                            let active = monitor_pool.active_profiles().await;
-                            let now = std::time::Instant::now();
-                            let default_profile = {
-                                let config = config_for_pool.read().await;
-                                config.browser.default_profile.clone()
-                            };
-
-                            for name in &active {
-                                if monitor_session.has_any_active().await
-                                    || !last_active.contains_key(name)
-                                {
-                                    last_active.insert(name.clone(), now);
-                                }
-                            }
-
-                            let idle_threshold =
-                                std::time::Duration::from_secs(POOL_IDLE_TIMEOUT_SECS);
-                            let profiles_to_close: Vec<String> = last_active
-                                .iter()
-                                .filter(|(name, last)| {
-                                    **name != default_profile
-                                        && now.duration_since(**last) > idle_threshold
-                                })
-                                .map(|(name, _)| name.clone())
-                                .collect();
-
-                            for name in profiles_to_close {
-                                tracing::info!(
-                                    profile = %name,
-                                    "Shutting down idle browser profile (>10 min inactive)"
-                                );
-                                monitor_pool.shutdown_profile(&name).await;
-                                last_active.remove(&name);
-                            }
-
-                            let active_set: std::collections::HashSet<String> =
-                                active.into_iter().collect();
-                            last_active.retain(|k, _| active_set.contains(k));
-                        }
-                    });
-
-                    tracing::info!("🌐 Browser tool registered successfully");
-                } else {
-                    tracing::warn!(
-                        "⚠️ Browser MCP peer not available after retries — browser tool will NOT be registered. \
-                         Check that @playwright/mcp is installed: npx @playwright/mcp --help"
-                    );
-                }
-            }
-
-            estop_for_mcp.write().await.mcp_manager = Some(std::sync::Arc::new(mcp_manager));
-
-            tracing::info!(
-                elapsed_ms = startup_t0_mcp.elapsed().as_millis(),
-                "⏱ MCP servers connected (deferred)"
-            );
-        })
-    };
+    let _mcp_handle = start_deferred_mcp(DeferredMcpContext {
+        agent: agent.clone(),
+        estop_arc: estop_arc.clone(),
+        startup_t0,
+        mcp_servers_config,
+        mcp_sandbox_config,
+        mcp_shared_config,
+        #[cfg(feature = "browser")]
+        config_for_pool,
+    });
 
     tracing::info!(
         elapsed_ms = startup_t0.elapsed().as_millis(),
