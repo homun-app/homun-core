@@ -2613,6 +2613,19 @@ fn start_gateway_from_db(
                     );
                 }
             }
+            if !cfg.enabled || !cfg.is_configured() {
+                tracing::warn!(
+                    id = gw_id,
+                    account = %account_key,
+                    enabled = cfg.enabled,
+                    has_imap_host = !cfg.imap_host.trim().is_empty(),
+                    has_smtp_host = !cfg.smtp_host.trim().is_empty(),
+                    has_username = !cfg.username.trim().is_empty(),
+                    has_password = !cfg.password.trim().is_empty(),
+                    "Email gateway is enabled but its account config is disabled or incomplete; skipping channel startup"
+                );
+                return None;
+            }
             let mut accounts = std::collections::HashMap::new();
             accounts.insert(account_key, cfg);
             Some(spawn_monitored_channel(
