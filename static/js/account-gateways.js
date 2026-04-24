@@ -27,15 +27,24 @@
     if (!grid || !modal) return;
 
     let gateways = [];
+    let gatewayDiagnostics = new Map();
     let profiles = [];
 
     // ─── Load ───
 
     async function loadGateways() {
         try {
-            const res = await fetch('/api/v1/gateways');
-            if (!res.ok) return;
-            gateways = await res.json();
+            const [gatewaysRes, diagnosticsRes] = await Promise.all([
+                fetch('/api/v1/gateways'),
+                fetch('/api/v1/gateways/diagnostics').catch(() => null),
+            ]);
+            if (!gatewaysRes.ok) return;
+            gateways = await gatewaysRes.json();
+            gatewayDiagnostics = new Map();
+            if (diagnosticsRes && diagnosticsRes.ok) {
+                const diagnostics = await diagnosticsRes.json();
+                diagnostics.forEach(item => gatewayDiagnostics.set(item.id, item));
+            }
             render();
         } catch (e) {
             console.error('[Gateways] Failed to load:', e);
@@ -55,6 +64,7 @@
     function createCard(gw) {
         var svgIcon = CHANNEL_SVGS[gw.channel_type] || CHANNEL_SVGS.web;
         var profileName = gw.default_profile || 'Default';
+        var diagnostics = gatewayDiagnostics.get(gw.id);
 
         var card = document.createElement('div');
         card.className = 'provider-card channel-card';
@@ -88,8 +98,17 @@
         var actions = document.createElement('div');
         actions.className = 'provider-card-actions';
         var badge = document.createElement('span');
-        badge.className = gw.enabled ? 'badge badge-success' : 'badge badge-neutral';
-        badge.textContent = gw.enabled ? 'Active' : 'Disabled';
+        var status = diagnostics ? diagnostics.status : (gw.enabled ? 'ready' : 'disabled');
+        if (status === 'ready') {
+            badge.className = 'badge badge-success';
+            badge.textContent = 'Ready';
+        } else if (status === 'needs_attention') {
+            badge.className = 'badge badge-warning';
+            badge.textContent = 'Needs attention';
+        } else {
+            badge.className = 'badge badge-neutral';
+            badge.textContent = 'Disabled';
+        }
         actions.appendChild(badge);
         header.appendChild(actions);
 
@@ -100,6 +119,17 @@
         desc.className = 'provider-card-desc';
         desc.textContent = gw.channel_type + ' \u00B7 Profile: ' + profileName + ' \u00B7 ' + gw.response_mode;
         card.appendChild(desc);
+
+        if (diagnostics && diagnostics.issues && diagnostics.issues.length > 0) {
+            var issueList = document.createElement('div');
+            issueList.className = 'provider-card-desc';
+            issueList.style.marginTop = '6px';
+            var visibleIssues = diagnostics.issues.filter(issue => issue.code !== 'disabled').slice(0, 2);
+            if (visibleIssues.length > 0) {
+                issueList.textContent = visibleIssues.map(issue => issue.message).join(' ');
+                card.appendChild(issueList);
+            }
+        }
 
         card.addEventListener('click', function () { openModal(gw); });
         return card;
