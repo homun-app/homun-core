@@ -804,6 +804,7 @@ async fn chat_page(
             "model-loader.js",
             "response-blocks.js",
             "chat-rendering.js",
+            "chat-conversations.js",
             "chat.js",
         ],
     ))
