@@ -30,6 +30,18 @@ struct GatewayToolSetup {
     workflow_engine_cell: Arc<tokio::sync::OnceCell<Arc<workflows::engine::WorkflowEngine>>>,
 }
 
+struct AgentRegistryContext<'a> {
+    config: &'a Config,
+    shared_config: Arc<tokio::sync::RwLock<Config>>,
+    skill_registry: Arc<tokio::sync::RwLock<skills::SkillRegistry>>,
+    tool_msg_tx: tokio::sync::mpsc::Sender<crate::bus::OutboundMessage>,
+    tool_names: &'a [String],
+    #[cfg(feature = "embeddings")]
+    db_for_searcher: Database,
+    #[cfg(feature = "embeddings")]
+    rag_engine: Option<Arc<tokio::sync::Mutex<rag::RagEngine>>>,
+}
+
 async fn load_runtime_setup(startup_t0: std::time::Instant) -> Result<RuntimeSetup> {
     let mut config = Config::load()?;
 
@@ -132,6 +144,86 @@ fn build_gateway_tool_registry(
     }
 }
 
+async fn load_skill_registry() -> Arc<tokio::sync::RwLock<skills::SkillRegistry>> {
+    let mut skill_registry = skills::SkillRegistry::new();
+    if let Err(e) = skill_registry.scan_and_load().await {
+        tracing::warn!(error = %e, "Failed to load skills");
+    }
+    Arc::new(tokio::sync::RwLock::new(skill_registry))
+}
+
+async fn configure_agent_registry(
+    registry: &mut Option<agent::AgentRegistry>,
+    context: AgentRegistryContext<'_>,
+) {
+    let active_channels = context.config.channels.active_channels_with_chat_ids();
+    let channel_refs: Vec<(&str, &str)> = active_channels
+        .iter()
+        .map(|(name, id)| (name.as_str(), id.as_str()))
+        .collect();
+    let email_accounts: Vec<(String, crate::config::EmailMode)> = context
+        .config
+        .channels
+        .active_email_accounts()
+        .into_iter()
+        .map(|(name, acc)| (name.clone(), acc.mode.clone()))
+        .collect();
+
+    if let Some(ref mut reg) = registry {
+        #[cfg(feature = "embeddings")]
+        let (memory_searcher, rag_for_agents) = {
+            let cfg = context.shared_config.read().await;
+            let searcher = crate::try_create_memory_searcher(context.db_for_searcher, &cfg)
+                .map(|s| Arc::new(tokio::sync::Mutex::new(s)));
+            (searcher, context.rag_engine.clone())
+        };
+
+        let skills_summary = {
+            let sr = context.skill_registry.read().await;
+            if !sr.is_empty() {
+                tracing::info!(
+                    skills = sr.len(),
+                    "Skills loaded into agent context (gateway)"
+                );
+                Some(sr.build_prompt_summary())
+            } else {
+                None
+            }
+        };
+
+        reg.for_each_mut(|a| {
+            a.set_message_tx(context.tool_msg_tx.clone());
+            a.set_skill_registry(context.skill_registry.clone());
+
+            if !active_channels.is_empty() {
+                a.set_channels_info(&channel_refs);
+            }
+            if !email_accounts.is_empty() {
+                a.set_email_accounts_info(&email_accounts);
+            }
+
+            #[cfg(feature = "embeddings")]
+            {
+                if let Some(ref searcher) = memory_searcher {
+                    a.set_memory_searcher_shared(searcher.clone());
+                }
+                if let Some(ref rag) = rag_for_agents {
+                    a.set_rag_engine(rag.clone());
+                }
+            }
+        });
+
+        for agent in reg.agents() {
+            if let Some(ref summary) = skills_summary {
+                agent.set_skills_summary(summary.clone()).await;
+            }
+            agent
+                .set_registered_tool_names(context.tool_names.to_vec())
+                .await;
+        }
+    }
+}
+
 pub async fn run_gateway() -> Result<()> {
     let pid_file = gateway_process::prepare_pid_file()?;
 
@@ -221,75 +313,22 @@ pub async fn run_gateway() -> Result<()> {
         None
     };
 
-    let mut skill_registry = skills::SkillRegistry::new();
-    if let Err(e) = skill_registry.scan_and_load().await {
-        tracing::warn!(error = %e, "Failed to load skills");
-    }
-    let skill_registry = Arc::new(tokio::sync::RwLock::new(skill_registry));
-
-    let active_channels = config.channels.active_channels_with_chat_ids();
-    let channel_refs: Vec<(&str, &str)> = active_channels
-        .iter()
-        .map(|(name, id)| (name.as_str(), id.as_str()))
-        .collect();
-    let email_accounts: Vec<(String, crate::config::EmailMode)> = config
-        .channels
-        .active_email_accounts()
-        .into_iter()
-        .map(|(name, acc)| (name.clone(), acc.mode.clone()))
-        .collect();
-
-    if let Some(ref mut reg) = registry {
-        #[cfg(feature = "embeddings")]
-        let (memory_searcher, rag_for_agents) = {
-            let cfg = shared_config.read().await;
-            let searcher = crate::try_create_memory_searcher(db_for_searcher, &cfg)
-                .map(|s| Arc::new(tokio::sync::Mutex::new(s)));
-            (searcher, rag_engine.clone())
-        };
-
-        let skills_summary = {
-            let sr = skill_registry.read().await;
-            if !sr.is_empty() {
-                tracing::info!(
-                    skills = sr.len(),
-                    "Skills loaded into agent context (gateway)"
-                );
-                Some(sr.build_prompt_summary())
-            } else {
-                None
-            }
-        };
-
-        reg.for_each_mut(|a| {
-            a.set_message_tx(tool_msg_tx.clone());
-            a.set_skill_registry(skill_registry.clone());
-
-            if !active_channels.is_empty() {
-                a.set_channels_info(&channel_refs);
-            }
-            if !email_accounts.is_empty() {
-                a.set_email_accounts_info(&email_accounts);
-            }
-
+    let skill_registry = load_skill_registry().await;
+    configure_agent_registry(
+        &mut registry,
+        AgentRegistryContext {
+            config: &config,
+            shared_config: shared_config.clone(),
+            skill_registry: skill_registry.clone(),
+            tool_msg_tx: tool_msg_tx.clone(),
+            tool_names: &tool_names,
             #[cfg(feature = "embeddings")]
-            {
-                if let Some(ref searcher) = memory_searcher {
-                    a.set_memory_searcher_shared(searcher.clone());
-                }
-                if let Some(ref rag) = rag_for_agents {
-                    a.set_rag_engine(rag.clone());
-                }
-            }
-        });
-
-        for agent in reg.agents() {
-            if let Some(ref summary) = skills_summary {
-                agent.set_skills_summary(summary.clone()).await;
-            }
-            agent.set_registered_tool_names(tool_names.clone()).await;
-        }
-    }
+            db_for_searcher,
+            #[cfg(feature = "embeddings")]
+            rag_engine: rag_engine.clone(),
+        },
+    )
+    .await;
 
     let Some(registry) = registry else {
         #[cfg(feature = "web-ui")]
