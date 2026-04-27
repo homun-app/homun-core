@@ -489,6 +489,13 @@ impl Database {
         )
         .await?;
 
+        Self::apply_migration(
+            pool,
+            "055_user_lifecycle",
+            include_str!("../../migrations/055_user_lifecycle.sql"),
+        )
+        .await?;
+
         // One-shot backfill post-migration-050 (namespace isolation):
         // Chunks created by contacts before the namespace feature had `namespace = '_private'`
         // (the SQL column default). With the new structural filter in memory_search.rs,
@@ -862,7 +869,7 @@ impl Database {
     /// Load a user by their internal ID.
     pub async fn load_user(&self, id: &str) -> Result<Option<UserRow>> {
         let row = sqlx::query_as::<_, UserRow>(
-            "SELECT id, username, roles, password_hash, created_at, updated_at, metadata
+            "SELECT id, username, roles, password_hash, enabled, must_change_password, created_at, updated_at, metadata
              FROM users WHERE id = ?",
         )
         .bind(id)
@@ -876,7 +883,7 @@ impl Database {
     /// Load a user by their username.
     pub async fn load_user_by_username(&self, username: &str) -> Result<Option<UserRow>> {
         let row = sqlx::query_as::<_, UserRow>(
-            "SELECT id, username, roles, password_hash, created_at, updated_at, metadata
+            "SELECT id, username, roles, password_hash, enabled, must_change_password, created_at, updated_at, metadata
              FROM users WHERE username = ?",
         )
         .bind(username)
@@ -890,7 +897,7 @@ impl Database {
     /// Load all users.
     pub async fn load_all_users(&self) -> Result<Vec<UserRow>> {
         let rows = sqlx::query_as::<_, UserRow>(
-            "SELECT id, username, roles, password_hash, created_at, updated_at, metadata
+            "SELECT id, username, roles, password_hash, enabled, must_change_password, created_at, updated_at, metadata
              FROM users ORDER BY created_at ASC",
         )
         .fetch_all(&self.pool)
@@ -911,6 +918,37 @@ impl Database {
                 .execute(&self.pool)
                 .await
                 .context("Failed to update user roles")?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Update whether a user can authenticate.
+    pub async fn set_user_enabled(&self, id: &str, enabled: bool) -> Result<bool> {
+        let result =
+            sqlx::query("UPDATE users SET enabled = ?, updated_at = datetime('now') WHERE id = ?")
+                .bind(if enabled { 1 } else { 0 })
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .context("Failed to update user enabled flag")?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Update whether a user must change password after login.
+    pub async fn set_user_must_change_password(
+        &self,
+        id: &str,
+        must_change_password: bool,
+    ) -> Result<bool> {
+        let result = sqlx::query(
+            "UPDATE users SET must_change_password = ?, updated_at = datetime('now') WHERE id = ?",
+        )
+        .bind(if must_change_password { 1 } else { 0 })
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .context("Failed to update user must_change_password flag")?;
 
         Ok(result.rows_affected() > 0)
     }
@@ -958,7 +996,7 @@ impl Database {
         platform_id: &str,
     ) -> Result<Option<UserRow>> {
         let row = sqlx::query_as::<_, UserRow>(
-            "SELECT u.id, u.username, u.roles, u.password_hash, u.created_at, u.updated_at, u.metadata
+            "SELECT u.id, u.username, u.roles, u.password_hash, u.enabled, u.must_change_password, u.created_at, u.updated_at, u.metadata
              FROM users u
              JOIN user_identities i ON u.id = i.user_id
              WHERE i.channel = ? AND i.platform_id = ?",
@@ -1042,7 +1080,7 @@ impl Database {
     /// Returns `None` if the token is disabled or expired.
     pub async fn lookup_user_by_webhook_token(&self, token: &str) -> Result<Option<UserRow>> {
         let row = sqlx::query_as::<_, UserRow>(
-            "SELECT u.id, u.username, u.roles, u.password_hash, u.created_at, u.updated_at, u.metadata
+            "SELECT u.id, u.username, u.roles, u.password_hash, u.enabled, u.must_change_password, u.created_at, u.updated_at, u.metadata
              FROM users u
              JOIN webhook_tokens wt ON u.id = wt.user_id
              WHERE wt.token = ? AND wt.enabled = 1
@@ -2541,6 +2579,8 @@ pub struct UserRow {
     pub username: String,
     pub roles: String, // JSON array
     pub password_hash: Option<String>,
+    pub enabled: i64,
+    pub must_change_password: i64,
     pub created_at: String,
     pub updated_at: String,
     pub metadata: String, // JSON object
@@ -2980,6 +3020,28 @@ END;
         let db_path = dir.path().join("test.db");
         let _db1 = Database::open(&db_path).await.unwrap();
         let _db2 = Database::open(&db_path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_user_lifecycle_flags() {
+        let (db, _dir) = test_db().await;
+
+        db.create_user("user-lifecycle", "lifecycle", &["user"])
+            .await
+            .unwrap();
+        let row = db.load_user("user-lifecycle").await.unwrap().unwrap();
+        assert_eq!(row.enabled, 1);
+        assert_eq!(row.must_change_password, 0);
+
+        assert!(db.set_user_enabled("user-lifecycle", false).await.unwrap());
+        assert!(db
+            .set_user_must_change_password("user-lifecycle", true)
+            .await
+            .unwrap());
+
+        let row = db.load_user("user-lifecycle").await.unwrap().unwrap();
+        assert_eq!(row.enabled, 0);
+        assert_eq!(row.must_change_password, 1);
     }
 
     #[tokio::test]

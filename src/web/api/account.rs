@@ -7,7 +7,7 @@ use axum::routing::get;
 use axum::Router;
 use serde::{Deserialize, Serialize};
 
-use super::super::auth::{require_admin, AuthUser};
+use super::super::auth::{hash_password, require_admin, AuthUser};
 use super::super::server::AppState;
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -20,6 +20,11 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route(
             "/v1/account/identities/{channel}/{platform_id}",
             axum::routing::delete(remove_identity),
+        )
+        .route("/v1/account/users", get(list_users).post(create_user))
+        .route(
+            "/v1/account/users/{user_id}/enabled",
+            axum::routing::put(set_user_enabled),
         )
         .route("/v1/account/tokens", get(list_tokens).post(create_token))
         .route(
@@ -123,7 +128,21 @@ struct AccountResponse {
     id: String,
     username: String,
     role: String,
+    enabled: bool,
+    must_change_password: bool,
     created_at: String,
+}
+
+#[derive(Debug, Serialize)]
+struct UserAccountResponse {
+    id: String,
+    username: String,
+    roles: Vec<String>,
+    enabled: bool,
+    must_change_password: bool,
+    has_password: bool,
+    created_at: String,
+    updated_at: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -177,6 +196,37 @@ struct CreateTokenRequest {
     expires_in: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct CreateUserRequest {
+    username: String,
+    password: String,
+    role: Option<String>,
+    must_change_password: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SetUserEnabledRequest {
+    enabled: bool,
+}
+
+fn user_response(row: crate::storage::UserRow) -> UserAccountResponse {
+    let roles: Vec<String> = serde_json::from_str(&row.roles).unwrap_or_default();
+    UserAccountResponse {
+        id: row.id,
+        username: row.username,
+        roles,
+        enabled: row.enabled != 0,
+        must_change_password: row.must_change_password != 0,
+        has_password: row
+            .password_hash
+            .as_ref()
+            .map(|value| !value.is_empty())
+            .unwrap_or(false),
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+    }
+}
+
 /// Get the owner account info (first user in database)
 async fn get_account(
     State(state): State<Arc<AppState>>,
@@ -206,11 +256,195 @@ async fn get_account(
             id: u.id,
             username: u.username,
             role,
+            enabled: u.enabled != 0,
+            must_change_password: u.must_change_password != 0,
             created_at: u.created_at,
         }
     });
 
     Ok(Json(owner))
+}
+
+/// List local users. Admin only.
+async fn list_users(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+) -> Result<Json<Vec<UserAccountResponse>>, (StatusCode, Json<serde_json::Value>)> {
+    require_admin(&auth)?;
+    let db = match &state.db {
+        Some(db) => db,
+        None => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database not available"})),
+            ))
+        }
+    };
+
+    let users = db.load_all_users().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+    })?;
+
+    Ok(Json(users.into_iter().map(user_response).collect()))
+}
+
+/// Create a local user with an initial password. Admin only.
+async fn create_user(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+    Json(req): Json<CreateUserRequest>,
+) -> Result<(StatusCode, Json<UserAccountResponse>), (StatusCode, Json<serde_json::Value>)> {
+    require_admin(&auth)?;
+    let db = match &state.db {
+        Some(db) => db,
+        None => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database not available"})),
+            ))
+        }
+    };
+
+    let username = req.username.trim();
+    if username.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Username is required"})),
+        ));
+    }
+    if req.password.len() < 8 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Password must be at least 8 characters"})),
+        ));
+    }
+
+    let role = match req.role.as_deref().unwrap_or("user") {
+        "admin" => "admin",
+        "user" => "user",
+        "guest" => "guest",
+        _ => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Invalid role"})),
+            ))
+        }
+    };
+    let user_id = uuid::Uuid::new_v4().to_string();
+    let password_hash = hash_password(&req.password).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+    })?;
+
+    db.create_user(&user_id, username, &[role])
+        .await
+        .map_err(|e| {
+            let status = if e.to_string().contains("UNIQUE") {
+                StatusCode::CONFLICT
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+            (status, Json(serde_json::json!({"error": e.to_string()})))
+        })?;
+    db.set_user_password_hash(&user_id, &password_hash)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+        })?;
+    if req.must_change_password.unwrap_or(true) {
+        db.set_user_must_change_password(&user_id, true)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": e.to_string()})),
+                )
+            })?;
+    }
+
+    let row = db
+        .load_user(&user_id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Created user not found"})),
+            )
+        })?;
+
+    Ok((StatusCode::CREATED, Json(user_response(row))))
+}
+
+/// Enable or disable a local user. Admin only.
+async fn set_user_enabled(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+    Path(user_id): Path<String>,
+    Json(req): Json<SetUserEnabledRequest>,
+) -> Result<Json<UserAccountResponse>, (StatusCode, Json<serde_json::Value>)> {
+    require_admin(&auth)?;
+    if user_id == auth.user_id && !req.enabled {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Cannot disable the current user"})),
+        ));
+    }
+    let db = match &state.db {
+        Some(db) => db,
+        None => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database not available"})),
+            ))
+        }
+    };
+
+    let updated = db
+        .set_user_enabled(&user_id, req.enabled)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+        })?;
+    if !updated {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "User not found"})),
+        ));
+    }
+    let row = db
+        .load_user(&user_id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "User not found"})),
+            )
+        })?;
+
+    Ok(Json(user_response(row)))
 }
 
 /// List all channel identities for the owner

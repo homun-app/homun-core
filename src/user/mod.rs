@@ -276,6 +276,8 @@ mod tests {
             username: "testuser".to_string(),
             roles: r#"["admin","user"]"#.to_string(),
             password_hash: None,
+            enabled: 1,
+            must_change_password: 0,
             created_at: "2024-01-01T00:00:00Z".to_string(),
             updated_at: "2024-01-01T00:00:00Z".to_string(),
             metadata: "{}".to_string(),

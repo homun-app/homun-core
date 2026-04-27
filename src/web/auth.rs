@@ -877,6 +877,18 @@ pub async fn login_handler(
         }
     };
 
+    if user.enabled == 0 {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(AuthResponse {
+                success: false,
+                redirect: None,
+                error: Some("Account disabled".into()),
+            }),
+        )
+            .into_response();
+    }
+
     // Verify password
     let password_hash = match &user.password_hash {
         Some(h) if !h.is_empty() => h,
