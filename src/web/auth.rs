@@ -267,17 +267,20 @@ impl AuthUser {
     /// Check if this auth context allows write operations.
     pub fn can_write(&self) -> bool {
         match &self.auth_method {
-            AuthMethod::Session => true,
+            AuthMethod::Session => self
+                .roles
+                .iter()
+                .any(|role| role == "admin" || role == "user"),
             AuthMethod::BearerToken { scope } => scope != "read",
         }
     }
 
     /// Check if this auth context has admin-level access.
     ///
-    /// Session users are always admin; Bearer tokens need `scope == "admin"`.
+    /// Session users need the `admin` role; Bearer tokens need `scope == "admin"`.
     pub fn is_admin(&self) -> bool {
         match &self.auth_method {
-            AuthMethod::Session => true,
+            AuthMethod::Session => self.roles.iter().any(|role| role == "admin"),
             AuthMethod::BearerToken { scope } => scope == "admin",
         }
     }
@@ -285,7 +288,7 @@ impl AuthUser {
     /// Check whether this auth context may trigger a global emergency stop.
     pub fn can_emergency_stop(&self) -> bool {
         match &self.auth_method {
-            AuthMethod::Session => true,
+            AuthMethod::Session => self.roles.iter().any(|role| role == "admin"),
             AuthMethod::BearerToken { scope } => {
                 matches!(scope.as_str(), "admin" | "mobile_stop")
             }
@@ -1610,92 +1613,130 @@ mod tests {
 
     // ─── is_admin / require_write / require_admin tests ──────────
 
-    fn make_user(method: AuthMethod) -> AuthUser {
+    fn make_user(method: AuthMethod, roles: &[&str]) -> AuthUser {
         AuthUser {
             user_id: "u1".into(),
             username: "test".into(),
-            roles: vec!["user".into()],
+            roles: roles.iter().map(|role| role.to_string()).collect(),
             auth_method: method,
         }
     }
 
     #[test]
-    fn test_session_is_admin() {
-        let u = make_user(AuthMethod::Session);
+    fn test_admin_session_is_admin() {
+        let u = make_user(AuthMethod::Session, &["admin"]);
         assert!(u.is_admin());
         assert!(u.can_write());
     }
 
     #[test]
+    fn test_user_session_can_write_but_is_not_admin() {
+        let u = make_user(AuthMethod::Session, &["user"]);
+        assert!(!u.is_admin());
+        assert!(u.can_write());
+    }
+
+    #[test]
+    fn test_guest_session_cannot_write_or_admin() {
+        let u = make_user(AuthMethod::Session, &["guest"]);
+        assert!(!u.is_admin());
+        assert!(!u.can_write());
+    }
+
+    #[test]
     fn test_bearer_admin_is_admin() {
-        let u = make_user(AuthMethod::BearerToken {
-            scope: "admin".into(),
-        });
+        let u = make_user(
+            AuthMethod::BearerToken {
+                scope: "admin".into(),
+            },
+            &["user"],
+        );
         assert!(u.is_admin());
         assert!(u.can_write());
     }
 
     #[test]
     fn test_bearer_write_not_admin() {
-        let u = make_user(AuthMethod::BearerToken {
-            scope: "write".into(),
-        });
+        let u = make_user(
+            AuthMethod::BearerToken {
+                scope: "write".into(),
+            },
+            &["user"],
+        );
         assert!(!u.is_admin());
         assert!(u.can_write());
     }
 
     #[test]
     fn test_bearer_read_cannot_write() {
-        let u = make_user(AuthMethod::BearerToken {
-            scope: "read".into(),
-        });
+        let u = make_user(
+            AuthMethod::BearerToken {
+                scope: "read".into(),
+            },
+            &["user"],
+        );
         assert!(!u.is_admin());
         assert!(!u.can_write());
     }
 
     #[test]
     fn test_require_write_allows_session() {
-        let u = make_user(AuthMethod::Session);
+        let u = make_user(AuthMethod::Session, &["user"]);
         assert!(require_write(&u).is_ok());
     }
 
     #[test]
     fn test_require_write_rejects_read() {
-        let u = make_user(AuthMethod::BearerToken {
-            scope: "read".into(),
-        });
+        let u = make_user(
+            AuthMethod::BearerToken {
+                scope: "read".into(),
+            },
+            &["user"],
+        );
         assert!(require_write(&u).is_err());
     }
 
     #[test]
     fn test_require_admin_rejects_write() {
-        let u = make_user(AuthMethod::BearerToken {
-            scope: "write".into(),
-        });
+        let u = make_user(
+            AuthMethod::BearerToken {
+                scope: "write".into(),
+            },
+            &["user"],
+        );
         assert!(require_admin(&u).is_err());
     }
 
     #[test]
     fn test_require_admin_allows_admin_token() {
-        let u = make_user(AuthMethod::BearerToken {
-            scope: "admin".into(),
-        });
+        let u = make_user(
+            AuthMethod::BearerToken {
+                scope: "admin".into(),
+            },
+            &["user"],
+        );
         assert!(require_admin(&u).is_ok());
     }
 
     #[test]
     fn test_check_write_returns_status_code() {
-        let u = make_user(AuthMethod::BearerToken {
-            scope: "read".into(),
-        });
+        let u = make_user(
+            AuthMethod::BearerToken {
+                scope: "read".into(),
+            },
+            &["user"],
+        );
         assert_eq!(check_write(&u), Err(StatusCode::FORBIDDEN));
     }
 
     #[test]
     fn test_check_admin_returns_status_code() {
-        let u = make_user(AuthMethod::BearerToken {
-            scope: "write".into(),
-        });
+        let u = make_user(
+            AuthMethod::BearerToken {
+                scope: "write".into(),
+            },
+            &["user"],
+        );
         assert_eq!(check_admin(&u), Err(StatusCode::FORBIDDEN));
     }
 

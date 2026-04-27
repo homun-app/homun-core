@@ -88,9 +88,10 @@ struct GenerateRequest {
 /// List all profiles (default first).
 async fn list_profiles(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
 ) -> Result<Json<Vec<profiles::Profile>>, ApiErr> {
     let db = require_db(&state)?;
-    let list = profiles::db::load_all_profiles(db.pool())
+    let list = profiles::db::load_profiles_for_user(db.pool(), &auth.user_id)
         .await
         .map_err(internal)?;
     Ok(Json(list))
@@ -109,9 +110,6 @@ async fn create_profile(
     let color = body.color.as_deref().unwrap_or("#3B82F6");
     let pj = body.profile_json.as_deref().unwrap_or("{}");
 
-    // In v2 all profiles belong to the default admin user.
-    // In v3 this will come from the authenticated session.
-    let user_id = Some(crate::user::DEFAULT_ADMIN_USER_ID);
     let id = profiles::db::insert_profile(
         db.pool(),
         &body.slug,
@@ -119,7 +117,7 @@ async fn create_profile(
         emoji,
         color,
         pj,
-        user_id,
+        Some(&auth.user_id),
     )
     .await
     .map_err(internal)?;
@@ -140,10 +138,11 @@ async fn create_profile(
 /// Get a single profile by ID.
 async fn get_profile(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Path(id): Path<i64>,
 ) -> Result<Json<profiles::Profile>, ApiErr> {
     let db = require_db(&state)?;
-    let profile = profiles::db::load_profile_by_id(db.pool(), id)
+    let profile = profiles::db::load_profile_by_id_for_user(db.pool(), id, &auth.user_id)
         .await
         .map_err(internal)?
         .ok_or_else(|| not_found("Profile not found"))?;
@@ -160,7 +159,7 @@ async fn update_profile(
     require_write(&auth)?;
     let db = require_db(&state)?;
 
-    let existing = profiles::db::load_profile_by_id(db.pool(), id)
+    let existing = profiles::db::load_profile_by_id_for_user(db.pool(), id, &auth.user_id)
         .await
         .map_err(internal)?
         .ok_or_else(|| not_found("Profile not found"))?;
@@ -183,7 +182,7 @@ async fn update_profile(
         .await
         .map_err(internal)?;
 
-    let updated = profiles::db::load_profile_by_id(db.pool(), id)
+    let updated = profiles::db::load_profile_by_id_for_user(db.pool(), id, &auth.user_id)
         .await
         .map_err(internal)?
         .ok_or_else(|| not_found("Profile not found after update"))?;
@@ -199,6 +198,11 @@ async fn delete_profile(
 ) -> Result<StatusCode, ApiErr> {
     require_write(&auth)?;
     let db = require_db(&state)?;
+
+    profiles::db::load_profile_by_id_for_user(db.pool(), id, &auth.user_id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| not_found("Profile not found"))?;
 
     profiles::db::delete_profile(db.pool(), id)
         .await
@@ -219,10 +223,11 @@ async fn delete_profile(
 /// Read SOUL.md from a profile's brain directory.
 async fn read_soul(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Path(id): Path<i64>,
 ) -> Result<Json<Value>, ApiErr> {
     let db = require_db(&state)?;
-    let profile = profiles::db::load_profile_by_id(db.pool(), id)
+    let profile = profiles::db::load_profile_by_id_for_user(db.pool(), id, &auth.user_id)
         .await
         .map_err(internal)?
         .ok_or_else(|| not_found("Profile not found"))?;
@@ -248,7 +253,7 @@ async fn write_soul(
 ) -> Result<Json<Value>, ApiErr> {
     require_write(&auth)?;
     let db = require_db(&state)?;
-    let profile = profiles::db::load_profile_by_id(db.pool(), id)
+    let profile = profiles::db::load_profile_by_id_for_user(db.pool(), id, &auth.user_id)
         .await
         .map_err(internal)?
         .ok_or_else(|| not_found("Profile not found"))?;
@@ -266,10 +271,11 @@ async fn write_soul(
 /// Read INSTRUCTIONS.md from a profile's brain directory.
 async fn read_instructions(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Path(id): Path<i64>,
 ) -> Result<Json<Value>, ApiErr> {
     let db = require_db(&state)?;
-    let profile = profiles::db::load_profile_by_id(db.pool(), id)
+    let profile = profiles::db::load_profile_by_id_for_user(db.pool(), id, &auth.user_id)
         .await
         .map_err(internal)?
         .ok_or_else(|| not_found("Profile not found"))?;
@@ -289,10 +295,11 @@ async fn read_instructions(
 /// Read USER.md from a profile's brain directory.
 async fn read_user_md(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Path(id): Path<i64>,
 ) -> Result<Json<Value>, ApiErr> {
     let db = require_db(&state)?;
-    let profile = profiles::db::load_profile_by_id(db.pool(), id)
+    let profile = profiles::db::load_profile_by_id_for_user(db.pool(), id, &auth.user_id)
         .await
         .map_err(internal)?
         .ok_or_else(|| not_found("Profile not found"))?;
@@ -318,7 +325,7 @@ async fn generate_profile_json(
 ) -> Result<Json<profiles::Profile>, ApiErr> {
     require_write(&auth)?;
     let db = require_db(&state)?;
-    let profile = profiles::db::load_profile_by_id(db.pool(), id)
+    let profile = profiles::db::load_profile_by_id_for_user(db.pool(), id, &auth.user_id)
         .await
         .map_err(internal)?
         .ok_or_else(|| not_found("Profile not found"))?;
@@ -366,7 +373,7 @@ Output raw JSON only — no markdown fences, no explanation."#;
     .await
     .map_err(internal)?;
 
-    let updated = profiles::db::load_profile_by_id(db.pool(), id)
+    let updated = profiles::db::load_profile_by_id_for_user(db.pool(), id, &auth.user_id)
         .await
         .map_err(internal)?
         .ok_or_else(|| not_found("Profile not found after update"))?;

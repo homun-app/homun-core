@@ -48,6 +48,21 @@ pub async fn load_profile_by_id(pool: &Pool<Sqlite>, id: i64) -> Result<Option<P
     Ok(row)
 }
 
+/// Load a profile by id, restricted to an owner user.
+pub async fn load_profile_by_id_for_user(
+    pool: &Pool<Sqlite>,
+    id: i64,
+    user_id: &str,
+) -> Result<Option<Profile>> {
+    let row = sqlx::query_as::<_, Profile>("SELECT * FROM profiles WHERE id = ? AND user_id = ?")
+        .bind(id)
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await
+        .context("Failed to load profile by id for user")?;
+    Ok(row)
+}
+
 /// Load a profile by slug.
 pub async fn load_profile_by_slug(pool: &Pool<Sqlite>, slug: &str) -> Result<Option<Profile>> {
     let row = sqlx::query_as::<_, Profile>("SELECT * FROM profiles WHERE slug = ?")
@@ -65,6 +80,18 @@ pub async fn load_all_profiles(pool: &Pool<Sqlite>) -> Result<Vec<Profile>> {
             .fetch_all(pool)
             .await
             .context("Failed to load profiles")?;
+    Ok(rows)
+}
+
+/// Load all profiles owned by a user, ordered by is_default DESC then slug ASC.
+pub async fn load_profiles_for_user(pool: &Pool<Sqlite>, user_id: &str) -> Result<Vec<Profile>> {
+    let rows = sqlx::query_as::<_, Profile>(
+        "SELECT * FROM profiles WHERE user_id = ? ORDER BY is_default DESC, slug ASC",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await
+    .context("Failed to load profiles for user")?;
     Ok(rows)
 }
 
@@ -484,6 +511,48 @@ mod tests {
             .expect("first insert");
         let result = insert_profile(&pool, "test", "Test 2", "🧪", "#3B82F6", "{}", None).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn profiles_can_be_listed_by_owner_user() {
+        let pool = test_pool().await;
+        let alice_id = insert_profile(
+            &pool,
+            "alice-main",
+            "Alice Main",
+            "🧑",
+            "#3B82F6",
+            "{}",
+            Some("alice"),
+        )
+        .await
+        .expect("insert alice profile");
+        insert_profile(
+            &pool,
+            "bob-main",
+            "Bob Main",
+            "🧑",
+            "#10B981",
+            "{}",
+            Some("bob"),
+        )
+        .await
+        .expect("insert bob profile");
+
+        let alice_profiles = load_profiles_for_user(&pool, "alice")
+            .await
+            .expect("load alice profiles");
+        assert_eq!(alice_profiles.len(), 1);
+        assert_eq!(alice_profiles[0].id, alice_id);
+
+        assert!(load_profile_by_id_for_user(&pool, alice_id, "alice")
+            .await
+            .expect("load alice by id")
+            .is_some());
+        assert!(load_profile_by_id_for_user(&pool, alice_id, "bob")
+            .await
+            .expect("bob cannot load alice by id")
+            .is_none());
     }
 
     #[tokio::test]
