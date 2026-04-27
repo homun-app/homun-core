@@ -104,11 +104,7 @@ const GENERIC_PLAN_CONSTRAINTS = new Set([
 
 // Track the currently streaming message element so we can
 // append incremental deltas as they arrive from the LLM.
-let streamingEl = null;
-let streamingContent = '';
-let streamRenderRafId = null;
-let lastStreamRenderTime = 0;
-const STREAM_RENDER_INTERVAL = 150; // ms — throttle gate for progressive markdown
+let streamingController = null;
 
 // Pending rich blocks received before the final response
 let pendingBlocks = null;
@@ -677,12 +673,8 @@ function purgeOrphanLiveArtifacts() {
     if (!messagesEl) return;
 
     messagesEl.querySelectorAll('.chat-msg.assistant.streaming').forEach((el) => {
-        if (el === streamingEl) {
-            if (!streamingContent.trim() && !el.textContent.trim()) {
-                el.remove();
-                streamingEl = null;
-                streamingContent = '';
-            }
+        if (streamingController && el === streamingController.getElement()) {
+            streamingController.removeCurrentIfEmpty();
             return;
         }
         if (!el.textContent.trim()) {
@@ -730,10 +722,10 @@ function clearTransientRunUi() {
         toolIndicatorEl.remove();
         toolIndicatorEl = null;
     }
+    const streamingEl = streamingController?.getElement();
     if (streamingEl) {
         streamingEl.remove();
-        streamingEl = null;
-        streamingContent = '';
+        streamingController.clearState();
     }
     if (reasoningSectionEl) {
         reasoningSectionEl.remove();
@@ -1310,8 +1302,8 @@ function createReasoningSection() {
     reasoningContentEl = reasoningSectionEl.querySelector('.chat-reasoning-content');
     if (toolIndicatorEl && toolIndicatorEl.parentElement === messagesEl) {
         messagesEl.insertBefore(reasoningSectionEl, toolIndicatorEl);
-    } else if (streamingEl && streamingEl.parentElement === messagesEl) {
-        messagesEl.insertBefore(reasoningSectionEl, streamingEl);
+    } else if (streamingController?.getElement()?.parentElement === messagesEl) {
+        messagesEl.insertBefore(reasoningSectionEl, streamingController.getElement());
     } else {
         messagesEl.appendChild(reasoningSectionEl);
     }
@@ -1620,9 +1612,7 @@ function morphIndicatorToStreaming() {
         const body = document.createElement('div');
         body.className = 'chat-msg-body';
         toolIndicatorEl.appendChild(body);
-        streamingEl = toolIndicatorEl;
-        streamingContent = '';
-        lastStreamRenderTime = 0;
+        streamingController.startFromElement(toolIndicatorEl);
         toolIndicatorEl = null;
         activeTools = [];
     }
@@ -1946,6 +1936,17 @@ function renderMcpPickerList() {
 
 // ─── WebSocket ─────────────────────────────────────────────────
 
+streamingController = window.HomunChatStreaming.createStreamingController({
+    messagesEl,
+    renderIntervalMs: 150,
+    purgeOrphanLiveArtifacts,
+    scrollThreadToBottom,
+    renderContent: window.HomunChatRendering.renderContent,
+    addMessage,
+    renderBlocks: (...args) => (typeof renderBlocks === 'function' ? renderBlocks(...args) : undefined),
+    sendBlockResponse: (...args) => sendBlockResponse(...args),
+});
+
 function disconnectSocket() {
     if (reconnectTimer) {
         clearTimeout(reconnectTimer);
@@ -2011,11 +2012,10 @@ function connect() {
                 // Absorb any in-progress streaming text into reasoning.
                 // Text generated before a tool call is "thinking out loud",
                 // not the final answer — hide it from the main chat flow.
-                if (streamingEl && streamingContent.trim()) {
-                    addReasoningNote(streamingContent.trim());
-                    streamingEl.remove();
-                    streamingEl = null;
-                    streamingContent = '';
+                if (streamingController.getElement() && streamingController.getContent().trim()) {
+                    addReasoningNote(streamingController.getContent().trim());
+                    streamingController.getElement().remove();
+                    streamingController.clearState();
                 }
                 // Agent is calling a tool
                 showToolIndicator(data.name, data.tool_call);
@@ -2064,6 +2064,7 @@ function connect() {
                     if (blockId && document.querySelector(`.approval-gate-container[data-block-id="${blockId}"]`)) {
                         pendingBlocks = null;
                     } else {
+                        const streamingEl = streamingController.getElement();
                         let target = streamingEl
                             ? (streamingEl.querySelector('.chat-msg-body') || streamingEl)
                             : null;
@@ -2146,98 +2147,13 @@ function connect() {
 
 // ─── Streaming (progressive markdown rendering) ────────────────
 
-/** Render accumulated streaming content as markdown with fence patching.
- *  All HTML output is sanitized via DOMPurify.sanitize() to prevent XSS.
- */
-function renderStreamingMarkdown() {
-    if (!streamingEl || !streamingContent) return;
-    let content = streamingContent;
-
-    // Patch unclosed code fences — count lines starting with 3+ backticks
-    const fenceCount = (content.match(/^`{3,}/gm) || []).length;
-    if (fenceCount % 2 !== 0) content += '\n```';
-
-    // Patch unclosed inline code (simple heuristic: odd single backticks)
-    const inlineCount = (content.match(/(?<!`)`(?!`)/g) || []).length;
-    if (inlineCount % 2 !== 0) content += '`';
-
-    const bodyEl = streamingEl.querySelector('.chat-msg-body') || streamingEl;
-
-    if (typeof marked === 'undefined' || typeof DOMPurify === 'undefined') {
-        // Fallback if libs not loaded yet — safe plain text
-        bodyEl.textContent = streamingContent;
-        return;
-    }
-
-    const rawHtml = marked.parse(content);
-    // DOMPurify sanitizes all HTML to prevent XSS (safe: uses DOMPurify.sanitize)
-    const safeHtml = DOMPurify.sanitize(rawHtml);
-    bodyEl.innerHTML = safeHtml;
-}
-
-/** Schedule a throttled markdown render (max once per STREAM_RENDER_INTERVAL). */
-function scheduleStreamRender() {
-    const now = Date.now();
-    if (now - lastStreamRenderTime >= STREAM_RENDER_INTERVAL) {
-        renderStreamingMarkdown();
-        lastStreamRenderTime = now;
-    } else if (!streamRenderRafId) {
-        streamRenderRafId = requestAnimationFrame(() => {
-            streamRenderRafId = null;
-            if (Date.now() - lastStreamRenderTime >= STREAM_RENDER_INTERVAL) {
-                renderStreamingMarkdown();
-                lastStreamRenderTime = Date.now();
-            }
-        });
-    }
-}
-
-/** Cancel any pending streaming render frame. */
-function cancelStreamRender() {
-    if (streamRenderRafId) {
-        cancelAnimationFrame(streamRenderRafId);
-        streamRenderRafId = null;
-    }
-    lastStreamRenderTime = 0;
-}
-
 /** Handle an incremental streaming chunk from the LLM. */
 function handleStreamChunk(delta) {
-    if (!delta) return;
-    purgeOrphanLiveArtifacts();
-
-    if (!streamingEl) {
-        // First chunk — create a new assistant message bubble with body child
-        streamingEl = document.createElement('div');
-        streamingEl.className = 'chat-msg assistant streaming';
-        const body = document.createElement('div');
-        body.className = 'chat-msg-body';
-        streamingEl.appendChild(body);
-        streamingContent = '';
-        lastStreamRenderTime = 0;
-        messagesEl.appendChild(streamingEl);
-    }
-
-    // Accumulate and schedule throttled markdown render
-    streamingContent += delta;
-    scheduleStreamRender();
-    scrollThreadToBottom();
+    streamingController.handleChunk(delta);
 }
 
 function settleLiveArtifacts() {
-    cancelStreamRender();
-    purgeOrphanLiveArtifacts();
-    if (streamingEl) {
-        if (streamingContent.trim()) {
-            const bodyEl = streamingEl.querySelector('.chat-msg-body') || streamingEl;
-            window.HomunChatRendering.renderContent(bodyEl, streamingContent, 'assistant');
-            streamingEl.classList.remove('streaming');
-        } else {
-            streamingEl.remove();
-        }
-        streamingEl = null;
-        streamingContent = '';
-    }
+    streamingController.settle();
 
     if (toolIndicatorEl) {
         removeToolIndicator();
@@ -2260,9 +2176,6 @@ function settleLiveArtifacts() {
  *  Render markdown on the final content for proper formatting.
  */
 function finalizeStream(content) {
-    // Cancel any pending progressive render
-    cancelStreamRender();
-
     // Detect and add screenshots to the browser gallery
     const screenshotPattern = /\/api\/v1\/browser\/screenshots\/([a-zA-Z0-9_-]+\.png)/g;
     let match;
@@ -2270,22 +2183,8 @@ function finalizeStream(content) {
         addBrowserScreenshot(match[0]);
     }
 
-    if (streamingEl) {
-        // Final render into the body child (or fallback to streamingEl)
-        const bodyEl = streamingEl.querySelector('.chat-msg-body') || streamingEl;
-        window.HomunChatRendering.renderContent(bodyEl, content, 'assistant');
-        // Render rich blocks if any were received before the response
-        if (pendingBlocks && pendingBlocks.length && typeof renderBlocks === 'function') {
-            renderBlocks(pendingBlocks, bodyEl, sendBlockResponse);
-        }
-        streamingEl.classList.remove('streaming');
-        streamingEl = null;
-        streamingContent = '';
-    } else {
-        addMessage('assistant', content, null, { blocks: pendingBlocks });
-    }
+    streamingController.finalize(content, pendingBlocks);
     pendingBlocks = null;
-    scrollThreadToBottom();
 
     // Reset processing state
     setProcessing(false);
