@@ -62,10 +62,15 @@ async fn ws_handler(
     super::api::ensure_chat_conversation_access(&state, &auth, &conversation_id, false)
         .await?
         .ok_or(axum::http::StatusCode::NOT_FOUND)?;
-    Ok(ws.on_upgrade(move |socket| handle_socket(socket, state, conversation_id)))
+    Ok(ws.on_upgrade(move |socket| handle_socket(socket, state, conversation_id, auth)))
 }
 
-async fn handle_socket(socket: WebSocket, state: Arc<AppState>, conversation_id: String) {
+async fn handle_socket(
+    socket: WebSocket,
+    state: Arc<AppState>,
+    conversation_id: String,
+    auth: AuthUser,
+) {
     let (mut sender, mut receiver) = socket.split();
 
     let chat_id = conversation_id.clone();
@@ -369,6 +374,9 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, conversation_id:
                                                     timestamp: Utc::now(),
                                                     metadata: Some(MessageMetadata {
                                                         web_run_id: Some(run.run_id),
+                                                        auth_user_id: Some(auth.user_id.clone()),
+                                                        auth_username: Some(auth.username.clone()),
+                                                        auth_roles: auth.roles.clone(),
                                                         ..MessageMetadata::default()
                                                     }),
                                                 };
@@ -447,6 +455,9 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, conversation_id:
                                 web_run_id: Some(run.run_id),
                                 thinking_override,
                                 block_response,
+                                auth_user_id: Some(auth.user_id.clone()),
+                                auth_username: Some(auth.username.clone()),
+                                auth_roles: auth.roles.clone(),
                                 ..MessageMetadata::default()
                             }),
                         };

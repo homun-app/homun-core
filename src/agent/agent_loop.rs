@@ -376,6 +376,7 @@ impl AgentLoop {
             &[],
             None,
             None,
+            None,
         )
         .await
     }
@@ -399,6 +400,31 @@ impl AgentLoop {
             blocked_tools,
             None,
             None,
+            None,
+        )
+        .await
+    }
+
+    /// Process a message with explicit authenticated user context.
+    pub async fn process_message_with_blocked_tools_and_user(
+        &self,
+        content: &str,
+        session_key: &str,
+        channel: &str,
+        chat_id: &str,
+        blocked_tools: &[&str],
+        auth_user_id: Option<&str>,
+    ) -> Result<String> {
+        self.process_message_with_retry(
+            content,
+            session_key,
+            channel,
+            chat_id,
+            None,
+            blocked_tools,
+            None,
+            None,
+            auth_user_id,
         )
         .await
     }
@@ -415,6 +441,32 @@ impl AgentLoop {
         blocked_tools: &[&str],
         thinking_override: Option<bool>,
     ) -> Result<String> {
+        self.process_message_streaming_with_context(
+            content,
+            session_key,
+            channel,
+            chat_id,
+            stream_tx,
+            blocked_tools,
+            thinking_override,
+            None,
+        )
+        .await
+    }
+
+    /// Streaming variant with explicit authenticated user context.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn process_message_streaming_with_context(
+        &self,
+        content: &str,
+        session_key: &str,
+        channel: &str,
+        chat_id: &str,
+        stream_tx: mpsc::Sender<crate::provider::StreamChunk>,
+        blocked_tools: &[&str],
+        thinking_override: Option<bool>,
+        auth_user_id: Option<&str>,
+    ) -> Result<String> {
         self.process_message_with_retry(
             content,
             session_key,
@@ -424,6 +476,7 @@ impl AgentLoop {
             blocked_tools,
             thinking_override,
             None,
+            auth_user_id,
         )
         .await
     }
@@ -449,6 +502,7 @@ impl AgentLoop {
         blocked_tools: &[&str],
         thinking_override: Option<bool>,
         gateway_id_hint: Option<i64>,
+        auth_user_id: Option<&str>,
     ) -> Result<String> {
         // OBS-1: wrap the whole message processing in a metric observation.
         // Placed here (rather than inside process_message_inner) so retries are
@@ -463,6 +517,7 @@ impl AgentLoop {
                 blocked_tools,
                 thinking_override,
                 gateway_id_hint,
+                auth_user_id,
             )
             .await;
 
@@ -486,6 +541,7 @@ impl AgentLoop {
         blocked_tools: &[&str],
         thinking_override: Option<bool>,
         gateway_id_hint: Option<i64>,
+        auth_user_id: Option<&str>,
     ) -> Result<String> {
         let retry_enabled = self.config.read().await.agent.retry_on_overflow;
 
@@ -500,6 +556,7 @@ impl AgentLoop {
                     blocked_tools,
                     thinking_override,
                     gateway_id_hint,
+                    auth_user_id,
                 )
                 .await;
         }
@@ -518,6 +575,7 @@ impl AgentLoop {
                     blocked_tools,
                     thinking_override,
                     gateway_id_hint,
+                    auth_user_id,
                 )
                 .await;
 
@@ -572,8 +630,13 @@ impl AgentLoop {
         blocked_tools: &[&str],
         thinking_override: Option<bool>,
         _gateway_id_hint: Option<i64>,
+        auth_user_id: Option<&str>,
     ) -> Result<String> {
         crate::agent::stop::clear_stop();
+        let effective_user_id = auth_user_id
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or(crate::user::DEFAULT_ADMIN_USER_ID)
+            .to_string();
 
         // Built-in /profile command: switch active profile for this session
         if let Some(response) = handle_profile_command(&self.db, &self.config, content).await {
@@ -829,7 +892,7 @@ impl AgentLoop {
         // Using tokio::task_local ensures correctness across .await and thread migration.
         let profile_scope = crate::logs::ProfileScope {
             profile_id: Some(active_profile_id),
-            user_id: Some(crate::user::DEFAULT_ADMIN_USER_ID.to_string()),
+            user_id: Some(effective_user_id.clone()),
         };
 
         crate::logs::TASK_PROFILE_SCOPE.scope(profile_scope, async {
@@ -1252,7 +1315,7 @@ impl AgentLoop {
             message_tx: self.message_tx.clone(),
             approval_manager: crate::tools::global_approval_manager(),
             skill_env: None,
-            user_id: Some(crate::user::DEFAULT_ADMIN_USER_ID.to_string()),
+            user_id: Some(effective_user_id.clone()),
             profile_id: Some(active_profile_id),
             profile_brain_dir: active_profile_brain_dir.clone(),
             profile_slug: active_profile_slug.clone(),

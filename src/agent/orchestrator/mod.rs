@@ -47,6 +47,7 @@ impl TaskOrchestrator {
         stream_tx: Option<mpsc::Sender<StreamChunk>>,
         blocked_tools: &[&str],
         thinking_override: Option<bool>,
+        auth_user_id: Option<&str>,
     ) -> Result<String> {
         // Skip orchestration entirely if disabled.
         if intent::should_skip(config) {
@@ -59,6 +60,7 @@ impl TaskOrchestrator {
                 stream_tx,
                 blocked_tools,
                 thinking_override,
+                auth_user_id,
             )
             .await;
         }
@@ -78,6 +80,7 @@ impl TaskOrchestrator {
                     stream_tx,
                     blocked_tools,
                     thinking_override,
+                    auth_user_id,
                 )
                 .await
             }
@@ -92,6 +95,7 @@ impl TaskOrchestrator {
                     stream_tx,
                     blocked_tools,
                     thinking_override,
+                    auth_user_id,
                     &analysis,
                 )
                 .await
@@ -111,10 +115,11 @@ async fn passthrough(
     stream_tx: Option<mpsc::Sender<StreamChunk>>,
     blocked_tools: &[&str],
     thinking_override: Option<bool>,
+    auth_user_id: Option<&str>,
 ) -> Result<String> {
     if let Some(tx) = stream_tx {
         agent
-            .process_message_streaming_with_options(
+            .process_message_streaming_with_context(
                 content,
                 session_key,
                 channel,
@@ -122,16 +127,18 @@ async fn passthrough(
                 tx,
                 blocked_tools,
                 thinking_override,
+                auth_user_id,
             )
             .await
     } else {
         agent
-            .process_message_with_blocked_tools(
+            .process_message_with_blocked_tools_and_user(
                 content,
                 session_key,
                 channel,
                 chat_id,
                 blocked_tools,
+                auth_user_id,
             )
             .await
     }
@@ -149,6 +156,7 @@ async fn orchestrate(
     stream_tx: Option<mpsc::Sender<StreamChunk>>,
     blocked_tools: &[&str],
     thinking_override: Option<bool>,
+    auth_user_id: Option<&str>,
     analysis: &IntentAnalysis,
 ) -> Result<String> {
     // Emit "planning" phase to UI.
@@ -171,6 +179,7 @@ async fn orchestrate(
                 stream_tx,
                 blocked_tools,
                 thinking_override,
+                auth_user_id,
             )
             .await;
         }
@@ -196,6 +205,7 @@ async fn orchestrate(
         channel,
         chat_id,
         stream_tx.as_ref(),
+        auth_user_id,
     )
     .await;
 

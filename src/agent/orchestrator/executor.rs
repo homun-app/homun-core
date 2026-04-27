@@ -31,6 +31,7 @@ pub async fn execute(
     channel: &str,
     chat_id: &str,
     stream_tx: Option<&mpsc::Sender<StreamChunk>>,
+    auth_user_id: Option<&str>,
 ) -> Vec<SubtaskResult> {
     let mut results: HashMap<String, SubtaskResult> = HashMap::new();
 
@@ -77,6 +78,7 @@ pub async fn execute(
                     channel,
                     chat_id,
                     &subtask_desc,
+                    auth_user_id,
                 )
                 .await;
                 results.insert(subtask_id.clone(), result.clone());
@@ -105,9 +107,19 @@ pub async fn execute(
                 let cid = chat_id.to_string();
                 let desc = subtask_desc.clone();
                 let sid = subtask_id.clone();
+                let auth_uid = auth_user_id.map(str::to_string);
 
                 let handle = tokio::spawn(async move {
-                    execute_single(&agent_clone, &prompt, &sub_session, &ch, &cid, &desc).await
+                    execute_single(
+                        &agent_clone,
+                        &prompt,
+                        &sub_session,
+                        &ch,
+                        &cid,
+                        &desc,
+                        auth_uid.as_deref(),
+                    )
+                    .await
                 });
                 handles.push((idx, handle));
 
@@ -194,6 +206,7 @@ async fn execute_single(
     channel: &str,
     chat_id: &str,
     description: &str,
+    auth_user_id: Option<&str>,
 ) -> SubtaskResult {
     let mut retries = 0u8;
     let mut last_error = String::new();
@@ -209,7 +222,14 @@ async fn execute_single(
         };
 
         match agent
-            .process_message(&message, session_key, channel, chat_id)
+            .process_message_with_blocked_tools_and_user(
+                &message,
+                session_key,
+                channel,
+                chat_id,
+                &[],
+                auth_user_id,
+            )
             .await
         {
             Ok(output) => {

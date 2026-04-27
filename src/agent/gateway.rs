@@ -1982,6 +1982,8 @@ async fn dispatch_to_agent_inner(
 
     let blocked_tools = ctx.blocked_tools;
     let thinking_override = ctx.thinking_override;
+    let effective_auth_user_id = inbound.effective_auth_user_id().to_string();
+    let auth_user_id = Some(effective_auth_user_id.as_str());
 
     // Route through the task orchestrator — it decides whether to pass through
     // directly to the ReAct loop (simple) or decompose into subtasks (orchestrated).
@@ -2014,6 +2016,7 @@ async fn dispatch_to_agent_inner(
                 Some(chunk_tx),
                 blocked_tools,
                 thinking_override,
+                auth_user_id,
             )
             .await;
 
@@ -2074,6 +2077,7 @@ async fn dispatch_to_agent_inner(
                 None,
                 blocked_tools,
                 thinking_override,
+                auth_user_id,
             )
             .await
             {
@@ -2098,6 +2102,7 @@ async fn dispatch_to_agent_inner(
             None,
             blocked_tools,
             thinking_override,
+            auth_user_id,
         )
         .await
         {

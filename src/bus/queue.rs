@@ -62,6 +62,15 @@ pub struct MessageMetadata {
     /// Stored for audit — the LLM only sees the text content, not this metadata.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub block_response: Option<crate::tools::BlockResponse>,
+    /// Authenticated web/API user ID at the ingress boundary, when available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_user_id: Option<String>,
+    /// Authenticated username at the ingress boundary, when available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_username: Option<String>,
+    /// Authenticated role names at the ingress boundary, when available.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub auth_roles: Vec<String>,
 }
 
 /// Message from a channel to the agent
@@ -80,6 +89,14 @@ pub struct InboundMessage {
 impl InboundMessage {
     pub fn session_key(&self) -> String {
         format!("{}:{}", self.channel, self.chat_id)
+    }
+
+    pub fn effective_auth_user_id(&self) -> &str {
+        self.metadata
+            .as_ref()
+            .and_then(|metadata| metadata.auth_user_id.as_deref())
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or(crate::user::DEFAULT_ADMIN_USER_ID)
     }
 }
 
@@ -113,6 +130,61 @@ pub fn build_outbound_meta(inbound_meta: Option<&MessageMetadata>) -> Option<Out
         email_message_id: meta.email_message_id.clone(),
         email_subject: meta.email_subject.clone(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn message_metadata_serializes_authenticated_user_context() {
+        let metadata = MessageMetadata {
+            auth_user_id: Some("user-123".to_string()),
+            auth_username: Some("fabio".to_string()),
+            auth_roles: vec!["admin".to_string()],
+            ..MessageMetadata::default()
+        };
+
+        let encoded = serde_json::to_value(&metadata).unwrap();
+
+        assert_eq!(encoded["auth_user_id"], "user-123");
+        assert_eq!(encoded["auth_username"], "fabio");
+        assert_eq!(encoded["auth_roles"][0], "admin");
+    }
+
+    #[test]
+    fn inbound_message_effective_auth_user_id_falls_back_to_default_admin() {
+        let inbound = InboundMessage {
+            channel: "web".to_string(),
+            sender_id: "sender".to_string(),
+            chat_id: "chat".to_string(),
+            content: "hello".to_string(),
+            timestamp: Utc::now(),
+            metadata: None,
+        };
+
+        assert_eq!(
+            inbound.effective_auth_user_id(),
+            crate::user::DEFAULT_ADMIN_USER_ID
+        );
+    }
+
+    #[test]
+    fn inbound_message_effective_auth_user_id_prefers_metadata_user() {
+        let inbound = InboundMessage {
+            channel: "web".to_string(),
+            sender_id: "sender".to_string(),
+            chat_id: "chat".to_string(),
+            content: "hello".to_string(),
+            timestamp: Utc::now(),
+            metadata: Some(MessageMetadata {
+                auth_user_id: Some("user-456".to_string()),
+                ..MessageMetadata::default()
+            }),
+        };
+
+        assert_eq!(inbound.effective_auth_user_id(), "user-456");
+    }
 }
 
 /// Message from the agent to a channel
