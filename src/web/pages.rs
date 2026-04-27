@@ -2990,6 +2990,22 @@ pub(crate) async fn section_account(state: &AppState) -> String {
                     </div>
                 </section>
 
+                <section class="section" id="section-local-users">
+                    <div class="section-header" style="display:flex;justify-content:space-between;align-items:center;">
+                        <div style="display:flex;align-items:center;gap:8px">
+                            <h2 style="margin:0;padding:0;border:0">Local Users</h2>
+                            <span class="badge" id="local-users-count">0</span>
+                        </div>
+                        <button class="btn btn-primary btn-sm" id="btn-add-local-user">+ Add User</button>
+                    </div>
+                    <p style="color:var(--muted);margin-bottom:1rem;font-size:0.875rem">
+                        Local web accounts stored in the database. New users can be forced to change their password at first login.
+                    </p>
+                    <div class="item-list" id="local-users-list">
+                        <div class="empty-state" id="local-users-empty"><p>No local users configured</p></div>
+                    </div>
+                </section>
+
                 <section class="section">
                     <div class="section-header" style="display:flex;justify-content:space-between;align-items:center;">
                         <div style="display:flex;align-items:center;gap:8px">
@@ -3144,6 +3160,60 @@ pub(crate) async fn section_account(state: &AppState) -> String {
                     <div class="form-hint" style="margin-bottom:12px;">Add extra email accounts beyond the primary one configured in Settings &rarr; Channels.</div>
                     <div class="provider-grid" id="email-accounts-grid">{email_accounts_html}</div>
                 </section>
+
+        <div id="local-user-modal" class="modal">
+            <div class="modal-backdrop"></div>
+            <div class="modal-content modal-content--channel">
+                <div class="modal-header-group">
+                    <div class="modal-header">
+                        <h3 class="modal-title">Add Local User</h3>
+                        <button class="modal-close local-user-modal-close" type="button">&times;</button>
+                    </div>
+                    <p class="modal-subtitle">Create a local database account for Web UI access.</p>
+                </div>
+                <div class="modal-body">
+                    <form id="local-user-form">
+                        <div class="form-row--2">
+                            <div class="form-group">
+                                <label for="local-user-username">Username</label>
+                                <input type="text" id="local-user-username" class="input" autocomplete="username" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="local-user-role">Role</label>
+                                <select id="local-user-role" class="input">
+                                    <option value="user">User</option>
+                                    <option value="admin">Admin</option>
+                                    <option value="guest">Guest</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-row--2">
+                            <div class="form-group">
+                                <label for="local-user-password">Initial Password</label>
+                                <input type="password" id="local-user-password" class="input" autocomplete="new-password" minlength="8" required>
+                                <div class="form-hint">Minimum 8 characters.</div>
+                            </div>
+                            <div class="form-group">
+                                <label for="local-user-password-confirm">Confirm Password</label>
+                                <input type="password" id="local-user-password-confirm" class="input" autocomplete="new-password" minlength="8" required>
+                            </div>
+                        </div>
+                        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin-top:6px;">
+                            <input type="checkbox" id="local-user-must-change" checked style="margin-top:4px;">
+                            <span>
+                                <strong>Require password change on first login</strong><br>
+                                <span class="form-hint">The user can sign in with the initial password, then must choose a new one.</span>
+                            </span>
+                        </label>
+                        <div id="local-user-form-error" class="form-hint" style="color:var(--err);margin-top:10px;"></div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary local-user-modal-close">Cancel</button>
+                    <button type="submit" form="local-user-form" class="btn btn-primary" id="btn-save-local-user">Create User</button>
+                </div>
+            </div>
+        </div>
 
         <div id="email-account-modal" class="modal">
             <div class="modal-backdrop"></div>

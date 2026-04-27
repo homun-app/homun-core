@@ -4,6 +4,7 @@
 let owner = null;
 let identities = [];
 let tokens = [];
+let localUsers = [];
 
 function formatDate(isoString) {
     if (!isoString) return '—';
@@ -25,6 +26,11 @@ function channelIcon(channel) {
         web: '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" style="width:20px;height:20px"><circle cx="9" cy="9" r="7.5"/><path d="M1.5 9h15"/><path d="M9 1.5a11.5 11.5 0 0 1 3 7.5 11.5 11.5 0 0 1-3 7.5"/><path d="M9 1.5a11.5 11.5 0 0 0-3 7.5 11.5 11.5 0 0 0 3 7.5"/></svg>',
     };
     return icons[channel] || icons.web;
+}
+
+function roleLabel(user) {
+    if (!user || !Array.isArray(user.roles) || user.roles.length === 0) return 'user';
+    return user.roles.join(', ');
 }
 
 // ─── Owner ───
@@ -53,11 +59,202 @@ async function loadOwner() {
         var roleEl = document.getElementById('owner-role');
         if (usernameEl) usernameEl.textContent = data.username;
         if (roleEl) roleEl.textContent = data.role;
+        var usersList = document.getElementById('local-users-list');
+        var usersEmpty = document.getElementById('local-users-empty');
+        if (usersList && localUsers.length) renderLocalUsers(usersList, usersEmpty);
 
     } catch (e) {
         console.error('Failed to load owner:', e);
         document.getElementById('account-status').textContent = 'Error';
     }
+}
+
+// ─── Local Users ───
+async function loadLocalUsers() {
+    const list = document.getElementById('local-users-list');
+    const countBadge = document.getElementById('local-users-count');
+    const empty = document.getElementById('local-users-empty');
+    if (!list || !countBadge) return;
+
+    try {
+        const resp = await fetch('/api/v1/account/users');
+        if (!resp.ok) throw new Error('Failed to load users');
+        localUsers = await resp.json();
+        countBadge.textContent = localUsers.length;
+        renderLocalUsers(list, empty);
+    } catch (e) {
+        console.error('Failed to load local users:', e);
+        countBadge.textContent = '!';
+        list.innerHTML = '<div class="empty-state"><p>Unable to load local users</p></div>';
+    }
+}
+
+function renderLocalUsers(list, empty) {
+    list.innerHTML = '';
+    if (!localUsers.length) {
+        if (empty) {
+            list.appendChild(empty);
+            empty.style.display = 'block';
+        } else {
+            list.innerHTML = '<div class="empty-state"><p>No local users configured</p></div>';
+        }
+        return;
+    }
+
+    if (empty) empty.style.display = 'none';
+    localUsers.forEach(function (user) {
+        const row = document.createElement('div');
+        row.className = 'item-row';
+
+        const icon = document.createElement('div');
+        icon.className = 'item-icon';
+        icon.innerHTML = '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="6" r="3.5"/><path d="M3 17c0-3.5 2.5-6 6-6s6 2.5 6 6"/></svg>';
+
+        const info = document.createElement('div');
+        info.className = 'item-info';
+        const name = document.createElement('div');
+        name.className = 'item-name';
+        name.textContent = user.username || user.id;
+        const meta = document.createElement('div');
+        meta.className = 'item-meta';
+        const flags = [];
+        flags.push(roleLabel(user));
+        flags.push(user.has_password ? 'password set' : 'no password');
+        if (user.must_change_password) flags.push('must change password');
+        flags.push('created ' + formatDate(user.created_at));
+        meta.textContent = flags.join(' · ');
+        info.appendChild(name);
+        info.appendChild(meta);
+
+        const actions = document.createElement('div');
+        actions.className = 'item-actions';
+        const status = document.createElement('span');
+        status.className = user.enabled ? 'badge badge-success' : 'badge badge-warning';
+        status.textContent = user.enabled ? 'Enabled' : 'Disabled';
+        actions.appendChild(status);
+        actions.appendChild(document.createTextNode(' '));
+
+        const toggle = document.createElement('button');
+        const isCurrentUser = owner && owner.id === user.id;
+        toggle.className = user.enabled ? 'btn btn-ghost btn-sm' : 'btn btn-primary btn-sm';
+        toggle.textContent = user.enabled ? 'Disable' : 'Enable';
+        toggle.disabled = Boolean(isCurrentUser && user.enabled);
+        if (isCurrentUser && user.enabled) {
+            toggle.title = 'You cannot disable the current user';
+        }
+        toggle.addEventListener('click', function () {
+            setLocalUserEnabled(user.id, !user.enabled);
+        });
+        actions.appendChild(toggle);
+
+        row.appendChild(icon);
+        row.appendChild(info);
+        row.appendChild(actions);
+        list.appendChild(row);
+    });
+}
+
+function openLocalUserModal() {
+    const modal = document.getElementById('local-user-modal');
+    const form = document.getElementById('local-user-form');
+    const error = document.getElementById('local-user-form-error');
+    if (!modal || !form) return;
+    form.reset();
+    document.getElementById('local-user-role').value = 'user';
+    document.getElementById('local-user-must-change').checked = true;
+    if (error) error.textContent = '';
+    if (modal.parentElement !== document.body) document.body.appendChild(modal);
+    modal.classList.add('open');
+    setTimeout(function () {
+        const input = document.getElementById('local-user-username');
+        if (input) input.focus();
+    }, 0);
+}
+
+function closeLocalUserModal() {
+    const modal = document.getElementById('local-user-modal');
+    if (modal) modal.classList.remove('open');
+}
+
+async function createLocalUser(e) {
+    e.preventDefault();
+    const username = document.getElementById('local-user-username').value.trim();
+    const password = document.getElementById('local-user-password').value;
+    const confirm = document.getElementById('local-user-password-confirm').value;
+    const role = document.getElementById('local-user-role').value;
+    const mustChange = document.getElementById('local-user-must-change').checked;
+    const error = document.getElementById('local-user-form-error');
+    const saveBtn = document.getElementById('btn-save-local-user');
+    if (error) error.textContent = '';
+
+    if (!username) {
+        if (error) error.textContent = 'Username is required';
+        return;
+    }
+    if (password.length < 8) {
+        if (error) error.textContent = 'Password must be at least 8 characters';
+        return;
+    }
+    if (password !== confirm) {
+        if (error) error.textContent = 'Passwords do not match';
+        return;
+    }
+
+    if (saveBtn) saveBtn.disabled = true;
+    try {
+        const resp = await fetch('/api/v1/account/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                username: username,
+                password: password,
+                role: role,
+                must_change_password: mustChange,
+            }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'Failed to create user');
+        closeLocalUserModal();
+        showToast('User created');
+        await loadLocalUsers();
+    } catch (err) {
+        if (error) error.textContent = err.message;
+        else showToast(err.message, 'error');
+    } finally {
+        if (saveBtn) saveBtn.disabled = false;
+    }
+}
+
+async function setLocalUserEnabled(userId, enabled) {
+    try {
+        const resp = await fetch('/api/v1/account/users/' + encodeURIComponent(userId) + '/enabled', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: enabled }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'Failed to update user');
+        showToast(enabled ? 'User enabled' : 'User disabled');
+        await loadLocalUsers();
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+}
+
+function initLocalUsers() {
+    const addBtn = document.getElementById('btn-add-local-user');
+    const form = document.getElementById('local-user-form');
+    const modal = document.getElementById('local-user-modal');
+    if (!addBtn || !form || !modal) return;
+
+    addBtn.removeEventListener('click', openLocalUserModal);
+    addBtn.addEventListener('click', openLocalUserModal);
+    form.removeEventListener('submit', createLocalUser);
+    form.addEventListener('submit', createLocalUser);
+    modal.querySelectorAll('.local-user-modal-close, .modal-backdrop').forEach(function (el) {
+        el.removeEventListener('click', closeLocalUserModal);
+        el.addEventListener('click', closeLocalUserModal);
+    });
 }
 
 // ─── Identities ───
@@ -484,6 +681,8 @@ function initAccount() {
     // Guard: skip if account DOM not present
     if (!document.getElementById('owner-card')) return;
     loadOwner();
+    initLocalUsers();
+    loadLocalUsers();
     loadIdentities();
     loadDevices();
 }
