@@ -175,9 +175,203 @@
         if (compact) compact.appendChild(summary);
     }
 
+    function compactCognitionLabel(raw) {
+        if (!raw || raw.length < 60) return raw || 'Analysis complete';
+        const toolsMatch = raw.match(/Tools:\s*([^|]+)/);
+        const planMatch = raw.match(/Plan:\s*(\d+)\s*steps?/);
+        const parts = [];
+        if (toolsMatch) {
+            const names = toolsMatch[1].trim().split(/,\s*/);
+            parts.push(names.length + ' tool' + (names.length > 1 ? 's' : ''));
+        }
+        if (planMatch) parts.push(planMatch[1] + ' steps');
+        if (raw.includes('Memory: loaded')) parts.push('memory');
+        if (parts.length > 0) return 'Analyzed \u00b7 ' + parts.join(', ');
+        return raw.length > 50 ? raw.substring(0, 50) + '\u2026' : raw;
+    }
+
+    function friendlyCognitionStep(raw) {
+        if (raw.startsWith('discover_tools')) return 'Searching tools...';
+        if (raw.startsWith('discover_skills')) return 'Searching skills...';
+        if (raw.startsWith('discover_mcp')) return 'Checking services...';
+        if (raw.startsWith('search_memory')) return 'Checking memory...';
+        if (raw.startsWith('search_knowledge')) return 'Searching knowledge...';
+        return raw;
+    }
+
+    function cleanToolNames(text) {
+        return text.replace(/\b[\w-]+__(\w+)/g, '$1');
+    }
+
+    function formatCognitionStep(raw) {
+        const arrowIdx = raw.indexOf('\u2192');
+        if (arrowIdx === -1) return raw;
+        const result = raw.substring(arrowIdx + 1).trim();
+        if (raw.startsWith('discover_tools')) return 'Tools: ' + cleanToolNames(result);
+        if (raw.startsWith('discover_skills')) return 'Skills: ' + result;
+        if (raw.startsWith('discover_mcp')) return 'Services: ' + cleanToolNames(result);
+        if (raw.startsWith('search_memory')) return 'Memory: ' + result;
+        if (raw.startsWith('search_knowledge')) return 'Knowledge: ' + result;
+        return raw;
+    }
+
+    function createActivityController(options) {
+        let cognitionEl = null;
+        let thinkingEl = null;
+        let thinkingContent = '';
+
+        function getThinkingElement() {
+            return thinkingEl;
+        }
+
+        function getThinkingContent() {
+            return thinkingContent;
+        }
+
+        function clearThinkingState() {
+            thinkingEl = null;
+            thinkingContent = '';
+        }
+
+        function showCognitionStep(label) {
+            if (!cognitionEl) {
+                cognitionEl = document.createElement('div');
+                cognitionEl.className = 'chat-cognition is-active';
+
+                const header = document.createElement('div');
+                header.className = 'chat-cognition-header';
+                header.onclick = function () { window.toggleCognition(this); };
+
+                const dot = document.createElement('span');
+                dot.className = 'chat-cognition-dot';
+                const lbl = document.createElement('span');
+                lbl.className = 'chat-cognition-label';
+                const toggle = document.createElement('span');
+                toggle.className = 'chat-cognition-toggle';
+                toggle.textContent = '\u203A';
+
+                header.append(dot, lbl, toggle);
+
+                const steps = document.createElement('div');
+                steps.className = 'chat-cognition-steps';
+
+                cognitionEl.append(header, steps);
+                options.messagesEl.appendChild(cognitionEl);
+                options.scrollThreadToBottom();
+            }
+            const labelEl = cognitionEl.querySelector('.chat-cognition-label');
+            if (labelEl) labelEl.textContent = label;
+        }
+
+        function addCognitionStep(step) {
+            if (!cognitionEl) showCognitionStep('Analyzing...');
+            const stepsEl = cognitionEl.querySelector('.chat-cognition-steps');
+            if (!stepsEl) return;
+            const stepEl = document.createElement('div');
+            stepEl.className = 'chat-cognition-step';
+            stepEl.textContent = formatCognitionStep(step);
+            stepsEl.appendChild(stepEl);
+            const labelEl = cognitionEl.querySelector('.chat-cognition-label');
+            if (labelEl) labelEl.textContent = friendlyCognitionStep(step);
+            options.scrollThreadToBottom();
+        }
+
+        function finalizeCognition(summary) {
+            if (!cognitionEl) showCognitionStep(summary);
+            cognitionEl.classList.remove('is-active');
+            cognitionEl.classList.add('collapsed');
+            const labelEl = cognitionEl.querySelector('.chat-cognition-label');
+            if (labelEl) labelEl.textContent = compactCognitionLabel(summary);
+        }
+
+        function removeCognition() {
+            if (cognitionEl) {
+                cognitionEl.remove();
+                cognitionEl = null;
+            }
+        }
+
+        function createThinkingBlock() {
+            options.purgeOrphanLiveArtifacts();
+            if (thinkingEl) return thinkingEl;
+
+            thinkingEl = document.createElement('div');
+            thinkingEl.className = 'chat-thinking collapsed';
+            thinkingEl.innerHTML = `
+                <div class="chat-thinking-header" onclick="toggleThinking(this)">
+                    <span class="chat-thinking-label">Thinking</span>
+                    <span class="chat-thinking-toggle">\u203A</span>
+                </div>
+                <div class="chat-thinking-content"></div>
+            `;
+
+            const toolIndicatorEl = options.getToolIndicator();
+            if (toolIndicatorEl && toolIndicatorEl.parentElement === options.messagesEl) {
+                options.messagesEl.insertBefore(thinkingEl, toolIndicatorEl);
+            } else {
+                options.messagesEl.appendChild(thinkingEl);
+            }
+            options.scrollThreadToBottom();
+
+            return thinkingEl;
+        }
+
+        function appendThinking(delta) {
+            if (!thinkingEl) createThinkingBlock();
+
+            thinkingContent += delta;
+            thinkingEl.classList.add('has-content', 'is-live');
+            const contentEl = thinkingEl.querySelector('.chat-thinking-content');
+            if (contentEl) {
+                contentEl.textContent = thinkingContent;
+            }
+
+            options.scrollThreadToBottom();
+        }
+
+        function finalizeThinking() {
+            if (thinkingEl && thinkingContent) {
+                thinkingEl.classList.remove('collapsed');
+                thinkingEl.classList.remove('is-live');
+                thinkingEl.classList.add('has-content');
+
+                if (thinkingContent.length > 200) {
+                    thinkingEl.classList.add('collapsed');
+                }
+            }
+            clearThinkingState();
+        }
+
+        return {
+            addCognitionStep,
+            appendThinking,
+            clearThinkingState,
+            createThinkingBlock,
+            finalizeCognition,
+            finalizeThinking,
+            getThinkingContent,
+            getThinkingElement,
+            removeCognition,
+            showCognitionStep,
+        };
+    }
+
+    window.toggleCognition = function (headerEl) {
+        const section = headerEl.closest('.chat-cognition');
+        if (section) section.classList.toggle('collapsed');
+    };
+
+    window.toggleThinking = function (headerEl) {
+        const thinkingBlock = headerEl.closest('.chat-thinking');
+        if (thinkingBlock) {
+            thinkingBlock.classList.toggle('collapsed');
+        }
+    };
+
     window.HomunChatTools = {
         buildReasoningNote,
         buildToolCallCard,
+        createActivityController,
         markToolCallComplete,
         reasoningHeadline,
         toolStatusLabel,

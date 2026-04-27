@@ -105,6 +105,7 @@ const GENERIC_PLAN_CONSTRAINTS = new Set([
 // Track the currently streaming message element so we can
 // append incremental deltas as they arrive from the LLM.
 let streamingController = null;
+let activityController = null;
 
 // Pending rich blocks received before the final response
 let pendingBlocks = null;
@@ -115,10 +116,6 @@ let toolIndicatorEl = null;
 // Current tool call blocks for display (shown before streaming text)
 let currentToolCallsEl = null;
 let currentToolCalls = [];
-
-// Thinking block element
-let thinkingEl = null;
-let thinkingContent = '';
 
 // Browser screenshot gallery
 let browserGalleryEl = null;
@@ -687,11 +684,10 @@ function purgeOrphanLiveArtifacts() {
     messagesEl.querySelectorAll('.chat-thinking').forEach((el) => {
         const contentEl = el.querySelector('.chat-thinking-content');
         const hasContent = !!(contentEl && contentEl.textContent.trim());
-        if (el === thinkingEl) {
-            if (!thinkingContent.trim() && !hasContent) {
+        if (activityController && el === activityController.getThinkingElement()) {
+            if (!activityController.getThinkingContent().trim() && !hasContent) {
                 el.remove();
-                thinkingEl = null;
-                thinkingContent = '';
+                activityController.clearThinkingState();
             }
             return;
         }
@@ -735,10 +731,10 @@ function clearTransientRunUi() {
     reasoningCount = 0;
     reasoningTools = [];
     activeTools = [];
+    const thinkingEl = activityController?.getThinkingElement();
     if (thinkingEl) {
         thinkingEl.remove();
-        thinkingEl = null;
-        thinkingContent = '';
+        activityController.clearThinkingState();
     }
 }
 
@@ -1156,118 +1152,20 @@ function setExecutionModel(model) {
 
 // ─── Cognition indicator ──────────────────────────────────────
 
-let cognitionEl = null;
-
-/** Show or update the cognition phase indicator. */
 function showCognitionStep(label) {
-    if (!cognitionEl) {
-        cognitionEl = document.createElement('div');
-        cognitionEl.className = 'chat-cognition is-active';
-
-        const header = document.createElement('div');
-        header.className = 'chat-cognition-header';
-        header.onclick = function () { toggleCognition(this); };
-
-        const dot = document.createElement('span');
-        dot.className = 'chat-cognition-dot';
-        const lbl = document.createElement('span');
-        lbl.className = 'chat-cognition-label';
-        const toggle = document.createElement('span');
-        toggle.className = 'chat-cognition-toggle';
-        toggle.textContent = '\u203A';
-
-        header.append(dot, lbl, toggle);
-
-        const steps = document.createElement('div');
-        steps.className = 'chat-cognition-steps';
-
-        cognitionEl.append(header, steps);
-        messagesEl.appendChild(cognitionEl);
-        scrollThreadToBottom();
-    }
-    const labelEl = cognitionEl.querySelector('.chat-cognition-label');
-    if (labelEl) labelEl.textContent = label;
+    activityController.showCognitionStep(label);
 }
 
-/** Add a discovery step to the cognition indicator. */
 function addCognitionStep(step) {
-    if (!cognitionEl) showCognitionStep('Analyzing...');
-    const stepsEl = cognitionEl.querySelector('.chat-cognition-steps');
-    if (!stepsEl) return;
-    const stepEl = document.createElement('div');
-    stepEl.className = 'chat-cognition-step';
-    stepEl.textContent = formatCognitionStep(step);
-    stepsEl.appendChild(stepEl);
-    const labelEl = cognitionEl.querySelector('.chat-cognition-label');
-    if (labelEl) labelEl.textContent = friendlyCognitionStep(step);
-    scrollThreadToBottom();
+    activityController.addCognitionStep(step);
 }
 
-/** Finalize the cognition indicator with the result summary. */
 function finalizeCognition(summary) {
-    if (!cognitionEl) showCognitionStep(summary);
-    cognitionEl.classList.remove('is-active');
-    cognitionEl.classList.add('collapsed');
-    const labelEl = cognitionEl.querySelector('.chat-cognition-label');
-    if (labelEl) labelEl.textContent = compactCognitionLabel(summary);
+    activityController.finalizeCognition(summary);
 }
 
-/** Compact the cognition result into a short label for the collapsed header. */
-function compactCognitionLabel(raw) {
-    if (!raw || raw.length < 60) return raw || 'Analysis complete';
-    // Extract key parts from "Understanding... | Tools: x, y | Plan: N steps"
-    const toolsMatch = raw.match(/Tools:\s*([^|]+)/);
-    const planMatch = raw.match(/Plan:\s*(\d+)\s*steps?/);
-    const parts = [];
-    if (toolsMatch) {
-        const names = toolsMatch[1].trim().split(/,\s*/);
-        parts.push(names.length + ' tool' + (names.length > 1 ? 's' : ''));
-    }
-    if (planMatch) parts.push(planMatch[1] + ' steps');
-    if (raw.includes('Memory: loaded')) parts.push('memory');
-    if (parts.length > 0) return 'Analyzed \u00b7 ' + parts.join(', ');
-    // Fallback: truncate
-    return raw.length > 50 ? raw.substring(0, 50) + '\u2026' : raw;
-}
-
-/** Toggle cognition detail visibility. */
-window.toggleCognition = function (headerEl) {
-    const section = headerEl.closest('.chat-cognition');
-    if (section) section.classList.toggle('collapsed');
-};
-
-/** Map discovery tool calls to user-friendly labels (used for header during activity). */
-function friendlyCognitionStep(raw) {
-    if (raw.startsWith('discover_tools')) return 'Searching tools...';
-    if (raw.startsWith('discover_skills')) return 'Searching skills...';
-    if (raw.startsWith('discover_mcp')) return 'Checking services...';
-    if (raw.startsWith('search_memory')) return 'Checking memory...';
-    if (raw.startsWith('search_knowledge')) return 'Searching knowledge...';
-    return raw;
-}
-
-/** Format a cognition step for display in the expanded details. */
-function formatCognitionStep(raw) {
-    // "discover_tools(query) → N found: tool1, tool2" → "Tools: 7 found (browser, web_search, ...)"
-    const arrowIdx = raw.indexOf('\u2192');
-    if (arrowIdx === -1) return raw;
-    const result = raw.substring(arrowIdx + 1).trim();
-    if (raw.startsWith('discover_tools')) return 'Tools: ' + cleanToolNames(result);
-    if (raw.startsWith('discover_skills')) return 'Skills: ' + result;
-    if (raw.startsWith('discover_mcp')) return 'Services: ' + cleanToolNames(result);
-    if (raw.startsWith('search_memory')) return 'Memory: ' + result;
-    if (raw.startsWith('search_knowledge')) return 'Knowledge: ' + result;
-    return raw;
-}
-
-/** Clean MCP-prefixed tool names for display: "brave-search__brave_local_search" → "local_search" */
-function cleanToolNames(text) {
-    return text.replace(/\b[\w-]+__(\w+)/g, '$1');
-}
-
-/** Remove the cognition indicator from the DOM. */
 function removeCognition() {
-    if (cognitionEl) { cognitionEl.remove(); cognitionEl = null; }
+    activityController.removeCognition();
 }
 
 // ─── Tool indicators ───────────────────────────────────────────
@@ -1506,69 +1404,17 @@ function clearToolCalls() {
 
 // ─── Thinking blocks ────────────────────────────────────────────
 
-/** Create a collapsible thinking block */
 function createThinkingBlock() {
-    purgeOrphanLiveArtifacts();
-    if (thinkingEl) return thinkingEl;
-
-    thinkingEl = document.createElement('div');
-    thinkingEl.className = 'chat-thinking collapsed';
-    thinkingEl.innerHTML = `
-        <div class="chat-thinking-header" onclick="toggleThinking(this)">
-            <span class="chat-thinking-label">Thinking</span>
-            <span class="chat-thinking-toggle">›</span>
-        </div>
-        <div class="chat-thinking-content"></div>
-    `;
-
-    // Insert before tool indicator or at the end
-    if (toolIndicatorEl && toolIndicatorEl.parentElement === messagesEl) {
-        messagesEl.insertBefore(thinkingEl, toolIndicatorEl);
-    } else {
-        messagesEl.appendChild(thinkingEl);
-    }
-    scrollThreadToBottom();
-
-    return thinkingEl;
+    return activityController.createThinkingBlock();
 }
 
-/** Append content to the thinking block */
 function appendThinking(delta) {
-    if (!thinkingEl) createThinkingBlock();
-
-    thinkingContent += delta;
-    thinkingEl.classList.add('has-content', 'is-live');
-    const contentEl = thinkingEl.querySelector('.chat-thinking-content');
-    if (contentEl) {
-        contentEl.textContent = thinkingContent;
-    }
-
-    scrollThreadToBottom();
+    activityController.appendThinking(delta);
 }
 
-/** Finalize thinking block (collapses it if there's content) */
 function finalizeThinking() {
-    if (thinkingEl && thinkingContent) {
-        thinkingEl.classList.remove('collapsed');
-        thinkingEl.classList.remove('is-live');
-        thinkingEl.classList.add('has-content');
-
-        // Auto-collapse if content is long
-        if (thinkingContent.length > 200) {
-            thinkingEl.classList.add('collapsed');
-        }
-    }
-    thinkingEl = null;
-    thinkingContent = '';
+    activityController.finalizeThinking();
 }
-
-/** Toggle thinking block visibility */
-window.toggleThinking = function (headerEl) {
-    const thinkingBlock = headerEl.closest('.chat-thinking');
-    if (thinkingBlock) {
-        thinkingBlock.classList.toggle('collapsed');
-    }
-};
 
 // ─── Utility functions ───────────────────────────────────────────
 
@@ -1796,6 +1642,12 @@ streamingController = window.HomunChatStreaming.createStreamingController({
     renderBlocks: (...args) => (typeof renderBlocks === 'function' ? renderBlocks(...args) : undefined),
     sendBlockResponse: (...args) => sendBlockResponse(...args),
 });
+activityController = window.HomunChatTools.createActivityController({
+    messagesEl,
+    getToolIndicator: () => toolIndicatorEl,
+    purgeOrphanLiveArtifacts,
+    scrollThreadToBottom,
+});
 
 function disconnectSocket() {
     if (reconnectTimer) {
@@ -2009,9 +1861,10 @@ function settleLiveArtifacts() {
         removeToolIndicator();
     }
 
-    if (thinkingEl && !thinkingContent.trim()) {
+    const thinkingEl = activityController.getThinkingElement();
+    if (thinkingEl && !activityController.getThinkingContent().trim()) {
         thinkingEl.remove();
-        thinkingEl = null;
+        activityController.clearThinkingState();
     }
 
     if (reasoningSectionEl && reasoningCount === 0 && !(reasoningContentEl && reasoningContentEl.textContent.trim())) {
