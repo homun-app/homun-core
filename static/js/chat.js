@@ -1902,46 +1902,9 @@ function finalizeStream(content) {
 
 // ─── Message actions (copy, edit/resend) ────────────────────────
 
-const ICON_COPY = '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M3 12V4a1.5 1.5 0 011.5-1.5H12"/></svg>';
-const ICON_EDIT = '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 3l4 4-9 9H2v-4z"/><path d="M9.5 4.5l4 4"/></svg>';
-const ICON_CHECK = '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9l4 4 6-7"/></svg>';
-
 function createMessageActions(role, msgDiv) {
-    const actions = document.createElement('div');
-    actions.className = 'chat-msg-actions';
-
-    // Copy button (all messages)
-    const copyBtn = document.createElement('button');
-    copyBtn.className = 'chat-msg-action-btn';
-    copyBtn.title = 'Copy';
-    copyBtn.innerHTML = ICON_COPY;
-    copyBtn.addEventListener('click', () => copyMessageContent(msgDiv, copyBtn));
-    actions.appendChild(copyBtn);
-
-    // Edit button (user messages only)
-    if (role === 'user') {
-        const editBtn = document.createElement('button');
-        editBtn.className = 'chat-msg-action-btn';
-        editBtn.title = 'Edit & Resend';
-        editBtn.innerHTML = ICON_EDIT;
-        editBtn.addEventListener('click', () => startEditMessage(msgDiv));
-        actions.appendChild(editBtn);
-    }
-
-    return actions;
-}
-
-function copyMessageContent(msgDiv, btn) {
-    const raw = msgDiv.dataset.rawContent || '';
-    if (!raw) return;
-    navigator.clipboard.writeText(raw).then(() => {
-        // Brief visual feedback — swap icon to checkmark
-        btn.classList.add('is-copied');
-        btn.innerHTML = ICON_CHECK;
-        setTimeout(() => {
-            btn.classList.remove('is-copied');
-            btn.innerHTML = ICON_COPY;
-        }, 1500);
+    return window.HomunChatTools.createMessageActions(role, msgDiv, {
+        startEditMessage,
     });
 }
 
@@ -2105,40 +2068,7 @@ function addMessage(role, content, toolsUsed, options = {}) {
 
     // Show tools as a collapsible section (matches live tool timeline)
     if (toolsUsed && toolsUsed.length > 0) {
-        const section = document.createElement('div');
-        section.className = 'chat-reasoning collapsed';
-        const uniqueTools = [...new Set(toolsUsed)];
-        const label = uniqueTools.length === 1
-            ? `Used ${uniqueTools[0]}`
-            : `Used tools`;
-        const headerHtml = '<div class="chat-reasoning-header" onclick="toggleReasoning(this)">' +
-            '<span class="chat-reasoning-summary">' +
-            '' +
-            '<span class="chat-reasoning-label">' + window.HomunChatRendering.escapeHtml(label) + '</span>' +
-            '<span class="chat-reasoning-count">' + toolsUsed.length + '</span>' +
-            '</span>' +
-            '<span class="chat-reasoning-toggle">\u203a</span>' +
-            '</div>' +
-            '<div class="chat-reasoning-content"></div>';
-        section.innerHTML = headerHtml; // safe: no user content in template
-        const contentEl = section.querySelector('.chat-reasoning-content');
-        toolsUsed.forEach(toolName => {
-            const card = document.createElement('div');
-            card.className = 'chat-tool-call';
-            card.dataset.toolStatus = 'done';
-            const compact = document.createElement('div');
-            compact.className = 'chat-tool-call-compact';
-            const nameSpan = document.createElement('span');
-            nameSpan.className = 'chat-tool-call-name';
-            nameSpan.textContent = toolName;
-            compact.appendChild(nameSpan);
-            const metaSpan = document.createElement('span');
-            metaSpan.className = 'chat-tool-call-meta';
-            metaSpan.textContent = 'Done';
-            compact.appendChild(metaSpan);
-            card.appendChild(compact);
-            contentEl.appendChild(card);
-        });
+        const section = window.HomunChatTools.buildHistoricalToolsSection(toolsUsed);
         div.prepend(section);
     }
 
