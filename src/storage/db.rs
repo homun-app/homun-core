@@ -1083,7 +1083,7 @@ impl Database {
             "SELECT u.id, u.username, u.roles, u.password_hash, u.enabled, u.must_change_password, u.created_at, u.updated_at, u.metadata
              FROM users u
              JOIN webhook_tokens wt ON u.id = wt.user_id
-             WHERE wt.token = ? AND wt.enabled = 1
+             WHERE wt.token = ? AND wt.enabled = 1 AND u.enabled = 1
                AND (wt.expires_at IS NULL OR wt.expires_at > datetime('now'))",
         )
         .bind(token)
@@ -3042,6 +3042,40 @@ END;
         let row = db.load_user("user-lifecycle").await.unwrap().unwrap();
         assert_eq!(row.enabled, 0);
         assert_eq!(row.must_change_password, 1);
+    }
+
+    #[tokio::test]
+    async fn test_disabled_user_cannot_authenticate_with_webhook_token() {
+        let (db, _dir) = test_db().await;
+
+        db.create_user("disabled-token-user", "disabled-token", &["user"])
+            .await
+            .unwrap();
+        db.create_webhook_token(
+            "wh_disabled_user",
+            "disabled-token-user",
+            "Disabled User Token",
+            "admin",
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert!(db
+            .lookup_user_by_webhook_token("wh_disabled_user")
+            .await
+            .unwrap()
+            .is_some());
+
+        assert!(db
+            .set_user_enabled("disabled-token-user", false)
+            .await
+            .unwrap());
+        assert!(db
+            .lookup_user_by_webhook_token("wh_disabled_user")
+            .await
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]

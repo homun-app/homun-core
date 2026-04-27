@@ -7,7 +7,7 @@ use axum::routing::get;
 use axum::Router;
 use serde::{Deserialize, Serialize};
 
-use super::super::auth::{hash_password, require_admin, AuthUser};
+use super::super::auth::{hash_password, require_admin, verify_password, AuthUser};
 use super::super::server::AppState;
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -25,6 +25,10 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route(
             "/v1/account/users/{user_id}/enabled",
             axum::routing::put(set_user_enabled),
+        )
+        .route(
+            "/v1/account/password",
+            axum::routing::post(change_own_password),
         )
         .route("/v1/account/tokens", get(list_tokens).post(create_token))
         .route(
@@ -209,6 +213,12 @@ struct SetUserEnabledRequest {
     enabled: bool,
 }
 
+#[derive(Debug, Deserialize)]
+struct ChangePasswordRequest {
+    current_password: String,
+    new_password: String,
+}
+
 fn user_response(row: crate::storage::UserRow) -> UserAccountResponse {
     let roles: Vec<String> = serde_json::from_str(&row.roles).unwrap_or_default();
     UserAccountResponse {
@@ -263,6 +273,90 @@ async fn get_account(
     });
 
     Ok(Json(owner))
+}
+
+/// Change the current session user's local password.
+async fn change_own_password(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+    Json(req): Json<ChangePasswordRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let db = match &state.db {
+        Some(db) => db,
+        None => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database not available"})),
+            ))
+        }
+    };
+
+    if req.new_password.len() < 8 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Password must be at least 8 characters"})),
+        ));
+    }
+    if req.current_password == req.new_password {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "New password must be different"})),
+        ));
+    }
+
+    let user = db
+        .load_user(&auth.user_id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "User not found"})),
+            )
+        })?;
+
+    let current_hash = user.password_hash.as_deref().ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Account has no password set"})),
+        )
+    })?;
+    if !verify_password(&req.current_password, current_hash) {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "Current password is invalid"})),
+        ));
+    }
+
+    let new_hash = hash_password(&req.new_password).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+    })?;
+    db.set_user_password_hash(&auth.user_id, &new_hash)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+        })?;
+    db.set_user_must_change_password(&auth.user_id, false)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+        })?;
+
+    Ok(Json(serde_json::json!({"ok": true})))
 }
 
 /// List local users. Admin only.

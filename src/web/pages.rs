@@ -34,6 +34,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/profiles", get(profiles_page))
         .route("/memory", get(memory_page))
         .route("/knowledge", get(knowledge_page))
+        .route("/change-password", get(change_password_page))
         .route("/onboarding", get(onboarding_page))
 }
 
@@ -2478,6 +2479,15 @@ async fn knowledge_page(State(_state): State<Arc<AppState>>) -> Html<String> {
 
 // ─── Auth Pages (standalone, no sidebar) ───────────────────────
 
+fn html_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
 /// Standalone page wrapper without sidebar (for login, setup).
 fn standalone_page(title: &str, body: &str) -> String {
     format!(
@@ -2713,6 +2723,86 @@ pub async fn setup_wizard_page() -> Html<String> {
     "##;
 
     Html(standalone_page("Setup", body))
+}
+
+/// GET /change-password — required password update for admin-created users.
+pub async fn change_password_page(Extension(auth): Extension<AuthUser>) -> Html<String> {
+    let username = html_escape(&auth.username);
+    let body = format!(
+        r##"
+    <div class="auth-card">
+        <div class="auth-logo">
+            <img src="/static/img/homun.png" alt="Homun" class="auth-logo-light">
+            <img src="/static/img/homun_white.png" alt="Homun" class="auth-logo-dark">
+        </div>
+        <h1>Change Password</h1>
+        <p>Signed in as {username}</p>
+        <div class="auth-error" id="error-msg"></div>
+        <form id="change-password-form" onsubmit="return handlePasswordChange(event)">
+            <label for="current-password">Current Password</label>
+            <input type="password" id="current-password" name="current-password" required autocomplete="current-password" autofocus>
+            <label for="new-password">New Password</label>
+            <input type="password" id="new-password" name="new-password" required autocomplete="new-password" minlength="8">
+            <label for="confirm-password">Confirm New Password</label>
+            <input type="password" id="confirm-password" name="confirm-password" required autocomplete="new-password" minlength="8">
+            <button type="submit" id="change-password-btn">Update Password</button>
+        </form>
+    </div>
+    <script>
+    function getCsrfToken() {{
+        var match = document.cookie.match(/(?:^|;\s*)homun_csrf=([^;]+)/);
+        return match ? match[1] : '';
+    }}
+    async function handlePasswordChange(e) {{
+        e.preventDefault();
+        var btn = document.getElementById('change-password-btn');
+        var err = document.getElementById('error-msg');
+        var current = document.getElementById('current-password').value;
+        var next = document.getElementById('new-password').value;
+        var confirm = document.getElementById('confirm-password').value;
+        btn.disabled = true;
+        err.textContent = '';
+
+        if (next.length < 8) {{
+            err.textContent = 'Password must be at least 8 characters';
+            btn.disabled = false;
+            return false;
+        }}
+        if (next !== confirm) {{
+            err.textContent = 'Passwords do not match';
+            btn.disabled = false;
+            return false;
+        }}
+
+        try {{
+            var res = await fetch('/api/v1/account/password', {{
+                method: 'POST',
+                headers: {{
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': getCsrfToken()
+                }},
+                body: JSON.stringify({{
+                    current_password: current,
+                    new_password: next
+                }})
+            }});
+            var data = await res.json();
+            if (res.ok && data.ok) {{
+                window.location.href = '/';
+            }} else {{
+                err.textContent = data.error || 'Password update failed';
+            }}
+        }} catch (ex) {{
+            err.textContent = 'Network error';
+        }}
+        btn.disabled = false;
+        return false;
+    }}
+    </script>
+    "##
+    );
+
+    Html(standalone_page("Change Password", &body))
 }
 
 // ─── Onboarding ─────────────────────────────────────────────────

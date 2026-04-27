@@ -293,6 +293,22 @@ impl AuthUser {
     }
 }
 
+fn auth_redirect_response(path: &str, redirect_to: &str, error: &str, message: &str) -> Response {
+    if path.starts_with("/api/") || path.starts_with("/ws/") {
+        (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": error,
+                "message": message,
+                "redirect": redirect_to
+            })),
+        )
+            .into_response()
+    } else {
+        Redirect::to(redirect_to).into_response()
+    }
+}
+
 /// Reject with 403 if the auth context does not allow writes.
 pub fn require_write(auth: &AuthUser) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
     if auth.can_write() {
@@ -387,6 +403,49 @@ pub async fn auth_middleware(
         if let Some(cookie_value) = extract_session_cookie(&req) {
             if let Some(session_id) = session_store.verify_cookie(&cookie_value) {
                 if let Some(session) = session_store.get(&session_id).await {
+                    let path = req.uri().path().to_string();
+                    let mut auth_user_id = session.user_id.clone();
+                    let mut auth_username = session.username.clone();
+                    let mut auth_roles = session.roles.clone();
+                    let mut must_change_password = false;
+
+                    if let Some(db) = &state.db {
+                        match db.load_user(&session.user_id).await {
+                            Ok(Some(user_row)) if user_row.enabled != 0 => {
+                                auth_user_id = user_row.id;
+                                auth_username = user_row.username;
+                                auth_roles = serde_json::from_str(&user_row.roles)
+                                    .unwrap_or_else(|_| vec!["user".to_string()]);
+                                must_change_password = user_row.must_change_password != 0;
+                            }
+                            Ok(Some(_)) => {
+                                session_store.destroy(&session_id).await;
+                                return auth_redirect_response(
+                                    &path,
+                                    "/login",
+                                    "account_disabled",
+                                    "Account disabled.",
+                                );
+                            }
+                            Ok(None) => {
+                                session_store.destroy(&session_id).await;
+                                return auth_redirect_response(
+                                    &path,
+                                    "/login",
+                                    "session_user_missing",
+                                    "Session user no longer exists.",
+                                );
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    user_id = %session.user_id,
+                                    error = %e,
+                                    "Failed to refresh session user from DB"
+                                );
+                            }
+                        }
+                    }
+
                     // Session binding checks (REM-4b): warn on IP/User-Agent drift
                     let current_ua = req
                         .headers()
@@ -425,14 +484,13 @@ pub async fn auth_middleware(
                         .insert(CsrfToken(session.csrf_token.clone()));
 
                     req.extensions_mut().insert(AuthUser {
-                        user_id: session.user_id,
-                        username: session.username,
-                        roles: session.roles,
+                        user_id: auth_user_id,
+                        username: auth_username,
+                        roles: auth_roles,
                         auth_method: AuthMethod::Session,
                     });
 
                     // Redirect to onboarding if not yet completed and no provider set up
-                    let path = req.uri().path();
                     let config = state.config.read().await;
                     let needs_onboarding = !config.ui.onboarding_completed
                         && config.agent.model.is_empty()
@@ -444,6 +502,19 @@ pub async fn auth_middleware(
                     drop(config);
                     if needs_onboarding {
                         return Redirect::to("/onboarding").into_response();
+                    }
+
+                    let can_change_password = path == "/change-password"
+                        || path == "/api/v1/account/password"
+                        || path == "/api/auth/logout"
+                        || path.starts_with("/static/");
+                    if must_change_password && !can_change_password {
+                        return auth_redirect_response(
+                            &path,
+                            "/change-password",
+                            "password_change_required",
+                            "Password change required before continuing.",
+                        );
                     }
 
                     return next.run(req).await;
