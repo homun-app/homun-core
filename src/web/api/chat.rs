@@ -1102,13 +1102,25 @@ async fn get_chat_profile(
     let db = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
     let session_key = web_session_key(&conversation_id);
 
-    // Load all profiles for the response
-    let all_profiles = crate::profiles::db::load_all_profiles(db.pool())
+    // Load profiles owned by the authenticated user.
+    let mut all_profiles = crate::profiles::db::load_profiles_for_user(db.pool(), &auth.user_id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if all_profiles.is_empty() {
+        let profile = crate::profiles::db::ensure_initial_profile_for_user(
+            db.pool(),
+            &auth.user_id,
+            &auth.username,
+        )
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        all_profiles.push(profile);
+    }
 
     // Resolve the active profile
-    let active = resolve_active_profile(db, &session_key, &state).await;
+    let active = resolve_active_profile_for_user(db, &session_key, &state, &auth, &all_profiles)
+        .await
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     Ok(Json(ChatProfileResponse {
         conversation_id,
@@ -1139,11 +1151,15 @@ async fn set_chat_profile(
     let db = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
     let session_key = web_session_key(&body.conversation_id);
 
-    // Find the target profile by slug
-    let profile = crate::profiles::db::load_profile_by_slug(db.pool(), &body.profile_slug)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::NOT_FOUND)?;
+    // Find the target profile by slug, restricted to the authenticated user.
+    let profile = crate::profiles::db::load_profile_by_slug_for_user(
+        db.pool(),
+        &body.profile_slug,
+        &auth.user_id,
+    )
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .ok_or(StatusCode::NOT_FOUND)?;
 
     // Persist the profile switch on this session
     db.set_session_profile_id(&session_key, profile.id)
@@ -1157,20 +1173,42 @@ async fn set_chat_profile(
     }))
 }
 
-/// Resolve the active profile for a web chat session.
-///
-/// Delegates to [`profile_resolver::resolve_session_profile`] which implements
-/// the shared cascade: session override → global config default → DB default.
-async fn resolve_active_profile(
+async fn resolve_active_profile_for_user(
     db: &crate::storage::Database,
     session_key: &str,
     state: &Arc<AppState>,
-) -> crate::profiles::Profile {
+    auth: &AuthUser,
+    available_profiles: &[crate::profiles::Profile],
+) -> Option<crate::profiles::Profile> {
+    if let Some(pid) = db.get_session_profile_id(session_key).await {
+        if let Ok(Some(profile)) =
+            crate::profiles::db::load_profile_by_id_for_user(db.pool(), pid, &auth.user_id).await
+        {
+            return Some(profile);
+        }
+    }
+
     let global_default = {
         let cfg = state.config.read().await;
         cfg.profiles.default.clone()
     };
-    crate::agent::profile_resolver::resolve_session_profile(db, session_key, &global_default).await
+    if !global_default.is_empty() {
+        if let Ok(Some(profile)) = crate::profiles::db::load_profile_by_slug_for_user(
+            db.pool(),
+            &global_default,
+            &auth.user_id,
+        )
+        .await
+        {
+            return Some(profile);
+        }
+    }
+
+    available_profiles
+        .iter()
+        .find(|profile| profile.is_default != 0)
+        .cloned()
+        .or_else(|| available_profiles.first().cloned())
 }
 
 // ─── Tests ──────────────────────────────────────────────────────

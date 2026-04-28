@@ -98,8 +98,7 @@
         var badge = document.getElementById('topbar-profile-badge');
         if (!badge) return;
 
-        // Hide badge when only one default profile (no point switching)
-        var shouldShow = cachedProfiles && cachedProfiles.length > 1;
+        var shouldShow = cachedProfiles && cachedProfiles.length > 0;
         if (!shouldShow) {
             badge.hidden = true;
             return;

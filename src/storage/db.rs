@@ -495,6 +495,7 @@ impl Database {
             include_str!("../../migrations/055_user_lifecycle.sql"),
         )
         .await?;
+        Self::reassign_legacy_seed_admin_data(pool).await?;
 
         // One-shot backfill post-migration-050 (namespace isolation):
         // Chunks created by contacts before the namespace feature had `namespace = '_private'`
@@ -647,6 +648,79 @@ impl Database {
                 }
                 Err(e) => {
                     tracing::warn!(table, error = %e, "Failed to backfill profile_id");
+                }
+                _ => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Reassign data owned by the migration-seeded admin placeholder to the
+    /// real first-run admin account when setup created a separate user.
+    async fn reassign_legacy_seed_admin_data(pool: &Pool<Sqlite>) -> Result<()> {
+        use crate::user::DEFAULT_ADMIN_USER_ID;
+
+        let seed_has_password: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM users
+             WHERE id = ? AND password_hash IS NOT NULL AND password_hash != ''",
+        )
+        .bind(DEFAULT_ADMIN_USER_ID)
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0);
+        if seed_has_password > 0 {
+            return Ok(());
+        }
+
+        let admin_ids: Vec<String> = sqlx::query_scalar(
+            "SELECT id FROM users
+             WHERE id != ?
+               AND enabled = 1
+               AND password_hash IS NOT NULL
+               AND password_hash != ''
+               AND roles LIKE '%admin%'
+             ORDER BY created_at ASC, id ASC",
+        )
+        .bind(DEFAULT_ADMIN_USER_ID)
+        .fetch_all(pool)
+        .await
+        .context("Failed to find real admin users for legacy data reassignment")?;
+
+        if admin_ids.len() != 1 {
+            return Ok(());
+        }
+        let real_admin_id = &admin_ids[0];
+
+        let tables = [
+            "profiles",
+            "memory_chunks",
+            "rag_chunks",
+            "contacts",
+            "sessions",
+            "automations",
+            "workflows",
+            "memory_summaries",
+            "rag_sources",
+            "email_pending",
+        ];
+        for table in &tables {
+            let sql = format!("UPDATE {table} SET user_id = ? WHERE user_id = ?");
+            let result = sqlx::query(&sql)
+                .bind(real_admin_id)
+                .bind(DEFAULT_ADMIN_USER_ID)
+                .execute(pool)
+                .await;
+            match result {
+                Ok(r) if r.rows_affected() > 0 => tracing::info!(
+                    table,
+                    rows = r.rows_affected(),
+                    from = DEFAULT_ADMIN_USER_ID,
+                    to = %real_admin_id,
+                    "Reassigned legacy seed-admin data to real admin user"
+                ),
+                Err(e) => {
+                    tracing::warn!(table, error = %e, "Failed to reassign legacy seed-admin data");
                 }
                 _ => {}
             }
@@ -3076,6 +3150,34 @@ END;
             .await
             .unwrap()
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn test_reassigns_seed_admin_profiles_to_real_admin() {
+        let (db, _dir) = test_db().await;
+
+        db.create_user("real-admin", "real-admin", &["admin"])
+            .await
+            .unwrap();
+        db.set_user_password_hash("real-admin", "salt:hash")
+            .await
+            .unwrap();
+
+        Database::reassign_legacy_seed_admin_data(db.pool())
+            .await
+            .unwrap();
+
+        let profiles = crate::profiles::db::load_profiles_for_user(db.pool(), "real-admin")
+            .await
+            .unwrap();
+        assert!(profiles.iter().any(|profile| profile.slug == "default"));
+        assert!(crate::profiles::db::load_profiles_for_user(
+            db.pool(),
+            crate::user::DEFAULT_ADMIN_USER_ID
+        )
+        .await
+        .unwrap()
+        .is_empty());
     }
 
     #[tokio::test]

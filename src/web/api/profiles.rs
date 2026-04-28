@@ -91,9 +91,16 @@ async fn list_profiles(
     axum::Extension(auth): axum::Extension<AuthUser>,
 ) -> Result<Json<Vec<profiles::Profile>>, ApiErr> {
     let db = require_db(&state)?;
-    let list = profiles::db::load_profiles_for_user(db.pool(), &auth.user_id)
+    let mut list = profiles::db::load_profiles_for_user(db.pool(), &auth.user_id)
         .await
         .map_err(internal)?;
+    if list.is_empty() {
+        let profile =
+            profiles::db::ensure_initial_profile_for_user(db.pool(), &auth.user_id, &auth.username)
+                .await
+                .map_err(internal)?;
+        list.push(profile);
+    }
     Ok(Json(list))
 }
 

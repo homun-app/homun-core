@@ -151,6 +151,21 @@ pub async fn load_profile_by_slug(pool: &Pool<Sqlite>, slug: &str) -> Result<Opt
     Ok(row)
 }
 
+/// Load a profile by slug, restricted to an owner user.
+pub async fn load_profile_by_slug_for_user(
+    pool: &Pool<Sqlite>,
+    slug: &str,
+    user_id: &str,
+) -> Result<Option<Profile>> {
+    let row = sqlx::query_as::<_, Profile>("SELECT * FROM profiles WHERE slug = ? AND user_id = ?")
+        .bind(slug)
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await
+        .context("Failed to load profile by slug for user")?;
+    Ok(row)
+}
+
 /// Load all profiles, ordered by is_default DESC then slug ASC.
 pub async fn load_all_profiles(pool: &Pool<Sqlite>) -> Result<Vec<Profile>> {
     let rows =
