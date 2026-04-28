@@ -43,6 +43,7 @@ pub(super) struct MemoryFinalizationContext {
     pub active_profile_id: i64,
     pub active_profile_brain_dir: Option<PathBuf>,
     pub active_profile_slug: Option<String>,
+    pub user_id: String,
 }
 
 pub(super) struct TraceContext {
@@ -122,6 +123,7 @@ pub(super) async fn finalize_response_turn(
         inputs.memory.active_profile_brain_dir,
         Some(inputs.memory.active_profile_id),
         inputs.memory.active_profile_slug,
+        Some(inputs.memory.user_id),
     )
     .await;
 

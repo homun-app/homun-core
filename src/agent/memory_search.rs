@@ -492,6 +492,7 @@ mod tests {
                 None,
                 3,
                 profile_id,
+                None,
             )
             .await
             .unwrap();

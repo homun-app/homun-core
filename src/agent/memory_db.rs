@@ -26,6 +26,7 @@ impl Database {
         agent_id: Option<&str>,
         importance: i32,
         profile_id: Option<i64>,
+        user_id: Option<&str>,
     ) -> Result<i64> {
         // Contact-scoped chunks are _public so the contact can see them;
         // owner chunks (contact_id=NULL) default to _private.
@@ -36,8 +37,8 @@ impl Database {
         };
 
         let result = sqlx::query(
-            "INSERT INTO memory_chunks (date, source, heading, content, memory_type, contact_id, agent_id, importance, profile_id, namespace)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO memory_chunks (date, source, heading, content, memory_type, contact_id, agent_id, importance, profile_id, namespace, user_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(date)
         .bind(source)
@@ -49,6 +50,7 @@ impl Database {
         .bind(importance)
         .bind(profile_id)
         .bind(namespace)
+        .bind(user_id)
         .execute(self.pool())
         .await
         .context("Failed to insert memory chunk")?;

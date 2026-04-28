@@ -2845,6 +2845,7 @@ impl super::traits::MemoryStore for Database {
         agent_id: Option<&str>,
         importance: i32,
         profile_id: Option<i64>,
+        user_id: Option<&str>,
     ) -> Result<i64> {
         Database::insert_memory_chunk(
             self,
@@ -2857,6 +2858,7 @@ impl super::traits::MemoryStore for Database {
             agent_id,
             importance,
             profile_id,
+            user_id,
         )
         .await
     }

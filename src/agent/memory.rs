@@ -24,6 +24,27 @@ pub fn daily_log_dir(data_dir: &std::path::Path, profile_slug: Option<&str>) -> 
     }
 }
 
+/// Resolve the daily log directory for a user/profile scope.
+///
+/// User-owned profiles live under `{data_dir}/memory/users/{user_id}/profiles/{slug}/`.
+/// The older `daily_log_dir()` remains for legacy/global callers and migrations.
+pub fn daily_log_dir_for_user(
+    data_dir: &std::path::Path,
+    user_id: &str,
+    profile_slug: Option<&str>,
+) -> PathBuf {
+    let slug = profile_slug
+        .map(str::trim)
+        .filter(|slug| !slug.is_empty())
+        .unwrap_or("default");
+    data_dir
+        .join("memory")
+        .join("users")
+        .join(user_id)
+        .join("profiles")
+        .join(slug)
+}
+
 /// Memory consolidation system — LLM-powered summarization.
 ///
 /// Follows nanobot's pattern with two-tier storage:
@@ -181,6 +202,7 @@ impl MemoryConsolidator {
         profile_brain_dir: Option<std::path::PathBuf>,
         profile_id: Option<i64>,
         profile_slug: Option<String>,
+        user_id: Option<String>,
     ) -> Result<ConsolidationResult> {
         // How many to keep in active session
         let keep_count = (memory_window / 2) as i64;
@@ -245,7 +267,9 @@ impl MemoryConsolidator {
             .join("\n");
 
         // Load current long-term memory
-        let current_memory = self.load_memory_md().unwrap_or_default();
+        let current_memory = self
+            .load_memory_md_for(profile_brain_dir.as_deref())
+            .unwrap_or_default();
 
         // Load existing instructions for deduplication (profile-scoped if available)
         let instructions_path = profile_brain_dir
@@ -433,8 +457,12 @@ impl MemoryConsolidator {
 
         // --- 3. Append to HISTORY.md and daily memory file ---
         if !history_entry.is_empty() {
-            self.append_history_md(&history_entry)?;
-            self.save_daily_md_for(&history_entry, profile_slug.as_deref())?;
+            self.append_history_md_for(&history_entry, profile_brain_dir.as_deref())?;
+            self.save_daily_md_for_user(
+                &history_entry,
+                user_id.as_deref(),
+                profile_slug.as_deref(),
+            )?;
         }
 
         // --- 4. Update MEMORY.md + DB if memory changed ---
@@ -476,6 +504,7 @@ impl MemoryConsolidator {
                     agent_id,
                     2,
                     profile_id,
+                    user_id.as_deref(),
                 )
                 .await?;
             new_chunk_ids.push((chunk_id, history_entry.clone()));
@@ -496,6 +525,7 @@ impl MemoryConsolidator {
                     agent_id,
                     3,
                     profile_id,
+                    user_id.as_deref(),
                 )
                 .await?;
             new_chunk_ids.push((chunk_id, memory_update.clone()));
@@ -516,6 +546,7 @@ impl MemoryConsolidator {
                     agent_id,
                     importance,
                     profile_id,
+                    user_id.as_deref(),
                 )
                 .await?;
             new_chunk_ids.push((chunk_id, instruction.text.clone()));
@@ -722,7 +753,18 @@ impl MemoryConsolidator {
 
     /// Load MEMORY.md content
     pub fn load_memory_md(&self) -> Option<String> {
-        let path = self.data_dir.join("MEMORY.md");
+        self.load_memory_md_for(None)
+    }
+
+    /// Load MEMORY.md content from a profile brain directory, falling back to global legacy.
+    pub fn load_memory_md_for(
+        &self,
+        profile_brain_dir: Option<&std::path::Path>,
+    ) -> Option<String> {
+        let path = profile_brain_dir
+            .map(|dir| dir.join("MEMORY.md"))
+            .filter(|path| path.exists())
+            .unwrap_or_else(|| self.data_dir.join("MEMORY.md"));
         std::fs::read_to_string(&path)
             .ok()
             .filter(|s| !s.trim().is_empty())
@@ -749,7 +791,27 @@ impl MemoryConsolidator {
     /// Save a daily memory file for a specific profile.
     pub fn save_daily_md_for(&self, entry: &str, profile_slug: Option<&str>) -> Result<()> {
         let memory_dir = daily_log_dir(&self.data_dir, profile_slug);
-        std::fs::create_dir_all(&memory_dir).context("Failed to create memory/ directory")?;
+        self.save_daily_md_in_dir(entry, &memory_dir)
+    }
+
+    /// Save a daily memory file for a user/profile scope.
+    pub fn save_daily_md_for_user(
+        &self,
+        entry: &str,
+        user_id: Option<&str>,
+        profile_slug: Option<&str>,
+    ) -> Result<()> {
+        let memory_dir = match user_id {
+            Some(uid) if !uid.is_empty() => {
+                daily_log_dir_for_user(&self.data_dir, uid, profile_slug)
+            }
+            _ => daily_log_dir(&self.data_dir, profile_slug),
+        };
+        self.save_daily_md_in_dir(entry, &memory_dir)
+    }
+
+    fn save_daily_md_in_dir(&self, entry: &str, memory_dir: &std::path::Path) -> Result<()> {
+        std::fs::create_dir_all(memory_dir).context("Failed to create memory/ directory")?;
 
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
         let path = memory_dir.join(format!("{today}.md"));
@@ -813,8 +875,18 @@ impl MemoryConsolidator {
 
     /// Append an entry to HISTORY.md
     fn append_history_md(&self, entry: &str) -> Result<()> {
-        let path = self.data_dir.join("HISTORY.md");
-        std::fs::create_dir_all(&self.data_dir).context("Failed to create data directory")?;
+        self.append_history_md_for(entry, None)
+    }
+
+    /// Append an entry to profile-scoped HISTORY.md, falling back to legacy global.
+    fn append_history_md_for(
+        &self,
+        entry: &str,
+        profile_brain_dir: Option<&std::path::Path>,
+    ) -> Result<()> {
+        let dir = profile_brain_dir.unwrap_or(&self.data_dir);
+        let path = dir.join("HISTORY.md");
+        std::fs::create_dir_all(dir).context("Failed to create history directory")?;
 
         use std::fs::OpenOptions;
         use std::io::Write;

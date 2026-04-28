@@ -107,6 +107,7 @@ pub trait MemoryStore: Send + Sync {
         agent_id: Option<&str>,
         importance: i32,
         profile_id: Option<i64>,
+        user_id: Option<&str>,
     ) -> Result<i64>;
 
     /// Load chunks by their IDs (for vector search result hydration).

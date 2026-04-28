@@ -236,7 +236,12 @@ async fn memory_stats(
         None => 0,
     };
 
-    let daily_dir = crate::agent::memory::daily_log_dir(&data_dir, q.profile.as_deref());
+    let profile_slug = brain_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|slug| !slug.is_empty());
+    let daily_dir =
+        crate::agent::memory::daily_log_dir_for_user(&data_dir, &auth.user_id, profile_slug);
     let daily_count = std::fs::read_dir(&daily_dir)
         .map(|entries| {
             entries
@@ -249,10 +254,9 @@ async fn memory_stats(
     Ok(Json(MemoryStatsResponse {
         chunk_count,
         daily_count,
-        has_memory_md: brain_dir.join("MEMORY.md").exists() || data_dir.join("MEMORY.md").exists(),
-        has_history_md: data_dir.join("HISTORY.md").exists(),
-        has_instructions_md: brain_dir.join("INSTRUCTIONS.md").exists()
-            || data_dir.join("INSTRUCTIONS.md").exists(),
+        has_memory_md: brain_dir.join("MEMORY.md").exists(),
+        has_history_md: brain_dir.join("HISTORY.md").exists(),
+        has_instructions_md: brain_dir.join("INSTRUCTIONS.md").exists(),
     }))
 }
 
@@ -350,38 +354,14 @@ async fn get_memory_file(
     )
     .await?;
     let path = match q.file.as_str() {
-        "memory" => {
-            // MEMORY.md lives in profile brain dir if profiled, else data_dir
-            let profile_path = brain_dir.join("MEMORY.md");
-            if profile_path.exists() {
-                profile_path
-            } else {
-                data_dir.join("MEMORY.md")
-            }
-        }
-        "history" => data_dir.join("HISTORY.md"),
-        "instructions" => {
-            let new_path = brain_dir.join("INSTRUCTIONS.md");
-            if new_path.exists() {
-                new_path
-            } else {
-                data_dir.join("INSTRUCTIONS.md")
-            }
-        }
+        "memory" => brain_dir.join("MEMORY.md"),
+        "history" => brain_dir.join("HISTORY.md"),
+        "instructions" => brain_dir.join("INSTRUCTIONS.md"),
         _ => return Err(StatusCode::BAD_REQUEST),
     };
 
     let content = tokio::fs::read_to_string(&path).await.unwrap_or_default();
     Ok(Json(MemoryFileResponse { ok: true, content }))
-}
-
-/// Resolve the brain directory for a profile slug.
-/// Returns `brain/profiles/{slug}/` if slug is provided, else `brain/`.
-fn resolve_brain_dir(data_dir: &std::path::Path, profile_slug: Option<&str>) -> std::path::PathBuf {
-    match profile_slug {
-        Some(slug) if !slug.is_empty() => data_dir.join("brain").join("profiles").join(slug),
-        _ => data_dir.join("brain"),
-    }
 }
 
 #[derive(Deserialize)]
@@ -728,7 +708,11 @@ async fn list_daily_files(
         &auth.user_id,
     )
     .await?;
-    let memory_dir = crate::agent::memory::daily_log_dir(&data_dir, q.profile.as_deref());
+    let memory_dir = crate::agent::memory::daily_log_dir_for_user(
+        &data_dir,
+        &auth.user_id,
+        q.profile.as_deref(),
+    );
 
     let mut dates: Vec<String> = std::fs::read_dir(&memory_dir)
         .map(|entries| {
@@ -772,7 +756,11 @@ async fn get_daily_file(
         &auth.user_id,
     )
     .await?;
-    let memory_dir = crate::agent::memory::daily_log_dir(&data_dir, q.profile.as_deref());
+    let memory_dir = crate::agent::memory::daily_log_dir_for_user(
+        &data_dir,
+        &auth.user_id,
+        q.profile.as_deref(),
+    );
     let path = memory_dir.join(format!("{date}.md"));
 
     let content = tokio::fs::read_to_string(&path)

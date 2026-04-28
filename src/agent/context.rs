@@ -41,7 +41,7 @@ pub struct ContextBuilder {
     bootstrap_content: Arc<RwLock<String>>,
     /// Bootstrap files as (filename, content) pairs for the new prompt system.
     bootstrap_files: Arc<RwLock<Vec<(String, String)>>>,
-    memory_content: String,
+    memory_content: RwLock<String>,
     /// Relevant memories retrieved by vector + FTS5 search for the current query.
     /// Uses RwLock for interior mutability — updated per-request via `&self`.
     relevant_memories: RwLock<String>,
@@ -89,7 +89,7 @@ impl ContextBuilder {
             skills_summary: Arc::new(RwLock::new(String::new())),
             bootstrap_content: Arc::new(RwLock::new(bootstrap_content)),
             bootstrap_files: Arc::new(RwLock::new(bootstrap_files)),
-            memory_content: String::new(),
+            memory_content: RwLock::new(String::new()),
             relevant_memories: RwLock::new(String::new()),
             rag_knowledge: RwLock::new(String::new()),
             mcp_suggestions: RwLock::new(String::new()),
@@ -237,7 +237,12 @@ impl ContextBuilder {
 
     /// Set long-term memory content (loaded from MEMORY.md)
     pub fn set_memory(&mut self, memory: String) {
-        self.memory_content = memory;
+        *self.memory_content.get_mut() = memory;
+    }
+
+    /// Set long-term memory content for the active user/profile.
+    pub async fn set_memory_content(&self, memory: String) {
+        *self.memory_content.write().await = memory;
     }
 
     /// Set relevant memories from vector + FTS5 search.
@@ -410,6 +415,7 @@ impl ContextBuilder {
     pub async fn build_system_prompt_with_tools(&self, tools: &[ToolInfo]) -> String {
         // Gather all context
         let bootstrap_files = self.bootstrap_files.read().await;
+        let memory_content = self.memory_content.read().await;
         let skills_summary = self.skills_summary.read().await;
         let relevant_memories = self.relevant_memories.read().await;
         let rag_knowledge = self.rag_knowledge.read().await;
@@ -434,7 +440,7 @@ impl ContextBuilder {
             registered_tool_names: &registered_tool_names,
             skills_summary: &skills_summary,
             bootstrap_files: &bootstrap_files,
-            memory_content: &self.memory_content,
+            memory_content: &memory_content,
             relevant_memories: &relevant_memories,
             rag_knowledge: &rag_knowledge,
             mcp_suggestions: &mcp_suggestions,
@@ -476,9 +482,10 @@ impl ContextBuilder {
             prompt.push_str(&bootstrap);
         }
 
-        if !self.memory_content.is_empty() {
+        let memory_content = self.memory_content.read().await;
+        if !memory_content.is_empty() {
             prompt.push_str("\n\n## Memory\n");
-            prompt.push_str(&self.memory_content);
+            prompt.push_str(&memory_content);
         }
 
         prompt

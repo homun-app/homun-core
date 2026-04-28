@@ -36,6 +36,7 @@ pub(super) async fn maybe_consolidate(
     profile_brain_dir: Option<PathBuf>,
     profile_id: Option<i64>,
     profile_slug: Option<String>,
+    user_id: Option<String>,
 ) {
     let cfg = inputs.config.read().await;
     let window = cfg.agent.consolidation_threshold;
@@ -70,6 +71,7 @@ pub(super) async fn maybe_consolidate(
                         profile_brain_dir,
                         profile_id,
                         profile_slug,
+                        user_id,
                     )
                     .await
                 {

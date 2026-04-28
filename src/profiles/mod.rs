@@ -44,7 +44,15 @@ impl Profile {
 
     /// Directory path for this profile's brain files.
     pub fn brain_dir(&self, data_dir: &Path) -> PathBuf {
-        data_dir.join("brain").join("profiles").join(&self.slug)
+        match self.user_id.as_deref() {
+            Some(user_id) if !user_id.is_empty() => data_dir
+                .join("brain")
+                .join("users")
+                .join(user_id)
+                .join("profiles")
+                .join(&self.slug),
+            _ => data_dir.join("brain").join("profiles").join(&self.slug),
+        }
     }
 }
 
@@ -360,14 +368,14 @@ mod tests {
             color: "#3B82F6".into(),
             profile_json: "{}".into(),
             is_default: 0,
-            user_id: None,
+            user_id: Some("user-123".into()),
             created_at: String::new(),
             updated_at: String::new(),
         };
         let dir = p.brain_dir(Path::new("/home/user/.homun"));
         assert_eq!(
             dir,
-            PathBuf::from("/home/user/.homun/brain/profiles/acme-corp")
+            PathBuf::from("/home/user/.homun/brain/users/user-123/profiles/acme-corp")
         );
     }
 }
