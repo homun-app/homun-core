@@ -349,6 +349,24 @@ async function createConversation() {
     return await res.json();
 }
 
+async function syncActiveProfileToConversation() {
+    if (!currentConversationId || !window.getActiveProfileSlug) return;
+    const profileSlug = window.getActiveProfileSlug();
+    if (!profileSlug) return;
+    try {
+        await fetch('/api/v1/chat/profile', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                conversation_id: currentConversationId,
+                profile_slug: profileSlug,
+            }),
+        });
+    } catch (e) {
+        console.warn('Failed to sync active profile to conversation:', e);
+    }
+}
+
 async function ensureConversationSelected() {
     await refreshConversationList();
 
@@ -372,6 +390,7 @@ async function ensureConversationSelected() {
         window.HomunChatConversations.setConversationUrl(currentConversationId);
         renderConversationList();
         syncConversationHeader();
+        await syncActiveProfileToConversation();
     }
 }
 
@@ -456,6 +475,7 @@ async function ensureConversationSelectedAfterRemoval(removedId) {
     window.HomunChatConversations.setConversationUrl(currentConversationId);
     renderConversationList();
     syncConversationHeader();
+    await syncActiveProfileToConversation();
     disconnectSocket();
     connect();
 }
@@ -936,6 +956,7 @@ async function selectConversation(conversationId) {
     syncConversationHeader();
     renderConversationList();
     resetConversationView();
+    await syncActiveProfileToConversation();
     disconnectSocket();
     connect();
     await refreshConversationList();
@@ -3154,5 +3175,8 @@ async function bootstrapChat() {
 // ─── Profile — delegated to global topbar.js ───────────────────
 // Active profile is managed by topbar.js; use window.getActiveProfileId()
 // or window.getActiveProfileSlug() when needed.
+document.addEventListener('profile-changed', function () {
+    syncActiveProfileToConversation();
+});
 
 bootstrapChat();

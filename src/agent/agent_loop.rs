@@ -124,6 +124,25 @@ impl AgentLoop {
         let _ = tool_name;
     }
 
+    async fn resolve_user_default_profile_id(&self, user_id: &str) -> i64 {
+        match crate::profiles::db::load_profiles_for_user(self.db.pool(), user_id).await {
+            Ok(profiles) => profiles
+                .iter()
+                .find(|profile| profile.is_default != 0)
+                .or_else(|| profiles.first())
+                .map(|profile| profile.id)
+                .unwrap_or(1),
+            Err(e) => {
+                tracing::warn!(
+                    user_id,
+                    error = %e,
+                    "Failed to resolve default profile for user, falling back to id=1"
+                );
+                1
+            }
+        }
+    }
+
     pub async fn new(
         provider: Arc<dyn Provider>,
         config: Arc<RwLock<Config>>,
@@ -804,12 +823,24 @@ impl AgentLoop {
             let session_override = self.db.get_session_profile_id(session_key).await;
             let profile_id = if let Some(pid) = session_override {
                 // Verify the profile still exists (might have been deleted)
-                if crate::profiles::db::load_profile_by_id(self.db.pool(), pid)
+                let profile_exists = if channel == "web" {
+                    crate::profiles::db::load_profile_by_id_for_user(
+                        self.db.pool(),
+                        pid,
+                        &effective_user_id,
+                    )
                     .await
                     .ok()
                     .flatten()
                     .is_some()
-                {
+                } else {
+                    crate::profiles::db::load_profile_by_id(self.db.pool(), pid)
+                        .await
+                        .ok()
+                        .flatten()
+                        .is_some()
+                };
+                if profile_exists {
                     pid
                 } else {
                     tracing::warn!(
@@ -826,15 +857,23 @@ impl AgentLoop {
                             .ok()
                             .and_then(|gws| gws.first().map(|g| g.id))
                     };
-                    crate::agent::profile_resolver::resolve_profile_id_from_values(
-                        contact.as_ref(),
-                        &ch_default_profile,
-                        &global_default_profile,
-                        &self.db,
-                        gateway_id,
-                    )
-                    .await
+                    if channel == "web" {
+                        self.resolve_user_default_profile_id(&effective_user_id)
+                            .await
+                    } else {
+                        crate::agent::profile_resolver::resolve_profile_id_from_values(
+                            contact.as_ref(),
+                            &ch_default_profile,
+                            &global_default_profile,
+                            &self.db,
+                            gateway_id,
+                        )
+                        .await
+                    }
                 }
+            } else if channel == "web" {
+                self.resolve_user_default_profile_id(&effective_user_id)
+                    .await
             } else {
                 // No session override — use resolver cascade
                 let gateway_id: Option<i64> = if _gateway_id_hint.is_some() {
@@ -857,9 +896,17 @@ impl AgentLoop {
 
             // Build profile brain dir path + inject profile context
             let data_dir = Config::data_dir();
-            let (profile_brain_dir, active_profile_slug) = if let Ok(Some(profile)) =
+            let profile_row = if channel == "web" {
+                crate::profiles::db::load_profile_by_id_for_user(
+                    self.db.pool(),
+                    profile_id,
+                    &effective_user_id,
+                )
+                .await
+            } else {
                 crate::profiles::db::load_profile_by_id(self.db.pool(), profile_id).await
-            {
+            };
+            let (profile_brain_dir, active_profile_slug) = if let Ok(Some(profile)) = profile_row {
                 let dir = profile.brain_dir(&data_dir);
                 let slug = profile.slug.clone();
                 // Reload bootstrap files from profile dir
