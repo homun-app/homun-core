@@ -463,6 +463,14 @@ async fn create_user(
                 )
             })?;
     }
+    crate::profiles::db::ensure_initial_profile_for_user(db.pool(), &user_id, username)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+        })?;
 
     let row = db
         .load_user(&user_id)

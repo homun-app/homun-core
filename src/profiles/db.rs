@@ -38,6 +38,84 @@ pub async fn insert_profile(
     Ok(id)
 }
 
+fn initial_profile_slug(user_id: &str) -> String {
+    let suffix: String = user_id
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .take(12)
+        .collect();
+    if suffix.is_empty() {
+        "default-user".to_string()
+    } else {
+        format!("default-{suffix}")
+    }
+}
+
+fn initial_profile_json(username: &str) -> Result<String> {
+    let profile = serde_json::json!({
+        "version": "1.0",
+        "identity": {
+            "name": username,
+            "display_name": username,
+            "bio": "",
+            "role": "",
+            "avatar_emoji": "👤"
+        },
+        "linguistics": {
+            "language": "",
+            "formality": "",
+            "style": "",
+            "forbidden_words": [],
+            "catchphrases": []
+        },
+        "personality": {
+            "traits": [],
+            "tone": "",
+            "humor": false
+        },
+        "capabilities": {
+            "tools_emphasis": [],
+            "domains": []
+        },
+        "visibility": {
+            "readable_from": ["default"]
+        }
+    });
+    serde_json::to_string(&profile).context("Failed to serialize initial profile JSON")
+}
+
+/// Ensure a local user has a starter profile and return it.
+pub async fn ensure_initial_profile_for_user(
+    pool: &Pool<Sqlite>,
+    user_id: &str,
+    username: &str,
+) -> Result<Profile> {
+    if let Some(existing) = load_profiles_for_user(pool, user_id)
+        .await?
+        .into_iter()
+        .next()
+    {
+        return Ok(existing);
+    }
+
+    let slug = initial_profile_slug(user_id);
+    let profile_json = initial_profile_json(username)?;
+    let id = insert_profile(
+        pool,
+        &slug,
+        "Default",
+        "👤",
+        "#3B82F6",
+        &profile_json,
+        Some(user_id),
+    )
+    .await?;
+
+    load_profile_by_id_for_user(pool, id, user_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("Initial profile created but not found"))
+}
+
 /// Load a profile by id.
 pub async fn load_profile_by_id(pool: &Pool<Sqlite>, id: i64) -> Result<Option<Profile>> {
     let row = sqlx::query_as::<_, Profile>("SELECT * FROM profiles WHERE id = ?")
@@ -553,6 +631,28 @@ mod tests {
             .await
             .expect("bob cannot load alice by id")
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn ensure_initial_profile_creates_one_profile_per_user() {
+        let pool = test_pool().await;
+
+        let first = ensure_initial_profile_for_user(&pool, "user-1234567890", "alice")
+            .await
+            .expect("create initial profile");
+        assert_eq!(first.display_name, "Default");
+        assert_eq!(first.user_id.as_deref(), Some("user-1234567890"));
+        assert_eq!(first.slug, "default-user12345678");
+
+        let second = ensure_initial_profile_for_user(&pool, "user-1234567890", "alice")
+            .await
+            .expect("reuse initial profile");
+        assert_eq!(second.id, first.id);
+
+        let profiles = load_profiles_for_user(&pool, "user-1234567890")
+            .await
+            .expect("load user profiles");
+        assert_eq!(profiles.len(), 1);
     }
 
     #[tokio::test]
