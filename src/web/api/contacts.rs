@@ -17,17 +17,29 @@ use crate::web::auth::{require_write, AuthUser};
 
 type ApiErr = (StatusCode, Json<Value>);
 
-/// Resolve a profile slug query param to an id. Returns None if empty/missing.
-async fn resolve_profile_filter(db: &Database, slug: Option<&str>) -> Option<i64> {
-    let slug = slug?.trim();
+/// Resolve a profile slug query param to an id owned by the authenticated user.
+async fn resolve_profile_filter(
+    db: &Database,
+    slug: Option<&str>,
+    auth: &AuthUser,
+) -> Result<Option<i64>, ApiErr> {
+    let Some(slug) = slug.map(str::trim) else {
+        return Ok(None);
+    };
     if slug.is_empty() {
-        return None;
+        return Ok(None);
     }
-    crate::profiles::db::load_profile_by_slug(db.pool(), slug)
-        .await
-        .ok()
-        .flatten()
-        .map(|p| p.id)
+    let profile =
+        crate::profiles::db::load_profile_by_slug_for_user(db.pool(), slug, &auth.user_id)
+            .await
+            .map_err(internal)?;
+    match profile {
+        Some(p) => Ok(Some(p.id)),
+        None => Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Profile not found"})),
+        )),
+    }
 }
 
 fn require_db(state: &AppState) -> Result<&Database, ApiErr> {
@@ -44,6 +56,142 @@ fn internal(e: anyhow::Error) -> ApiErr {
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({"error": e.to_string()})),
     )
+}
+
+async fn validate_profile_owner(
+    db: &Database,
+    profile_id: Option<i64>,
+    auth: &AuthUser,
+) -> Result<(), ApiErr> {
+    if let Some(pid) = profile_id {
+        let profile =
+            crate::profiles::db::load_profile_by_id_for_user(db.pool(), pid, &auth.user_id)
+                .await
+                .map_err(internal)?;
+        if profile.is_none() {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "Profile not found"})),
+            ));
+        }
+    }
+    Ok(())
+}
+
+async fn require_owned_contact(
+    db: &Database,
+    contact_id: i64,
+    auth: &AuthUser,
+) -> Result<crate::contacts::Contact, ApiErr> {
+    db.load_contact_for_user(contact_id, &auth.user_id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "Contact not found"})),
+            )
+        })
+}
+
+async fn require_owned_identity(
+    db: &Database,
+    identity_id: i64,
+    auth: &AuthUser,
+) -> Result<(), ApiErr> {
+    let owned = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*)
+         FROM contact_identities ci
+         JOIN contacts c ON c.id = ci.contact_id
+         WHERE ci.id = ? AND c.user_id = ?",
+    )
+    .bind(identity_id)
+    .bind(&auth.user_id)
+    .fetch_one(db.pool())
+    .await
+    .map_err(|e| internal(e.into()))?;
+    if owned == 0 {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Identity not found"})),
+        ));
+    }
+    Ok(())
+}
+
+async fn require_owned_relationship(
+    db: &Database,
+    relationship_id: i64,
+    auth: &AuthUser,
+) -> Result<(), ApiErr> {
+    let owned = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*)
+         FROM contact_relationships cr
+         JOIN contacts from_c ON from_c.id = cr.from_contact_id
+         JOIN contacts to_c ON to_c.id = cr.to_contact_id
+         WHERE cr.id = ? AND from_c.user_id = ? AND to_c.user_id = ?",
+    )
+    .bind(relationship_id)
+    .bind(&auth.user_id)
+    .bind(&auth.user_id)
+    .fetch_one(db.pool())
+    .await
+    .map_err(|e| internal(e.into()))?;
+    if owned == 0 {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Relationship not found"})),
+        ));
+    }
+    Ok(())
+}
+
+async fn require_owned_event(db: &Database, event_id: i64, auth: &AuthUser) -> Result<(), ApiErr> {
+    let owned = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*)
+         FROM contact_events ce
+         JOIN contacts c ON c.id = ce.contact_id
+         WHERE ce.id = ? AND c.user_id = ?",
+    )
+    .bind(event_id)
+    .bind(&auth.user_id)
+    .fetch_one(db.pool())
+    .await
+    .map_err(|e| internal(e.into()))?;
+    if owned == 0 {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Event not found"})),
+        ));
+    }
+    Ok(())
+}
+
+async fn require_owned_pending_response(
+    db: &Database,
+    pending_id: i64,
+    auth: &AuthUser,
+) -> Result<(), ApiErr> {
+    let owned = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*)
+         FROM pending_responses pr
+         LEFT JOIN contacts c ON c.id = pr.contact_id
+         LEFT JOIN profiles p ON p.id = pr.profile_id
+         WHERE pr.id = ? AND (c.user_id = ? OR p.user_id = ?)",
+    )
+    .bind(pending_id)
+    .bind(&auth.user_id)
+    .bind(&auth.user_id)
+    .fetch_one(db.pool())
+    .await
+    .map_err(|e| internal(e.into()))?;
+    if owned == 0 {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Pending response not found"})),
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -155,12 +303,13 @@ struct AddEventRequest {
 
 async fn list_contacts(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Query(params): Query<ListQuery>,
 ) -> Result<Json<Vec<crate::contacts::Contact>>, ApiErr> {
     let db = require_db(&state)?;
-    let profile_id = resolve_profile_filter(db, params.profile.as_deref()).await;
+    let profile_id = resolve_profile_filter(db, params.profile.as_deref(), &auth).await?;
     let contacts = db
-        .list_contacts(params.q.as_deref(), profile_id)
+        .list_contacts_for_user(params.q.as_deref(), profile_id, &auth.user_id)
         .await
         .map_err(internal)?;
     Ok(Json(contacts))
@@ -174,7 +323,8 @@ async fn create_contact(
     require_write(&auth)?;
     let db = require_db(&state)?;
     let id = db
-        .insert_contact(
+        .insert_contact_for_user(
+            Some(&auth.user_id),
             &body.name,
             body.nickname.as_deref(),
             body.bio.as_deref(),
@@ -195,7 +345,7 @@ async fn create_contact(
     }
 
     let contact = db
-        .load_contact(id)
+        .load_contact_for_user(id, &auth.user_id)
         .await
         .map_err(internal)?
         .ok_or_else(|| {
@@ -213,19 +363,11 @@ async fn create_contact(
 
 async fn get_contact(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Path(id): Path<i64>,
 ) -> Result<Json<ContactResponse>, ApiErr> {
     let db = require_db(&state)?;
-    let contact = db
-        .load_contact(id)
-        .await
-        .map_err(internal)?
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "Contact not found"})),
-            )
-        })?;
+    let contact = require_owned_contact(db, id, &auth).await?;
     let identities = db.list_contact_identities(id).await.map_err(internal)?;
 
     Ok(Json(ContactResponse {
@@ -242,7 +384,11 @@ async fn update_contact(
 ) -> Result<Json<crate::contacts::Contact>, ApiErr> {
     require_write(&auth)?;
     let db = require_db(&state)?;
-    let updated = db.update_contact(id, &body).await.map_err(internal)?;
+    validate_profile_owner(db, body.profile_id, &auth).await?;
+    let updated = db
+        .update_contact_for_user(id, &body, &auth.user_id)
+        .await
+        .map_err(internal)?;
     if !updated {
         return Err((
             StatusCode::NOT_FOUND,
@@ -250,7 +396,7 @@ async fn update_contact(
         ));
     }
     let contact = db
-        .load_contact(id)
+        .load_contact_for_user(id, &auth.user_id)
         .await
         .map_err(internal)?
         .ok_or_else(|| {
@@ -269,7 +415,10 @@ async fn delete_contact(
 ) -> Result<StatusCode, ApiErr> {
     require_write(&auth)?;
     let db = require_db(&state)?;
-    let deleted = db.delete_contact(id).await.map_err(internal)?;
+    let deleted = db
+        .delete_contact_for_user(id, &auth.user_id)
+        .await
+        .map_err(internal)?;
     if deleted {
         Ok(StatusCode::NO_CONTENT)
     } else {
@@ -284,9 +433,11 @@ async fn delete_contact(
 
 async fn list_identities(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Path(id): Path<i64>,
 ) -> Result<Json<Vec<crate::contacts::ContactIdentity>>, ApiErr> {
     let db = require_db(&state)?;
+    require_owned_contact(db, id, &auth).await?;
     let ids = db.list_contact_identities(id).await.map_err(internal)?;
     Ok(Json(ids))
 }
@@ -299,6 +450,7 @@ async fn add_identity(
 ) -> Result<Json<Value>, ApiErr> {
     require_write(&auth)?;
     let db = require_db(&state)?;
+    require_owned_contact(db, contact_id, &auth).await?;
     let id = db
         .insert_contact_identity(
             contact_id,
@@ -318,6 +470,7 @@ async fn remove_identity(
 ) -> Result<StatusCode, ApiErr> {
     require_write(&auth)?;
     let db = require_db(&state)?;
+    require_owned_identity(db, id, &auth).await?;
     let deleted = db.delete_contact_identity(id).await.map_err(internal)?;
     if deleted {
         Ok(StatusCode::NO_CONTENT)
@@ -333,9 +486,11 @@ async fn remove_identity(
 
 async fn list_relationships(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Path(id): Path<i64>,
 ) -> Result<Json<Vec<crate::contacts::ContactRelationship>>, ApiErr> {
     let db = require_db(&state)?;
+    require_owned_contact(db, id, &auth).await?;
     let rels = db.list_contact_relationships(id).await.map_err(internal)?;
     Ok(Json(rels))
 }
@@ -348,6 +503,8 @@ async fn add_relationship(
 ) -> Result<Json<Value>, ApiErr> {
     require_write(&auth)?;
     let db = require_db(&state)?;
+    require_owned_contact(db, from_id, &auth).await?;
+    require_owned_contact(db, body.to_contact_id, &auth).await?;
     let id = db
         .insert_contact_relationship(
             from_id,
@@ -369,6 +526,7 @@ async fn remove_relationship(
 ) -> Result<StatusCode, ApiErr> {
     require_write(&auth)?;
     let db = require_db(&state)?;
+    require_owned_relationship(db, id, &auth).await?;
     let deleted = db.delete_contact_relationship(id).await.map_err(internal)?;
     if deleted {
         Ok(StatusCode::NO_CONTENT)
@@ -384,9 +542,11 @@ async fn remove_relationship(
 
 async fn list_events(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Path(id): Path<i64>,
 ) -> Result<Json<Vec<crate::contacts::ContactEvent>>, ApiErr> {
     let db = require_db(&state)?;
+    require_owned_contact(db, id, &auth).await?;
     let events = db.list_contact_events(id).await.map_err(internal)?;
     Ok(Json(events))
 }
@@ -399,6 +559,7 @@ async fn add_event(
 ) -> Result<Json<Value>, ApiErr> {
     require_write(&auth)?;
     let db = require_db(&state)?;
+    require_owned_contact(db, contact_id, &auth).await?;
     let id = db
         .insert_contact_event(
             contact_id,
@@ -421,6 +582,7 @@ async fn remove_event(
 ) -> Result<StatusCode, ApiErr> {
     require_write(&auth)?;
     let db = require_db(&state)?;
+    require_owned_event(db, id, &auth).await?;
     let deleted = db.delete_contact_event(id).await.map_err(internal)?;
     if deleted {
         Ok(StatusCode::NO_CONTENT)
@@ -446,11 +608,12 @@ fn default_days() -> i32 {
 
 async fn upcoming_events(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Query(params): Query<UpcomingQuery>,
 ) -> Result<Json<Vec<crate::contacts::UpcomingEvent>>, ApiErr> {
     let db = require_db(&state)?;
     let events = db
-        .load_upcoming_contact_events(params.days)
+        .load_upcoming_contact_events_for_user(params.days, &auth.user_id)
         .await
         .map_err(internal)?;
     Ok(Json(events))
@@ -460,12 +623,13 @@ async fn upcoming_events(
 
 async fn list_pending(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Query(params): Query<ListQuery>,
 ) -> Result<Json<Vec<crate::contacts::PendingResponse>>, ApiErr> {
     let db = require_db(&state)?;
-    let profile_id = resolve_profile_filter(db, params.profile.as_deref()).await;
+    let profile_id = resolve_profile_filter(db, params.profile.as_deref(), &auth).await?;
     let pending = db
-        .list_pending_responses(Some("pending"), profile_id)
+        .list_pending_responses_for_user(Some("pending"), profile_id, &auth.user_id)
         .await
         .map_err(internal)?;
     Ok(Json(pending))
@@ -478,6 +642,7 @@ async fn approve_pending(
 ) -> Result<Json<Value>, ApiErr> {
     require_write(&auth)?;
     let db = require_db(&state)?;
+    require_owned_pending_response(db, id, &auth).await?;
     let updated = db
         .update_pending_response_status(id, "approved")
         .await
@@ -499,6 +664,7 @@ async fn reject_pending(
 ) -> Result<Json<Value>, ApiErr> {
     require_write(&auth)?;
     let db = require_db(&state)?;
+    require_owned_pending_response(db, id, &auth).await?;
     let updated = db
         .update_pending_response_status(id, "rejected")
         .await
@@ -518,9 +684,11 @@ async fn reject_pending(
 /// List all gateway profile overrides for a contact.
 async fn list_gateway_overrides(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Path(contact_id): Path<i64>,
 ) -> Result<Json<Vec<crate::gateways::db::ContactGatewayOverride>>, ApiErr> {
     let db = require_db(&state)?;
+    require_owned_contact(db, contact_id, &auth).await?;
     let overrides = crate::gateways::db::load_overrides_for_contact(db.pool(), contact_id)
         .await
         .map_err(internal)?;
@@ -542,6 +710,8 @@ async fn set_gateway_override(
 ) -> Result<Json<serde_json::Value>, ApiErr> {
     require_write(&auth)?;
     let db = require_db(&state)?;
+    require_owned_contact(db, contact_id, &auth).await?;
+    validate_profile_owner(db, Some(body.profile_id), &auth).await?;
     crate::gateways::db::upsert_gateway_override(
         db.pool(),
         contact_id,
@@ -561,6 +731,7 @@ async fn delete_gateway_override(
 ) -> Result<Json<serde_json::Value>, ApiErr> {
     require_write(&auth)?;
     let db = require_db(&state)?;
+    require_owned_contact(db, contact_id, &auth).await?;
     crate::gateways::db::delete_gateway_override(db.pool(), contact_id, gateway_id)
         .await
         .map_err(internal)?;
@@ -572,9 +743,11 @@ async fn delete_gateway_override(
 /// Get a contact's perimeter (returns defaults if none configured).
 async fn get_perimeter(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Path(contact_id): Path<i64>,
 ) -> Result<Json<crate::contacts::perimeter::ContactPerimeter>, ApiErr> {
     let db = require_db(&state)?;
+    require_owned_contact(db, contact_id, &auth).await?;
     let p = crate::contacts::perimeter::load_perimeter(db.pool(), contact_id)
         .await
         .map_err(internal)?;
@@ -600,6 +773,7 @@ async fn set_perimeter(
 ) -> Result<Json<serde_json::Value>, ApiErr> {
     require_write(&auth)?;
     let db = require_db(&state)?;
+    require_owned_contact(db, contact_id, &auth).await?;
     // Load existing to merge partial updates
     let existing = crate::contacts::perimeter::load_perimeter(db.pool(), contact_id)
         .await
@@ -648,6 +822,7 @@ async fn delete_perimeter(
 ) -> Result<Json<serde_json::Value>, ApiErr> {
     require_write(&auth)?;
     let db = require_db(&state)?;
+    require_owned_contact(db, contact_id, &auth).await?;
     crate::contacts::perimeter::delete_perimeter(db.pool(), contact_id)
         .await
         .map_err(internal)?;

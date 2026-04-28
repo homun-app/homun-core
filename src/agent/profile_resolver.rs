@@ -160,6 +160,7 @@ mod tests {
             persona_instructions: String::new(),
             agent_override: None,
             profile_id,
+            user_id: None,
         }
     }
 

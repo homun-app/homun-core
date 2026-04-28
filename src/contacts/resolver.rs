@@ -83,9 +83,35 @@ pub async fn resolve_contact(
     description: &str,
     profile_id: Option<i64>,
 ) -> Result<Option<ResolveResult>> {
+    resolve_contact_scoped(db, config, description, profile_id, None).await
+}
+
+pub async fn resolve_contact_for_user(
+    db: &Database,
+    config: &Config,
+    description: &str,
+    profile_id: Option<i64>,
+    user_id: &str,
+) -> Result<Option<ResolveResult>> {
+    resolve_contact_scoped(db, config, description, profile_id, Some(user_id)).await
+}
+
+async fn resolve_contact_scoped(
+    db: &Database,
+    config: &Config,
+    description: &str,
+    profile_id: Option<i64>,
+    user_id: Option<&str>,
+) -> Result<Option<ResolveResult>> {
     // Fast path: direct name search
     if !has_relationship_keywords(description) {
-        let matches = db.list_contacts(Some(description), profile_id).await?;
+        let matches = match user_id {
+            Some(uid) => {
+                db.list_contacts_for_user(Some(description), profile_id, uid)
+                    .await?
+            }
+            None => db.list_contacts(Some(description), profile_id).await?,
+        };
         if matches.len() == 1 {
             return Ok(Some(ResolveResult {
                 resolution_path: format!("Direct match: {}", matches[0].name),
@@ -100,7 +126,10 @@ pub async fn resolve_contact(
     }
 
     // Slow path: LLM resolution with relationship graph
-    let contacts = db.list_contacts(None, profile_id).await?;
+    let contacts = match user_id {
+        Some(uid) => db.list_contacts_for_user(None, profile_id, uid).await?,
+        None => db.list_contacts(None, profile_id).await?,
+    };
     if contacts.is_empty() {
         return Ok(None);
     }

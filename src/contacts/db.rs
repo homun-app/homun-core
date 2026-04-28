@@ -48,14 +48,46 @@ impl Database {
         tags: Option<&str>,
         tone_of_voice: Option<&str>,
     ) -> Result<i64> {
+        self.insert_contact_for_user(
+            None,
+            name,
+            nickname,
+            bio,
+            notes,
+            birthday,
+            nameday,
+            preferred_channel,
+            response_mode,
+            tags,
+            tone_of_voice,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_contact_for_user(
+        &self,
+        user_id: Option<&str>,
+        name: &str,
+        nickname: Option<&str>,
+        bio: Option<&str>,
+        notes: Option<&str>,
+        birthday: Option<&str>,
+        nameday: Option<&str>,
+        preferred_channel: Option<&str>,
+        response_mode: Option<&str>,
+        tags: Option<&str>,
+        tone_of_voice: Option<&str>,
+    ) -> Result<i64> {
         let mode = response_mode.unwrap_or("");
         let tags_val = tags.unwrap_or("[]");
 
         let id = sqlx::query_scalar::<_, i64>(
-            "INSERT INTO contacts (name, nickname, bio, notes, birthday, nameday, preferred_channel, response_mode, tags, tone_of_voice)
-             VALUES (?, ?, COALESCE(?, ''), COALESCE(?, ''), ?, ?, ?, ?, ?, COALESCE(?, ''))
+            "INSERT INTO contacts (user_id, name, nickname, bio, notes, birthday, nameday, preferred_channel, response_mode, tags, tone_of_voice)
+             VALUES (?, ?, ?, COALESCE(?, ''), COALESCE(?, ''), ?, ?, ?, ?, ?, COALESCE(?, ''))
              RETURNING id",
         )
+        .bind(user_id)
         .bind(name)
         .bind(nickname)
         .bind(bio)
@@ -82,6 +114,17 @@ impl Database {
         Ok(row)
     }
 
+    pub async fn load_contact_for_user(&self, id: i64, user_id: &str) -> Result<Option<Contact>> {
+        let row =
+            sqlx::query_as::<_, Contact>("SELECT * FROM contacts WHERE id = ? AND user_id = ?")
+                .bind(id)
+                .bind(user_id)
+                .fetch_optional(self.pool())
+                .await
+                .context("Failed to load contact for user")?;
+        Ok(row)
+    }
+
     /// List contacts with optional text search and profile scoping.
     ///
     /// When `profile_id` is `Some`, only contacts belonging to that profile
@@ -91,8 +134,31 @@ impl Database {
         query: Option<&str>,
         profile_id: Option<i64>,
     ) -> Result<Vec<Contact>> {
+        self.list_contacts_scoped(query, profile_id, None).await
+    }
+
+    pub async fn list_contacts_for_user(
+        &self,
+        query: Option<&str>,
+        profile_id: Option<i64>,
+        user_id: &str,
+    ) -> Result<Vec<Contact>> {
+        self.list_contacts_scoped(query, profile_id, Some(user_id))
+            .await
+    }
+
+    async fn list_contacts_scoped(
+        &self,
+        query: Option<&str>,
+        profile_id: Option<i64>,
+        user_id: Option<&str>,
+    ) -> Result<Vec<Contact>> {
         let profile_clause = match profile_id {
             Some(_) => " AND (profile_id IS NULL OR profile_id = ?)",
+            None => "",
+        };
+        let user_clause = match user_id {
+            Some(_) => " AND user_id = ?",
             None => "",
         };
 
@@ -101,12 +167,15 @@ impl Database {
                 let pattern = format!("%{q}%");
                 let sql = format!(
                     "SELECT * FROM contacts \
-                     WHERE (name LIKE ?1 OR nickname LIKE ?1 OR bio LIKE ?1){profile_clause} \
+                     WHERE (name LIKE ?1 OR nickname LIKE ?1 OR bio LIKE ?1){profile_clause}{user_clause} \
                      ORDER BY name COLLATE NOCASE"
                 );
                 let mut qry = sqlx::query_as::<_, Contact>(&sql).bind(&pattern);
                 if let Some(pid) = profile_id {
                     qry = qry.bind(pid);
+                }
+                if let Some(uid) = user_id {
+                    qry = qry.bind(uid);
                 }
                 qry.fetch_all(self.pool())
                     .await
@@ -114,11 +183,14 @@ impl Database {
             }
             _ => {
                 let sql = format!(
-                    "SELECT * FROM contacts WHERE 1=1{profile_clause} ORDER BY name COLLATE NOCASE"
+                    "SELECT * FROM contacts WHERE 1=1{profile_clause}{user_clause} ORDER BY name COLLATE NOCASE"
                 );
                 let mut qry = sqlx::query_as::<_, Contact>(&sql);
                 if let Some(pid) = profile_id {
                     qry = qry.bind(pid);
+                }
+                if let Some(uid) = user_id {
+                    qry = qry.bind(uid);
                 }
                 qry.fetch_all(self.pool())
                     .await
@@ -129,6 +201,24 @@ impl Database {
     }
 
     pub async fn update_contact(&self, id: i64, upd: &ContactUpdate) -> Result<bool> {
+        self.update_contact_scoped(id, upd, None).await
+    }
+
+    pub async fn update_contact_for_user(
+        &self,
+        id: i64,
+        upd: &ContactUpdate,
+        user_id: &str,
+    ) -> Result<bool> {
+        self.update_contact_scoped(id, upd, Some(user_id)).await
+    }
+
+    async fn update_contact_scoped(
+        &self,
+        id: i64,
+        upd: &ContactUpdate,
+        user_id: Option<&str>,
+    ) -> Result<bool> {
         let mut sets = Vec::new();
         let mut vals: Vec<String> = Vec::new();
 
@@ -166,7 +256,15 @@ impl Database {
         }
 
         sets.push("updated_at = datetime('now')");
-        let sql = format!("UPDATE contacts SET {} WHERE id = ?", sets.join(", "));
+        let owner_clause = if user_id.is_some() {
+            " AND user_id = ?"
+        } else {
+            ""
+        };
+        let sql = format!(
+            "UPDATE contacts SET {} WHERE id = ?{owner_clause}",
+            sets.join(", ")
+        );
 
         let mut q = sqlx::query(&sql);
         for v in &vals {
@@ -176,6 +274,9 @@ impl Database {
             q = q.bind(pid);
         }
         q = q.bind(id);
+        if let Some(uid) = user_id {
+            q = q.bind(uid);
+        }
 
         let rows = q
             .execute(self.pool())
@@ -187,8 +288,25 @@ impl Database {
     }
 
     pub async fn delete_contact(&self, id: i64) -> Result<bool> {
-        let rows = sqlx::query("DELETE FROM contacts WHERE id = ?")
-            .bind(id)
+        self.delete_contact_scoped(id, None).await
+    }
+
+    pub async fn delete_contact_for_user(&self, id: i64, user_id: &str) -> Result<bool> {
+        self.delete_contact_scoped(id, Some(user_id)).await
+    }
+
+    async fn delete_contact_scoped(&self, id: i64, user_id: Option<&str>) -> Result<bool> {
+        let owner_clause = if user_id.is_some() {
+            " AND user_id = ?"
+        } else {
+            ""
+        };
+        let sql = format!("DELETE FROM contacts WHERE id = ?{owner_clause}");
+        let mut q = sqlx::query(&sql).bind(id);
+        if let Some(uid) = user_id {
+            q = q.bind(uid);
+        }
+        let rows = q
             .execute(self.pool())
             .await
             .context("Failed to delete contact")?
@@ -414,8 +532,47 @@ impl Database {
     /// Load contact events whose MM-DD falls within the next `days` days.
     /// Returns events joined with contact name for display.
     pub async fn load_upcoming_contact_events(&self, days: i32) -> Result<Vec<UpcomingEvent>> {
+        self.load_upcoming_contact_events_scoped(days, None).await
+    }
+
+    pub async fn load_upcoming_contact_events_for_user(
+        &self,
+        days: i32,
+        user_id: &str,
+    ) -> Result<Vec<UpcomingEvent>> {
+        self.load_upcoming_contact_events_scoped(days, Some(user_id))
+            .await
+    }
+
+    async fn load_upcoming_contact_events_scoped(
+        &self,
+        days: i32,
+        user_id: Option<&str>,
+    ) -> Result<Vec<UpcomingEvent>> {
         // For yearly recurrence: compare MM-DD portion.
         // For 'once': compare full date.
+        let user_clause = if user_id.is_some() {
+            " AND c.user_id = ?"
+        } else {
+            ""
+        };
+        let sql = format!(
+            "SELECT ce.id, ce.contact_id, ce.event_type, ce.date, ce.recurrence,
+                    ce.label, ce.auto_greet, ce.greet_template, ce.notify_days_before,
+                    ce.created_at, c.name
+             FROM contact_events ce
+             JOIN contacts c ON c.id = ce.contact_id
+             WHERE (((ce.recurrence = 'yearly'
+                    AND substr(ce.date, -5) BETWEEN strftime('%m-%d', 'now')
+                                                AND strftime('%m-%d', 'now', '+' || ? || ' days'))
+                OR (ce.recurrence = 'once'
+                    AND ce.date BETWEEN date('now') AND date('now', '+' || ? || ' days'))
+                OR (ce.recurrence = 'monthly'
+                    AND CAST(substr(ce.date, -2) AS INTEGER)
+                        BETWEEN CAST(strftime('%d', 'now') AS INTEGER)
+                            AND CAST(strftime('%d', 'now', '+' || ? || ' days') AS INTEGER)))){user_clause}
+             ORDER BY ce.date"
+        );
         let rows = sqlx::query_as::<
             _,
             (
@@ -431,29 +588,15 @@ impl Database {
                 String,
                 String,
             ),
-        >(
-            "SELECT ce.id, ce.contact_id, ce.event_type, ce.date, ce.recurrence,
-                    ce.label, ce.auto_greet, ce.greet_template, ce.notify_days_before,
-                    ce.created_at, c.name
-             FROM contact_events ce
-             JOIN contacts c ON c.id = ce.contact_id
-             WHERE (ce.recurrence = 'yearly'
-                    AND substr(ce.date, -5) BETWEEN strftime('%m-%d', 'now')
-                                                AND strftime('%m-%d', 'now', '+' || ? || ' days'))
-                OR (ce.recurrence = 'once'
-                    AND ce.date BETWEEN date('now') AND date('now', '+' || ? || ' days'))
-                OR (ce.recurrence = 'monthly'
-                    AND CAST(substr(ce.date, -2) AS INTEGER)
-                        BETWEEN CAST(strftime('%d', 'now') AS INTEGER)
-                            AND CAST(strftime('%d', 'now', '+' || ? || ' days') AS INTEGER))
-             ORDER BY ce.date",
-        )
-        .bind(days)
-        .bind(days)
-        .bind(days)
-        .fetch_all(self.pool())
-        .await
-        .context("Failed to load upcoming contact events")?;
+        >(&sql);
+        let mut q = rows.bind(days).bind(days).bind(days);
+        if let Some(uid) = user_id {
+            q = q.bind(uid);
+        }
+        let rows = q
+            .fetch_all(self.pool())
+            .await
+            .context("Failed to load upcoming contact events")?;
 
         Ok(rows
             .into_iter()
@@ -565,18 +708,50 @@ impl Database {
         status: Option<&str>,
         profile_id: Option<i64>,
     ) -> Result<Vec<PendingResponse>> {
+        self.list_pending_responses_scoped(status, profile_id, None)
+            .await
+    }
+
+    pub async fn list_pending_responses_for_user(
+        &self,
+        status: Option<&str>,
+        profile_id: Option<i64>,
+        user_id: &str,
+    ) -> Result<Vec<PendingResponse>> {
+        self.list_pending_responses_scoped(status, profile_id, Some(user_id))
+            .await
+    }
+
+    async fn list_pending_responses_scoped(
+        &self,
+        status: Option<&str>,
+        profile_id: Option<i64>,
+        user_id: Option<&str>,
+    ) -> Result<Vec<PendingResponse>> {
         let profile_clause = match profile_id {
-            Some(_) => " AND (profile_id IS NULL OR profile_id = ?)",
+            Some(_) => " AND (pr.profile_id IS NULL OR pr.profile_id = ?)",
             None => "",
+        };
+        let user_clause = if user_id.is_some() {
+            " AND (c.user_id = ? OR p.user_id = ?)"
+        } else {
+            ""
         };
         let rows = match status {
             Some(s) => {
                 let sql = format!(
-                    "SELECT * FROM pending_responses WHERE status = ?{profile_clause} ORDER BY created_at DESC"
+                    "SELECT pr.* FROM pending_responses pr
+                     LEFT JOIN contacts c ON c.id = pr.contact_id
+                     LEFT JOIN profiles p ON p.id = pr.profile_id
+                     WHERE pr.status = ?{profile_clause}{user_clause}
+                     ORDER BY pr.created_at DESC"
                 );
                 let mut q = sqlx::query_as::<_, PendingResponse>(&sql).bind(s);
                 if let Some(pid) = profile_id {
                     q = q.bind(pid);
+                }
+                if let Some(uid) = user_id {
+                    q = q.bind(uid).bind(uid);
                 }
                 q.fetch_all(self.pool())
                     .await
@@ -584,11 +759,18 @@ impl Database {
             }
             None => {
                 let sql = format!(
-                    "SELECT * FROM pending_responses WHERE 1=1{profile_clause} ORDER BY created_at DESC"
+                    "SELECT pr.* FROM pending_responses pr
+                     LEFT JOIN contacts c ON c.id = pr.contact_id
+                     LEFT JOIN profiles p ON p.id = pr.profile_id
+                     WHERE 1=1{profile_clause}{user_clause}
+                     ORDER BY pr.created_at DESC"
                 );
                 let mut q = sqlx::query_as::<_, PendingResponse>(&sql);
                 if let Some(pid) = profile_id {
                     q = q.bind(pid);
+                }
+                if let Some(uid) = user_id {
+                    q = q.bind(uid).bind(uid);
                 }
                 q.fetch_all(self.pool())
                     .await
@@ -809,6 +991,85 @@ mod tests {
         assert!(unscoped_ids.contains(&global));
         assert!(unscoped_ids.contains(&work));
         assert!(unscoped_ids.contains(&family));
+    }
+
+    #[tokio::test]
+    async fn contacts_are_scoped_by_owner_user() {
+        let (db, _dir) = test_db().await;
+        sqlx::query("INSERT INTO users (id, username, roles) VALUES (?, ?, ?), (?, ?, ?)")
+            .bind("alice")
+            .bind("alice")
+            .bind("[]")
+            .bind("bob")
+            .bind("bob")
+            .bind("[]")
+            .execute(db.pool())
+            .await
+            .unwrap();
+
+        let alice = db
+            .insert_contact_for_user(
+                Some("alice"),
+                "Alice Contact",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let bob = db
+            .insert_contact_for_user(
+                Some("bob"),
+                "Bob Contact",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let alice_contacts = db
+            .list_contacts_for_user(None, None, "alice")
+            .await
+            .unwrap();
+        assert_eq!(alice_contacts.len(), 1);
+        assert_eq!(alice_contacts[0].id, alice);
+        assert_eq!(alice_contacts[0].user_id.as_deref(), Some("alice"));
+
+        assert!(db
+            .load_contact_for_user(bob, "alice")
+            .await
+            .unwrap()
+            .is_none());
+        assert!(!db
+            .update_contact_for_user(
+                bob,
+                &ContactUpdate {
+                    bio: Some("cross-user edit".into()),
+                    ..Default::default()
+                },
+                "alice",
+            )
+            .await
+            .unwrap());
+        assert!(!db.delete_contact_for_user(bob, "alice").await.unwrap());
+        assert!(db
+            .load_contact_for_user(bob, "bob")
+            .await
+            .unwrap()
+            .is_some());
     }
 
     #[tokio::test]

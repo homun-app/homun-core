@@ -72,6 +72,8 @@ pub struct Contact {
     pub agent_override: Option<String>,
     /// Profile to use when responding to this contact. NULL = use channel/global default.
     pub profile_id: Option<i64>,
+    /// Owner user. NULL is legacy single-user data.
+    pub user_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]

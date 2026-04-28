@@ -98,18 +98,19 @@ impl Tool for ContactsTool {
     async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
         let action = args["action"].as_str().unwrap_or("");
         let profile_id = ctx.profile_id;
+        let user_id = ctx.user_id.as_deref();
 
         match action {
-            "search" => self.do_search(&args, profile_id).await,
-            "resolve" => self.do_resolve(&args, profile_id).await,
-            "get" => self.do_get(&args).await,
-            "create" => self.do_create(&args).await,
-            "update" => self.do_update(&args).await,
-            "add_identity" => self.do_add_identity(&args).await,
-            "add_relationship" => self.do_add_relationship(&args).await,
-            "add_event" => self.do_add_event(&args).await,
-            "upcoming" => self.do_upcoming(&args).await,
-            "send" => self.do_send(&args, profile_id).await,
+            "search" => self.do_search(&args, profile_id, user_id).await,
+            "resolve" => self.do_resolve(&args, profile_id, user_id).await,
+            "get" => self.do_get(&args, user_id).await,
+            "create" => self.do_create(&args, user_id).await,
+            "update" => self.do_update(&args, user_id).await,
+            "add_identity" => self.do_add_identity(&args, user_id).await,
+            "add_relationship" => self.do_add_relationship(&args, user_id).await,
+            "add_event" => self.do_add_event(&args, user_id).await,
+            "upcoming" => self.do_upcoming(&args, user_id).await,
+            "send" => self.do_send(&args, profile_id, user_id).await,
             _ => Ok(ToolResult {
                 output: format!("Unknown action: {action}. Valid: search, resolve, get, create, update, add_identity, add_relationship, add_event, upcoming, send"),
                 is_error: true, ..Default::default()
@@ -119,9 +120,21 @@ impl Tool for ContactsTool {
 }
 
 impl ContactsTool {
-    async fn do_search(&self, args: &Value, profile_id: Option<i64>) -> Result<ToolResult> {
+    async fn do_search(
+        &self,
+        args: &Value,
+        profile_id: Option<i64>,
+        user_id: Option<&str>,
+    ) -> Result<ToolResult> {
         let query = args["query"].as_str();
-        let contacts = self.db.list_contacts(query, profile_id).await?;
+        let contacts = match user_id {
+            Some(uid) => {
+                self.db
+                    .list_contacts_for_user(query, profile_id, uid)
+                    .await?
+            }
+            None => self.db.list_contacts(query, profile_id).await?,
+        };
         let output = if contacts.is_empty() {
             "No contacts found.".to_string()
         } else {
@@ -150,7 +163,12 @@ impl ContactsTool {
         })
     }
 
-    async fn do_resolve(&self, args: &Value, profile_id: Option<i64>) -> Result<ToolResult> {
+    async fn do_resolve(
+        &self,
+        args: &Value,
+        profile_id: Option<i64>,
+        user_id: Option<&str>,
+    ) -> Result<ToolResult> {
         let query = args["query"].as_str().unwrap_or("");
         if query.is_empty() {
             return Ok(ToolResult {
@@ -160,9 +178,19 @@ impl ContactsTool {
             });
         }
         let config = self.config.read().await.clone();
-        match crate::contacts::resolver::resolve_contact(&self.db, &config, query, profile_id)
-            .await?
-        {
+        let resolved = match user_id {
+            Some(uid) => {
+                crate::contacts::resolver::resolve_contact_for_user(
+                    &self.db, &config, query, profile_id, uid,
+                )
+                .await?
+            }
+            None => {
+                crate::contacts::resolver::resolve_contact(&self.db, &config, query, profile_id)
+                    .await?
+            }
+        };
+        match resolved {
             Some(result) => Ok(ToolResult {
                 output: format!(
                     "Resolved: #{} {} (confidence: {:.0}%)\nPath: {}",
@@ -182,7 +210,7 @@ impl ContactsTool {
         }
     }
 
-    async fn do_get(&self, args: &Value) -> Result<ToolResult> {
+    async fn do_get(&self, args: &Value, user_id: Option<&str>) -> Result<ToolResult> {
         let id = args["contact_id"].as_i64().unwrap_or(0);
         if id == 0 {
             return Ok(ToolResult {
@@ -191,7 +219,10 @@ impl ContactsTool {
                 ..Default::default()
             });
         }
-        let contact = self.db.load_contact(id).await?;
+        let contact = match user_id {
+            Some(uid) => self.db.load_contact_for_user(id, uid).await?,
+            None => self.db.load_contact(id).await?,
+        };
         match contact {
             Some(c) => {
                 let identities = self.db.list_contact_identities(id).await?;
@@ -234,7 +265,7 @@ impl ContactsTool {
         }
     }
 
-    async fn do_create(&self, args: &Value) -> Result<ToolResult> {
+    async fn do_create(&self, args: &Value, user_id: Option<&str>) -> Result<ToolResult> {
         let name = args["name"].as_str().unwrap_or("");
         if name.is_empty() {
             return Ok(ToolResult {
@@ -245,7 +276,8 @@ impl ContactsTool {
         }
         let id = self
             .db
-            .insert_contact(
+            .insert_contact_for_user(
+                user_id,
                 name,
                 args["nickname"].as_str(),
                 args["bio"].as_str(),
@@ -273,7 +305,7 @@ impl ContactsTool {
         })
     }
 
-    async fn do_update(&self, args: &Value) -> Result<ToolResult> {
+    async fn do_update(&self, args: &Value, user_id: Option<&str>) -> Result<ToolResult> {
         let id = args["contact_id"].as_i64().unwrap_or(0);
         if id == 0 {
             return Ok(ToolResult {
@@ -299,7 +331,10 @@ impl ContactsTool {
             agent_override: args["agent_override"].as_str().map(|s| s.to_string()),
             profile_id: args["profile_id"].as_i64(),
         };
-        let updated = self.db.update_contact(id, &upd).await?;
+        let updated = match user_id {
+            Some(uid) => self.db.update_contact_for_user(id, &upd, uid).await?,
+            None => self.db.update_contact(id, &upd).await?,
+        };
         Ok(ToolResult {
             output: if updated {
                 format!("Updated contact #{id}")
@@ -311,7 +346,7 @@ impl ContactsTool {
         })
     }
 
-    async fn do_add_identity(&self, args: &Value) -> Result<ToolResult> {
+    async fn do_add_identity(&self, args: &Value, user_id: Option<&str>) -> Result<ToolResult> {
         let contact_id = args["contact_id"].as_i64().unwrap_or(0);
         let channel = args["channel"].as_str().unwrap_or("");
         let identifier = args["identifier"].as_str().unwrap_or("");
@@ -321,6 +356,20 @@ impl ContactsTool {
                 is_error: true,
                 ..Default::default()
             });
+        }
+        if let Some(uid) = user_id {
+            if self
+                .db
+                .load_contact_for_user(contact_id, uid)
+                .await?
+                .is_none()
+            {
+                return Ok(ToolResult {
+                    output: format!("Contact #{contact_id} not found"),
+                    is_error: true,
+                    ..Default::default()
+                });
+            }
         }
         let id = self
             .db
@@ -333,7 +382,7 @@ impl ContactsTool {
         })
     }
 
-    async fn do_add_relationship(&self, args: &Value) -> Result<ToolResult> {
+    async fn do_add_relationship(&self, args: &Value, user_id: Option<&str>) -> Result<ToolResult> {
         let from_id = args["contact_id"].as_i64().unwrap_or(0);
         let to_id = args["to_contact_id"].as_i64().unwrap_or(0);
         let rel_type = args["relationship_type"].as_str().unwrap_or("");
@@ -343,6 +392,17 @@ impl ContactsTool {
                 is_error: true,
                 ..Default::default()
             });
+        }
+        if let Some(uid) = user_id {
+            if self.db.load_contact_for_user(from_id, uid).await?.is_none()
+                || self.db.load_contact_for_user(to_id, uid).await?.is_none()
+            {
+                return Ok(ToolResult {
+                    output: "One or both contacts were not found".into(),
+                    is_error: true,
+                    ..Default::default()
+                });
+            }
         }
         let bidir = args["bidirectional"].as_bool().unwrap_or(false);
         let id = self
@@ -363,7 +423,7 @@ impl ContactsTool {
         })
     }
 
-    async fn do_add_event(&self, args: &Value) -> Result<ToolResult> {
+    async fn do_add_event(&self, args: &Value, user_id: Option<&str>) -> Result<ToolResult> {
         let contact_id = args["contact_id"].as_i64().unwrap_or(0);
         let event_type = args["event_type"].as_str().unwrap_or("");
         let date = args["date"].as_str().unwrap_or("");
@@ -373,6 +433,20 @@ impl ContactsTool {
                 is_error: true,
                 ..Default::default()
             });
+        }
+        if let Some(uid) = user_id {
+            if self
+                .db
+                .load_contact_for_user(contact_id, uid)
+                .await?
+                .is_none()
+            {
+                return Ok(ToolResult {
+                    output: format!("Contact #{contact_id} not found"),
+                    is_error: true,
+                    ..Default::default()
+                });
+            }
         }
         let id = self
             .db
@@ -393,9 +467,16 @@ impl ContactsTool {
         })
     }
 
-    async fn do_upcoming(&self, args: &Value) -> Result<ToolResult> {
+    async fn do_upcoming(&self, args: &Value, user_id: Option<&str>) -> Result<ToolResult> {
         let days = args["days"].as_i64().unwrap_or(7) as i32;
-        let events = self.db.load_upcoming_contact_events(days).await?;
+        let events = match user_id {
+            Some(uid) => {
+                self.db
+                    .load_upcoming_contact_events_for_user(days, uid)
+                    .await?
+            }
+            None => self.db.load_upcoming_contact_events(days).await?,
+        };
         if events.is_empty() {
             return Ok(ToolResult {
                 output: format!("No events in the next {days} days."),
@@ -422,7 +503,12 @@ impl ContactsTool {
         })
     }
 
-    async fn do_send(&self, args: &Value, profile_id: Option<i64>) -> Result<ToolResult> {
+    async fn do_send(
+        &self,
+        args: &Value,
+        profile_id: Option<i64>,
+        user_id: Option<&str>,
+    ) -> Result<ToolResult> {
         let message = args["message"].as_str().unwrap_or("");
         if message.is_empty() {
             return Ok(ToolResult {
@@ -434,12 +520,24 @@ impl ContactsTool {
 
         // Resolve the contact (by ID or query)
         let contact = if let Some(id) = args["contact_id"].as_i64() {
-            self.db.load_contact(id).await?
+            match user_id {
+                Some(uid) => self.db.load_contact_for_user(id, uid).await?,
+                None => self.db.load_contact(id).await?,
+            }
         } else if let Some(query) = args["query"].as_str() {
             let config = self.config.read().await.clone();
-            crate::contacts::resolver::resolve_contact(&self.db, &config, query, profile_id)
+            match user_id {
+                Some(uid) => crate::contacts::resolver::resolve_contact_for_user(
+                    &self.db, &config, query, profile_id, uid,
+                )
                 .await?
-                .map(|r| r.contact)
+                .map(|r| r.contact),
+                None => {
+                    crate::contacts::resolver::resolve_contact(&self.db, &config, query, profile_id)
+                        .await?
+                        .map(|r| r.contact)
+                }
+            }
         } else {
             return Ok(ToolResult {
                 output: "Provide contact_id or query to identify the recipient".into(),
