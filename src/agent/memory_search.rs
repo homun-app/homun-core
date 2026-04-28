@@ -76,7 +76,7 @@ impl MemorySearcher {
         top_k: usize,
         contact_id: Option<i64>,
     ) -> Result<Vec<SearchResult>> {
-        self.search_scoped_full(query, top_k, contact_id, None, &[], &[])
+        self.search_scoped_full(query, top_k, contact_id, None, &[], None, &[])
             .await
     }
 
@@ -90,6 +90,7 @@ impl MemorySearcher {
     ///
     /// `allowed_namespaces`: if non-empty, only chunks in these namespaces (+ global `_private`
     /// for owner, `_public` for contacts) are included. Pass empty slice to disable.
+    #[allow(clippy::too_many_arguments)]
     pub async fn search_scoped_full(
         &mut self,
         query: &str,
@@ -97,6 +98,7 @@ impl MemorySearcher {
         contact_id: Option<i64>,
         agent_id: Option<&str>,
         profile_ids: &[i64],
+        user_id: Option<&str>,
         allowed_namespaces: &[String],
     ) -> Result<Vec<SearchResult>> {
         // Run vector search (always works)
@@ -123,6 +125,7 @@ impl MemorySearcher {
                         contact_id,
                         agent_id,
                         profile_ids,
+                        user_id,
                         allowed_namespaces,
                     )
                     .await;
@@ -173,6 +176,11 @@ impl MemorySearcher {
                             }
                         }
                     }
+                    if let Some(uid) = user_id {
+                        if chunk.user_id.as_deref() != Some(uid) {
+                            return None;
+                        }
+                    }
                     // Namespace scoping: only include chunks in allowed namespaces
                     if !allowed_namespaces.is_empty()
                         && !allowed_namespaces.iter().any(|ns| ns == &chunk.namespace)
@@ -204,6 +212,7 @@ impl MemorySearcher {
     }
 
     /// Fallback: search using vector results only (when FTS5 fails).
+    #[allow(clippy::too_many_arguments)]
     async fn search_vector_only(
         &mut self,
         vector_results: &[(i64, f32)],
@@ -211,6 +220,7 @@ impl MemorySearcher {
         contact_id: Option<i64>,
         agent_id: Option<&str>,
         profile_ids: &[i64],
+        user_id: Option<&str>,
         allowed_namespaces: &[String],
     ) -> Result<Vec<SearchResult>> {
         if vector_results.is_empty() {
@@ -257,6 +267,11 @@ impl MemorySearcher {
                             if !profile_ids.contains(&cpid) {
                                 return None;
                             }
+                        }
+                    }
+                    if let Some(uid) = user_id {
+                        if chunk.user_id.as_deref() != Some(uid) {
+                            return None;
                         }
                     }
                     // Namespace scoping (must match main search path)
@@ -678,7 +693,7 @@ mod tests {
         .await;
 
         let results = searcher
-            .search_scoped_full("alpha", 10, None, None, &[work_profile], &[])
+            .search_scoped_full("alpha", 10, None, None, &[work_profile], None, &[])
             .await
             .unwrap();
         let contents: Vec<&str> = results
@@ -725,7 +740,7 @@ mod tests {
 
         let allowed = vec!["_public".to_string(), format!("contact_{alice}")];
         let results = searcher
-            .search_scoped_full("alpha", 10, Some(alice), None, &[], &allowed)
+            .search_scoped_full("alpha", 10, Some(alice), None, &[], None, &allowed)
             .await
             .unwrap();
         let contents: Vec<&str> = results

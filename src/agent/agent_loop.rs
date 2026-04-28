@@ -1008,6 +1008,7 @@ impl AgentLoop {
                 channel,
                 agent_id: self.agent_id.as_deref(),
                 contact_id: memory_contact_id,
+                user_id: Some(&effective_user_id),
                 visible_profile_ids: active_visible_profile_ids.clone(),
                 active_profile_slug: active_profile_slug.clone(),
                 contact_perimeter: contact_perimeter.clone(),

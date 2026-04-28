@@ -12,16 +12,139 @@ use crate::storage::Database;
 use crate::web::auth::{check_write, AuthUser};
 
 /// Resolve a profile slug query param to an id. Returns None if empty/missing.
-async fn resolve_profile_filter(db: &Database, slug: Option<&str>) -> Option<i64> {
-    let slug = slug?.trim();
+async fn resolve_profile_filter_for_user(
+    db: &Database,
+    slug: Option<&str>,
+    user_id: &str,
+) -> Result<Option<i64>, StatusCode> {
+    let Some(slug) = slug.map(str::trim) else {
+        return Ok(None);
+    };
     if slug.is_empty() {
-        return None;
+        return Ok(None);
     }
-    crate::profiles::db::load_profile_by_slug(db.pool(), slug)
+    let profile = crate::profiles::db::load_profile_by_slug_for_user(db.pool(), slug, user_id)
         .await
         .ok()
         .flatten()
-        .map(|p| p.id)
+        .ok_or(StatusCode::FORBIDDEN)?;
+    Ok(Some(profile.id))
+}
+
+async fn resolve_brain_dir_for_user(
+    data_dir: &std::path::Path,
+    db: Option<&Database>,
+    slug: Option<&str>,
+    user_id: &str,
+) -> Result<std::path::PathBuf, StatusCode> {
+    let db = db.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let Some(slug) = slug.map(str::trim).filter(|s| !s.is_empty()) else {
+        let profile =
+            crate::profiles::db::ensure_initial_profile_for_user(db.pool(), user_id, user_id)
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        return Ok(profile.brain_dir(data_dir));
+    };
+    let profile = crate::profiles::db::load_profile_by_slug_for_user(db.pool(), slug, user_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::FORBIDDEN)?;
+    Ok(profile.brain_dir(data_dir))
+}
+
+async fn user_profile_ids(db: &Database, user_id: &str) -> Vec<i64> {
+    crate::profiles::db::load_profiles_for_user(db.pool(), user_id)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|profile| profile.id)
+        .collect()
+}
+
+async fn count_memory_chunks_for_user(
+    db: &Database,
+    user_id: &str,
+    profile_id: Option<i64>,
+) -> anyhow::Result<i64> {
+    let count = if let Some(profile_id) = profile_id {
+        sqlx::query_scalar(
+            "SELECT COUNT(*) FROM memory_chunks
+             WHERE user_id = ? AND (profile_id IS NULL OR profile_id = ?)",
+        )
+        .bind(user_id)
+        .bind(profile_id)
+        .fetch_one(db.pool())
+        .await?
+    } else {
+        sqlx::query_scalar("SELECT COUNT(*) FROM memory_chunks WHERE user_id = ?")
+            .bind(user_id)
+            .fetch_one(db.pool())
+            .await?
+    };
+    Ok(count)
+}
+
+async fn audit_namespace_counts_for_user(
+    db: &Database,
+    user_id: &str,
+    profile_id: Option<i64>,
+) -> anyhow::Result<(i64, i64, i64)> {
+    let profile_filter = if profile_id.is_some() {
+        " AND (profile_id IS NULL OR profile_id = ?)"
+    } else {
+        ""
+    };
+    let private_sql = format!(
+        "SELECT COUNT(*) FROM memory_chunks
+         WHERE user_id = ? AND namespace = '_private' AND contact_id IS NULL{profile_filter}"
+    );
+    let public_sql = format!(
+        "SELECT COUNT(*) FROM memory_chunks
+         WHERE user_id = ? AND namespace != '_private'{profile_filter}"
+    );
+    let contact_sql = format!(
+        "SELECT COUNT(*) FROM memory_chunks
+         WHERE user_id = ? AND contact_id IS NOT NULL{profile_filter}"
+    );
+
+    async fn count(
+        db: &Database,
+        sql: &str,
+        user_id: &str,
+        profile_id: Option<i64>,
+    ) -> anyhow::Result<i64> {
+        let mut query = sqlx::query_scalar(sql).bind(user_id);
+        if let Some(profile_id) = profile_id {
+            query = query.bind(profile_id);
+        }
+        Ok(query.fetch_one(db.pool()).await?)
+    }
+
+    Ok((
+        count(db, &private_sql, user_id, profile_id).await?,
+        count(db, &public_sql, user_id, profile_id).await?,
+        count(db, &contact_sql, user_id, profile_id).await?,
+    ))
+}
+
+async fn private_chunk_ids_for_user(
+    db: &Database,
+    user_id: &str,
+    profile_id: Option<i64>,
+) -> anyhow::Result<Vec<i64>> {
+    let sql = if profile_id.is_some() {
+        "SELECT id FROM memory_chunks
+         WHERE user_id = ? AND namespace = '_private' AND contact_id IS NULL
+           AND (profile_id IS NULL OR profile_id = ?)"
+    } else {
+        "SELECT id FROM memory_chunks
+         WHERE user_id = ? AND namespace = '_private' AND contact_id IS NULL"
+    };
+    let mut query = sqlx::query_scalar(sql).bind(user_id);
+    if let Some(profile_id) = profile_id {
+        query = query.bind(profile_id);
+    }
+    Ok(query.fetch_all(db.pool()).await?)
 }
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -74,30 +197,40 @@ struct StatsQuery {
 
 async fn memory_stats(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Query(q): Query<StatsQuery>,
-) -> Json<MemoryStatsResponse> {
+) -> Result<Json<MemoryStatsResponse>, StatusCode> {
     let data_dir = crate::config::Config::data_dir();
-    let brain_dir = resolve_brain_dir(&data_dir, q.profile.as_deref());
+    let brain_dir = resolve_brain_dir_for_user(
+        &data_dir,
+        state.db.as_ref(),
+        q.profile.as_deref(),
+        &auth.user_id,
+    )
+    .await?;
 
     let chunk_count = match state.db.as_ref() {
         Some(db) => {
             if let Some(ref slug) = q.profile {
                 if !slug.is_empty() {
                     // Count only chunks for this profile (+ global NULL chunks)
-                    if let Ok(Some(profile)) =
-                        crate::profiles::db::load_profile_by_slug(db.pool(), slug).await
-                    {
-                        db.count_memory_chunks_for_profile(profile.id)
-                            .await
-                            .unwrap_or(0)
-                    } else {
-                        0
+                    match resolve_profile_filter_for_user(db, Some(slug), &auth.user_id).await {
+                        Ok(profile_id) => {
+                            count_memory_chunks_for_user(db, auth.user_id.as_str(), profile_id)
+                                .await
+                                .unwrap_or(0)
+                        }
+                        _ => 0,
                     }
                 } else {
-                    db.count_memory_chunks().await.unwrap_or(0)
+                    count_memory_chunks_for_user(db, auth.user_id.as_str(), None)
+                        .await
+                        .unwrap_or(0)
                 }
             } else {
-                db.count_memory_chunks().await.unwrap_or(0)
+                count_memory_chunks_for_user(db, auth.user_id.as_str(), None)
+                    .await
+                    .unwrap_or(0)
             }
         }
         None => 0,
@@ -113,14 +246,14 @@ async fn memory_stats(
         })
         .unwrap_or(0);
 
-    Json(MemoryStatsResponse {
+    Ok(Json(MemoryStatsResponse {
         chunk_count,
         daily_count,
         has_memory_md: brain_dir.join("MEMORY.md").exists() || data_dir.join("MEMORY.md").exists(),
         has_history_md: data_dir.join("HISTORY.md").exists(),
         has_instructions_md: brain_dir.join("INSTRUCTIONS.md").exists()
             || data_dir.join("INSTRUCTIONS.md").exists(),
-    })
+    }))
 }
 
 /// Run memory cleanup based on retention policies.
@@ -204,10 +337,18 @@ struct MemoryFileResponse {
 }
 
 async fn get_memory_file(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Query(q): Query<MemoryFileQuery>,
 ) -> Result<Json<MemoryFileResponse>, StatusCode> {
     let data_dir = crate::config::Config::data_dir();
-    let brain_dir = resolve_brain_dir(&data_dir, q.profile.as_deref());
+    let brain_dir = resolve_brain_dir_for_user(
+        &data_dir,
+        state.db.as_ref(),
+        q.profile.as_deref(),
+        &auth.user_id,
+    )
+    .await?;
     let path = match q.file.as_str() {
         "memory" => {
             // MEMORY.md lives in profile brain dir if profiled, else data_dir
@@ -253,12 +394,19 @@ struct PutMemoryFileRequest {
 }
 
 async fn put_memory_file(
+    State(state): State<Arc<AppState>>,
     axum::Extension(auth): axum::Extension<AuthUser>,
     Json(req): Json<PutMemoryFileRequest>,
 ) -> Result<Json<OkResponse>, StatusCode> {
     check_write(&auth)?;
     let data_dir = crate::config::Config::data_dir();
-    let brain_dir = resolve_brain_dir(&data_dir, req.profile.as_deref());
+    let brain_dir = resolve_brain_dir_for_user(
+        &data_dir,
+        state.db.as_ref(),
+        req.profile.as_deref(),
+        &auth.user_id,
+    )
+    .await?;
     let path = match req.file.as_str() {
         "memory" => brain_dir.join("MEMORY.md"),
         "instructions" => brain_dir.join("INSTRUCTIONS.md"),
@@ -286,6 +434,8 @@ struct SearchQuery {
     q: String,
     #[serde(default = "default_search_limit")]
     limit: usize,
+    #[serde(default)]
+    profile: Option<String>,
 }
 
 fn default_search_limit() -> usize {
@@ -332,6 +482,7 @@ impl From<crate::storage::MemoryChunkRow> for ChunkView {
 
 async fn search_memory(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Query(q): Query<SearchQuery>,
 ) -> Result<Json<SearchResponse>, StatusCode> {
     let db = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
@@ -344,7 +495,23 @@ async fn search_memory(
     #[cfg(feature = "embeddings")]
     if let Some(ref searcher_mutex) = state.memory_searcher {
         let mut searcher = searcher_mutex.lock().await;
-        match searcher.search(&q.q, q.limit).await {
+        let profile_ids =
+            match resolve_profile_filter_for_user(db, q.profile.as_deref(), &auth.user_id).await? {
+                Some(profile_id) => vec![profile_id],
+                None => user_profile_ids(db, &auth.user_id).await,
+            };
+        match searcher
+            .search_scoped_full(
+                &q.q,
+                q.limit,
+                None,
+                None,
+                &profile_ids,
+                Some(&auth.user_id),
+                &[],
+            )
+            .await
+        {
             Ok(results) => {
                 let chunks: Vec<ChunkView> = results
                     .into_iter()
@@ -390,7 +557,11 @@ async fn search_memory(
     for (i, &(id, _)) in fts_results.iter().enumerate() {
         id_order.insert(id, i);
     }
-    let mut chunks: Vec<ChunkView> = rows.into_iter().map(ChunkView::from).collect();
+    let mut chunks: Vec<ChunkView> = rows
+        .into_iter()
+        .filter(|row| row.user_id.as_deref() == Some(auth.user_id.as_str()))
+        .map(ChunkView::from)
+        .collect();
     chunks.sort_by_key(|c| id_order.get(&c.id).copied().unwrap_or(usize::MAX));
 
     Ok(Json(SearchResponse { chunks }))
@@ -413,17 +584,23 @@ fn default_history_limit() -> i64 {
 
 async fn get_memory_history(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Query(q): Query<HistoryQuery>,
 ) -> Result<Json<SearchResponse>, StatusCode> {
     let db = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
 
-    let profile_id = resolve_profile_filter(db, q.profile.as_deref()).await;
+    let profile_id =
+        resolve_profile_filter_for_user(db, q.profile.as_deref(), &auth.user_id).await?;
     let rows = db
         .list_memory_history(q.limit, q.offset, profile_id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let chunks: Vec<ChunkView> = rows.into_iter().map(ChunkView::from).collect();
+    let chunks: Vec<ChunkView> = rows
+        .into_iter()
+        .filter(|row| row.user_id.as_deref() == Some(auth.user_id.as_str()))
+        .map(ChunkView::from)
+        .collect();
 
     Ok(Json(SearchResponse { chunks }))
 }
@@ -441,9 +618,19 @@ struct InstructionsQuery {
     profile: Option<String>,
 }
 
-async fn get_instructions(Query(q): Query<InstructionsQuery>) -> Json<InstructionsResponse> {
+async fn get_instructions(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+    Query(q): Query<InstructionsQuery>,
+) -> Result<Json<InstructionsResponse>, StatusCode> {
     let data_dir = crate::config::Config::data_dir();
-    let brain_dir = resolve_brain_dir(&data_dir, q.profile.as_deref());
+    let brain_dir = resolve_brain_dir_for_user(
+        &data_dir,
+        state.db.as_ref(),
+        q.profile.as_deref(),
+        &auth.user_id,
+    )
+    .await?;
     let brain_path = brain_dir.join("INSTRUCTIONS.md");
     let legacy_path = data_dir.join("INSTRUCTIONS.md");
     let path = if brain_path.exists() {
@@ -465,10 +652,10 @@ async fn get_instructions(Query(q): Query<InstructionsQuery>) -> Json<Instructio
         .filter(|s| !s.is_empty())
         .collect();
 
-    Json(InstructionsResponse {
+    Ok(Json(InstructionsResponse {
         ok: true,
         instructions,
-    })
+    }))
 }
 
 #[derive(Deserialize)]
@@ -480,12 +667,19 @@ struct PutInstructionsRequest {
 }
 
 async fn put_instructions(
+    State(state): State<Arc<AppState>>,
     axum::Extension(auth): axum::Extension<AuthUser>,
     Json(req): Json<PutInstructionsRequest>,
 ) -> Result<Json<OkResponse>, StatusCode> {
     check_write(&auth)?;
     let data_dir = crate::config::Config::data_dir();
-    let brain_dir = resolve_brain_dir(&data_dir, req.profile.as_deref());
+    let brain_dir = resolve_brain_dir_for_user(
+        &data_dir,
+        state.db.as_ref(),
+        req.profile.as_deref(),
+        &auth.user_id,
+    )
+    .await?;
     let path = brain_dir.join("INSTRUCTIONS.md");
 
     tokio::fs::create_dir_all(&brain_dir)
@@ -521,8 +715,19 @@ struct DailyListResponse {
     dates: Vec<String>,
 }
 
-async fn list_daily_files(Query(q): Query<StatsQuery>) -> Json<DailyListResponse> {
+async fn list_daily_files(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+    Query(q): Query<StatsQuery>,
+) -> Result<Json<DailyListResponse>, StatusCode> {
     let data_dir = crate::config::Config::data_dir();
+    resolve_brain_dir_for_user(
+        &data_dir,
+        state.db.as_ref(),
+        q.profile.as_deref(),
+        &auth.user_id,
+    )
+    .await?;
     let memory_dir = crate::agent::memory::daily_log_dir(&data_dir, q.profile.as_deref());
 
     let mut dates: Vec<String> = std::fs::read_dir(&memory_dir)
@@ -538,7 +743,7 @@ async fn list_daily_files(Query(q): Query<StatsQuery>) -> Json<DailyListResponse
         .unwrap_or_default();
 
     dates.sort_unstable_by(|a, b| b.cmp(a)); // newest first
-    Json(DailyListResponse { dates })
+    Ok(Json(DailyListResponse { dates }))
 }
 
 #[derive(Serialize)]
@@ -550,6 +755,8 @@ struct DailyFileResponse {
 
 async fn get_daily_file(
     Path(date): Path<String>,
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Query(q): Query<StatsQuery>,
 ) -> Result<Json<DailyFileResponse>, StatusCode> {
     // Validate date format to prevent path traversal
@@ -558,6 +765,13 @@ async fn get_daily_file(
     }
 
     let data_dir = crate::config::Config::data_dir();
+    resolve_brain_dir_for_user(
+        &data_dir,
+        state.db.as_ref(),
+        q.profile.as_deref(),
+        &auth.user_id,
+    )
+    .await?;
     let memory_dir = crate::agent::memory::daily_log_dir(&data_dir, q.profile.as_deref());
     let path = memory_dir.join(format!("{date}.md"));
 
@@ -606,15 +820,17 @@ struct AuditQuery {
 /// `GET /v1/memory/audit` — visibility audit dashboard.
 async fn memory_audit(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Query(q): Query<AuditQuery>,
 ) -> Result<Json<AuditResponse>, StatusCode> {
     let db = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
-    let profile_id = resolve_profile_filter(db, q.profile.as_deref()).await;
+    let profile_id =
+        resolve_profile_filter_for_user(db, q.profile.as_deref(), &auth.user_id).await?;
 
-    let (private, public, contact_scoped) = db
-        .audit_namespace_counts(profile_id)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let (private, public, contact_scoped) =
+        audit_namespace_counts_for_user(db, auth.user_id.as_str(), profile_id)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let samples = db
         .audit_private_samples(20, profile_id)
@@ -623,6 +839,7 @@ async fn memory_audit(
 
     let unscoped_samples = samples
         .into_iter()
+        .filter(|c| c.user_id.as_deref() == Some(auth.user_id.as_str()))
         .map(|c| {
             let preview = if c.content.len() > 120 {
                 format!("{}…", &c.content[..120])
@@ -668,6 +885,17 @@ async fn classify_chunks(
         return Err(StatusCode::BAD_REQUEST);
     }
 
+    let owned_count = db
+        .load_chunks_by_ids(&body.chunk_ids)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .into_iter()
+        .filter(|chunk| chunk.user_id.as_deref() == Some(auth.user_id.as_str()))
+        .count();
+    if owned_count != body.chunk_ids.len() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
     let updated = db
         .reclassify_chunks(&body.chunk_ids, &body.namespace)
         .await
@@ -703,11 +931,18 @@ async fn classify_all(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let profile_id = resolve_profile_filter(db, body.profile.as_deref()).await;
-    let updated = db
-        .reclassify_all_private(&body.namespace, profile_id)
+    let profile_id =
+        resolve_profile_filter_for_user(db, body.profile.as_deref(), &auth.user_id).await?;
+    let ids = private_chunk_ids_for_user(db, auth.user_id.as_str(), profile_id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let updated = if ids.is_empty() {
+        0
+    } else {
+        db.reclassify_chunks(&ids, &body.namespace)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    };
 
     Ok(Json(OkResponse {
         ok: true,

@@ -262,6 +262,7 @@ impl RagEngine {
         query: &str,
         top_k: usize,
         profile_id: Option<i64>,
+        user_id: Option<&str>,
         allowed_namespaces: Option<&[String]>,
     ) -> Result<Vec<RagSearchResult>> {
         let vector_results = self
@@ -327,6 +328,12 @@ impl RagEngine {
                     if let Some(pid) = profile_id {
                         if chunk.profile_id.is_some() && chunk.profile_id != Some(pid) {
                             return None; // belongs to a different profile
+                        }
+                    }
+                    // User scoping: authenticated users only see their own chunks.
+                    if let Some(uid) = user_id {
+                        if chunk.user_id.as_deref() != Some(uid) {
+                            return None;
                         }
                     }
                     // Namespace scoping: if allowed_namespaces is set (contact perimeter),
@@ -412,6 +419,13 @@ impl RagEngine {
         self.store.delete_rag_source(source_id).await
     }
 
+    /// Remove a source only if it belongs to the authenticated user.
+    pub async fn remove_source_for_user(&mut self, source_id: i64, user_id: &str) -> Result<bool> {
+        self.store
+            .delete_rag_source_for_user(source_id, user_id)
+            .await
+    }
+
     /// List indexed sources, optionally filtered by profile.
     ///
     /// When `profile_id` is `Some`, returns sources belonging to that profile
@@ -422,6 +436,17 @@ impl RagEngine {
         } else {
             self.store.list_rag_sources().await
         }
+    }
+
+    /// List indexed sources owned by a user.
+    pub async fn list_sources_for_user(
+        &self,
+        user_id: &str,
+        profile_id: Option<i64>,
+    ) -> Result<Vec<RagSourceRow>> {
+        self.store
+            .list_rag_sources_for_user(user_id, profile_id)
+            .await
     }
 
     /// Get knowledge base stats.
@@ -505,6 +530,15 @@ impl RagEngine {
     pub async fn reveal_chunk(&self, chunk_id: i64) -> Result<Option<RagChunkRow>> {
         let chunks = self.store.load_rag_chunks_by_ids(&[chunk_id]).await?;
         Ok(chunks.into_iter().next())
+    }
+
+    /// Reveal a chunk only if it belongs to the authenticated user.
+    pub async fn reveal_chunk_for_user(
+        &self,
+        chunk_id: i64,
+        user_id: &str,
+    ) -> Result<Option<RagChunkRow>> {
+        self.store.load_rag_chunk_for_user(chunk_id, user_id).await
     }
 }
 
@@ -643,16 +677,22 @@ mod tests {
 
     /// Create an isolated RAG engine with temp DB + temp index.
     async fn test_rag_engine() -> (RagEngine, TempDir) {
+        let (rag, dir, _) = test_rag_engine_with_db().await;
+        (rag, dir)
+    }
+
+    async fn test_rag_engine_with_db() -> (RagEngine, TempDir, Database) {
         let dir = TempDir::new().unwrap();
         let db_path = dir.path().join("test.db");
         let db = Database::open(&db_path).await.unwrap();
+        let db_handle = db.clone();
 
         let index_path = dir.path().join("rag_test.usearch");
         let provider = Box::new(MockEmbeddingProvider { dims: 32 });
         let engine = EmbeddingEngine::with_provider_and_path(provider, index_path).unwrap();
 
         let rag = RagEngine::new(db, engine, ChunkOptions::default());
-        (rag, dir)
+        (rag, dir, db_handle)
     }
 
     /// Write a test markdown file and return its path.
@@ -660,6 +700,16 @@ mod tests {
         let path = dir.join(name);
         std::fs::write(&path, content).unwrap();
         path
+    }
+
+    async fn insert_test_user(db: &Database, user_id: &str) {
+        sqlx::query("INSERT OR IGNORE INTO users (id, username, roles) VALUES (?, ?, ?)")
+            .bind(user_id)
+            .bind(user_id)
+            .bind(r#"["user"]"#)
+            .execute(db.pool())
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -722,10 +772,76 @@ mod tests {
             .await
             .unwrap();
 
-        let results = rag.search("neural networks", 5, None, None).await.unwrap();
+        let results = rag
+            .search("neural networks", 5, None, None, None)
+            .await
+            .unwrap();
         assert!(!results.is_empty(), "Search should return results");
         assert!(results[0].score > 0.0, "Score should be positive");
         assert_eq!(results[0].source_file, "searchable.md");
+    }
+
+    #[tokio::test]
+    async fn test_search_filters_by_user() {
+        let (mut rag, dir, db) = test_rag_engine_with_db().await;
+        insert_test_user(&db, "alice").await;
+        insert_test_user(&db, "bob").await;
+
+        let alice_md = write_test_md(
+            dir.path(),
+            "alice-tax.md",
+            "# Alice\n\nAlice fiscal code is ALICE123.",
+        );
+        let bob_md = write_test_md(
+            dir.path(),
+            "bob-tax.md",
+            "# Bob\n\nBob fiscal code is BOB456.",
+        );
+
+        rag.ingest_file(&alice_md, "test", None, Some("alice"), None)
+            .await
+            .unwrap();
+        rag.ingest_file(&bob_md, "test", None, Some("bob"), None)
+            .await
+            .unwrap();
+
+        let alice_results = rag
+            .search("fiscal code", 10, None, Some("alice"), None)
+            .await
+            .unwrap();
+        assert!(
+            alice_results
+                .iter()
+                .any(|r| r.chunk.content.contains("ALICE123")),
+            "Alice should see Alice content"
+        );
+        assert!(
+            !alice_results
+                .iter()
+                .any(|r| r.chunk.content.contains("BOB456")),
+            "Alice must not see Bob content"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_list_sources_filters_by_user() {
+        let (mut rag, dir, db) = test_rag_engine_with_db().await;
+        insert_test_user(&db, "alice").await;
+        insert_test_user(&db, "bob").await;
+
+        let alice_md = write_test_md(dir.path(), "alice-source.md", "# Alice\n\nContent.");
+        let bob_md = write_test_md(dir.path(), "bob-source.md", "# Bob\n\nContent.");
+
+        rag.ingest_file(&alice_md, "test", None, Some("alice"), None)
+            .await
+            .unwrap();
+        rag.ingest_file(&bob_md, "test", None, Some("bob"), None)
+            .await
+            .unwrap();
+
+        let alice_sources = rag.list_sources_for_user("alice", None).await.unwrap();
+        assert_eq!(alice_sources.len(), 1);
+        assert_eq!(alice_sources[0].file_name, "alice-source.md");
     }
 
     #[tokio::test]
@@ -743,7 +859,10 @@ mod tests {
             .await
             .unwrap();
 
-        let results = rag.search("api key config", 5, None, None).await.unwrap();
+        let results = rag
+            .search("api key config", 5, None, None, None)
+            .await
+            .unwrap();
         // Find the sensitive chunk — it should be redacted
         let has_redacted = results
             .iter()

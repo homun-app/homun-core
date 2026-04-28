@@ -334,12 +334,13 @@ pub(super) async fn search_memory(
     contact_id: Option<i64>,
     agent_id: Option<&str>,
     profile_ids: &[i64],
+    user_id: Option<&str>,
     allowed_namespaces: Option<&[String]>,
 ) -> String {
     let mut guard = searcher.lock().await;
     let ns = allowed_namespaces.unwrap_or(&[]);
     match guard
-        .search_scoped_full(query, 3, contact_id, agent_id, profile_ids, ns)
+        .search_scoped_full(query, 3, contact_id, agent_id, profile_ids, user_id, ns)
         .await
     {
         Ok(results) if !results.is_empty() => {
@@ -380,12 +381,16 @@ pub(super) async fn search_memory(
 pub(super) async fn search_knowledge(
     query: &str,
     rag_engine: &Arc<tokio::sync::Mutex<crate::rag::RagEngine>>,
+    user_id: Option<&str>,
     profile_ids: &[i64],
     allowed_namespaces: Option<&[String]>,
 ) -> String {
     let pid = profile_ids.first().copied();
     let mut guard = rag_engine.lock().await;
-    match guard.search(query, 3, pid, allowed_namespaces).await {
+    match guard
+        .search(query, 3, pid, user_id, allowed_namespaces)
+        .await
+    {
         Ok(results) if !results.is_empty() => {
             let entries: Vec<KnowledgeEntry> = results
                 .iter()

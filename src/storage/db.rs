@@ -2466,6 +2466,9 @@ pub struct MemoryChunkRow {
     /// Namespace for access control (default: _private).
     #[sqlx(default)]
     pub namespace: String,
+    /// User that owns this memory chunk.
+    #[sqlx(default)]
+    pub user_id: Option<String>,
 }
 
 /// A hierarchical summary of memory chunks over a time period.
@@ -2566,6 +2569,9 @@ pub struct RagSourceRow {
     /// Profile that owns this source (NULL = global).
     #[sqlx(default)]
     pub profile_id: Option<i64>,
+    /// User that owns this source.
+    #[sqlx(default)]
+    pub user_id: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
@@ -2580,6 +2586,9 @@ pub struct RagChunkRow {
     pub created_at: String,
     /// Profile this chunk belongs to (NULL = global, visible to all profiles).
     pub profile_id: Option<i64>,
+    /// User that owns this chunk.
+    #[sqlx(default)]
+    pub user_id: Option<String>,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow, Serialize)]
@@ -2965,11 +2974,28 @@ impl super::traits::RagStore for Database {
     async fn delete_rag_source(&self, id: i64) -> Result<bool> {
         Database::delete_rag_source(self, id).await
     }
+    async fn delete_rag_source_for_user(&self, id: i64, user_id: &str) -> Result<bool> {
+        Database::delete_rag_source_for_user(self, id, user_id).await
+    }
     async fn list_rag_sources(&self) -> Result<Vec<RagSourceRow>> {
         Database::list_rag_sources(self).await
     }
     async fn list_rag_sources_for_profile(&self, profile_id: i64) -> Result<Vec<RagSourceRow>> {
         Database::list_rag_sources_for_profile(self, profile_id).await
+    }
+    async fn list_rag_sources_for_user(
+        &self,
+        user_id: &str,
+        profile_id: Option<i64>,
+    ) -> Result<Vec<RagSourceRow>> {
+        Database::list_rag_sources_for_user(self, user_id, profile_id).await
+    }
+    async fn load_rag_source_for_user(
+        &self,
+        source_id: i64,
+        user_id: &str,
+    ) -> Result<Option<RagSourceRow>> {
+        Database::load_rag_source_for_user(self, source_id, user_id).await
     }
     async fn count_rag_sources(&self) -> Result<i64> {
         Database::count_rag_sources(self).await
@@ -3003,6 +3029,13 @@ impl super::traits::RagStore for Database {
     }
     async fn load_rag_chunks_by_ids(&self, ids: &[i64]) -> Result<Vec<RagChunkRow>> {
         Database::load_rag_chunks_by_ids(self, ids).await
+    }
+    async fn load_rag_chunk_for_user(
+        &self,
+        chunk_id: i64,
+        user_id: &str,
+    ) -> Result<Option<RagChunkRow>> {
+        Database::load_rag_chunk_for_user(self, chunk_id, user_id).await
     }
     async fn rag_fts5_search(&self, query: &str, limit: usize) -> Result<Vec<(i64, f64)>> {
         Database::rag_fts5_search(self, query, limit).await

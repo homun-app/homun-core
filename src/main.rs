@@ -1800,7 +1800,7 @@ async fn main() -> Result<()> {
                 }
                 KnowledgeCommands::Search { query, limit } => {
                     let mut engine = rag_handle.lock().await;
-                    match engine.search(&query, limit, None, None).await {
+                    match engine.search(&query, limit, None, None, None).await {
                         Ok(results) if results.is_empty() => {
                             println!("No results found.");
                         }

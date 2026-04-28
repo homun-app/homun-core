@@ -15,6 +15,7 @@ mod inner {
     /// Resolve a profile slug from query params into a profile_id.
     async fn resolve_profile_id(
         state: &Arc<AppState>,
+        user_id: &str,
         params: &HashMap<String, String>,
     ) -> Option<i64> {
         let slug = params.get("profile")?;
@@ -22,7 +23,7 @@ mod inner {
             return None;
         }
         let db = state.db.as_ref()?;
-        crate::profiles::db::load_profile_by_slug(db.pool(), slug)
+        crate::profiles::db::load_profile_by_slug_for_user(db.pool(), slug, user_id)
             .await
             .ok()
             .flatten()
@@ -75,6 +76,7 @@ mod inner {
     /// GET /api/v1/knowledge/sources?profile=slug
     async fn list_knowledge_sources(
         State(state): State<Arc<AppState>>,
+        axum::Extension(auth): axum::Extension<AuthUser>,
         Query(params): Query<HashMap<String, String>>,
     ) -> impl IntoResponse {
         let Some(ref rag) = state.rag_engine else {
@@ -83,10 +85,13 @@ mod inner {
         };
 
         // Resolve profile filter
-        let profile_id = resolve_profile_id(&state, &params).await;
+        let profile_id = resolve_profile_id(&state, &auth.user_id, &params).await;
 
         let engine = rag.lock().await;
-        match engine.list_sources(profile_id).await {
+        match engine
+            .list_sources_for_user(&auth.user_id, profile_id)
+            .await
+        {
             Ok(sources) => Json(serde_json::json!({"sources": sources})).into_response(),
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -130,7 +135,10 @@ mod inner {
         };
 
         let mut engine = rag.lock().await;
-        match engine.remove_source(source_id).await {
+        match engine
+            .remove_source_for_user(source_id, &auth.user_id)
+            .await
+        {
             Ok(_) => Json(serde_json::json!({"ok": true})).into_response(),
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -143,6 +151,7 @@ mod inner {
     /// GET /api/v1/knowledge/search?q=...&limit=5
     async fn search_knowledge(
         State(state): State<Arc<AppState>>,
+        axum::Extension(auth): axum::Extension<AuthUser>,
         Query(params): Query<HashMap<String, String>>,
     ) -> impl IntoResponse {
         let Some(ref rag) = state.rag_engine else {
@@ -167,10 +176,13 @@ mod inner {
             .unwrap_or(5);
 
         // Resolve profile filter
-        let profile_id = resolve_profile_id(&state, &params).await;
+        let profile_id = resolve_profile_id(&state, &auth.user_id, &params).await;
 
         let mut engine = rag.lock().await;
-        match engine.search(query, limit, profile_id, None).await {
+        match engine
+            .search(query, limit, profile_id, Some(&auth.user_id), None)
+            .await
+        {
             Ok(results) => {
                 let items: Vec<serde_json::Value> = results
                     .iter()
@@ -237,7 +249,7 @@ mod inner {
                 continue;
             }
 
-            let profile_id = resolve_profile_id(&state, &params).await;
+            let profile_id = resolve_profile_id(&state, &auth.user_id, &params).await;
             let mut engine = rag.lock().await;
             match engine
                 .ingest_file(
@@ -319,11 +331,15 @@ mod inner {
         let profile_id = if let Some(slug) = req["profile"].as_str() {
             if !slug.is_empty() {
                 if let Some(ref db) = state.db {
-                    crate::profiles::db::load_profile_by_slug(db.pool(), slug)
-                        .await
-                        .ok()
-                        .flatten()
-                        .map(|p| p.id)
+                    crate::profiles::db::load_profile_by_slug_for_user(
+                        db.pool(),
+                        slug,
+                        &auth.user_id,
+                    )
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|p| p.id)
                 } else {
                     None
                 }
@@ -433,7 +449,7 @@ mod inner {
         }
 
         let engine = rag.lock().await;
-        match engine.reveal_chunk(chunk_id).await {
+        match engine.reveal_chunk_for_user(chunk_id, &auth.user_id).await {
             Ok(Some(chunk)) => Json(serde_json::json!({
                 "chunk_id": chunk.id,
                 "content": chunk.content,
@@ -486,6 +502,24 @@ mod inner {
             )
                 .into_response();
         };
+
+        match db.load_rag_source_for_user(source_id, &auth.user_id).await {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({"error": "Source not found"})),
+                )
+                    .into_response();
+            }
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": e.to_string()})),
+                )
+                    .into_response();
+            }
+        }
 
         match db.update_rag_source_namespace(source_id, namespace).await {
             Ok(()) => Json(serde_json::json!({"ok": true})).into_response(),

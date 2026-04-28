@@ -12,6 +12,7 @@ use axum::routing::get;
 use axum::Router;
 use serde::Deserialize;
 
+use crate::storage::Database;
 use crate::web::auth::{check_write, AuthUser};
 use crate::web::server::AppState;
 
@@ -69,7 +70,10 @@ fn default_empty_array() -> String {
 }
 
 /// GET /api/v1/knowledge/watches — list all watches with doc counts.
-async fn list_watches(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+async fn list_watches(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+) -> impl IntoResponse {
     let Some(ref db) = state.db else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -78,7 +82,7 @@ async fn list_watches(State(state): State<Arc<AppState>>) -> impl IntoResponse {
             .into_response();
     };
 
-    match db.list_knowledge_watches().await {
+    match list_watches_for_user(db, &auth.user_id).await {
         Ok(watches) => {
             // Enrich each watch with doc_count
             let mut items = Vec::with_capacity(watches.len());
@@ -124,6 +128,11 @@ async fn create_watch(
             .into_response();
     };
 
+    let profile_id = match resolve_watch_profile_id(db, req.profile_id, &auth).await {
+        Ok(id) => id,
+        Err(status) => return status.into_response(),
+    };
+
     // Expand tilde in path
     let expanded = expand_path(&req.path);
 
@@ -141,7 +150,7 @@ async fn create_watch(
         .insert_knowledge_watch(
             &expanded,
             req.recursive,
-            req.profile_id,
+            Some(profile_id),
             &req.namespace,
             &req.contact_ids,
         )
@@ -193,9 +202,16 @@ async fn update_watch(
     };
 
     let expanded = expand_path(&req.path);
+    let profile_id = match resolve_watch_profile_id(db, req.profile_id, &auth).await {
+        Ok(id) => id,
+        Err(status) => return status.into_response(),
+    };
 
     // Load old watch for perimeter diff
     let old_watch = db.load_knowledge_watch(id).await.ok().flatten();
+    if !watch_belongs_to_user(db, id, &auth.user_id).await {
+        return StatusCode::NOT_FOUND.into_response();
+    }
 
     match db
         .update_knowledge_watch(
@@ -203,7 +219,7 @@ async fn update_watch(
             &expanded,
             req.recursive,
             req.enabled,
-            req.profile_id,
+            Some(profile_id),
             &req.namespace,
             &req.contact_ids,
         )
@@ -251,6 +267,9 @@ async fn delete_watch(
 
     // Load watch before deleting (for perimeter cleanup)
     let old_watch = db.load_knowledge_watch(id).await.ok().flatten();
+    if !watch_belongs_to_user(db, id, &auth.user_id).await {
+        return StatusCode::NOT_FOUND.into_response();
+    }
 
     match db.delete_knowledge_watch(id).await {
         Ok(true) => {
@@ -274,6 +293,63 @@ async fn delete_watch(
     }
 }
 
+async fn resolve_watch_profile_id(
+    db: &Database,
+    requested_profile_id: Option<i64>,
+    auth: &AuthUser,
+) -> Result<i64, StatusCode> {
+    if let Some(profile_id) = requested_profile_id {
+        let allowed =
+            crate::profiles::db::load_profile_by_id_for_user(db.pool(), profile_id, &auth.user_id)
+                .await
+                .ok()
+                .flatten()
+                .is_some();
+        if allowed {
+            return Ok(profile_id);
+        }
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    crate::profiles::db::ensure_initial_profile_for_user(db.pool(), &auth.user_id, &auth.username)
+        .await
+        .map(|p| p.id)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+async fn watch_belongs_to_user(db: &Database, watch_id: i64, user_id: &str) -> bool {
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)
+         FROM knowledge_watches kw
+         JOIN profiles p ON p.id = kw.profile_id
+         WHERE kw.id = ? AND p.user_id = ?",
+    )
+    .bind(watch_id)
+    .bind(user_id)
+    .fetch_one(db.pool())
+    .await
+    .unwrap_or(0);
+    count > 0
+}
+
+async fn list_watches_for_user(
+    db: &Database,
+    user_id: &str,
+) -> anyhow::Result<Vec<crate::rag::db::KnowledgeWatch>> {
+    let rows = sqlx::query_as::<_, crate::rag::db::KnowledgeWatch>(
+        "SELECT kw.id, kw.path, kw.recursive, kw.enabled, kw.profile_id, kw.namespace,
+                kw.contact_ids, kw.created_at, kw.updated_at
+         FROM knowledge_watches kw
+         JOIN profiles p ON p.id = kw.profile_id
+         WHERE p.user_id = ?
+         ORDER BY kw.created_at DESC",
+    )
+    .bind(user_id)
+    .fetch_all(db.pool())
+    .await?;
+    Ok(rows)
+}
+
 /// Expand `~/` prefix to the user's home directory.
 fn expand_path(path: &str) -> String {
     if let Some(rest) = path.strip_prefix("~/") {
@@ -295,7 +371,6 @@ async fn notify_watcher(state: &AppState) {
 // ── Perimeter sync helpers ───────────────────────────────────────
 
 use crate::contacts::perimeter;
-use crate::storage::Database;
 
 /// Parse contact_ids JSON string into a Vec<i64>.
 fn parse_contact_ids(json_str: &str) -> Vec<i64> {

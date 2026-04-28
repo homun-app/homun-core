@@ -56,6 +56,8 @@ pub struct CognitionParams<'a> {
     pub channel: &'a str,
     pub agent_id: Option<&'a str>,
     pub contact_id: Option<i64>,
+    /// Authenticated user ID for user-scoped memory/RAG discovery.
+    pub user_id: Option<&'a str>,
     /// Visible profile IDs for memory/RAG scoping (active + readable_from).
     pub visible_profile_ids: Vec<i64>,
     /// Active profile slug for skill filtering.
@@ -445,6 +447,7 @@ async fn dispatch_discovery_tool(
                     params.contact_id,
                     params.agent_id,
                     &params.visible_profile_ids,
+                    params.user_id,
                     params.allowed_namespaces.as_deref(),
                 )
                 .await;
@@ -459,6 +462,7 @@ async fn dispatch_discovery_tool(
                 return discovery::search_knowledge(
                     query,
                     rag,
+                    params.user_id,
                     &params.visible_profile_ids,
                     params.allowed_namespaces.as_deref(),
                 )

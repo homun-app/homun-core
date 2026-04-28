@@ -219,11 +219,28 @@ pub trait RagStore: Send + Sync {
     /// Delete a source and its chunks. Returns true if deleted.
     async fn delete_rag_source(&self, id: i64) -> Result<bool>;
 
+    /// Delete a source owned by a specific user. Returns true if deleted.
+    async fn delete_rag_source_for_user(&self, id: i64, user_id: &str) -> Result<bool>;
+
     /// List all document sources.
     async fn list_rag_sources(&self) -> Result<Vec<RagSourceRow>>;
 
     /// List document sources filtered by profile (includes global sources).
     async fn list_rag_sources_for_profile(&self, profile_id: i64) -> Result<Vec<RagSourceRow>>;
+
+    /// List document sources owned by a user, optionally filtered by profile.
+    async fn list_rag_sources_for_user(
+        &self,
+        user_id: &str,
+        profile_id: Option<i64>,
+    ) -> Result<Vec<RagSourceRow>>;
+
+    /// Load a single source owned by a user.
+    async fn load_rag_source_for_user(
+        &self,
+        source_id: i64,
+        user_id: &str,
+    ) -> Result<Option<RagSourceRow>>;
 
     /// Count total document sources.
     async fn count_rag_sources(&self) -> Result<i64>;
@@ -246,6 +263,13 @@ pub trait RagStore: Send + Sync {
 
     /// Load chunks by their IDs (for vector search result hydration).
     async fn load_rag_chunks_by_ids(&self, ids: &[i64]) -> Result<Vec<RagChunkRow>>;
+
+    /// Load a single chunk owned by a user.
+    async fn load_rag_chunk_for_user(
+        &self,
+        chunk_id: i64,
+        user_id: &str,
+    ) -> Result<Option<RagChunkRow>>;
 
     /// Full-text search on RAG chunks. Returns (chunk_id, bm25_score).
     async fn rag_fts5_search(&self, query: &str, limit: usize) -> Result<Vec<(i64, f64)>>;

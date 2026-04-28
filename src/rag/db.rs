@@ -94,7 +94,8 @@ impl Database {
     pub async fn find_rag_source_by_hash(&self, file_hash: &str) -> Result<Option<RagSourceRow>> {
         let row = sqlx::query_as::<_, RagSourceRow>(
             "SELECT id, file_path, file_name, file_hash, doc_type, file_size,
-                    chunk_count, status, error_message, source_channel, created_at, updated_at, profile_id
+                    chunk_count, status, error_message, source_channel, created_at, updated_at,
+                    COALESCE(namespace, '_private') AS namespace, profile_id, user_id
              FROM rag_sources WHERE file_hash = ?",
         )
         .bind(file_hash)
@@ -109,7 +110,8 @@ impl Database {
     pub async fn find_rag_source_by_path(&self, file_path: &str) -> Result<Option<RagSourceRow>> {
         let row = sqlx::query_as::<_, RagSourceRow>(
             "SELECT id, file_path, file_name, file_hash, doc_type, file_size,
-                    chunk_count, status, error_message, source_channel, created_at, updated_at, profile_id
+                    chunk_count, status, error_message, source_channel, created_at, updated_at,
+                    COALESCE(namespace, '_private') AS namespace, profile_id, user_id
              FROM rag_sources WHERE file_path = ?",
         )
         .bind(file_path)
@@ -154,11 +156,24 @@ impl Database {
         Ok(result.rows_affected() > 0)
     }
 
+    /// Delete a source only if it belongs to the given user.
+    pub async fn delete_rag_source_for_user(&self, id: i64, user_id: &str) -> Result<bool> {
+        let result = sqlx::query("DELETE FROM rag_sources WHERE id = ? AND user_id = ?")
+            .bind(id)
+            .bind(user_id)
+            .execute(self.pool())
+            .await
+            .context("Failed to delete RAG source for user")?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
     /// List all document sources.
     pub async fn list_rag_sources(&self) -> Result<Vec<RagSourceRow>> {
         let rows = sqlx::query_as::<_, RagSourceRow>(
             "SELECT id, file_path, file_name, file_hash, doc_type, file_size,
-                    chunk_count, status, error_message, source_channel, created_at, updated_at, profile_id
+                    chunk_count, status, error_message, source_channel, created_at, updated_at,
+                    COALESCE(namespace, '_private') AS namespace, profile_id, user_id
              FROM rag_sources ORDER BY created_at DESC",
         )
         .fetch_all(self.pool())
@@ -174,7 +189,8 @@ impl Database {
     pub async fn list_rag_sources_for_profile(&self, profile_id: i64) -> Result<Vec<RagSourceRow>> {
         let rows = sqlx::query_as::<_, RagSourceRow>(
             "SELECT id, file_path, file_name, file_hash, doc_type, file_size,
-                    chunk_count, status, error_message, source_channel, created_at, updated_at, profile_id
+                    chunk_count, status, error_message, source_channel, created_at, updated_at,
+                    COALESCE(namespace, '_private') AS namespace, profile_id, user_id
              FROM rag_sources
              WHERE profile_id = ? OR profile_id IS NULL
              ORDER BY created_at DESC",
@@ -185,6 +201,61 @@ impl Database {
         .context("Failed to list RAG sources for profile")?;
 
         Ok(rows)
+    }
+
+    /// List document sources owned by a user, optionally filtered by profile.
+    pub async fn list_rag_sources_for_user(
+        &self,
+        user_id: &str,
+        profile_id: Option<i64>,
+    ) -> Result<Vec<RagSourceRow>> {
+        let select = "SELECT id, file_path, file_name, file_hash, doc_type, file_size,
+                    chunk_count, status, error_message, source_channel, created_at, updated_at,
+                    COALESCE(namespace, '_private') AS namespace, profile_id, user_id
+             FROM rag_sources";
+
+        let rows = if let Some(pid) = profile_id {
+            sqlx::query_as::<_, RagSourceRow>(&format!(
+                "{select} WHERE user_id = ? AND (profile_id = ? OR profile_id IS NULL)
+                 ORDER BY created_at DESC"
+            ))
+            .bind(user_id)
+            .bind(pid)
+            .fetch_all(self.pool())
+            .await
+        } else {
+            sqlx::query_as::<_, RagSourceRow>(&format!(
+                "{select} WHERE user_id = ? ORDER BY created_at DESC"
+            ))
+            .bind(user_id)
+            .fetch_all(self.pool())
+            .await
+        }
+        .context("Failed to list RAG sources for user")?;
+
+        Ok(rows)
+    }
+
+    /// Load a single source owned by a user.
+    pub async fn load_rag_source_for_user(
+        &self,
+        source_id: i64,
+        user_id: &str,
+    ) -> Result<Option<RagSourceRow>> {
+        let row = sqlx::query_as::<_, RagSourceRow>(
+            "SELECT id, file_path, file_name, file_hash, doc_type, file_size,
+                    chunk_count, status, error_message, source_channel, created_at, updated_at,
+                    COALESCE(namespace, '_private') AS namespace, profile_id, user_id
+             FROM rag_sources
+             WHERE id = ? AND user_id = ?",
+        )
+        .bind(source_id)
+        .bind(user_id)
+        .fetch_optional(self.pool())
+        .await
+        .context("Failed to load RAG source for user")?;
+
+        Ok(row)
     }
 
     /// Insert a document chunk. Returns the chunk ID.
@@ -238,7 +309,8 @@ impl Database {
 
         let placeholders: Vec<String> = ids.iter().map(|_| "?".to_string()).collect();
         let query = format!(
-            "SELECT id, source_id, chunk_index, heading, content, token_count, sensitive, created_at, profile_id
+            "SELECT id, source_id, chunk_index, heading, content, token_count, sensitive,
+                    created_at, profile_id, user_id
              FROM rag_chunks WHERE id IN ({})
              ORDER BY created_at DESC",
             placeholders.join(",")
@@ -255,6 +327,27 @@ impl Database {
             .context("Failed to load RAG chunks by IDs")?;
 
         Ok(rows)
+    }
+
+    /// Load a single chunk owned by a user.
+    pub async fn load_rag_chunk_for_user(
+        &self,
+        chunk_id: i64,
+        user_id: &str,
+    ) -> Result<Option<RagChunkRow>> {
+        let row = sqlx::query_as::<_, RagChunkRow>(
+            "SELECT id, source_id, chunk_index, heading, content, token_count, sensitive,
+                    created_at, profile_id, user_id
+             FROM rag_chunks
+             WHERE id = ? AND user_id = ?",
+        )
+        .bind(chunk_id)
+        .bind(user_id)
+        .fetch_optional(self.pool())
+        .await
+        .context("Failed to load RAG chunk for user")?;
+
+        Ok(row)
     }
 
     /// Full-text search on RAG chunks. Returns (chunk_id, bm25_score).
@@ -296,7 +389,8 @@ impl Database {
     /// Load all chunks for a specific source.
     pub async fn load_rag_chunks_by_source(&self, source_id: i64) -> Result<Vec<RagChunkRow>> {
         let rows = sqlx::query_as::<_, RagChunkRow>(
-            "SELECT id, source_id, chunk_index, heading, content, token_count, sensitive, created_at, profile_id
+            "SELECT id, source_id, chunk_index, heading, content, token_count, sensitive,
+                    created_at, profile_id, user_id
              FROM rag_chunks WHERE source_id = ? ORDER BY chunk_index",
         )
         .bind(source_id)

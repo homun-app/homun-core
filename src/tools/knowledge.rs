@@ -143,7 +143,13 @@ impl Tool for KnowledgeTool {
                 let query = get_string_param(&args, "query")?;
                 let mut engine = self.engine.lock().await;
                 let results = engine
-                    .search(&query, 5, ctx.profile_id, ctx.allowed_namespaces.as_deref())
+                    .search(
+                        &query,
+                        5,
+                        ctx.profile_id,
+                        ctx.user_id.as_deref(),
+                        ctx.allowed_namespaces.as_deref(),
+                    )
                     .await?;
 
                 if results.is_empty() {
@@ -243,7 +249,13 @@ impl Tool for KnowledgeTool {
 
             "list" => {
                 let engine = self.engine.lock().await;
-                let sources = engine.list_sources(None).await?;
+                let sources = if let Some(user_id) = ctx.user_id.as_deref() {
+                    engine
+                        .list_sources_for_user(user_id, ctx.profile_id)
+                        .await?
+                } else {
+                    engine.list_sources(ctx.profile_id).await?
+                };
 
                 if sources.is_empty() {
                     return Ok(ToolResult {
@@ -283,7 +295,11 @@ impl Tool for KnowledgeTool {
                 };
 
                 let mut engine = self.engine.lock().await;
-                let deleted = engine.remove_source(source_id).await?;
+                let deleted = if let Some(user_id) = ctx.user_id.as_deref() {
+                    engine.remove_source_for_user(source_id, user_id).await?
+                } else {
+                    engine.remove_source(source_id).await?
+                };
 
                 Ok(ToolResult {
                     output: if deleted {
@@ -327,7 +343,12 @@ impl Tool for KnowledgeTool {
                 }
 
                 let engine = self.engine.lock().await;
-                match engine.reveal_chunk(chunk_id).await? {
+                let chunk = if let Some(user_id) = ctx.user_id.as_deref() {
+                    engine.reveal_chunk_for_user(chunk_id, user_id).await?
+                } else {
+                    engine.reveal_chunk(chunk_id).await?
+                };
+                match chunk {
                     Some(chunk) => Ok(ToolResult::success(format!(
                         "**Revealed chunk {} (source_id: {}):**\n\n{}\n\n\
                          ⚠️ This chunk was marked sensitive. Handle with care.",
