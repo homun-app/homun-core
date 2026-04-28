@@ -62,40 +62,26 @@ struct VaultProfileQuery {
     profile: Option<String>,
 }
 
-/// Build vault key prefix for a profile.
-/// - "default" or empty → `vault.` (excludes profile-scoped keys)
-/// - Other profile → `vault.p:{slug}.`
-fn vault_prefix(profile: Option<&str>) -> String {
-    match profile {
-        Some(slug) if !slug.is_empty() && slug != "default" => {
-            format!("vault.p:{slug}.")
-        }
-        _ => "vault.".to_string(),
-    }
+/// Build vault key prefix for an authenticated user/profile.
+fn vault_prefix(user_id: Option<&str>, profile: Option<&str>) -> String {
+    crate::tools::vault::vault_prefix_for_scope(user_id, profile)
 }
 
 /// Strip profile-specific vault prefix from a raw key.
-fn strip_vault_prefix(raw_key: &str, profile: Option<&str>) -> Option<String> {
-    let prefix = vault_prefix(profile);
-    // For default profile, exclude profile-scoped keys (vault.p:*)
-    if let Some(stripped) = raw_key.strip_prefix(&prefix) {
-        if profile.is_none() || profile == Some("") || profile == Some("default") {
-            // Don't match profile-scoped keys when filtering default
-            if stripped.starts_with("p:") {
-                return None;
-            }
-        }
-        Some(stripped.to_string())
-    } else {
-        None
-    }
+fn strip_vault_prefix(
+    raw_key: &str,
+    user_id: Option<&str>,
+    profile: Option<&str>,
+) -> Option<String> {
+    crate::tools::vault::strip_vault_prefix_for_scope(raw_key, user_id, profile)
 }
 
 async fn list_vault_keys(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Query(q): Query<VaultProfileQuery>,
 ) -> Result<Json<VaultKeysResponse>, StatusCode> {
-    let profile_id = resolve_profile_id_from_slug(&state, q.profile.as_deref()).await;
+    let profile_id = resolve_profile_id_from_slug(&state, q.profile.as_deref(), &auth).await;
     audit_log(&state, "*", "list", true, profile_id);
     let secrets =
         crate::storage::global_secrets().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -106,7 +92,7 @@ async fn list_vault_keys(
     let profile = q.profile.as_deref();
     let mut keys: Vec<String> = all
         .keys()
-        .filter_map(|k| strip_vault_prefix(k, profile))
+        .filter_map(|k| strip_vault_prefix(k, Some(&auth.user_id), profile))
         .collect();
     keys.sort_unstable();
 
@@ -141,7 +127,7 @@ async fn set_vault_secret(
         }));
     }
 
-    let prefix = vault_prefix(req.profile.as_deref());
+    let prefix = vault_prefix(Some(&auth.user_id), req.profile.as_deref());
     let secrets =
         crate::storage::global_secrets().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let secret_key = crate::storage::SecretKey::custom(&format!("{prefix}{}", req.key));
@@ -149,7 +135,7 @@ async fn set_vault_secret(
         .set(&secret_key, &req.value)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let profile_id = resolve_profile_id_from_slug(&state, req.profile.as_deref()).await;
+    let profile_id = resolve_profile_id_from_slug(&state, req.profile.as_deref(), &auth).await;
     audit_log(&state, &req.key, "store", true, profile_id);
 
     Ok(Json(OkResponse {
@@ -184,12 +170,13 @@ struct RevealRequest {
 #[cfg(feature = "vault-2fa")]
 async fn reveal_vault_secret(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Path(key): Path<String>,
     Json(req): Json<RevealRequest>,
 ) -> Result<Json<RevealResponse>, StatusCode> {
     use crate::security::{global_session_manager, TotpManager, TwoFactorStorage};
 
-    let profile_id = resolve_profile_id_from_slug(&state, req.profile.as_deref()).await;
+    let profile_id = resolve_profile_id_from_slug(&state, req.profile.as_deref(), &auth).await;
 
     // Check if 2FA is enabled
     let storage = match TwoFactorStorage::new() {
@@ -198,7 +185,7 @@ async fn reveal_vault_secret(
             // If we can't load 2FA config, allow access (fail open for availability)
             tracing::warn!("Could not load 2FA config, allowing vault access");
             audit_log(&state, &key, "reveal", true, profile_id);
-            return do_reveal_secret(&key, req.profile.as_deref()).await;
+            return do_reveal_secret(&key, Some(&auth.user_id), req.profile.as_deref()).await;
         }
     };
 
@@ -207,14 +194,14 @@ async fn reveal_vault_secret(
         Err(_) => {
             tracing::warn!("Could not load 2FA config, allowing vault access");
             audit_log(&state, &key, "reveal", true, profile_id);
-            return do_reveal_secret(&key, req.profile.as_deref()).await;
+            return do_reveal_secret(&key, Some(&auth.user_id), req.profile.as_deref()).await;
         }
     };
 
     if !config.enabled {
         // 2FA not enabled, allow access
         audit_log(&state, &key, "reveal", true, profile_id);
-        return do_reveal_secret(&key, req.profile.as_deref()).await;
+        return do_reveal_secret(&key, Some(&auth.user_id), req.profile.as_deref()).await;
     }
 
     // 2FA is enabled - verify authentication
@@ -247,28 +234,30 @@ async fn reveal_vault_secret(
     }
 
     audit_log(&state, &key, "reveal", true, profile_id);
-    do_reveal_secret(&key, req.profile.as_deref()).await
+    do_reveal_secret(&key, Some(&auth.user_id), req.profile.as_deref()).await
 }
 
 #[cfg(not(feature = "vault-2fa"))]
 async fn reveal_vault_secret(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Path(key): Path<String>,
     Json(req): Json<RevealRequest>,
 ) -> Result<Json<RevealResponse>, StatusCode> {
     // 2FA feature not enabled, allow direct access
-    let profile_id = resolve_profile_id_from_slug(&state, req.profile.as_deref()).await;
+    let profile_id = resolve_profile_id_from_slug(&state, req.profile.as_deref(), &auth).await;
     audit_log(&state, &key, "reveal", true, profile_id);
-    do_reveal_secret(&key, req.profile.as_deref()).await
+    do_reveal_secret(&key, Some(&auth.user_id), req.profile.as_deref()).await
 }
 
 async fn do_reveal_secret(
     key: &str,
+    user_id: Option<&str>,
     profile: Option<&str>,
 ) -> Result<Json<RevealResponse>, StatusCode> {
     let secrets =
         crate::storage::global_secrets().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let prefix = vault_prefix(profile);
+    let prefix = vault_prefix(user_id, profile);
     let secret_key = crate::storage::SecretKey::custom(&format!("{prefix}{key}"));
 
     match secrets.get(&secret_key) {
@@ -297,7 +286,7 @@ async fn delete_vault_secret(
     Query(q): Query<VaultProfileQuery>,
 ) -> Result<Json<OkResponse>, StatusCode> {
     check_admin(&auth)?;
-    let prefix = vault_prefix(q.profile.as_deref());
+    let prefix = vault_prefix(Some(&auth.user_id), q.profile.as_deref());
     let secrets =
         crate::storage::global_secrets().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let secret_key = crate::storage::SecretKey::custom(&format!("{prefix}{key}"));
@@ -306,7 +295,7 @@ async fn delete_vault_secret(
         .delete(&secret_key)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let profile_id = resolve_profile_id_from_slug(&state, q.profile.as_deref()).await;
+    let profile_id = resolve_profile_id_from_slug(&state, q.profile.as_deref(), &auth).await;
     audit_log(&state, &key, "delete", true, profile_id);
 
     Ok(Json(OkResponse {
@@ -328,16 +317,23 @@ async fn delete_vault_secret(
 /// See A-bug-8: before this helper, `audit_log()` hardcoded `profile_id=NULL`
 /// for every web_api operation, producing audit rows inconsistent with the
 /// tool-side audit rows (which propagate `ctx.profile_id` correctly).
-async fn resolve_profile_id_from_slug(state: &Arc<AppState>, slug: Option<&str>) -> Option<i64> {
-    let slug = slug?;
-    if slug.is_empty() || slug == "default" {
-        return None;
-    }
+async fn resolve_profile_id_from_slug(
+    state: &Arc<AppState>,
+    slug: Option<&str>,
+    auth: &AuthUser,
+) -> Option<i64> {
     let db = state.db.as_ref()?;
-    crate::profiles::db::load_profile_by_slug(db.pool(), slug)
+    let slug = slug.map(str::trim).filter(|slug| !slug.is_empty());
+    if let Some(slug) = slug {
+        return crate::profiles::db::load_profile_by_slug_for_user(db.pool(), slug, &auth.user_id)
+            .await
+            .ok()
+            .flatten()
+            .map(|p| p.id);
+    }
+    crate::profiles::db::ensure_initial_profile_for_user(db.pool(), &auth.user_id, &auth.username)
         .await
         .ok()
-        .flatten()
         .map(|p| p.id)
 }
 
@@ -382,9 +378,10 @@ fn default_audit_limit() -> i64 {
 
 async fn get_vault_audit_log(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     axum::extract::Query(q): axum::extract::Query<AuditQuery>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let profile_id = resolve_profile_id_from_slug(&state, q.profile.as_deref()).await;
+    let profile_id = resolve_profile_id_from_slug(&state, q.profile.as_deref(), &auth).await;
     let db = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
     let rows = db
         .list_vault_access_log(q.limit, profile_id)

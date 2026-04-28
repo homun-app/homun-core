@@ -27,13 +27,26 @@ use super::registry::{get_optional_string, get_string_param, Tool, ToolContext, 
 /// Vault prefix for user secrets (namespaced away from provider/channel keys)
 const VAULT_PREFIX: &str = "vault.";
 
-/// Build a vault key prefix for listing, scoped to the active profile.
+/// Build a vault key prefix for listing, scoped to the active user and profile.
 ///
-/// - Default profile (or None/empty/"default"): `"vault."`
-/// - Other profiles: `"vault.p:{slug}."`
+/// - No user context: legacy `"vault."` / `"vault.p:{slug}."`
+/// - User + default profile: `"vault.u:{user_id}."`
+/// - User + named profile: `"vault.u:{user_id}.p:{slug}."`
 ///
 /// Used by the agent loop for profile-aware vault resolution.
 pub fn vault_prefix_for_profile(profile_slug: Option<&str>) -> String {
+    vault_prefix_for_scope(None, profile_slug)
+}
+
+pub fn vault_prefix_for_scope(user_id: Option<&str>, profile_slug: Option<&str>) -> String {
+    if let Some(uid) = user_id.filter(|value| !value.trim().is_empty()) {
+        return match profile_slug {
+            Some(slug) if !slug.is_empty() && slug != "default" => {
+                format!("{VAULT_PREFIX}u:{uid}.p:{slug}.")
+            }
+            _ => format!("{VAULT_PREFIX}u:{uid}."),
+        };
+    }
     match profile_slug {
         Some(slug) if !slug.is_empty() && slug != "default" => {
             format!("{VAULT_PREFIX}p:{slug}.")
@@ -46,11 +59,19 @@ pub fn vault_prefix_for_profile(profile_slug: Option<&str>) -> String {
 ///
 /// For the default profile, excludes other profiles' scoped keys (`vault.p:*`).
 pub fn strip_vault_prefix(key: &str, profile_slug: Option<&str>) -> Option<String> {
-    let prefix = vault_prefix_for_profile(profile_slug);
+    strip_vault_prefix_for_scope(key, None, profile_slug)
+}
+
+pub fn strip_vault_prefix_for_scope(
+    key: &str,
+    user_id: Option<&str>,
+    profile_slug: Option<&str>,
+) -> Option<String> {
+    let prefix = vault_prefix_for_scope(user_id, profile_slug);
     if let Some(stripped) = key.strip_prefix(&prefix) {
         let is_default =
             profile_slug.is_none() || profile_slug == Some("default") || profile_slug == Some("");
-        if is_default && stripped.starts_with("p:") {
+        if is_default && (stripped.starts_with("p:") || stripped.starts_with("u:")) {
             return None;
         }
         Some(stripped.to_string())
@@ -98,8 +119,8 @@ impl VaultTool {
     ///
     /// - Default profile (or None): `vault.{name}` (backward compatible)
     /// - Other profiles: `vault.p:{slug}.{name}`
-    fn vault_key_for(name: &str, profile_slug: Option<&str>) -> SecretKey {
-        let prefix = vault_prefix_for_profile(profile_slug);
+    fn vault_key_for(name: &str, user_id: Option<&str>, profile_slug: Option<&str>) -> SecretKey {
+        let prefix = vault_prefix_for_scope(user_id, profile_slug);
         SecretKey::custom(&format!("{prefix}{name}"))
     }
 
@@ -269,6 +290,7 @@ impl Tool for VaultTool {
     async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
         let action = get_string_param(&args, "action")?;
         let profile = ctx.profile_slug.as_deref();
+        let user_id = ctx.user_id.as_deref();
 
         match action.as_str() {
             "store" => {
@@ -277,7 +299,7 @@ impl Tool for VaultTool {
 
                 let secrets = global_secrets()
                     .map_err(|e| anyhow::anyhow!("Failed to access vault: {e}"))?;
-                secrets.set(&Self::vault_key_for(&key, profile), &value)?;
+                secrets.set(&Self::vault_key_for(&key, user_id, profile), &value)?;
                 self.log_access(&key, "store", true, ctx.profile_id);
 
                 tracing::info!(key = %key, profile = ?profile, "Stored secret in vault");
@@ -331,7 +353,7 @@ impl Tool for VaultTool {
                 let secrets = global_secrets()
                     .map_err(|e| anyhow::anyhow!("Failed to access vault: {e}"))?;
 
-                match secrets.get(&Self::vault_key_for(&key, profile))? {
+                match secrets.get(&Self::vault_key_for(&key, user_id, profile))? {
                     Some(value) => {
                         self.log_access(&key, "retrieve", true, ctx.profile_id);
                         tracing::info!(key = %key, "Retrieved secret from vault");
@@ -382,7 +404,7 @@ impl Tool for VaultTool {
                 let all = secrets.load()?;
                 let vault_keys: Vec<String> = all
                     .keys()
-                    .filter_map(|k| strip_vault_prefix(k, profile))
+                    .filter_map(|k| strip_vault_prefix_for_scope(k, user_id, profile))
                     .collect();
 
                 if vault_keys.is_empty() {
@@ -405,7 +427,7 @@ impl Tool for VaultTool {
                 let secrets = global_secrets()
                     .map_err(|e| anyhow::anyhow!("Failed to access vault: {e}"))?;
 
-                let vault_key = Self::vault_key_for(&key, profile);
+                let vault_key = Self::vault_key_for(&key, user_id, profile);
                 // Check if it exists first
                 if secrets.get(&vault_key)?.is_none() {
                     return Ok(ToolResult::error(format!(
@@ -434,15 +456,21 @@ mod tests {
     #[test]
     fn test_vault_key_namespacing() {
         // Default profile — backward compatible flat key
-        let key = VaultTool::vault_key_for("aws_password", None);
+        let key = VaultTool::vault_key_for("aws_password", None, None);
         assert_eq!(key.as_str(), "vault.aws_password");
 
-        let key = VaultTool::vault_key_for("aws_password", Some("default"));
+        let key = VaultTool::vault_key_for("aws_password", None, Some("default"));
         assert_eq!(key.as_str(), "vault.aws_password");
 
         // Non-default profile — namespaced key
-        let key = VaultTool::vault_key_for("aws_password", Some("fabio-personale"));
+        let key = VaultTool::vault_key_for("aws_password", None, Some("fabio-personale"));
         assert_eq!(key.as_str(), "vault.p:fabio-personale.aws_password");
+
+        let key = VaultTool::vault_key_for("aws_password", Some("user-1"), None);
+        assert_eq!(key.as_str(), "vault.u:user-1.aws_password");
+
+        let key = VaultTool::vault_key_for("aws_password", Some("user-1"), Some("work"));
+        assert_eq!(key.as_str(), "vault.u:user-1.p:work.aws_password");
     }
 
     #[test]
@@ -458,6 +486,12 @@ mod tests {
         // Profile-scoped
         let name = strip_vault_prefix("vault.p:work.my_key", Some("work"));
         assert_eq!(name, Some("my_key".to_string()));
+
+        let name = strip_vault_prefix_for_scope("vault.u:user-1.my_key", Some("user-1"), None);
+        assert_eq!(name, Some("my_key".to_string()));
+
+        let name = strip_vault_prefix_for_scope("vault.u:user-2.my_key", Some("user-1"), None);
+        assert_eq!(name, None);
     }
 
     #[test]
