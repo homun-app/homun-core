@@ -1,0 +1,152 @@
+{
+  "version": 1,
+  "app": {
+    "slug": "ferie-permessi",
+    "name": "Ferie e Permessi",
+    "description": "Gestione richieste ferie e permessi dei dipendenti",
+    "icon": "calendar"
+  },
+  "entities": [
+    {
+      "name": "employee",
+      "label": "Dipendente",
+      "fields": [
+        {
+          "name": "full_name",
+          "type": "string",
+          "label": "Nome completo",
+          "required": true
+        },
+        {
+          "name": "email",
+          "type": "string",
+          "label": "Email"
+        },
+        {
+          "name": "team",
+          "type": "string",
+          "label": "Team"
+        }
+      ]
+    },
+    {
+      "name": "leave_request",
+      "label": "Richiesta",
+      "fields": [
+        {
+          "name": "employee",
+          "type": "relation",
+          "to": "employee",
+          "label": "Dipendente",
+          "required": true
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "label": "Tipo",
+          "options": [
+            "ferie",
+            "permesso",
+            "malattia"
+          ],
+          "required": true
+        },
+        {
+          "name": "start_date",
+          "type": "date",
+          "label": "Dal",
+          "required": true
+        },
+        {
+          "name": "end_date",
+          "type": "date",
+          "label": "Al",
+          "required": true
+        },
+        {
+          "name": "notes",
+          "type": "text",
+          "label": "Note"
+        },
+        {
+          "name": "status",
+          "type": "enum",
+          "label": "Stato",
+          "options": [
+            "pending",
+            "approved",
+            "rejected"
+          ],
+          "default": "pending"
+        }
+      ]
+    }
+  ],
+  "views": [
+    {
+      "type": "table",
+      "entity": "leave_request",
+      "name": "Richieste",
+      "columns": [
+        "employee",
+        "kind",
+        "start_date",
+        "end_date",
+        "status"
+      ]
+    },
+    {
+      "type": "form",
+      "entity": "leave_request",
+      "name": "Nuova richiesta"
+    },
+    {
+      "type": "detail",
+      "entity": "leave_request",
+      "name": "Dettaglio richiesta"
+    }
+  ],
+  "workflows": [
+    {
+      "entity": "leave_request",
+      "state_field": "status",
+      "states": [
+        "pending",
+        "approved",
+        "rejected"
+      ],
+      "transitions": [
+        {
+          "name": "approve",
+          "from": "pending",
+          "to": "approved",
+          "label": "Approva"
+        },
+        {
+          "name": "reject",
+          "from": "pending",
+          "to": "rejected",
+          "label": "Rifiuta"
+        }
+      ]
+    }
+  ],
+  "agent_commands": [
+    {
+      "intent": "create_leave_request",
+      "entity": "leave_request",
+      "action": "create",
+      "examples": [
+        "Crea una richiesta ferie per Mario dal 10 al 12 maggio"
+      ]
+    },
+    {
+      "intent": "count_approved_leave_requests",
+      "entity": "leave_request",
+      "action": "query",
+      "examples": [
+        "Quante richieste ferie sono state approvate questa settimana?"
+      ]
+    }
+  ]
+}
