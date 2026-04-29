@@ -65,6 +65,8 @@ pub struct ContextBuilder {
     persona_context: RwLock<String>,
     /// Structured profile context from PROFILE.json (linguistics, personality, etc.).
     profile_context: RwLock<String>,
+    /// Active profile's brain directory.
+    profile_brain_dir: RwLock<Option<std::path::PathBuf>>,
     /// Per-agent instructions from `AgentDefinition`.
     agent_instructions: RwLock<String>,
     /// Cognition understanding (what the user wants, natural language).
@@ -100,6 +102,7 @@ impl ContextBuilder {
             contact_context: RwLock::new(String::new()),
             persona_context: RwLock::new(String::new()),
             profile_context: RwLock::new(String::new()),
+            profile_brain_dir: RwLock::new(None),
             agent_instructions: RwLock::new(String::new()),
             cognition_understanding: RwLock::new(String::new()),
             cognition_plan: RwLock::new(Vec::new()),
@@ -273,6 +276,11 @@ impl ContextBuilder {
         *self.profile_context.write().await = ctx;
     }
 
+    /// Set active profile brain directory for prompt guidance.
+    pub async fn set_profile_brain_dir(&self, dir: Option<std::path::PathBuf>) {
+        *self.profile_brain_dir.write().await = dir;
+    }
+
     /// Set per-agent instructions (from `AgentDefinition.instructions`).
     pub async fn set_agent_instructions(&self, instructions: &str) {
         *self.agent_instructions.write().await = instructions.to_string();
@@ -425,6 +433,7 @@ impl ContextBuilder {
         let contact_context = self.contact_context.read().await;
         let persona_context = self.persona_context.read().await;
         let profile_context = self.profile_context.read().await;
+        let profile_brain_dir = self.profile_brain_dir.read().await;
         let agent_instructions = self.agent_instructions.read().await;
         let cognition_understanding = self.cognition_understanding.read().await;
         let cognition_plan = self.cognition_plan.read().await;
@@ -441,6 +450,7 @@ impl ContextBuilder {
             skills_summary: &skills_summary,
             bootstrap_files: &bootstrap_files,
             memory_content: &memory_content,
+            profile_brain_dir: profile_brain_dir.as_deref(),
             relevant_memories: &relevant_memories,
             rag_knowledge: &rag_knowledge,
             mcp_suggestions: &mcp_suggestions,

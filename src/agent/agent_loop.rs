@@ -916,6 +916,7 @@ impl AgentLoop {
                     .load_memory_md_for(Some(&dir))
                     .unwrap_or_default();
                 self.context.set_memory_content(memory_content).await;
+                self.context.set_profile_brain_dir(Some(dir.clone())).await;
                 // Set structured profile context from PROFILE.json
                 let profile_ctx = crate::profiles::build_profile_context(&profile);
                 self.context.set_profile_context(profile_ctx).await;
@@ -923,6 +924,7 @@ impl AgentLoop {
             } else {
                 let memory_content = self.memory.load_memory_md_for(None).unwrap_or_default();
                 self.context.set_memory_content(memory_content).await;
+                self.context.set_profile_brain_dir(None).await;
                 self.context.set_profile_context(String::new()).await;
                 (None, None)
             };

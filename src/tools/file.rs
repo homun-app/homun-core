@@ -366,6 +366,49 @@ fn resolve_path(path: &str, allowed_dir: Option<&Path>) -> Result<PathBuf, Strin
     Ok(resolved)
 }
 
+fn canonical_brain_filename(name: &str) -> Option<&'static str> {
+    match name.to_ascii_lowercase().as_str() {
+        "memory.md" => Some("MEMORY.md"),
+        "user.md" => Some("USER.md"),
+        "instructions.md" => Some("INSTRUCTIONS.md"),
+        "soul.md" => Some("SOUL.md"),
+        "agents.md" => Some("AGENTS.md"),
+        "history.md" => Some("HISTORY.md"),
+        _ => None,
+    }
+}
+
+/// Resolve common brain-file aliases against the active profile brain directory.
+///
+/// This keeps user requests like "cosa hai in memory.md" scoped to the active
+/// user/profile instead of accidentally probing the workspace or legacy
+/// `~/.homun/brain` root.
+pub(crate) fn resolve_profile_brain_alias(path: &str, ctx: &ToolContext) -> Option<PathBuf> {
+    let brain_dir = ctx.profile_brain_dir.as_ref()?;
+    let trimmed = path.trim();
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let legacy_brain = home.join(".homun").join("brain");
+
+    if matches!(trimmed, "brain" | "./brain" | "~/.homun/brain") {
+        return Some(brain_dir.clone());
+    }
+
+    if legacy_brain == Path::new(trimmed) {
+        return Some(brain_dir.clone());
+    }
+
+    let raw_path = Path::new(trimmed);
+    if raw_path.components().count() == 1 {
+        return canonical_brain_filename(trimmed).map(|filename| brain_dir.join(filename));
+    }
+
+    if let Some(rest) = trimmed.strip_prefix("brain/") {
+        return Some(brain_dir.join(rest));
+    }
+
+    None
+}
+
 // =============================================================================
 // ReadFileTool
 // =============================================================================
@@ -418,11 +461,14 @@ impl Tool for ReadFileTool {
         })
     }
 
-    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
         let path_str = get_string_param(&args, "path")?;
-        let path = match resolve_path(&path_str, self.allowed_dir.as_deref()) {
-            Ok(p) => p,
-            Err(e) => return Ok(ToolResult::error(e)),
+        let path = match resolve_profile_brain_alias(&path_str, ctx) {
+            Some(path) => path,
+            None => match resolve_path(&path_str, self.allowed_dir.as_deref()) {
+                Ok(p) => p,
+                Err(e) => return Ok(ToolResult::error(e)),
+            },
         };
 
         // Check permissions (combines sensitive path + ACL)
@@ -523,7 +569,7 @@ impl Tool for WriteFileTool {
         })
     }
 
-    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
         // Check content first — if args is completely empty ({}), give a clear
         // error that tells the model to include BOTH path and content.
         let content = match get_optional_string(&args, "content") {
@@ -565,9 +611,12 @@ impl Tool for WriteFileTool {
                 auto_path.to_string_lossy().to_string()
             }
         };
-        let path = match resolve_path(&path_str, self.allowed_dir.as_deref()) {
-            Ok(p) => p,
-            Err(e) => return Ok(ToolResult::error(e)),
+        let path = match resolve_profile_brain_alias(&path_str, ctx) {
+            Some(path) => path,
+            None => match resolve_path(&path_str, self.allowed_dir.as_deref()) {
+                Ok(p) => p,
+                Err(e) => return Ok(ToolResult::error(e)),
+            },
         };
 
         // Check permissions (combines sensitive path + ACL)
@@ -682,13 +731,16 @@ impl Tool for EditFileTool {
         })
     }
 
-    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
         let path_str = get_string_param(&args, "path")?;
         let old_text = get_string_param(&args, "old_text")?;
         let new_text = get_string_param(&args, "new_text")?;
-        let path = match resolve_path(&path_str, self.allowed_dir.as_deref()) {
-            Ok(p) => p,
-            Err(e) => return Ok(ToolResult::error(e)),
+        let path = match resolve_profile_brain_alias(&path_str, ctx) {
+            Some(path) => path,
+            None => match resolve_path(&path_str, self.allowed_dir.as_deref()) {
+                Ok(p) => p,
+                Err(e) => return Ok(ToolResult::error(e)),
+            },
         };
 
         // Check permissions (edit requires write)
@@ -797,11 +849,14 @@ impl Tool for ListDirTool {
         })
     }
 
-    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
         let path_str = get_string_param(&args, "path")?;
-        let path = match resolve_path(&path_str, self.allowed_dir.as_deref()) {
-            Ok(p) => p,
-            Err(e) => return Ok(ToolResult::error(e)),
+        let path = match resolve_profile_brain_alias(&path_str, ctx) {
+            Some(path) => path,
+            None => match resolve_path(&path_str, self.allowed_dir.as_deref()) {
+                Ok(p) => p,
+                Err(e) => return Ok(ToolResult::error(e)),
+            },
         };
 
         // Check permissions (list requires read)
@@ -939,6 +994,27 @@ mod tests {
             contact_id: None,
             channel_defaults: None,
         }
+    }
+
+    #[test]
+    fn test_profile_brain_aliases_resolve_to_active_profile() {
+        let mut ctx = test_ctx();
+        let brain_dir = PathBuf::from("/tmp/homun/users/fabio/profiles/default");
+        ctx.profile_brain_dir = Some(brain_dir.clone());
+
+        assert_eq!(
+            resolve_profile_brain_alias("memory.md", &ctx),
+            Some(brain_dir.join("MEMORY.md"))
+        );
+        assert_eq!(
+            resolve_profile_brain_alias("brain/USER.md", &ctx),
+            Some(brain_dir.join("USER.md"))
+        );
+        assert_eq!(
+            resolve_profile_brain_alias("brain", &ctx),
+            Some(brain_dir.clone())
+        );
+        assert_eq!(resolve_profile_brain_alias("notes.txt", &ctx), None);
     }
 
     #[tokio::test]

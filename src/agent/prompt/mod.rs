@@ -33,6 +33,8 @@ pub struct PromptContext<'a> {
     pub bootstrap_files: &'a [(String, String)],
     /// Long-term memory content (MEMORY.md)
     pub memory_content: &'a str,
+    /// Active profile brain directory for brain files (USER.md, MEMORY.md, etc.).
+    pub profile_brain_dir: Option<&'a Path>,
     /// Relevant memories from vector search
     pub relevant_memories: &'a str,
     /// Relevant knowledge from RAG knowledge base search

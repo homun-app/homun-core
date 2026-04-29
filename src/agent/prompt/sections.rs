@@ -395,12 +395,18 @@ impl PromptSection for MemorySection {
         // Memory instructions (only in full mode)
         if ctx.prompt_mode.is_full() {
             let data_dir = crate::config::Config::data_dir();
-            let brain_dir = data_dir.join("brain");
+            let fallback_brain_dir = data_dir.join("brain");
+            let brain_dir = ctx.profile_brain_dir.unwrap_or(&fallback_brain_dir);
 
             prompt.push_str(&format!(
                 r#"## Memory Persistence
 
+Your active profile brain directory is `{brain_dir}`.
+
+When the user asks about `memory.md`, `MEMORY.md`, `user.md`, or the brain files, use this active profile brain directory, not the workspace and not `~/.homun/brain`.
+
 You can save information to these files in `{brain_dir}`:
+- `MEMORY.md` — consolidated long-term facts and context for the active profile
 - `USER.md` — user info: name, preferences, habits, personal context
 - `INSTRUCTIONS.md` — learned rules: how the user wants things done
 - `SOUL.md` — your personality (edit only if explicitly asked)
@@ -675,6 +681,7 @@ mod tests {
             skills_summary: "",
             bootstrap_files: &[],
             memory_content: "",
+            profile_brain_dir: None,
             relevant_memories: "",
             rag_knowledge: "",
             mcp_suggestions: "",

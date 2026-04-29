@@ -93,7 +93,10 @@ impl Tool for ViewFileTool {
         let raw_file = get_string_param(&args, "file")?;
 
         // Resolve path
-        let path = match resolve_workspace_file(&raw_file) {
+        let path = match super::file::resolve_profile_brain_alias(&raw_file, ctx)
+            .filter(|path| path.exists() && path.is_file())
+            .or_else(|| resolve_workspace_file(&raw_file))
+        {
             Some(p) => p,
             None => {
                 return Ok(ToolResult::error(format!(
@@ -102,6 +105,23 @@ impl Tool for ViewFileTool {
                 )));
             }
         };
+
+        let is_profile_brain_file = ctx
+            .profile_brain_dir
+            .as_ref()
+            .is_some_and(|dir| path.starts_with(dir));
+        if is_profile_brain_file {
+            return match tokio::fs::read_to_string(&path).await {
+                Ok(content) => Ok(ToolResult::success(format!(
+                    "{}\n\n{}",
+                    path.display(),
+                    content
+                ))),
+                Err(e) => Ok(ToolResult::error(format!(
+                    "Failed to read file '{raw_file}': {e}"
+                ))),
+            };
+        }
 
         // Read file size for the block
         let size_bytes = match tokio::fs::metadata(&path).await {
