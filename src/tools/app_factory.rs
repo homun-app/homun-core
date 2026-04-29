@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 
 use super::registry::{get_string_param, Tool, ToolContext, ToolResult};
 use crate::app_factory::blueprint::AppBlueprint;
-use crate::app_factory::{db as app_db, runtime, validation};
+use crate::app_factory::{bridge::BridgePolicy, db as app_db, runtime, validation};
 use crate::storage::Database;
 
 #[derive(Clone)]
@@ -97,6 +97,18 @@ impl UpdateInternalAppTool {
     }
 }
 
+pub struct ConfigureAppCapabilitiesTool {
+    core: AppFactoryCore,
+}
+
+impl ConfigureAppCapabilitiesTool {
+    pub fn new(db: Database, data_dir: PathBuf) -> Self {
+        Self {
+            core: AppFactoryCore::new(db, data_dir),
+        }
+    }
+}
+
 pub struct CreateAppRecordTool {
     core: AppFactoryCore,
 }
@@ -138,6 +150,10 @@ pub fn app_factory_tools(db: Database, data_dir: PathBuf) -> Vec<Box<dyn Tool>> 
         Box::new(CreateInternalAppTool::new(db.clone(), data_dir.clone())),
         Box::new(ListInternalAppsTool::new(db.clone(), data_dir.clone())),
         Box::new(UpdateInternalAppTool::new(db.clone(), data_dir.clone())),
+        Box::new(ConfigureAppCapabilitiesTool::new(
+            db.clone(),
+            data_dir.clone(),
+        )),
         Box::new(CreateAppRecordTool::new(db.clone(), data_dir.clone())),
         Box::new(QueryAppRecordsTool::new(db.clone(), data_dir.clone())),
         Box::new(RunAppActionTool::new(db, data_dir)),
@@ -339,6 +355,102 @@ impl Tool for UpdateInternalAppTool {
         Ok(ToolResult::success(format!(
             "Internal app updated.\nslug={app_slug}\nname={} -> {}\nversion={version}\nchange_note={change_note}",
             previous_blueprint.app.name, blueprint.app.name
+        )))
+    }
+}
+
+#[async_trait]
+impl Tool for ConfigureAppCapabilitiesTool {
+    fn name(&self) -> &str {
+        "configure_app_capabilities"
+    }
+
+    fn description(&self) -> &str {
+        "Configure what a blueprint-generated internal app may access through the Homun bridge policy, such as contacts, channels, knowledge namespaces, tools, profiles, and writeback scopes."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "app_slug": {"type": "string", "description": "Existing internal app slug"},
+                "profiles": {"type": "array", "items": {"type": "string"}, "description": "Allowed Homun profile slugs"},
+                "contacts_read": {"type": "array", "items": {"type": "string"}, "description": "Allowed contact refs: *, id, name, nickname, or tag"},
+                "link_app_users_to_contacts": {"type": "boolean", "description": "Whether app users may be linked to Homun contacts"},
+                "channels_send": {"type": "array", "items": {"type": "string"}, "description": "Allowed outbound channel names"},
+                "channels_receive": {"type": "array", "items": {"type": "string"}, "description": "Allowed inbound channel names"},
+                "knowledge_namespaces": {"type": "array", "items": {"type": "string"}, "description": "Allowed knowledge namespaces"},
+                "tools": {"type": "array", "items": {"type": "string"}, "description": "Allowed bridge tools or skill-like capabilities"},
+                "writeback": {"type": "array", "items": {"type": "string"}, "description": "Allowed writeback scopes"},
+                "mode": {"type": "string", "enum": ["replace", "merge"], "description": "replace overwrites the policy, merge adds to existing policy. Default merge."}
+            },
+            "required": ["app_slug"]
+        })
+    }
+
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
+        let user_id = match self.core.require_user_id(ctx) {
+            Ok(user_id) => user_id,
+            Err(result) => return Ok(result),
+        };
+        let app_slug = get_string_param(&args, "app_slug")?;
+        let mode = args.get("mode").and_then(Value::as_str).unwrap_or("merge");
+        if !matches!(mode, "replace" | "merge") {
+            return Ok(ToolResult::error(
+                "mode must be either 'replace' or 'merge'",
+            ));
+        }
+        let (app, _) = match self.core.load_app(user_id, &app_slug).await {
+            Ok(app) => app,
+            Err(result) => return Ok(result),
+        };
+        let mut policy = if mode == "merge" {
+            match app_db::load_bridge_policy(self.core.db.pool(), app.id).await {
+                Ok(Some(row)) => serde_json::from_str::<BridgePolicy>(&row.policy_json)
+                    .unwrap_or_else(|_| BridgePolicy::deny_all()),
+                Ok(None) => BridgePolicy::deny_all(),
+                Err(e) => {
+                    return Ok(ToolResult::error(format!(
+                        "Failed to load app capabilities: {e}"
+                    )))
+                }
+            }
+        } else {
+            BridgePolicy::deny_all()
+        };
+
+        merge_array_arg(&mut policy.profiles, &args, "profiles");
+        merge_array_arg(&mut policy.contacts.read, &args, "contacts_read");
+        if let Some(link) = args
+            .get("link_app_users_to_contacts")
+            .and_then(Value::as_bool)
+        {
+            policy.contacts.link_app_users = link;
+        }
+        merge_array_arg(&mut policy.channels.send, &args, "channels_send");
+        merge_array_arg(&mut policy.channels.receive, &args, "channels_receive");
+        merge_array_arg(
+            &mut policy.knowledge_namespaces,
+            &args,
+            "knowledge_namespaces",
+        );
+        merge_array_arg(&mut policy.tools, &args, "tools");
+        merge_array_arg(&mut policy.writeback, &args, "writeback");
+        let policy = policy.normalized();
+
+        if let Err(e) = app_db::upsert_bridge_policy(self.core.db.pool(), app.id, &policy).await {
+            return Ok(ToolResult::error(format!(
+                "Failed to save app capabilities: {e}"
+            )));
+        }
+
+        Ok(ToolResult::success(format!(
+            "Internal app capabilities configured.\napp={app_slug}\nmode={mode}\nprofiles={}\ncontacts_read={}\nchannels_send={}\nknowledge_namespaces={}\ntools={}",
+            policy.profiles.join(", "),
+            policy.contacts.read.join(", "),
+            policy.channels.send.join(", "),
+            policy.knowledge_namespaces.join(", "),
+            policy.tools.join(", ")
         )))
     }
 }
@@ -624,6 +736,20 @@ fn filters_match(data: &Value, filters: Option<&serde_json::Map<String, Value>>)
         .all(|(field, expected)| data.get(field) == Some(expected))
 }
 
+fn merge_array_arg(target: &mut Vec<String>, args: &Value, key: &str) {
+    let Some(values) = args.get(key).and_then(Value::as_array) else {
+        return;
+    };
+    target.extend(
+        values
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned),
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -686,7 +812,7 @@ mod tests {
 
         let tools = app_factory_tools(db, data_dir);
 
-        assert_eq!(tools.len(), 6);
+        assert_eq!(tools.len(), 7);
         for tool in tools {
             let description = tool.description().to_lowercase();
             assert!(description.contains("internal app"));
@@ -758,6 +884,51 @@ mod tests {
         assert!(result
             .output
             .contains("Ferie e Permessi -> Ferie e Permessi HR"));
+    }
+
+    #[tokio::test]
+    async fn configure_app_capabilities_merges_bridge_policy() {
+        let (db, dir) = test_db().await;
+        let data_dir = dir.path().to_path_buf();
+        let ctx = test_context(Some("user-1"));
+        let create_app = CreateInternalAppTool::new(db.clone(), data_dir.clone());
+        let configure = ConfigureAppCapabilitiesTool::new(db.clone(), data_dir);
+
+        let created_app = create_app
+            .execute(json!({"blueprint": valid_blueprint()}), &ctx)
+            .await
+            .unwrap();
+        assert!(!created_app.is_error, "{}", created_app.output);
+
+        let result = configure
+            .execute(
+                json!({
+                    "app_slug": "ferie-permessi",
+                    "contacts_read": ["hr-team", " hr-team "],
+                    "channels_send": ["email"],
+                    "tools": ["send_message"],
+                    "mode": "merge"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(!result.is_error, "{}", result.output);
+        assert!(result.output.contains("contacts_read=hr-team"));
+        assert!(result.output.contains("channels_send=email"));
+
+        let app = app_db::load_app_for_user(db.pool(), "user-1", "ferie-permessi")
+            .await
+            .unwrap()
+            .unwrap();
+        let row = app_db::load_bridge_policy(db.pool(), app.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let policy: BridgePolicy = serde_json::from_str(&row.policy_json).unwrap();
+        assert_eq!(policy.contacts.read, vec!["hr-team"]);
+        assert_eq!(policy.channels.send, vec!["email"]);
+        assert_eq!(policy.tools, vec!["send_message"]);
     }
 
     #[tokio::test]

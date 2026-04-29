@@ -661,6 +661,28 @@ Comportamento:
 - salva una nuova versione in `internal_app_versions`;
 - aggiorna il runtime usato da Studio e dall'app esterna.
 
+### `configure_app_capabilities`
+
+Input:
+
+```json
+{
+  "app_slug": "ferie-permessi",
+  "contacts_read": ["hr-team"],
+  "channels_send": ["email"],
+  "tools": ["send_message"],
+  "mode": "merge"
+}
+```
+
+Comportamento:
+
+- carica la bridge policy esistente o parte da deny-all;
+- in modalita' `merge` aggiunge capability senza rimuovere quelle gia' presenti;
+- in modalita' `replace` sostituisce la policy;
+- normalizza valori vuoti, spazi e duplicati;
+- salva la policy nel control plane.
+
 ### `create_app_record`
 
 Input:
@@ -735,6 +757,7 @@ La skill deve guidare il modello a produrre blueprint validi.
 - `create_internal_app`
 - `list_internal_apps`
 - `update_internal_app`
+- `configure_app_capabilities`
 - `create_app_record`
 - `query_app_records`
 - `run_app_action`
