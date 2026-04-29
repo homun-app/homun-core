@@ -4645,6 +4645,81 @@
     gap: 10px;
 }
 
+.app-studio-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--r-md);
+    background: var(--surface);
+}
+
+.app-studio-panel-header,
+.app-studio-users-layout,
+.app-studio-user-row {
+    display: flex;
+    gap: 12px;
+}
+
+.app-studio-panel-header {
+    align-items: flex-start;
+    justify-content: space-between;
+}
+
+.app-studio-panel h2,
+.app-studio-panel h3 {
+    margin: 0;
+    color: var(--t1);
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.app-studio-panel p {
+    margin: 4px 0 0;
+    color: var(--t3);
+    font-size: 13px;
+}
+
+.app-studio-users-layout {
+    align-items: flex-start;
+}
+
+.app-studio-users,
+.app-studio-user-form {
+    min-width: 0;
+    flex: 1;
+}
+
+.app-studio-users {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.app-studio-user-row {
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.app-studio-user-row strong,
+.app-studio-user-row span {
+    display: block;
+}
+
+.app-studio-user-row span {
+    color: var(--t3);
+    font-size: 12px;
+}
+
+.app-studio-user-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
 .app-summary-card {
     display: flex;
     flex-direction: column;
@@ -4841,6 +4916,11 @@
 @media (max-width: 980px) {
     .app-runtime-layout {
         grid-template-columns: 1fr;
+    }
+
+    .app-studio-panel-header,
+    .app-studio-users-layout {
+        flex-direction: column;
     }
 
     .app-runtime-controls {

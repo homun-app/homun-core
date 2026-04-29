@@ -8,7 +8,8 @@
         selectedRecord: null,
         statusFilter: 'all',
         search: '',
-        relationRecords: {}
+        relationRecords: {},
+        appUsers: []
     };
 
     function qs(selector, root) {
@@ -243,6 +244,7 @@
         root.appendChild(header);
 
         root.appendChild(renderSummary());
+        root.appendChild(renderStudioPanel());
 
         var tabs = el('div', 'app-runtime-tabs');
         runtimeViews().forEach(function (view, index) {
@@ -275,6 +277,121 @@
         renderForm();
         renderTable();
         renderDetail();
+    }
+
+    function renderStudioPanel() {
+        var panel = el('section', 'app-studio-panel');
+        var header = el('div', 'app-studio-panel-header');
+        var title = el('div');
+        title.appendChild(el('h2', '', 'External access'));
+        title.appendChild(el('p', '', 'Manage the standalone app link and app-local users.'));
+        header.appendChild(title);
+        var linkActions = el('div', 'actions');
+        var publicUrl = '/a/' + encodeURIComponent(state.app.slug);
+        var open = el('a', 'btn btn-secondary btn-sm', 'Open app');
+        open.href = publicUrl;
+        open.target = '_blank';
+        open.rel = 'noopener';
+        linkActions.appendChild(open);
+        var copy = el('button', 'btn btn-secondary btn-sm', 'Copy link');
+        copy.type = 'button';
+        copy.addEventListener('click', function () {
+            navigator.clipboard.writeText(location.origin + publicUrl).then(function () {
+                if (window.showToast) window.showToast('App link copied', 'success');
+            }).catch(function () {
+                if (window.showToast) window.showToast('Unable to copy link', 'error');
+            });
+        });
+        linkActions.appendChild(copy);
+        header.appendChild(linkActions);
+        panel.appendChild(header);
+
+        var body = el('div', 'app-studio-users-layout');
+        body.appendChild(renderAppUsersList());
+        body.appendChild(renderAppUserForm());
+        panel.appendChild(body);
+        return panel;
+    }
+
+    function renderAppUsersList() {
+        var wrap = el('div', 'app-studio-users');
+        wrap.appendChild(el('h3', '', 'App users'));
+        if (!state.appUsers.length) {
+            wrap.appendChild(el('p', 'muted', 'No app users yet.'));
+            return wrap;
+        }
+        state.appUsers.forEach(function (user) {
+            var row = el('div', 'app-studio-user-row');
+            var identity = el('div');
+            identity.appendChild(el('strong', '', user.display_name || user.email));
+            identity.appendChild(el('span', '', user.email));
+            row.appendChild(identity);
+            row.appendChild(el('span', 'app-status-pill', user.role));
+            wrap.appendChild(row);
+        });
+        return wrap;
+    }
+
+    function renderAppUserForm() {
+        var form = el('form', 'app-studio-user-form');
+        form.appendChild(el('h3', '', 'Create user'));
+        [
+            ['email', 'Email', 'email'],
+            ['display_name', 'Display name', 'text'],
+            ['password', 'Password', 'password']
+        ].forEach(function (field) {
+            var label = el('label', 'app-field');
+            label.appendChild(el('span', '', field[1]));
+            var input = document.createElement('input');
+            input.className = 'input';
+            input.name = field[0];
+            input.type = field[2];
+            input.required = true;
+            if (field[0] === 'password') input.minLength = 8;
+            label.appendChild(input);
+            form.appendChild(label);
+        });
+        var roleLabel = el('label', 'app-field');
+        roleLabel.appendChild(el('span', '', 'Role'));
+        var role = document.createElement('select');
+        role.className = 'input';
+        role.name = 'role';
+        ['admin', 'approver', 'employee', 'viewer'].forEach(function (item) {
+            var option = document.createElement('option');
+            option.value = item;
+            option.textContent = humanName(item);
+            role.appendChild(option);
+        });
+        roleLabel.appendChild(role);
+        form.appendChild(roleLabel);
+
+        var error = el('p', 'external-error');
+        var submit = el('button', 'btn btn-primary', 'Create user');
+        submit.type = 'submit';
+        form.appendChild(submit);
+        form.appendChild(error);
+        form.addEventListener('submit', function (event) {
+            event.preventDefault();
+            error.textContent = '';
+            var data = new FormData(form);
+            api('/api/v1/apps/' + encodeURIComponent(state.app.slug) + '/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email: data.get('email'),
+                    display_name: data.get('display_name'),
+                    password: data.get('password'),
+                    role: data.get('role')
+                })
+            }).then(function () {
+                form.reset();
+                if (window.showToast) window.showToast('App user created', 'success');
+                return loadAppUsers();
+            }).catch(function (err) {
+                error.textContent = err.message;
+            });
+        });
+        return form;
     }
 
     function renderSummary() {
@@ -558,12 +675,25 @@
                 state.app = app;
                 state.activeViewIndex = 0;
                 state.relationRecords = {};
+                state.appUsers = [];
                 renderRuntime();
-                return loadActiveRecords();
+                return Promise.all([loadActiveRecords(), loadAppUsers()]);
             })
             .catch(function (err) {
                 var root = qs('#app-runtime');
                 if (root) showInline(root, err.message);
+            });
+    }
+
+    function loadAppUsers() {
+        if (!state.app) return Promise.resolve();
+        return api('/api/v1/apps/' + encodeURIComponent(state.app.slug) + '/users')
+            .then(function (users) {
+                state.appUsers = users || [];
+                renderRuntime();
+            })
+            .catch(function (err) {
+                if (window.showToast) window.showToast(err.message, 'error', 4000);
             });
     }
 

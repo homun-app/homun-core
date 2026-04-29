@@ -12,7 +12,7 @@ use crate::app_factory::blueprint::AppBlueprint;
 use crate::app_factory::{db as app_db, runtime, validation};
 use crate::config::Config;
 use crate::storage::Database;
-use crate::web::auth::{require_write, AuthUser};
+use crate::web::auth::{hash_password, require_write, AuthUser};
 use crate::web::server::AppState;
 
 type ApiErr = (StatusCode, Json<Value>);
@@ -36,6 +36,15 @@ struct CreateAppRequest {
 #[derive(Debug, Deserialize)]
 struct CreateRecordRequest {
     data: Value,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateAppUserRequest {
+    email: String,
+    display_name: String,
+    password: String,
+    role: String,
+    contact_id: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -66,6 +75,17 @@ struct RecordView {
 }
 
 #[derive(Debug, Serialize)]
+struct AppUserView {
+    id: i64,
+    email: String,
+    display_name: String,
+    role: String,
+    status: String,
+    contact_id: Option<i64>,
+    created_at: String,
+}
+
+#[derive(Debug, Serialize)]
 struct ActionResponse {
     record: RecordView,
     event_type: String,
@@ -75,6 +95,10 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/v1/apps", get(list_apps).post(create_app))
         .route("/v1/apps/{slug}", get(get_app))
+        .route(
+            "/v1/apps/{slug}/users",
+            get(list_app_users).post(create_app_user),
+        )
         .route(
             "/v1/apps/{slug}/entities/{entity}/records",
             get(list_records).post(create_record),
@@ -158,6 +182,18 @@ fn record_view(row: app_db::AppRecordRow) -> Result<RecordView, ApiErr> {
         created_at: row.created_at,
         updated_at: row.updated_at,
     })
+}
+
+fn app_user_view(row: app_db::AppUserRow) -> AppUserView {
+    AppUserView {
+        id: row.id,
+        email: row.email,
+        display_name: row.display_name,
+        role: row.role,
+        status: row.status,
+        contact_id: row.contact_id,
+        created_at: row.created_at,
+    }
 }
 
 async fn load_owned_app(
@@ -256,6 +292,69 @@ async fn get_app(
     let db = require_db(&state)?;
     let (row, _) = load_owned_app(db, &auth, &slug).await?;
     Ok(Json(app_view(row)?))
+}
+
+async fn list_app_users(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+    Path(slug): Path<String>,
+) -> Result<Json<Vec<AppUserView>>, ApiErr> {
+    let db = require_db(&state)?;
+    let (app, _) = load_owned_app(db, &auth, &slug).await?;
+    let app_pool = app_db::open_app_pool(std::path::Path::new(&app.db_path))
+        .await
+        .map_err(internal)?;
+    let users = app_db::list_app_users(&app_pool)
+        .await
+        .map_err(internal)?
+        .into_iter()
+        .map(app_user_view)
+        .collect();
+    app_pool.close().await;
+
+    Ok(Json(users))
+}
+
+async fn create_app_user(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+    Path(slug): Path<String>,
+    Json(body): Json<CreateAppUserRequest>,
+) -> Result<(StatusCode, Json<AppUserView>), ApiErr> {
+    require_write(&auth)?;
+    if !matches!(
+        body.role.as_str(),
+        "admin" | "approver" | "employee" | "viewer"
+    ) {
+        return Err(bad_request("Unsupported app role"));
+    }
+    if body.password.len() < 8 {
+        return Err(bad_request("Password must be at least 8 characters"));
+    }
+
+    let db = require_db(&state)?;
+    let (app, _) = load_owned_app(db, &auth, &slug).await?;
+    let password_hash = hash_password(&body.password).map_err(internal)?;
+    let app_pool = app_db::open_app_pool(std::path::Path::new(&app.db_path))
+        .await
+        .map_err(internal)?;
+    let user_id = app_db::insert_app_user(
+        &app_pool,
+        &body.email,
+        &body.display_name,
+        &password_hash,
+        &body.role,
+        body.contact_id,
+    )
+    .await
+    .map_err(internal)?;
+    let user = app_db::load_app_user(&app_pool, user_id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| internal("Created app user was not found"))?;
+    app_pool.close().await;
+
+    Ok((StatusCode::CREATED, Json(app_user_view(user))))
 }
 
 async fn list_records(
