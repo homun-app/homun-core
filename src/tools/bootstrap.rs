@@ -3,8 +3,9 @@ use std::sync::Arc;
 use crate::config::Config;
 use crate::storage::Database;
 use crate::tools::{
-    AutomationTool, ContactsTool, CreateSkillTool, EditFileTool, ListDirTool, ReadFileTool,
-    ShellTool, ToolRegistry, VaultTool, WebFetchTool, WebSearchTool, WriteFileTool,
+    app_factory::app_factory_tools, AutomationTool, ContactsTool, CreateSkillTool, EditFileTool,
+    ListDirTool, ReadFileTool, ShellTool, ToolRegistry, VaultTool, WebFetchTool, WebSearchTool,
+    WriteFileTool,
 };
 
 #[cfg(feature = "channel-email")]
@@ -74,7 +75,10 @@ pub fn create_tool_registry(
         registry.register(Box::new(ContactsTool::new(db.clone(), sc.clone())));
     }
 
-    registry.register(Box::new(AutomationTool::new(db)));
+    registry.register(Box::new(AutomationTool::new(db.clone())));
+    for tool in app_factory_tools(db, Config::data_dir()) {
+        registry.register(tool);
+    }
     registry.register(Box::new(CreateSkillTool::new()));
 
     #[cfg(feature = "channel-email")]

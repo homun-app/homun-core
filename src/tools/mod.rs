@@ -1,4 +1,5 @@
 pub mod add_data;
+pub mod app_factory;
 pub mod approval;
 pub mod automation;
 pub mod bootstrap;
