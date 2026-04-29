@@ -740,7 +740,10 @@ pub fn parse_allowed_tools(spec: &str) -> std::collections::HashSet<String> {
         return tools;
     }
 
-    for token in spec.split_whitespace() {
+    for token in spec.split(|c: char| c.is_whitespace() || c == ',') {
+        if token.is_empty() {
+            continue;
+        }
         // Strip parenthesized patterns: "Bash(curl:*)" → "Bash"
         let base = token.split('(').next().unwrap_or(token);
 
@@ -1450,6 +1453,19 @@ Body.
         assert!(result.contains("read_file"));
         assert!(result.contains("write_file"));
         assert_eq!(result.len(), 3);
+    }
+
+    #[test]
+    fn test_parse_allowed_tools_comma_separated_raw_names() {
+        let result = parse_allowed_tools(
+            "create_internal_app, list_internal_apps, create_app_record, query_app_records, run_app_action",
+        );
+        assert!(result.contains("create_internal_app"));
+        assert!(result.contains("list_internal_apps"));
+        assert!(result.contains("create_app_record"));
+        assert!(result.contains("query_app_records"));
+        assert!(result.contains("run_app_action"));
+        assert_eq!(result.len(), 5);
     }
 
     #[test]

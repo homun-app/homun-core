@@ -1,7 +1,7 @@
 ---
 name: app-factory
 description: Use when the user asks to create, design, generate, or modify an internal business app, operational tool, database-backed workflow, approval system, tracker, CRM-like mini app, employee portal, request system, or internal interface.
-allowed-tools: create_internal_app, list_internal_apps, create_app_record, query_app_records, run_app_action, read_file, write_file
+allowed-tools: "create_internal_app list_internal_apps create_app_record query_app_records run_app_action read_file write_file"
 ---
 
 # App Factory
