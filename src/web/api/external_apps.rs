@@ -61,6 +61,7 @@ pub(super) fn public_routes() -> Router<Arc<AppState>> {
         .route("/api/a/{slug}/login", post(login))
         .route("/api/a/{slug}/logout", post(logout))
         .route("/api/a/{slug}/me", get(me))
+        .route("/api/a/{slug}/meta", get(meta))
         .route(
             "/api/a/{slug}/entities/{entity}/records",
             get(list_records).post(create_record),
@@ -270,6 +271,27 @@ async fn me(
         display_name: user.display_name,
         role: user.role,
     }))
+}
+
+async fn meta(
+    State(state): State<Arc<AppState>>,
+    Path(slug): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiErr> {
+    let (app, blueprint, app_pool, user) = require_app_user(&state, &slug, &headers).await?;
+    app_pool.close().await;
+    Ok(Json(json!({
+        "slug": app.slug,
+        "name": app.name,
+        "description": app.description,
+        "blueprint": blueprint,
+        "user": {
+            "id": user.app_user_id,
+            "email": user.email,
+            "display_name": user.display_name,
+            "role": user.role
+        }
+    })))
 }
 
 async fn list_records(
