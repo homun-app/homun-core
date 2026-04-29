@@ -1,27 +1,145 @@
 # Homun — Piano presentazione 10 giorni
 
 > Data: 2026-04-29
-> Obiettivo: arrivare a una demo credibile per presentare Homun come agente operativo per aziende piccole, team tecnici e single developer.
+> Obiettivo: arrivare a una demo credibile di Homun come piattaforma che genera strumenti interni aziendali tramite agenti, skills, MCP, workflow e componenti predefiniti.
 
 ---
 
-## 1. Obiettivo di prodotto
+## 1. Direzione prodotto
 
-Homun non deve presentarsi come una chat AI generica. Deve presentarsi come un **agent operativo personale/aziendale** che riceve un obiettivo, usa strumenti reali, mantiene memoria e produce un risultato verificabile.
+Homun non deve essere raccontato come una chat AI. Deve essere raccontato come una **piattaforma agentica per costruire e usare strumenti operativi interni**.
 
-Il riferimento competitivo e narrativo e' Manus, ma con una visione diversa:
+Il riferimento competitivo e narrativo resta Manus, ma Homun deve differenziarsi in modo netto:
 
-- Manus punta su agente generalista, cloud, browser operator, wide research, slides, mail/slack e team plan.
-- Homun deve puntare su **controllo locale/self-hosted**, canali reali, memoria proprietaria, profili/utenti, strumenti MCP e automazioni.
-- Target iniziale consigliato: **single developer, founder tecnico, piccola azienda con workflow ripetitivi**.
+- Manus comunica "AI che agisce" con browser, wide research, slides, app e integrazioni.
+- Homun deve comunicare "AI che costruisce strumenti interni e poi li usa": app, workflow, automazioni, memoria, canali, MCP, skills e dati aziendali.
+- Il target iniziale piu' forte e' il **single developer / founder tecnico / piccola azienda**: persone che hanno bisogno di tool interni ma non possono permettersi settimane di sviluppo per ogni processo.
 
-Messaggio sintetico:
+One-liner:
 
-> Homun e' un agente operativo self-hosted per trasformare messaggi, dati e strumenti aziendali in azioni verificabili.
+> Homun trasforma una richiesta aziendale in un tool interno funzionante, con dati, interfaccia, workflow, automazioni e agente operativo.
 
 ---
 
-## 2. Cosa copiare da Manus, cosa no
+## 2. Killer feature: Tool/App Factory
+
+La killer feature proposta e' la **Tool/App Factory**.
+
+Flusso ideale:
+
+1. L'utente descrive un processo aziendale in linguaggio naturale.
+2. Homun produce un blueprint strutturato.
+3. Il runtime compone componenti predefiniti.
+4. Homun crea database, viste, form, workflow e permessi.
+5. L'utente riceve un link interno all'app.
+6. L'agente puo' usare quell'app via chat/canali/automazioni.
+
+Esempio:
+
+```text
+Mi serve un'applicazione interna per gestire ferie e permessi dei dipendenti.
+I dipendenti devono inviare richieste, il responsabile deve approvare o rifiutare,
+e voglio vedere un calendario/registro delle assenze.
+```
+
+Risultato atteso:
+
+- app interna `Ferie e Permessi`;
+- schema dati per dipendenti, richieste, stati, note;
+- form richiesta ferie;
+- tabella richieste con filtri;
+- vista approvazione;
+- workflow approva/rifiuta;
+- notifiche opzionali;
+- link interno tipo `/apps/ferie-permessi`;
+- interazione agentica: "quante ferie ha richiesto Mario questo mese?"
+
+---
+
+## 3. Principio architetturale: blueprint sempre, codice libero solo dopo
+
+Il blueprint non deve essere una scorciatoia da demo. Deve essere la base stabile del prodotto.
+
+### Regola
+
+Homun non genera applicazioni interne scrivendo codice arbitrario a ogni richiesta. Homun genera un **blueprint dichiarativo** che il sistema interpreta usando componenti approvati.
+
+Questo approccio permette:
+
+- sicurezza migliore;
+- UI coerente;
+- permessi controllabili;
+- migrazioni prevedibili;
+- test piu' semplici;
+- estensione graduale verso app sempre piu' complesse.
+
+### Componenti blueprint v0
+
+Per la prima versione servono pochi mattoni, ma solidi:
+
+- `App`: nome, slug, descrizione, icona.
+- `Entity`: tabella/dataset.
+- `Field`: stringa, testo, numero, data, enum, relazione, boolean.
+- `View`: lista, dettaglio, form.
+- `Action`: crea, aggiorna, approva, rifiuta, archivia.
+- `Workflow`: stati e transizioni.
+- `Role`: owner, admin, requester, approver.
+- `Notification`: evento + canale.
+- `Automation`: trigger manuale, schedulato o su cambio stato.
+- `AgentCommand`: query/azioni che l'agente puo' fare sull'app.
+
+### Componenti futuri
+
+La stessa struttura potra' crescere con:
+
+- dashboard e grafici;
+- calendari;
+- kanban;
+- allegati;
+- firme/approvazioni avanzate;
+- import/export CSV;
+- connessioni MCP;
+- sync con Google Workspace, Notion, GitHub, Slack, email;
+- template verticali.
+
+---
+
+## 4. Cosa Homun ha gia' e va valorizzato
+
+Homun oggi ha piu' superficie prodotto di una semplice web chat:
+
+- skills;
+- MCP e tool discovery;
+- browser tool;
+- automazioni;
+- workflow;
+- memoria e knowledge;
+- vault;
+- profili e multiutente;
+- contatti;
+- gateway web/Telegram/WhatsApp/email;
+- app mobile/parziale gia' collegata al sistema;
+- UI web admin;
+- file/artifact flow;
+- cron/scheduler;
+- sandbox e controlli di sicurezza.
+
+La Tool/App Factory deve usare questi pezzi, non sostituirli.
+
+Esempio: un'app ferie non e' solo CRUD. Puo' usare:
+
+- workflow per approvazioni;
+- automation per reminder;
+- email/Telegram per notifiche;
+- memory per preferenze aziendali;
+- MCP per calendario;
+- skills per generare template;
+- knowledge per policy aziendale;
+- vault per credenziali integrazioni.
+
+---
+
+## 5. Rapporto con Manus
 
 Fonti osservate:
 
@@ -30,411 +148,415 @@ Fonti osservate:
 - Wide Research: https://manus.im/features/wide-research
 - Team/API: https://manus.im/team e https://open.manus.ai/docs
 
-### Pattern da adottare
+### Cosa adottare
 
-1. **Task, non chat**
-   - Manus comunica "What can I do for you?" e propone azioni come creare slide, siti, app e design.
-   - Homun dovrebbe trasformare la chat in "missioni": obiettivo, piano, azioni, risultato, artefatti.
+1. **AI che agisce**
+   - Homun deve mostrare piani, tool usati, stati e risultati, non solo risposte.
 
-2. **Agente che opera**
-   - Browser Operator vende autonomia: pianifica, naviga, clicca, compila form, usa sessioni locali.
-   - Homun ha gia' browser/MCP/tools: serve renderlo visibile e dimostrabile.
+2. **Output finito**
+   - Ogni demo deve terminare con qualcosa di usabile: app interna, report, workflow, link, artifact.
 
-3. **Ricerca su scala**
-   - Wide Research vende parallelismo, contesto fresco per ogni item e report finale.
-   - Homun puo' proporre una versione piu' piccola: "company/developer research pack" con browser + knowledge + artifact.
+3. **Business readiness**
+   - Utenti, profili, permessi, canali e audit devono essere visibili.
 
-4. **Output finito**
-   - Manus enfatizza report, dataset, presentazioni, app, risultati pronti.
-   - Homun deve mostrare file, report, checklist, decisioni, follow-up e fonti.
+4. **Composizione rapida**
+   - Manus vende creazione di slide/siti/app. Homun deve vendere creazione di tool interni.
 
-5. **Business/team readiness**
-   - Manus ha team plan, SSO, Slack, API.
-   - Homun per la demo deve mostrare almeno multiutente/profili, isolamento dati, canali e controllo admin.
+### Cosa evitare ora
 
-### Pattern da non copiare ora
-
-- Billing a crediti.
-- Cloud browser su larga scala.
-- Marketplace pubblico.
-- SSO enterprise completo.
-- Multi-agent massivo tipo Wide Research a centinaia di agenti.
-- Mobile app come asse principale della demo.
+- Promettere generazione universale di qualsiasi software.
+- Far scrivere codice libero senza guardrail.
+- Puntare su cloud browser massivo.
+- Inseguire SSO/team enterprise prima della demo.
+- Creare un builder visuale drag-and-drop: il builder deve essere invisibile e agentico.
 
 ---
 
-## 3. Stato Homun oggi
+## 6. Demo principale
 
-### Punti forti gia' dimostrabili
+### Titolo demo
 
-- Web UI con chat, memory, knowledge, contacts, profiles, settings.
-- Gateway canali: web, Telegram, WhatsApp, email, cron.
-- Tool registry: shell, file, web search/fetch, vault, contacts, automation, knowledge, browser/MCP.
-- Memoria e brain per user/profilo.
-- Knowledge e memory scoping per user/profilo.
-- Vault scoped per user/profilo.
-- Contacts scoped per user.
-- UI scope indicator per utente/profilo.
-- Build release pulita e workflow di test manuale gia' in uso.
+**Da prompt ad applicazione interna: gestione ferie e permessi**
 
-### Rischi residui
+### Script demo
 
-- Audit multiutente non ancora completo su tutte le API.
-- Chat conversations, uploads/files e workspace possono ancora avere residui globali.
-- UX ancora piu' da pannello admin che da "agent mission control".
-- Demo browser/MCP da rendere robusta e prevedibile.
-- Presentazione non ancora costruita.
-- Mancano script/demo seed per partire sempre da uno stato controllato.
-
----
-
-## 4. Strategia dei prossimi 10 giorni
-
-La priorita' non e' "rendere tutto perfetto". La priorita' e':
-
-1. Stabilizzare il percorso demo.
-2. Implementare una nuova feature piccola ma visibile.
-3. Raccontare Homun come prodotto coerente.
-4. Preparare backup/fallback se qualcosa live fallisce.
-
-### Feature nuova consigliata: Mission Pack
-
-Una "Missione" e' una vista/struttura leggera sopra la chat:
-
-- titolo missione;
-- obiettivo;
-- piano;
-- step eseguiti;
-- strumenti usati;
-- output finale;
-- artefatti prodotti;
-- follow-up consigliati.
-
-Non serve creare subito un nuovo sistema complesso di workflow. Per la demo basta partire da una implementazione pragmatica:
-
-- migliorare rendering dei task step/tool timeline;
-- aggiungere una card finale "Mission completed";
-- salvare o mostrare un report finale come artifact;
-- aggiungere quick actions da chat vuota per lanciare missioni demo.
-
-Questa feature e' coerente con Manus, ma in Homun diventa piu' business/dev oriented.
-
----
-
-## 5. Demo consigliata
-
-### Demo principale: "AI Ops assistant per single developer"
-
-Scenario:
-
-> Un founder tecnico deve analizzare un possibile cliente/competitor, produrre un mini-brief operativo, salvarlo in knowledge/memory e preparare un follow-up.
-
-Flusso demo:
-
-1. Login come Fabio.
-2. Mostrare topbar con scope `Fabio / Default`.
-3. Aprire chat con quick action "Research company".
+1. Login come Fabio/admin.
+2. Mostrare scope utente/profilo.
+3. Aprire chat.
 4. Prompt:
 
 ```text
-Prepara un brief operativo su un potenziale cliente B2B: cerca informazioni pubbliche, sintetizza cosa fa, identifica 3 opportunita' per vendergli un agente operativo, prepara un messaggio email di primo contatto e salva il brief in knowledge.
+Crea un'app interna per gestire ferie e permessi.
+I dipendenti devono poter inviare richieste indicando tipo, date e note.
+Un responsabile deve approvare o rifiutare.
+Voglio una lista delle richieste, un dettaglio, stati chiari e una notifica quando una richiesta viene approvata.
 ```
 
-5. Homun mostra piano e tool timeline.
-6. Usa browser/web/search/knowledge/file.
-7. Produce:
-   - executive summary;
-   - opportunita';
-   - rischi;
-   - messaggio email;
-   - artifact markdown scaricabile o visibile.
-8. Salvare una nota in memory:
+5. Homun genera un blueprint.
+6. Homun mostra un riepilogo: entita', viste, workflow, ruoli.
+7. Homun crea l'app.
+8. Appare link interno: `Apri Ferie e Permessi`.
+9. Aprire l'app:
+   - form richiesta;
+   - lista richieste;
+   - dettaglio;
+   - azioni approva/rifiuta.
+10. Creare una richiesta demo.
+11. Approvare la richiesta.
+12. Mostrare che Homun puo' interrogare l'app:
 
 ```text
-ricorda che per questo cliente vogliamo proporre Homun come agente operativo per founder tecnici
+Quante richieste ferie sono state approvate questa settimana?
 ```
 
-9. Switch a user2.
-10. Mostrare che user2 non vede memory/contacts/knowledge di Fabio.
-11. Tornare a Fabio e mostrare che il brief resta disponibile.
+13. Switch a user2 o profilo diverso per mostrare isolamento/scope se serve.
 
-### Demo secondaria: "Canale operativo"
+### Perche' funziona come demo
 
-Se Telegram/WhatsApp sono stabili:
-
-1. Mandare un messaggio da Telegram.
-2. Homun riconosce il contatto.
-3. Risponde usando profilo/memoria.
-4. Mostrare che il web admin registra/scope correttamente.
-
-### Demo fallback
-
-Se browser/live web fallisce:
-
-- usare una knowledge source gia' caricata;
-- chiedere a Homun di analizzarla;
-- generare report e follow-up;
-- mostrare memory/profili/isolamento.
+- E' concreta.
+- Parla a ogni azienda.
+- Mostra generazione di valore, non solo conversazione.
+- Usa componenti interni controllati.
+- Apre una roadmap ampia senza promettere magia incontrollata.
 
 ---
 
-## 6. Roadmap operativa giorno per giorno
+## 7. Demo secondaria
 
-### Giorno 1 — Audit multiutente residuo
+### "L'agente usa il tool appena creato"
 
-Obiettivo: chiudere le aree dove i dati possono ancora essere globali.
+Dopo la creazione dell'app ferie:
+
+1. Inviare un messaggio via chat o canale:
+
+```text
+Segna una richiesta ferie per Mario Rossi dal 10 al 12 maggio e lasciala in attesa di approvazione.
+```
+
+2. Homun usa l'app generata.
+3. La richiesta compare nella UI.
+4. Il responsabile approva.
+5. Homun conferma e registra l'evento.
+
+Questo dimostra il punto chiave: Homun non solo genera strumenti, li puo' anche usare.
+
+---
+
+## 8. Demo fallback
+
+Se la generazione live e' instabile, usare un blueprint pre-seed gia' pronto:
+
+1. Mostrare il prompt.
+2. Mostrare il blueprint generato/caricato.
+3. Aprire l'app gia' creata.
+4. Creare/approvare una richiesta.
+5. Far interrogare l'app dall'agente.
+
+Fallback accettabile:
+
+- non fingere che sia tutto generato live se non lo e';
+- spiegare che il runtime blueprint e' il pezzo core;
+- mostrare che il modello puo' produrre/modificare blueprint.
+
+---
+
+## 9. Roadmap operativa 10 giorni
+
+### Giorno 1 — Specifica Tool/App Factory v0
+
+Obiettivo: fissare schema blueprint e limiti della v0.
 
 Interventi:
 
-- Audit `chat conversations`.
-- Audit `uploads/files/workspace`.
-- Audit `automations`.
-- Audit `sessions/devices/account`.
-- Scrivere test minimi per user isolation dove mancano.
+- Definire JSON/YAML blueprint v0.
+- Definire componenti supportati.
+- Definire cosa non e' supportato.
+- Definire app demo ferie/permessi come blueprint di riferimento.
+- Decidere storage: tabelle generiche vs tabelle dedicate.
 
 Definition of Done:
 
-- Documento breve con API audited.
-- Fix dei blocker scoperti.
-- Build release passata.
+- Documento tecnico blueprint v0.
+- Esempio completo ferie/permessi.
 
-### Giorno 2 — Mission Pack v0
+### Giorno 2 — Runtime blueprint minimo
 
-Obiettivo: rendere la chat piu' simile a un task operativo.
+Obiettivo: renderizzare una app da blueprint.
 
 Interventi:
 
-- Migliorare empty state con quick actions business/dev.
-- Migliorare timeline tool/steps.
-- Aggiungere card "Mission completed" quando il task finisce con tool usage.
-- Aggiungere follow-up suggestions statiche o derivate dalla risposta.
+- Registry app interne.
+- Loader blueprint.
+- Route interna `/apps/{slug}`.
+- Renderer liste/form/dettaglio.
+- Storage record generico.
 
 Definition of Done:
 
-- La chat racconta visivamente "sto lavorando su una missione".
-- Nessun cambio architetturale pesante.
+- Una app statica da blueprint si apre e salva record.
 
-### Giorno 3 — Artifact/report flow
+### Giorno 3 — Workflow e azioni
 
-Obiettivo: ogni demo deve concludersi con un output tangibile.
+Obiettivo: supportare stati e transizioni.
 
 Interventi:
 
-- Standardizzare output markdown/report.
-- Rendere visibile file generato nella chat.
-- Aggiungere eventuale sezione "Artifacts" o riusare file preview.
-- Preparare template di report demo.
+- Stato record.
+- Azioni approva/rifiuta.
+- Validazioni minime.
+- Audit eventi.
 
 Definition of Done:
 
-- Il demo produce un file/report apribile.
+- La richiesta ferie passa da `pending` a `approved/rejected`.
 
-### Giorno 4 — Demo seed e script
+### Giorno 4 — Generazione blueprint via agente
+
+Obiettivo: passare da prompt a blueprint controllato.
+
+Interventi:
+
+- Skill/prompt specializzato `app-factory`.
+- Validatore schema.
+- Preview blueprint prima della creazione.
+- Salvataggio app.
+
+Definition of Done:
+
+- Il prompt ferie produce un blueprint valido o una proposta modificabile.
+
+### Giorno 5 — AgentCommand e interrogazione app
+
+Obiettivo: Homun deve usare l'app generata.
+
+Interventi:
+
+- Tool per leggere/scrivere record app.
+- Query semplici sui record.
+- Prompt guidance: usare app generata quando pertinente.
+
+Definition of Done:
+
+- "Quante richieste approvate?" restituisce risposta corretta.
+- "Crea richiesta per Mario" crea record nell'app.
+
+### Giorno 6 — UI polish demo
+
+Obiettivo: rendere la demo presentabile.
+
+Interventi:
+
+- Empty state app.
+- Form e tabella coerenti con UI Homun.
+- Link app dalla chat.
+- Card "App created".
+- Messaggi di errore chiari.
+
+Definition of Done:
+
+- Screenshot dell'app ferie presentabile.
+
+### Giorno 7 — Seed demo e runbook
 
 Obiettivo: demo ripetibile.
 
 Interventi:
 
-- Preparare utenti `fabio` e `user2`.
-- Preparare profili default.
-- Preparare knowledge source controllate.
-- Preparare contatti demo.
-- Preparare prompt demo e prompt fallback.
+- Seed utenti/profili.
+- Seed app ferie.
+- Seed dipendenti/richieste.
+- Prompt live e fallback.
+- Script demo 5-7 minuti.
 
 Definition of Done:
 
-- Runbook demo eseguibile senza improvvisare.
+- Demo eseguibile da stato pulito.
 
-### Giorno 5 — Stabilizzazione browser/MCP/tools
+### Giorno 8 — Presentazione
 
-Obiettivo: evitare fallimenti live.
-
-Interventi:
-
-- Smoke test browser tool.
-- Smoke test web search/fetch.
-- Smoke test file/artifact.
-- Smoke test memory/knowledge/vault.
-- Migliorare messaggi d'errore nei punti piu' visibili.
-
-Definition of Done:
-
-- Lista dei rischi live con workaround.
-
-### Giorno 6 — UI polish mirato
-
-Obiettivo: migliorare percezione prodotto senza redesign.
-
-Interventi:
-
-- Chat empty state.
-- Tool timeline.
-- Completion/follow-up.
-- Scope indicators.
-- Knowledge/memory visual clarity.
-
-Definition of Done:
-
-- Screenshot demo presentabile.
-
-### Giorno 7 — Presentazione
-
-Obiettivo: creare deck e narrativa.
+Obiettivo: costruire deck e narrativa.
 
 Struttura deck:
 
-1. Problema: le aziende piccole hanno troppi strumenti e poco tempo operativo.
-2. Insight: non serve un'altra chat, serve un agente che agisce.
-3. Homun: agente operativo self-hosted con canali, memoria, tool e automazioni.
-4. Differenza da Manus: controllo locale, dati proprietari, canali reali, adattabile al team.
-5. Demo scenario.
-6. Architettura ad alto livello.
-7. Roadmap prodotto.
-8. Ask: cosa serve per proseguire.
+1. Problema: ogni azienda ha processi interni non coperti da software standard.
+2. Soluzione: descrivi il processo, Homun crea il tool.
+3. Architettura: agent + blueprint + componenti + skills/MCP/workflow.
+4. Demo ferie/permessi.
+5. Differenza da Manus e dai no-code builder.
+6. Roadmap.
+7. Ask.
 
 Definition of Done:
 
-- Deck draft pronto.
-- Script parlato di 5-7 minuti.
+- Deck draft.
+- Script parlato.
 
-### Giorno 8 — Prova demo integrale
+### Giorno 9 — Hardening e freeze feature
 
-Obiettivo: provare come se fosse il giorno della presentazione.
+Obiettivo: solo bugfix demo.
 
 Interventi:
 
-- Prova con cronometro.
-- Annotare tutti gli intoppi.
-- Creare piano B per ogni intoppo.
-- Bloccare nuove feature non essenziali.
+- Smoke test app factory.
+- Smoke test multiutente.
+- Smoke test build release.
+- Fix solo blocker.
 
 Definition of Done:
 
-- Demo ripetuta almeno 3 volte.
-
-### Giorno 9 — Fix solo blocker
-
-Obiettivo: non introdurre instabilita'.
-
-Regola:
-
-- Solo bug che rompono demo o sicurezza percepita.
-- Niente refactor.
-- Niente feature nuove.
-
-Definition of Done:
-
-- Release build finale.
+- Build release finale.
 - Stato git pulito.
 
-### Giorno 10 — Freeze e delivery
+### Giorno 10 — Prova finale
 
-Obiettivo: materiale pronto.
+Obiettivo: delivery.
 
 Checklist:
 
-- Build release.
-- Database demo controllato.
-- Script demo stampato.
+- Demo ripetuta almeno 3 volte.
 - Deck esportato.
-- Prompt demo salvati.
-- Fallback offline pronto.
+- Prompt salvati.
+- Backup blueprint pronto.
 - Screenshot/video breve opzionale.
+- Piano B documentato.
 
 ---
 
-## 7. Backlog prioritizzato
+## 10. Backlog prioritizzato
 
 ### P0 — Necessario per presentazione
 
-- Audit multiutente residuo su chat/uploads/automations.
-- Mission Pack v0 in chat.
-- Artifact/report finale.
-- Demo seed e runbook.
+- Blueprint schema v0.
+- Runtime app da blueprint.
+- App ferie/permessi.
+- Workflow approve/reject.
+- Tool/agent command per leggere e scrivere record app.
+- Link interno app dalla chat.
+- Demo seed/runbook.
 - Deck presentazione.
-- Smoke test completo.
 
 ### P1 — Molto utile se resta tempo
 
-- Quick actions in home/chat.
+- Mission Pack UX in chat.
+- Quick actions "Crea tool interno".
 - Follow-up suggestions.
-- Libreria artefatti minimale.
-- Migliore pagina Knowledge per distinguere input knowledge vs output artifacts.
-- Script di reset demo.
+- Notifiche via canale su cambio stato.
+- Import CSV dipendenti.
+- Mini libreria app create.
 
 ### P2 — Post presentazione
 
-- SSO/team completo.
-- Workspace per organizzazione.
-- Permission model enterprise.
-- Billing/licensing.
-- Parallel research multi-agent vero.
-- Browser operator extension dedicata.
-- API pubblica stabile.
+- Builder visuale opzionale.
+- Componenti avanzati: calendario, kanban, grafici, allegati.
+- Template marketplace interno.
+- Permessi enterprise dettagliati.
+- SSO.
+- App factory con MCP esterni.
+- Versioning/migrazioni blueprint.
+- Test generator automatico per blueprint.
 
 ---
 
-## 8. Posizionamento consigliato
+## 11. Blueprint v0 — esempio ferie/permessi
 
-### One-liner
-
-Homun e' un agente operativo self-hosted per aziende piccole e founder tecnici: capisce un obiettivo, usa strumenti reali, mantiene memoria e consegna risultati verificabili.
-
-### Differenziatori
-
-- Self-hosted/local-first.
-- Multi-canale: web, Telegram, WhatsApp, email.
-- Memoria e knowledge proprietarie.
-- Vault e profili per separare contesti.
-- MCP/tools per collegarsi agli strumenti aziendali.
-- Automazioni e cron.
-- Pensato per single developer e piccoli team, non solo enterprise.
-
-### Cosa non promettere ancora
-
-- Autonomia perfetta su qualsiasi sito.
-- Multi-agent su larga scala.
-- Enterprise SSO completo.
-- Zero configurazione.
-- Sicurezza enterprise certificata.
+```json
+{
+  "app": {
+    "slug": "ferie-permessi",
+    "name": "Ferie e Permessi",
+    "description": "Gestione richieste ferie e permessi dei dipendenti",
+    "icon": "calendar"
+  },
+  "entities": [
+    {
+      "name": "employee",
+      "label": "Dipendente",
+      "fields": [
+        { "name": "full_name", "type": "string", "label": "Nome completo", "required": true },
+        { "name": "email", "type": "string", "label": "Email" },
+        { "name": "team", "type": "string", "label": "Team" }
+      ]
+    },
+    {
+      "name": "leave_request",
+      "label": "Richiesta",
+      "fields": [
+        { "name": "employee", "type": "relation", "to": "employee", "label": "Dipendente", "required": true },
+        { "name": "kind", "type": "enum", "label": "Tipo", "options": ["ferie", "permesso", "malattia"], "required": true },
+        { "name": "start_date", "type": "date", "label": "Dal", "required": true },
+        { "name": "end_date", "type": "date", "label": "Al", "required": true },
+        { "name": "notes", "type": "text", "label": "Note" },
+        { "name": "status", "type": "enum", "label": "Stato", "options": ["pending", "approved", "rejected"], "default": "pending" }
+      ]
+    }
+  ],
+  "views": [
+    { "type": "table", "entity": "leave_request", "name": "Richieste", "columns": ["employee", "kind", "start_date", "end_date", "status"] },
+    { "type": "form", "entity": "leave_request", "name": "Nuova richiesta" },
+    { "type": "detail", "entity": "leave_request", "name": "Dettaglio richiesta" }
+  ],
+  "workflows": [
+    {
+      "entity": "leave_request",
+      "states": ["pending", "approved", "rejected"],
+      "transitions": [
+        { "name": "approve", "from": "pending", "to": "approved", "label": "Approva" },
+        { "name": "reject", "from": "pending", "to": "rejected", "label": "Rifiuta" }
+      ]
+    }
+  ],
+  "agent_commands": [
+    { "intent": "create_leave_request", "entity": "leave_request", "action": "create" },
+    { "intent": "count_approved_leave_requests", "entity": "leave_request", "action": "query" }
+  ]
+}
+```
 
 ---
 
-## 9. Prompt demo
+## 12. Prompt demo
 
-### Prompt demo principale
+### Creazione app
 
 ```text
-Agisci come mio agente operativo. Devo valutare un potenziale cliente B2B per Homun.
-Cerca informazioni pubbliche sull'azienda, sintetizza cosa fa, identifica 3 opportunita' concrete per proporre un agente operativo, prepara un messaggio email di primo contatto e genera un brief markdown finale.
+Crea un'app interna per gestire ferie e permessi.
+I dipendenti devono poter inviare richieste indicando tipo, date e note.
+Un responsabile deve approvare o rifiutare.
+Voglio una lista delle richieste, un dettaglio, stati chiari e una notifica quando una richiesta viene approvata.
 ```
 
-### Prompt demo con knowledge gia' caricata
+### Uso app generata
 
 ```text
-Usa la knowledge disponibile per preparare un brief operativo: contesto, opportunita', rischi, prossima azione e bozza email. Alla fine produci un report markdown.
+Crea una richiesta ferie per Mario Rossi dal 10 al 12 maggio, con nota "vacanza famiglia", e lasciala in attesa di approvazione.
 ```
 
-### Prompt demo isolamento utente
+### Query app generata
 
 ```text
-Cosa sai in memory.md e quali documenti knowledge sono disponibili per questo profilo?
+Quante richieste ferie sono state approvate questa settimana?
+```
+
+### Isolamento utente
+
+```text
+Quali app interne e quali richieste ferie sono disponibili per questo profilo?
 ```
 
 Atteso:
 
-- Fabio vede dati Fabio.
-- user2 non vede dati Fabio.
+- Fabio vede app e dati Fabio.
+- user2 non vede app e dati Fabio.
 
 ---
 
-## 10. Decisione operativa proposta
+## 13. Decisione operativa proposta
 
 Partire subito da:
 
-1. Audit multiutente residuo.
-2. Mission Pack v0.
-3. Demo seed/runbook.
+1. Specifica tecnica Blueprint v0.
+2. Runtime minimo app da blueprint.
+3. Demo ferie/permessi.
 
-Questi tre elementi aumentano la credibilita' piu' di qualsiasi feature profonda aggiunta in modo isolato.
+Mission Pack resta utile, ma diventa supporto UX. La vera feature da presentare e costruire e' la Tool/App Factory basata su blueprint componibili.
 
