@@ -1,7 +1,7 @@
 ---
 name: app-factory
 description: Use when the user asks to create, design, generate, or modify an internal business app, operational tool, database-backed workflow, approval system, tracker, CRM-like mini app, employee portal, request system, or internal interface.
-allowed-tools: "create_internal_app list_internal_apps create_app_record query_app_records run_app_action read_file write_file"
+allowed-tools: "create_internal_app list_internal_apps update_internal_app create_app_record query_app_records run_app_action read_file write_file"
 ---
 
 # App Factory
@@ -77,9 +77,26 @@ The workflow `states` must match the enum options of the state field.
    - workflow actions;
    - any assumptions made.
 
+## Modification Workflow
+
+1. Use `list_internal_apps` if the target app slug is not explicit.
+2. Ask one concise question only if the requested change changes the data model in an ambiguous way.
+3. Produce the complete updated blueprint, not a partial diff.
+4. Keep `app.slug` unchanged.
+5. Call `update_internal_app` with:
+   - `app_slug`;
+   - the complete updated blueprint;
+   - a short `change_note`.
+6. Return:
+   - updated app link: `/apps/{slug}`;
+   - concise change summary;
+   - new/changed entities, fields, views, workflows;
+   - any migration caveat if existing records may need manual cleanup.
+
 ## Operating Existing Apps
 
 - Use `list_internal_apps` before operating on an app when the slug is unknown.
+- Use `update_internal_app` to modify an existing app blueprint from chat.
 - Use `create_app_record` to add records after validating entity fields from the blueprint.
 - Use `query_app_records` for simple exact-match searches.
 - Use `run_app_action` for workflow transitions.

@@ -85,6 +85,18 @@ impl ListInternalAppsTool {
     }
 }
 
+pub struct UpdateInternalAppTool {
+    core: AppFactoryCore,
+}
+
+impl UpdateInternalAppTool {
+    pub fn new(db: Database, data_dir: PathBuf) -> Self {
+        Self {
+            core: AppFactoryCore::new(db, data_dir),
+        }
+    }
+}
+
 pub struct CreateAppRecordTool {
     core: AppFactoryCore,
 }
@@ -125,6 +137,7 @@ pub fn app_factory_tools(db: Database, data_dir: PathBuf) -> Vec<Box<dyn Tool>> 
     vec![
         Box::new(CreateInternalAppTool::new(db.clone(), data_dir.clone())),
         Box::new(ListInternalAppsTool::new(db.clone(), data_dir.clone())),
+        Box::new(UpdateInternalAppTool::new(db.clone(), data_dir.clone())),
         Box::new(CreateAppRecordTool::new(db.clone(), data_dir.clone())),
         Box::new(QueryAppRecordsTool::new(db.clone(), data_dir.clone())),
         Box::new(RunAppActionTool::new(db, data_dir)),
@@ -240,6 +253,93 @@ impl Tool for ListInternalAppsTool {
             })
             .collect::<Vec<_>>();
         Ok(ToolResult::success(serde_json::to_string_pretty(&apps)?))
+    }
+}
+
+#[async_trait]
+impl Tool for UpdateInternalAppTool {
+    fn name(&self) -> &str {
+        "update_internal_app"
+    }
+
+    fn description(&self) -> &str {
+        "Update an existing internal app by replacing its validated blueprint and saving a new blueprint version. Use when the user asks to modify an app created by App Factory."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "app_slug": {"type": "string", "description": "Existing internal app slug"},
+                "blueprint": {
+                    "type": "object",
+                    "description": "Complete updated App Factory blueprint. The app.slug must match app_slug."
+                },
+                "change_note": {
+                    "type": "string",
+                    "description": "Short human-readable summary of the requested change"
+                }
+            },
+            "required": ["app_slug", "blueprint"]
+        })
+    }
+
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
+        let user_id = match self.core.require_user_id(ctx) {
+            Ok(user_id) => user_id,
+            Err(result) => return Ok(result),
+        };
+        let app_slug = get_string_param(&args, "app_slug")?;
+        let change_note = args
+            .get("change_note")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|note| !note.is_empty())
+            .unwrap_or("Updated from chat");
+        let Some(raw_blueprint) = args.get("blueprint") else {
+            return Ok(ToolResult::error("Missing required parameter: blueprint"));
+        };
+        let blueprint = match serde_json::from_value::<AppBlueprint>(raw_blueprint.clone()) {
+            Ok(blueprint) => blueprint,
+            Err(e) => return Ok(ToolResult::error(format!("Invalid blueprint JSON: {e}"))),
+        };
+        if blueprint.app.slug != app_slug {
+            return Ok(ToolResult::error(
+                "Changing an app slug is not supported yet. Keep blueprint.app.slug equal to app_slug.",
+            ));
+        }
+        if let Err(report) = validation::validate_blueprint(&blueprint) {
+            return Ok(ToolResult::error(format!(
+                "Invalid blueprint: {}",
+                report.errors.join(" | ")
+            )));
+        }
+
+        let (app, previous_blueprint) = match self.core.load_app(user_id, &app_slug).await {
+            Ok(app) => app,
+            Err(result) => return Ok(result),
+        };
+        let version = match app_db::update_app_blueprint(
+            self.core.db.pool(),
+            app.id,
+            &blueprint,
+            Some(change_note),
+            Some(user_id),
+        )
+        .await
+        {
+            Ok(version) => version,
+            Err(e) => {
+                return Ok(ToolResult::error(format!(
+                    "Failed to update internal app: {e}"
+                )))
+            }
+        };
+
+        Ok(ToolResult::success(format!(
+            "Internal app updated.\nslug={app_slug}\nname={} -> {}\nversion={version}\nchange_note={change_note}",
+            previous_blueprint.app.name, blueprint.app.name
+        )))
     }
 }
 
@@ -586,7 +686,7 @@ mod tests {
 
         let tools = app_factory_tools(db, data_dir);
 
-        assert_eq!(tools.len(), 5);
+        assert_eq!(tools.len(), 6);
         for tool in tools {
             let description = tool.description().to_lowercase();
             assert!(description.contains("internal app"));
@@ -623,6 +723,41 @@ mod tests {
         assert!(result.is_error);
         assert!(result.output.contains("Invalid blueprint"));
         assert!(result.output.contains("must define 1-32 options"));
+    }
+
+    #[tokio::test]
+    async fn update_internal_app_saves_new_blueprint_version() {
+        let (db, dir) = test_db().await;
+        let data_dir = dir.path().to_path_buf();
+        let ctx = test_context(Some("user-1"));
+        let create_app = CreateInternalAppTool::new(db.clone(), data_dir.clone());
+        let update_app = UpdateInternalAppTool::new(db, data_dir);
+        let mut updated = valid_blueprint();
+        updated["app"]["name"] = json!("Ferie e Permessi HR");
+
+        let created_app = create_app
+            .execute(json!({"blueprint": valid_blueprint()}), &ctx)
+            .await
+            .unwrap();
+        assert!(!created_app.is_error, "{}", created_app.output);
+
+        let result = update_app
+            .execute(
+                json!({
+                    "app_slug": "ferie-permessi",
+                    "blueprint": updated,
+                    "change_note": "Rinomina app"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert!(!result.is_error, "{}", result.output);
+        assert!(result.output.contains("version=2"));
+        assert!(result
+            .output
+            .contains("Ferie e Permessi -> Ferie e Permessi HR"));
     }
 
     #[tokio::test]

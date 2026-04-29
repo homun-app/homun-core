@@ -1458,14 +1458,15 @@ Body.
     #[test]
     fn test_parse_allowed_tools_comma_separated_raw_names() {
         let result = parse_allowed_tools(
-            "create_internal_app, list_internal_apps, create_app_record, query_app_records, run_app_action",
+            "create_internal_app, list_internal_apps, update_internal_app, create_app_record, query_app_records, run_app_action",
         );
         assert!(result.contains("create_internal_app"));
         assert!(result.contains("list_internal_apps"));
+        assert!(result.contains("update_internal_app"));
         assert!(result.contains("create_app_record"));
         assert!(result.contains("query_app_records"));
         assert!(result.contains("run_app_action"));
-        assert_eq!(result.len(), 5);
+        assert_eq!(result.len(), 6);
     }
 
     #[test]

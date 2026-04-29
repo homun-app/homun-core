@@ -641,6 +641,26 @@ Input:
 { "profile": "default" }
 ```
 
+### `update_internal_app`
+
+Input:
+
+```json
+{
+  "app_slug": "ferie-permessi",
+  "blueprint": {},
+  "change_note": "Aggiunge campo motivazione"
+}
+```
+
+Comportamento:
+
+- carica l'app esistente dell'utente;
+- valida il blueprint completo aggiornato;
+- non consente cambio slug nella v0;
+- salva una nuova versione in `internal_app_versions`;
+- aggiorna il runtime usato da Studio e dall'app esterna.
+
 ### `create_app_record`
 
 Input:
@@ -714,6 +734,7 @@ La skill deve guidare il modello a produrre blueprint validi.
 
 - `create_internal_app`
 - `list_internal_apps`
+- `update_internal_app`
 - `create_app_record`
 - `query_app_records`
 - `run_app_action`
