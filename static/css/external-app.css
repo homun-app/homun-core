@@ -73,6 +73,46 @@ body {
     margin-bottom: 14px;
 }
 
+.external-app-dashboard {
+    align-items: stretch;
+}
+
+.external-contacts-panel {
+    width: 100%;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--r-md);
+    background: var(--surface);
+    padding: 14px;
+}
+
+.external-contact-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+}
+
+.external-contact-card {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--r-sm);
+    background: var(--surface-inset);
+}
+
+.external-contact-card strong {
+    color: var(--t1);
+    font-size: 13px;
+}
+
+.external-contact-card span,
+.external-contact-card small {
+    color: var(--t3);
+    font-size: 12px;
+}
+
 .external-app-body {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 340px;

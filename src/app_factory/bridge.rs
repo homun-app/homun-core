@@ -52,6 +52,13 @@ impl BridgePolicy {
         self.channels.send.iter().any(|name| name == channel)
     }
 
+    pub fn allows_contact_ref(&self, contact_ref: &str) -> bool {
+        self.contacts
+            .read
+            .iter()
+            .any(|name| name == "*" || name.eq_ignore_ascii_case(contact_ref))
+    }
+
     pub fn allows_knowledge_namespace(&self, namespace: &str) -> bool {
         self.knowledge_namespaces
             .iter()
@@ -106,12 +113,14 @@ mod tests {
         let policy: BridgePolicy = serde_json::from_value(serde_json::json!({
             "tools": ["send_message"],
             "channels": {"send": ["email"]},
+            "contacts": {"read": ["*"]},
             "knowledge_namespaces": ["hr-policy"]
         }))
         .unwrap();
 
         assert!(policy.allows_tool("send_message"));
         assert!(policy.allows_channel_send("email"));
+        assert!(policy.allows_contact_ref("*"));
         assert!(policy.allows_knowledge_namespace("hr-policy"));
         assert!(!policy.allows_tool("vault"));
     }

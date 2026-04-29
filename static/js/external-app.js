@@ -68,6 +68,7 @@
         document.getElementById('external-app-title').textContent = state.app.name;
         document.getElementById('external-app-user').textContent =
             state.app.user.display_name + ' - ' + state.app.user.role;
+        loadContacts();
         renderNav();
         loadRecords();
     }
@@ -271,6 +272,39 @@
             actions.appendChild(button);
         });
         container.appendChild(actions);
+    }
+
+    function loadContacts() {
+        var dashboard = document.getElementById('external-app-dashboard');
+        if (!dashboard) return;
+        dashboard.textContent = '';
+        api('/contacts').then(function (contacts) {
+            renderContacts(contacts || []);
+        }).catch(function () {
+            renderContacts([]);
+        });
+    }
+
+    function renderContacts(contacts) {
+        var dashboard = document.getElementById('external-app-dashboard');
+        if (!dashboard) return;
+        dashboard.textContent = '';
+        if (!contacts.length) return;
+        var panel = el('section', 'external-contacts-panel');
+        var title = el('div', 'external-section-title');
+        title.appendChild(el('h2', null, 'Contacts'));
+        title.appendChild(el('span', null, contacts.length + ' allowed'));
+        panel.appendChild(title);
+        var list = el('div', 'external-contact-list');
+        contacts.forEach(function (contact) {
+            var item = el('article', 'external-contact-card');
+            item.appendChild(el('strong', null, contact.name));
+            if (contact.nickname) item.appendChild(el('span', null, contact.nickname));
+            if (contact.preferred_channel) item.appendChild(el('small', null, contact.preferred_channel));
+            list.appendChild(item);
+        });
+        panel.appendChild(list);
+        dashboard.appendChild(panel);
     }
 
     var loginForm = document.getElementById('external-login-form');

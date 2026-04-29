@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 
 use crate::app_factory::blueprint::AppBlueprint;
 use crate::app_factory::{bridge::BridgePolicy, db as app_db, external_auth, runtime, validation};
+use crate::contacts::Contact;
 use crate::web::auth::verify_password;
 use crate::web::server::AppState;
 
@@ -56,12 +57,23 @@ struct ActionResponse {
     event_type: String,
 }
 
+#[derive(Debug, Serialize)]
+struct ExternalContactView {
+    id: i64,
+    name: String,
+    nickname: Option<String>,
+    bio: String,
+    preferred_channel: Option<String>,
+    tags: Vec<String>,
+}
+
 pub(super) fn public_routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/a/{slug}/login", post(login))
         .route("/api/a/{slug}/logout", post(logout))
         .route("/api/a/{slug}/me", get(me))
         .route("/api/a/{slug}/meta", get(meta))
+        .route("/api/a/{slug}/contacts", get(list_allowed_contacts))
         .route(
             "/api/a/{slug}/entities/{entity}/records",
             get(list_records).post(create_record),
@@ -204,6 +216,47 @@ fn external_record_view(row: app_db::AppRecordRow) -> Result<ExternalRecordView,
     })
 }
 
+fn contact_tags(contact: &Contact) -> Vec<String> {
+    serde_json::from_str::<Vec<String>>(&contact.tags).unwrap_or_else(|_| {
+        contact
+            .tags
+            .split(',')
+            .map(str::trim)
+            .filter(|tag| !tag.is_empty())
+            .map(ToOwned::to_owned)
+            .collect()
+    })
+}
+
+fn policy_allows_contact(policy: &BridgePolicy, contact: &Contact) -> bool {
+    if policy.allows_contact_ref("*")
+        || policy.allows_contact_ref(&contact.id.to_string())
+        || policy.allows_contact_ref(&contact.name)
+    {
+        return true;
+    }
+    if let Some(nickname) = contact.nickname.as_deref() {
+        if policy.allows_contact_ref(nickname) {
+            return true;
+        }
+    }
+    contact_tags(contact)
+        .iter()
+        .any(|tag| policy.allows_contact_ref(tag))
+}
+
+fn external_contact_view(contact: Contact) -> ExternalContactView {
+    let tags = contact_tags(&contact);
+    ExternalContactView {
+        id: contact.id,
+        name: contact.name,
+        nickname: contact.nickname,
+        bio: contact.bio,
+        preferred_channel: contact.preferred_channel,
+        tags,
+    }
+}
+
 async fn login(
     State(state): State<Arc<AppState>>,
     Path(slug): Path<String>,
@@ -334,6 +387,33 @@ async fn list_records(
             .map(external_record_view)
             .collect::<Result<Vec<_>, _>>()?,
     ))
+}
+
+async fn list_allowed_contacts(
+    State(state): State<Arc<AppState>>,
+    Path(slug): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<ExternalContactView>>, ApiErr> {
+    let db = state
+        .db
+        .as_ref()
+        .ok_or_else(|| internal("Database not available"))?;
+    let (app, _, app_pool, _) = require_app_user(&state, &slug, &headers).await?;
+    app_pool.close().await;
+    let policy = load_bridge_policy_or_deny_all(&state, app.id).await;
+    if policy.contacts.read.is_empty() {
+        return Ok(Json(Vec::new()));
+    }
+    let contacts = db
+        .list_contacts_for_user(None, app.profile_id, &app.user_id)
+        .await
+        .map_err(internal)?
+        .into_iter()
+        .filter(|contact| policy_allows_contact(&policy, contact))
+        .map(external_contact_view)
+        .collect();
+
+    Ok(Json(contacts))
 }
 
 async fn create_record(
@@ -493,5 +573,41 @@ mod tests {
             Some("session-1".to_string())
         );
         assert_eq!(app_session_cookie(&headers, "crm"), None);
+    }
+
+    #[test]
+    fn contact_policy_allows_star_id_name_nickname_and_tags() {
+        let contact = Contact {
+            id: 42,
+            name: "Mario Rossi".to_string(),
+            nickname: Some("mario".to_string()),
+            bio: String::new(),
+            notes: String::new(),
+            birthday: None,
+            nameday: None,
+            preferred_channel: Some("email".to_string()),
+            response_mode: "automatic".to_string(),
+            tone_of_voice: String::new(),
+            tags: "[\"hr-team\",\"manager\"]".to_string(),
+            avatar_url: None,
+            created_at: String::new(),
+            updated_at: String::new(),
+            persona_override: None,
+            persona_instructions: String::new(),
+            agent_override: None,
+            profile_id: None,
+            user_id: Some("owner".to_string()),
+        };
+
+        for allowed_ref in ["*", "42", "Mario Rossi", "mario", "hr-team"] {
+            let policy = BridgePolicy {
+                contacts: crate::app_factory::bridge::ContactAccess {
+                    read: vec![allowed_ref.to_string()],
+                    link_app_users: false,
+                },
+                ..BridgePolicy::deny_all()
+            };
+            assert!(policy_allows_contact(&policy, &contact));
+        }
     }
 }
