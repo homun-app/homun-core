@@ -302,9 +302,15 @@ Uso:
 
 ## 5. Storage v0
 
-La v0 deve evitare migrazioni dinamiche per ogni app. Usa storage generico.
+La v0 separa il database di controllo dal database dati delle app generate.
 
-### Tabelle
+- `homun.db` resta il control plane: contiene metadata, ownership, blueprint, path del database applicativo e audit di sistema.
+- ogni app generata ha un proprio SQLite dedicato: contiene i record operativi dell'app.
+- il runtime apre il database dell'app solo dopo aver verificato ownership e profilo nel control plane.
+
+Questa scelta mantiene semplice la v0 ma introduce isolamento reale: se una singola app viene corrotta o compromessa, i dati delle altre app e il database principale non sono nello stesso file dati.
+
+### Tabelle in `homun.db`
 
 ```sql
 CREATE TABLE internal_apps (
@@ -315,23 +321,13 @@ CREATE TABLE internal_apps (
     name TEXT NOT NULL,
     description TEXT,
     blueprint_json TEXT NOT NULL,
+    db_path TEXT NOT NULL,
+    schema_version INTEGER NOT NULL DEFAULT 1,
+    storage_mode TEXT NOT NULL DEFAULT 'sqlite_per_app',
     status TEXT NOT NULL DEFAULT 'active',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT,
     UNIQUE(user_id, slug)
-);
-```
-
-```sql
-CREATE TABLE internal_app_records (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    app_id INTEGER NOT NULL REFERENCES internal_apps(id) ON DELETE CASCADE,
-    entity_name TEXT NOT NULL,
-    data_json TEXT NOT NULL,
-    status TEXT,
-    created_by_user_id TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT
 );
 ```
 
@@ -351,27 +347,62 @@ CREATE TABLE internal_app_events (
 
 ```sql
 CREATE INDEX idx_internal_apps_user_profile ON internal_apps(user_id, profile_id);
-CREATE INDEX idx_internal_app_records_app_entity ON internal_app_records(app_id, entity_name);
 CREATE INDEX idx_internal_app_events_app_record ON internal_app_events(app_id, record_id);
 ```
 
-### Perche' storage generico
+### Database per-app
+
+Ogni app usa un file dedicato:
+
+```text
+~/.homun/apps/<user_id>/<app_slug>/app.db
+```
+
+Schema v0 del database applicativo:
+
+```sql
+CREATE TABLE app_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_name TEXT NOT NULL,
+    data_json TEXT NOT NULL,
+    status TEXT,
+    created_by_user_id TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT
+);
+
+CREATE TABLE app_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    record_id INTEGER,
+    event_type TEXT NOT NULL,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    actor_user_id TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_app_records_entity ON app_records(entity_name);
+CREATE INDEX idx_app_events_record ON app_events(record_id);
+```
+
+### Perche' SQLite per-app
 
 Pro:
 
-- nessun SQL dinamico generato dal modello;
-- migrazione singola;
-- ideale per demo e v0;
-- facile enforcement `user_id`;
-- blueprint versionabile.
+- isolamento tra app generate;
+- backup, export e cancellazione per singola app;
+- superficie di danno limitata se un'app viene compromessa;
+- nessun SQL custom generato dal modello;
+- blueprint versionabile nel control plane.
 
 Contro:
 
-- query avanzate meno efficienti;
+- piu' file da gestire;
+- serve aprire pool/connessioni per-app;
+- query aggregate cross-app non immediate;
 - validazione applicativa necessaria;
-- report complessi richiederanno indici o materializzazioni future.
+- report complessi richiederanno indici o materializzazioni nel DB applicativo.
 
-Decisione v0: storage generico.
+Decisione v0: control plane in `homun.db`, record operativi in SQLite dedicato per ogni app.
 
 ---
 
@@ -673,7 +704,9 @@ Regola:
 - `internal_apps.user_id` sempre valorizzato.
 - ogni query API filtra per `auth.user_id`.
 - `profile` slug risolto solo per profili dell'utente.
-- record accessibili solo se `app_id` appartiene all'utente.
+- record accessibili solo dopo lookup dell'app in `internal_apps` con `auth.user_id`.
+- il path del DB applicativo viene risolto dal server, mai accettato dal client o dal modello.
+- ogni app usa un database SQLite dedicato sotto `~/.homun/apps/<user_id>/<app_slug>/app.db`.
 - blueprint validato prima del salvataggio.
 - nessun HTML/JS custom da blueprint.
 - nessun SQL custom da blueprint.
@@ -808,4 +841,3 @@ La v0 e' completa quando:
 - skill `app-factory` produce blueprint valido;
 - demo ferie/permessi funziona da prompt o da blueprint pre-seed;
 - `cargo fmt --all -- --check`, `cargo check --all-features`, `cargo clippy --all-features -- -D warnings`, build release passano.
-

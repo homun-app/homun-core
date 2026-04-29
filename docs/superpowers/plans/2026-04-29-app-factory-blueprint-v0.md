@@ -4,7 +4,7 @@
 
 **Goal:** Build the first usable Tool/App Factory path: a validated blueprint creates an internal app, renders a generic UI, stores records, supports approve/reject workflow actions, and exposes tools the agent can use.
 
-**Architecture:** Use a declarative blueprint and generic storage rather than generated code. The backend owns validation, persistence, API, and agent tools; the web UI renders apps from blueprint; the `app-factory` skill guides the model to produce valid blueprints. Keep v0 scoped to CRUD + simple state workflows so it is demoable in 10 days.
+**Architecture:** Use a declarative blueprint and per-app SQLite storage rather than generated code. `homun.db` is the control plane for app metadata, ownership, blueprint, and app DB paths. Each generated app has an isolated SQLite database for operational records and events. The backend owns validation, persistence, API, and agent tools; the web UI renders apps from blueprint; the `app-factory` skill guides the model to produce valid blueprints. Keep v0 scoped to CRUD + simple state workflows so it is demoable in 10 days.
 
 **Tech Stack:** Rust, Axum, SQLx/SQLite migrations, Serde, existing Homun ToolRegistry, existing web static JS/CSS, existing skills loader.
 
@@ -14,7 +14,7 @@
 
 Create:
 
-- `migrations/056_internal_apps.sql` — generic app factory tables.
+- `migrations/056_internal_apps.sql` — app factory control-plane tables.
 - `src/app_factory/mod.rs` — module exports.
 - `src/app_factory/blueprint.rs` — serde structs for blueprint v0.
 - `src/app_factory/validation.rs` — strict validator and tests.
@@ -50,7 +50,8 @@ Modify:
 Create `migrations/056_internal_apps.sql`:
 
 ```sql
--- Internal App Factory: generic blueprint apps and records
+-- Internal App Factory: control-plane metadata.
+-- Each generated app stores its operational records in a dedicated SQLite DB.
 CREATE TABLE IF NOT EXISTS internal_apps (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL,
@@ -59,21 +60,13 @@ CREATE TABLE IF NOT EXISTS internal_apps (
     name TEXT NOT NULL,
     description TEXT,
     blueprint_json TEXT NOT NULL,
+    db_path TEXT NOT NULL,
+    schema_version INTEGER NOT NULL DEFAULT 1,
+    storage_mode TEXT NOT NULL DEFAULT 'sqlite_per_app',
     status TEXT NOT NULL DEFAULT 'active',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT,
     UNIQUE(user_id, slug)
-);
-
-CREATE TABLE IF NOT EXISTS internal_app_records (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    app_id INTEGER NOT NULL REFERENCES internal_apps(id) ON DELETE CASCADE,
-    entity_name TEXT NOT NULL,
-    data_json TEXT NOT NULL,
-    status TEXT,
-    created_by_user_id TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS internal_app_events (
@@ -87,7 +80,6 @@ CREATE TABLE IF NOT EXISTS internal_app_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_internal_apps_user_profile ON internal_apps(user_id, profile_id);
-CREATE INDEX IF NOT EXISTS idx_internal_app_records_app_entity ON internal_app_records(app_id, entity_name);
 CREATE INDEX IF NOT EXISTS idx_internal_app_events_app_record ON internal_app_events(app_id, record_id);
 ```
 
@@ -570,20 +562,22 @@ git commit -m "Add app factory blueprint validator"
 
 ---
 
-## Task 3: Persistence Layer
+## Task 3: Persistence Layer With Per-App SQLite Isolation
 
 **Files:**
 
 - Create: `src/app_factory/db.rs`
 - Modify: `src/app_factory/mod.rs`
 
-- [ ] **Step 1: Add DB row structs and helpers**
+- [ ] **Step 1: Add DB row structs, path resolution, and helpers**
 
 Create `src/app_factory/db.rs` with:
 
 ```rust
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::SqlitePool;
 
 use super::blueprint::AppBlueprint;
@@ -597,15 +591,17 @@ pub struct InternalAppRow {
     pub name: String,
     pub description: Option<String>,
     pub blueprint_json: String,
+    pub db_path: String,
+    pub schema_version: i64,
+    pub storage_mode: String,
     pub status: String,
     pub created_at: String,
     pub updated_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InternalAppRecordRow {
+pub struct AppRecordRow {
     pub id: i64,
-    pub app_id: i64,
     pub entity_name: String,
     pub data_json: String,
     pub status: Option<String>,
@@ -614,16 +610,76 @@ pub struct InternalAppRecordRow {
     pub updated_at: Option<String>,
 }
 
+pub fn app_db_path(data_dir: &Path, user_id: &str, app_slug: &str) -> PathBuf {
+    data_dir.join("apps").join(user_id).join(app_slug).join("app.db")
+}
+
+pub async fn open_app_pool(db_path: &Path) -> Result<SqlitePool> {
+    if let Some(parent) = db_path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    let options = SqliteConnectOptions::new()
+        .filename(db_path)
+        .create_if_missing(true);
+    let pool = SqlitePoolOptions::new()
+        .max_connections(5)
+        .connect_with(options)
+        .await?;
+    migrate_app_db(&pool).await?;
+    Ok(pool)
+}
+
+pub async fn migrate_app_db(pool: &SqlitePool) -> Result<()> {
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS app_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entity_name TEXT NOT NULL,
+            data_json TEXT NOT NULL,
+            status TEXT,
+            created_by_user_id TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS app_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            record_id INTEGER,
+            event_type TEXT NOT NULL,
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            actor_user_id TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_app_records_entity ON app_records(entity_name)")
+        .execute(pool)
+        .await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_app_events_record ON app_events(record_id)")
+        .execute(pool)
+        .await?;
+
+    Ok(())
+}
+
 pub async fn insert_app(
-    pool: &SqlitePool,
+    control_pool: &SqlitePool,
+    data_dir: &Path,
     user_id: &str,
     profile_id: Option<i64>,
     blueprint: &AppBlueprint,
 ) -> Result<i64> {
     let blueprint_json = serde_json::to_string(blueprint)?;
+    let db_path = app_db_path(data_dir, user_id, &blueprint.app.slug);
+    open_app_pool(&db_path).await?;
     let id = sqlx::query_scalar(
-        "INSERT INTO internal_apps (user_id, profile_id, slug, name, description, blueprint_json)
-         VALUES (?, ?, ?, ?, ?, ?)
+        "INSERT INTO internal_apps (user_id, profile_id, slug, name, description, blueprint_json, db_path)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
          RETURNING id",
     )
     .bind(user_id)
@@ -632,93 +688,91 @@ pub async fn insert_app(
     .bind(&blueprint.app.name)
     .bind(blueprint.app.description.as_deref())
     .bind(blueprint_json)
-    .fetch_one(pool)
+    .bind(db_path.to_string_lossy().as_ref())
+    .fetch_one(control_pool)
     .await?;
     Ok(id)
 }
 
 pub async fn list_apps_for_user(
-    pool: &SqlitePool,
+    control_pool: &SqlitePool,
     user_id: &str,
     profile_id: Option<i64>,
 ) -> Result<Vec<InternalAppRow>> {
     let rows = if let Some(profile_id) = profile_id {
         sqlx::query_as!(
             InternalAppRow,
-            "SELECT id, user_id, profile_id, slug, name, description, blueprint_json, status, created_at, updated_at
+            "SELECT id, user_id, profile_id, slug, name, description, blueprint_json, db_path, schema_version, storage_mode, status, created_at, updated_at
              FROM internal_apps
              WHERE user_id = ? AND (profile_id IS NULL OR profile_id = ?)
              ORDER BY updated_at DESC, created_at DESC",
             user_id,
             profile_id
         )
-        .fetch_all(pool)
+        .fetch_all(control_pool)
         .await?
     } else {
         sqlx::query_as!(
             InternalAppRow,
-            "SELECT id, user_id, profile_id, slug, name, description, blueprint_json, status, created_at, updated_at
+            "SELECT id, user_id, profile_id, slug, name, description, blueprint_json, db_path, schema_version, storage_mode, status, created_at, updated_at
              FROM internal_apps
              WHERE user_id = ?
              ORDER BY updated_at DESC, created_at DESC",
             user_id
         )
-        .fetch_all(pool)
+        .fetch_all(control_pool)
         .await?
     };
     Ok(rows)
 }
 
-pub async fn load_app_for_user(pool: &SqlitePool, user_id: &str, slug: &str) -> Result<Option<InternalAppRow>> {
+pub async fn load_app_for_user(control_pool: &SqlitePool, user_id: &str, slug: &str) -> Result<Option<InternalAppRow>> {
     let row = sqlx::query_as!(
         InternalAppRow,
-        "SELECT id, user_id, profile_id, slug, name, description, blueprint_json, status, created_at, updated_at
+        "SELECT id, user_id, profile_id, slug, name, description, blueprint_json, db_path, schema_version, storage_mode, status, created_at, updated_at
          FROM internal_apps
          WHERE user_id = ? AND slug = ?",
         user_id,
         slug
     )
-    .fetch_optional(pool)
+    .fetch_optional(control_pool)
     .await?;
     Ok(row)
 }
 
 pub async fn insert_record(
-    pool: &SqlitePool,
-    app_id: i64,
+    app_pool: &SqlitePool,
     entity_name: &str,
     data: &serde_json::Value,
     status: Option<&str>,
     created_by_user_id: Option<&str>,
 ) -> Result<i64> {
     let id = sqlx::query_scalar(
-        "INSERT INTO internal_app_records (app_id, entity_name, data_json, status, created_by_user_id)
-         VALUES (?, ?, ?, ?, ?)
+        "INSERT INTO app_records (entity_name, data_json, status, created_by_user_id)
+         VALUES (?, ?, ?, ?)
          RETURNING id",
     )
-    .bind(app_id)
     .bind(entity_name)
     .bind(serde_json::to_string(data)?)
     .bind(status)
     .bind(created_by_user_id)
-    .fetch_one(pool)
+    .fetch_one(app_pool)
     .await?;
     Ok(id)
 }
 
-pub async fn list_records(pool: &SqlitePool, app_id: i64, entity_name: &str, limit: i64) -> Result<Vec<InternalAppRecordRow>> {
+pub async fn list_records(app_pool: &SqlitePool, entity_name: &str, limit: i64) -> Result<Vec<AppRecordRow>> {
     let rows = sqlx::query_as!(
-        InternalAppRecordRow,
-        "SELECT id, app_id, entity_name, data_json, status, created_by_user_id, created_at, updated_at
-         FROM internal_app_records
-         WHERE app_id = ? AND entity_name = ?
+        AppRecordRow,
+        "SELECT id, entity_name, data_json, status, created_by_user_id, created_at, updated_at
+         FROM app_records
+         WHERE entity_name = ?
          ORDER BY created_at DESC
          LIMIT ?",
-        app_id,
         entity_name,
         limit
     )
-    .fetch_all(pool)
+    .fetch_all(app_pool)
     .await?;
     Ok(rows)
 }
@@ -743,7 +797,7 @@ Expected: pass. If `query_as!` requires prepared DB metadata, switch these helpe
 - [ ] **Step 3: Commit**
 
 ```bash
-git add src/app_factory/db.rs src/app_factory/mod.rs
+git add migrations/056_internal_apps.sql docs/specs/APP-FACTORY-BLUEPRINT-V0.md docs/superpowers/plans/2026-04-29-app-factory-blueprint-v0.md src/app_factory/db.rs src/app_factory/mod.rs
 git commit -m "Add internal app persistence helpers"
 ```
 
