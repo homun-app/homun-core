@@ -505,6 +505,7 @@ async fn update_bridge_policy(
     require_write(&auth)?;
     let db = require_db(&state)?;
     let (app, _) = load_owned_app(db, &auth, &slug).await?;
+    let policy = policy.normalized();
     app_db::upsert_bridge_policy(db.pool(), app.id, &policy)
         .await
         .map_err(internal)?;

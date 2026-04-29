@@ -57,6 +57,29 @@ impl BridgePolicy {
             .iter()
             .any(|name| name == namespace)
     }
+
+    pub fn normalized(mut self) -> Self {
+        normalize_list(&mut self.profiles);
+        normalize_list(&mut self.contacts.read);
+        normalize_list(&mut self.channels.send);
+        normalize_list(&mut self.channels.receive);
+        normalize_list(&mut self.knowledge_namespaces);
+        normalize_list(&mut self.tools);
+        normalize_list(&mut self.writeback);
+        self
+    }
+}
+
+fn normalize_list(items: &mut Vec<String>) {
+    let mut normalized = Vec::new();
+    for item in items.drain(..) {
+        let item = item.trim();
+        if item.is_empty() || normalized.iter().any(|existing| existing == item) {
+            continue;
+        }
+        normalized.push(item.to_string());
+    }
+    *items = normalized;
 }
 
 pub fn ensure_tool_allowed(policy: &BridgePolicy, tool: &str) -> anyhow::Result<()> {
@@ -98,5 +121,26 @@ mod tests {
         let policy = BridgePolicy::deny_all();
 
         assert!(ensure_tool_allowed(&policy, "send_message").is_err());
+    }
+
+    #[test]
+    fn normalized_policy_trims_and_deduplicates_capabilities() {
+        let policy = BridgePolicy {
+            tools: vec![
+                " send_message ".to_string(),
+                "send_message".to_string(),
+                "".to_string(),
+                "contacts".to_string(),
+            ],
+            channels: ChannelAccess {
+                send: vec![" email ".to_string(), "email".to_string()],
+                receive: Vec::new(),
+            },
+            ..BridgePolicy::deny_all()
+        }
+        .normalized();
+
+        assert_eq!(policy.tools, vec!["send_message", "contacts"]);
+        assert_eq!(policy.channels.send, vec!["email"]);
     }
 }
