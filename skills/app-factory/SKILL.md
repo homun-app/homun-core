@@ -1,7 +1,7 @@
 ---
 name: app-factory
 description: Use when the user asks to create, design, generate, or modify an internal business app, operational tool, database-backed workflow, approval system, tracker, CRM-like mini app, employee portal, request system, or internal interface.
-allowed-tools: "create_internal_app list_internal_apps update_internal_app configure_app_capabilities create_app_record query_app_records run_app_action read_file write_file"
+allowed-tools: "create_internal_app list_internal_apps update_internal_app add_app_field configure_app_capabilities create_app_record query_app_records run_app_action read_file write_file"
 ---
 
 # App Factory
@@ -81,13 +81,14 @@ The workflow `states` must match the enum options of the state field.
 
 1. Use `list_internal_apps` if the target app slug is not explicit.
 2. Ask one concise question only if the requested change changes the data model in an ambiguous way.
-3. Produce the complete updated blueprint, not a partial diff.
-4. Keep `app.slug` unchanged.
-5. Call `update_internal_app` with:
+3. For simple field additions, prefer `add_app_field` instead of rewriting the full blueprint.
+4. For broader structural changes, produce the complete updated blueprint, not a partial diff.
+5. Keep `app.slug` unchanged.
+6. Call `update_internal_app` with:
    - `app_slug`;
    - the complete updated blueprint;
    - a short `change_note`.
-6. Return:
+7. Return:
    - updated app link: `/apps/{slug}`;
    - concise change summary;
    - new/changed entities, fields, views, workflows;
@@ -108,6 +109,7 @@ Prefer `mode: "merge"` unless the user explicitly asks to replace or reset permi
 ## Operating Existing Apps
 
 - Use `list_internal_apps` before operating on an app when the slug is unknown.
+- Use `add_app_field` for requests like "add a field", "add notes", "add detailed reason", or "add email".
 - Use `update_internal_app` to modify an existing app blueprint from chat.
 - Use `configure_app_capabilities` to configure app bridge permissions from chat.
 - Use `create_app_record` to add records after validating entity fields from the blueprint.

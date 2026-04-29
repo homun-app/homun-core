@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 
 use super::registry::{get_string_param, Tool, ToolContext, ToolResult};
-use crate::app_factory::blueprint::AppBlueprint;
+use crate::app_factory::blueprint::{AppBlueprint, FieldDefinition, FieldType};
 use crate::app_factory::{bridge::BridgePolicy, db as app_db, runtime, validation};
 use crate::storage::Database;
 
@@ -109,6 +109,18 @@ impl ConfigureAppCapabilitiesTool {
     }
 }
 
+pub struct AddAppFieldTool {
+    core: AppFactoryCore,
+}
+
+impl AddAppFieldTool {
+    pub fn new(db: Database, data_dir: PathBuf) -> Self {
+        Self {
+            core: AppFactoryCore::new(db, data_dir),
+        }
+    }
+}
+
 pub struct CreateAppRecordTool {
     core: AppFactoryCore,
 }
@@ -154,6 +166,7 @@ pub fn app_factory_tools(db: Database, data_dir: PathBuf) -> Vec<Box<dyn Tool>> 
             db.clone(),
             data_dir.clone(),
         )),
+        Box::new(AddAppFieldTool::new(db.clone(), data_dir.clone())),
         Box::new(CreateAppRecordTool::new(db.clone(), data_dir.clone())),
         Box::new(QueryAppRecordsTool::new(db.clone(), data_dir.clone())),
         Box::new(RunAppActionTool::new(db, data_dir)),
@@ -456,6 +469,154 @@ impl Tool for ConfigureAppCapabilitiesTool {
 }
 
 #[async_trait]
+impl Tool for AddAppFieldTool {
+    fn name(&self) -> &str {
+        "add_app_field"
+    }
+
+    fn description(&self) -> &str {
+        "Add a field to an entity in a blueprint-generated internal app, validate the updated blueprint, and save a new version. Use for chat requests like adding a field to an existing app."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "app_slug": {"type": "string", "description": "Existing internal app slug"},
+                "entity": {"type": "string", "description": "Entity name to modify"},
+                "field_name": {"type": "string", "description": "New field identifier. Optional if label is provided; generated as snake_case."},
+                "label": {"type": "string", "description": "Human-readable field label"},
+                "field_type": {"type": "string", "description": "Field type: string, text, number, date, boolean, enum, relation. Common aliases like email/select/textarea are normalized."},
+                "required": {"type": "boolean", "description": "Whether the field is required"},
+                "default": {"description": "Optional default JSON value"},
+                "options": {"type": "array", "items": {"type": "string"}, "description": "Enum options"},
+                "to": {"type": "string", "description": "Relation target entity"},
+                "append_to_table_views": {"type": "boolean", "description": "Append the field to existing table views for the entity. Default true."},
+                "change_note": {"type": "string", "description": "Short human-readable summary of the change"}
+            },
+            "required": ["app_slug", "entity", "label", "field_type"]
+        })
+    }
+
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
+        let user_id = match self.core.require_user_id(ctx) {
+            Ok(user_id) => user_id,
+            Err(result) => return Ok(result),
+        };
+        let app_slug = get_string_param(&args, "app_slug")?;
+        let entity_name = get_string_param(&args, "entity")?;
+        let label = get_string_param(&args, "label")?;
+        let field_name = args
+            .get("field_name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| ident_from_label(&label));
+        let field_type_raw = get_string_param(&args, "field_type")?;
+        let field_type = match parse_field_type(&field_type_raw) {
+            Ok(field_type) => field_type,
+            Err(message) => return Ok(ToolResult::error(message)),
+        };
+        let required = args
+            .get("required")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let options = args
+            .get("options")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let to = args
+            .get("to")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned);
+        let default = args.get("default").cloned();
+        let append_to_table_views = args
+            .get("append_to_table_views")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let change_note = args
+            .get("change_note")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|note| !note.is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| format!("Add field {field_name} to {entity_name}"));
+
+        let (app, mut blueprint) = match self.core.load_app(user_id, &app_slug).await {
+            Ok(app) => app,
+            Err(result) => return Ok(result),
+        };
+        let Some(entity) = blueprint
+            .entities
+            .iter_mut()
+            .find(|entity| entity.name == entity_name)
+        else {
+            return Ok(ToolResult::error(format!(
+                "Entity not found: {entity_name}"
+            )));
+        };
+        if entity.fields.iter().any(|field| field.name == field_name) {
+            return Ok(ToolResult::error(format!(
+                "Field already exists: {entity_name}.{field_name}"
+            )));
+        }
+
+        entity.fields.push(FieldDefinition {
+            name: field_name.clone(),
+            field_type,
+            label: label.clone(),
+            required,
+            default,
+            options,
+            to,
+        });
+        if append_to_table_views {
+            for view in &mut blueprint.views {
+                if view.entity == entity_name && !view.columns.iter().any(|col| col == &field_name)
+                {
+                    view.columns.push(field_name.clone());
+                }
+            }
+        }
+        if let Err(report) = validation::validate_blueprint(&blueprint) {
+            return Ok(ToolResult::error(format!(
+                "Invalid updated blueprint: {}",
+                report.errors.join(" | ")
+            )));
+        }
+
+        let version = match app_db::update_app_blueprint(
+            self.core.db.pool(),
+            app.id,
+            &blueprint,
+            Some(&change_note),
+            Some(user_id),
+        )
+        .await
+        {
+            Ok(version) => version,
+            Err(e) => return Ok(ToolResult::error(format!("Failed to add app field: {e}"))),
+        };
+
+        Ok(ToolResult::success(format!(
+            "Internal app field added.\napp={app_slug}\nentity={entity_name}\nfield={field_name}\nlabel={label}\nversion={version}"
+        )))
+    }
+}
+
+#[async_trait]
 impl Tool for CreateAppRecordTool {
     fn name(&self) -> &str {
         "create_app_record"
@@ -750,6 +911,43 @@ fn merge_array_arg(target: &mut Vec<String>, args: &Value, key: &str) {
     );
 }
 
+fn ident_from_label(label: &str) -> String {
+    let mut ident = String::new();
+    let mut last_was_sep = false;
+    for ch in label.chars() {
+        if ch.is_ascii_alphanumeric() {
+            ident.push(ch.to_ascii_lowercase());
+            last_was_sep = false;
+        } else if !last_was_sep && !ident.is_empty() {
+            ident.push('_');
+            last_was_sep = true;
+        }
+    }
+    while ident.ends_with('_') {
+        ident.pop();
+    }
+    if ident.is_empty() {
+        "field".to_string()
+    } else {
+        ident
+    }
+}
+
+fn parse_field_type(raw: &str) -> std::result::Result<FieldType, String> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "string" | "email" | "phone" | "url" => Ok(FieldType::String),
+        "text" | "textarea" | "long_text" | "markdown" => Ok(FieldType::Text),
+        "number" | "integer" | "float" | "decimal" => Ok(FieldType::Number),
+        "date" | "datetime" => Ok(FieldType::Date),
+        "boolean" | "bool" | "checkbox" => Ok(FieldType::Boolean),
+        "enum" | "select" | "choice" | "dropdown" => Ok(FieldType::Enum),
+        "relation" | "reference" | "lookup" => Ok(FieldType::Relation),
+        other => Err(format!(
+            "Unsupported field_type '{other}'. Use string, text, number, date, boolean, enum, or relation."
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -812,7 +1010,7 @@ mod tests {
 
         let tools = app_factory_tools(db, data_dir);
 
-        assert_eq!(tools.len(), 7);
+        assert_eq!(tools.len(), 8);
         for tool in tools {
             let description = tool.description().to_lowercase();
             assert!(description.contains("internal app"));
@@ -929,6 +1127,57 @@ mod tests {
         assert_eq!(policy.contacts.read, vec!["hr-team"]);
         assert_eq!(policy.channels.send, vec!["email"]);
         assert_eq!(policy.tools, vec!["send_message"]);
+    }
+
+    #[tokio::test]
+    async fn add_app_field_updates_blueprint_without_rewriting_it() {
+        let (db, dir) = test_db().await;
+        let data_dir = dir.path().to_path_buf();
+        let ctx = test_context(Some("user-1"));
+        let create_app = CreateInternalAppTool::new(db.clone(), data_dir.clone());
+        let add_field = AddAppFieldTool::new(db.clone(), data_dir);
+
+        let created_app = create_app
+            .execute(json!({"blueprint": valid_blueprint()}), &ctx)
+            .await
+            .unwrap();
+        assert!(!created_app.is_error, "{}", created_app.output);
+
+        let result = add_field
+            .execute(
+                json!({
+                    "app_slug": "ferie-permessi",
+                    "entity": "leave_request",
+                    "label": "Motivo dettagliato",
+                    "field_type": "textarea"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(!result.is_error, "{}", result.output);
+        assert!(result.output.contains("field=motivo_dettagliato"));
+        assert!(result.output.contains("version=2"));
+
+        let app = app_db::load_app_for_user(db.pool(), "user-1", "ferie-permessi")
+            .await
+            .unwrap()
+            .unwrap();
+        let blueprint: AppBlueprint = serde_json::from_str(&app.blueprint_json).unwrap();
+        let entity = blueprint
+            .entities
+            .iter()
+            .find(|entity| entity.name == "leave_request")
+            .unwrap();
+        let field = entity
+            .fields
+            .iter()
+            .find(|field| field.name == "motivo_dettagliato")
+            .unwrap();
+        assert_eq!(field.field_type, FieldType::Text);
+        assert!(blueprint.views[0]
+            .columns
+            .contains(&"motivo_dettagliato".to_string()));
     }
 
     #[tokio::test]

@@ -661,6 +661,28 @@ Comportamento:
 - salva una nuova versione in `internal_app_versions`;
 - aggiorna il runtime usato da Studio e dall'app esterna.
 
+### `add_app_field`
+
+Input:
+
+```json
+{
+  "app_slug": "ferie-permessi",
+  "entity": "leave_request",
+  "label": "Motivo dettagliato",
+  "field_type": "text"
+}
+```
+
+Comportamento:
+
+- carica il blueprint corrente;
+- genera `field_name` snake_case se non fornito;
+- normalizza alias comuni (`email` -> `string`, `select` -> `enum`, `textarea` -> `text`);
+- aggiunge il campo alla entity;
+- opzionalmente lo aggiunge alle table view della stessa entity;
+- valida e salva una nuova versione.
+
 ### `configure_app_capabilities`
 
 Input:
@@ -757,6 +779,7 @@ La skill deve guidare il modello a produrre blueprint validi.
 - `create_internal_app`
 - `list_internal_apps`
 - `update_internal_app`
+- `add_app_field`
 - `configure_app_capabilities`
 - `create_app_record`
 - `query_app_records`
