@@ -1700,23 +1700,61 @@ async fn profiles_page(State(_state): State<Arc<AppState>>) -> Html<String> {
 
 // ─── Memory ──────────────────────────────────────────────────────
 
-async fn memory_page(State(state): State<Arc<AppState>>) -> Html<String> {
+async fn memory_page(
+    State(state): State<Arc<AppState>>,
+    Extension(auth): Extension<AuthUser>,
+) -> Html<String> {
     // Gather stats for server-render
     let data_dir = crate::config::Config::data_dir();
     let chunk_count = match state.db.as_ref() {
-        Some(db) => db.count_memory_chunks().await.unwrap_or(0),
+        Some(db) => sqlx::query_scalar("SELECT COUNT(*) FROM memory_chunks WHERE user_id = ?")
+            .bind(&auth.user_id)
+            .fetch_one(db.pool())
+            .await
+            .unwrap_or(0),
         None => 0,
     };
-    let daily_count = std::fs::read_dir(data_dir.join("memory"))
+    let active_profile_slug = match state.db.as_ref() {
+        Some(db) => crate::profiles::db::load_profiles_for_user(db.pool(), &auth.user_id)
+            .await
+            .ok()
+            .and_then(|profiles| {
+                profiles
+                    .iter()
+                    .find(|profile| profile.is_default != 0)
+                    .or_else(|| profiles.first())
+                    .map(|profile| profile.slug.clone())
+            }),
+        None => None,
+    };
+    let daily_dir = crate::agent::memory::daily_log_dir_for_user(
+        &data_dir,
+        &auth.user_id,
+        active_profile_slug.as_deref(),
+    );
+    let daily_count = std::fs::read_dir(daily_dir)
         .map(|e| {
             e.filter_map(|f| f.ok())
                 .filter(|f| f.path().extension().is_some_and(|ext| ext == "md"))
                 .count()
         })
         .unwrap_or(0);
-    let has_memory = data_dir.join("MEMORY.md").exists();
-    let has_instructions = data_dir.join("brain").join("INSTRUCTIONS.md").exists()
-        || data_dir.join("INSTRUCTIONS.md").exists();
+    let active_brain_dir = match (state.db.as_ref(), active_profile_slug.as_deref()) {
+        (Some(db), Some(slug)) => {
+            crate::profiles::db::load_profile_by_slug_for_user(db.pool(), slug, &auth.user_id)
+                .await
+                .ok()
+                .flatten()
+                .map(|profile| profile.brain_dir(&data_dir))
+        }
+        _ => None,
+    };
+    let has_memory = active_brain_dir
+        .as_ref()
+        .is_some_and(|dir| dir.join("MEMORY.md").exists());
+    let has_instructions = active_brain_dir
+        .as_ref()
+        .is_some_and(|dir| dir.join("INSTRUCTIONS.md").exists());
 
     let body = format!(
         r#"<main class="content">
@@ -1724,7 +1762,7 @@ async fn memory_page(State(state): State<Arc<AppState>>) -> Html<String> {
                 <div class="page-header">
                     <div class="page-title-group">
                         <h1 class="page-title">Memory</h1>
-                        <span class="badge badge-info">{chunk_count} chunks</span>
+                        <span class="badge badge-info" id="mem-title-chunks">{chunk_count} chunks</span>
                     </div>
                 </div>
 

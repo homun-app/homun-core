@@ -25,6 +25,7 @@ async function reloadMemoryStats() {
         const data = await resp.json();
         const el = (id) => document.getElementById(id);
         if (el('mem-stat-chunks')) el('mem-stat-chunks').textContent = data.chunk_count;
+        if (el('mem-title-chunks')) el('mem-title-chunks').textContent = data.chunk_count + ' chunks';
         if (el('mem-stat-daily')) el('mem-stat-daily').textContent = data.daily_count;
         const fileCount = [data.has_memory_md, data.has_instructions_md].filter(Boolean).length;
         if (el('mem-stat-files')) el('mem-stat-files').textContent = fileCount;
