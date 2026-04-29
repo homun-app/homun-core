@@ -66,10 +66,12 @@ impl Tool for ViewFileTool {
         "Display a workspace file to the user with an interactive inline preview. \
          Opens a modal with smart rendering per file type: CSV as a table, PDF inline, \
          images, JSON/markdown/code with syntax highlighting, plain text otherwise. \
+         Also supports active profile brain file aliases like memory.md, USER.md, \
+         INSTRUCTIONS.md, or brain/USER.md for text display. \
          Use this when the user asks to 'show', 'view', 'display', 'preview', \
          'mostrami', 'visualizza', 'fammi vedere', 'apri' a file that already exists \
-         in the workspace. Does NOT dump raw bytes into the chat — that's what read_file \
-         does for internal inspection. Does NOT deliver a file as an attachment on \
+         in the workspace or active profile brain. Does NOT dump raw bytes into the chat \
+         except for profile brain text files. Does NOT deliver a file as an attachment on \
          Telegram/WhatsApp/Email — that's what send_file does. view_file is the right \
          choice on the web UI for any 'show me this file' intent."
     }
@@ -80,9 +82,9 @@ impl Tool for ViewFileTool {
             "properties": {
                 "file": {
                     "type": "string",
-                    "description": "Filename or path of the workspace file to display \
+                    "description": "Filename or path of the workspace or active profile brain file to display \
                                     (e.g. 'diesel_shops.csv', 'report.pdf', 'notes.md'). \
-                                    Resolved against the workspace directory."
+                                    Active profile brain aliases are supported: memory.md, USER.md, INSTRUCTIONS.md, brain/USER.md."
                 }
             },
             "required": ["file"]
@@ -100,8 +102,8 @@ impl Tool for ViewFileTool {
             Some(p) => p,
             None => {
                 return Ok(ToolResult::error(format!(
-                    "File not found: '{raw_file}'. Make sure the file exists in the workspace \
-                     (use write_file to create it, or list_dir to discover existing files)."
+                    "File not found: '{raw_file}'. Make sure the file exists in the workspace or active profile brain \
+                     (use write_file with an explicit path to create it, or list_dir to discover existing files)."
                 )));
             }
         };

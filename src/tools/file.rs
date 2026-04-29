@@ -445,7 +445,9 @@ impl Tool for ReadFileTool {
     }
 
     fn description(&self) -> &str {
-        "Read the contents of a file at the given path. Returns the file content as text."
+        "Read the contents of a file at the given path. Returns the file content as text. \
+         For active profile brain files, use aliases like memory.md, USER.md, INSTRUCTIONS.md, \
+         or brain/USER.md; these resolve to the active profile brain directory."
     }
 
     fn parameters(&self) -> Value {
@@ -454,7 +456,7 @@ impl Tool for ReadFileTool {
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Path to the file to read"
+                    "description": "Path to the file to read. Active profile brain aliases are supported: memory.md, USER.md, INSTRUCTIONS.md, brain/USER.md."
                 }
             },
             "required": ["path"]
@@ -549,7 +551,10 @@ impl Tool for WriteFileTool {
     }
 
     fn description(&self) -> &str {
-        "Write content to a file at the given path. Creates the file and parent directories if they don't exist. Overwrites existing content."
+        "Write content to a file at the given path. Creates the file and parent directories if they don't exist. Overwrites existing content. \
+         For active profile brain files, use aliases like memory.md, USER.md, INSTRUCTIONS.md, \
+         or brain/USER.md; these resolve to the active profile brain directory. \
+         Always provide an explicit path."
     }
 
     fn parameters(&self) -> Value {
@@ -558,7 +563,7 @@ impl Tool for WriteFileTool {
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Path to the file to write"
+                    "description": "Path to the file to write. Required. Active profile brain aliases are supported: memory.md, USER.md, INSTRUCTIONS.md, brain/USER.md."
                 },
                 "content": {
                     "type": "string",
@@ -570,46 +575,28 @@ impl Tool for WriteFileTool {
     }
 
     async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
-        // Check content first — if args is completely empty ({}), give a clear
-        // error that tells the model to include BOTH path and content.
+        // Check content first — if args is empty or incomplete, give a clear
+        // retry instruction. Do not suggest shell here: brain files must stay
+        // inside the profile-scoped file tools.
         let content = match get_optional_string(&args, "content") {
             Some(c) if !c.is_empty() => c,
             _ => {
-                let workspace = crate::config::Config::data_dir().join("workspace");
-                return Ok(ToolResult::error(format!(
-                    "write_file failed: no content received (args were empty). \
-                     This usually happens when the content is too large for tool call parameters. \
-                     WORKAROUND: Use the shell tool instead to write the file. Example:\n\
-                     shell({{\"command\": \"cat << 'CSVEOF' > {workspace}/output.csv\\nNome,Indirizzo,Citta\\nNegozio1,Via Roma 1,Milano\\nCSVEOF\"}})\n\
-                     Use a heredoc (cat << 'EOF' > file\\n...\\nEOF) to write multi-line content.",
-                    workspace = workspace.display()
-                )));
+                return Ok(ToolResult::error(
+                    "Missing required parameter: content. Retry write_file with both path and content. \
+                     For active profile brain files use path=\"memory.md\", path=\"USER.md\", or path=\"INSTRUCTIONS.md\". \
+                     Do not use shell for brain files."
+                        .to_string(),
+                ));
             }
         };
-        // Auto-generate workspace path when model omits the `path` parameter.
-        // Some models (kimi-k2.5, etc.) consistently call write_file without path.
         let path_str = match get_optional_string(&args, "path") {
             Some(p) if !p.trim().is_empty() => p,
-            _ => {
-                let workspace = crate::config::Config::data_dir().join("workspace");
-                let ext = if content.starts_with("Nome,")
-                    || content.starts_with("name,")
-                    || content.contains(",\"")
-                {
-                    "csv"
-                } else if content.starts_with('{') || content.starts_with('[') {
-                    "json"
-                } else {
-                    "txt"
-                };
-                let name = format!(
-                    "output_{}.{ext}",
-                    chrono::Utc::now().format("%Y%m%d_%H%M%S")
-                );
-                let auto_path = workspace.join(&name);
-                tracing::info!(path = %auto_path.display(), "write_file: auto-generated path (model omitted parameter)");
-                auto_path.to_string_lossy().to_string()
-            }
+            _ => return Ok(ToolResult::error(
+                "Missing required parameter: path. Retry write_file with an explicit path. \
+                 For active profile brain files use path=\"memory.md\", path=\"USER.md\", or path=\"INSTRUCTIONS.md\". \
+                 Do not use shell for brain files."
+                    .to_string(),
+            )),
         };
         let path = match resolve_profile_brain_alias(&path_str, ctx) {
             Some(path) => path,
@@ -1033,6 +1020,36 @@ mod tests {
         let result = read_tool.execute(args, &test_ctx()).await.unwrap();
         assert!(!result.is_error);
         assert_eq!(result.output, "hello world");
+    }
+
+    #[tokio::test]
+    async fn test_write_profile_memory_alias_creates_in_active_profile() {
+        let dir = TempDir::new().unwrap();
+        let brain_dir = dir.path().join("users/fabio/profiles/default");
+        let mut ctx = test_ctx();
+        ctx.profile_brain_dir = Some(brain_dir.clone());
+
+        let write_tool = WriteFileTool::new(None);
+        let args = serde_json::json!({
+            "path": "memory.md",
+            "content": "Questo profilo usa memoria separata"
+        });
+        let result = write_tool.execute(args, &ctx).await.unwrap();
+        assert!(!result.is_error, "write error: {}", result.output);
+
+        let content = tokio::fs::read_to_string(brain_dir.join("MEMORY.md"))
+            .await
+            .unwrap();
+        assert_eq!(content, "Questo profilo usa memoria separata");
+    }
+
+    #[tokio::test]
+    async fn test_write_without_path_fails_explicitly() {
+        let write_tool = WriteFileTool::new(None);
+        let args = serde_json::json!({"content": "hello world"});
+        let result = write_tool.execute(args, &test_ctx()).await.unwrap();
+        assert!(result.is_error);
+        assert!(result.output.contains("Missing required parameter: path"));
     }
 
     #[tokio::test]

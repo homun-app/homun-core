@@ -412,6 +412,9 @@ You can save information to these files in `{brain_dir}`:
 - `SOUL.md` — your personality (edit only if explicitly asked)
 
 Use the `remember` tool for simple key-value pairs, or `write_file`/`edit_file` for complex changes.
+If the user explicitly names one of these brain files, do not use `remember` as a substitute: use `read_file`, `write_file`, or `edit_file` with that filename as the path.
+For example, if the user says "aggiungi a memory.md ...", call `write_file` or `edit_file` with `path="memory.md"`; the file tools resolve it to the active profile brain directory.
+Never use the `shell` tool to read or write active profile brain files.
 These files are loaded into context at startup, so anything you save will be available in future conversations.
 "#,
                 brain_dir = brain_dir.display()
