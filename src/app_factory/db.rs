@@ -45,6 +45,27 @@ pub struct AppEventRow {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct AppUserRow {
+    pub id: i64,
+    pub email: String,
+    pub display_name: String,
+    pub password_hash: String,
+    pub role: String,
+    pub status: String,
+    pub contact_id: Option<i64>,
+    pub created_at: String,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct AppSessionRow {
+    pub id: String,
+    pub app_user_id: i64,
+    pub expires_at: String,
+    pub created_at: String,
+}
+
 pub fn app_db_path(data_dir: &Path, user_id: &str, app_slug: &str) -> PathBuf {
     data_dir
         .join("apps")
@@ -106,6 +127,50 @@ pub async fn migrate_app_db(pool: &SqlitePool) -> Result<()> {
     .await
     .context("Failed to create app_events table")?;
 
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS app_users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT NOT NULL UNIQUE,
+            display_name TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            contact_id INTEGER,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT
+        )",
+    )
+    .execute(pool)
+    .await
+    .context("Failed to create app_users table")?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS app_sessions (
+            id TEXT PRIMARY KEY,
+            app_user_id INTEGER NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+            expires_at TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )",
+    )
+    .execute(pool)
+    .await
+    .context("Failed to create app_sessions table")?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS app_invites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT NOT NULL,
+            role TEXT NOT NULL,
+            token_hash TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            expires_at TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )",
+    )
+    .execute(pool)
+    .await
+    .context("Failed to create app_invites table")?;
+
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_app_records_entity ON app_records(entity_name)")
         .execute(pool)
         .await
@@ -114,6 +179,14 @@ pub async fn migrate_app_db(pool: &SqlitePool) -> Result<()> {
         .execute(pool)
         .await
         .context("Failed to create app_events record index")?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_app_users_email ON app_users(email)")
+        .execute(pool)
+        .await
+        .context("Failed to create app_users email index")?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_app_sessions_user ON app_sessions(app_user_id)")
+        .execute(pool)
+        .await
+        .context("Failed to create app_sessions user index")?;
 
     Ok(())
 }
@@ -259,6 +332,121 @@ pub async fn load_record(app_pool: &SqlitePool, record_id: i64) -> Result<Option
     Ok(row)
 }
 
+pub async fn insert_app_user(
+    app_pool: &SqlitePool,
+    email: &str,
+    display_name: &str,
+    password_hash: &str,
+    role: &str,
+    contact_id: Option<i64>,
+) -> Result<i64> {
+    let normalized_email = email.trim().to_ascii_lowercase();
+    let display_name = display_name.trim();
+    let id = sqlx::query_scalar::<_, i64>(
+        "INSERT INTO app_users (email, display_name, password_hash, role, contact_id)
+         VALUES (?, ?, ?, ?, ?)
+         RETURNING id",
+    )
+    .bind(normalized_email)
+    .bind(display_name)
+    .bind(password_hash)
+    .bind(role)
+    .bind(contact_id)
+    .fetch_one(app_pool)
+    .await
+    .context("Failed to insert app user")?;
+
+    Ok(id)
+}
+
+pub async fn load_app_user(app_pool: &SqlitePool, app_user_id: i64) -> Result<Option<AppUserRow>> {
+    let row = sqlx::query_as::<_, AppUserRow>(
+        "SELECT id, email, display_name, password_hash, role, status, contact_id, created_at, updated_at
+         FROM app_users
+         WHERE id = ?",
+    )
+    .bind(app_user_id)
+    .fetch_optional(app_pool)
+    .await?;
+
+    Ok(row)
+}
+
+pub async fn load_app_user_by_email(
+    app_pool: &SqlitePool,
+    email: &str,
+) -> Result<Option<AppUserRow>> {
+    let normalized_email = email.trim().to_ascii_lowercase();
+    let row = sqlx::query_as::<_, AppUserRow>(
+        "SELECT id, email, display_name, password_hash, role, status, contact_id, created_at, updated_at
+         FROM app_users
+         WHERE email = ?",
+    )
+    .bind(normalized_email)
+    .fetch_optional(app_pool)
+    .await?;
+
+    Ok(row)
+}
+
+pub async fn list_app_users(app_pool: &SqlitePool) -> Result<Vec<AppUserRow>> {
+    let rows = sqlx::query_as::<_, AppUserRow>(
+        "SELECT id, email, display_name, password_hash, role, status, contact_id, created_at, updated_at
+         FROM app_users
+         ORDER BY display_name COLLATE NOCASE ASC, email ASC",
+    )
+    .fetch_all(app_pool)
+    .await?;
+
+    Ok(rows)
+}
+
+pub async fn insert_app_session(
+    app_pool: &SqlitePool,
+    session_id: &str,
+    app_user_id: i64,
+    expires_at: &str,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO app_sessions (id, app_user_id, expires_at)
+         VALUES (?, ?, ?)",
+    )
+    .bind(session_id)
+    .bind(app_user_id)
+    .bind(expires_at)
+    .execute(app_pool)
+    .await
+    .context("Failed to insert app session")?;
+
+    Ok(())
+}
+
+pub async fn load_app_session(
+    app_pool: &SqlitePool,
+    session_id: &str,
+) -> Result<Option<AppSessionRow>> {
+    let row = sqlx::query_as::<_, AppSessionRow>(
+        "SELECT id, app_user_id, expires_at, created_at
+         FROM app_sessions
+         WHERE id = ? AND expires_at > datetime('now')",
+    )
+    .bind(session_id)
+    .fetch_optional(app_pool)
+    .await?;
+
+    Ok(row)
+}
+
+pub async fn delete_app_session(app_pool: &SqlitePool, session_id: &str) -> Result<()> {
+    sqlx::query("DELETE FROM app_sessions WHERE id = ?")
+        .bind(session_id)
+        .execute(app_pool)
+        .await
+        .context("Failed to delete app session")?;
+
+    Ok(())
+}
+
 pub async fn update_record_data(
     app_pool: &SqlitePool,
     record_id: i64,
@@ -375,6 +563,11 @@ mod tests {
         pool
     }
 
+    async fn test_app_pool(dir: &TempDir, slug: &str) -> SqlitePool {
+        let db_path = app_db_path(dir.path(), "user-1", slug);
+        open_app_pool(&db_path).await.unwrap()
+    }
+
     #[test]
     fn app_db_path_places_database_under_user_and_app_slug() {
         let base = std::path::Path::new("/tmp/homun-data");
@@ -457,5 +650,70 @@ mod tests {
         assert_eq!(first_records.len(), 1);
         assert_eq!(first_records[0].status.as_deref(), Some("pending"));
         assert!(second_records.is_empty());
+    }
+
+    #[tokio::test]
+    async fn app_db_migration_creates_app_identity_tables() {
+        let dir = TempDir::new().unwrap();
+        let pool = test_app_pool(&dir, "identity").await;
+
+        let table_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*)
+             FROM sqlite_master
+             WHERE type = 'table' AND name IN ('app_users', 'app_sessions', 'app_invites')",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(table_count, 3);
+    }
+
+    #[tokio::test]
+    async fn app_user_crud_and_session_lookup_work() {
+        let dir = TempDir::new().unwrap();
+        let pool = test_app_pool(&dir, "identity").await;
+
+        let user_id = insert_app_user(
+            &pool,
+            " Employee@Example.COM ",
+            " Mario Rossi ",
+            "hash",
+            "employee",
+            Some(42),
+        )
+        .await
+        .unwrap();
+
+        let user = load_app_user_by_email(&pool, "employee@example.com")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(user.id, user_id);
+        assert_eq!(user.email, "employee@example.com");
+        assert_eq!(user.display_name, "Mario Rossi");
+        assert_eq!(user.password_hash, "hash");
+        assert_eq!(user.role, "employee");
+        assert_eq!(user.status, "active");
+        assert_eq!(user.contact_id, Some(42));
+
+        let loaded_by_id = load_app_user(&pool, user_id).await.unwrap().unwrap();
+        assert_eq!(loaded_by_id.email, "employee@example.com");
+
+        let all_users = list_app_users(&pool).await.unwrap();
+        assert_eq!(all_users.len(), 1);
+
+        insert_app_session(&pool, "session-1", user_id, "2099-01-01 00:00:00")
+            .await
+            .unwrap();
+        let session = load_app_session(&pool, "session-1").await.unwrap().unwrap();
+        assert_eq!(session.id, "session-1");
+        assert_eq!(session.app_user_id, user_id);
+
+        delete_app_session(&pool, "session-1").await.unwrap();
+        assert!(load_app_session(&pool, "session-1")
+            .await
+            .unwrap()
+            .is_none());
     }
 }
