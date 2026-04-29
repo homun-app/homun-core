@@ -11,6 +11,7 @@ use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
 
 mod agent;
+mod app_factory;
 #[cfg(feature = "browser")]
 mod browser;
 
