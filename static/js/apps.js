@@ -5,7 +5,10 @@
         app: null,
         activeViewIndex: 0,
         records: [],
-        selectedRecord: null
+        selectedRecord: null,
+        statusFilter: 'all',
+        search: '',
+        relationRecords: {}
     };
 
     function qs(selector, root) {
@@ -104,8 +107,29 @@
     }
 
     function currentView() {
-        if (!state.app || !state.app.blueprint || !state.app.blueprint.views.length) return null;
-        return state.app.blueprint.views[state.activeViewIndex] || state.app.blueprint.views[0];
+        var views = runtimeViews();
+        if (!views.length) return null;
+        return views[state.activeViewIndex] || views[0];
+    }
+
+    function runtimeViews() {
+        if (!state.app || !state.app.blueprint) return [];
+        var blueprint = state.app.blueprint;
+        var views = (blueprint.views || []).slice();
+        var covered = {};
+        views.forEach(function (view) {
+            if (view && view.entity) covered[view.entity] = true;
+        });
+        (blueprint.entities || []).forEach(function (entity) {
+            if (covered[entity.name]) return;
+            views.push({
+                type: 'table',
+                entity: entity.name,
+                name: entity.label || entity.name,
+                columns: (entity.fields || []).slice(0, 5).map(function (field) { return field.name; })
+            });
+        });
+        return views;
     }
 
     function entityDef(name) {
@@ -129,6 +153,69 @@
         return String(value);
     }
 
+    function humanName(raw) {
+        return String(raw || '')
+            .replace(/_/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .replace(/\b\w/g, function (m) { return m.toUpperCase(); });
+    }
+
+    function viewTitle(view) {
+        if (!view) return '';
+        return humanName(view.name || view.entity);
+    }
+
+    function viewColumns(view, entity) {
+        if (view && view.columns && view.columns.length) return view.columns;
+        return entity && entity.fields ? entity.fields.slice(0, 6).map(function (field) { return field.name; }) : [];
+    }
+
+    function recordLabel(entityName, record) {
+        var entity = entityDef(entityName);
+        var data = record && record.data ? record.data : {};
+        var preferred = ['full_name', 'name', 'title', 'email', 'nome'];
+        for (var i = 0; i < preferred.length; i++) {
+            if (data[preferred[i]]) return valueText(data[preferred[i]]);
+        }
+        if (data.nome && data.cognome) return data.nome + ' ' + data.cognome;
+        var firstField = entity && entity.fields && entity.fields[0] ? entity.fields[0].name : null;
+        return firstField && data[firstField] ? valueText(data[firstField]) : '#' + record.id;
+    }
+
+    function fieldDef(entity, fieldName) {
+        return entity && entity.fields ? entity.fields.find(function (field) { return field.name === fieldName; }) : null;
+    }
+
+    function fieldValueText(entity, fieldName, value) {
+        var field = fieldDef(entity, fieldName);
+        if (field && field.type === 'relation' && field.to) {
+            var related = state.relationRecords[field.to] || [];
+            var match = related.find(function (record) { return String(record.id) === String(value); });
+            if (match) return recordLabel(field.to, match);
+        }
+        if (field && field.type === 'boolean') return value ? 'Yes' : 'No';
+        return valueText(value);
+    }
+
+    function filteredRecords() {
+        var search = state.search.trim().toLowerCase();
+        return state.records.filter(function (record) {
+            if (state.statusFilter !== 'all' && String(record.status || '') !== state.statusFilter) return false;
+            if (!search) return true;
+            return JSON.stringify(record.data || {}).toLowerCase().indexOf(search) !== -1;
+        });
+    }
+
+    function relationTargets(entity) {
+        var seen = {};
+        return (entity && entity.fields ? entity.fields : []).filter(function (field) {
+            if (field.type !== 'relation' || !field.to || seen[field.to]) return false;
+            seen[field.to] = true;
+            return true;
+        }).map(function (field) { return field.to; });
+    }
+
     function setSelectedRecord(record) {
         state.selectedRecord = record;
         renderDetail();
@@ -145,6 +232,7 @@
         titleGroup.appendChild(el('p', 'page-subtitle', state.app.description || 'Internal app generated from blueprint.'));
         header.appendChild(titleGroup);
         var actions = el('div', 'actions');
+        actions.appendChild(el('span', 'app-status-pill', state.app.status || 'active'));
         var back = el('a', 'btn btn-secondary btn-sm', 'Apps');
         back.href = '/apps';
         actions.appendChild(back);
@@ -154,13 +242,17 @@
         header.appendChild(actions);
         root.appendChild(header);
 
+        root.appendChild(renderSummary());
+
         var tabs = el('div', 'app-runtime-tabs');
-        (state.app.blueprint.views || []).forEach(function (view, index) {
-            var tab = el('button', 'app-runtime-tab' + (index === state.activeViewIndex ? ' active' : ''), view.name);
+        runtimeViews().forEach(function (view, index) {
+            var tab = el('button', 'app-runtime-tab' + (index === state.activeViewIndex ? ' active' : ''), viewTitle(view));
             tab.type = 'button';
             tab.addEventListener('click', function () {
                 state.activeViewIndex = index;
                 state.selectedRecord = null;
+                state.statusFilter = 'all';
+                state.search = '';
                 renderRuntime();
                 loadActiveRecords();
             });
@@ -174,7 +266,7 @@
         layout.appendChild(main);
 
         var side = el('aside', 'app-runtime-form');
-        side.appendChild(el('h2', '', 'New Record'));
+        side.appendChild(el('h2', 'app-form-title'));
         side.appendChild(el('form', 'app-record-form'));
         side.appendChild(el('div', 'app-record-detail'));
         layout.appendChild(side);
@@ -185,19 +277,59 @@
         renderDetail();
     }
 
+    function renderSummary() {
+        var view = currentView();
+        var entity = view ? entityDef(view.entity) : null;
+        var workflow = entity ? workflowFor(entity.name) : null;
+        var summary = el('div', 'app-runtime-summary');
+        var total = el('div', 'app-summary-card');
+        total.appendChild(el('span', '', 'Records'));
+        total.appendChild(el('strong', '', state.records.length));
+        summary.appendChild(total);
+
+        if (workflow && workflow.states && workflow.states.length) {
+            workflow.states.forEach(function (status) {
+                var card = el('button', 'app-summary-card app-summary-card-button' + (state.statusFilter === status ? ' active' : ''));
+                card.type = 'button';
+                card.appendChild(el('span', '', humanName(status)));
+                card.appendChild(el('strong', '', state.records.filter(function (record) { return record.status === status; }).length));
+                card.addEventListener('click', function () {
+                    state.statusFilter = state.statusFilter === status ? 'all' : status;
+                    renderRuntime();
+                });
+                summary.appendChild(card);
+            });
+        }
+        return summary;
+    }
+
     function renderForm() {
         var form = qs('.app-record-form');
         var view = currentView();
         var entity = view ? entityDef(view.entity) : null;
         if (!form || !entity) return;
         form.textContent = '';
+        var title = qs('.app-form-title');
+        if (title) title.textContent = 'New ' + (entity.label || humanName(entity.name));
 
         entity.fields.forEach(function (field) {
             if (field.name === (workflowFor(entity.name) || {}).state_field) return;
             var group = el('label', 'app-field');
             group.appendChild(el('span', '', field.label || field.name));
             var input;
-            if (field.type === 'enum') {
+            if (field.type === 'relation' && field.to && state.relationRecords[field.to]) {
+                input = document.createElement('select');
+                var blank = document.createElement('option');
+                blank.value = '';
+                blank.textContent = 'Select ' + humanName(field.to);
+                input.appendChild(blank);
+                state.relationRecords[field.to].forEach(function (record) {
+                    var opt = document.createElement('option');
+                    opt.value = record.id;
+                    opt.textContent = recordLabel(field.to, record);
+                    input.appendChild(opt);
+                });
+            } else if (field.type === 'enum') {
                 input = document.createElement('select');
                 (field.options || []).forEach(function (option) {
                     var opt = document.createElement('option');
@@ -225,11 +357,12 @@
             input.className = 'input';
             input.name = field.name;
             input.required = !!field.required;
+            if (field.type === 'relation' && field.to) input.placeholder = 'Select or enter ' + humanName(field.to);
             group.appendChild(input);
             form.appendChild(group);
         });
 
-        var submit = el('button', 'btn btn-primary app-submit-btn', 'Create');
+        var submit = el('button', 'btn btn-primary app-submit-btn', 'Create ' + (entity.label || humanName(entity.name)));
         submit.type = 'submit';
         form.appendChild(submit);
         form.addEventListener('submit', submitRecord, { once: true });
@@ -275,15 +408,51 @@
         if (!wrap || !view || !entity) return;
         wrap.textContent = '';
 
-        if (!state.records.length) {
-            showInline(wrap, 'No records yet.');
+        var controls = el('div', 'app-runtime-controls');
+        var search = document.createElement('input');
+        search.className = 'input app-runtime-search';
+        search.type = 'search';
+        search.placeholder = 'Search ' + viewTitle(view).toLowerCase();
+        search.value = state.search;
+        search.addEventListener('input', function () {
+            state.search = search.value;
+            renderTable();
+        });
+        controls.appendChild(search);
+
+        var workflow = workflowFor(entity.name);
+        if (workflow && workflow.states && workflow.states.length) {
+            var filter = document.createElement('select');
+            filter.className = 'input app-runtime-filter';
+            [['all', 'All states']].concat(workflow.states.map(function (status) {
+                return [status, humanName(status)];
+            })).forEach(function (item) {
+                var opt = document.createElement('option');
+                opt.value = item[0];
+                opt.textContent = item[1];
+                filter.appendChild(opt);
+            });
+            filter.value = state.statusFilter;
+            filter.addEventListener('change', function () {
+                state.statusFilter = filter.value;
+                renderRuntime();
+            });
+            controls.appendChild(filter);
+        }
+        wrap.appendChild(controls);
+
+        var records = filteredRecords();
+        if (!records.length) {
+            var empty = el('div', 'empty-state');
+            empty.appendChild(el('p', '', state.records.length ? 'No records match the current filter.' : 'No ' + viewTitle(view).toLowerCase() + ' yet.'));
+            wrap.appendChild(empty);
             return;
         }
 
         var table = el('table', 'app-runtime-table');
         var thead = document.createElement('thead');
         var headRow = document.createElement('tr');
-        (view.columns || []).forEach(function (column) {
+        viewColumns(view, entity).forEach(function (column) {
             headRow.appendChild(el('th', '', fieldLabel(entity, column)));
         });
         headRow.appendChild(el('th', '', 'Status'));
@@ -291,12 +460,12 @@
         table.appendChild(thead);
 
         var tbody = document.createElement('tbody');
-        state.records.forEach(function (record) {
+        records.forEach(function (record) {
             var row = document.createElement('tr');
             row.tabIndex = 0;
             row.addEventListener('click', function () { setSelectedRecord(record); });
-            (view.columns || []).forEach(function (column) {
-                row.appendChild(el('td', '', valueText(record.data[column])));
+            viewColumns(view, entity).forEach(function (column) {
+                row.appendChild(el('td', '', fieldValueText(entity, column, record.data[column])));
             });
             var status = el('td');
             status.appendChild(el('span', 'app-status-pill', record.status || ''));
@@ -315,11 +484,11 @@
         detail.textContent = '';
         if (!state.selectedRecord) return;
 
-        detail.appendChild(el('h2', '', 'Selected Record'));
+        detail.appendChild(el('h2', '', 'Selected ' + (entity.label || humanName(entity.name))));
         entity.fields.forEach(function (field) {
             var row = el('div', 'app-detail-row');
             row.appendChild(el('span', '', field.label || field.name));
-            row.appendChild(el('strong', '', valueText(state.selectedRecord.data[field.name])));
+            row.appendChild(el('strong', '', fieldValueText(entity, field.name, state.selectedRecord.data[field.name])));
             detail.appendChild(row);
         });
 
@@ -351,17 +520,36 @@
     function loadActiveRecords() {
         var view = currentView();
         if (!view) return Promise.resolve();
+        var entity = entityDef(view.entity);
         var wrap = qs('.app-runtime-table-wrap');
         if (wrap) showInline(wrap, 'Loading records...');
         return api('/api/v1/apps/' + encodeURIComponent(state.app.slug) + '/entities/' + encodeURIComponent(view.entity) + '/records')
             .then(function (records) {
                 state.records = records || [];
-                renderTable();
-                renderDetail();
+                return loadRelationRecords(entity);
+            })
+            .then(function () {
+                renderRuntime();
             })
             .catch(function (err) {
                 if (wrap) showInline(wrap, err.message);
             });
+    }
+
+    function loadRelationRecords(entity) {
+        var targets = relationTargets(entity).filter(function (target) {
+            return !state.relationRecords[target];
+        });
+        if (!targets.length) return Promise.resolve();
+        return Promise.all(targets.map(function (target) {
+            return api('/api/v1/apps/' + encodeURIComponent(state.app.slug) + '/entities/' + encodeURIComponent(target) + '/records')
+                .then(function (records) {
+                    state.relationRecords[target] = records || [];
+                })
+                .catch(function () {
+                    state.relationRecords[target] = [];
+                });
+        }));
     }
 
     function loadAppDetail(slug) {
@@ -369,6 +557,7 @@
             .then(function (app) {
                 state.app = app;
                 state.activeViewIndex = 0;
+                state.relationRecords = {};
                 renderRuntime();
                 return loadActiveRecords();
             })

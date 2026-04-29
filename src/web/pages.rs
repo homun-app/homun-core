@@ -62,6 +62,9 @@ const LOGO_ICON: &str = r#"<div class="logo-icon" title="HOMUN"></div>"#;
 /// Automation icon — clock with cardinal ticks (flows + schedules).
 const ICON_AUTOMATION: &str = r#"<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="6.5"/><path d="M9 5.5v4l2.8 1.8"/><path d="M9 1v1.5M9 15.5V17M1 9h1.5M15.5 9H17"/></svg>"#;
 
+/// Apps icon — component grid (internal app factory).
+const ICON_APPS: &str = r#"<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2.5" width="5" height="5" rx="1.2"/><rect x="10.5" y="2.5" width="5" height="5" rx="1.2"/><rect x="2.5" y="10.5" width="5" height="5" rx="1.2"/><rect x="10.5" y="10.5" width="5" height="5" rx="1.2"/></svg>"#;
+
 /// Brain icon — stylised brain (memory, knowledge, contacts).
 const ICON_BRAIN: &str = r#"<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 16V9"/><path d="M6.5 3.5a3 3 0 0 0-3 3c0 1-.5 2-1 2.5s-.5 2 .5 3 2.5 1 3.5.5L9 9"/><path d="M11.5 3.5a3 3 0 0 1 3 3c0 1 .5 2 1 2.5s.5 2-.5 3-2.5 1-3.5.5L9 9"/></svg>"#;
 
@@ -78,7 +81,7 @@ const ICON_SYSTEM: &str = r#"<svg viewBox="0 0 18 18" fill="none" stroke="curren
 const ICON_ESTOP: &str = r#"<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6,1 12,1 17,6 17,12 12,17 6,17 1,12 1,6"/><rect x="6.5" y="6.5" width="5" height="5" rx="0.8"/></svg>"#;
 
 /// Pages that belong to the "Automation" sub-navigation group.
-const AUTOMATION_PAGES: &[&str] = &["automations", "workflows", "apps"];
+const AUTOMATION_PAGES: &[&str] = &["automations", "workflows"];
 /// Pages that belong to the "Brain" sub-navigation group.
 const BRAIN_PAGES: &[&str] = &["memory", "knowledge", "contacts", "profiles"];
 /// Pages that belong to the "Extensions" sub-navigation group.
@@ -119,6 +122,9 @@ fn sidebar(active: &str) -> String {
                 <a href="/automations" class="nav-link{auto_a}" data-label="Automation">
                     <span class="nav-icon">{ic_auto}</span>
                 </a>
+                <a href="/apps" class="nav-link{apps_a}" data-label="Apps">
+                    <span class="nav-icon">{ic_apps}</span>
+                </a>
                 <a href="/memory" class="nav-link{brain_a}" data-label="Brain">
                     <span class="nav-icon">{ic_brain}</span>
                 </a>
@@ -136,11 +142,13 @@ fn sidebar(active: &str) -> String {
         // Active states
         chat_a = a("chat"),
         auto_a = group_active(active, AUTOMATION_PAGES),
+        apps_a = a("apps"),
         brain_a = group_active(active, BRAIN_PAGES),
         ext_a = group_active(active, EXTENSIONS_PAGES),
         // Icons
         ic_chat = ICON_CHAT,
         ic_auto = ICON_AUTOMATION,
+        ic_apps = ICON_APPS,
         ic_brain = ICON_BRAIN,
         ic_ext = ICON_EXTENSIONS,
         ic_settings = ICON_SETTINGS,
@@ -188,11 +196,9 @@ fn content_subnav(active: &str) -> String {
                 <div class="sidebar-subnav-header">AUTOMATION{toggle}</div>
                 <a href="/automations" class="sidebar-subnav-link{0}">Automations</a>
                 <a href="/workflows" class="sidebar-subnav-link{1}">Workflows</a>
-                <a href="/apps" class="sidebar-subnav-link{2}">Apps</a>
             </aside>"#,
             a("automations"),
             a("workflows"),
-            a("apps"),
             toggle = SUBNAV_TOGGLE,
         )
     } else if BRAIN_PAGES.contains(&active) {
