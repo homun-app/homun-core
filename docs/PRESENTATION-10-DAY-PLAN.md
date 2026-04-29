@@ -19,6 +19,27 @@ One-liner:
 
 > Homun trasforma una richiesta aziendale in un tool interno funzionante, con dati, interfaccia, workflow, automazioni e agente operativo.
 
+### Stato implementazione al 2026-04-29
+
+La prima v0 della Tool/App Factory e' stata implementata come demo tecnica:
+
+- blueprint schema e validatore;
+- storage isolato per singola app con SQLite dedicato;
+- control plane in `homun.db`;
+- API interne per app, record e azioni;
+- strumenti agente per creare app, creare/query record e lanciare workflow action;
+- UI `/apps` e `/apps/{slug}`;
+- skill `app-factory`;
+- blueprint e runbook demo ferie/permessi.
+
+Restano da trattare come rischi demo:
+
+- generazione live LLM non deterministica: usare il blueprint pre-seed come fallback;
+- smoke test manuale da ripetere sul binario release prima della presentazione;
+- polish UI sufficiente per demo, non ancora builder completo;
+- notification e automation da blueprint sono narrativa/roadmap, non P0 operativo;
+- ruoli granulari multiutente restano post-demo, mentre la v0 usa ownership e scope utente/profilo.
+
 ---
 
 ## 2. Killer feature: Tool/App Factory
@@ -266,6 +287,8 @@ Fallback accettabile:
 
 Obiettivo: fissare schema blueprint e limiti della v0.
 
+Stato: completato.
+
 Interventi:
 
 - Definire JSON/YAML blueprint v0.
@@ -283,6 +306,8 @@ Definition of Done:
 
 Obiettivo: renderizzare una app da blueprint.
 
+Stato: completato per table/form/detail generici e storage record per-app.
+
 Interventi:
 
 - Registry app interne.
@@ -299,6 +324,8 @@ Definition of Done:
 
 Obiettivo: supportare stati e transizioni.
 
+Stato: completato per transizioni locali `approved/rejected` e audit/eventi.
+
 Interventi:
 
 - Stato record.
@@ -313,6 +340,8 @@ Definition of Done:
 ### Giorno 4 — Generazione blueprint via agente
 
 Obiettivo: passare da prompt a blueprint controllato.
+
+Stato: completato come skill `app-factory` + tool `create_internal_app`; la preview esplicita e' migliorabile.
 
 Interventi:
 
@@ -329,6 +358,8 @@ Definition of Done:
 
 Obiettivo: Homun deve usare l'app generata.
 
+Stato: completato per tool runtime `create_app_record`, `query_app_records`, `run_app_action`.
+
 Interventi:
 
 - Tool per leggere/scrivere record app.
@@ -343,6 +374,8 @@ Definition of Done:
 ### Giorno 6 — UI polish demo
 
 Obiettivo: rendere la demo presentabile.
+
+Stato: implementato a livello demo; resta da fare verifica visiva finale su release gateway.
 
 Interventi:
 
@@ -359,6 +392,8 @@ Definition of Done:
 ### Giorno 7 — Seed demo e runbook
 
 Obiettivo: demo ripetibile.
+
+Stato: completato con [runbook demo](demo/app-factory-runbook.md) e [blueprint pre-seed](demo/blueprints/ferie-permessi.json).
 
 Interventi:
 
@@ -426,14 +461,21 @@ Checklist:
 
 ### P0 — Necessario per presentazione
 
-- Blueprint schema v0.
-- Runtime app da blueprint.
-- App ferie/permessi.
-- Workflow approve/reject.
-- Tool/agent command per leggere e scrivere record app.
-- Link interno app dalla chat.
-- Demo seed/runbook.
+- Blueprint schema v0. **Completato.**
+- Runtime app da blueprint. **Completato per CRUD generico e workflow semplice.**
+- App ferie/permessi. **Completato come blueprint pre-seed e demo target.**
+- Workflow approve/reject. **Completato.**
+- Tool/agent command per leggere e scrivere record app. **Completato.**
+- Link interno app dalla chat. **Completato nel risultato dei tool; da verificare nel flusso live.**
+- Demo seed/runbook. **Completato.**
 - Deck presentazione.
+
+P0 residuo:
+
+- completare deck e script parlato;
+- eseguire smoke test manuale su release gateway;
+- registrare eventuale video/screenshot fallback;
+- congelare feature e correggere solo blocker.
 
 ### P1 — Molto utile se resta tempo
 
@@ -559,4 +601,3 @@ Partire subito da:
 3. Demo ferie/permessi.
 
 Mission Pack resta utile, ma diventa supporto UX. La vera feature da presentare e costruire e' la Tool/App Factory basata su blueprint componibili.
-

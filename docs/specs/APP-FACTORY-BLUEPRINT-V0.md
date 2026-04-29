@@ -1,8 +1,33 @@
 # SPEC: Tool/App Factory Blueprint v0
 
-> Status: Draft operativo
+> Status: Implementazione demo v0 completata, in verifica finale
 > Data: 2026-04-29
 > Obiettivo: definire il contratto tecnico per generare applicazioni interne tramite blueprint dichiarativi e componenti predefiniti.
+
+---
+
+## 0. Stato implementativo
+
+Al 2026-04-29 la v0 demo include:
+
+- dominio blueprint e validazione schema;
+- registry app interne nel control plane;
+- database SQLite dedicato per ogni app;
+- storage generico record/eventi;
+- API interne per app, record e azioni;
+- UI `/apps` e `/apps/{slug}`;
+- workflow locale su campi enum;
+- tool agente per creare app, leggere/scrivere record e lanciare azioni;
+- skill `app-factory`;
+- blueprint demo ferie/permessi e runbook operativo.
+
+Rischi/limiti consapevoli:
+
+- relation v0 e' rappresentata come valore semplice nel record; lookup/selector avanzato e' P1;
+- notification e automation blueprint sono metadati/proposte, non invii reali P0;
+- RBAC granulare e ruoli multiutente sono P1/P2; la v0 protegge via ownership utente/profilo;
+- import/export, allegati, calendario e dashboard sono componenti futuri;
+- la generazione live del blueprint dipende dal modello, quindi la demo usa un blueprint pre-seed come fallback.
 
 ---
 
@@ -832,12 +857,16 @@ Output errore:
 
 La v0 e' completa quando:
 
-- migration crea le 3 tabelle generiche;
-- blueprint validator ha test unitari;
-- API crea/lista app e record;
-- UI `/apps/{slug}` renderizza table/form/detail;
-- workflow approve/reject cambia stato e scrive evento;
-- tool app runtime sono registrati;
-- skill `app-factory` produce blueprint valido;
-- demo ferie/permessi funziona da prompt o da blueprint pre-seed;
-- `cargo fmt --all -- --check`, `cargo check --all-features`, `cargo clippy --all-features -- -D warnings`, build release passano.
+- [x] migration/control plane crea le tabelle app/eventi;
+- [x] ogni app usa un database SQLite dedicato;
+- [x] blueprint validator ha test unitari;
+- [x] API crea/lista app e record;
+- [x] UI `/apps/{slug}` renderizza table/form/detail;
+- [x] workflow approve/reject cambia stato e scrive evento;
+- [x] tool app runtime sono registrati;
+- [x] skill `app-factory` produce blueprint valido;
+- [x] demo ferie/permessi ha blueprint pre-seed e runbook;
+- [ ] smoke test manuale finale su gateway release;
+- [x] `cargo fmt --all -- --check`, `cargo check --all-features`, `cargo test --all-features app_factory`, `cargo test --all-features tools::app_factory`, `cargo clippy --all-features -- -D warnings`, build release passano nell'ultimo giro di verifica.
+
+Ultima verifica automatica: 2026-04-29.

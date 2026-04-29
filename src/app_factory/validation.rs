@@ -101,13 +101,11 @@ pub fn validate_blueprint(blueprint: &AppBlueprint) -> Result<(), ValidationRepo
                     }
                     validate_unique_options(&entity.name, &field.name, &field.options, &mut errors);
                 }
-                FieldType::Relation => {
-                    if field.to.as_deref().unwrap_or("").trim().is_empty() {
-                        errors.push(format!(
-                            "Relation field '{}.{}' must define target entity",
-                            entity.name, field.name
-                        ));
-                    }
+                FieldType::Relation if field.to.as_deref().unwrap_or("").trim().is_empty() => {
+                    errors.push(format!(
+                        "Relation field '{}.{}' must define target entity",
+                        entity.name, field.name
+                    ));
                 }
                 _ => {}
             }
