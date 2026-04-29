@@ -12,6 +12,7 @@
 
     var STORAGE_KEY = 'homun-active-profile';
     var activeProfile = null;
+    var activeUser = null;
     var cachedProfiles = null;
     var dropdown = null;
     var lastAvatarBtn = null; // tracks which avatar button was clicked
@@ -29,6 +30,16 @@
 
     window.getActiveProfile = function () {
         return activeProfile;
+    };
+
+    window.getActiveUser = function () {
+        return activeUser;
+    };
+
+    window.getActiveScopeLabel = function () {
+        var user = activeUser && activeUser.username ? activeUser.username : 'Current user';
+        var profile = activeProfile && activeProfile.display_name ? activeProfile.display_name : 'Default';
+        return user + ' / ' + profile;
     };
 
     /** Returns cached profiles list (loaded at init). */
@@ -63,10 +74,26 @@
 
         // Load profiles + restore last selection
         try {
-            var res = await fetch('/api/v1/profiles');
-            if (!res.ok) return;
-            cachedProfiles = await res.json();
-            if (!cachedProfiles.length) return;
+            var results = await Promise.all([
+                fetch('/api/v1/account/session').catch(function () { return null; }),
+                fetch('/api/v1/profiles').catch(function () { return null; }),
+            ]);
+            var accountRes = results[0];
+            var profilesRes = results[1];
+
+            if (accountRes && accountRes.ok) {
+                activeUser = await accountRes.json();
+            }
+
+            if (!profilesRes || !profilesRes.ok) {
+                updateScopeLabels();
+                return;
+            }
+            cachedProfiles = await profilesRes.json();
+            if (!cachedProfiles.length) {
+                updateScopeLabels();
+                return;
+            }
 
             var saved = localStorage.getItem(STORAGE_KEY);
             var restored = saved ? cachedProfiles.find(function (p) { return p.slug === saved; }) : null;
@@ -77,6 +104,7 @@
             setActiveProfile(initial, true);
         } catch (_) {
             // Profile selector is optional
+            updateScopeLabels();
         }
     }
 
@@ -86,9 +114,10 @@
         activeProfile = profile;
         localStorage.setItem(STORAGE_KEY, profile.slug);
         updateBadge(profile);
+        updateScopeLabels();
         if (emit) {
             document.dispatchEvent(new CustomEvent('profile-changed', {
-                detail: { profile: profile },
+                detail: { profile: profile, user: activeUser },
             }));
         }
     }
@@ -107,8 +136,22 @@
         var dot = document.getElementById('topbar-profile-dot');
         var name = document.getElementById('topbar-profile-name');
         if (dot) dot.style.background = profile.color || '#3B82F6';
-        if (name) name.textContent = profile.display_name;
+        if (name) name.textContent = window.getActiveScopeLabel();
+        badge.title = 'Scope: ' + window.getActiveScopeLabel();
         badge.hidden = false;
+    }
+
+    function updateScopeLabels() {
+        var label = window.getActiveScopeLabel();
+        document.querySelectorAll('[data-scope-label]').forEach(function (el) {
+            el.textContent = 'Scope: ' + label;
+        });
+        document.querySelectorAll('[data-scope-user]').forEach(function (el) {
+            el.textContent = activeUser && activeUser.username ? activeUser.username : 'Current user';
+        });
+        document.querySelectorAll('[data-scope-profile]').forEach(function (el) {
+            el.textContent = activeProfile && activeProfile.display_name ? activeProfile.display_name : 'Default';
+        });
     }
 
     // ─── Dropdown ────────────────────────────────────────
@@ -143,7 +186,7 @@
         var info = document.createElement('div');
         var nameEl = document.createElement('div');
         nameEl.className = 'topbar-avatar-dropdown-name';
-        nameEl.textContent = 'Homun';
+        nameEl.textContent = activeUser && activeUser.username ? activeUser.username : 'Homun';
         info.appendChild(nameEl);
         var subEl = document.createElement('div');
         subEl.className = 'topbar-avatar-dropdown-sub';

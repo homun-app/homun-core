@@ -1640,6 +1640,7 @@ async fn contacts_page(State(_state): State<Arc<AppState>>) -> Html<String> {
                         <span><span id="contacts-count">0</span> contacts</span>
                         <button class="btn btn-primary btn-sm" id="add-contact-btn">+ New</button>
                     </div>
+                    <div class="scope-indicator scope-indicator--compact" data-scope-label>Scope: Current user / Default</div>
                 </div>
                 <div class="contacts-list-scroll" id="contacts-list"></div>
             </div>
@@ -1682,6 +1683,7 @@ async fn profiles_page(State(_state): State<Arc<AppState>>) -> Html<String> {
                         <span><span id="profiles-count">0</span> profiles</span>
                         <button class="btn btn-primary btn-sm" id="add-profile-btn">+ New</button>
                     </div>
+                    <div class="scope-indicator scope-indicator--compact" data-scope-label>Scope: Current user / Default</div>
                 </div>
                 <div class="contacts-list-scroll" id="profiles-list"></div>
             </div>
@@ -1765,6 +1767,7 @@ async fn memory_page(
                         <span class="badge badge-info" id="mem-title-chunks">{chunk_count} chunks</span>
                     </div>
                 </div>
+                <div class="scope-indicator" data-scope-label>Scope: Current user / Default</div>
 
                 <div class="stats-grid stats-grid--3">
                     <div class="stat-card">
@@ -2431,6 +2434,7 @@ async fn knowledge_page(State(_state): State<Arc<AppState>>) -> Html<String> {
                 </div>
             </div>
             <p class="page-subtitle">Personal document knowledge base — upload files and search across your documents.</p>
+            <div class="scope-indicator" data-scope-label>Scope: Current user / Default</div>
 
             <div class="stats-grid" style="grid-template-columns:repeat(3,1fr)" id="knowledge-stats">
                 <div class="stat-card">

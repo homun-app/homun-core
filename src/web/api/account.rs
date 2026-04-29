@@ -13,6 +13,7 @@ use super::super::server::AppState;
 pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/v1/account", get(get_account))
+        .route("/v1/account/session", get(get_session_account))
         .route(
             "/v1/account/identities",
             get(list_identities).post(add_identity),
@@ -135,6 +136,14 @@ struct AccountResponse {
     enabled: bool,
     must_change_password: bool,
     created_at: String,
+}
+
+#[derive(Debug, Serialize)]
+struct SessionAccountResponse {
+    id: String,
+    username: String,
+    roles: Vec<String>,
+    role: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -273,6 +282,23 @@ async fn get_account(
     });
 
     Ok(Json(owner))
+}
+
+/// Get the account info for the current authenticated web session.
+async fn get_session_account(
+    axum::Extension(auth): axum::Extension<AuthUser>,
+) -> Json<SessionAccountResponse> {
+    let role = auth
+        .roles
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "user".to_string());
+    Json(SessionAccountResponse {
+        id: auth.user_id,
+        username: auth.username,
+        roles: auth.roles,
+        role,
+    })
 }
 
 /// Change the current session user's local password.

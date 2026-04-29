@@ -547,7 +547,7 @@
     color: var(--t1);
     transition: border-color var(--fast), box-shadow var(--fast);
     white-space: nowrap;
-    max-width: 160px;
+    max-width: 240px;
     overflow: hidden;
 }
 .topbar-profile-badge:hover {
@@ -719,6 +719,34 @@
     margin-top: 4px;
     line-height: 1.5;
     font-weight: 400;
+}
+
+.scope-indicator {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    padding: 4px 10px;
+    margin: 8px 0 24px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: var(--surface);
+    color: var(--t3);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.4;
+    width: fit-content;
+    max-width: 100%;
+}
+
+.page-header + .scope-indicator {
+    margin-top: -28px;
+}
+
+.scope-indicator--compact {
+    margin: 10px 2px 0;
+    min-height: 24px;
+    padding: 3px 8px;
+    font-size: 11px;
 }
 
 /* ─── Background Textures ─── */

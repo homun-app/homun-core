@@ -63,7 +63,9 @@ if (searchInput) {
 
 async function searchMemory(q) {
     try {
-        const resp = await fetch(`/api/v1/memory/search?q=${encodeURIComponent(q)}&limit=20`);
+        const pf = getProfileFilter();
+        const profileParam = pf ? '&profile=' + encodeURIComponent(pf) : '';
+        const resp = await fetch(`/api/v1/memory/search?q=${encodeURIComponent(q)}&limit=20${profileParam}`);
         const data = await resp.json();
         // Clear existing results using safe DOM methods
         searchResults.textContent = '';

@@ -321,7 +321,9 @@ async function ensureSharedPerimeters(namespaces) {
 
 async function loadStats() {
     try {
-        const resp = await fetch('/api/v1/knowledge/stats');
+        const pf = getKnowledgeProfileFilter();
+        const profileParam = pf ? '?profile=' + encodeURIComponent(pf) : '';
+        const resp = await fetch('/api/v1/knowledge/stats' + profileParam);
         if (!resp.ok) return;
         const data = await resp.json();
         document.getElementById('stat-sources').textContent = data.source_count ?? '0';
