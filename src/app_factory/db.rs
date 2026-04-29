@@ -25,6 +25,16 @@ pub struct InternalAppRow {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct InternalAppBridgePolicyRow {
+    pub id: i64,
+    pub app_id: i64,
+    pub policy_json: String,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct AppRecordRow {
     pub id: i64,
     pub entity_name: String,
@@ -271,6 +281,47 @@ pub async fn load_app_for_user(
     .bind(slug)
     .fetch_optional(control_pool)
     .await?;
+
+    Ok(row)
+}
+
+pub async fn upsert_bridge_policy(
+    control_pool: &SqlitePool,
+    app_id: i64,
+    policy: &crate::app_factory::bridge::BridgePolicy,
+) -> Result<i64> {
+    let policy_json = serde_json::to_string(policy)?;
+    let id = sqlx::query_scalar::<_, i64>(
+        "INSERT INTO internal_app_bridge_policies (app_id, policy_json, updated_at)
+         VALUES (?, ?, datetime('now'))
+         ON CONFLICT(app_id) DO UPDATE SET
+             policy_json = excluded.policy_json,
+             status = 'active',
+             updated_at = datetime('now')
+         RETURNING id",
+    )
+    .bind(app_id)
+    .bind(policy_json)
+    .fetch_one(control_pool)
+    .await
+    .context("Failed to upsert bridge policy")?;
+
+    Ok(id)
+}
+
+pub async fn load_bridge_policy(
+    control_pool: &SqlitePool,
+    app_id: i64,
+) -> Result<Option<InternalAppBridgePolicyRow>> {
+    let row = sqlx::query_as::<_, InternalAppBridgePolicyRow>(
+        "SELECT id, app_id, policy_json, status, created_at, updated_at
+         FROM internal_app_bridge_policies
+         WHERE app_id = ? AND status = 'active'",
+    )
+    .bind(app_id)
+    .fetch_optional(control_pool)
+    .await
+    .context("Failed to load bridge policy")?;
 
     Ok(row)
 }
@@ -559,6 +610,14 @@ mod tests {
                 sqlx::query(statement).execute(&pool).await.unwrap();
             }
         }
+        for statement in
+            include_str!("../../migrations/057_internal_app_bridge_policies.sql").split(';')
+        {
+            let statement = statement.trim();
+            if !statement.is_empty() {
+                sqlx::query(statement).execute(&pool).await.unwrap();
+            }
+        }
 
         pool
     }
@@ -715,5 +774,52 @@ mod tests {
             .await
             .unwrap()
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn bridge_policy_upsert_and_load_work() {
+        let dir = TempDir::new().unwrap();
+        let control_pool = test_control_pool(&dir).await;
+        let blueprint = valid_leave_blueprint("ferie-permessi");
+        let app_id = insert_app(&control_pool, dir.path(), "user-1", None, &blueprint)
+            .await
+            .unwrap();
+        let policy = crate::app_factory::bridge::BridgePolicy {
+            tools: vec!["send_message".to_string()],
+            ..crate::app_factory::bridge::BridgePolicy::deny_all()
+        };
+
+        let first_policy_id = upsert_bridge_policy(&control_pool, app_id, &policy)
+            .await
+            .unwrap();
+        let row = load_bridge_policy(&control_pool, app_id)
+            .await
+            .unwrap()
+            .unwrap();
+        let loaded_policy: crate::app_factory::bridge::BridgePolicy =
+            serde_json::from_str(&row.policy_json).unwrap();
+
+        assert_eq!(row.id, first_policy_id);
+        assert_eq!(row.app_id, app_id);
+        assert!(loaded_policy.allows_tool("send_message"));
+        assert!(!loaded_policy.allows_tool("vault"));
+
+        let updated_policy = crate::app_factory::bridge::BridgePolicy {
+            tools: vec!["contacts".to_string()],
+            ..crate::app_factory::bridge::BridgePolicy::deny_all()
+        };
+        let second_policy_id = upsert_bridge_policy(&control_pool, app_id, &updated_policy)
+            .await
+            .unwrap();
+        let updated_row = load_bridge_policy(&control_pool, app_id)
+            .await
+            .unwrap()
+            .unwrap();
+        let loaded_updated_policy: crate::app_factory::bridge::BridgePolicy =
+            serde_json::from_str(&updated_row.policy_json).unwrap();
+
+        assert_eq!(second_policy_id, first_policy_id);
+        assert!(loaded_updated_policy.allows_tool("contacts"));
+        assert!(!loaded_updated_policy.allows_tool("send_message"));
     }
 }

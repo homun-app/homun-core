@@ -503,6 +503,13 @@ impl Database {
         )
         .await?;
 
+        Self::apply_migration(
+            pool,
+            "057_internal_app_bridge_policies",
+            include_str!("../../migrations/057_internal_app_bridge_policies.sql"),
+        )
+        .await?;
+
         Self::reassign_legacy_seed_admin_data(pool).await?;
 
         // One-shot backfill post-migration-050 (namespace isolation):
