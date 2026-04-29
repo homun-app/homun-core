@@ -4655,6 +4655,16 @@
     background: var(--surface);
 }
 
+.app-blueprint-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--r-md);
+    background: var(--surface);
+}
+
 .app-studio-panel-header,
 .app-studio-users-layout,
 .app-studio-user-row {
@@ -4668,17 +4678,74 @@
 }
 
 .app-studio-panel h2,
-.app-studio-panel h3 {
+.app-studio-panel h3,
+.app-blueprint-panel h2,
+.app-blueprint-panel h3 {
     margin: 0;
     color: var(--t1);
     font-size: 15px;
     font-weight: 700;
 }
 
-.app-studio-panel p {
+.app-studio-panel p,
+.app-blueprint-panel p {
     margin: 4px 0 0;
     color: var(--t3);
     font-size: 13px;
+}
+
+.app-blueprint-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 280px;
+    gap: 16px;
+}
+
+.app-blueprint-editor,
+.app-blueprint-versions {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.app-blueprint-textarea {
+    min-height: 360px;
+    resize: vertical;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.45;
+    tab-size: 2;
+}
+
+.app-blueprint-version {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    width: 100%;
+    padding: 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--r-sm);
+    background: var(--surface-inset);
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+}
+
+.app-blueprint-version:hover {
+    border-color: var(--border);
+    background: var(--surface-hover);
+}
+
+.app-blueprint-version strong {
+    color: var(--t1);
+    font-size: 13px;
+}
+
+.app-blueprint-version span,
+.app-blueprint-version small {
+    color: var(--t3);
+    font-size: 12px;
 }
 
 .app-studio-users-layout {
@@ -4921,6 +4988,10 @@
     .app-studio-panel-header,
     .app-studio-users-layout {
         flex-direction: column;
+    }
+
+    .app-blueprint-layout {
+        grid-template-columns: 1fr;
     }
 
     .app-runtime-controls {

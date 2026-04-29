@@ -9,7 +9,8 @@
         statusFilter: 'all',
         search: '',
         relationRecords: {},
-        appUsers: []
+        appUsers: [],
+        appVersions: []
     };
 
     function qs(selector, root) {
@@ -245,6 +246,7 @@
 
         root.appendChild(renderSummary());
         root.appendChild(renderStudioPanel());
+        root.appendChild(renderBlueprintPanel());
 
         var tabs = el('div', 'app-runtime-tabs');
         runtimeViews().forEach(function (view, index) {
@@ -392,6 +394,108 @@
             });
         });
         return form;
+    }
+
+    function renderBlueprintPanel() {
+        var panel = el('section', 'app-blueprint-panel');
+        var header = el('div', 'app-studio-panel-header');
+        var title = el('div');
+        title.appendChild(el('h2', '', 'Blueprint'));
+        title.appendChild(el('p', '', 'Edit the declarative app definition. The slug is locked in this version.'));
+        header.appendChild(title);
+        header.appendChild(el('span', 'app-status-pill', 'v' + state.app.schema_version));
+        panel.appendChild(header);
+
+        var layout = el('div', 'app-blueprint-layout');
+        var editorWrap = el('form', 'app-blueprint-editor');
+        var textarea = document.createElement('textarea');
+        textarea.className = 'input app-blueprint-textarea';
+        textarea.name = 'blueprint';
+        textarea.spellcheck = false;
+        textarea.value = JSON.stringify(state.app.blueprint || {}, null, 2);
+        editorWrap.appendChild(textarea);
+
+        var note = document.createElement('input');
+        note.className = 'input';
+        note.name = 'change_note';
+        note.placeholder = 'Change note';
+        editorWrap.appendChild(note);
+
+        var error = el('p', 'external-error');
+        var actions = el('div', 'actions');
+        var validate = el('button', 'btn btn-secondary btn-sm', 'Validate');
+        validate.type = 'button';
+        validate.addEventListener('click', function () {
+            try {
+                JSON.parse(textarea.value);
+                error.textContent = 'JSON syntax is valid. Server validation runs on save.';
+            } catch (err) {
+                error.textContent = err.message;
+            }
+        });
+        actions.appendChild(validate);
+        var save = el('button', 'btn btn-primary btn-sm', 'Save version');
+        save.type = 'submit';
+        actions.appendChild(save);
+        editorWrap.appendChild(actions);
+        editorWrap.appendChild(error);
+        editorWrap.addEventListener('submit', function (event) {
+            event.preventDefault();
+            error.textContent = '';
+            var blueprint;
+            try {
+                blueprint = JSON.parse(textarea.value);
+            } catch (err) {
+                error.textContent = err.message;
+                return;
+            }
+            api('/api/v1/apps/' + encodeURIComponent(state.app.slug) + '/blueprint', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    blueprint: blueprint,
+                    change_note: note.value || 'Blueprint updated from Studio'
+                })
+            }).then(function (updated) {
+                state.app.blueprint = updated.blueprint;
+                state.app.schema_version = updated.schema_version;
+                textarea.value = JSON.stringify(updated.blueprint, null, 2);
+                note.value = '';
+                if (window.showToast) window.showToast('Blueprint saved', 'success');
+                return loadAppVersions();
+            }).then(function () {
+                renderRuntime();
+                return loadActiveRecords();
+            }).catch(function (err) {
+                error.textContent = err.message;
+            });
+        });
+        layout.appendChild(editorWrap);
+        layout.appendChild(renderVersionsList());
+        panel.appendChild(layout);
+        return panel;
+    }
+
+    function renderVersionsList() {
+        var wrap = el('div', 'app-blueprint-versions');
+        wrap.appendChild(el('h3', '', 'Versions'));
+        if (!state.appVersions.length) {
+            wrap.appendChild(el('p', 'muted', 'No versions loaded yet.'));
+            return wrap;
+        }
+        state.appVersions.forEach(function (version) {
+            var row = el('button', 'app-blueprint-version');
+            row.type = 'button';
+            row.appendChild(el('strong', '', 'v' + version.version_number));
+            row.appendChild(el('span', '', version.change_note || 'Blueprint version'));
+            row.appendChild(el('small', '', version.created_at || ''));
+            row.addEventListener('click', function () {
+                var textarea = qs('.app-blueprint-textarea');
+                if (textarea) textarea.value = JSON.stringify(version.blueprint || {}, null, 2);
+            });
+            wrap.appendChild(row);
+        });
+        return wrap;
     }
 
     function renderSummary() {
@@ -676,8 +780,9 @@
                 state.activeViewIndex = 0;
                 state.relationRecords = {};
                 state.appUsers = [];
+                state.appVersions = [];
                 renderRuntime();
-                return Promise.all([loadActiveRecords(), loadAppUsers()]);
+                return Promise.all([loadActiveRecords(), loadAppUsers(), loadAppVersions()]);
             })
             .catch(function (err) {
                 var root = qs('#app-runtime');
@@ -690,6 +795,18 @@
         return api('/api/v1/apps/' + encodeURIComponent(state.app.slug) + '/users')
             .then(function (users) {
                 state.appUsers = users || [];
+                renderRuntime();
+            })
+            .catch(function (err) {
+                if (window.showToast) window.showToast(err.message, 'error', 4000);
+            });
+    }
+
+    function loadAppVersions() {
+        if (!state.app) return Promise.resolve();
+        return api('/api/v1/apps/' + encodeURIComponent(state.app.slug) + '/versions')
+            .then(function (versions) {
+                state.appVersions = versions || [];
                 renderRuntime();
             })
             .catch(function (err) {
