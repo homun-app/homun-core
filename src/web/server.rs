@@ -625,6 +625,7 @@ impl WebServer {
                 axum::routing::post(api::webhook_ingress),
             )
             .merge(api::public_router())
+            .merge(crate::web::external_apps::routes())
             .merge(static_assets())
             .merge(auth_routes);
 

@@ -1,6 +1,7 @@
 pub mod api;
 pub mod auth;
 pub mod chat_attachments;
+pub mod external_apps;
 pub mod pages;
 pub mod run_state;
 pub mod server;
