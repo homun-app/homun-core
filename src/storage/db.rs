@@ -495,6 +495,14 @@ impl Database {
             include_str!("../../migrations/055_user_lifecycle.sql"),
         )
         .await?;
+
+        Self::apply_migration(
+            pool,
+            "056_internal_apps",
+            include_str!("../../migrations/056_internal_apps.sql"),
+        )
+        .await?;
+
         Self::reassign_legacy_seed_admin_data(pool).await?;
 
         // One-shot backfill post-migration-050 (namespace isolation):
