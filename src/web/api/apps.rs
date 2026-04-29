@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::app_factory::blueprint::AppBlueprint;
-use crate::app_factory::{db as app_db, runtime, validation};
+use crate::app_factory::{bridge::BridgePolicy, db as app_db, runtime, validation};
 use crate::config::Config;
 use crate::storage::Database;
 use crate::web::auth::{hash_password, require_write, AuthUser};
@@ -98,6 +98,10 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route(
             "/v1/apps/{slug}/users",
             get(list_app_users).post(create_app_user),
+        )
+        .route(
+            "/v1/apps/{slug}/bridge-policy",
+            get(get_bridge_policy).put(update_bridge_policy),
         )
         .route(
             "/v1/apps/{slug}/entities/{entity}/records",
@@ -355,6 +359,38 @@ async fn create_app_user(
     app_pool.close().await;
 
     Ok((StatusCode::CREATED, Json(app_user_view(user))))
+}
+
+async fn get_bridge_policy(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+    Path(slug): Path<String>,
+) -> Result<Json<BridgePolicy>, ApiErr> {
+    let db = require_db(&state)?;
+    let (app, _) = load_owned_app(db, &auth, &slug).await?;
+    let policy = app_db::load_bridge_policy(db.pool(), app.id)
+        .await
+        .map_err(internal)?
+        .and_then(|row| serde_json::from_str::<BridgePolicy>(&row.policy_json).ok())
+        .unwrap_or_else(BridgePolicy::deny_all);
+
+    Ok(Json(policy))
+}
+
+async fn update_bridge_policy(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+    Path(slug): Path<String>,
+    Json(policy): Json<BridgePolicy>,
+) -> Result<Json<BridgePolicy>, ApiErr> {
+    require_write(&auth)?;
+    let db = require_db(&state)?;
+    let (app, _) = load_owned_app(db, &auth, &slug).await?;
+    app_db::upsert_bridge_policy(db.pool(), app.id, &policy)
+        .await
+        .map_err(internal)?;
+
+    Ok(Json(policy))
 }
 
 async fn list_records(

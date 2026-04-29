@@ -59,6 +59,13 @@ impl BridgePolicy {
     }
 }
 
+pub fn ensure_tool_allowed(policy: &BridgePolicy, tool: &str) -> anyhow::Result<()> {
+    if !policy.allows_tool(tool) {
+        anyhow::bail!("Bridge policy does not allow tool '{tool}'");
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -84,5 +91,12 @@ mod tests {
         assert!(policy.allows_channel_send("email"));
         assert!(policy.allows_knowledge_namespace("hr-policy"));
         assert!(!policy.allows_tool("vault"));
+    }
+
+    #[test]
+    fn ensure_tool_allowed_fails_closed() {
+        let policy = BridgePolicy::deny_all();
+
+        assert!(ensure_tool_allowed(&policy, "send_message").is_err());
     }
 }

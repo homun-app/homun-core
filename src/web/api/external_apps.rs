@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::app_factory::blueprint::AppBlueprint;
-use crate::app_factory::{db as app_db, external_auth, runtime, validation};
+use crate::app_factory::{bridge::BridgePolicy, db as app_db, external_auth, runtime, validation};
 use crate::web::auth::verify_password;
 use crate::web::server::AppState;
 
@@ -167,6 +167,18 @@ async fn require_app_user(
         app_pool,
         external_auth::AppAuthUser::from((slug, user)),
     ))
+}
+
+async fn load_bridge_policy_or_deny_all(state: &AppState, app_id: i64) -> BridgePolicy {
+    let Some(db) = state.db.as_ref() else {
+        return BridgePolicy::deny_all();
+    };
+    match app_db::load_bridge_policy(db.pool(), app_id).await {
+        Ok(Some(row)) => {
+            serde_json::from_str(&row.policy_json).unwrap_or_else(|_| BridgePolicy::deny_all())
+        }
+        _ => BridgePolicy::deny_all(),
+    }
 }
 
 fn record_status(blueprint: &AppBlueprint, entity_name: &str, data: &Value) -> Option<String> {
@@ -335,6 +347,7 @@ async fn create_record(
         .as_ref()
         .ok_or_else(|| internal("Database not available"))?;
     let (app, blueprint, app_pool, user) = require_app_user(&state, &slug, &headers).await?;
+    let _bridge_policy = load_bridge_policy_or_deny_all(&state, app.id).await;
     external_auth::ensure_role(
         external_auth::can_create_record(&user.role),
         "This role cannot create records",
@@ -392,6 +405,7 @@ async fn run_action(
         .as_ref()
         .ok_or_else(|| internal("Database not available"))?;
     let (app, blueprint, app_pool, user) = require_app_user(&state, &slug, &headers).await?;
+    let _bridge_policy = load_bridge_policy_or_deny_all(&state, app.id).await;
     external_auth::ensure_role(
         external_auth::can_run_action(&user.role, &action),
         "This role cannot run this action",
