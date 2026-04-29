@@ -35,6 +35,17 @@ pub struct InternalAppBridgePolicyRow {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct InternalAppVersionRow {
+    pub id: i64,
+    pub app_id: i64,
+    pub version_number: i64,
+    pub blueprint_json: String,
+    pub change_note: Option<String>,
+    pub created_by_user_id: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct AppRecordRow {
     pub id: i64,
     pub entity_name: String,
@@ -224,11 +235,21 @@ pub async fn insert_app(
     .bind(&blueprint.app.slug)
     .bind(&blueprint.app.name)
     .bind(blueprint.app.description.as_deref())
-    .bind(blueprint_json)
+    .bind(&blueprint_json)
     .bind(db_path)
     .fetch_one(control_pool)
     .await
     .context("Failed to insert internal app metadata")?;
+
+    insert_app_version(
+        control_pool,
+        id,
+        1,
+        &blueprint_json,
+        Some("Initial blueprint"),
+        Some(user_id),
+    )
+    .await?;
 
     Ok(id)
 }
@@ -303,6 +324,92 @@ pub async fn load_app_by_slug(
     .context("Failed to load internal app by slug")?;
 
     Ok(row)
+}
+
+pub async fn insert_app_version(
+    control_pool: &SqlitePool,
+    app_id: i64,
+    version_number: i64,
+    blueprint_json: &str,
+    change_note: Option<&str>,
+    created_by_user_id: Option<&str>,
+) -> Result<i64> {
+    let id = sqlx::query_scalar::<_, i64>(
+        "INSERT INTO internal_app_versions (
+            app_id, version_number, blueprint_json, change_note, created_by_user_id
+         )
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(app_id, version_number) DO UPDATE SET
+            blueprint_json = excluded.blueprint_json,
+            change_note = excluded.change_note,
+            created_by_user_id = excluded.created_by_user_id
+         RETURNING id",
+    )
+    .bind(app_id)
+    .bind(version_number)
+    .bind(blueprint_json)
+    .bind(change_note)
+    .bind(created_by_user_id)
+    .fetch_one(control_pool)
+    .await
+    .context("Failed to insert internal app version")?;
+
+    Ok(id)
+}
+
+pub async fn list_app_versions(
+    control_pool: &SqlitePool,
+    app_id: i64,
+) -> Result<Vec<InternalAppVersionRow>> {
+    let rows = sqlx::query_as::<_, InternalAppVersionRow>(
+        "SELECT id, app_id, version_number, blueprint_json, change_note, created_by_user_id, created_at
+         FROM internal_app_versions
+         WHERE app_id = ?
+         ORDER BY version_number DESC",
+    )
+    .bind(app_id)
+    .fetch_all(control_pool)
+    .await
+    .context("Failed to list internal app versions")?;
+
+    Ok(rows)
+}
+
+pub async fn update_app_blueprint(
+    control_pool: &SqlitePool,
+    app_id: i64,
+    blueprint: &AppBlueprint,
+    change_note: Option<&str>,
+    created_by_user_id: Option<&str>,
+) -> Result<i64> {
+    let blueprint_json = serde_json::to_string(blueprint)?;
+    let next_version = sqlx::query_scalar::<_, i64>(
+        "UPDATE internal_apps
+         SET name = ?, description = ?, blueprint_json = ?,
+             schema_version = schema_version + 1,
+             updated_at = datetime('now')
+         WHERE id = ?
+         RETURNING schema_version",
+    )
+    .bind(&blueprint.app.name)
+    .bind(blueprint.app.description.as_deref())
+    .bind(&blueprint_json)
+    .bind(app_id)
+    .fetch_one(control_pool)
+    .await
+    .context("Failed to update internal app blueprint")?;
+
+    insert_app_version(
+        control_pool,
+        app_id,
+        next_version,
+        &blueprint_json,
+        change_note,
+        created_by_user_id,
+    )
+    .await?;
+
+    Ok(next_version)
 }
 
 pub async fn upsert_bridge_policy(
@@ -638,6 +745,12 @@ mod tests {
                 sqlx::query(statement).execute(&pool).await.unwrap();
             }
         }
+        for statement in include_str!("../../migrations/058_internal_app_versions.sql").split(';') {
+            let statement = statement.trim();
+            if !statement.is_empty() {
+                sqlx::query(statement).execute(&pool).await.unwrap();
+            }
+        }
 
         pool
     }
@@ -841,5 +954,40 @@ mod tests {
         assert_eq!(second_policy_id, first_policy_id);
         assert!(loaded_updated_policy.allows_tool("contacts"));
         assert!(!loaded_updated_policy.allows_tool("send_message"));
+    }
+
+    #[tokio::test]
+    async fn app_blueprint_updates_create_version_history() {
+        let dir = TempDir::new().unwrap();
+        let control_pool = test_control_pool(&dir).await;
+        let blueprint = valid_leave_blueprint("ferie-permessi");
+        let app_id = insert_app(&control_pool, dir.path(), "user-1", None, &blueprint)
+            .await
+            .unwrap();
+        let mut updated = blueprint.clone();
+        updated.app.name = "Ferie Aggiornate".to_string();
+
+        let version = update_app_blueprint(
+            &control_pool,
+            app_id,
+            &updated,
+            Some("Rename app"),
+            Some("user-1"),
+        )
+        .await
+        .unwrap();
+        let row = load_app_for_user(&control_pool, "user-1", "ferie-permessi")
+            .await
+            .unwrap()
+            .unwrap();
+        let versions = list_app_versions(&control_pool, app_id).await.unwrap();
+
+        assert_eq!(version, 2);
+        assert_eq!(row.schema_version, 2);
+        assert_eq!(row.name, "Ferie Aggiornate");
+        assert_eq!(versions.len(), 2);
+        assert_eq!(versions[0].version_number, 2);
+        assert_eq!(versions[0].change_note.as_deref(), Some("Rename app"));
+        assert_eq!(versions[1].version_number, 1);
     }
 }

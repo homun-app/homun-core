@@ -510,6 +510,13 @@ impl Database {
         )
         .await?;
 
+        Self::apply_migration(
+            pool,
+            "058_internal_app_versions",
+            include_str!("../../migrations/058_internal_app_versions.sql"),
+        )
+        .await?;
+
         Self::reassign_legacy_seed_admin_data(pool).await?;
 
         // One-shot backfill post-migration-050 (namespace isolation):
