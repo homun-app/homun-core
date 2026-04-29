@@ -131,6 +131,33 @@
       ]
     }
   ],
+  "roles": [
+    {
+      "name": "admin",
+      "label": "Admin",
+      "permissions": [
+        "*"
+      ]
+    },
+    {
+      "name": "approver",
+      "label": "Responsabile",
+      "permissions": [
+        "leave_request:read",
+        "leave_request:update",
+        "leave_request:transition:approve",
+        "leave_request:transition:reject"
+      ]
+    },
+    {
+      "name": "employee",
+      "label": "Dipendente",
+      "permissions": [
+        "leave_request:create",
+        "leave_request:read:own"
+      ]
+    }
+  ],
   "agent_commands": [
     {
       "intent": "create_leave_request",

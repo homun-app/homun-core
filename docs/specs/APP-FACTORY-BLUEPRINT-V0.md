@@ -16,6 +16,9 @@ Al 2026-04-29 la v0 demo include:
 - storage generico record/eventi;
 - API interne per app, record e azioni;
 - UI `/apps` e `/apps/{slug}`;
+- runtime esterno `/a/{slug}` con login app-local;
+- utenti/sessioni app-local nel database per-app;
+- bridge policy fail-closed nel control plane;
 - workflow locale su campi enum;
 - tool agente per creare app, leggere/scrivere record e lanciare azioni;
 - skill `app-factory`;
@@ -25,7 +28,7 @@ Rischi/limiti consapevoli:
 
 - relation v0 e' rappresentata come valore semplice nel record; lookup/selector avanzato e' P1;
 - notification e automation blueprint sono metadati/proposte, non invii reali P0;
-- RBAC granulare e ruoli multiutente sono P1/P2; la v0 protegge via ownership utente/profilo;
+- RBAC granulare per permessi blueprint e' P1/P2; la v0 include ruoli app-local base (`admin`, `approver`, `employee`, `viewer`) e policy bridge fail-closed;
 - import/export, allegati, calendario e dashboard sono componenti futuri;
 - la generazione live del blueprint dipende dal modello, quindi la demo usa un blueprint pre-seed come fallback.
 
@@ -54,9 +57,10 @@ La v0 non deve generare codice arbitrario. Il modello produce un blueprint valid
    - UI, storage, workflow e tool sono composti da mattoni noti.
    - Nessun JavaScript/Rust/SQL arbitrario generato dal modello nella v0.
 
-3. **User/profile scoped**
+3. **User/profile scoped + app isolation**
    - Ogni app, record e evento e' scoped a `user_id`.
    - `profile_id` e' opzionale ma supportato, come memory/knowledge.
+   - Ogni app ha anche utenti/sessioni propri nel database per-app.
 
 4. **Agent-usable**
    - Le app create non sono solo UI.
@@ -95,6 +99,7 @@ User prompt
 | Memory/Knowledge | Policy aziendali, contesto utente, documenti usati dall'app |
 | Vault | Segreti per integrazioni esterne |
 | Web UI | Renderer delle app interne e admin view |
+| External Runtime | UI separata `/a/{slug}` per utenti dell'app generata |
 
 ---
 
@@ -265,8 +270,11 @@ Regole:
 
 Regole v0:
 
-- se `roles` e' assente, l'app e' disponibile all'utente proprietario.
-- i ruoli sono metadati per UI e futura RBAC; enforcement v0 usa `user_id` owner/admin.
+- se `roles` e' assente, l'app resta comunque utilizzabile dal proprietario in Studio;
+- nel runtime esterno i ruoli app-local base sono applicati dal server;
+- `employee` puo' creare e leggere i propri record;
+- `approver` puo' leggere e lanciare azioni `approve` / `reject`;
+- `admin` puo' gestire utenti app-local e lanciare azioni.
 
 ### Notification
 
@@ -409,6 +417,29 @@ CREATE INDEX idx_app_records_entity ON app_records(entity_name);
 CREATE INDEX idx_app_events_record ON app_events(record_id);
 ```
 
+Identita' app-local:
+
+```sql
+CREATE TABLE app_users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    contact_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT
+);
+
+CREATE TABLE app_sessions (
+    id TEXT PRIMARY KEY,
+    app_user_id INTEGER NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+```
+
 ### Perche' SQLite per-app
 
 Pro:
@@ -517,6 +548,29 @@ Comportamento:
 - cambia `status`;
 - scrive evento `leave_request.approved`;
 - restituisce record aggiornato.
+
+### App users from Studio
+
+```http
+GET /api/v1/apps/ferie-permessi/users
+POST /api/v1/apps/ferie-permessi/users
+```
+
+Gli utenti app-local vengono salvati nel database dedicato dell'app, non nel database utenti Homun.
+
+### External runtime
+
+```http
+GET /a/ferie-permessi/login
+GET /a/ferie-permessi
+POST /api/a/ferie-permessi/login
+GET /api/a/ferie-permessi/meta
+GET /api/a/ferie-permessi/entities/leave_request/records
+POST /api/a/ferie-permessi/entities/leave_request/records
+POST /api/a/ferie-permessi/entities/leave_request/records/123/actions/approve
+```
+
+Il runtime esterno usa cookie di sessione separati per slug e non richiede login Homun.
 
 ---
 

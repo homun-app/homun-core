@@ -10,6 +10,8 @@ Creare e usare un'app interna per la gestione di ferie e permessi dei dipendenti
 - generazione di un blueprint App Factory;
 - creazione dell'app con database per-app isolato;
 - apertura dell'interfaccia interna;
+- creazione utenti app-local separati da Homun;
+- apertura dell'app esterna pubblicata;
 - inserimento di una richiesta;
 - approvazione tramite workflow;
 - interrogazione dei dati dalla chat.
@@ -39,7 +41,8 @@ Risultato atteso:
 - l'agente riconosce il bisogno come App Factory;
 - produce o usa un blueprint compatibile;
 - chiama `create_internal_app`;
-- restituisce un link interno simile a `/apps/ferie-permessi`.
+- restituisce un link Studio simile a `/apps/ferie-permessi`;
+- dalla pagina Studio si puo' aprire l'app esterna `/a/ferie-permessi`.
 
 ## Fallback Blueprint
 
@@ -67,11 +70,29 @@ Aprire la chat, inviare il prompt e spiegare che Homun non genera codice arbitra
 
 Mostrare la risposta dell'agente e il link `/apps/ferie-permessi`.
 
-3:00 - Aprire l'interfaccia.
+3:00 - Preparare gli accessi app-local.
 
-Aprire `/apps`, entrare in "Ferie e Permessi", mostrare tabella, form e azioni. Sottolineare che l'app usa uno storage isolato per-app.
+Aprire `/apps/ferie-permessi` e nel pannello "External access" creare:
 
-4:00 - Inserire una richiesta.
+- Email: `employee@example.com`
+- Nome: `Mario Rossi`
+- Ruolo: `employee`
+- Password: `Password123!`
+
+Poi creare:
+
+- Email: `approver@example.com`
+- Nome: `Responsabile HR`
+- Ruolo: `approver`
+- Password: `Password123!`
+
+Sottolineare che questi utenti appartengono solo all'app generata: non sono account Homun.
+
+4:00 - Aprire l'app esterna.
+
+Aprire `/a/ferie-permessi/login` in una finestra privata, accedere come `employee@example.com`, mostrare interfaccia separata da Homun Studio.
+
+5:00 - Inserire una richiesta.
 
 Creare una richiesta con questi dati:
 
@@ -82,11 +103,11 @@ Creare una richiesta con questi dati:
 - Note: `Vacanza famiglia`
 - Stato: lasciare `pending`, se presente
 
-5:00 - Approvare.
+6:00 - Approvare.
 
-Selezionare la richiesta e usare l'azione `Approva`. Verificare che lo stato diventi `approved`.
+Fare logout, accedere come `approver@example.com`, selezionare la richiesta e usare l'azione `Approva`. Verificare che lo stato diventi `approved`.
 
-6:00 - Interrogare dalla chat.
+7:00 - Interrogare dalla chat.
 
 Usare:
 
@@ -99,8 +120,10 @@ Risultato atteso: l'agente usa gli strumenti App Factory per leggere i record de
 ## Schermate Attese
 
 - `/apps`: elenco app interne con la card "Ferie e Permessi".
-- `/apps/ferie-permessi`: runtime app con form e tabella.
-- Dettaglio richiesta: record selezionato con stato e azioni `Approva` / `Rifiuta`.
+- `/apps/ferie-permessi`: Studio app con link pubblico e gestione utenti app-local.
+- `/a/ferie-permessi/login`: login separato dell'app.
+- `/a/ferie-permessi`: runtime app esterno con form, tabella e azioni.
+- Dettaglio richiesta: record selezionato con stato e azioni `Approva` / `Rifiuta` per il ruolo responsabile.
 - Chat: risposta dell'agente basata su `query_app_records`.
 
 ## Fallback Operativi
@@ -111,6 +134,7 @@ Risultato atteso: l'agente usa gli strumenti App Factory per leggere i record de
 | I tool App Factory non sono visibili | Riavviare il gateway e verificare la registrazione degli agent tools. |
 | Il blueprint live non e' valido | Usare il blueprint pre-seed in `docs/demo/blueprints/ferie-permessi.json`. |
 | L'app esiste gia' | Continuare con `/apps/ferie-permessi` oppure generare uno slug alternativo. |
+| Login app esterna non riuscito | Ricreare l'utente dal pannello "External access" con password `Password123!`. |
 | La UI non crea il record | Creare il record dalla chat con `create_app_record` tramite l'agente. |
 | L'azione non aggiorna lo stato | Mostrare il record e proseguire spiegando il workflow dichiarativo previsto dal blueprint. |
 | Email o WhatsApp non sono pronti | Presentare tutto dalla Web UI; i gateway esterni non sono necessari per questa demo. |
@@ -118,7 +142,9 @@ Risultato atteso: l'agente usa gli strumenti App Factory per leggere i record de
 ## Success Criteria
 
 - L'app viene creata o recuperata.
-- L'app e' raggiungibile da `/apps/ferie-permessi`.
+- L'app e' gestibile da `/apps/ferie-permessi`.
+- L'app esterna e' raggiungibile da `/a/ferie-permessi`.
+- Dipendente e responsabile accedono con credenziali app-local.
 - Un record di richiesta ferie viene salvato.
 - Una transizione di workflow aggiorna lo stato a `approved`.
 - La chat riesce a interrogare i dati dell'app.
