@@ -1,6 +1,7 @@
 mod account;
 mod agents;
 mod approvals;
+mod apps;
 mod automations;
 mod browser;
 mod browser_sites;
@@ -82,6 +83,7 @@ pub fn router() -> Router<Arc<AppState>> {
         // --- Connection Recipes ---
         .merge(connections::routes())
         .merge(automations::routes())
+        .merge(apps::routes())
         // --- Maintenance ---
         .merge(maintenance::routes())
         // --- Usage ---

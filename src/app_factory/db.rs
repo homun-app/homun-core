@@ -35,6 +35,16 @@ pub struct AppRecordRow {
     pub updated_at: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct AppEventRow {
+    pub id: i64,
+    pub record_id: Option<i64>,
+    pub event_type: String,
+    pub payload_json: String,
+    pub actor_user_id: Option<String>,
+    pub created_at: String,
+}
+
 pub fn app_db_path(data_dir: &Path, user_id: &str, app_slug: &str) -> PathBuf {
     data_dir
         .join("apps")
@@ -234,6 +244,89 @@ pub async fn list_records(
     .await?;
 
     Ok(rows)
+}
+
+pub async fn load_record(app_pool: &SqlitePool, record_id: i64) -> Result<Option<AppRecordRow>> {
+    let row = sqlx::query_as::<_, AppRecordRow>(
+        "SELECT id, entity_name, data_json, status, created_by_user_id, created_at, updated_at
+         FROM app_records
+         WHERE id = ?",
+    )
+    .bind(record_id)
+    .fetch_optional(app_pool)
+    .await?;
+
+    Ok(row)
+}
+
+pub async fn update_record_data(
+    app_pool: &SqlitePool,
+    record_id: i64,
+    data: &serde_json::Value,
+    status: Option<&str>,
+) -> Result<()> {
+    let data_json = serde_json::to_string(data)?;
+    sqlx::query(
+        "UPDATE app_records
+         SET data_json = ?, status = ?, updated_at = datetime('now')
+         WHERE id = ?",
+    )
+    .bind(data_json)
+    .bind(status)
+    .bind(record_id)
+    .execute(app_pool)
+    .await
+    .context("Failed to update app record")?;
+
+    Ok(())
+}
+
+pub async fn insert_app_event(
+    app_pool: &SqlitePool,
+    record_id: Option<i64>,
+    event_type: &str,
+    payload: &serde_json::Value,
+    actor_user_id: Option<&str>,
+) -> Result<i64> {
+    let id = sqlx::query_scalar::<_, i64>(
+        "INSERT INTO app_events (record_id, event_type, payload_json, actor_user_id)
+         VALUES (?, ?, ?, ?)
+         RETURNING id",
+    )
+    .bind(record_id)
+    .bind(event_type)
+    .bind(serde_json::to_string(payload)?)
+    .bind(actor_user_id)
+    .fetch_one(app_pool)
+    .await
+    .context("Failed to insert app event")?;
+
+    Ok(id)
+}
+
+pub async fn insert_internal_app_event(
+    control_pool: &SqlitePool,
+    app_id: i64,
+    record_id: Option<i64>,
+    event_type: &str,
+    payload: &serde_json::Value,
+    actor_user_id: Option<&str>,
+) -> Result<i64> {
+    let id = sqlx::query_scalar::<_, i64>(
+        "INSERT INTO internal_app_events (app_id, record_id, event_type, payload_json, actor_user_id)
+         VALUES (?, ?, ?, ?, ?)
+         RETURNING id",
+    )
+    .bind(app_id)
+    .bind(record_id)
+    .bind(event_type)
+    .bind(serde_json::to_string(payload)?)
+    .bind(actor_user_id)
+    .fetch_one(control_pool)
+    .await
+    .context("Failed to insert internal app event")?;
+
+    Ok(id)
 }
 
 #[cfg(test)]
