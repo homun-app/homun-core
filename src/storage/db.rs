@@ -3002,6 +3002,13 @@ impl super::traits::RagStore for Database {
     async fn count_rag_sources(&self) -> Result<i64> {
         Database::count_rag_sources(self).await
     }
+    async fn count_rag_sources_for_user(
+        &self,
+        user_id: &str,
+        profile_id: Option<i64>,
+    ) -> Result<i64> {
+        Database::count_rag_sources_for_user(self, user_id, profile_id).await
+    }
     async fn insert_rag_chunk(
         &self,
         source_id: i64,
@@ -3044,6 +3051,13 @@ impl super::traits::RagStore for Database {
     }
     async fn count_rag_chunks(&self) -> Result<i64> {
         Database::count_rag_chunks(self).await
+    }
+    async fn count_rag_chunks_for_user(
+        &self,
+        user_id: &str,
+        profile_id: Option<i64>,
+    ) -> Result<i64> {
+        Database::count_rag_chunks_for_user(self, user_id, profile_id).await
     }
     async fn load_rag_chunks_by_source(&self, source_id: i64) -> Result<Vec<RagChunkRow>> {
         Database::load_rag_chunks_by_source(self, source_id).await

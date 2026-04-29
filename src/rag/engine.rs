@@ -458,6 +458,24 @@ impl RagEngine {
         })
     }
 
+    /// Get knowledge base stats scoped to an owner user.
+    pub async fn stats_for_user(&self, user_id: &str, profile_id: Option<i64>) -> Result<RagStats> {
+        Ok(RagStats {
+            source_count: self
+                .store
+                .count_rag_sources_for_user(user_id, profile_id)
+                .await
+                .unwrap_or(0),
+            chunk_count: self
+                .store
+                .count_rag_chunks_for_user(user_id, profile_id)
+                .await
+                .unwrap_or(0),
+            // The vector index is process-wide. Keep exposing it as engine health, not visibility.
+            index_vectors: self.engine.len(),
+        })
+    }
+
     /// Rebuild the HNSW index from all chunks in the database.
     pub async fn reindex_all(&mut self) -> Result<usize> {
         let sources = self.store.list_rag_sources().await?;

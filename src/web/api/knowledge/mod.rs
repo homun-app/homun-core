@@ -57,13 +57,18 @@ mod inner {
     }
 
     /// GET /api/v1/knowledge/stats
-    async fn knowledge_stats(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    async fn knowledge_stats(
+        State(state): State<Arc<AppState>>,
+        axum::Extension(auth): axum::Extension<AuthUser>,
+        Query(params): Query<HashMap<String, String>>,
+    ) -> impl IntoResponse {
         let Some(ref rag) = state.rag_engine else {
             return Json(serde_json::json!({"error": "Knowledge base not initialized"}))
                 .into_response();
         };
+        let profile_id = resolve_profile_id(&state, &auth.user_id, &params).await;
         let engine = rag.lock().await;
-        match engine.stats().await {
+        match engine.stats_for_user(&auth.user_id, profile_id).await {
             Ok(stats) => Json(serde_json::json!(stats)).into_response(),
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,

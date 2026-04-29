@@ -377,12 +377,62 @@ impl Database {
         Ok(count)
     }
 
+    /// Count RAG chunks owned by a user, optionally filtered by profile visibility.
+    pub async fn count_rag_chunks_for_user(
+        &self,
+        user_id: &str,
+        profile_id: Option<i64>,
+    ) -> Result<i64> {
+        let count = if let Some(pid) = profile_id {
+            sqlx::query_scalar(
+                "SELECT COUNT(*) FROM rag_chunks
+                 WHERE user_id = ? AND (profile_id IS NULL OR profile_id = ?)",
+            )
+            .bind(user_id)
+            .bind(pid)
+            .fetch_one(self.pool())
+            .await
+        } else {
+            sqlx::query_scalar("SELECT COUNT(*) FROM rag_chunks WHERE user_id = ?")
+                .bind(user_id)
+                .fetch_one(self.pool())
+                .await
+        }
+        .context("Failed to count user RAG chunks")?;
+        Ok(count)
+    }
+
     /// Count total document sources.
     pub async fn count_rag_sources(&self) -> Result<i64> {
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM rag_sources")
             .fetch_one(self.pool())
             .await
             .context("Failed to count RAG sources")?;
+        Ok(count)
+    }
+
+    /// Count document sources owned by a user, optionally filtered by profile visibility.
+    pub async fn count_rag_sources_for_user(
+        &self,
+        user_id: &str,
+        profile_id: Option<i64>,
+    ) -> Result<i64> {
+        let count = if let Some(pid) = profile_id {
+            sqlx::query_scalar(
+                "SELECT COUNT(*) FROM rag_sources
+                 WHERE user_id = ? AND (profile_id IS NULL OR profile_id = ?)",
+            )
+            .bind(user_id)
+            .bind(pid)
+            .fetch_one(self.pool())
+            .await
+        } else {
+            sqlx::query_scalar("SELECT COUNT(*) FROM rag_sources WHERE user_id = ?")
+                .bind(user_id)
+                .fetch_one(self.pool())
+                .await
+        }
+        .context("Failed to count user RAG sources")?;
         Ok(count)
     }
 

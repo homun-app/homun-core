@@ -246,6 +246,13 @@ pub trait RagStore: Send + Sync {
     /// Count total document sources.
     async fn count_rag_sources(&self) -> Result<i64>;
 
+    /// Count document sources owned by a user, optionally filtered by profile.
+    async fn count_rag_sources_for_user(
+        &self,
+        user_id: &str,
+        profile_id: Option<i64>,
+    ) -> Result<i64>;
+
     /// Insert a document chunk. Returns the chunk ID.
     async fn insert_rag_chunk(
         &self,
@@ -277,6 +284,13 @@ pub trait RagStore: Send + Sync {
 
     /// Count total RAG chunks.
     async fn count_rag_chunks(&self) -> Result<i64>;
+
+    /// Count RAG chunks owned by a user, optionally filtered by profile.
+    async fn count_rag_chunks_for_user(
+        &self,
+        user_id: &str,
+        profile_id: Option<i64>,
+    ) -> Result<i64>;
 
     /// Load all chunks for a specific source.
     async fn load_rag_chunks_by_source(&self, source_id: i64) -> Result<Vec<RagChunkRow>>;
