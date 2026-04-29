@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
 use axum::response::{Html, IntoResponse};
 use axum::routing::get;
 use axum::{Extension, Router};
@@ -15,6 +15,8 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/chat", get(chat_page))
         .route("/automations", get(automations_page))
         .route("/workflows", get(workflows_page))
+        .route("/apps", get(apps_page))
+        .route("/apps/{slug}", get(app_detail_page))
         .route("/skills", get(skills_page))
         .route("/mcp", get(mcp_page))
         .route("/agents", get(agents_page))
@@ -76,7 +78,7 @@ const ICON_SYSTEM: &str = r#"<svg viewBox="0 0 18 18" fill="none" stroke="curren
 const ICON_ESTOP: &str = r#"<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6,1 12,1 17,6 17,12 12,17 6,17 1,12 1,6"/><rect x="6.5" y="6.5" width="5" height="5" rx="0.8"/></svg>"#;
 
 /// Pages that belong to the "Automation" sub-navigation group.
-const AUTOMATION_PAGES: &[&str] = &["automations", "workflows"];
+const AUTOMATION_PAGES: &[&str] = &["automations", "workflows", "apps"];
 /// Pages that belong to the "Brain" sub-navigation group.
 const BRAIN_PAGES: &[&str] = &["memory", "knowledge", "contacts", "profiles"];
 /// Pages that belong to the "Extensions" sub-navigation group.
@@ -186,9 +188,11 @@ fn content_subnav(active: &str) -> String {
                 <div class="sidebar-subnav-header">AUTOMATION{toggle}</div>
                 <a href="/automations" class="sidebar-subnav-link{0}">Automations</a>
                 <a href="/workflows" class="sidebar-subnav-link{1}">Workflows</a>
+                <a href="/apps" class="sidebar-subnav-link{2}">Apps</a>
             </aside>"#,
             a("automations"),
             a("workflows"),
+            a("apps"),
             toggle = SUBNAV_TOGGLE,
         )
     } else if BRAIN_PAGES.contains(&active) {
@@ -1048,6 +1052,51 @@ async fn workflows_page() -> Html<String> {
         </main>"#;
 
     Html(page_html("Workflows", "workflows", body, &["workflows.js"]))
+}
+
+// ─── Internal Apps ───────────────────────────────────────────────
+
+async fn apps_page() -> Html<String> {
+    let body = r#"<main class="content">
+        <div class="content-inner app-runtime-page">
+            <div class="page-header app-runtime-header">
+                <div class="page-title-group">
+                    <h1 class="page-title">Apps</h1>
+                    <span class="badge badge-info" id="apps-count">0</span>
+                </div>
+                <div class="actions">
+                    <button class="btn btn-secondary btn-sm" id="btn-apps-refresh">Refresh</button>
+                </div>
+            </div>
+
+            <section class="app-runtime-section">
+                <div id="apps-list" class="app-list-grid">
+                    <div class="empty-state">
+                        <p>Loading apps...</p>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>"#;
+
+    Html(page_html("Apps", "apps", body, &["apps.js"]))
+}
+
+async fn app_detail_page(Path(slug): Path<String>) -> Html<String> {
+    let escaped_slug = html_escape(&slug);
+    let body = format!(
+        r#"<main class="content">
+        <div class="content-inner app-runtime-page">
+            <div id="app-runtime" class="app-runtime-shell" data-app-slug="{escaped_slug}">
+                <div class="app-runtime-loading empty-state">
+                    <p>Loading app...</p>
+                </div>
+            </div>
+        </div>
+    </main>"#
+    );
+
+    Html(page_html("App", "apps", &body, &["apps.js"]))
 }
 
 // ─── Skills ─────────────────────────────────────────────────────

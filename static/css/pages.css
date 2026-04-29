@@ -4519,3 +4519,264 @@
     .traces-list-pane { border-right: none; border-bottom: 1px solid var(--border); height: 280px; }
 }
 
+/* ═══ Internal Apps Runtime ═══ */
+
+.app-runtime-page {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    min-height: 100%;
+}
+
+.app-runtime-header {
+    align-items: flex-start;
+    gap: 14px;
+}
+
+.app-runtime-section {
+    min-height: 0;
+}
+
+.app-list-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 14px;
+}
+
+.app-list-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 172px;
+    padding: 16px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--r-md);
+    background: var(--surface);
+    color: inherit;
+    text-decoration: none;
+    transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease), transform var(--fast) var(--ease);
+}
+
+.app-list-card:hover {
+    border-color: var(--border);
+    box-shadow: var(--shadow-sm);
+    transform: translateY(-1px);
+}
+
+.app-list-card-top,
+.app-list-meta,
+.app-runtime-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.app-list-card-top {
+    justify-content: space-between;
+}
+
+.app-list-icon {
+    display: inline-flex;
+    width: 30px;
+    height: 30px;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--r-md);
+    background: var(--surface-inset);
+    color: var(--accent);
+}
+
+.app-list-icon svg {
+    width: 16px;
+    height: 16px;
+}
+
+.app-list-status,
+.app-status-pill {
+    display: inline-flex;
+    align-items: center;
+    min-height: 22px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--surface-inset);
+    color: var(--t3);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+}
+
+.app-list-title {
+    margin: 0;
+    color: var(--t1);
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+.app-list-desc {
+    margin: 0;
+    color: var(--t3);
+    font-size: 13px;
+    line-height: 1.4;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.app-list-meta {
+    margin-top: auto;
+    color: var(--t4);
+    font-size: 12px;
+}
+
+.app-runtime-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-height: 0;
+}
+
+.app-runtime-tabs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 34px;
+    overflow-x: auto;
+}
+
+.app-runtime-tab {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--r-md);
+    background: var(--surface);
+    color: var(--t3);
+    padding: 7px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.app-runtime-tab:hover,
+.app-runtime-tab.active {
+    border-color: var(--border);
+    color: var(--t1);
+    background: var(--surface-hover);
+}
+
+.app-runtime-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 340px;
+    gap: 16px;
+    min-height: 0;
+}
+
+.app-runtime-main,
+.app-runtime-form {
+    min-width: 0;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--r-md);
+    background: var(--surface);
+}
+
+.app-runtime-main {
+    overflow: hidden;
+}
+
+.app-runtime-form {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.app-runtime-form h2 {
+    margin: 0;
+    color: var(--t1);
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.app-runtime-table-wrap {
+    overflow: auto;
+    min-height: 240px;
+}
+
+.app-runtime-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.app-runtime-table th,
+.app-runtime-table td {
+    padding: 11px 12px;
+    border-bottom: 1px solid var(--border-subtle);
+    text-align: left;
+    vertical-align: middle;
+}
+
+.app-runtime-table th {
+    color: var(--t4);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.app-runtime-table tbody tr {
+    cursor: pointer;
+}
+
+.app-runtime-table tbody tr:hover {
+    background: var(--surface-hover);
+}
+
+.app-record-form,
+.app-field {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.app-record-form {
+    gap: 12px;
+}
+
+.app-field span {
+    color: var(--t3);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.app-submit-btn {
+    justify-content: center;
+}
+
+.app-record-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.app-detail-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-subtle);
+    color: var(--t3);
+    font-size: 12px;
+}
+
+.app-detail-row strong {
+    color: var(--t1);
+    font-weight: 600;
+    text-align: right;
+    word-break: break-word;
+}
+
+@media (max-width: 980px) {
+    .app-runtime-layout {
+        grid-template-columns: 1fr;
+    }
+}
