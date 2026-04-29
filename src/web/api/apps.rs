@@ -34,6 +34,12 @@ struct CreateAppRequest {
 }
 
 #[derive(Debug, Deserialize)]
+struct UpdateBlueprintRequest {
+    blueprint: AppBlueprint,
+    change_note: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct CreateRecordRequest {
     data: Value,
 }
@@ -61,6 +67,25 @@ struct AppView {
     status: String,
     created_at: String,
     updated_at: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct AppBlueprintView {
+    app_id: i64,
+    slug: String,
+    schema_version: i64,
+    blueprint: AppBlueprint,
+}
+
+#[derive(Debug, Serialize)]
+struct AppVersionView {
+    id: i64,
+    app_id: i64,
+    version_number: i64,
+    blueprint: AppBlueprint,
+    change_note: Option<String>,
+    created_by_user_id: Option<String>,
+    created_at: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -103,6 +128,11 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
             "/v1/apps/{slug}/bridge-policy",
             get(get_bridge_policy).put(update_bridge_policy),
         )
+        .route(
+            "/v1/apps/{slug}/blueprint",
+            get(get_blueprint).put(update_blueprint),
+        )
+        .route("/v1/apps/{slug}/versions", get(list_app_versions))
         .route(
             "/v1/apps/{slug}/entities/{entity}/records",
             get(list_records).post(create_record),
@@ -172,6 +202,29 @@ fn app_view(row: app_db::InternalAppRow) -> Result<AppView, ApiErr> {
         status: row.status,
         created_at: row.created_at,
         updated_at: row.updated_at,
+    })
+}
+
+fn app_blueprint_view(row: &app_db::InternalAppRow) -> Result<AppBlueprintView, ApiErr> {
+    let blueprint = serde_json::from_str::<AppBlueprint>(&row.blueprint_json).map_err(internal)?;
+    Ok(AppBlueprintView {
+        app_id: row.id,
+        slug: row.slug.clone(),
+        schema_version: row.schema_version,
+        blueprint,
+    })
+}
+
+fn app_version_view(row: app_db::InternalAppVersionRow) -> Result<AppVersionView, ApiErr> {
+    let blueprint = serde_json::from_str::<AppBlueprint>(&row.blueprint_json).map_err(internal)?;
+    Ok(AppVersionView {
+        id: row.id,
+        app_id: row.app_id,
+        version_number: row.version_number,
+        blueprint,
+        change_note: row.change_note,
+        created_by_user_id: row.created_by_user_id,
+        created_at: row.created_at,
     })
 }
 
@@ -296,6 +349,72 @@ async fn get_app(
     let db = require_db(&state)?;
     let (row, _) = load_owned_app(db, &auth, &slug).await?;
     Ok(Json(app_view(row)?))
+}
+
+async fn get_blueprint(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+    Path(slug): Path<String>,
+) -> Result<Json<AppBlueprintView>, ApiErr> {
+    let db = require_db(&state)?;
+    let (row, _) = load_owned_app(db, &auth, &slug).await?;
+
+    Ok(Json(app_blueprint_view(&row)?))
+}
+
+async fn update_blueprint(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+    Path(slug): Path<String>,
+    Json(body): Json<UpdateBlueprintRequest>,
+) -> Result<Json<AppBlueprintView>, ApiErr> {
+    require_write(&auth)?;
+    if body.blueprint.app.slug != slug {
+        return Err(bad_request(
+            "Changing an app slug is not supported by the blueprint editor yet",
+        ));
+    }
+    validation::validate_blueprint(&body.blueprint).map_err(|report| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Invalid blueprint", "details": report.errors})),
+        )
+    })?;
+
+    let db = require_db(&state)?;
+    let (app, _) = load_owned_app(db, &auth, &slug).await?;
+    app_db::update_app_blueprint(
+        db.pool(),
+        app.id,
+        &body.blueprint,
+        body.change_note.as_deref(),
+        Some(&auth.user_id),
+    )
+    .await
+    .map_err(internal)?;
+    let updated = app_db::load_app_for_user(db.pool(), &auth.user_id, &slug)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| internal("Updated app was not found"))?;
+
+    Ok(Json(app_blueprint_view(&updated)?))
+}
+
+async fn list_app_versions(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+    Path(slug): Path<String>,
+) -> Result<Json<Vec<AppVersionView>>, ApiErr> {
+    let db = require_db(&state)?;
+    let (app, _) = load_owned_app(db, &auth, &slug).await?;
+    let versions = app_db::list_app_versions(db.pool(), app.id)
+        .await
+        .map_err(internal)?
+        .into_iter()
+        .map(app_version_view)
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(Json(versions))
 }
 
 async fn list_app_users(
