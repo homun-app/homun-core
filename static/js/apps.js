@@ -10,7 +10,8 @@
         search: '',
         relationRecords: {},
         appUsers: [],
-        appVersions: []
+        appVersions: [],
+        bridgePolicy: null
     };
 
     function qs(selector, root) {
@@ -246,6 +247,7 @@
 
         root.appendChild(renderSummary());
         root.appendChild(renderStudioPanel());
+        root.appendChild(renderBridgePolicyPanel());
         root.appendChild(renderBlueprintPanel());
 
         var tabs = el('div', 'app-runtime-tabs');
@@ -394,6 +396,139 @@
             });
         });
         return form;
+    }
+
+    function defaultBridgePolicy() {
+        return {
+            profiles: [],
+            contacts: { read: [], link_app_users: false },
+            channels: { send: [], receive: [] },
+            knowledge_namespaces: [],
+            tools: [],
+            writeback: []
+        };
+    }
+
+    function normalizeBridgePolicy(policy) {
+        var base = defaultBridgePolicy();
+        policy = policy || {};
+        return {
+            profiles: Array.isArray(policy.profiles) ? policy.profiles : base.profiles,
+            contacts: {
+                read: policy.contacts && Array.isArray(policy.contacts.read) ? policy.contacts.read : [],
+                link_app_users: !!(policy.contacts && policy.contacts.link_app_users)
+            },
+            channels: {
+                send: policy.channels && Array.isArray(policy.channels.send) ? policy.channels.send : [],
+                receive: policy.channels && Array.isArray(policy.channels.receive) ? policy.channels.receive : []
+            },
+            knowledge_namespaces: Array.isArray(policy.knowledge_namespaces) ? policy.knowledge_namespaces : [],
+            tools: Array.isArray(policy.tools) ? policy.tools : [],
+            writeback: Array.isArray(policy.writeback) ? policy.writeback : []
+        };
+    }
+
+    function csvToList(value) {
+        return String(value || '')
+            .split(',')
+            .map(function (item) { return item.trim(); })
+            .filter(Boolean)
+            .filter(function (item, index, all) { return all.indexOf(item) === index; });
+    }
+
+    function listToCsv(value) {
+        return (value || []).join(', ');
+    }
+
+    function renderBridgePolicyPanel() {
+        var policy = normalizeBridgePolicy(state.bridgePolicy);
+        var panel = el('section', 'app-bridge-panel');
+        var header = el('div', 'app-studio-panel-header');
+        var title = el('div');
+        title.appendChild(el('h2', '', 'Capabilities'));
+        title.appendChild(el('p', '', 'Allow this app to use selected Homun profiles, channels, knowledge and tools. Empty means denied.'));
+        header.appendChild(title);
+        header.appendChild(el('span', 'app-status-pill', 'fail closed'));
+        panel.appendChild(header);
+
+        var form = el('form', 'app-bridge-form');
+        [
+            ['profiles', 'Profiles', listToCsv(policy.profiles), 'default, hr'],
+            ['tools', 'Tools / skills', listToCsv(policy.tools), 'send_message, contacts, calendar'],
+            ['knowledge_namespaces', 'Knowledge namespaces', listToCsv(policy.knowledge_namespaces), 'hr-policy, company-handbook'],
+            ['channels_send', 'Channels send', listToCsv(policy.channels.send), 'email, telegram'],
+            ['channels_receive', 'Channels receive', listToCsv(policy.channels.receive), 'email'],
+            ['contacts_read', 'Contacts read', listToCsv(policy.contacts.read), 'hr-team, managers'],
+            ['writeback', 'Writeback scopes', listToCsv(policy.writeback), 'memory, app_events']
+        ].forEach(function (field) {
+            var label = el('label', 'app-field');
+            label.appendChild(el('span', '', field[1]));
+            var input = document.createElement('input');
+            input.className = 'input';
+            input.name = field[0];
+            input.value = field[2];
+            input.placeholder = field[3];
+            label.appendChild(input);
+            form.appendChild(label);
+        });
+
+        var linkUsers = el('label', 'app-bridge-checkbox');
+        var checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.name = 'link_app_users';
+        checkbox.checked = !!policy.contacts.link_app_users;
+        linkUsers.appendChild(checkbox);
+        linkUsers.appendChild(el('span', '', 'Allow linking app users to Homun contacts'));
+        form.appendChild(linkUsers);
+
+        var error = el('p', 'external-error');
+        var actions = el('div', 'actions');
+        var save = el('button', 'btn btn-primary btn-sm', 'Save capabilities');
+        save.type = 'submit';
+        actions.appendChild(save);
+        var deny = el('button', 'btn btn-secondary btn-sm', 'Deny all');
+        deny.type = 'button';
+        deny.addEventListener('click', function () {
+            saveBridgePolicy(defaultBridgePolicy(), error);
+        });
+        actions.appendChild(deny);
+        form.appendChild(actions);
+        form.appendChild(error);
+        form.addEventListener('submit', function (event) {
+            event.preventDefault();
+            saveBridgePolicy({
+                profiles: csvToList(form.elements.profiles.value),
+                contacts: {
+                    read: csvToList(form.elements.contacts_read.value),
+                    link_app_users: !!form.elements.link_app_users.checked
+                },
+                channels: {
+                    send: csvToList(form.elements.channels_send.value),
+                    receive: csvToList(form.elements.channels_receive.value)
+                },
+                knowledge_namespaces: csvToList(form.elements.knowledge_namespaces.value),
+                tools: csvToList(form.elements.tools.value),
+                writeback: csvToList(form.elements.writeback.value)
+            }, error);
+        });
+        panel.appendChild(form);
+        return panel;
+    }
+
+    function saveBridgePolicy(policy, error) {
+        if (error) error.textContent = '';
+        return api('/api/v1/apps/' + encodeURIComponent(state.app.slug) + '/bridge-policy', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(policy)
+        }).then(function (saved) {
+            state.bridgePolicy = normalizeBridgePolicy(saved);
+            if (window.showToast) window.showToast('Capabilities saved', 'success');
+            renderRuntime();
+        }).catch(function (err) {
+            if (error) error.textContent = err.message;
+            else if (window.showToast) window.showToast(err.message, 'error', 4000);
+        });
     }
 
     function renderBlueprintPanel() {
@@ -781,8 +916,9 @@
                 state.relationRecords = {};
                 state.appUsers = [];
                 state.appVersions = [];
+                state.bridgePolicy = null;
                 renderRuntime();
-                return Promise.all([loadActiveRecords(), loadAppUsers(), loadAppVersions()]);
+                return Promise.all([loadActiveRecords(), loadAppUsers(), loadAppVersions(), loadBridgePolicy()]);
             })
             .catch(function (err) {
                 var root = qs('#app-runtime');
@@ -807,6 +943,18 @@
         return api('/api/v1/apps/' + encodeURIComponent(state.app.slug) + '/versions')
             .then(function (versions) {
                 state.appVersions = versions || [];
+                renderRuntime();
+            })
+            .catch(function (err) {
+                if (window.showToast) window.showToast(err.message, 'error', 4000);
+            });
+    }
+
+    function loadBridgePolicy() {
+        if (!state.app) return Promise.resolve();
+        return api('/api/v1/apps/' + encodeURIComponent(state.app.slug) + '/bridge-policy')
+            .then(function (policy) {
+                state.bridgePolicy = normalizeBridgePolicy(policy);
                 renderRuntime();
             })
             .catch(function (err) {

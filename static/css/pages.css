@@ -4665,6 +4665,16 @@
     background: var(--surface);
 }
 
+.app-bridge-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--r-md);
+    background: var(--surface);
+}
+
 .app-studio-panel-header,
 .app-studio-users-layout,
 .app-studio-user-row {
@@ -4680,7 +4690,9 @@
 .app-studio-panel h2,
 .app-studio-panel h3,
 .app-blueprint-panel h2,
-.app-blueprint-panel h3 {
+.app-blueprint-panel h3,
+.app-bridge-panel h2,
+.app-bridge-panel h3 {
     margin: 0;
     color: var(--t1);
     font-size: 15px;
@@ -4688,10 +4700,36 @@
 }
 
 .app-studio-panel p,
-.app-blueprint-panel p {
+.app-blueprint-panel p,
+.app-bridge-panel p {
     margin: 4px 0 0;
     color: var(--t3);
     font-size: 13px;
+}
+
+.app-bridge-form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.app-bridge-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--t2);
+    font-size: 13px;
+}
+
+.app-bridge-checkbox input {
+    width: 16px;
+    height: 16px;
+}
+
+.app-bridge-form .actions,
+.app-bridge-form .external-error,
+.app-bridge-checkbox {
+    grid-column: 1 / -1;
 }
 
 .app-blueprint-layout {
@@ -4991,6 +5029,10 @@
     }
 
     .app-blueprint-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .app-bridge-form {
         grid-template-columns: 1fr;
     }
 
