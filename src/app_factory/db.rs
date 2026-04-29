@@ -285,6 +285,26 @@ pub async fn load_app_for_user(
     Ok(row)
 }
 
+pub async fn load_app_by_slug(
+    control_pool: &SqlitePool,
+    slug: &str,
+) -> Result<Option<InternalAppRow>> {
+    let row = sqlx::query_as::<_, InternalAppRow>(
+        "SELECT id, user_id, profile_id, slug, name, description, blueprint_json,
+                db_path, schema_version, storage_mode, status, created_at, updated_at
+         FROM internal_apps
+         WHERE slug = ? AND status = 'active'
+         ORDER BY id DESC
+         LIMIT 1",
+    )
+    .bind(slug)
+    .fetch_optional(control_pool)
+    .await
+    .context("Failed to load internal app by slug")?;
+
+    Ok(row)
+}
+
 pub async fn upsert_bridge_policy(
     control_pool: &SqlitePool,
     app_id: i64,

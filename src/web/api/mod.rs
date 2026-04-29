@@ -13,6 +13,7 @@ mod crashes;
 mod devices;
 mod email_accounts;
 mod embeddings;
+mod external_apps;
 mod gateways;
 mod health;
 mod knowledge;
@@ -126,7 +127,9 @@ pub fn router() -> Router<Arc<AppState>> {
 }
 
 pub fn public_router() -> Router<Arc<AppState>> {
-    mobile::public_routes()
+    Router::new()
+        .merge(mobile::public_routes())
+        .merge(external_apps::public_routes())
 }
 
 #[derive(Serialize)]
