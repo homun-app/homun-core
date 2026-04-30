@@ -64,6 +64,32 @@ Add `workflow` when records move through states. Add `dashboard` for apps with a
 - `notifications`: declarative notification intents.
 - `agent_commands`: natural-language intents that map to app actions.
 
+## Exact Schema Requirements
+
+Use these exact keys. Do not invent aliases.
+
+- Root must include `"version": 1`.
+- A view must use `name`, not `label`.
+- A dashboard must use `name`, not `label`.
+- A dashboard widget filter key is `filter`, not `filters`.
+- A workflow transition `from` must be a single string. To allow multiple source states, create multiple transitions with different `name` values.
+- `navigation[].view` must reference an existing view `id` or view `name`.
+- Do not create navigation entries for dashboards unless a matching view exists.
+- Do not put unsupported keys like `filters` on views.
+- Use `description`, not `descrizione`, for app description.
+
+Minimal valid view:
+
+```json
+{"id": "tickets", "type": "table", "entity": "ticket", "name": "Ticket", "columns": ["title", "priority", "status"], "roles": ["admin", "support", "employee"]}
+```
+
+Minimal valid dashboard:
+
+```json
+{"name": "overview", "widgets": [{"type": "count", "entity": "ticket", "label": "Ticket aperti", "filter": {"status": "open"}, "roles": ["admin", "support"]}]}
+```
+
 ## Field Types
 
 Use only:
@@ -243,6 +269,22 @@ Use a ticket entity with:
 - description;
 - priority enum;
 - system workflow status.
+
+Use this exact state model unless the user asks otherwise:
+
+```json
+{
+  "entity": "ticket",
+  "state_field": "status",
+  "initial_state": "open",
+  "states": ["open", "in_progress", "closed"],
+  "transitions": [
+    {"name": "start", "from": "open", "to": "in_progress", "label": "Prendi in carico", "roles": ["admin", "support"]},
+    {"name": "close", "from": "in_progress", "to": "closed", "label": "Chiudi", "roles": ["admin", "support"]},
+    {"name": "reopen", "from": "closed", "to": "open", "label": "Riapri", "roles": ["admin"]}
+  ]
+}
+```
 
 ### CRM mini app
 
