@@ -7,6 +7,17 @@ const MAX_ENTITIES: usize = 12;
 const MAX_FIELDS_PER_ENTITY: usize = 40;
 const MAX_VIEWS: usize = 20;
 const MAX_TRANSITIONS: usize = 20;
+const SUPPORTED_MODULES: &[&str] = &[
+    "identity",
+    "data",
+    "workflow",
+    "navigation",
+    "dashboard",
+    "calendar",
+    "directory",
+    "notifications",
+    "agent_bridge",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidationReport {
@@ -59,6 +70,7 @@ pub fn validate_blueprint(blueprint: &AppBlueprint) -> Result<(), ValidationRepo
             "Blueprint cannot define more than {MAX_VIEWS} views"
         ));
     }
+    validate_modules(blueprint, &mut errors);
 
     let mut entity_names = HashSet::new();
     let mut field_map: HashMap<&str, HashMap<&str, &FieldDefinition>> = HashMap::new();
@@ -89,6 +101,17 @@ pub fn validate_blueprint(blueprint: &AppBlueprint) -> Result<(), ValidationRepo
             validate_len("field.label", &field.label, 1, 80, &mut errors);
             if !seen_fields.insert(field.name.as_str()) {
                 errors.push(format!("Duplicate field '{}.{}'", entity.name, field.name));
+            }
+            if let Some(manager) = field.managed_by.as_deref() {
+                if manager != "workflow" {
+                    errors.push(format!(
+                        "Field '{}.{}' has unsupported managed_by '{}'",
+                        entity.name, field.name, manager
+                    ));
+                }
+            }
+            for role in &field.editable_by {
+                validate_ident("field.editable_by", role, &mut errors);
             }
 
             match field.field_type {
@@ -129,6 +152,7 @@ pub fn validate_blueprint(blueprint: &AppBlueprint) -> Result<(), ValidationRepo
         }
     }
 
+    let mut view_refs = HashSet::new();
     for view in &blueprint.views {
         if !entity_names.contains(view.entity.as_str()) {
             errors.push(format!(
@@ -136,6 +160,11 @@ pub fn validate_blueprint(blueprint: &AppBlueprint) -> Result<(), ValidationRepo
                 view.name, view.entity
             ));
             continue;
+        }
+        view_refs.insert(view.name.clone());
+        if let Some(id) = view.id.as_deref() {
+            validate_ident("view.id", id, &mut errors);
+            view_refs.insert(id.to_string());
         }
         validate_len("view.name", &view.name, 1, 80, &mut errors);
         if view.view_type == ViewType::Table && view.columns.is_empty() {
@@ -150,6 +179,22 @@ pub fn validate_blueprint(blueprint: &AppBlueprint) -> Result<(), ValidationRepo
                     ));
                 }
             }
+        }
+        for role in &view.roles {
+            validate_ident("view.role", role, &mut errors);
+        }
+    }
+
+    for item in &blueprint.navigation {
+        validate_len("navigation.label", &item.label, 1, 80, &mut errors);
+        if !view_refs.contains(&item.view) {
+            errors.push(format!(
+                "Navigation item '{}' references unknown view '{}'",
+                item.label, item.view
+            ));
+        }
+        for role in &item.roles {
+            validate_ident("navigation.role", role, &mut errors);
         }
     }
 
@@ -185,6 +230,14 @@ pub fn validate_blueprint(blueprint: &AppBlueprint) -> Result<(), ValidationRepo
             ));
         }
         let states: HashSet<&str> = workflow.states.iter().map(String::as_str).collect();
+        if let Some(initial_state) = workflow.initial_state.as_deref() {
+            if !states.contains(initial_state) {
+                errors.push(format!(
+                    "Workflow '{}.{}' initial_state '{}' is not listed in states",
+                    workflow.entity, workflow.state_field, initial_state
+                ));
+            }
+        }
         for transition in &workflow.transitions {
             validate_ident("transition.name", &transition.name, &mut errors);
             validate_len("transition.label", &transition.label, 1, 80, &mut errors);
@@ -199,6 +252,9 @@ pub fn validate_blueprint(blueprint: &AppBlueprint) -> Result<(), ValidationRepo
                     "Transition '{}' has unknown to state '{}'",
                     transition.name, transition.to
                 ));
+            }
+            for role in &transition.roles {
+                validate_ident("transition.role", role, &mut errors);
             }
         }
     }
@@ -223,6 +279,28 @@ fn validate_workflow_states_match_enum(
             "Workflow states for '{}.{}' must match enum options",
             workflow.entity, workflow.state_field
         ));
+    }
+}
+
+fn validate_modules(blueprint: &AppBlueprint, errors: &mut Vec<String>) {
+    let mut seen = HashSet::new();
+    for module in &blueprint.modules {
+        validate_ident("module.name", &module.name, errors);
+        if !seen.insert(module.name.as_str()) {
+            errors.push(format!("Duplicate module '{}'", module.name));
+        }
+        if module.version != 1 {
+            errors.push(format!(
+                "Module '{}' version {} is not supported",
+                module.name, module.version
+            ));
+        }
+        if module.required && !SUPPORTED_MODULES.contains(&module.name.as_str()) {
+            errors.push(format!("Unsupported required module '{}'", module.name));
+        }
+        for feature in &module.features {
+            validate_ident("module.feature", feature, errors);
+        }
     }
 }
 
@@ -362,5 +440,94 @@ mod tests {
             .errors
             .iter()
             .any(|e| e.contains("must match enum options")));
+    }
+}
+
+#[cfg(test)]
+mod modular_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn raw_blueprint(extra: serde_json::Value) -> String {
+        let mut base = json!({
+            "version": 1,
+            "app": {"slug": "ferie-permessi", "name": "Ferie e Permessi"},
+            "modules": [
+                {"name": "identity", "version": 1, "features": ["local_users", "roles"], "required": true},
+                {"name": "data", "version": 1, "features": ["ownership"], "required": true},
+                {"name": "workflow", "version": 1, "features": ["state_machine"], "required": true},
+                {"name": "navigation", "version": 1, "features": [], "required": true}
+            ],
+            "entities": [{
+                "name": "leave_request",
+                "label": "Richiesta",
+                "fields": [
+                    {"name": "kind", "type": "enum", "label": "Tipo", "options": ["ferie"], "required": true},
+                    {"name": "status", "type": "enum", "label": "Stato", "options": ["pending", "approved"], "default": "pending", "system": true, "managed_by": "workflow"}
+                ]
+            }],
+            "views": [{"id": "leave_requests", "type": "table", "entity": "leave_request", "name": "Richieste", "columns": ["kind", "status"]}],
+            "workflows": [{
+                "entity": "leave_request",
+                "state_field": "status",
+                "initial_state": "pending",
+                "states": ["pending", "approved"],
+                "transitions": [{"name": "approve", "from": "pending", "to": "approved", "label": "Approva", "roles": ["admin", "approver"]}]
+            }],
+            "roles": [{"name": "admin", "label": "Admin", "permissions": ["*"]}, {"name": "employee", "label": "Dipendente", "permissions": ["leave_request:create"]}],
+            "permissions": [{"role": "employee", "allow": ["leave_request:create", "leave_request:read:own"], "deny": ["leave_request:transition:*"]}],
+            "navigation": [{"label": "Richieste", "view": "leave_requests", "roles": ["admin", "employee"]}]
+        });
+        merge_json(&mut base, extra);
+        serde_json::to_string(&base).unwrap()
+    }
+
+    fn merge_json(base: &mut serde_json::Value, extra: serde_json::Value) {
+        if let (Some(base), Some(extra)) = (base.as_object_mut(), extra.as_object()) {
+            for (key, value) in extra {
+                base.insert(key.clone(), value.clone());
+            }
+        }
+    }
+
+    #[test]
+    fn accepts_supported_modular_blueprint() {
+        let parsed = validate_blueprint_json(&raw_blueprint(json!({}))).unwrap();
+        assert_eq!(parsed.modules.len(), 4);
+    }
+
+    #[test]
+    fn rejects_unknown_required_module() {
+        let err = validate_blueprint_json(&raw_blueprint(json!({
+            "modules": [{"name": "payroll", "version": 1, "required": true}]
+        })))
+        .unwrap_err();
+        assert!(err
+            .errors
+            .iter()
+            .any(|e| e.contains("Unsupported required module 'payroll'")));
+    }
+
+    #[test]
+    fn rejects_workflow_initial_state_not_in_states() {
+        let err = validate_blueprint_json(&raw_blueprint(json!({
+            "workflows": [{"entity": "leave_request", "state_field": "status", "initial_state": "draft", "states": ["pending", "approved"], "transitions": []}]
+        })))
+        .unwrap_err();
+        assert!(err
+            .errors
+            .iter()
+            .any(|e| e.contains("initial_state 'draft' is not listed")));
+    }
+
+    #[test]
+    fn rejects_navigation_unknown_view() {
+        let err = validate_blueprint_json(&raw_blueprint(json!({
+            "navigation": [{"label": "Missing", "view": "missing_view", "roles": ["admin"]}]
+        })))
+        .unwrap_err();
+        assert!(err.errors.iter().any(|e| {
+            e.contains("Navigation item 'Missing' references unknown view 'missing_view'")
+        }));
     }
 }
