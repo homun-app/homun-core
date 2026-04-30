@@ -12,10 +12,20 @@ pub enum RecordScope {
 }
 
 pub fn can_create(blueprint: &AppBlueprint, role: &str, entity: &str) -> bool {
+    if blueprint.permissions.is_empty() {
+        return matches!(role, "admin" | "approver" | "employee");
+    }
     role == "admin" || is_allowed(blueprint, role, &format!("{entity}:create"))
 }
 
 pub fn read_scope(blueprint: &AppBlueprint, role: &str, entity: &str) -> RecordScope {
+    if blueprint.permissions.is_empty() {
+        return if role == "employee" {
+            RecordScope::Own
+        } else {
+            RecordScope::All
+        };
+    }
     if role == "admin" || is_allowed(blueprint, role, &format!("{entity}:read")) {
         return RecordScope::All;
     }
@@ -28,6 +38,9 @@ pub fn read_scope(blueprint: &AppBlueprint, role: &str, entity: &str) -> RecordS
 pub fn can_transition(blueprint: &AppBlueprint, role: &str, entity: &str, action: &str) -> bool {
     if role == "admin" {
         return true;
+    }
+    if blueprint.permissions.is_empty() {
+        return role == "approver" && matches!(action, "approve" | "reject");
     }
 
     let workflow_transition_allows = blueprint

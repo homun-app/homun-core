@@ -9,7 +9,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::app_factory::blueprint::AppBlueprint;
-use crate::app_factory::{bridge::BridgePolicy, db as app_db, external_auth, runtime, validation};
+use crate::app_factory::{
+    bridge::BridgePolicy,
+    db as app_db, external_auth,
+    permissions::{self, RecordScope},
+    runtime, validation,
+};
 use crate::contacts::Contact;
 use crate::web::auth::verify_password;
 use crate::web::server::AppState;
@@ -371,16 +376,21 @@ async fn list_records(
     let rows = app_db::list_records(&app_pool, &entity_name, limit)
         .await
         .map_err(internal)?;
-    app_pool.close().await;
 
-    let app_user_id = user.app_user_id.to_string();
-    let rows = if user.role == "employee" {
-        rows.into_iter()
-            .filter(|row| row.created_by_user_id.as_deref() == Some(app_user_id.as_str()))
-            .collect()
-    } else {
-        rows
+    let rows = match permissions::read_scope(&blueprint, &user.role, &entity_name) {
+        RecordScope::All => rows,
+        RecordScope::Own => {
+            let app_user_id = user.app_user_id.to_string();
+            rows.into_iter()
+                .filter(|row| row.created_by_user_id.as_deref() == Some(app_user_id.as_str()))
+                .collect()
+        }
+        RecordScope::None => {
+            app_pool.close().await;
+            return Err(forbidden("This role cannot read records"));
+        }
     };
+    app_pool.close().await;
 
     Ok(Json(
         rows.into_iter()
@@ -429,12 +439,15 @@ async fn create_record(
     let (app, blueprint, app_pool, user) = require_app_user(&state, &slug, &headers).await?;
     let _bridge_policy = load_bridge_policy_or_deny_all(&state, app.id).await;
     external_auth::ensure_role(
-        external_auth::can_create_record(&user.role),
+        permissions::can_create(&blueprint, &user.role, &entity_name),
         "This role cannot create records",
     )
     .map_err(forbidden)?;
-    let data =
-        runtime::validate_record_data(&blueprint, &entity_name, &body.data).map_err(bad_request)?;
+    let sanitized =
+        permissions::sanitize_create_input(&blueprint, &user.role, &entity_name, &body.data)
+            .map_err(bad_request)?;
+    let data = runtime::validate_record_data(&blueprint, &entity_name, &sanitized)
+        .map_err(bad_request)?;
     let status = record_status(&blueprint, &entity_name, &data);
     let actor_user_id = user.app_user_id.to_string();
     let record_id = app_db::insert_record(
@@ -487,7 +500,7 @@ async fn run_action(
     let (app, blueprint, app_pool, user) = require_app_user(&state, &slug, &headers).await?;
     let _bridge_policy = load_bridge_policy_or_deny_all(&state, app.id).await;
     external_auth::ensure_role(
-        external_auth::can_run_action(&user.role, &action),
+        permissions::can_transition(&blueprint, &user.role, &entity_name, &action),
         "This role cannot run this action",
     )
     .map_err(forbidden)?;

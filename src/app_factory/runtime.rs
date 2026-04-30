@@ -33,7 +33,28 @@ pub fn validate_record_data(
         }
     }
 
+    apply_initial_workflow_state(blueprint, entity_name, &mut out);
+
     Ok(Value::Object(out))
+}
+
+fn apply_initial_workflow_state(
+    blueprint: &AppBlueprint,
+    entity_name: &str,
+    out: &mut Map<String, Value>,
+) {
+    for workflow in blueprint
+        .workflows
+        .iter()
+        .filter(|workflow| workflow.entity == entity_name)
+    {
+        if let Some(initial_state) = workflow.initial_state.as_deref() {
+            out.insert(
+                workflow.state_field.clone(),
+                Value::String(initial_state.to_string()),
+            );
+        }
+    }
 }
 
 fn validate_field_value(field: &FieldDefinition, value: &Value) -> Result<()> {
@@ -127,7 +148,7 @@ mod tests {
             "entities": [
                 {"name": "leave_request", "label": "Richiesta", "fields": [
                     {"name": "kind", "type": "enum", "label": "Tipo", "required": true, "options": ["ferie", "permesso"]},
-                    {"name": "status", "type": "enum", "label": "Stato", "options": ["pending", "approved", "rejected"], "default": "pending"},
+                    {"name": "status", "type": "enum", "label": "Stato", "options": ["pending", "approved", "rejected"], "default": "pending", "system": true, "managed_by": "workflow"},
                     {"name": "days", "type": "number", "label": "Giorni"},
                     {"name": "notes", "type": "text", "label": "Note"}
                 ]}
@@ -136,7 +157,7 @@ mod tests {
                 {"type": "table", "entity": "leave_request", "name": "Richieste", "columns": ["kind", "status"]}
             ],
             "workflows": [
-                {"entity": "leave_request", "state_field": "status", "states": ["pending", "approved", "rejected"], "transitions": [
+                {"entity": "leave_request", "state_field": "status", "initial_state": "pending", "states": ["pending", "approved", "rejected"], "transitions": [
                     {"name": "approve", "from": "pending", "to": "approved", "label": "Approva"},
                     {"name": "reject", "from": "pending", "to": "rejected", "label": "Rifiuta"}
                 ]}
@@ -157,6 +178,23 @@ mod tests {
         assert_eq!(data["kind"], "ferie");
         assert_eq!(data["days"], 3);
         assert_eq!(data["notes"], "Agosto");
+        assert_eq!(data["status"], "pending");
+    }
+
+    #[test]
+    fn create_validation_applies_workflow_initial_state_after_sanitized_input() {
+        let blueprint = leave_blueprint();
+        let sanitized = crate::app_factory::permissions::sanitize_create_input(
+            &blueprint,
+            "employee",
+            "leave_request",
+            &json!({"kind": "ferie", "status": "approved"}),
+        )
+        .unwrap();
+
+        let data = validate_record_data(&blueprint, "leave_request", &sanitized).unwrap();
+
+        assert_eq!(data["kind"], "ferie");
         assert_eq!(data["status"], "pending");
     }
 
