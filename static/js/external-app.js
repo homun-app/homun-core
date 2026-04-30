@@ -57,16 +57,48 @@
         });
     }
 
-    function visibleViews() {
-        var role = state.app.user.role;
-        var views = state.app.blueprint.views || [];
-        if (role === 'employee') {
-            var employeeViews = views.filter(function (view) {
-                return /request|richiest/i.test(view.entity) || /request|richiest/i.test(view.name);
-            });
-            return employeeViews.length ? employeeViews : views;
+    function role() {
+        return state.app && state.app.user ? state.app.user.role : '';
+    }
+
+    function roleAllowed(roles) {
+        return role() === 'admin' || !roles || !roles.length || roles.indexOf(role()) !== -1;
+    }
+
+    function viewRef(view) {
+        return view.id || view.name;
+    }
+
+    function fieldWritable(field) {
+        if (role() === 'admin' && field.managed_by !== 'workflow') return true;
+        if (field.system || field.managed_by) {
+            return (field.editable_by || []).indexOf(role()) !== -1;
         }
-        return views;
+        return !(field.editable_by || []).length || field.editable_by.indexOf(role()) !== -1;
+    }
+
+    function formFields(entity, workflow) {
+        return (entity.fields || []).filter(function (field) {
+            if (workflow && field.name === workflow.state_field) return false;
+            if (field.system || field.managed_by) return false;
+            return fieldWritable(field);
+        });
+    }
+
+    function visibleViews() {
+        var views = state.app.blueprint.views || [];
+        var navigation = state.app.blueprint.navigation || [];
+        if (navigation.length) {
+            return navigation
+                .filter(function (item) { return roleAllowed(item.roles); })
+                .map(function (item) {
+                    return views.find(function (view) {
+                        return viewRef(view) === item.view || view.name === item.view;
+                    });
+                })
+                .filter(Boolean);
+        }
+        return views.filter(function (view) { return roleAllowed(view.roles); });
     }
 
     function currentView() {
@@ -302,8 +334,8 @@
         formWrap.appendChild(title);
 
         var form = el('form', 'external-record-form');
-        (entity.fields || []).forEach(function (field) {
-            if (field.name === (workflowFor(entity.name) || {}).state_field) return;
+        var writableFields = formFields(entity, workflowFor(entity.name));
+        writableFields.forEach(function (field) {
             form.appendChild(renderField(field));
         });
 
@@ -318,7 +350,7 @@
             api('/entities/' + encodeURIComponent(view.entity) + '/records', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ data: formData(entity.fields || [], form) })
+                body: JSON.stringify({ data: formData(writableFields, form) })
             }).then(function () {
                 form.reset();
                 loadRecords();
@@ -398,7 +430,7 @@
         if (!workflow || !state.selected) return;
         var status = selectedStatus(view);
         var transitions = (workflow.transitions || []).filter(function (transition) {
-            return transition.from === status;
+            return transition.from === status && roleAllowed(transition.roles);
         });
         if (!transitions.length) return;
 
