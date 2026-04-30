@@ -33,7 +33,7 @@ Usare questo prompt nella chat:
 Crea un'app interna per gestire ferie e permessi dei dipendenti.
 Serve registrare dipendenti, richieste ferie/permesso/malattia, date, note e stato approvativo.
 Il responsabile deve poter approvare o rifiutare le richieste.
-Genera l'app usando i componenti App Factory predefiniti.
+Genera l'app usando Blueprint v1 modulare con modules, permissions, navigation, workflow initial_state e campi system per lo stato.
 ```
 
 Risultato atteso:
