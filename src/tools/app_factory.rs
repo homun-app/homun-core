@@ -581,6 +581,9 @@ impl Tool for AddAppFieldTool {
             default,
             options,
             to,
+            system: false,
+            managed_by: None,
+            editable_by: Vec::new(),
         });
         if append_to_table_views {
             for view in &mut blueprint.views {
