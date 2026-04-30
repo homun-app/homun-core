@@ -61,6 +61,15 @@ impl AppFactoryCore {
     }
 }
 
+fn parse_blueprint_arg(raw_blueprint: &Value) -> Result<AppBlueprint, String> {
+    match raw_blueprint {
+        Value::String(raw) => serde_json::from_str::<AppBlueprint>(raw)
+            .map_err(|e| format!("Invalid blueprint JSON string: {e}")),
+        value => serde_json::from_value::<AppBlueprint>(value.clone())
+            .map_err(|e| format!("Invalid blueprint JSON: {e}")),
+    }
+}
+
 pub struct CreateInternalAppTool {
     core: AppFactoryCore,
 }
@@ -188,7 +197,10 @@ impl Tool for CreateInternalAppTool {
             "type": "object",
             "properties": {
                 "blueprint": {
-                    "type": "object",
+                    "oneOf": [
+                        {"type": "object"},
+                        {"type": "string"}
+                    ],
                     "description": "Internal app blueprint JSON following the App Factory schema"
                 }
             },
@@ -204,9 +216,9 @@ impl Tool for CreateInternalAppTool {
         let Some(raw_blueprint) = args.get("blueprint") else {
             return Ok(ToolResult::error("Missing required parameter: blueprint"));
         };
-        let blueprint = match serde_json::from_value::<AppBlueprint>(raw_blueprint.clone()) {
+        let blueprint = match parse_blueprint_arg(raw_blueprint) {
             Ok(blueprint) => blueprint,
-            Err(e) => return Ok(ToolResult::error(format!("Invalid blueprint JSON: {e}"))),
+            Err(e) => return Ok(ToolResult::error(e)),
         };
         if let Err(report) = validation::validate_blueprint(&blueprint) {
             return Ok(ToolResult::error(format!(
@@ -301,7 +313,10 @@ impl Tool for UpdateInternalAppTool {
             "properties": {
                 "app_slug": {"type": "string", "description": "Existing internal app slug"},
                 "blueprint": {
-                    "type": "object",
+                    "oneOf": [
+                        {"type": "object"},
+                        {"type": "string"}
+                    ],
                     "description": "Complete updated App Factory blueprint. The app.slug must match app_slug."
                 },
                 "change_note": {
@@ -328,9 +343,9 @@ impl Tool for UpdateInternalAppTool {
         let Some(raw_blueprint) = args.get("blueprint") else {
             return Ok(ToolResult::error("Missing required parameter: blueprint"));
         };
-        let blueprint = match serde_json::from_value::<AppBlueprint>(raw_blueprint.clone()) {
+        let blueprint = match parse_blueprint_arg(raw_blueprint) {
             Ok(blueprint) => blueprint,
-            Err(e) => return Ok(ToolResult::error(format!("Invalid blueprint JSON: {e}"))),
+            Err(e) => return Ok(ToolResult::error(e)),
         };
         if blueprint.app.slug != app_slug {
             return Ok(ToolResult::error(
@@ -1053,6 +1068,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_internal_app_accepts_stringified_blueprint() {
+        let (db, dir) = test_db().await;
+        let tool = CreateInternalAppTool::new(db.clone(), dir.path().to_path_buf());
+        let blueprint = serde_json::to_string(&valid_blueprint()).unwrap();
+
+        let result = tool
+            .execute(json!({"blueprint": blueprint}), &test_context(Some("user-1")))
+            .await
+            .unwrap();
+
+        assert!(!result.is_error, "{}", result.output);
+        assert!(result.output.contains("slug=ferie-permessi"));
+        let app = app_db::load_app_for_user(db.pool(), "user-1", "ferie-permessi")
+            .await
+            .unwrap();
+        assert!(app.is_some());
+    }
+
+    #[tokio::test]
     async fn update_internal_app_saves_new_blueprint_version() {
         let (db, dir) = test_db().await;
         let data_dir = dir.path().to_path_buf();
@@ -1085,6 +1119,39 @@ mod tests {
         assert!(result
             .output
             .contains("Ferie e Permessi -> Ferie e Permessi HR"));
+    }
+
+    #[tokio::test]
+    async fn update_internal_app_accepts_stringified_blueprint() {
+        let (db, dir) = test_db().await;
+        let data_dir = dir.path().to_path_buf();
+        let ctx = test_context(Some("user-1"));
+        let create_app = CreateInternalAppTool::new(db.clone(), data_dir.clone());
+        let update_app = UpdateInternalAppTool::new(db, data_dir);
+        let mut updated = valid_blueprint();
+        updated["app"]["name"] = json!("Ferie e Permessi HR");
+        let updated = serde_json::to_string(&updated).unwrap();
+
+        let created_app = create_app
+            .execute(json!({"blueprint": valid_blueprint()}), &ctx)
+            .await
+            .unwrap();
+        assert!(!created_app.is_error, "{}", created_app.output);
+
+        let result = update_app
+            .execute(
+                json!({
+                    "app_slug": "ferie-permessi",
+                    "blueprint": updated,
+                    "change_note": "Rinomina app"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert!(!result.is_error, "{}", result.output);
+        assert!(result.output.contains("version=2"));
     }
 
     #[tokio::test]
