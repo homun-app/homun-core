@@ -77,6 +77,15 @@
         return (item && item.label) || view.name || humanName(view.entity);
     }
 
+    function iconClass(view) {
+        var label = (navLabel(view) + ' ' + view.entity).toLowerCase();
+        if (/new|nuov|create|form/.test(label)) return 'icon-add';
+        if (/request|richiest|ticket|workflow/.test(label)) return 'icon-workflow';
+        if (/dashboard|stat|approv/.test(label)) return 'icon-settings';
+        if (/employee|dipendent|contact|person/.test(label)) return 'icon-person';
+        return 'icon-list';
+    }
+
     function fieldWritable(field) {
         if (role() === 'admin' && field.managed_by !== 'workflow') return true;
         if (field.system || field.managed_by) {
@@ -170,15 +179,19 @@
     function renderMetrics() {
         var wrap = el('section', 'external-metrics');
         wrap.id = 'external-app-dashboard';
-        wrap.appendChild(metricCard('Total records', state.records.length, 'Across current view'));
         var view = currentView();
         var workflow = view ? workflowFor(view.entity) : null;
+        if (!workflow || !workflow.states || !workflow.states.length) {
+            wrap.classList.add('is-empty');
+            return wrap;
+        }
+        wrap.appendChild(metricCard('All', state.records.length, 'Records'));
         if (workflow && workflow.states && workflow.states.length) {
             workflow.states.slice(0, 4).forEach(function (status) {
                 var count = state.records.filter(function (record) {
                     return String(record.status || '') === status;
                 }).length;
-                var card = metricCard(humanName(status), count, 'Workflow state');
+                var card = metricCard(humanName(status), count, 'State');
                 card.classList.add('status-' + String(status).toLowerCase());
                 card.addEventListener('click', function () {
                     state.statusFilter = state.statusFilter === status ? 'all' : status;
@@ -228,7 +241,7 @@
         visibleViews().forEach(function (view, index) {
             var button = el('button', 'external-tab' + (index === state.activeView ? ' active' : ''));
             button.type = 'button';
-            button.appendChild(el('span', 'external-tab-icon', navLabel(view).charAt(0)));
+            button.appendChild(el('span', 'external-tab-icon ' + iconClass(view)));
             var label = el('span', 'external-tab-label', humanName(navLabel(view)));
             button.appendChild(label);
             button.appendChild(el('small', null, humanName(view.entity)));
@@ -347,7 +360,12 @@
 
     function renderEmptyState(title, message) {
         var empty = el('section', 'external-empty-state');
-        empty.appendChild(el('div', 'external-empty-icon', '+'));
+        var illustration = el('div', 'external-empty-illustration');
+        illustration.appendChild(el('span'));
+        illustration.appendChild(el('span'));
+        illustration.appendChild(el('span'));
+        illustration.appendChild(el('i'));
+        empty.appendChild(illustration);
         empty.appendChild(el('h3', null, title));
         empty.appendChild(el('p', null, message));
         return empty;
@@ -419,6 +437,7 @@
                 field.type === 'date' ? 'date' :
                     field.type === 'boolean' ? 'checkbox' : 'text';
         }
+        if (field.type === 'boolean') label.classList.add('external-field-boolean');
         input.name = field.name;
         input.required = !!field.required;
         if (field.default !== undefined && field.default !== null && input.type !== 'checkbox') {
