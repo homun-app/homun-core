@@ -1,0 +1,196 @@
+{
+  "version": 1,
+  "app": {
+    "slug": "ticket-interni",
+    "name": "Ticket Interni",
+    "description": "Gestione richieste operative interne",
+    "icon": "ticket"
+  },
+  "modules": [
+    {
+      "name": "identity",
+      "version": 1,
+      "features": ["local_users", "roles", "ownership"],
+      "required": true
+    },
+    {
+      "name": "data",
+      "version": 1,
+      "features": ["ownership"],
+      "required": true
+    },
+    {
+      "name": "workflow",
+      "version": 1,
+      "features": ["state_machine"],
+      "required": true
+    },
+    {
+      "name": "navigation",
+      "version": 1,
+      "features": [],
+      "required": true
+    },
+    {
+      "name": "dashboard",
+      "version": 1,
+      "features": ["counts"],
+      "required": false
+    }
+  ],
+  "entities": [
+    {
+      "name": "ticket",
+      "label": "Ticket",
+      "fields": [
+        {
+          "name": "title",
+          "type": "string",
+          "label": "Titolo",
+          "required": true
+        },
+        {
+          "name": "description",
+          "type": "text",
+          "label": "Descrizione",
+          "required": true
+        },
+        {
+          "name": "priority",
+          "type": "enum",
+          "label": "Priorita",
+          "options": ["low", "normal", "high"],
+          "default": "normal"
+        },
+        {
+          "name": "status",
+          "type": "enum",
+          "label": "Stato",
+          "options": ["open", "in_progress", "closed"],
+          "default": "open",
+          "system": true,
+          "managed_by": "workflow",
+          "editable_by": []
+        }
+      ]
+    }
+  ],
+  "views": [
+    {
+      "id": "tickets",
+      "type": "table",
+      "entity": "ticket",
+      "name": "Ticket",
+      "columns": ["title", "priority", "status"],
+      "roles": ["admin", "support", "employee"]
+    },
+    {
+      "id": "new_ticket",
+      "type": "form",
+      "entity": "ticket",
+      "name": "Nuovo ticket",
+      "roles": ["admin", "employee"]
+    },
+    {
+      "id": "ticket_detail",
+      "type": "detail",
+      "entity": "ticket",
+      "name": "Dettaglio ticket",
+      "roles": ["admin", "support", "employee"]
+    }
+  ],
+  "workflows": [
+    {
+      "entity": "ticket",
+      "state_field": "status",
+      "initial_state": "open",
+      "states": ["open", "in_progress", "closed"],
+      "transitions": [
+        {
+          "name": "start",
+          "from": "open",
+          "to": "in_progress",
+          "label": "Prendi in carico",
+          "roles": ["admin", "support"]
+        },
+        {
+          "name": "close",
+          "from": "in_progress",
+          "to": "closed",
+          "label": "Chiudi",
+          "roles": ["admin", "support"]
+        }
+      ]
+    }
+  ],
+  "roles": [
+    {
+      "name": "admin",
+      "label": "Admin",
+      "permissions": ["*"]
+    },
+    {
+      "name": "support",
+      "label": "Supporto",
+      "permissions": ["ticket:read", "ticket:transition:start", "ticket:transition:close"]
+    },
+    {
+      "name": "employee",
+      "label": "Dipendente",
+      "permissions": ["ticket:create", "ticket:read:own"]
+    }
+  ],
+  "permissions": [
+    {
+      "role": "employee",
+      "allow": ["ticket:create", "ticket:read:own"],
+      "deny": ["ticket:transition:*"]
+    },
+    {
+      "role": "support",
+      "allow": ["ticket:read", "ticket:transition:start", "ticket:transition:close"],
+      "deny": []
+    },
+    {
+      "role": "admin",
+      "allow": ["*"],
+      "deny": []
+    }
+  ],
+  "navigation": [
+    {
+      "label": "Ticket",
+      "view": "tickets",
+      "roles": ["admin", "support", "employee"]
+    },
+    {
+      "label": "Nuovo ticket",
+      "view": "new_ticket",
+      "roles": ["admin", "employee"]
+    }
+  ],
+  "dashboards": [
+    {
+      "name": "overview",
+      "widgets": [
+        {
+          "type": "count",
+          "entity": "ticket",
+          "label": "Ticket aperti",
+          "filter": {
+            "status": "open"
+          },
+          "roles": ["admin", "support"]
+        }
+      ]
+    }
+  ],
+  "agent_commands": [
+    {
+      "intent": "create_ticket",
+      "entity": "ticket",
+      "action": "create",
+      "examples": ["Apri un ticket per sistemare la stampante"]
+    }
+  ]
+}

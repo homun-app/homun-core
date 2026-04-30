@@ -991,3 +991,11 @@ La v0 e' completa quando:
 - [x] `cargo fmt --all -- --check`, `cargo check --all-features`, `cargo test --all-features app_factory`, `cargo test --all-features tools::app_factory`, `cargo clippy --all-features -- -D warnings`, build release passano nell'ultimo giro di verifica.
 
 Ultima verifica automatica: 2026-04-29.
+
+---
+
+## 16. Blueprint v1 modulare
+
+La direzione successiva non sostituisce la v0 con generazione di codice libero. Estende il contratto dichiarativo con moduli applicativi componibili: `identity`, `data`, `workflow`, `navigation`, `dashboard`, `calendar`, `directory`, `notifications` e `agent_bridge`.
+
+Vedi [Modular App Factory Blueprint v1 Design](../superpowers/specs/2026-04-30-modular-app-factory-blueprint-v1-design.md) per il modello completo.

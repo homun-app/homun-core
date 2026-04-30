@@ -101,7 +101,8 @@ Creare una richiesta con questi dati:
 - Dal: `2026-05-10`
 - Al: `2026-05-12`
 - Note: `Vacanza famiglia`
-- Stato: lasciare `pending`, se presente
+
+Nota demo: il campo `Stato` non deve apparire nel form employee. Il runtime lo tratta come campo system gestito dal workflow e il server imposta `pending`.
 
 6:00 - Approvare.
 
@@ -125,6 +126,21 @@ Risultato atteso: l'agente usa gli strumenti App Factory per leggere i record de
 - `/a/ferie-permessi`: runtime app esterno con form, tabella e azioni.
 - Dettaglio richiesta: record selezionato con stato e azioni `Approva` / `Rifiuta` per il ruolo responsabile.
 - Chat: risposta dell'agente basata su `query_app_records`.
+
+## Modular Blueprint v1 Demo Checks
+
+Use `ferie-permessi` to show identity + workflow + calendar:
+
+1. Login as employee.
+2. Create a leave request.
+3. Confirm the form does not expose `status`.
+4. Confirm the created record starts as `pending`.
+5. Login as approver.
+6. Approve or reject the pending request.
+7. Login as admin.
+8. Confirm all records and actions are visible.
+
+Use `ticket-interni` to show the same modules applied to a different domain.
 
 ## Fallback Operativi
 

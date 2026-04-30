@@ -6,6 +6,50 @@
     "description": "Gestione richieste ferie e permessi dei dipendenti",
     "icon": "calendar"
   },
+  "modules": [
+    {
+      "name": "identity",
+      "version": 1,
+      "features": ["local_users", "roles", "ownership"],
+      "required": true
+    },
+    {
+      "name": "data",
+      "version": 1,
+      "features": ["relations", "ownership"],
+      "required": true
+    },
+    {
+      "name": "workflow",
+      "version": 1,
+      "features": ["state_machine", "approval_actions"],
+      "required": true
+    },
+    {
+      "name": "navigation",
+      "version": 1,
+      "features": [],
+      "required": true
+    },
+    {
+      "name": "dashboard",
+      "version": 1,
+      "features": ["counts"],
+      "required": false
+    },
+    {
+      "name": "calendar",
+      "version": 1,
+      "features": ["date_range"],
+      "required": false
+    },
+    {
+      "name": "notifications",
+      "version": 1,
+      "features": ["homun_channels"],
+      "required": false
+    }
+  ],
   "entities": [
     {
       "name": "employee",
@@ -44,11 +88,7 @@
           "name": "kind",
           "type": "enum",
           "label": "Tipo",
-          "options": [
-            "ferie",
-            "permesso",
-            "malattia"
-          ],
+          "options": ["ferie", "permesso", "malattia"],
           "required": true
         },
         {
@@ -72,61 +112,59 @@
           "name": "status",
           "type": "enum",
           "label": "Stato",
-          "options": [
-            "pending",
-            "approved",
-            "rejected"
-          ],
-          "default": "pending"
+          "options": ["pending", "approved", "rejected"],
+          "default": "pending",
+          "system": true,
+          "managed_by": "workflow",
+          "editable_by": []
         }
       ]
     }
   ],
   "views": [
     {
+      "id": "leave_requests",
       "type": "table",
       "entity": "leave_request",
       "name": "Richieste",
-      "columns": [
-        "employee",
-        "kind",
-        "start_date",
-        "end_date",
-        "status"
-      ]
+      "columns": ["employee", "kind", "start_date", "end_date", "status"],
+      "roles": ["admin", "approver", "employee"]
     },
     {
+      "id": "new_leave_request",
       "type": "form",
       "entity": "leave_request",
-      "name": "Nuova richiesta"
+      "name": "Nuova richiesta",
+      "roles": ["admin", "employee"]
     },
     {
+      "id": "leave_request_detail",
       "type": "detail",
       "entity": "leave_request",
-      "name": "Dettaglio richiesta"
+      "name": "Dettaglio richiesta",
+      "roles": ["admin", "approver", "employee"]
     }
   ],
   "workflows": [
     {
       "entity": "leave_request",
       "state_field": "status",
-      "states": [
-        "pending",
-        "approved",
-        "rejected"
-      ],
+      "initial_state": "pending",
+      "states": ["pending", "approved", "rejected"],
       "transitions": [
         {
           "name": "approve",
           "from": "pending",
           "to": "approved",
-          "label": "Approva"
+          "label": "Approva",
+          "roles": ["admin", "approver"]
         },
         {
           "name": "reject",
           "from": "pending",
           "to": "rejected",
-          "label": "Rifiuta"
+          "label": "Rifiuta",
+          "roles": ["admin", "approver"]
         }
       ]
     }
@@ -135,16 +173,13 @@
     {
       "name": "admin",
       "label": "Admin",
-      "permissions": [
-        "*"
-      ]
+      "permissions": ["*"]
     },
     {
       "name": "approver",
       "label": "Responsabile",
       "permissions": [
         "leave_request:read",
-        "leave_request:update",
         "leave_request:transition:approve",
         "leave_request:transition:reject"
       ]
@@ -152,10 +187,66 @@
     {
       "name": "employee",
       "label": "Dipendente",
-      "permissions": [
-        "leave_request:create",
-        "leave_request:read:own"
+      "permissions": ["leave_request:create", "leave_request:read:own"]
+    }
+  ],
+  "permissions": [
+    {
+      "role": "employee",
+      "allow": ["leave_request:create", "leave_request:read:own"],
+      "deny": ["leave_request:update:status", "leave_request:transition:*"]
+    },
+    {
+      "role": "approver",
+      "allow": [
+        "leave_request:read",
+        "leave_request:transition:approve",
+        "leave_request:transition:reject"
+      ],
+      "deny": []
+    },
+    {
+      "role": "admin",
+      "allow": ["*"],
+      "deny": []
+    }
+  ],
+  "navigation": [
+    {
+      "label": "Richieste",
+      "view": "leave_requests",
+      "roles": ["admin", "approver", "employee"]
+    },
+    {
+      "label": "Nuova richiesta",
+      "view": "new_leave_request",
+      "roles": ["admin", "employee"]
+    }
+  ],
+  "dashboards": [
+    {
+      "name": "overview",
+      "widgets": [
+        {
+          "type": "count",
+          "entity": "leave_request",
+          "label": "Richieste pending",
+          "filter": {
+            "status": "pending"
+          },
+          "roles": ["admin", "approver"]
+        }
       ]
+    }
+  ],
+  "calendars": [
+    {
+      "name": "leave_calendar",
+      "entity": "leave_request",
+      "start_field": "start_date",
+      "end_field": "end_date",
+      "title_field": "employee",
+      "roles": ["admin", "approver"]
     }
   ],
   "agent_commands": [
@@ -163,17 +254,13 @@
       "intent": "create_leave_request",
       "entity": "leave_request",
       "action": "create",
-      "examples": [
-        "Crea una richiesta ferie per Mario dal 10 al 12 maggio"
-      ]
+      "examples": ["Crea una richiesta ferie per Mario dal 10 al 12 maggio"]
     },
     {
       "intent": "count_approved_leave_requests",
       "entity": "leave_request",
       "action": "query",
-      "examples": [
-        "Quante richieste ferie sono state approvate questa settimana?"
-      ]
+      "examples": ["Quante richieste ferie sono state approvate questa settimana?"]
     }
   ]
 }
