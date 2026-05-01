@@ -58,7 +58,8 @@ pub fn can_transition(blueprint: &AppBlueprint, role: &str, entity: &str, action
         })
         .unwrap_or(false);
 
-    workflow_transition_allows && is_allowed(blueprint, role, &format!("{entity}:transition:{action}"))
+    workflow_transition_allows
+        && is_allowed(blueprint, role, &format!("{entity}:transition:{action}"))
 }
 
 pub fn sanitize_create_input(
@@ -149,7 +150,10 @@ mod tests {
     #[test]
     fn admin_has_all_app_permissions() {
         assert!(can_create(&blueprint(), "admin", "leave_request"));
-        assert_eq!(read_scope(&blueprint(), "admin", "leave_request"), RecordScope::All);
+        assert_eq!(
+            read_scope(&blueprint(), "admin", "leave_request"),
+            RecordScope::All
+        );
         assert!(can_transition(
             &blueprint(),
             "admin",

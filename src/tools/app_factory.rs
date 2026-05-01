@@ -1074,7 +1074,10 @@ mod tests {
         let blueprint = serde_json::to_string(&valid_blueprint()).unwrap();
 
         let result = tool
-            .execute(json!({"blueprint": blueprint}), &test_context(Some("user-1")))
+            .execute(
+                json!({"blueprint": blueprint}),
+                &test_context(Some("user-1")),
+            )
             .await
             .unwrap();
 

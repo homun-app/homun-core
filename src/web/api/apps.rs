@@ -1,3 +1,4 @@
+use std::path::{Path as FsPath, PathBuf};
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
@@ -116,10 +117,16 @@ struct ActionResponse {
     event_type: String,
 }
 
+#[derive(Debug, Serialize)]
+struct DeleteAppResponse {
+    slug: String,
+    removed_db_file: bool,
+}
+
 pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/v1/apps", get(list_apps).post(create_app))
-        .route("/v1/apps/{slug}", get(get_app))
+        .route("/v1/apps/{slug}", get(get_app).delete(delete_app))
         .route(
             "/v1/apps/{slug}/users",
             get(list_app_users).post(create_app_user),
@@ -349,6 +356,38 @@ async fn get_app(
     let db = require_db(&state)?;
     let (row, _) = load_owned_app(db, &auth, &slug).await?;
     Ok(Json(app_view(row)?))
+}
+
+async fn delete_app(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+    Path(slug): Path<String>,
+) -> Result<Json<DeleteAppResponse>, ApiErr> {
+    require_write(&auth)?;
+    let db = require_db(&state)?;
+    let (app, _) = load_owned_app(db, &auth, &slug).await?;
+    let db_path = removable_app_database_path(&Config::data_dir(), &app.db_path)?;
+
+    app_db::delete_app(db.pool(), app.id)
+        .await
+        .map_err(internal)?;
+    let removed_db_file = match remove_app_database_file(&db_path) {
+        Ok(removed) => removed,
+        Err(error) => {
+            tracing::warn!(
+                app_slug = %slug,
+                db_path = %db_path.display(),
+                %error,
+                "Deleted internal app metadata but failed to remove app database file"
+            );
+            false
+        }
+    };
+
+    Ok(Json(DeleteAppResponse {
+        slug,
+        removed_db_file,
+    }))
 }
 
 async fn get_blueprint(
@@ -664,4 +703,94 @@ async fn run_action(
         record: record_view(updated)?,
         event_type,
     }))
+}
+
+fn removable_app_database_path(data_dir: &FsPath, db_path: &str) -> Result<PathBuf, ApiErr> {
+    let path = PathBuf::from(db_path);
+    if !path.is_absolute() {
+        return Err(internal(
+            "Refusing to delete app database with a relative path",
+        ));
+    }
+    if path.file_name().and_then(|name| name.to_str()) != Some("app.db") {
+        return Err(internal(
+            "Refusing to delete app database with an unexpected file name",
+        ));
+    }
+
+    let apps_root = data_dir.join("apps");
+    let normalized_root = apps_root
+        .canonicalize()
+        .unwrap_or_else(|_| apps_root.clone());
+    let parent = path
+        .parent()
+        .ok_or_else(|| internal("App database path has no parent directory"))?;
+    let normalized_parent = parent
+        .canonicalize()
+        .unwrap_or_else(|_| parent.to_path_buf());
+    if !normalized_parent.starts_with(&normalized_root) {
+        return Err(internal(
+            "Refusing to delete app database outside the apps directory",
+        ));
+    }
+
+    Ok(path)
+}
+
+fn remove_app_database_file(path: &FsPath) -> std::io::Result<bool> {
+    if !path.exists() {
+        return Ok(false);
+    }
+
+    std::fs::remove_file(path)?;
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::remove_dir(parent);
+    }
+    Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn removable_app_database_path_accepts_app_database_under_apps_root() {
+        let dir = TempDir::new().unwrap();
+        let path = dir
+            .path()
+            .join("apps")
+            .join("user-1")
+            .join("crm")
+            .join("app.db");
+
+        let result = removable_app_database_path(dir.path(), &path.to_string_lossy()).unwrap();
+
+        assert_eq!(result, path);
+    }
+
+    #[test]
+    fn removable_app_database_path_rejects_files_outside_apps_root() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("homun.db");
+
+        let result = removable_app_database_path(dir.path(), &path.to_string_lossy());
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn removable_app_database_path_rejects_non_app_db_file_names() {
+        let dir = TempDir::new().unwrap();
+        let path = dir
+            .path()
+            .join("apps")
+            .join("user-1")
+            .join("crm")
+            .join("notes.db");
+
+        let result = removable_app_database_path(dir.path(), &path.to_string_lossy());
+
+        assert!(result.is_err());
+    }
 }

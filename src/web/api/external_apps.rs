@@ -446,8 +446,8 @@ async fn create_record(
     let sanitized =
         permissions::sanitize_create_input(&blueprint, &user.role, &entity_name, &body.data)
             .map_err(bad_request)?;
-    let data = runtime::validate_record_data(&blueprint, &entity_name, &sanitized)
-        .map_err(bad_request)?;
+    let data =
+        runtime::validate_record_data(&blueprint, &entity_name, &sanitized).map_err(bad_request)?;
     let status = record_status(&blueprint, &entity_name, &data);
     let actor_user_id = user.app_user_id.to_string();
     let record_id = app_db::insert_record(

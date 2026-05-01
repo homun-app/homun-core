@@ -1,7 +1,7 @@
 ---
 name: app-factory
 description: Use when the user asks to create, design, generate, or modify an internal business app, operational tool, database-backed workflow, approval system, tracker, CRM-like mini app, employee portal, request system, or internal interface.
-allowed-tools: "create_internal_app list_internal_apps update_internal_app add_app_field configure_app_capabilities create_app_record query_app_records run_app_action read_file write_file"
+allowed-tools: "create_internal_app list_internal_apps update_internal_app add_app_field configure_app_capabilities create_app_record query_app_records run_app_action read_file"
 ---
 
 # App Factory
@@ -10,16 +10,21 @@ Create internal business tools using Homun Blueprint v1 and the App Factory tool
 
 App Factory is a modular app composer, not a code generator. Build apps by selecting supported modules and configuring a declarative blueprint. Never generate arbitrary Rust, JavaScript, SQL, shell commands, webhooks, scripts, or external scaffolds.
 
+An app is not created until an App Factory tool succeeds. Draft files, YAML trees, Markdown summaries, attachments, or downloadable artifacts are not valid completion criteria for app creation requests.
+
 ## Core Rules
 
 - Always produce or update a complete blueprint before creating the app.
 - Prefer Blueprint v1 modular structure for every new app.
 - Keep apps small enough to be immediately usable: identity, data, navigation, optional workflow, optional dashboard/calendar.
 - Make conservative assumptions for common business tools and proceed without long interviews.
+- Treat over-specified prompts as product requirements, not implementation instructions. Extract the business intent, roles, data, workflow, and views, then build the simplest valid App Factory blueprint.
 - Ask one concise question only when the missing answer changes entities, fields, ownership, or workflow states.
 - Do not expose system/workflow fields as user-editable fields.
 - Use human-facing labels for navigation, views, fields, roles, and transitions.
 - Never show snake_case names in user-facing labels.
+- Never satisfy a create-app request by writing files or returning a scaffold. For create requests, the final action must be `create_internal_app`; if that tool is unavailable or fails, report the blocker instead of claiming the app exists.
+- If the user mentions YAML, routes, templates, folders, schema aliases, or low-level blueprint mechanics, do not create files and do not mirror that structure in the answer. Translate only the useful intent into the supported JSON blueprint and call the App Factory tool.
 
 ## Supported Modules
 
@@ -189,6 +194,7 @@ Use `view` ids instead of raw view names when possible.
 ## Creation Workflow
 
 1. Identify the business domain and choose modules.
+   - If the prompt is long or technical, first reduce it internally to a short app brief: purpose, roles, entities, workflow, views, dashboard.
 2. Define roles and ownership:
    - who creates records;
    - who reads all records;
@@ -201,7 +207,7 @@ Use `view` ids instead of raw view names when possible.
 7. Define workflows with `initial_state` and transition `roles`.
 8. Define permissions.
 9. Add dashboard/calendar only when useful.
-10. Call `create_internal_app` with the full blueprint.
+10. Call `create_internal_app` with the full blueprint. This step is mandatory: do not stop after producing blueprint text or files.
 11. Return:
     - external app link: `/a/{slug}`;
     - internal Studio link: `/apps/{slug}`;

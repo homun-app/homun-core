@@ -249,6 +249,7 @@
         root.appendChild(renderStudioPanel());
         root.appendChild(renderBridgePolicyPanel());
         root.appendChild(renderBlueprintPanel());
+        root.appendChild(renderDangerPanel());
 
         var tabs = el('div', 'app-runtime-tabs');
         runtimeViews().forEach(function (view, index) {
@@ -315,6 +316,39 @@
         body.appendChild(renderAppUserForm());
         panel.appendChild(body);
         return panel;
+    }
+
+    function renderDangerPanel() {
+        var panel = el('section', 'app-danger-panel');
+        var header = el('div', 'app-studio-panel-header');
+        var title = el('div');
+        title.appendChild(el('h2', '', 'Danger zone'));
+        title.appendChild(el('p', '', 'Delete this generated app, its Studio metadata and its dedicated SQLite database.'));
+        header.appendChild(title);
+        var remove = el('button', 'btn btn-danger btn-sm', 'Delete app');
+        remove.type = 'button';
+        remove.addEventListener('click', deleteCurrentApp);
+        header.appendChild(remove);
+        panel.appendChild(header);
+        return panel;
+    }
+
+    function deleteCurrentApp() {
+        if (!state.app) return;
+        var typed = window.prompt('Type "' + state.app.slug + '" to delete this app permanently.');
+        if (typed === null) return;
+        if (typed !== state.app.slug) {
+            if (window.showToast) window.showToast('Delete cancelled: slug did not match', 'error', 4000);
+            return;
+        }
+        api('/api/v1/apps/' + encodeURIComponent(state.app.slug), {
+            method: 'DELETE'
+        }).then(function () {
+            if (window.showToast) window.showToast('App deleted', 'success');
+            window.location.href = '/apps';
+        }).catch(function (err) {
+            if (window.showToast) window.showToast(err.message, 'error', 5000);
+        });
     }
 
     function renderAppUsersList() {

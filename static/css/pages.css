@@ -4675,6 +4675,16 @@
     background: var(--surface);
 }
 
+.app-danger-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px;
+    border: 1px solid var(--err-bg);
+    border-radius: var(--r-md);
+    background: var(--surface);
+}
+
 .app-studio-panel-header,
 .app-studio-users-layout,
 .app-studio-user-row {
@@ -4692,7 +4702,8 @@
 .app-blueprint-panel h2,
 .app-blueprint-panel h3,
 .app-bridge-panel h2,
-.app-bridge-panel h3 {
+.app-bridge-panel h3,
+.app-danger-panel h2 {
     margin: 0;
     color: var(--t1);
     font-size: 15px;
@@ -4701,7 +4712,8 @@
 
 .app-studio-panel p,
 .app-blueprint-panel p,
-.app-bridge-panel p {
+.app-bridge-panel p,
+.app-danger-panel p {
     margin: 4px 0 0;
     color: var(--t3);
     font-size: 13px;

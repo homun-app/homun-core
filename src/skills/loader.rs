@@ -1472,6 +1472,25 @@ Body.
     }
 
     #[test]
+    fn app_factory_skill_policy_blocks_file_scaffolding() {
+        let skill = include_str!("../../skills/app-factory/SKILL.md");
+        let allowed_tools = skill
+            .lines()
+            .find_map(|line| line.strip_prefix("allowed-tools:"))
+            .expect("app-factory skill must declare allowed-tools")
+            .trim()
+            .trim_matches('"');
+
+        let result = parse_allowed_tools(allowed_tools);
+
+        assert!(result.contains("create_internal_app"));
+        assert!(result.contains("update_internal_app"));
+        assert!(!result.contains("write_file"));
+        assert!(!result.contains("edit_file"));
+        assert!(!result.contains("shell"));
+    }
+
+    #[test]
     fn test_parse_allowed_tools_empty() {
         let result = parse_allowed_tools("");
         assert!(result.is_empty());

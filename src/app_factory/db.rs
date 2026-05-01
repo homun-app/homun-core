@@ -326,6 +326,34 @@ pub async fn load_app_by_slug(
     Ok(row)
 }
 
+pub async fn delete_app(control_pool: &SqlitePool, app_id: i64) -> Result<bool> {
+    sqlx::query("DELETE FROM internal_app_bridge_policies WHERE app_id = ?")
+        .bind(app_id)
+        .execute(control_pool)
+        .await
+        .context("Failed to delete internal app bridge policy")?;
+
+    sqlx::query("DELETE FROM internal_app_versions WHERE app_id = ?")
+        .bind(app_id)
+        .execute(control_pool)
+        .await
+        .context("Failed to delete internal app versions")?;
+
+    sqlx::query("DELETE FROM internal_app_events WHERE app_id = ?")
+        .bind(app_id)
+        .execute(control_pool)
+        .await
+        .context("Failed to delete internal app events")?;
+
+    let result = sqlx::query("DELETE FROM internal_apps WHERE id = ?")
+        .bind(app_id)
+        .execute(control_pool)
+        .await
+        .context("Failed to delete internal app")?;
+
+    Ok(result.rows_affected() > 0)
+}
+
 pub async fn insert_app_version(
     control_pool: &SqlitePool,
     app_id: i64,
@@ -989,5 +1017,59 @@ mod tests {
         assert_eq!(versions[0].version_number, 2);
         assert_eq!(versions[0].change_note.as_deref(), Some("Rename app"));
         assert_eq!(versions[1].version_number, 1);
+    }
+
+    #[tokio::test]
+    async fn delete_app_removes_control_plane_metadata() {
+        let dir = TempDir::new().unwrap();
+        let control_pool = test_control_pool(&dir).await;
+        let blueprint = valid_leave_blueprint("ferie-permessi");
+        let app_id = insert_app(&control_pool, dir.path(), "user-1", None, &blueprint)
+            .await
+            .unwrap();
+        insert_internal_app_event(
+            &control_pool,
+            app_id,
+            Some(12),
+            "record.created",
+            &serde_json::json!({"record_id": 12}),
+            Some("user-1"),
+        )
+        .await
+        .unwrap();
+        upsert_bridge_policy(
+            &control_pool,
+            app_id,
+            &crate::app_factory::bridge::BridgePolicy {
+                tools: vec!["contacts".to_string()],
+                ..crate::app_factory::bridge::BridgePolicy::deny_all()
+            },
+        )
+        .await
+        .unwrap();
+
+        let deleted = delete_app(&control_pool, app_id).await.unwrap();
+
+        assert!(deleted);
+        assert!(load_app_for_user(&control_pool, "user-1", "ferie-permessi")
+            .await
+            .unwrap()
+            .is_none());
+        assert!(list_app_versions(&control_pool, app_id)
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(load_bridge_policy(&control_pool, app_id)
+            .await
+            .unwrap()
+            .is_none());
+        let event_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM internal_app_events WHERE app_id = ?",
+        )
+        .bind(app_id)
+        .fetch_one(&control_pool)
+        .await
+        .unwrap();
+        assert_eq!(event_count, 0);
     }
 }
