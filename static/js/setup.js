@@ -289,9 +289,11 @@ if (providerGrid) {
         var chevron = header.querySelector('.provider-chevron');
         if (chevron) chevron.classList.toggle('expanded', !isExpanded);
 
-        // Load models when expanding for the first time
-        if (!isExpanded && !card.dataset.modelsLoaded) {
-            loadProviderModels(card);
+        // Dynamic providers can change while Homun is running, so refresh them
+        // whenever the card is opened.
+        var dynamicProvider = card.dataset.provider === 'ollama' || card.dataset.provider === 'ollama_cloud';
+        if (!isExpanded && (!card.dataset.modelsLoaded || dynamicProvider)) {
+            loadProviderModels(card, { fresh: dynamicProvider });
         }
     });
 
@@ -913,8 +915,8 @@ async function hydrateModelCapabilities(data) {
     return data;
 }
 
-async function fetchAllModels() {
-    if (_allModelsCache) return _allModelsCache;
+async function fetchAllModels(opts) {
+    if (_allModelsCache && !(opts && opts.fresh)) return _allModelsCache;
     try {
         var resp = await fetch('/api/v1/providers/models');
         var data = await resp.json();
@@ -1082,15 +1084,17 @@ function buildModelOptions(selectEl, data, opts) {
     }
 }
 
-async function loadProviderModels(item) {
+async function loadProviderModels(item, opts) {
     var provider = item.dataset.provider;
     var modelList = item.querySelector('.provider-model-list');
     if (!modelList) return;
 
     item.dataset.modelsLoaded = 'true';
 
-    var data = await fetchAllModels();
+    var dynamicProvider = provider === 'ollama' || provider === 'ollama_cloud';
+    var data = await fetchAllModels({ fresh: (opts && opts.fresh) || dynamicProvider });
     var currentModel = data.current || '';
+    var provHidden = (data.hidden_models && data.hidden_models[provider]) || [];
     var models = [];
 
     // Get static models for this provider
@@ -1126,6 +1130,10 @@ async function loadProviderModels(item) {
         } catch (_) {}
     }
 
+    models = models.filter(function(m) {
+        return m.value === currentModel || provHidden.indexOf(m.value) === -1;
+    });
+
     // If current model belongs to this provider but isn't in the list, add it
     if (currentModel.startsWith(provider + '/')) {
         var found = models.some(function(m) { return m.value === currentModel; });
@@ -1153,7 +1161,6 @@ async function loadProviderModels(item) {
         return;
     }
 
-    var provHidden = (data.hidden_models && data.hidden_models[provider]) || [];
     var overrides = data.model_overrides || {};
 
     models.forEach(function(m) {

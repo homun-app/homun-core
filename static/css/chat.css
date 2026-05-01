@@ -2988,6 +2988,39 @@
     padding-top: 4px;
 }
 
+.chat-model-option-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+}
+
+.chat-model-option-favorite {
+    flex: 0 0 28px;
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--t4);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.chat-model-option-favorite:hover {
+    background: var(--surface-hover);
+    color: var(--accent);
+}
+
+.chat-model-option-favorite:disabled {
+    opacity: 0.5;
+    cursor: wait;
+}
+
 .chat-model-option {
     display: flex;
     align-items: center;

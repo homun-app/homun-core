@@ -2501,9 +2501,37 @@ async function openModelPicker() {
     if (modelPickerBackdrop) return;
 
     const result = window.ModelLoader
-        ? await ModelLoader.fetchGrouped()
+        ? await ModelLoader.fetchGrouped({ fresh: true, includeHidden: true })
         : { groups: {}, raw: {} };
     const groups = result.groups;
+    const hiddenModels = (result.raw && result.raw.hidden_models) || {};
+
+    function isFavoriteModel(modelId) {
+        const slash = modelId.indexOf('/');
+        if (slash < 0) return true;
+        const provider = modelId.substring(0, slash);
+        const hidden = hiddenModels[provider] || [];
+        return !hidden.includes(modelId);
+    }
+
+    async function setModelFavorite(modelId, favorite) {
+        const slash = modelId.indexOf('/');
+        if (slash < 0) return;
+        const provider = modelId.substring(0, slash);
+        const currentHidden = hiddenModels[provider] || [];
+        const nextHidden = favorite
+            ? currentHidden.filter(id => id !== modelId)
+            : Array.from(new Set(currentHidden.concat(modelId)));
+
+        const res = await fetch('/api/v1/config', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key: 'providers.' + provider + '.hidden_models', value: nextHidden })
+        });
+        if (!res.ok) throw new Error('Failed to update favorite models');
+        hiddenModels[provider] = nextHidden;
+        if (window.ModelLoader) ModelLoader.clearCache();
+    }
 
     // Build modal DOM
     const backdrop = document.createElement('div');
@@ -2596,10 +2624,35 @@ async function openModelPicker() {
     }
 
     function buildModelOption(modelId, label) {
+        const row = document.createElement('div');
+        row.className = 'chat-model-option-row';
+
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'chat-model-option';
         if (modelId === currentModel) btn.classList.add('is-current');
+
+        const favoriteBtn = document.createElement('button');
+        favoriteBtn.type = 'button';
+        favoriteBtn.className = 'chat-model-option-favorite';
+        favoriteBtn.setAttribute('aria-label', isFavoriteModel(modelId) ? 'Remove from favorites' : 'Add to favorites');
+        favoriteBtn.title = isFavoriteModel(modelId) ? 'Remove from favorites' : 'Add to favorites';
+        favoriteBtn.textContent = isFavoriteModel(modelId) ? '\u2605' : '\u2606';
+        favoriteBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const makeFavorite = !isFavoriteModel(modelId);
+            favoriteBtn.disabled = true;
+            try {
+                await setModelFavorite(modelId, makeFavorite);
+                renderList(searchInput.value);
+            } catch (err) {
+                console.error('Failed to update favorite model:', err);
+                showToast('Failed to update favorites', 'error');
+                favoriteBtn.disabled = false;
+            }
+        });
+        row.appendChild(favoriteBtn);
 
         const nameSpan = document.createElement('span');
         nameSpan.className = 'chat-model-option-name';
@@ -2624,7 +2677,8 @@ async function openModelPicker() {
         }
 
         btn.addEventListener('click', () => selectModel(modelId));
-        return btn;
+        row.appendChild(btn);
+        return row;
     }
 
     renderList('');

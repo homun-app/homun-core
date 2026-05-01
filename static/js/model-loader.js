@@ -35,20 +35,29 @@ window.ModelLoader = {
      *
      * @param {Object} [opts]
      * @param {boolean} [opts.fresh] - Bypass cache and re-fetch
+     * @param {boolean} [opts.includeHidden] - Include models hidden from default UI lists
      * @returns {Promise<{groups: Object, raw: Object}>}
      *   groups: { providerKey: [{value, label}] }
      *   raw: original /providers/models response
      */
     async fetchGrouped(opts) {
-        if (this._cache && !(opts && opts.fresh)) return this._cache;
+        if (this._cache && !(opts && opts.fresh) && !(opts && opts.includeHidden)) return this._cache;
 
         var res = await fetch('/api/v1/providers/models');
         var data = await res.json();
+        var hiddenModels = data.hidden_models || {};
+        var currentModel = data.current || '';
+
+        function isVisibleModel(provider, modelId) {
+            var hidden = hiddenModels[provider] || [];
+            return (opts && opts.includeHidden) || modelId === currentModel || hidden.indexOf(modelId) === -1;
+        }
 
         // Group static models by provider
         var groups = {};
         (data.models || []).forEach(function(m) {
             var key = m.provider;
+            if (!isVisibleModel(key, m.model)) return;
             if (!groups[key]) groups[key] = [];
             groups[key].push({ value: m.model, label: m.label || m.model });
         });
@@ -59,12 +68,14 @@ window.ModelLoader = {
                 var olResp = await fetch('/api/v1/providers/ollama/models');
                 var olData = await olResp.json();
                 if (olData.ok && Array.isArray(olData.models) && olData.models.length > 0) {
-                    groups['ollama'] = olData.models.map(function(m) {
-                        return {
-                            value: 'ollama/' + m.name,
-                            label: m.name + (m.size ? ' (' + m.size + ')' : ''),
-                        };
-                    });
+                    groups['ollama'] = olData.models
+                        .map(function(m) {
+                            return {
+                                value: 'ollama/' + m.name,
+                                label: m.name + (m.size ? ' (' + m.size + ')' : ''),
+                            };
+                        })
+                        .filter(function(m) { return isVisibleModel('ollama', m.value); });
                 }
             } catch (_) { /* Ollama might not be running */ }
         }
@@ -75,14 +86,20 @@ window.ModelLoader = {
                 var ocResp = await fetch('/api/v1/providers/ollama-cloud/models');
                 var ocData = await ocResp.json();
                 if (ocData.ok && Array.isArray(ocData.models) && ocData.models.length > 0) {
-                    groups['ollama_cloud'] = ocData.models.map(function(m) {
-                        return {
-                            value: 'ollama_cloud/' + m.id,
-                            label: m.id,
-                        };
-                    });
+                    groups['ollama_cloud'] = ocData.models
+                        .map(function(m) {
+                            return {
+                                value: 'ollama_cloud/' + m.id,
+                                label: m.id,
+                            };
+                        })
+                        .filter(function(m) { return isVisibleModel('ollama_cloud', m.value); });
                 }
             } catch (_) { /* Ollama Cloud might not be reachable */ }
+        }
+
+        if (opts && opts.includeHidden) {
+            return { groups: groups, raw: data };
         }
 
         this._cache = { groups: groups, raw: data };

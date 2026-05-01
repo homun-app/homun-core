@@ -718,10 +718,6 @@ async fn list_all_models(State(state): State<Arc<AppState>>) -> Json<AllModelsRe
         }
 
         for model_id in cloud_models_for(name) {
-            // Skip models hidden by the user
-            if pc.hidden_models.contains(&model_id.to_string()) {
-                continue;
-            }
             // Strip provider prefix: "openrouter/anthropic/claude-sonnet-4" -> "anthropic/claude-sonnet-4"
             let label = model_id
                 .strip_prefix(name)
@@ -1030,24 +1026,21 @@ struct OllamaCloudModel {
     owned_by: String,
 }
 
-/// Ollama Cloud model allowlist — only models with verified "Tools" tag on ollama.com.
-/// Models without native tool calling produce free-text instead of structured tool calls.
-/// Source: https://ollama.com/search?c=cloud (check "Tools" tag)
+/// Ollama Cloud publishes the available account models through `/api/tags`.
+/// Keep the UI list authoritative to that live response so newly released or
+/// newly enabled cloud models appear without a Homun release.
 fn is_ollama_cloud_supported(model_name: &str) -> bool {
-    // Extract base name: "qwen3.5:397b" → "qwen3.5", "nemotron-3-super:latest" → "nemotron-3-super"
-    let base = model_name.split(':').next().unwrap_or(model_name);
-    matches!(
-        base,
-        "qwen3.5"
-            | "qwen3-coder-next"
-            | "qwen3-next"
-            | "nemotron-3-super"
-            | "nemotron-3-nano"
-            | "devstral-small-2"
-            | "devstral-2"
-            | "ministral-3"
-            | "rnj-1"
-    )
+    !model_name.trim().is_empty()
+}
+
+#[cfg(test)]
+mod ollama_cloud_model_tests {
+    use super::is_ollama_cloud_supported;
+
+    #[test]
+    fn includes_new_ollama_cloud_models_not_in_local_allowlist() {
+        assert!(is_ollama_cloud_supported("new-cloud-model:latest"));
+    }
 }
 
 async fn list_ollama_cloud_models(
