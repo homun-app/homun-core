@@ -129,6 +129,25 @@ impl AgentRegistry {
         self.agents.values()
     }
 
+    /// Append deferred tool names to every agent prompt context.
+    pub async fn append_registered_tool_names(&self, names: &[String]) {
+        for agent in self.agents.values() {
+            agent.append_registered_tool_names(names).await;
+        }
+    }
+
+    /// Share the browser session with every agent loop so continuation hints,
+    /// idle cleanup, and browser state are consistent after deferred MCP startup.
+    #[cfg(feature = "browser")]
+    pub async fn set_browser_session_for_all(
+        &self,
+        session: Arc<crate::tools::browser::BrowserSession>,
+    ) {
+        for agent in self.agents.values() {
+            agent.set_browser_session(session.clone()).await;
+        }
+    }
+
     /// Route a message to the appropriate agent.
     ///
     /// Priority:

@@ -55,6 +55,10 @@ pub struct CognitionParams<'a> {
     pub contact_summary: &'a str,
     pub channel: &'a str,
     pub agent_id: Option<&'a str>,
+    /// Tool allowlist from the selected AgentDefinition. Empty = all tools.
+    pub allowed_tools: &'a [String],
+    /// Skill allowlist from the selected AgentDefinition. Empty = all skills.
+    pub allowed_skills: &'a [String],
     pub contact_id: Option<i64>,
     /// Authenticated user ID for user-scoped memory/RAG discovery.
     pub user_id: Option<&'a str>,
@@ -108,9 +112,9 @@ pub async fn run_cognition(mut params: CognitionParams<'_>) -> Result<CognitionR
     // Collect available tool/skill/MCP names for the system prompt.
     // The model sees these names and references them in its plan —
     // no discovery tools needed.
-    let tool_names = collect_known_tool_names(params.tool_registry).await;
-    let skill_names = collect_known_skill_names(params.skill_registry).await;
-    let mcp_tool_names = collect_mcp_tool_names(params.tool_registry).await;
+    let tool_names = collect_known_tool_names(params.tool_registry, params.allowed_tools).await;
+    let skill_names = collect_known_skill_names(params.skill_registry, params.allowed_skills).await;
+    let mcp_tool_names = collect_mcp_tool_names(params.tool_registry, params.allowed_tools).await;
 
     let system_prompt = build_cognition_prompt_plan_first(
         params.contact_summary,
@@ -638,24 +642,32 @@ fn build_cognition_prompt_plan_first(
 }
 
 /// Collect all known tool names from the registry.
-async fn collect_known_tool_names(registry: &RwLock<ToolRegistry>) -> Vec<String> {
+async fn collect_known_tool_names(
+    registry: &RwLock<ToolRegistry>,
+    allowed_tools: &[String],
+) -> Vec<String> {
     registry
         .read()
         .await
         .names()
         .into_iter()
+        .filter(|name| super::is_tool_allowed_by_agent(name, allowed_tools))
         .map(|s| s.to_string())
         .collect()
 }
 
 /// Collect all known skill names from the registry.
-async fn collect_known_skill_names(registry: Option<&RwLock<SkillRegistry>>) -> Vec<String> {
+async fn collect_known_skill_names(
+    registry: Option<&RwLock<SkillRegistry>>,
+    allowed_skills: &[String],
+) -> Vec<String> {
     match registry {
         Some(r) => r
             .read()
             .await
             .list_for_model()
             .into_iter()
+            .filter(|(name, _)| super::is_skill_allowed_by_agent(name, allowed_skills))
             .map(|(name, _)| name.to_string())
             .collect(),
         None => Vec::new(),
@@ -666,13 +678,17 @@ async fn collect_known_skill_names(registry: Option<&RwLock<SkillRegistry>>) -> 
 ///
 /// MCP tools are prefixed with their server name (e.g. `google-workspace__gmail_send_email`).
 /// We extract just these for the system prompt listing.
-async fn collect_mcp_tool_names(registry: &RwLock<ToolRegistry>) -> Vec<String> {
+async fn collect_mcp_tool_names(
+    registry: &RwLock<ToolRegistry>,
+    allowed_tools: &[String],
+) -> Vec<String> {
     registry
         .read()
         .await
         .names()
         .into_iter()
         .filter(|n| n.contains("__"))
+        .filter(|name| super::is_tool_allowed_by_agent(name, allowed_tools))
         .map(|s| s.to_string())
         .collect()
 }
@@ -782,6 +798,33 @@ fn truncate_query(args: &serde_json::Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
+    use serde_json::Value;
+
+    struct TestTool(&'static str);
+
+    #[async_trait]
+    impl crate::tools::Tool for TestTool {
+        fn name(&self) -> &str {
+            self.0
+        }
+
+        fn description(&self) -> &str {
+            "test tool"
+        }
+
+        fn parameters(&self) -> Value {
+            serde_json::json!({"type": "object", "properties": {}})
+        }
+
+        async fn execute(
+            &self,
+            _args: Value,
+            _ctx: &crate::tools::ToolContext,
+        ) -> anyhow::Result<crate::tools::ToolResult> {
+            Ok(crate::tools::ToolResult::success("ok"))
+        }
+    }
 
     #[test]
     fn test_build_cognition_prompt_plan_first() {
@@ -808,6 +851,26 @@ mod tests {
             prompt.contains("intent_type"),
             "should explain intent types"
         );
+    }
+
+    #[tokio::test]
+    async fn collect_known_tool_names_respects_agent_allowlist() {
+        let mut registry = crate::tools::ToolRegistry::new();
+        registry.register(Box::new(TestTool("web_search")));
+        registry.register(Box::new(TestTool("shell")));
+        registry.register(Box::new(TestTool("github__search_issues")));
+        registry.register(Box::new(TestTool("slack__post_message")));
+        let registry = RwLock::new(registry);
+        let allowed = vec!["web_search".to_string(), "github".to_string()];
+
+        let tools = collect_known_tool_names(&registry, &allowed).await;
+        let mcp = collect_mcp_tool_names(&registry, &allowed).await;
+
+        assert!(tools.contains(&"web_search".to_string()));
+        assert!(tools.contains(&"github__search_issues".to_string()));
+        assert!(!tools.contains(&"shell".to_string()));
+        assert!(!tools.contains(&"slack__post_message".to_string()));
+        assert_eq!(mcp, vec!["github__search_issues".to_string()]);
     }
 
     #[test]

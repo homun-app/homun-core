@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket};
-use axum::extract::{Path, State, WebSocketUpgrade};
+use axum::extract::{Path, Query, State, WebSocketUpgrade};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json};
 use axum::routing::get;
@@ -38,6 +38,44 @@ struct ChannelTestRequest {
 struct ChannelTestResponse {
     ok: bool,
     message: String,
+}
+
+#[derive(Deserialize)]
+struct WhatsAppPairQuery {
+    phone: Option<String>,
+}
+
+fn normalize_pairing_phone(phone: Option<String>) -> Option<String> {
+    phone
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty())
+}
+
+fn pairing_phone_from_ws_text(text: &str) -> Option<String> {
+    let parsed = serde_json::from_str::<serde_json::Value>(text).ok()?;
+    let phone = parsed.get("phone").and_then(|v| v.as_str())?;
+    normalize_pairing_phone(Some(phone.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn whatsapp_pairing_accepts_phone_from_query() {
+        assert_eq!(
+            normalize_pairing_phone(Some(" 393331234567 ".to_string())),
+            Some("393331234567".to_string())
+        );
+    }
+
+    #[test]
+    fn whatsapp_pairing_accepts_phone_from_ws_json() {
+        assert_eq!(
+            pairing_phone_from_ws_text(r#"{"phone":" 393331234567 "}"#),
+            Some("393331234567".to_string())
+        );
+    }
 }
 
 /// Resolve a token: prefer explicit value, then gateway vault key, then legacy channel key.
@@ -347,33 +385,39 @@ async fn start_channel(
 ///    - `{ "type": "error", "message": "..." }`
 async fn ws_whatsapp_pair(
     ws: WebSocketUpgrade,
+    Query(query): Query<WhatsAppPairQuery>,
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_whatsapp_pairing(socket, state))
+    let initial_phone = normalize_pairing_phone(query.phone);
+    ws.on_upgrade(move |socket| handle_whatsapp_pairing(socket, state, initial_phone))
 }
 
-async fn handle_whatsapp_pairing(socket: WebSocket, state: Arc<AppState>) {
+async fn handle_whatsapp_pairing(
+    socket: WebSocket,
+    state: Arc<AppState>,
+    initial_phone: Option<String>,
+) {
     let (mut ws_sender, mut ws_receiver) = socket.split();
 
-    // Step 1: wait for { "phone": "..." } from client
-    let phone = loop {
-        match ws_receiver.next().await {
-            Some(Ok(Message::Text(text))) => {
-                let text = text.to_string();
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
-                    if let Some(phone) = parsed.get("phone").and_then(|v| v.as_str()) {
-                        if !phone.is_empty() {
-                            break phone.to_string();
-                        }
+    // Step 1: accept phone from query string (current UI) or first WS JSON message.
+    let phone = match initial_phone {
+        Some(phone) => phone,
+        None => loop {
+            match ws_receiver.next().await {
+                Some(Ok(Message::Text(text))) => {
+                    if let Some(phone) = pairing_phone_from_ws_text(&text) {
+                        break phone;
                     }
+                    let err = serde_json::json!({
+                        "type": "error",
+                        "message": "Send {\"phone\": \"number\"}"
+                    });
+                    let _ = ws_sender.send(Message::Text(err.to_string().into())).await;
                 }
-                let err =
-                    serde_json::json!({"type": "error", "message": "Send {\"phone\": \"number\"}"});
-                let _ = ws_sender.send(Message::Text(err.to_string().into())).await;
+                Some(Ok(Message::Close(_))) | None => return,
+                _ => continue,
             }
-            Some(Ok(Message::Close(_))) | None => return,
-            _ => continue,
-        }
+        },
     };
 
     tracing::info!(phone = %phone, "WhatsApp pairing started via WebSocket");

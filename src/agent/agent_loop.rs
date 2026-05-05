@@ -338,6 +338,13 @@ impl AgentLoop {
         self.context.set_registered_tool_names(names).await;
     }
 
+    /// Append registered tool names to the prompt context.
+    ///
+    /// Used when deferred MCP/browser tools are registered after startup.
+    pub async fn append_registered_tool_names(&self, names: &[String]) {
+        self.context.append_registered_tool_names(names).await;
+    }
+
     /// Get the names of all registered tools (for workflow step prompts).
     pub async fn registered_tool_names(&self) -> Vec<String> {
         // Also include dynamically registered tool names from registry
@@ -1119,6 +1126,8 @@ impl AgentLoop {
                 contact_summary: &contact_summary,
                 channel,
                 agent_id: self.agent_id.as_deref(),
+                allowed_tools: &self.allowed_tools,
+                allowed_skills: &self.allowed_skills,
                 contact_id: memory_contact_id,
                 user_id: Some(&effective_user_id),
                 visible_profile_ids: active_visible_profile_ids.clone(),
@@ -1257,6 +1266,8 @@ impl AgentLoop {
             &cognition_result.tools,
             &cognition_result.skills,
             &blocked_set,
+            &self.allowed_tools,
+            &self.allowed_skills,
             xml_mode,
             config.agent.cognition_implicit_browser,
         )
@@ -1390,6 +1401,18 @@ impl AgentLoop {
         // Check for /skill-name slash command invocation.
         // If matched, inject the skill instructions as a system message
         // so the LLM gets skill context without a tool-call round-trip.
+        let slash_skill_name = prompt_content
+            .trim()
+            .strip_prefix('/')
+            .and_then(|rest| rest.split_whitespace().next());
+        if let Some(skill_name) = slash_skill_name {
+            if !cognition::is_skill_allowed_by_agent(skill_name, &self.allowed_skills) {
+                return Ok(format!(
+                    "Skill '{skill_name}' is not available to this agent."
+                ));
+            }
+        }
+
         if let Some((skill_injection, allowed_tools_raw)) =
             skill_activator::try_resolve_slash_command(
                 &prompt_content,
@@ -2220,6 +2243,12 @@ impl AgentLoop {
                         }
                     }
 
+                    let requested_skill_exists = if let Some(ref registry) = self.skill_registry {
+                        registry.read().await.get(&tool_call.name).is_some()
+                    } else {
+                        false
+                    };
+
                     // --- OBSERVE: Execute and add result ---
                     // Check blocked tools, add_data buffer, skills, and finally real tools.
                     let mut result = if blocked_set.contains(tool_call.name.as_str()) {
@@ -2242,6 +2271,23 @@ impl AgentLoop {
                                     .to_string(),
                             )
                         }
+                    } else if !requested_skill_exists
+                        && !cognition::is_tool_allowed_by_agent(
+                        &tool_call.name,
+                        &self.allowed_tools,
+                    ) {
+                        crate::tools::ToolResult::error(format!(
+                            "Tool '{}' is not available to this agent.",
+                            tool_call.name
+                        ))
+                    } else if requested_skill_exists && !cognition::is_skill_allowed_by_agent(
+                        &tool_call.name,
+                        &self.allowed_skills,
+                    ) {
+                        crate::tools::ToolResult::error(format!(
+                            "Skill '{}' is not available to this agent.",
+                            tool_call.name
+                        ))
                     } else if let Some(activated) = skill_activator::try_activate_skill(
                         &tool_call.name,
                         &tool_call.arguments,

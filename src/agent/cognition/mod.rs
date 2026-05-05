@@ -39,6 +39,8 @@ pub(crate) async fn build_selective_tool_defs(
     discovered_tools: &[DiscoveredTool],
     discovered_skills: &[DiscoveredSkill],
     blocked_tools: &HashSet<&str>,
+    allowed_tools: &[String],
+    allowed_skills: &[String],
     xml_mode: bool,
     implicit_browser: bool,
 ) -> ToolDefinitionSet {
@@ -68,6 +70,7 @@ pub(crate) async fn build_selective_tool_defs(
         .filter(|td| {
             selected_names.contains(td.function.name.as_str())
                 && !blocked_tools.contains(td.function.name.as_str())
+                && is_tool_allowed_by_agent(&td.function.name, allowed_tools)
         })
         .collect();
 
@@ -77,7 +80,10 @@ pub(crate) async fn build_selective_tool_defs(
         let selected_skill_names: HashSet<&str> =
             discovered_skills.iter().map(|s| s.name.as_str()).collect();
         for (name, desc) in guard.list_for_model() {
-            if selected_skill_names.contains(name) && !blocked_tools.contains(name) {
+            if selected_skill_names.contains(name)
+                && !blocked_tools.contains(name)
+                && is_skill_allowed_by_agent(name, allowed_skills)
+            {
                 tool_defs.push(ToolDefinition {
                     tool_type: "function".to_string(),
                     function: FunctionDefinition {
@@ -128,6 +134,29 @@ pub(crate) async fn build_selective_tool_defs(
         available_names,
         has_tools,
     }
+}
+
+/// Agent-level hard tool allowlist.
+///
+/// Empty allowlist means all tools are visible. Exact names are accepted, and
+/// MCP namespace entries such as `github` allow all `github__*` tools.
+pub(crate) fn is_tool_allowed_by_agent(tool_name: &str, allowed_tools: &[String]) -> bool {
+    if allowed_tools.is_empty() {
+        return true;
+    }
+    allowed_tools.iter().any(|allowed| {
+        let allowed = allowed.trim();
+        !allowed.is_empty()
+            && (allowed == tool_name
+                || tool_name
+                    .strip_prefix(allowed)
+                    .is_some_and(|rest| rest.starts_with("__")))
+    })
+}
+
+/// Agent-level hard skill allowlist. Empty means all skills are visible.
+pub(crate) fn is_skill_allowed_by_agent(skill_name: &str, allowed_skills: &[String]) -> bool {
+    allowed_skills.is_empty() || allowed_skills.iter().any(|s| s.trim() == skill_name)
 }
 
 /// Apply implicit tool associations.
@@ -235,5 +264,27 @@ mod tests {
 
         assert!(selected.contains("web_fetch"));
         assert!(!selected.contains("browser"));
+    }
+
+    #[test]
+    fn agent_tool_allowlist_allows_exact_and_mcp_namespace() {
+        let allowed = vec!["web_search".to_string(), "github".to_string()];
+
+        assert!(is_tool_allowed_by_agent("web_search", &allowed));
+        assert!(is_tool_allowed_by_agent("github__search_issues", &allowed));
+        assert!(!is_tool_allowed_by_agent("shell", &allowed));
+        assert!(!is_tool_allowed_by_agent(
+            "githubish__search_issues",
+            &allowed
+        ));
+    }
+
+    #[test]
+    fn agent_skill_allowlist_restricts_when_non_empty() {
+        let allowed = vec!["code-review".to_string()];
+
+        assert!(is_skill_allowed_by_agent("code-review", &allowed));
+        assert!(!is_skill_allowed_by_agent("app-factory", &allowed));
+        assert!(is_skill_allowed_by_agent("app-factory", &[]));
     }
 }

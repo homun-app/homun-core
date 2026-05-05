@@ -646,26 +646,31 @@
             var wsUrl = proto + '://' + location.host + '/api/v1/channels/whatsapp/pair?phone=' + encodeURIComponent(phone);
             pairingWs = new WebSocket(wsUrl);
 
+            pairingWs.onopen = function () {
+                pairingWs.send(JSON.stringify({ phone: phone }));
+            };
+
             pairingWs.onmessage = function (ev) {
                 try {
                     var msg = JSON.parse(ev.data);
-                    if (msg.code) {
+                    var type = msg.type || msg.status;
+                    if (type === 'pairing_code' && msg.code) {
                         codeEl.textContent = msg.code;
                         codeEl.style.display = 'block';
                         statusEl.textContent = 'Enter this code in WhatsApp \u2192 Linked Devices \u2192 Link a Device';
                         statusEl.className = 'pairing-status';
                     }
-                    if (msg.status === 'connected') {
+                    if (type === 'paired' || type === 'connected' || type === 'done') {
                         statusEl.textContent = '\u2713 Connected!';
                         statusEl.className = 'pairing-status success';
                         codeEl.style.display = 'none';
                         btnWaPair.textContent = 'Start Pairing';
                         btnWaPair.disabled = false;
-                        pairingWs.close();
+                        if (pairingWs) pairingWs.close();
                         pairingWs = null;
                     }
-                    if (msg.error) {
-                        statusEl.textContent = '\u2717 ' + msg.error;
+                    if (type === 'error' || msg.error) {
+                        statusEl.textContent = '\u2717 ' + (msg.message || msg.error || 'Pairing failed');
                         statusEl.className = 'pairing-status error';
                         btnWaPair.textContent = 'Retry Pairing';
                         btnWaPair.disabled = false;

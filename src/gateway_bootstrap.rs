@@ -7,7 +7,7 @@ use crate::scheduler::CronScheduler;
 use crate::session::SessionManager;
 use crate::storage::Database;
 use crate::tools::bootstrap::create_tool_registry;
-use crate::tools::{MessageTool, ToolRegistry, WorkflowTool};
+use crate::tools::{MessageTool, Tool, ToolRegistry, WorkflowTool};
 use crate::utils::watcher::WatcherHandle;
 use crate::{agent, gateway_process, profiles, provider, skills, tools, workflows};
 
@@ -73,6 +73,7 @@ struct RuntimeServices {
 #[cfg(feature = "mcp")]
 struct DeferredMcpContext {
     agent: Arc<agent::AgentLoop>,
+    registry: Arc<agent::AgentRegistry>,
     estop_arc: Arc<tokio::sync::RwLock<crate::security::EStopHandles>>,
     startup_t0: std::time::Instant,
     mcp_servers_config: std::collections::HashMap<String, config::McpServerConfig>,
@@ -367,13 +368,19 @@ fn start_deferred_mcp(context: DeferredMcpContext) -> tokio::task::JoinHandle<()
         .await;
 
         let mut regular_tools: Vec<Box<dyn crate::tools::Tool>> = Vec::new();
+        let mut regular_tool_names: Vec<String> = Vec::new();
         for tool in mcp_tools {
             if !crate::browser::is_browser_tool(tool.name()) {
+                regular_tool_names.push(tool.name().to_string());
                 regular_tools.push(tool);
             }
         }
 
         context.agent.register_deferred_tools(regular_tools).await;
+        context
+            .registry
+            .append_registered_tool_names(&regular_tool_names)
+            .await;
 
         #[cfg(feature = "browser")]
         {
@@ -436,11 +443,19 @@ fn start_deferred_mcp(context: DeferredMcpContext) -> tokio::task::JoinHandle<()
                 let monitor_pool_ref = browser_pool.clone();
                 let browser_tool = crate::tools::BrowserTool::new(peer, Some(browser_pool));
                 let session = browser_tool.session();
+                let browser_tool_names = vec![browser_tool.name().to_string()];
                 context
                     .agent
                     .register_deferred_tools(vec![Box::new(browser_tool)])
                     .await;
-                context.agent.set_browser_session(session.clone()).await;
+                context
+                    .registry
+                    .append_registered_tool_names(&browser_tool_names)
+                    .await;
+                context
+                    .registry
+                    .set_browser_session_for_all(session.clone())
+                    .await;
                 context.estop_arc.write().await.browser_session = Some(session.clone());
 
                 let monitor_session = session;
@@ -683,7 +698,7 @@ pub async fn run_gateway() -> Result<()> {
     });
 
     let mut gateway = agent::Gateway::new(
-        registry,
+        registry.clone(),
         shared_config,
         session_manager,
         cron_scheduler,
@@ -707,6 +722,7 @@ pub async fn run_gateway() -> Result<()> {
     #[cfg(feature = "mcp")]
     let _mcp_handle = start_deferred_mcp(DeferredMcpContext {
         agent: agent.clone(),
+        registry: registry.clone(),
         estop_arc: estop_arc.clone(),
         startup_t0,
         mcp_servers_config,
