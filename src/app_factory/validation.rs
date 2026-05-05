@@ -170,6 +170,31 @@ pub fn validate_blueprint(blueprint: &AppBlueprint) -> Result<(), ValidationRepo
         if view.view_type == ViewType::Table && view.columns.is_empty() {
             errors.push(format!("Table view '{}' must define columns", view.name));
         }
+        if view.view_type == ViewType::Kanban
+            && !blueprint
+                .workflows
+                .iter()
+                .any(|workflow| workflow.entity == view.entity && !workflow.states.is_empty())
+        {
+            errors.push(format!(
+                "Kanban view '{}' requires a workflow with states for entity '{}'",
+                view.name, view.entity
+            ));
+        }
+        if view.view_type == ViewType::Calendar {
+            let Some(fields) = field_map.get(view.entity.as_str()) else {
+                continue;
+            };
+            let has_date_field = fields
+                .values()
+                .any(|field| field.field_type == FieldType::Date);
+            if !has_date_field {
+                errors.push(format!(
+                    "Calendar view '{}' requires at least one date field on entity '{}'",
+                    view.name, view.entity
+                ));
+            }
+        }
         if let Some(fields) = field_map.get(view.entity.as_str()) {
             for column in &view.columns {
                 if !fields.contains_key(column.as_str()) {
@@ -440,6 +465,93 @@ mod tests {
             .errors
             .iter()
             .any(|e| e.contains("must match enum options")));
+    }
+
+    #[test]
+    fn accepts_kanban_view_when_entity_has_workflow() {
+        let mut bp = valid_leave_blueprint();
+        bp.views.push(
+            serde_json::from_value(serde_json::json!({
+                "id": "leave_board",
+                "type": "kanban",
+                "entity": "leave_request",
+                "name": "Board",
+                "columns": ["employee", "status"]
+            }))
+            .unwrap(),
+        );
+
+        assert!(validate_blueprint(&bp).is_ok());
+    }
+
+    #[test]
+    fn rejects_kanban_view_without_workflow() {
+        let mut bp = valid_leave_blueprint();
+        bp.workflows.clear();
+        bp.views.push(
+            serde_json::from_value(serde_json::json!({
+                "id": "leave_board",
+                "type": "kanban",
+                "entity": "leave_request",
+                "name": "Board",
+                "columns": ["employee", "status"]
+            }))
+            .unwrap(),
+        );
+
+        let report = validate_blueprint(&bp).unwrap_err();
+
+        assert!(report
+            .errors
+            .iter()
+            .any(|e| e.contains("Kanban view 'Board' requires a workflow")));
+    }
+
+    #[test]
+    fn accepts_calendar_view_when_entity_has_date_field() {
+        let mut bp = valid_leave_blueprint();
+        bp.entities[1].fields.push(
+            serde_json::from_value(serde_json::json!({
+                "name": "start_date",
+                "type": "date",
+                "label": "Data inizio"
+            }))
+            .unwrap(),
+        );
+        bp.views.push(
+            serde_json::from_value(serde_json::json!({
+                "id": "leave_calendar",
+                "type": "calendar",
+                "entity": "leave_request",
+                "name": "Calendario",
+                "columns": ["employee", "start_date", "status"]
+            }))
+            .unwrap(),
+        );
+
+        assert!(validate_blueprint(&bp).is_ok());
+    }
+
+    #[test]
+    fn rejects_calendar_view_without_date_field() {
+        let mut bp = valid_leave_blueprint();
+        bp.views.push(
+            serde_json::from_value(serde_json::json!({
+                "id": "leave_calendar",
+                "type": "calendar",
+                "entity": "leave_request",
+                "name": "Calendario",
+                "columns": ["employee", "status"]
+            }))
+            .unwrap(),
+        );
+
+        let report = validate_blueprint(&bp).unwrap_err();
+
+        assert!(report
+            .errors
+            .iter()
+            .any(|e| e.contains("Calendar view 'Calendario' requires at least one date field")));
     }
 }
 

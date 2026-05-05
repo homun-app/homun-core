@@ -96,18 +96,34 @@ impl Tool for AutomationTool {
 
         match action {
             "create" => self.handle_create(&args, ctx).await,
-            "list" => self.handle_list(&args).await,
-            "status" => self.handle_status(&args).await,
-            "history" => self.handle_history(&args).await,
-            "enable" => self.handle_toggle(&args, true).await,
-            "disable" => self.handle_toggle(&args, false).await,
+            "list" => self.handle_list(&args, ctx).await,
+            "status" => self.handle_status(&args, ctx).await,
+            "history" => self.handle_history(&args, ctx).await,
+            "enable" => self.handle_toggle(&args, true, ctx).await,
+            "disable" => self.handle_toggle(&args, false, ctx).await,
             "update" => self.handle_update(&args, ctx).await,
-            "delete" => self.handle_delete(&args).await,
+            "delete" => self.handle_delete(&args, ctx).await,
             other => Ok(ToolResult::error(format!(
                 "Unknown action: {other}. Use create, list, status, history, enable, disable, update, or delete."
             ))),
         }
     }
+}
+
+async fn load_tool_automation(
+    db: &Database,
+    id: &str,
+    ctx: &ToolContext,
+) -> Result<Option<crate::storage::AutomationRow>> {
+    let automation = match ctx.user_id.as_deref() {
+        Some(user_id) => db.load_automation_for_user(id, user_id).await,
+        None => db.load_automation(id).await,
+    }?;
+
+    Ok(automation.filter(|row| match ctx.profile_id {
+        Some(profile_id) => row.profile_id.is_none() || row.profile_id == Some(profile_id),
+        None => true,
+    }))
 }
 
 // ── Action handlers ─────────────────────────────────────────────────
@@ -218,10 +234,18 @@ impl AutomationTool {
         )))
     }
 
-    async fn handle_list(&self, args: &Value) -> Result<ToolResult> {
+    async fn handle_list(&self, args: &Value, ctx: &ToolContext) -> Result<ToolResult> {
         let filter = args.get("filter").and_then(|v| v.as_str()).unwrap_or("all");
 
-        let automations = match self.db.load_automations(None).await {
+        let automations = match ctx.user_id.as_deref() {
+            Some(user_id) => {
+                self.db
+                    .load_automations_for_user(user_id, ctx.profile_id)
+                    .await
+            }
+            None => self.db.load_automations(ctx.profile_id).await,
+        };
+        let automations = match automations {
             Ok(a) => a,
             Err(e) => {
                 return Ok(ToolResult::error(format!(
@@ -264,13 +288,13 @@ impl AutomationTool {
         Ok(ToolResult::success(lines.join("\n")))
     }
 
-    async fn handle_status(&self, args: &Value) -> Result<ToolResult> {
+    async fn handle_status(&self, args: &Value, ctx: &ToolContext) -> Result<ToolResult> {
         let id = match args.get("automation_id").and_then(|v| v.as_str()) {
             Some(id) => id,
             None => return Ok(ToolResult::error("Missing required field: automation_id")),
         };
 
-        let automation = match self.db.load_automation(id).await {
+        let automation = match load_tool_automation(&self.db, id, ctx).await {
             Ok(Some(a)) => a,
             Ok(None) => return Ok(ToolResult::error(format!("Automation '{id}' not found"))),
             Err(e) => return Ok(ToolResult::error(format!("Failed to load automation: {e}"))),
@@ -321,11 +345,17 @@ impl AutomationTool {
         Ok(ToolResult::success(lines.join("\n")))
     }
 
-    async fn handle_history(&self, args: &Value) -> Result<ToolResult> {
+    async fn handle_history(&self, args: &Value, ctx: &ToolContext) -> Result<ToolResult> {
         let id = match args.get("automation_id").and_then(|v| v.as_str()) {
             Some(id) => id,
             None => return Ok(ToolResult::error("Missing required field: automation_id")),
         };
+
+        match load_tool_automation(&self.db, id, ctx).await {
+            Ok(Some(_)) => {}
+            Ok(None) => return Ok(ToolResult::error(format!("Automation '{id}' not found"))),
+            Err(e) => return Ok(ToolResult::error(format!("Failed to load automation: {e}"))),
+        }
 
         let runs = match self.db.load_automation_runs(id, 10).await {
             Ok(r) => r,
@@ -355,13 +385,18 @@ impl AutomationTool {
         Ok(ToolResult::success(lines.join("\n")))
     }
 
-    async fn handle_toggle(&self, args: &Value, enable: bool) -> Result<ToolResult> {
+    async fn handle_toggle(
+        &self,
+        args: &Value,
+        enable: bool,
+        ctx: &ToolContext,
+    ) -> Result<ToolResult> {
         let id = match args.get("automation_id").and_then(|v| v.as_str()) {
             Some(id) => id,
             None => return Ok(ToolResult::error("Missing required field: automation_id")),
         };
 
-        let automation = match self.db.load_automation(id).await {
+        let automation = match load_tool_automation(&self.db, id, ctx).await {
             Ok(Some(a)) => a,
             Ok(None) => return Ok(ToolResult::error(format!("Automation '{id}' not found"))),
             Err(e) => return Ok(ToolResult::error(format!("Failed to load automation: {e}"))),
@@ -392,13 +427,13 @@ impl AutomationTool {
         )))
     }
 
-    async fn handle_update(&self, args: &Value, _ctx: &ToolContext) -> Result<ToolResult> {
+    async fn handle_update(&self, args: &Value, ctx: &ToolContext) -> Result<ToolResult> {
         let id = match args.get("automation_id").and_then(|v| v.as_str()) {
             Some(id) => id,
             None => return Ok(ToolResult::error("Missing required field: automation_id")),
         };
 
-        if self.db.load_automation(id).await?.is_none() {
+        if load_tool_automation(&self.db, id, ctx).await?.is_none() {
             return Ok(ToolResult::error(format!("Automation '{id}' not found")));
         }
 
@@ -458,13 +493,13 @@ impl AutomationTool {
         )))
     }
 
-    async fn handle_delete(&self, args: &Value) -> Result<ToolResult> {
+    async fn handle_delete(&self, args: &Value, ctx: &ToolContext) -> Result<ToolResult> {
         let id = match args.get("automation_id").and_then(|v| v.as_str()) {
             Some(id) => id,
             None => return Ok(ToolResult::error("Missing required field: automation_id")),
         };
 
-        let automation = match self.db.load_automation(id).await {
+        let automation = match load_tool_automation(&self.db, id, ctx).await {
             Ok(Some(a)) => a,
             Ok(None) => return Ok(ToolResult::error(format!("Automation '{id}' not found"))),
             Err(e) => return Ok(ToolResult::error(format!("Failed to load automation: {e}"))),
@@ -669,6 +704,14 @@ mod tests {
         }
     }
 
+    fn scoped_test_ctx(user_id: &str, profile_id: i64) -> ToolContext {
+        ToolContext {
+            user_id: Some(user_id.to_string()),
+            profile_id: Some(profile_id),
+            ..test_ctx()
+        }
+    }
+
     #[test]
     fn test_normalize_schedule_variants() {
         assert_eq!(normalize_schedule("every:300").unwrap(), "every:300");
@@ -761,6 +804,57 @@ mod tests {
         assert!(!res.is_error);
         assert!(res.output.contains("Test Auto"));
         assert!(res.output.contains("every:3600"));
+    }
+
+    #[tokio::test]
+    async fn test_status_hides_automation_from_other_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("test.db")).await.unwrap();
+        let tool = AutomationTool::new(db.clone());
+        let user_id = crate::user::DEFAULT_ADMIN_USER_ID;
+
+        let profile_a =
+            crate::profiles::db::ensure_initial_profile_for_user(db.pool(), user_id, "admin")
+                .await
+                .unwrap();
+        let profile_b = crate::profiles::db::insert_profile(
+            db.pool(),
+            "other-profile",
+            "Other Profile",
+            "P",
+            "#111111",
+            "{}",
+            Some(user_id),
+        )
+        .await
+        .unwrap();
+
+        db.insert_automation(
+            "other-profile-auto",
+            "Other Profile Auto",
+            "do private profile work",
+            "every:3600",
+            true,
+            "active",
+            None,
+            "always",
+            None,
+            Some(profile_b),
+            Some(user_id),
+        )
+        .await
+        .unwrap();
+
+        let res = tool
+            .execute(
+                json!({"action": "status", "automation_id": "other-profile-auto"}),
+                &scoped_test_ctx(user_id, profile_a.id),
+            )
+            .await
+            .unwrap();
+
+        assert!(res.is_error);
+        assert!(res.output.contains("not found"));
     }
 
     #[tokio::test]

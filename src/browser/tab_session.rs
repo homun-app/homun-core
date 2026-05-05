@@ -209,10 +209,19 @@ impl TabSessionManager {
         let url = tab.last_url.read().await;
         let url_str = url.as_deref()?;
 
+        let page_hint = if url_str.contains("/search-results") || url_str.contains("search-results")
+        {
+            "\nCurrent page appears to be a results page. If the user refers to an option \
+                 from the previous list, continue from this page and select that option."
+        } else {
+            ""
+        };
+
         Some(format!(
-            "Browser is still open on: {url_str}\n\
-             You can continue from the current page — call snapshot() to see it.\n\
-             Do NOT navigate again to the same site unless you need a different page."
+            "Browser is still open on: {url_str}{page_hint}\n\
+             FIRST browser action this turn must be snapshot() to inspect the current page/state.\n\
+             Do NOT navigate, search again, reload, or reconstruct the same site flow before that snapshot.\n\
+             If the user is answering a previous browser question, continue from the existing page."
         ))
     }
 
@@ -379,5 +388,26 @@ mod tests {
         let hint = manager.continuation_hint_for("test").await;
         assert!(hint.is_some());
         assert!(hint.unwrap().contains("https://example.com"));
+    }
+
+    #[tokio::test]
+    async fn test_continuation_hint_requires_snapshot_before_navigation() {
+        let manager = TabSessionManager::new();
+        {
+            let mut sessions = manager.sessions.write().await;
+            let tab = Arc::new(TabSession::new());
+            *tab.tab_index.write().await = Some(0);
+            tab.note_action(Some(
+                "https://www.lefrecce.it/Channels.Website.WEB/#/search-results?handoff=true",
+            ))
+            .await;
+            sessions.insert("test".to_string(), tab);
+        }
+
+        let hint = manager.continuation_hint_for("test").await.unwrap();
+        assert!(hint.contains("FIRST browser action"));
+        assert!(hint.contains("snapshot()"));
+        assert!(hint.contains("Do NOT navigate"));
+        assert!(hint.contains("results page"));
     }
 }

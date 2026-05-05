@@ -26,7 +26,8 @@ use super::context::ContextBuilder;
 use super::context_compactor;
 use super::execution_plan::ExecutionPlanState;
 use super::iteration_budget::{
-    maybe_extend_iteration_budget, tool_call_signature, IterationBudgetState, ToolExecutionSummary,
+    budget_exhaustion_action, maybe_extend_iteration_budget, tool_call_signature,
+    BudgetExhaustionAction, IterationBudgetState, ToolExecutionSummary,
 };
 use super::llm_caller;
 use super::loop_control::{
@@ -396,6 +397,7 @@ impl AgentLoop {
             None,
             None,
             None,
+            None,
         )
         .await
     }
@@ -420,6 +422,7 @@ impl AgentLoop {
             None,
             None,
             None,
+            None,
         )
         .await
     }
@@ -434,6 +437,30 @@ impl AgentLoop {
         blocked_tools: &[&str],
         auth_user_id: Option<&str>,
     ) -> Result<String> {
+        self.process_message_with_scope(
+            content,
+            session_key,
+            channel,
+            chat_id,
+            blocked_tools,
+            auth_user_id,
+            None,
+        )
+        .await
+    }
+
+    /// Process a message with explicit authenticated user and profile context.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn process_message_with_scope(
+        &self,
+        content: &str,
+        session_key: &str,
+        channel: &str,
+        chat_id: &str,
+        blocked_tools: &[&str],
+        auth_user_id: Option<&str>,
+        forced_profile_id: Option<i64>,
+    ) -> Result<String> {
         self.process_message_with_retry(
             content,
             session_key,
@@ -444,6 +471,7 @@ impl AgentLoop {
             None,
             None,
             auth_user_id,
+            forced_profile_id,
         )
         .await
     }
@@ -486,6 +514,34 @@ impl AgentLoop {
         thinking_override: Option<bool>,
         auth_user_id: Option<&str>,
     ) -> Result<String> {
+        self.process_message_streaming_with_scope(
+            content,
+            session_key,
+            channel,
+            chat_id,
+            stream_tx,
+            blocked_tools,
+            thinking_override,
+            auth_user_id,
+            None,
+        )
+        .await
+    }
+
+    /// Streaming variant with explicit authenticated user and profile context.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn process_message_streaming_with_scope(
+        &self,
+        content: &str,
+        session_key: &str,
+        channel: &str,
+        chat_id: &str,
+        stream_tx: mpsc::Sender<crate::provider::StreamChunk>,
+        blocked_tools: &[&str],
+        thinking_override: Option<bool>,
+        auth_user_id: Option<&str>,
+        forced_profile_id: Option<i64>,
+    ) -> Result<String> {
         self.process_message_with_retry(
             content,
             session_key,
@@ -496,6 +552,7 @@ impl AgentLoop {
             thinking_override,
             None,
             auth_user_id,
+            forced_profile_id,
         )
         .await
     }
@@ -522,6 +579,7 @@ impl AgentLoop {
         thinking_override: Option<bool>,
         gateway_id_hint: Option<i64>,
         auth_user_id: Option<&str>,
+        forced_profile_id: Option<i64>,
     ) -> Result<String> {
         // OBS-1: wrap the whole message processing in a metric observation.
         // Placed here (rather than inside process_message_inner) so retries are
@@ -537,6 +595,7 @@ impl AgentLoop {
                 thinking_override,
                 gateway_id_hint,
                 auth_user_id,
+                forced_profile_id,
             )
             .await;
 
@@ -561,6 +620,7 @@ impl AgentLoop {
         thinking_override: Option<bool>,
         gateway_id_hint: Option<i64>,
         auth_user_id: Option<&str>,
+        forced_profile_id: Option<i64>,
     ) -> Result<String> {
         let retry_enabled = self.config.read().await.agent.retry_on_overflow;
 
@@ -576,6 +636,7 @@ impl AgentLoop {
                     thinking_override,
                     gateway_id_hint,
                     auth_user_id,
+                    forced_profile_id,
                 )
                 .await;
         }
@@ -595,6 +656,7 @@ impl AgentLoop {
                     thinking_override,
                     gateway_id_hint,
                     auth_user_id,
+                    forced_profile_id,
                 )
                 .await;
 
@@ -650,6 +712,7 @@ impl AgentLoop {
         thinking_override: Option<bool>,
         _gateway_id_hint: Option<i64>,
         auth_user_id: Option<&str>,
+        forced_profile_id: Option<i64>,
     ) -> Result<String> {
         crate::agent::stop::clear_stop();
         let effective_user_id = auth_user_id
@@ -821,7 +884,47 @@ impl AgentLoop {
             // Priority 0: explicit session override (set via /profile or chat profile API).
             // If unset, fall back to the resolver cascade (contact > channel > config default).
             let session_override = self.db.get_session_profile_id(session_key).await;
-            let profile_id = if let Some(pid) = session_override {
+            let profile_id = if let Some(pid) = forced_profile_id {
+                let profile_exists = crate::profiles::db::load_profile_by_id_for_user(
+                    self.db.pool(),
+                    pid,
+                    &effective_user_id,
+                )
+                .await
+                .ok()
+                .flatten()
+                .is_some();
+                if profile_exists {
+                    pid
+                } else {
+                    tracing::warn!(
+                        profile_id = pid,
+                        user_id = %effective_user_id,
+                        "Forced profile_id is not owned by user, falling back to resolver"
+                    );
+                    if channel == "web" {
+                        self.resolve_user_default_profile_id(&effective_user_id)
+                            .await
+                    } else {
+                        let gateway_id: Option<i64> = if _gateway_id_hint.is_some() {
+                            _gateway_id_hint
+                        } else {
+                            crate::gateways::db::load_gateways_by_type(self.db.pool(), channel)
+                                .await
+                                .ok()
+                                .and_then(|gws| gws.first().map(|g| g.id))
+                        };
+                        crate::agent::profile_resolver::resolve_profile_id_from_values(
+                            contact.as_ref(),
+                            &ch_default_profile,
+                            &global_default_profile,
+                            &self.db,
+                            gateway_id,
+                        )
+                        .await
+                    }
+                }
+            } else if let Some(pid) = session_override {
                 // Verify the profile still exists (might have been deleted)
                 let profile_exists = if channel == "web" {
                     crate::profiles::db::load_profile_by_id_for_user(
@@ -1486,8 +1589,8 @@ impl AgentLoop {
         let mut token_warning_sent = false;
         let mut token_budget_exhausted = false;
 
-        'agent_loop: while iteration <= active_iteration_budget && iteration <= hard_max_iterations
-        {
+        'budget_loop: loop {
+            'agent_loop: while iteration <= active_iteration_budget {
             if crate::agent::stop::is_stop_requested() {
                 final_content = Some("Stopped by user.".to_string());
                 break;
@@ -2699,6 +2802,7 @@ impl AgentLoop {
                         name: tool_call.name.clone(),
                         signature: tool_call_signature(&tool_call.name, &tool_call.arguments),
                         useful: !result.is_error && !result.output.trim().is_empty(),
+                        is_error: result.is_error,
                     });
 
                     if crate::browser::is_browser_tool(&tool_call.name) {
@@ -2987,19 +3091,43 @@ impl AgentLoop {
                 max_iterations = active_iteration_budget,
                 hard_max_iterations,
                 tools_used = tools_used.len(),
-                "Max iterations reached without final response — asking user whether to continue"
+                "Max iterations reached without final response"
             );
+
+            let done_steps = execution_plan.explicit_steps_done_count();
+            let total_steps = execution_plan.explicit_steps_count();
+            let budget_action = budget_exhaustion_action(
+                execution_plan.has_explicit_plan(),
+                done_steps,
+                total_steps,
+                &budget_state,
+            );
+
+            if matches!(budget_action, BudgetExhaustionAction::AutoExtend) {
+                let extension = 20u32;
+                active_iteration_budget = active_iteration_budget + extension;
+                budget_state.stall_streak = 0;
+                budget_state.cycle_detected = None;
+                budget_state.error_streak = 0;
+                tracing::info!(
+                    new_budget = active_iteration_budget,
+                    done_steps,
+                    total_steps,
+                    "Iteration budget auto-extended because execution is still making progress"
+                );
+                continue 'budget_loop;
+            }
 
             // Ask the user if they want to continue with more iterations.
             // Only offer this if we haven't hit the absolute hard max and have a stream.
             let mut user_wants_continue = false;
             let mut block_outcome: &'static str = "not_attempted";
-            if active_iteration_budget >= hard_max_iterations {
-                block_outcome = "skipped_hard_max_reached";
+            if matches!(budget_action, BudgetExhaustionAction::ForceFinalize) {
+                block_outcome = "skipped_force_finalize";
                 tracing::info!(
-                    active_iteration_budget,
-                    hard_max_iterations,
-                    "Budget continuation block skipped — hard max already reached"
+                    done_steps,
+                    total_steps,
+                    "Budget continuation block skipped — forcing final answer"
                 );
             } else if stream_tx.is_none() {
                 block_outcome = "skipped_no_stream";
@@ -3008,30 +3136,37 @@ impl AgentLoop {
                     "Budget continuation block skipped — channel has no stream_tx (cannot render interactive blocks)"
                 );
             } else if let Some(ref tx) = stream_tx {
-                let done_steps = execution_plan.explicit_steps_done_count();
-                let total_steps = execution_plan.explicit_steps_count();
                 // Count sandbox kills by scanning the diagnostic markers
                 // appended by src/tools/shell.rs to tool result messages.
                 let sigkill_hint = count_sigkill_diagnostics(&messages);
+                let attention_reason = if budget_state.error_streak >= 3 {
+                    "repeated errors"
+                } else if budget_state.stall_streak >= 3 {
+                    "stalled progress"
+                } else if budget_state.cycle_detected.is_some() {
+                    "repeating actions"
+                } else {
+                    "needs review"
+                };
                 let subtitle = if sigkill_hint >= 2 {
                     format!(
-                        "{done_steps}/{total_steps} steps, {iteration} iterations, {sigkill_hint} sandbox kills detected. Continue?"
+                        "{done_steps}/{total_steps} steps, {sigkill_hint} sandbox kills detected. Continue?"
                     )
                 } else {
                     format!(
-                        "{done_steps}/{total_steps} steps completed after {iteration} iterations. Continue?"
+                        "{done_steps}/{total_steps} steps completed; {attention_reason}. Continue?"
                     )
                 };
                 let block_json = serde_json::json!([{
                     "block_type": "choice",
-                    "id": format!("budget_extend_{iteration}"),
-                    "title": "Iteration budget reached",
+                    "id": format!("task_attention_{iteration}"),
+                    "title": "Task needs attention",
                     "subtitle": subtitle,
                     "options": [
                         {
                             "id": "continue",
                             "label": "Continue",
-                            "subtitle": "Add 20 more iterations and keep working",
+                            "subtitle": "Try another path and keep working",
                             "metadata": { "action": "extend" }
                         },
                         {
@@ -3043,7 +3178,7 @@ impl AgentLoop {
                     ]
                 }]);
 
-                let block_id = format!("budget_extend_{iteration}");
+                let block_id = format!("task_attention_{iteration}");
                 let gate = crate::agent::approval_gate::approval_gate();
 
                 // IMPORTANT: register the gate BEFORE sending the block to
@@ -3109,15 +3244,15 @@ impl AgentLoop {
 
             if user_wants_continue {
                 let extension = 20u32;
-                active_iteration_budget = (active_iteration_budget + extension).min(hard_max_iterations);
+                active_iteration_budget += extension;
                 tracing::info!(
                     new_budget = active_iteration_budget,
                     "User approved budget extension — continuing"
                 );
                 budget_state.stall_streak = 0;
                 budget_state.cycle_detected = None;
-                // Don't finalize — the while loop condition will re-enter
-                // since active_iteration_budget was just extended.
+                budget_state.error_streak = 0;
+                continue 'budget_loop;
             }
 
             if !user_wants_continue {
@@ -3126,7 +3261,7 @@ impl AgentLoop {
                 finalization_messages.push(plan_message);
             }
             finalization_messages.push(ChatMessage::user(
-                "The tool and iteration budget is exhausted. Do not call any tools, browser actions, functions, or MCP integrations. Using only the evidence, tool outputs, and sources already collected in this conversation, provide the best possible final answer now. If the information is incomplete, clearly separate confirmed findings, likely but unconfirmed points, and remaining unknowns. Do not ask to continue browsing unless it is strictly necessary.",
+                "The task has hit repeated errors, stalling, or a loop. Do not call any tools, browser actions, functions, or MCP integrations. Using only the evidence, tool outputs, and sources already collected in this conversation, provide the best possible final answer now. If the information is incomplete, clearly separate confirmed findings, likely but unconfirmed points, and remaining unknowns. Do not ask to continue browsing unless it is strictly necessary.",
             ));
 
             let finalization_request = ChatRequest {
@@ -3188,6 +3323,9 @@ impl AgentLoop {
             }
         } // if !user_wants_continue
         } // outer budget exhausted block
+
+            break 'budget_loop;
+        }
 
         // Mark all plan steps as completed now that execution is done
         if execution_plan.has_explicit_plan() {
@@ -3449,6 +3587,7 @@ mod tests {
             name: "browser".to_string(),
             signature: "browser:{\"action\":\"click\"}".to_string(),
             useful: true,
+            is_error: false,
         }];
 
         maybe_extend_iteration_budget(&mut active_budget, 12, 4, 4, &tool_summaries, &mut state, 8);
@@ -3470,6 +3609,7 @@ mod tests {
                 name: "browser".to_string(),
                 signature: format!("browser:{{\"action\":\"step_{i}\"}}"),
                 useful: true,
+                is_error: false,
             }];
             let iter = active_budget; // snapshot before mutable borrow
             maybe_extend_iteration_budget(
@@ -3503,6 +3643,7 @@ mod tests {
             name: "file_read".to_string(),
             signature: "file_read:{\"path\":\"/test\"}".to_string(),
             useful: true,
+            is_error: false,
         }];
 
         // Call 1 at iter=49 (near budget): new signature → extends
@@ -3628,6 +3769,16 @@ mod tests {
 
         assert!(instruction.contains("explicitly select the visible option"));
         assert!(instruction.contains("choose the requested date"));
+    }
+
+    #[test]
+    fn builds_browser_follow_up_instruction_for_autocomplete_dropdown_output() {
+        let instruction = browser_follow_up_instruction(
+            "Typed \"Napoli\".\n\nAutocomplete dropdown appeared with 2 suggestion(s):\n  - option \"Napoli Centrale\" [ref=e547]\n  - option \"Napoli Afragola\" [ref=e544]\n→ Click the matching option to select it.",
+        )
+        .expect("expected follow-up instruction");
+
+        assert!(instruction.contains("explicitly select the visible option"));
     }
 
     #[test]

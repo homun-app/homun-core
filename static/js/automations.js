@@ -432,7 +432,7 @@ function renderAutomations() {
         listEl.innerHTML = `
             <div class="empty-state">
                 <p>No automations configured yet.</p>
-                <p>Create your first one above.</p>
+                <p>Use a demo prompt below or describe a scheduled process to generate a flow.</p>
             </div>
         `;
         return;
@@ -1172,6 +1172,15 @@ function setupAutoPromptBar() {
         input.style.height = 'auto';
         input.style.height = Math.min(input.scrollHeight, 100) + 'px';
     });
+
+    document.querySelectorAll('[data-demo-prompt]').forEach((chip) => {
+        chip.addEventListener('click', () => {
+            input.value = chip.dataset.demoPrompt || '';
+            input.style.height = 'auto';
+            input.style.height = Math.min(input.scrollHeight, 100) + 'px';
+            input.focus();
+        });
+    });
 }
 
 async function submitAutoPrompt() {
@@ -1400,7 +1409,7 @@ const AUTOMATION_TEMPLATES = [
         id: 'email-digest',
         icon: '\u{1F4EC}',
         name: 'Daily Email Digest',
-        description: 'Check inbox every morning, summarize, and send digest',
+        description: 'Read important email, summarize with an agent, and deliver the digest to a channel',
         flow: {
             nodes: [
                 { id: 'n1', kind: 'trigger', label: 'Every morning', meta: 'daily 08:00' },
@@ -1415,7 +1424,7 @@ const AUTOMATION_TEMPLATES = [
         id: 'web-monitor',
         icon: '\u{1F50D}',
         name: 'Web Monitor',
-        description: 'Periodically check a website for changes and notify you',
+        description: 'Use web/browser tools to detect changes and notify only when something matters',
         flow: {
             nodes: [
                 { id: 'n1', kind: 'trigger', label: 'Every 6 hours', meta: 'every 6h' },
@@ -1434,7 +1443,7 @@ const AUTOMATION_TEMPLATES = [
         id: 'daily-standup',
         icon: '\u{1F4CB}',
         name: 'Daily Standup',
-        description: 'Generate a daily standup update every weekday morning',
+        description: 'Turn recent activity into a short weekday update for the team channel',
         flow: {
             nodes: [
                 { id: 'n1', kind: 'trigger', label: 'Weekdays 9am', meta: 'daily 09:00' },
@@ -1448,7 +1457,7 @@ const AUTOMATION_TEMPLATES = [
         id: 'news-briefing',
         icon: '\u{1F4F0}',
         name: 'News Briefing',
-        description: 'Search for news on a topic and get a morning summary',
+        description: 'Research a topic, synthesize the important items, and send a briefing',
         flow: {
             nodes: [
                 { id: 'n1', kind: 'trigger', label: 'Every morning', meta: 'daily 07:00' },
@@ -1463,7 +1472,7 @@ const AUTOMATION_TEMPLATES = [
         id: 'security-check',
         icon: '\u{1F6E1}',
         name: 'Security Check',
-        description: 'Run a nightly security audit and alert on issues',
+        description: 'Run controlled checks, analyze risk, and alert only when attention is needed',
         flow: {
             nodes: [
                 { id: 'n1', kind: 'trigger', label: 'Every night', meta: 'daily 22:00' },
@@ -1482,7 +1491,7 @@ const AUTOMATION_TEMPLATES = [
         id: 'file-organizer',
         icon: '\u{1F5C2}',
         name: 'File Organizer',
-        description: 'Weekly scan of a folder to identify old or unused files',
+        description: 'Scan files, suggest cleanup actions, and send a reviewable report',
         flow: {
             nodes: [
                 { id: 'n1', kind: 'trigger', label: 'Monday 8am', meta: 'daily 08:00' },
@@ -2036,7 +2045,7 @@ const Builder = {
 
         const heading = document.createElement('h3');
         heading.className = 'template-heading';
-        heading.textContent = 'Start from a template';
+        heading.textContent = 'Start from a demo automation';
         container.appendChild(heading);
 
         const grid = document.createElement('div');
@@ -2071,7 +2080,7 @@ const Builder = {
 
         const orHint = document.createElement('p');
         orHint.className = 'template-or-hint';
-        orHint.textContent = 'Or drag nodes from the palette to build from scratch';
+        orHint.textContent = 'Or drag nodes from the palette: trigger, tool, skill, MCP, approval, 2FA, and deliver';
         container.appendChild(orHint);
     },
 
@@ -3140,4 +3149,3 @@ const Builder = {
 document.addEventListener('DOMContentLoaded', () => {
     Builder.init();
 });
-

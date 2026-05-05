@@ -229,6 +229,75 @@ fn extract_json_object_block(input: &str) -> Option<&str> {
     Some(&input[start..=end])
 }
 
+fn workflow_request_from_automation_run(
+    automation: &crate::storage::AutomationRow,
+    run_id: &str,
+) -> Result<Option<crate::workflows::WorkflowCreateRequest>, String> {
+    let Some(steps_json) = automation.workflow_steps_json.as_deref() else {
+        return Ok(None);
+    };
+    let steps: Vec<crate::workflows::StepDefinition> =
+        serde_json::from_str(steps_json).map_err(|e| format!("Invalid workflow steps: {e}"))?;
+    if steps.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(crate::workflows::WorkflowCreateRequest {
+        name: automation.name.clone(),
+        objective: automation.prompt.clone(),
+        steps,
+        deliver_to: automation.deliver_to.clone(),
+        automation_id: Some(automation.id.clone()),
+        automation_run_id: Some(run_id.to_string()),
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn workflow_request_from_automation_run_preserves_run_link() {
+        let automation = crate::storage::AutomationRow {
+            id: "auto-123".to_string(),
+            name: "Digest".to_string(),
+            prompt: "Summarize inbox".to_string(),
+            schedule: "every:3600".to_string(),
+            enabled: true,
+            status: "active".to_string(),
+            deliver_to: Some("cli:default".to_string()),
+            last_run: None,
+            last_result: None,
+            created_at: "now".to_string(),
+            updated_at: None,
+            trigger_kind: "always".to_string(),
+            trigger_value: None,
+            plan_json: None,
+            dependencies_json: "[]".to_string(),
+            plan_version: 1,
+            validation_errors: None,
+            workflow_steps_json: Some(
+                r#"[{"name":"Step 1","instruction":"Do one thing","approval_required":false}]"#
+                    .to_string(),
+            ),
+            flow_json: None,
+            profile_id: Some(7),
+            user_id: Some(crate::user::DEFAULT_ADMIN_USER_ID.to_string()),
+        };
+
+        let req = workflow_request_from_automation_run(&automation, "run-456")
+            .unwrap()
+            .expect("workflow request");
+
+        assert_eq!(req.name, "Digest");
+        assert_eq!(req.objective, "Summarize inbox");
+        assert_eq!(req.deliver_to.as_deref(), Some("cli:default"));
+        assert_eq!(req.automation_id.as_deref(), Some("auto-123"));
+        assert_eq!(req.automation_run_id.as_deref(), Some("run-456"));
+        assert_eq!(req.steps.len(), 1);
+    }
+}
+
 // --- Handlers ---
 
 /// GET /api/v1/automations/targets
@@ -313,6 +382,7 @@ struct AutomationListQuery {
 /// GET /api/v1/automations
 async fn list_automations(
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Query(q): Query<AutomationListQuery>,
 ) -> Result<Json<Vec<AutomationListItem>>, (StatusCode, String)> {
     let db = state.db.as_ref().ok_or((
@@ -323,7 +393,7 @@ async fn list_automations(
     // Resolve profile filter slug → id
     let filter_profile_id = if let Some(ref slug) = q.profile {
         if !slug.is_empty() {
-            crate::profiles::db::load_profile_by_slug(db.pool(), slug)
+            crate::profiles::db::load_profile_by_slug_for_user(db.pool(), slug, &auth.user_id)
                 .await
                 .ok()
                 .flatten()
@@ -335,12 +405,15 @@ async fn list_automations(
         None
     };
 
-    let rows = db.load_automations(filter_profile_id).await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to list automations: {e}"),
-        )
-    })?;
+    let rows = db
+        .load_automations_for_user(&auth.user_id, filter_profile_id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to list automations: {e}"),
+            )
+        })?;
     let now = chrono::Utc::now();
     let items = rows
         .into_iter()
@@ -393,6 +466,20 @@ async fn create_automation(
 
     let schedule =
         build_automation_schedule(req.schedule.as_deref(), req.cron.as_deref(), req.every)?;
+    if let Some(profile_id) = req.profile_id {
+        let profile_exists =
+            crate::profiles::db::load_profile_by_id_for_user(db.pool(), profile_id, &auth.user_id)
+                .await
+                .ok()
+                .flatten()
+                .is_some();
+        if !profile_exists {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "Profile does not belong to authenticated user".to_string(),
+            ));
+        }
+    }
     let prompt = req.prompt.trim().to_string();
     let compiled_plan = {
         let cfg = state.config.read().await.clone();
@@ -483,8 +570,10 @@ async fn create_automation(
 async fn patch_automation(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
     Json(req): Json<PatchAutomationRequest>,
 ) -> Result<Json<crate::storage::AutomationRow>, (StatusCode, String)> {
+    require_write(&auth).map_err(|(s, j)| (s, j.0.to_string()))?;
     let db = state.db.as_ref().ok_or((
         StatusCode::SERVICE_UNAVAILABLE,
         "Database not available".to_string(),
@@ -502,6 +591,12 @@ async fn patch_automation(
             format!("Automation '{id}' not found"),
         ));
     };
+    if current.user_id.as_deref() != Some(auth.user_id.as_str()) {
+        return Err((
+            StatusCode::NOT_FOUND,
+            format!("Automation '{id}' not found"),
+        ));
+    }
 
     let requested_status = req.status.as_deref().map(|v| v.trim().to_string());
     let mut update = crate::storage::AutomationUpdate {
@@ -644,6 +739,24 @@ async fn delete_automation(
         StatusCode::SERVICE_UNAVAILABLE,
         "Database not available".to_string(),
     ))?;
+    let current = db.load_automation(&id).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to load automation: {e}"),
+        )
+    })?;
+    let Some(current) = current else {
+        return Err((
+            StatusCode::NOT_FOUND,
+            format!("Automation '{id}' not found"),
+        ));
+    };
+    if current.user_id.as_deref() != Some(auth.user_id.as_str()) {
+        return Err((
+            StatusCode::NOT_FOUND,
+            format!("Automation '{id}' not found"),
+        ));
+    }
 
     let removed = db.delete_automation(&id).await.map_err(|e| {
         (
@@ -670,11 +783,30 @@ async fn get_automation_history(
     Path(id): Path<String>,
     Query(q): Query<AutomationHistoryQuery>,
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
 ) -> Result<Json<Vec<crate::storage::AutomationRunRow>>, (StatusCode, String)> {
     let db = state.db.as_ref().ok_or((
         StatusCode::SERVICE_UNAVAILABLE,
         "Database not available".to_string(),
     ))?;
+    let automation = db.load_automation(&id).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to load automation: {e}"),
+        )
+    })?;
+    let Some(automation) = automation else {
+        return Err((
+            StatusCode::NOT_FOUND,
+            format!("Automation '{id}' not found"),
+        ));
+    };
+    if automation.user_id.as_deref() != Some(auth.user_id.as_str()) {
+        return Err((
+            StatusCode::NOT_FOUND,
+            format!("Automation '{id}' not found"),
+        ));
+    }
     let limit = q.limit.unwrap_or(50).clamp(1, 500);
     let runs = db.load_automation_runs(&id, limit).await.map_err(|e| {
         (
@@ -689,7 +821,9 @@ async fn get_automation_history(
 async fn run_automation_now(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
 ) -> Result<Json<RunAutomationResponse>, (StatusCode, String)> {
+    require_write(&auth).map_err(|(s, j)| (s, j.0.to_string()))?;
     let db = state.db.as_ref().ok_or((
         StatusCode::SERVICE_UNAVAILABLE,
         "Database not available".to_string(),
@@ -707,6 +841,12 @@ async fn run_automation_now(
             format!("Automation '{id}' not found"),
         ));
     };
+    if automation.user_id.as_deref() != Some(auth.user_id.as_str()) {
+        return Err((
+            StatusCode::NOT_FOUND,
+            format!("Automation '{id}' not found"),
+        ));
+    }
 
     let compiled_plan = {
         let cfg = state.config.read().await.clone();
@@ -791,6 +931,105 @@ async fn run_automation_now(
         )
     })?;
 
+    match workflow_request_from_automation_run(&automation, &run_id) {
+        Ok(Some(req)) => {
+            let Some(engine) = state.workflow_engine.as_ref() else {
+                let msg = "Workflow engine not available for multi-step automation".to_string();
+                let _ = db.complete_automation_run(&run_id, "error", Some(&msg)).await;
+                let _ = db
+                    .update_automation(
+                        &automation.id,
+                        crate::storage::AutomationUpdate {
+                            status: Some("error".to_string()),
+                            last_result: Some(Some(msg.clone())),
+                            touch_last_run: true,
+                            ..Default::default()
+                        },
+                    )
+                    .await;
+                return Ok(Json(RunAutomationResponse {
+                    run_id,
+                    status: "error".to_string(),
+                    message: msg,
+                }));
+            };
+
+            match engine
+                .create_and_start(
+                    req,
+                    &channel,
+                    &chat_id,
+                    automation.profile_id,
+                    Some(&auth.user_id),
+                )
+                .await
+            {
+                Ok(workflow_id) => {
+                    let msg = format!("Workflow {workflow_id} in progress");
+                    let _ = db
+                        .complete_automation_run(&run_id, "running", Some(&msg))
+                        .await;
+                    let _ = db
+                        .update_automation(
+                            &automation.id,
+                            crate::storage::AutomationUpdate {
+                                status: Some("active".to_string()),
+                                last_result: Some(Some(msg.clone())),
+                                touch_last_run: true,
+                                ..Default::default()
+                            },
+                        )
+                        .await;
+                    return Ok(Json(RunAutomationResponse {
+                        run_id,
+                        status: "running".to_string(),
+                        message: msg,
+                    }));
+                }
+                Err(e) => {
+                    let msg = format!("Failed to start workflow: {e}");
+                    let _ = db.complete_automation_run(&run_id, "error", Some(&msg)).await;
+                    let _ = db
+                        .update_automation(
+                            &automation.id,
+                            crate::storage::AutomationUpdate {
+                                status: Some("error".to_string()),
+                                last_result: Some(Some(msg.clone())),
+                                touch_last_run: true,
+                                ..Default::default()
+                            },
+                        )
+                        .await;
+                    return Ok(Json(RunAutomationResponse {
+                        run_id,
+                        status: "error".to_string(),
+                        message: msg,
+                    }));
+                }
+            }
+        }
+        Ok(None) => {}
+        Err(msg) => {
+            let _ = db.complete_automation_run(&run_id, "error", Some(&msg)).await;
+            let _ = db
+                .update_automation(
+                    &automation.id,
+                    crate::storage::AutomationUpdate {
+                        status: Some("error".to_string()),
+                        last_result: Some(Some(msg.clone())),
+                        touch_last_run: true,
+                        ..Default::default()
+                    },
+                )
+                .await;
+            return Ok(Json(RunAutomationResponse {
+                run_id,
+                status: "error".to_string(),
+                message: msg,
+            }));
+        }
+    }
+
     let Some(inbound_tx) = &state.inbound_tx else {
         let _ = db
             .complete_automation_run(
@@ -838,6 +1077,8 @@ async fn run_automation_now(
             scheduler_kind: Some("automation".to_string()),
             scheduler_job_id: Some(automation.id.clone()),
             automation_run_id: Some(run_id.clone()),
+            auth_user_id: Some(auth.user_id.clone()),
+            profile_id: automation.profile_id,
             ..Default::default()
         }),
     };

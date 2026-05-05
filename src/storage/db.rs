@@ -2635,6 +2635,8 @@ pub struct AutomationRow {
     pub workflow_steps_json: Option<String>,
     pub flow_json: Option<String>,
     pub profile_id: Option<i64>,
+    #[sqlx(default)]
+    pub user_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -3536,7 +3538,7 @@ END;
             "always",
             None,
             None, // profile_id
-            None, // user_id
+            Some(crate::user::DEFAULT_ADMIN_USER_ID),
         )
         .await
         .unwrap();
@@ -3546,6 +3548,10 @@ END;
         assert_eq!(rows[0].id, "auto-1");
         assert_eq!(rows[0].name, "Daily brief");
         assert_eq!(rows[0].trigger_kind, "always");
+        assert_eq!(
+            rows[0].user_id.as_deref(),
+            Some(crate::user::DEFAULT_ADMIN_USER_ID)
+        );
         assert!(rows[0].trigger_value.is_none());
 
         let changed = db

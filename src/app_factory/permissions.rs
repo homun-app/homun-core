@@ -62,6 +62,23 @@ pub fn can_transition(blueprint: &AppBlueprint, role: &str, entity: &str, action
         && is_allowed(blueprint, role, &format!("{entity}:transition:{action}"))
 }
 
+pub fn update_scope(blueprint: &AppBlueprint, role: &str, entity: &str) -> RecordScope {
+    if blueprint.permissions.is_empty() {
+        return if role == "employee" {
+            RecordScope::Own
+        } else {
+            RecordScope::All
+        };
+    }
+    if role == "admin" || is_allowed(blueprint, role, &format!("{entity}:update")) {
+        return RecordScope::All;
+    }
+    if is_allowed(blueprint, role, &format!("{entity}:update:own")) {
+        return RecordScope::Own;
+    }
+    RecordScope::None
+}
+
 pub fn sanitize_create_input(
     blueprint: &AppBlueprint,
     role: &str,
@@ -81,6 +98,15 @@ pub fn sanitize_create_input(
         }
     }
     Ok(Value::Object(out))
+}
+
+pub fn sanitize_update_input(
+    blueprint: &AppBlueprint,
+    role: &str,
+    entity_name: &str,
+    data: &Value,
+) -> Result<Value> {
+    sanitize_create_input(blueprint, role, entity_name, data)
 }
 
 pub fn can_write_field(role: &str, field: &FieldDefinition) -> bool {
@@ -175,6 +201,28 @@ mod tests {
             "leave_request",
             "approve"
         ));
+    }
+
+    #[test]
+    fn update_scope_respects_own_and_admin_permissions() {
+        assert_eq!(
+            update_scope(&blueprint(), "admin", "leave_request"),
+            RecordScope::All
+        );
+        assert_eq!(
+            update_scope(&blueprint(), "employee", "leave_request"),
+            RecordScope::None
+        );
+
+        let mut bp = blueprint();
+        bp.permissions[0]
+            .allow
+            .push("leave_request:update:own".to_string());
+
+        assert_eq!(
+            update_scope(&bp, "employee", "leave_request"),
+            RecordScope::Own
+        );
     }
 
     #[test]

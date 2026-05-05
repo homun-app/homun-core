@@ -675,6 +675,88 @@ pub async fn update_record_data(
     Ok(())
 }
 
+pub async fn delete_record(app_pool: &SqlitePool, record_id: i64) -> Result<bool> {
+    sqlx::query("DELETE FROM app_events WHERE record_id = ?")
+        .bind(record_id)
+        .execute(app_pool)
+        .await
+        .context("Failed to delete app record events")?;
+
+    let result = sqlx::query("DELETE FROM app_records WHERE id = ?")
+        .bind(record_id)
+        .execute(app_pool)
+        .await
+        .context("Failed to delete app record")?;
+
+    Ok(result.rows_affected() > 0)
+}
+
+pub async fn update_app_user(
+    app_pool: &SqlitePool,
+    app_user_id: i64,
+    email: &str,
+    display_name: &str,
+    role: &str,
+    status: &str,
+    contact_id: Option<i64>,
+    password_hash: Option<&str>,
+) -> Result<()> {
+    let normalized_email = email.trim().to_ascii_lowercase();
+    let display_name = display_name.trim();
+    if let Some(password_hash) = password_hash {
+        sqlx::query(
+            "UPDATE app_users
+             SET email = ?, display_name = ?, role = ?, status = ?, contact_id = ?,
+                 password_hash = ?, updated_at = datetime('now')
+             WHERE id = ?",
+        )
+        .bind(normalized_email)
+        .bind(display_name)
+        .bind(role)
+        .bind(status)
+        .bind(contact_id)
+        .bind(password_hash)
+        .bind(app_user_id)
+        .execute(app_pool)
+        .await
+        .context("Failed to update app user")?;
+    } else {
+        sqlx::query(
+            "UPDATE app_users
+             SET email = ?, display_name = ?, role = ?, status = ?, contact_id = ?,
+                 updated_at = datetime('now')
+             WHERE id = ?",
+        )
+        .bind(normalized_email)
+        .bind(display_name)
+        .bind(role)
+        .bind(status)
+        .bind(contact_id)
+        .bind(app_user_id)
+        .execute(app_pool)
+        .await
+        .context("Failed to update app user")?;
+    }
+
+    Ok(())
+}
+
+pub async fn delete_app_user(app_pool: &SqlitePool, app_user_id: i64) -> Result<bool> {
+    sqlx::query("DELETE FROM app_sessions WHERE app_user_id = ?")
+        .bind(app_user_id)
+        .execute(app_pool)
+        .await
+        .context("Failed to delete app user sessions")?;
+
+    let result = sqlx::query("DELETE FROM app_users WHERE id = ?")
+        .bind(app_user_id)
+        .execute(app_pool)
+        .await
+        .context("Failed to delete app user")?;
+
+    Ok(result.rows_affected() > 0)
+}
+
 pub async fn insert_app_event(
     app_pool: &SqlitePool,
     record_id: Option<i64>,
@@ -873,6 +955,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn app_record_delete_removes_record_and_events() {
+        let dir = TempDir::new().unwrap();
+        let pool = test_app_pool(&dir, "records").await;
+        let record_id = insert_record(
+            &pool,
+            "room",
+            &serde_json::json!({"name": "Sala A"}),
+            None,
+            Some("user-1"),
+        )
+        .await
+        .unwrap();
+        insert_app_event(
+            &pool,
+            Some(record_id),
+            "record.created",
+            &serde_json::json!({"record_id": record_id}),
+            Some("user-1"),
+        )
+        .await
+        .unwrap();
+
+        assert!(delete_record(&pool, record_id).await.unwrap());
+
+        assert!(load_record(&pool, record_id).await.unwrap().is_none());
+        let event_count =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM app_events WHERE record_id = ?")
+                .bind(record_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(event_count, 0);
+    }
+
+    #[tokio::test]
     async fn app_db_migration_creates_app_identity_tables() {
         let dir = TempDir::new().unwrap();
         let pool = test_app_pool(&dir, "identity").await;
@@ -931,6 +1048,53 @@ mod tests {
         assert_eq!(session.app_user_id, user_id);
 
         delete_app_session(&pool, "session-1").await.unwrap();
+        assert!(load_app_session(&pool, "session-1")
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn app_user_update_and_delete_work() {
+        let dir = TempDir::new().unwrap();
+        let pool = test_app_pool(&dir, "identity-crud").await;
+        let user_id = insert_app_user(
+            &pool,
+            "user@example.com",
+            "User",
+            "old-hash",
+            "employee",
+            None,
+        )
+        .await
+        .unwrap();
+        insert_app_session(&pool, "session-1", user_id, "2099-01-01 00:00:00")
+            .await
+            .unwrap();
+
+        update_app_user(
+            &pool,
+            user_id,
+            "admin@example.com",
+            "Admin User",
+            "admin",
+            "disabled",
+            Some(9),
+            Some("new-hash"),
+        )
+        .await
+        .unwrap();
+
+        let updated = load_app_user(&pool, user_id).await.unwrap().unwrap();
+        assert_eq!(updated.email, "admin@example.com");
+        assert_eq!(updated.display_name, "Admin User");
+        assert_eq!(updated.password_hash, "new-hash");
+        assert_eq!(updated.role, "admin");
+        assert_eq!(updated.status, "disabled");
+        assert_eq!(updated.contact_id, Some(9));
+
+        assert!(delete_app_user(&pool, user_id).await.unwrap());
+        assert!(load_app_user(&pool, user_id).await.unwrap().is_none());
         assert!(load_app_session(&pool, "session-1")
             .await
             .unwrap()

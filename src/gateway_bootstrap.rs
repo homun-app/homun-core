@@ -543,10 +543,12 @@ pub async fn run_gateway() -> Result<()> {
     );
 
     let GatewayToolSetup {
-        registry: mut tool_registry,
+        registry: tool_registry,
         spawn_manager_cell,
         workflow_engine_cell,
     } = build_gateway_tool_registry(&config, db.clone(), shared_config.clone());
+    #[cfg(feature = "embeddings")]
+    let mut tool_registry = tool_registry;
 
     #[cfg(feature = "mcp")]
     let mcp_servers_config = config.mcp.servers.clone();

@@ -7,8 +7,11 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 
 use super::registry::{get_string_param, Tool, ToolContext, ToolResult};
-use crate::app_factory::blueprint::{AppBlueprint, FieldDefinition, FieldType};
-use crate::app_factory::{bridge::BridgePolicy, db as app_db, runtime, validation};
+use crate::app_factory::blueprint::{
+    AppBlueprint, EntityDefinition, FieldDefinition, FieldType, NavigationItemDefinition,
+    ViewDefinition, ViewType,
+};
+use crate::app_factory::{bridge::BridgePolicy, db as app_db, planning, runtime, validation};
 use crate::storage::Database;
 
 #[derive(Clone)]
@@ -74,6 +77,14 @@ pub struct CreateInternalAppTool {
     core: AppFactoryCore,
 }
 
+pub struct PlanInternalAppTool;
+
+impl PlanInternalAppTool {
+    pub fn new(_db: Database, _data_dir: PathBuf) -> Self {
+        Self
+    }
+}
+
 impl CreateInternalAppTool {
     pub fn new(db: Database, data_dir: PathBuf) -> Self {
         Self {
@@ -130,6 +141,30 @@ impl AddAppFieldTool {
     }
 }
 
+pub struct AddAppViewTool {
+    core: AppFactoryCore,
+}
+
+impl AddAppViewTool {
+    pub fn new(db: Database, data_dir: PathBuf) -> Self {
+        Self {
+            core: AppFactoryCore::new(db, data_dir),
+        }
+    }
+}
+
+pub struct ExtractLookupEntityTool {
+    core: AppFactoryCore,
+}
+
+impl ExtractLookupEntityTool {
+    pub fn new(db: Database, data_dir: PathBuf) -> Self {
+        Self {
+            core: AppFactoryCore::new(db, data_dir),
+        }
+    }
+}
+
 pub struct CreateAppRecordTool {
     core: AppFactoryCore,
 }
@@ -168,6 +203,7 @@ impl RunAppActionTool {
 
 pub fn app_factory_tools(db: Database, data_dir: PathBuf) -> Vec<Box<dyn Tool>> {
     vec![
+        Box::new(PlanInternalAppTool::new(db.clone(), data_dir.clone())),
         Box::new(CreateInternalAppTool::new(db.clone(), data_dir.clone())),
         Box::new(ListInternalAppsTool::new(db.clone(), data_dir.clone())),
         Box::new(UpdateInternalAppTool::new(db.clone(), data_dir.clone())),
@@ -176,10 +212,57 @@ pub fn app_factory_tools(db: Database, data_dir: PathBuf) -> Vec<Box<dyn Tool>> 
             data_dir.clone(),
         )),
         Box::new(AddAppFieldTool::new(db.clone(), data_dir.clone())),
+        Box::new(AddAppViewTool::new(db.clone(), data_dir.clone())),
+        Box::new(ExtractLookupEntityTool::new(db.clone(), data_dir.clone())),
         Box::new(CreateAppRecordTool::new(db.clone(), data_dir.clone())),
         Box::new(QueryAppRecordsTool::new(db.clone(), data_dir.clone())),
         Box::new(RunAppActionTool::new(db, data_dir)),
     ]
+}
+
+#[async_trait]
+impl Tool for PlanInternalAppTool {
+    fn name(&self) -> &str {
+        "plan_internal_app"
+    }
+
+    fn description(&self) -> &str {
+        "Plan a blueprint-generated internal app before creating or modifying it. Classifies fields, detects structural questions, and recommends the next App Factory blueprint tool."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "request": {
+                    "type": "string",
+                    "description": "User's natural-language internal app request or modification request"
+                },
+                "existing_app_slug": {
+                    "type": "string",
+                    "description": "Existing internal app slug when planning a modification"
+                }
+            },
+            "required": ["request"]
+        })
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let request = get_string_param(&args, "request")?;
+        if request.trim().is_empty() {
+            return Ok(ToolResult::error("Missing required parameter: request"));
+        }
+        let existing_app_slug = args
+            .get("existing_app_slug")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let plan = planning::plan_request(&request, existing_app_slug);
+        let output = serde_json::to_string_pretty(&plan)
+            .map_err(|e| anyhow!("Failed to serialize planning report: {e}"))?;
+
+        Ok(ToolResult::success(output))
+    }
 }
 
 #[async_trait]
@@ -635,6 +718,383 @@ impl Tool for AddAppFieldTool {
 }
 
 #[async_trait]
+impl Tool for AddAppViewTool {
+    fn name(&self) -> &str {
+        "add_app_view"
+    }
+
+    fn description(&self) -> &str {
+        "Add a view such as table, kanban, calendar, form, or detail to an existing blueprint-generated internal app without rewriting the full blueprint."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "app_slug": {"type": "string", "description": "Existing internal app slug"},
+                "entity": {"type": "string", "description": "Entity name the view renders"},
+                "view_type": {"type": "string", "description": "View type: table, kanban, calendar, form, detail"},
+                "view_id": {"type": "string", "description": "Optional view identifier. Generated from view label when omitted."},
+                "label": {"type": "string", "description": "Human-readable view label"},
+                "columns": {"type": "array", "items": {"type": "string"}, "description": "Fields to show in the view"},
+                "roles": {"type": "array", "items": {"type": "string"}, "description": "Roles allowed to see the view"},
+                "add_to_navigation": {"type": "boolean", "description": "Add a navigation item for this view. Default true."},
+                "change_note": {"type": "string", "description": "Short human-readable summary of the change"}
+            },
+            "required": ["app_slug", "entity", "view_type", "label"]
+        })
+    }
+
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
+        let user_id = match self.core.require_user_id(ctx) {
+            Ok(user_id) => user_id,
+            Err(result) => return Ok(result),
+        };
+        let app_slug = get_string_param(&args, "app_slug")?;
+        let entity_name = get_string_param(&args, "entity")?;
+        let label = get_string_param(&args, "label")?;
+        let view_type_raw = get_string_param(&args, "view_type")?;
+        let view_type = match parse_view_type(&view_type_raw) {
+            Ok(view_type) => view_type,
+            Err(message) => return Ok(ToolResult::error(message)),
+        };
+        let view_id = args
+            .get("view_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| ident_from_label(&label));
+        let columns = args
+            .get("columns")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let roles = args
+            .get("roles")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let add_to_navigation = args
+            .get("add_to_navigation")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let change_note = args
+            .get("change_note")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|note| !note.is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| format!("Add {view_type_raw} view {view_id}"));
+
+        let (app, mut blueprint) = match self.core.load_app(user_id, &app_slug).await {
+            Ok(app) => app,
+            Err(result) => return Ok(result),
+        };
+        if !blueprint
+            .entities
+            .iter()
+            .any(|entity| entity.name == entity_name)
+        {
+            return Ok(ToolResult::error(format!(
+                "Entity not found: {entity_name}"
+            )));
+        }
+        if blueprint
+            .views
+            .iter()
+            .any(|view| view.id.as_deref() == Some(view_id.as_str()) || view.name == label)
+        {
+            return Ok(ToolResult::error(format!("View already exists: {view_id}")));
+        }
+
+        blueprint.views.push(ViewDefinition {
+            id: Some(view_id.clone()),
+            view_type,
+            entity: entity_name.clone(),
+            name: label.clone(),
+            columns,
+            roles: roles.clone(),
+        });
+        if add_to_navigation
+            && !blueprint
+                .navigation
+                .iter()
+                .any(|item| item.view == view_id || item.label == label)
+        {
+            blueprint
+                .navigation
+                .push(crate::app_factory::blueprint::NavigationItemDefinition {
+                    label: label.clone(),
+                    view: view_id.clone(),
+                    roles,
+                });
+        }
+        if let Err(report) = validation::validate_blueprint(&blueprint) {
+            return Ok(ToolResult::error(format!(
+                "Invalid updated blueprint: {}",
+                report.errors.join(" | ")
+            )));
+        }
+
+        let version = match app_db::update_app_blueprint(
+            self.core.db.pool(),
+            app.id,
+            &blueprint,
+            Some(&change_note),
+            Some(user_id),
+        )
+        .await
+        {
+            Ok(version) => version,
+            Err(e) => return Ok(ToolResult::error(format!("Failed to add app view: {e}"))),
+        };
+
+        Ok(ToolResult::success(format!(
+            "Internal app view added.\napp={app_slug}\nentity={entity_name}\nview={view_id}\nlabel={label}\nversion={version}"
+        )))
+    }
+}
+
+#[async_trait]
+impl Tool for ExtractLookupEntityTool {
+    fn name(&self) -> &str {
+        "extract_lookup_entity"
+    }
+
+    fn description(&self) -> &str {
+        "Convert a fixed enum/string field in a blueprint-generated internal app into a managed lookup entity and relation, creating a management view and optional seed records. Use for requests like managing room names instead of a hard-coded room select."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "app_slug": {"type": "string", "description": "Existing internal app slug"},
+                "source_entity": {"type": "string", "description": "Entity containing the current field"},
+                "source_field": {"type": "string", "description": "Field to convert to relation"},
+                "lookup_entity": {"type": "string", "description": "New or existing lookup entity name, e.g. room"},
+                "lookup_label": {"type": "string", "description": "Human-readable lookup entity label, e.g. Sala"},
+                "name_field": {"type": "string", "description": "Lookup display field name. Default name."},
+                "view_label": {"type": "string", "description": "Human-readable management view label"},
+                "read_roles": {"type": "array", "items": {"type": "string"}, "description": "Roles allowed to read lookup values. Default all app roles."},
+                "manage_roles": {"type": "array", "items": {"type": "string"}, "description": "Roles allowed to manage lookup values. Default admin."},
+                "seed_values": {"type": "array", "items": {"type": "string"}, "description": "Initial lookup values. Defaults to enum options from source field."},
+                "change_note": {"type": "string", "description": "Short human-readable summary of the change"}
+            },
+            "required": ["app_slug", "source_entity", "source_field", "lookup_entity", "lookup_label"]
+        })
+    }
+
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
+        let user_id = match self.core.require_user_id(ctx) {
+            Ok(user_id) => user_id,
+            Err(result) => return Ok(result),
+        };
+        let app_slug = get_string_param(&args, "app_slug")?;
+        let source_entity = get_string_param(&args, "source_entity")?;
+        let source_field = get_string_param(&args, "source_field")?;
+        let lookup_entity = get_string_param(&args, "lookup_entity")?;
+        let lookup_label = get_string_param(&args, "lookup_label")?;
+        let name_field = args
+            .get("name_field")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| "name".to_string());
+        let view_label = args
+            .get("view_label")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| format!("Gestione {}", lookup_label));
+        let manage_roles = string_array_arg(&args, "manage_roles")
+            .filter(|roles| !roles.is_empty())
+            .unwrap_or_else(|| vec!["admin".to_string()]);
+        let seed_values_arg = string_array_arg(&args, "seed_values").unwrap_or_default();
+        let change_note = args
+            .get("change_note")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|note| !note.is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| {
+                format!("Extract {source_entity}.{source_field} into lookup entity {lookup_entity}")
+            });
+
+        let (app, mut blueprint) = match self.core.load_app(user_id, &app_slug).await {
+            Ok(app) => app,
+            Err(result) => return Ok(result),
+        };
+        let role_names = blueprint
+            .roles
+            .iter()
+            .map(|role| role.name.clone())
+            .collect::<Vec<_>>();
+        let read_roles = string_array_arg(&args, "read_roles")
+            .filter(|roles| !roles.is_empty())
+            .unwrap_or_else(|| {
+                if role_names.is_empty() {
+                    vec![
+                        "admin".to_string(),
+                        "support".to_string(),
+                        "employee".to_string(),
+                    ]
+                } else {
+                    role_names
+                }
+            });
+
+        let source = match blueprint
+            .entities
+            .iter_mut()
+            .find(|entity| entity.name == source_entity)
+        {
+            Some(entity) => entity,
+            None => {
+                return Ok(ToolResult::error(format!(
+                    "Entity not found: {source_entity}"
+                )))
+            }
+        };
+        let source_field_def = match source
+            .fields
+            .iter_mut()
+            .find(|field| field.name == source_field)
+        {
+            Some(field) => field,
+            None => {
+                return Ok(ToolResult::error(format!(
+                    "Field not found: {source_entity}.{source_field}"
+                )))
+            }
+        };
+        let enum_options = source_field_def.options.clone();
+        let seed_values = if seed_values_arg.is_empty() {
+            enum_options
+        } else {
+            seed_values_arg
+        };
+        source_field_def.field_type = FieldType::Relation;
+        source_field_def.to = Some(lookup_entity.clone());
+        source_field_def.options.clear();
+        source_field_def.default = None;
+
+        if !blueprint
+            .entities
+            .iter()
+            .any(|entity| entity.name == lookup_entity)
+        {
+            blueprint.entities.push(EntityDefinition {
+                name: lookup_entity.clone(),
+                label: lookup_label.clone(),
+                fields: vec![
+                    FieldDefinition {
+                        name: name_field.clone(),
+                        field_type: FieldType::String,
+                        label: "Nome".to_string(),
+                        required: true,
+                        default: None,
+                        options: Vec::new(),
+                        to: None,
+                        system: false,
+                        managed_by: None,
+                        editable_by: manage_roles.clone(),
+                    },
+                    FieldDefinition {
+                        name: "active".to_string(),
+                        field_type: FieldType::Boolean,
+                        label: "Attiva".to_string(),
+                        required: false,
+                        default: Some(Value::Bool(true)),
+                        options: Vec::new(),
+                        to: None,
+                        system: false,
+                        managed_by: None,
+                        editable_by: manage_roles.clone(),
+                    },
+                ],
+            });
+        }
+
+        let view_id = plural_ident(&lookup_entity);
+        if !blueprint
+            .views
+            .iter()
+            .any(|view| view.id.as_deref() == Some(view_id.as_str()))
+        {
+            blueprint.views.push(ViewDefinition {
+                id: Some(view_id.clone()),
+                view_type: ViewType::Table,
+                entity: lookup_entity.clone(),
+                name: view_label.clone(),
+                columns: vec![name_field.clone(), "active".to_string()],
+                roles: manage_roles.clone(),
+            });
+        }
+        if !blueprint
+            .navigation
+            .iter()
+            .any(|item| item.view == view_id || item.label == view_label)
+        {
+            blueprint.navigation.push(NavigationItemDefinition {
+                label: view_label.clone(),
+                view: view_id.clone(),
+                roles: manage_roles.clone(),
+            });
+        }
+        ensure_lookup_permissions(&mut blueprint, &lookup_entity, &read_roles, &manage_roles);
+
+        if let Err(report) = validation::validate_blueprint(&blueprint) {
+            return Ok(ToolResult::error(format!(
+                "Invalid updated blueprint: {}",
+                report.errors.join(" | ")
+            )));
+        }
+
+        let version = match app_db::update_app_blueprint(
+            self.core.db.pool(),
+            app.id,
+            &blueprint,
+            Some(&change_note),
+            Some(user_id),
+        )
+        .await
+        {
+            Ok(version) => version,
+            Err(e) => {
+                return Ok(ToolResult::error(format!(
+                    "Failed to extract lookup entity: {e}"
+                )))
+            }
+        };
+        let seeded = seed_lookup_records(&app, &lookup_entity, &name_field, &seed_values).await?;
+
+        Ok(ToolResult::success(format!(
+            "Lookup entity extracted.\napp={app_slug}\nsource={source_entity}.{source_field}\nlookup_entity={lookup_entity}\nview={view_id}\nseeded_records={seeded}\nversion={version}"
+        )))
+    }
+}
+
+#[async_trait]
 impl Tool for CreateAppRecordTool {
     fn name(&self) -> &str {
         "create_app_record"
@@ -929,6 +1389,105 @@ fn merge_array_arg(target: &mut Vec<String>, args: &Value, key: &str) {
     );
 }
 
+fn string_array_arg(args: &Value, key: &str) -> Option<Vec<String>> {
+    args.get(key).and_then(Value::as_array).map(|values| {
+        values
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .collect()
+    })
+}
+
+fn ensure_lookup_permissions(
+    blueprint: &mut AppBlueprint,
+    entity: &str,
+    read_roles: &[String],
+    manage_roles: &[String],
+) {
+    for role in read_roles {
+        ensure_permission(blueprint, role, &format!("{entity}:read"));
+    }
+    for role in manage_roles {
+        ensure_permission(blueprint, role, &format!("{entity}:create"));
+        ensure_permission(blueprint, role, &format!("{entity}:update"));
+        ensure_permission(blueprint, role, &format!("{entity}:read"));
+    }
+}
+
+fn ensure_permission(blueprint: &mut AppBlueprint, role: &str, permission: &str) {
+    if role == "admin" {
+        return;
+    }
+    if let Some(policy) = blueprint
+        .permissions
+        .iter_mut()
+        .find(|policy| policy.role == role)
+    {
+        if !policy.allow.iter().any(|item| item == permission) {
+            policy.allow.push(permission.to_string());
+        }
+        return;
+    }
+    blueprint
+        .permissions
+        .push(crate::app_factory::blueprint::PermissionDefinition {
+            role: role.to_string(),
+            allow: vec![permission.to_string()],
+            deny: Vec::new(),
+        });
+}
+
+fn plural_ident(value: &str) -> String {
+    if value.ends_with('s') {
+        value.to_string()
+    } else {
+        format!("{value}s")
+    }
+}
+
+async fn seed_lookup_records(
+    app: &app_db::InternalAppRow,
+    entity: &str,
+    name_field: &str,
+    values: &[String],
+) -> Result<usize> {
+    if values.is_empty() {
+        return Ok(0);
+    }
+    let app_pool = app_db::open_app_pool(std::path::Path::new(&app.db_path)).await?;
+    let existing = app_db::list_records(&app_pool, entity, 500).await?;
+    let existing_names = existing
+        .iter()
+        .filter_map(|row| serde_json::from_str::<Value>(&row.data_json).ok())
+        .filter_map(|data| {
+            data.get(name_field)
+                .and_then(Value::as_str)
+                .map(str::to_ascii_lowercase)
+        })
+        .collect::<std::collections::HashSet<_>>();
+    let mut inserted = 0;
+    for value in values {
+        let value = value.trim();
+        if value.is_empty() || existing_names.contains(&value.to_ascii_lowercase()) {
+            continue;
+        }
+        app_db::insert_record(
+            &app_pool,
+            entity,
+            &json!({name_field: value, "active": true}),
+            None,
+            None,
+        )
+        .await?;
+        inserted += 1;
+    }
+    app_pool.close().await;
+    Ok(inserted)
+}
+
 fn ident_from_label(label: &str) -> String {
     let mut ident = String::new();
     let mut last_was_sep = false;
@@ -962,6 +1521,19 @@ fn parse_field_type(raw: &str) -> std::result::Result<FieldType, String> {
         "relation" | "reference" | "lookup" => Ok(FieldType::Relation),
         other => Err(format!(
             "Unsupported field_type '{other}'. Use string, text, number, date, boolean, enum, or relation."
+        )),
+    }
+}
+
+fn parse_view_type(raw: &str) -> std::result::Result<ViewType, String> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "table" | "list" | "lista" => Ok(ViewType::Table),
+        "form" | "create" | "new" => Ok(ViewType::Form),
+        "detail" | "details" | "dettaglio" => Ok(ViewType::Detail),
+        "kanban" | "board" | "pipeline" => Ok(ViewType::Kanban),
+        "calendar" | "calendario" | "agenda" => Ok(ViewType::Calendar),
+        other => Err(format!(
+            "Unsupported view_type '{other}'. Use table, form, detail, kanban, or calendar."
         )),
     }
 }
@@ -1028,7 +1600,7 @@ mod tests {
 
         let tools = app_factory_tools(db, data_dir);
 
-        assert_eq!(tools.len(), 8);
+        assert_eq!(tools.len(), 11);
         for tool in tools {
             let description = tool.description().to_lowercase();
             assert!(description.contains("internal app"));
@@ -1048,6 +1620,56 @@ mod tests {
 
         assert!(result.is_error);
         assert!(result.output.contains("user_id"));
+    }
+
+    #[tokio::test]
+    async fn plan_internal_app_recommends_lookup_extraction_for_room_select() {
+        let (db, dir) = test_db().await;
+        let tool = PlanInternalAppTool::new(db, dir.path().to_path_buf());
+
+        let result = tool
+            .execute(
+                json!({
+                    "request": "mi crei una vista per gestire i nomi delle sale e la colleghi alla select della sala",
+                    "existing_app_slug": "prenotazione-sale-riunioni"
+                }),
+                &test_context(Some("user-1")),
+            )
+            .await
+            .unwrap();
+
+        assert!(!result.is_error, "{}", result.output);
+        assert!(result
+            .output
+            .contains("\"intent\": \"structural_modification\""));
+        assert!(result
+            .output
+            .contains("\"tool\": \"extract_lookup_entity\""));
+        assert!(result.output.contains("\"classification\": \"relation\""));
+    }
+
+    #[tokio::test]
+    async fn plan_internal_app_returns_valid_blueprint_for_explicit_room_booking_app() {
+        let (db, dir) = test_db().await;
+        let tool = PlanInternalAppTool::new(db, dir.path().to_path_buf());
+
+        let result = tool
+            .execute(
+                json!({
+                    "request": "Crea un'app per prenotare sale riunioni. Le sale devono essere gestibili da una vista dedicata, non una lista fissa. Voglio un calendario operativo."
+                }),
+                &test_context(Some("user-1")),
+            )
+            .await
+            .unwrap();
+
+        assert!(!result.is_error, "{}", result.output);
+        assert!(result.output.contains("\"recommended_blueprint\""));
+        assert!(result
+            .output
+            .contains("\"slug\": \"prenotazione-sale-riunioni\""));
+        assert!(result.output.contains("\"type\": \"calendar\""));
+        assert!(result.output.contains("\"to\": \"room\""));
     }
 
     #[tokio::test]
@@ -1251,6 +1873,164 @@ mod tests {
         assert!(blueprint.views[0]
             .columns
             .contains(&"motivo_dettagliato".to_string()));
+    }
+
+    #[tokio::test]
+    async fn add_app_view_adds_calendar_without_rewriting_blueprint() {
+        let (db, dir) = test_db().await;
+        let data_dir = dir.path().to_path_buf();
+        let ctx = test_context(Some("user-1"));
+        let create_app = CreateInternalAppTool::new(db.clone(), data_dir.clone());
+        let add_field = AddAppFieldTool::new(db.clone(), data_dir.clone());
+        let add_view = AddAppViewTool::new(db.clone(), data_dir);
+
+        let created_app = create_app
+            .execute(json!({"blueprint": valid_blueprint()}), &ctx)
+            .await
+            .unwrap();
+        assert!(!created_app.is_error, "{}", created_app.output);
+        let added_date = add_field
+            .execute(
+                json!({
+                    "app_slug": "ferie-permessi",
+                    "entity": "leave_request",
+                    "field_name": "start_date",
+                    "label": "Data inizio",
+                    "field_type": "date"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(!added_date.is_error, "{}", added_date.output);
+
+        let result = add_view
+            .execute(
+                json!({
+                    "app_slug": "ferie-permessi",
+                    "entity": "leave_request",
+                    "view_type": "calendar",
+                    "view_id": "leave_calendar",
+                    "label": "Calendario",
+                    "columns": ["start_date", "kind", "status"],
+                    "roles": ["admin", "employee"]
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert!(!result.is_error, "{}", result.output);
+        assert!(result.output.contains("view=leave_calendar"));
+        assert!(result.output.contains("version=3"));
+
+        let app = app_db::load_app_for_user(db.pool(), "user-1", "ferie-permessi")
+            .await
+            .unwrap()
+            .unwrap();
+        let blueprint: AppBlueprint = serde_json::from_str(&app.blueprint_json).unwrap();
+        let view = blueprint
+            .views
+            .iter()
+            .find(|view| view.id.as_deref() == Some("leave_calendar"))
+            .unwrap();
+        assert_eq!(view.view_type, ViewType::Calendar);
+        assert!(blueprint
+            .navigation
+            .iter()
+            .any(|item| item.view == "leave_calendar"));
+    }
+
+    #[tokio::test]
+    async fn extract_lookup_entity_converts_enum_select_to_managed_relation() {
+        let (db, dir) = test_db().await;
+        let data_dir = dir.path().to_path_buf();
+        let ctx = test_context(Some("user-1"));
+        let create_app = CreateInternalAppTool::new(db.clone(), data_dir.clone());
+        let extract_lookup = ExtractLookupEntityTool::new(db.clone(), data_dir);
+        let mut blueprint = valid_blueprint();
+        blueprint["app"]["slug"] = json!("prenotazione-sale");
+        blueprint["app"]["name"] = json!("Prenotazione Sale");
+        blueprint["entities"][0]["name"] = json!("booking");
+        blueprint["entities"][0]["label"] = json!("Prenotazione");
+        blueprint["entities"][0]["fields"][0] = json!({
+            "name": "room",
+            "type": "enum",
+            "label": "Sala",
+            "options": ["sala_a", "sala_b"]
+        });
+        blueprint["views"][0] = json!({
+            "type": "table",
+            "entity": "booking",
+            "name": "Prenotazioni",
+            "columns": ["room", "status"]
+        });
+        blueprint["workflows"][0]["entity"] = json!("booking");
+
+        let created_app = create_app
+            .execute(json!({"blueprint": blueprint}), &ctx)
+            .await
+            .unwrap();
+        assert!(!created_app.is_error, "{}", created_app.output);
+
+        let result = extract_lookup
+            .execute(
+                json!({
+                    "app_slug": "prenotazione-sale",
+                    "source_entity": "booking",
+                    "source_field": "room",
+                    "lookup_entity": "room",
+                    "lookup_label": "Sala",
+                    "view_label": "Sale",
+                    "read_roles": ["employee"],
+                    "manage_roles": ["admin"]
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert!(!result.is_error, "{}", result.output);
+        assert!(result.output.contains("lookup_entity=room"));
+        assert!(result.output.contains("seeded_records=2"));
+
+        let app = app_db::load_app_for_user(db.pool(), "user-1", "prenotazione-sale")
+            .await
+            .unwrap()
+            .unwrap();
+        let blueprint: AppBlueprint = serde_json::from_str(&app.blueprint_json).unwrap();
+        let booking = blueprint
+            .entities
+            .iter()
+            .find(|entity| entity.name == "booking")
+            .unwrap();
+        let room_field = booking
+            .fields
+            .iter()
+            .find(|field| field.name == "room")
+            .unwrap();
+        assert_eq!(room_field.field_type, FieldType::Relation);
+        assert_eq!(room_field.to.as_deref(), Some("room"));
+        assert!(blueprint
+            .entities
+            .iter()
+            .any(|entity| entity.name == "room"));
+        assert!(blueprint
+            .views
+            .iter()
+            .any(|view| view.entity == "room" && view.name == "Sale"));
+        assert!(blueprint
+            .permissions
+            .iter()
+            .any(|policy| policy.role == "employee"
+                && policy.allow.contains(&"room:read".to_string())));
+
+        let app_pool = app_db::open_app_pool(std::path::Path::new(&app.db_path))
+            .await
+            .unwrap();
+        let rooms = app_db::list_records(&app_pool, "room", 20).await.unwrap();
+        app_pool.close().await;
+        assert_eq!(rooms.len(), 2);
     }
 
     #[tokio::test]

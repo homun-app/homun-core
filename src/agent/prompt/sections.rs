@@ -197,11 +197,12 @@ impl PromptSection for ToolsSection {
                  - Forms: READ ALL fields first, then fill in logical order (the accessibility tree \
                  order may differ from the visual layout — use field labels to determine correct sequence)\n\
                  - Autocomplete fields: type a FEW characters → read suggestions → click the match\n\
+                 - Travel station/airport comboboxes: typed text is not enough. You must click the exact suggestion (for example \"Napoli Centrale\"), then verify the field still shows that exact value before Search/Submit\n\
                  - NEVER re-navigate to a site you already have open — use snapshot() instead\n\
                  - NEVER navigate to URLs you constructed — only use URLs from search results or visible links\n\
                  - Booking sites: navigate via Google search first to establish a natural session\n\
                  - If a click fails with timeout: STOP, take snapshot() to see what's blocking (overlay, modal, banner). NEVER retry the same ref more than once\n\
-                 - Before clicking 'Search' or 'Submit': verify ALL required fields are filled (especially passengers, dates, quantity). If a field looks empty in the snapshot, fill it BEFORE submitting\n\
+                 - Before clicking 'Search' or 'Submit': verify ALL required fields are filled and resolved (especially station/airport comboboxes, passengers, dates, quantity). If a field looks empty or still has suggestions open in the snapshot, fix it BEFORE submitting\n\
                  - Fill forms ONE FIELD AT A TIME: type() → check autocomplete → click match → next field. Do NOT use fill_form for booking/travel sites — it skips autocomplete and breaks reactive fields\n\
                  - When a form asks for personal info (name, email, phone, etc.), use the data from the User Profile (USER.md) — NEVER ask the user for info you already have in the profile\n",
             );
@@ -787,6 +788,10 @@ mod tests {
         assert!(
             result.contains("Autocomplete"),
             "Autocomplete rule must be visible"
+        );
+        assert!(
+            result.contains("typed text is not enough"),
+            "Travel station comboboxes must require explicit suggestion selection"
         );
         // Should NOT have XML tool call format
         assert!(!result.contains("Tool Call Format"));

@@ -16,6 +16,23 @@ pub fn validate_record_data(
     entity_name: &str,
     data: &Value,
 ) -> Result<Value> {
+    validate_record_data_inner(blueprint, entity_name, data, true)
+}
+
+pub fn validate_existing_record_data(
+    blueprint: &AppBlueprint,
+    entity_name: &str,
+    data: &Value,
+) -> Result<Value> {
+    validate_record_data_inner(blueprint, entity_name, data, false)
+}
+
+fn validate_record_data_inner(
+    blueprint: &AppBlueprint,
+    entity_name: &str,
+    data: &Value,
+    apply_initial_state: bool,
+) -> Result<Value> {
     let entity = entity(blueprint, entity_name)?;
     let input = data
         .as_object()
@@ -33,7 +50,9 @@ pub fn validate_record_data(
         }
     }
 
-    apply_initial_workflow_state(blueprint, entity_name, &mut out);
+    if apply_initial_state {
+        apply_initial_workflow_state(blueprint, entity_name, &mut out);
+    }
 
     Ok(Value::Object(out))
 }
@@ -196,6 +215,19 @@ mod tests {
 
         assert_eq!(data["kind"], "ferie");
         assert_eq!(data["status"], "pending");
+    }
+
+    #[test]
+    fn update_validation_preserves_existing_workflow_state() {
+        let data = validate_existing_record_data(
+            &leave_blueprint(),
+            "leave_request",
+            &json!({"kind": "ferie", "status": "approved"}),
+        )
+        .unwrap();
+
+        assert_eq!(data["kind"], "ferie");
+        assert_eq!(data["status"], "approved");
     }
 
     #[test]

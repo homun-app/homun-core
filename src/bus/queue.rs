@@ -71,6 +71,9 @@ pub struct MessageMetadata {
     /// Authenticated role names at the ingress boundary, when available.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub auth_roles: Vec<String>,
+    /// Explicit profile scope for system/runtime messages.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<i64>,
 }
 
 /// Message from a channel to the agent
@@ -142,6 +145,7 @@ mod tests {
             auth_user_id: Some("user-123".to_string()),
             auth_username: Some("fabio".to_string()),
             auth_roles: vec!["admin".to_string()],
+            profile_id: Some(42),
             ..MessageMetadata::default()
         };
 
@@ -150,6 +154,7 @@ mod tests {
         assert_eq!(encoded["auth_user_id"], "user-123");
         assert_eq!(encoded["auth_username"], "fabio");
         assert_eq!(encoded["auth_roles"][0], "admin");
+        assert_eq!(encoded["profile_id"], 42);
     }
 
     #[test]

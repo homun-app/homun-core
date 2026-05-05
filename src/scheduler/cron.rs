@@ -23,6 +23,9 @@ pub struct CronEvent {
     pub deliver_to: Option<String>,
     /// Present for automation events to track end-to-end lifecycle.
     pub automation_run_id: Option<String>,
+    /// User/profile scope persisted on the automation definition.
+    pub auth_user_id: Option<String>,
+    pub profile_id: Option<i64>,
 }
 
 /// Automation scheduler — fires recurring automations on schedule.
@@ -213,14 +216,13 @@ impl CronScheduler {
                                 automation_run_id: Some(run_id.clone()),
                             };
                             let channel = automation.deliver_to.as_deref().unwrap_or("automation");
-                            // Cron: use automation's profile_id, no user context
                             match engine
                                 .create_and_start(
                                     req,
                                     channel,
                                     channel,
                                     automation.profile_id,
-                                    None,
+                                    automation.user_id.as_deref(),
                                 )
                                 .await
                             {
@@ -292,6 +294,8 @@ impl CronScheduler {
                 message: runtime_prompt,
                 deliver_to: automation.deliver_to.clone(),
                 automation_run_id: Some(run_id.clone()),
+                auth_user_id: automation.user_id.clone(),
+                profile_id: automation.profile_id,
             };
 
             if let Err(e) = self.event_tx.send(event).await {

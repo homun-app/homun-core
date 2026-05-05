@@ -1534,6 +1534,7 @@ impl Gateway {
                 let automation_id = automation_run_id
                     .as_ref()
                     .and_then(|_| infer_automation_id(&inbound));
+                let forced_profile_id = inbound_metadata.as_ref().and_then(|m| m.profile_id);
                 let base_suppress_outbound =
                     should_suppress_system_outbound(inbound_metadata.as_ref(), &channel_name);
                 let blocked_tools: &'static [&'static str] = if is_automation_context {
@@ -1557,6 +1558,7 @@ impl Gateway {
                         email_body_preview,
                         automation_run_id,
                         automation_id,
+                        profile_id: forced_profile_id,
                         suppress_outbound: base_suppress_outbound,
                         blocked_tools,
                         thinking_override,
@@ -1601,6 +1603,8 @@ impl Gateway {
                         scheduler_kind: Some("automation".to_string()),
                         scheduler_job_id: Some(event.job_id.clone()),
                         automation_run_id: event.automation_run_id.clone(),
+                        auth_user_id: event.auth_user_id.clone(),
+                        profile_id: event.profile_id,
                         ..Default::default()
                     }),
                 };
@@ -2017,6 +2021,7 @@ async fn dispatch_to_agent_inner(
                 blocked_tools,
                 thinking_override,
                 auth_user_id,
+                ctx.profile_id,
             )
             .await;
 
@@ -2078,6 +2083,7 @@ async fn dispatch_to_agent_inner(
                 blocked_tools,
                 thinking_override,
                 auth_user_id,
+                ctx.profile_id,
             )
             .await
             {
@@ -2103,6 +2109,7 @@ async fn dispatch_to_agent_inner(
             blocked_tools,
             thinking_override,
             auth_user_id,
+            ctx.profile_id,
         )
         .await
         {

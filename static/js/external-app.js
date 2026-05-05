@@ -10,8 +10,11 @@
         records: [],
         selected: null,
         contacts: [],
+        relatedRecords: {},
+        calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
         statusFilter: 'all',
-        search: ''
+        search: '',
+        editMode: false
     };
 
     function api(path, options) {
@@ -57,6 +60,12 @@
         });
     }
 
+    function fieldDef(entity, fieldName) {
+        return entity && entity.fields ? entity.fields.find(function (field) {
+            return field.name === fieldName;
+        }) : null;
+    }
+
     function role() {
         return state.app && state.app.user ? state.app.user.role : '';
     }
@@ -79,6 +88,8 @@
 
     function iconClass(view) {
         var label = (navLabel(view) + ' ' + view.entity).toLowerCase();
+        if (view.type === 'kanban') return 'icon-workflow';
+        if (view.type === 'calendar') return 'icon-calendar';
         if (/new|nuov|create|form/.test(label)) return 'icon-add';
         if (/request|richiest|ticket|workflow/.test(label)) return 'icon-workflow';
         if (/dashboard|stat|approv/.test(label)) return 'icon-settings';
@@ -127,6 +138,20 @@
         var workflow = workflowFor(view.entity);
         if (!workflow || !state.selected) return null;
         return state.selected.data[workflow.state_field] || state.selected.status;
+    }
+
+    function relationLabel(entityName, value) {
+        var records = state.relatedRecords[entityName] || [];
+        var match = records.find(function (record) {
+            return String(record.id) === String(value);
+        });
+        return match ? primaryRecordTitle(entityDef(entityName), match) : valueText(value);
+    }
+
+    function fieldDisplayValue(entity, fieldName, value) {
+        var field = fieldDef(entity, fieldName);
+        if (field && field.type === 'relation' && field.to) return relationLabel(field.to, value);
+        return valueText(value);
     }
 
     function filteredRecords() {
@@ -195,7 +220,7 @@
                 card.classList.add('status-' + String(status).toLowerCase());
                 card.addEventListener('click', function () {
                     state.statusFilter = state.statusFilter === status ? 'all' : status;
-                    renderTable();
+                    renderRecordsView();
                 });
                 wrap.appendChild(card);
             });
@@ -248,6 +273,7 @@
             button.addEventListener('click', function () {
                 state.activeView = index;
                 state.selected = null;
+                state.editMode = false;
                 state.statusFilter = 'all';
                 state.search = '';
                 renderNav();
@@ -266,8 +292,11 @@
         api('/entities/' + encodeURIComponent(view.entity) + '/records').then(function (records) {
             state.records = records || [];
             state.selected = state.records[0] || null;
+            state.editMode = false;
+            return loadRelationOptions(entityDef(view.entity));
+        }).then(function () {
             rerenderChrome();
-            renderTable();
+            renderRecordsView();
             renderForm();
         }).catch(function (err) {
             renderEmpty(err.message);
@@ -284,29 +313,27 @@
         if (form) form.textContent = '';
     }
 
-    function renderTable() {
+    function renderRecordsView() {
         var view = currentView();
+        if (!view) return;
+        if (view.type === 'kanban') {
+            renderKanban(view);
+            return;
+        }
+        if (view.type === 'calendar') {
+            renderCalendar(view);
+            return;
+        }
+        renderTable(view);
+    }
+
+    function renderTable(view) {
         var entity = entityDef(view.entity);
         var tableWrap = document.getElementById('external-app-table');
         if (!tableWrap) return;
         tableWrap.textContent = '';
 
-        var top = el('div', 'external-table-toolbar');
-        var title = el('div', 'external-section-title');
-        title.appendChild(el('h2', null, humanName(navLabel(view)) || (entity && entity.label) || humanName(view.entity)));
-        var shown = filteredRecords().length;
-        title.appendChild(el('span', null, shown + (shown === 1 ? ' record' : ' records')));
-        top.appendChild(title);
-        var search = el('input', 'input external-search');
-        search.type = 'search';
-        search.placeholder = 'Search records';
-        search.value = state.search;
-        search.addEventListener('input', function () {
-            state.search = search.value;
-            renderTable();
-        });
-        top.appendChild(search);
-        tableWrap.appendChild(top);
+        tableWrap.appendChild(renderViewToolbar(view, filteredRecords().length));
 
         var records = filteredRecords();
         if (!records.length) {
@@ -335,7 +362,7 @@
             var row = el('tr', state.selected && state.selected.id === record.id ? 'selected' : '');
             row.addEventListener('click', function () {
                 state.selected = record;
-                renderTable();
+                renderRecordsView();
                 renderForm();
             });
             columns.forEach(function (column) {
@@ -343,7 +370,7 @@
                 if (column === stateField) {
                     cell.appendChild(el('span', 'external-status-pill status-' + String(record.data[column] || record.status || 'none').toLowerCase(), record.data[column] || record.status || 'none'));
                 } else {
-                    cell.textContent = valueText(record.data[column]);
+                    cell.textContent = fieldDisplayValue(entity, column, record.data[column]);
                 }
                 row.appendChild(cell);
             });
@@ -356,6 +383,217 @@
         });
         table.appendChild(tbody);
         tableWrap.appendChild(table);
+    }
+
+    function renderViewToolbar(view, shown) {
+        var top = el('div', 'external-table-toolbar');
+        var title = el('div', 'external-section-title');
+        title.appendChild(el('h2', null, humanName(navLabel(view)) || humanName(view.entity)));
+        title.appendChild(el('span', null, shown + (shown === 1 ? ' record' : ' records')));
+        top.appendChild(title);
+        var search = el('input', 'input external-search');
+        search.type = 'search';
+        search.placeholder = 'Search records';
+        search.value = state.search;
+        search.addEventListener('input', function () {
+            state.search = search.value;
+            renderRecordsView();
+        });
+        top.appendChild(search);
+        return top;
+    }
+
+    function primaryRecordTitle(entity, record) {
+        var data = record.data || {};
+        var preferred = ['title', 'subject', 'name', 'full_name', 'nome'];
+        for (var i = 0; i < preferred.length; i++) {
+            if (data[preferred[i]]) return valueText(data[preferred[i]]);
+        }
+        var first = entity && entity.fields && entity.fields[0] ? entity.fields[0].name : null;
+        return first && data[first] ? valueText(data[first]) : '#' + record.id;
+    }
+
+    function secondaryRecordText(view, record) {
+        var data = record.data || {};
+        return (view.columns || [])
+            .filter(function (column) {
+                return data[column] !== undefined && data[column] !== null && data[column] !== '';
+            })
+            .slice(0, 3)
+            .map(function (column) {
+                return humanName(column) + ': ' + fieldDisplayValue(entityDef(view.entity), column, data[column]);
+            })
+            .join(' · ');
+    }
+
+    function renderKanban(view) {
+        var entity = entityDef(view.entity);
+        var workflow = workflowFor(view.entity);
+        var tableWrap = document.getElementById('external-app-table');
+        if (!tableWrap) return;
+        tableWrap.textContent = '';
+        tableWrap.appendChild(renderViewToolbar(view, filteredRecords().length));
+        if (!workflow || !workflow.states || !workflow.states.length) {
+            tableWrap.appendChild(renderEmptyState('Board unavailable', 'This view needs workflow states.'));
+            return;
+        }
+
+        var records = filteredRecords();
+        var board = el('section', 'external-kanban');
+        workflow.states.forEach(function (status) {
+            var items = records.filter(function (record) {
+                return String(record.status || record.data[workflow.state_field] || '') === status;
+            });
+            var column = el('article', 'external-kanban-column status-' + String(status).toLowerCase());
+            var header = el('div', 'external-kanban-header');
+            header.appendChild(el('h3', null, humanName(status)));
+            header.appendChild(el('span', null, items.length));
+            column.appendChild(header);
+            if (!items.length) column.appendChild(el('p', 'external-kanban-empty', 'No records'));
+            items.forEach(function (record) {
+                var card = el('button', 'external-kanban-card' + (state.selected && state.selected.id === record.id ? ' selected' : ''));
+                card.type = 'button';
+                card.appendChild(el('strong', null, primaryRecordTitle(entity, record)));
+                var meta = secondaryRecordText(view, record);
+                if (meta) card.appendChild(el('span', null, meta));
+                card.addEventListener('click', function () {
+                    state.selected = record;
+                    renderRecordsView();
+                    renderForm();
+                });
+                column.appendChild(card);
+            });
+            board.appendChild(column);
+        });
+        tableWrap.appendChild(board);
+    }
+
+    function calendarDateField(entity, view) {
+        var fields = entity && entity.fields ? entity.fields : [];
+        var columns = view.columns || [];
+        for (var i = 0; i < columns.length; i++) {
+            var columnField = fields.find(function (field) { return field.name === columns[i]; });
+            if (columnField && columnField.type === 'date') return columnField.name;
+        }
+        var firstDate = fields.find(function (field) { return field.type === 'date'; });
+        return firstDate ? firstDate.name : null;
+    }
+
+    function renderCalendar(view) {
+        var entity = entityDef(view.entity);
+        var tableWrap = document.getElementById('external-app-table');
+        if (!tableWrap) return;
+        tableWrap.textContent = '';
+        tableWrap.appendChild(renderCalendarToolbar(view, filteredRecords().length));
+        var dateField = calendarDateField(entity, view);
+        if (!dateField) {
+            tableWrap.appendChild(renderEmptyState('Calendar unavailable', 'This view needs a date field.'));
+            return;
+        }
+        tableWrap.appendChild(renderMonthCalendar(view, entity, dateField));
+    }
+
+    function renderCalendarToolbar(view, shown) {
+        var top = renderViewToolbar(view, shown);
+        var controls = el('div', 'external-calendar-controls');
+        var previous = el('button', 'external-secondary-action', 'Previous');
+        previous.type = 'button';
+        previous.addEventListener('click', function () {
+            state.calendarMonth = new Date(state.calendarMonth.getFullYear(), state.calendarMonth.getMonth() - 1, 1);
+            renderRecordsView();
+        });
+        var current = el('strong', null, state.calendarMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }));
+        var next = el('button', 'external-secondary-action', 'Next');
+        next.type = 'button';
+        next.addEventListener('click', function () {
+            state.calendarMonth = new Date(state.calendarMonth.getFullYear(), state.calendarMonth.getMonth() + 1, 1);
+            renderRecordsView();
+        });
+        controls.appendChild(previous);
+        controls.appendChild(current);
+        controls.appendChild(next);
+        top.appendChild(controls);
+        return top;
+    }
+
+    function renderMonthCalendar(view, entity, dateField) {
+        var grid = el('section', 'external-calendar-grid');
+        ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].forEach(function (day) {
+            grid.appendChild(el('div', 'external-calendar-weekday', day));
+        });
+        var year = state.calendarMonth.getFullYear();
+        var month = state.calendarMonth.getMonth();
+        var first = new Date(year, month, 1);
+        var leading = (first.getDay() + 6) % 7;
+        var days = new Date(year, month + 1, 0).getDate();
+        for (var i = 0; i < leading; i++) {
+            grid.appendChild(el('div', 'external-calendar-day is-muted'));
+        }
+        for (var day = 1; day <= days; day++) {
+            var date = dateKey(new Date(year, month, day));
+            var cell = el('div', 'external-calendar-day');
+            cell.dataset.date = date;
+            cell.addEventListener('dragover', function (event) {
+                event.preventDefault();
+                this.classList.add('is-drop-target');
+            });
+            cell.addEventListener('dragleave', function () {
+                this.classList.remove('is-drop-target');
+            });
+            cell.addEventListener('drop', function (event) {
+                event.preventDefault();
+                this.classList.remove('is-drop-target');
+                var recordId = event.dataTransfer.getData('text/plain');
+                if (recordId) moveCalendarRecord(view, recordId, dateField, this.dataset.date);
+            });
+            cell.appendChild(el('span', 'external-calendar-date', day));
+            filteredRecords().filter(function (record) {
+                return String(record.data[dateField] || '') === date;
+            }).forEach(function (record) {
+                cell.appendChild(renderCalendarEvent(view, entity, record));
+            });
+            grid.appendChild(cell);
+        }
+        return grid;
+    }
+
+    function renderCalendarEvent(view, entity, record) {
+        var event = el('button', 'external-calendar-event' + (state.selected && state.selected.id === record.id ? ' selected' : ''));
+        event.type = 'button';
+        event.draggable = true;
+        event.appendChild(el('strong', null, primaryRecordTitle(entity, record)));
+        var meta = secondaryRecordText(view, record);
+        if (meta) event.appendChild(el('span', null, meta));
+        event.addEventListener('dragstart', function (dragEvent) {
+            dragEvent.dataTransfer.setData('text/plain', String(record.id));
+            dragEvent.dataTransfer.effectAllowed = 'move';
+        });
+        event.addEventListener('click', function () {
+            state.selected = record;
+            renderRecordsView();
+            renderForm();
+        });
+        return event;
+    }
+
+    function dateKey(date) {
+        var month = String(date.getMonth() + 1).padStart(2, '0');
+        var day = String(date.getDate()).padStart(2, '0');
+        return date.getFullYear() + '-' + month + '-' + day;
+    }
+
+    function moveCalendarRecord(view, recordId, dateField, date) {
+        var payload = { data: {} };
+        payload.data[dateField] = date;
+        api('/entities/' + encodeURIComponent(view.entity) + '/records/' + encodeURIComponent(recordId), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        }).then(function () {
+            loadRecords();
+        }).catch(function (err) {
+            window.alert(err.message);
+        });
     }
 
     function renderEmptyState(title, message) {
@@ -407,6 +645,8 @@
                 body: JSON.stringify({ data: formData(writableFields, form) })
             }).then(function () {
                 form.reset();
+                state.selected = null;
+                state.editMode = false;
                 loadRecords();
             }).catch(function (err) {
                 error.textContent = err.message;
@@ -414,6 +654,7 @@
         });
         formWrap.appendChild(form);
         renderSelected(formWrap, view, entity);
+        renderEditForm(formWrap, view, entity);
         renderActions(formWrap, view);
     }
 
@@ -426,6 +667,16 @@
             (field.options || []).forEach(function (option) {
                 var item = el('option', null, option);
                 item.value = option;
+                input.appendChild(item);
+            });
+        } else if (field.type === 'relation' && field.to) {
+            input = el('select', 'input');
+            var blank = el('option', null, 'Select ' + humanName(field.to));
+            blank.value = '';
+            input.appendChild(blank);
+            (state.relatedRecords[field.to] || []).forEach(function (record) {
+                var item = el('option', null, primaryRecordTitle(entityDef(field.to), record));
+                item.value = record.id;
                 input.appendChild(item);
             });
         } else if (field.type === 'text') {
@@ -448,6 +699,31 @@
         return label;
     }
 
+    function relationTargets(entity) {
+        var seen = {};
+        return (entity && entity.fields ? entity.fields : []).filter(function (field) {
+            if (field.type !== 'relation' || !field.to || seen[field.to]) return false;
+            seen[field.to] = true;
+            return true;
+        }).map(function (field) { return field.to; });
+    }
+
+    function loadRelationOptions(entity) {
+        var targets = relationTargets(entity).filter(function (target) {
+            return !state.relatedRecords[target];
+        });
+        if (!targets.length) return Promise.resolve();
+        return Promise.all(targets.map(function (target) {
+            return api('/entities/' + encodeURIComponent(target) + '/records')
+                .then(function (records) {
+                    state.relatedRecords[target] = records || [];
+                })
+                .catch(function () {
+                    state.relatedRecords[target] = [];
+                });
+        }));
+    }
+
     function formData(fields, form) {
         var data = {};
         fields.forEach(function (field) {
@@ -467,7 +743,7 @@
         (entity.fields || []).slice(0, 6).forEach(function (field) {
             var row = el('div', 'external-detail-row');
             row.appendChild(el('span', null, field.label || humanName(field.name)));
-            row.appendChild(el('strong', null, valueText(state.selected.data[field.name])));
+            row.appendChild(el('strong', null, fieldDisplayValue(entity, field.name, state.selected.data[field.name])));
             detail.appendChild(row);
         });
         var status = selectedStatus(view);
@@ -477,7 +753,76 @@
             row.appendChild(el('strong', null, status));
             detail.appendChild(row);
         }
+        var actions = el('div', 'external-actions');
+        var edit = el('button', 'external-secondary-action', state.editMode ? 'Cancel edit' : 'Edit');
+        edit.type = 'button';
+        edit.addEventListener('click', function () {
+            state.editMode = !state.editMode;
+            renderForm();
+        });
+        actions.appendChild(edit);
+        var remove = el('button', 'external-danger-action', 'Delete');
+        remove.type = 'button';
+        remove.addEventListener('click', function () {
+            deleteSelectedRecord(view);
+        });
+        actions.appendChild(remove);
+        detail.appendChild(actions);
         container.appendChild(detail);
+    }
+
+    function renderEditForm(container, view, entity) {
+        if (!state.selected || !state.editMode) return;
+        var section = el('section', 'external-edit');
+        section.appendChild(el('h3', null, 'Edit item'));
+        var form = el('form', 'external-record-form');
+        var writableFields = formFields(entity, workflowFor(entity.name));
+        writableFields.forEach(function (field) {
+            var fieldNode = renderField(field);
+            var input = fieldNode.querySelector('[name="' + field.name + '"]');
+            var value = state.selected.data[field.name];
+            if (input) {
+                if (field.type === 'boolean') input.checked = !!value;
+                else if (value !== undefined && value !== null) input.value = value;
+            }
+            form.appendChild(fieldNode);
+        });
+        var error = el('p', 'external-error');
+        var save = el('button', 'external-primary-action', 'Save changes');
+        save.type = 'submit';
+        form.appendChild(save);
+        form.appendChild(error);
+        form.addEventListener('submit', function (event) {
+            event.preventDefault();
+            error.textContent = '';
+            var merged = Object.assign({}, state.selected.data, formData(writableFields, form));
+            api('/entities/' + encodeURIComponent(view.entity) + '/records/' + state.selected.id, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ data: merged })
+            }).then(function () {
+                state.editMode = false;
+                return loadRecords();
+            }).catch(function (err) {
+                error.textContent = err.message;
+            });
+        });
+        section.appendChild(form);
+        container.appendChild(section);
+    }
+
+    function deleteSelectedRecord(view) {
+        if (!state.selected) return;
+        if (!window.confirm('Delete this record?')) return;
+        api('/entities/' + encodeURIComponent(view.entity) + '/records/' + state.selected.id, {
+            method: 'DELETE'
+        }).then(function () {
+            state.selected = null;
+            state.editMode = false;
+            return loadRecords();
+        }).catch(function (err) {
+            window.alert(err.message);
+        });
     }
 
     function renderActions(container, view) {

@@ -1,7 +1,7 @@
 ---
 name: app-factory
 description: Use when the user asks to create, design, generate, or modify an internal business app, operational tool, database-backed workflow, approval system, tracker, CRM-like mini app, employee portal, request system, or internal interface.
-allowed-tools: "create_internal_app list_internal_apps update_internal_app add_app_field configure_app_capabilities create_app_record query_app_records run_app_action read_file"
+allowed-tools: "plan_internal_app create_internal_app list_internal_apps update_internal_app add_app_field add_app_view extract_lookup_entity configure_app_capabilities create_app_record query_app_records run_app_action read_file"
 ---
 
 # App Factory
@@ -14,6 +14,10 @@ An app is not created until an App Factory tool succeeds. Draft files, YAML tree
 
 ## Core Rules
 
+- Before creating or structurally modifying an app, call `plan_internal_app` and use its field classifications, questions, assumptions, and recommended tool.
+- If `plan_internal_app` returns questions, ask one concise business question before building unless the user already answered it in the current message.
+- If `plan_internal_app` returns `recommended_blueprint`, pass that exact object to `create_internal_app` unless the user asks for a change. Do not re-author the blueprint manually.
+- Treat field classification as binding: `workflow_state` is not user-editable, `lookup_dynamic` becomes a managed entity/relation, and `bridge_backed` requires explicit capability configuration.
 - Always produce or update a complete blueprint before creating the app.
 - Prefer Blueprint v1 modular structure for every new app.
 - Keep apps small enough to be immediately usable: identity, data, navigation, optional workflow, optional dashboard/calendar.
@@ -75,6 +79,11 @@ Use these exact keys. Do not invent aliases.
 
 - Root must include `"version": 1`.
 - A view must use `name`, not `label`.
+- Supported view types are `table`, `form`, `detail`, `kanban`, and `calendar`.
+- Use `kanban` for workflow entities with visible states.
+- Use `calendar` only when the entity has at least one `date` field. Calendar views render as operational month calendars with draggable records; add update permissions when non-admin users should reschedule items.
+- Relation fields render as app-local pickers when the current role may read the target entity, so prefer relations for assignee, customer, employee, project, account, and parent-record links.
+- Use `extract_lookup_entity` when the user asks to manage options that are currently hard-coded in a select/enum, such as rooms, categories, departments, clients, projects, assets, or locations.
 - A dashboard must use `name`, not `label`.
 - A dashboard widget filter key is `filter`, not `filters`.
 - A workflow transition `from` must be a single string. To allow multiple source states, create multiple transitions with different `name` values.
@@ -87,6 +96,18 @@ Minimal valid view:
 
 ```json
 {"id": "tickets", "type": "table", "entity": "ticket", "name": "Ticket", "columns": ["title", "priority", "status"], "roles": ["admin", "support", "employee"]}
+```
+
+Minimal valid kanban view:
+
+```json
+{"id": "ticket_board", "type": "kanban", "entity": "ticket", "name": "Board ticket", "columns": ["title", "priority", "status"], "roles": ["admin", "support"]}
+```
+
+Minimal valid calendar view:
+
+```json
+{"id": "calendar", "type": "calendar", "entity": "leave_request", "name": "Calendario", "columns": ["start_date", "kind", "status"], "roles": ["admin", "approver", "employee"]}
 ```
 
 Minimal valid dashboard:
@@ -221,14 +242,16 @@ Use `view` ids instead of raw view names when possible.
 1. Use `list_internal_apps` if the target app slug is not explicit.
 2. Ask one concise question only if the requested change changes the data model in an ambiguous way.
 3. For simple field additions, prefer `add_app_field` instead of rewriting the full blueprint.
-4. For broader structural changes, produce the complete updated blueprint, not a partial diff.
-5. Keep `app.slug` unchanged.
-6. Preserve existing `modules`, `permissions`, `navigation`, workflow `initial_state`, system fields, and transition roles unless the user explicitly asks to change them.
-7. Call `update_internal_app` with:
+4. For simple view additions, such as "add calendar view", "add kanban", "add board", or "add table/list view", use `add_app_view` instead of rewriting the full blueprint.
+5. For requests like "make rooms manageable and connect them to the room select", use `extract_lookup_entity` instead of rewriting the full blueprint.
+6. For broader structural changes, produce the complete updated blueprint, not a partial diff.
+7. Keep `app.slug` unchanged.
+8. Preserve existing `modules`, `permissions`, `navigation`, workflow `initial_state`, system fields, and transition roles unless the user explicitly asks to change them.
+9. Call `update_internal_app` with:
    - `app_slug`;
    - the complete updated blueprint;
    - a short `change_note`.
-8. Return:
+10. Return:
    - updated app link: `/apps/{slug}`;
    - concise change summary;
    - new/changed modules, entities, fields, views, workflows;
@@ -274,7 +297,24 @@ Use a ticket entity with:
 - title;
 - description;
 - priority enum;
+- category enum when useful;
+- assignee string or relation;
 - system workflow status.
+
+Add a `ticket_comment` entity when the user asks for collaboration, notes, internal updates, or a credible ticketing demo:
+
+- ticket relation to ticket;
+- body text;
+- visibility enum (`internal`, `public`) when support/admin roles exist;
+- created_date date.
+
+Recommended ticket views:
+
+- table view for all tickets;
+- kanban view for support/admin workflow;
+- form view for new tickets;
+- detail view for selected ticket;
+- table view for comments if `ticket_comment` is present.
 
 Use this exact state model unless the user asks otherwise:
 
@@ -300,10 +340,33 @@ Use entities: account, contact, opportunity or lead.
 
 If a pipeline exists, make stage a system workflow field and gate transitions by role.
 
+Recommended CRM views:
+
+- table view for accounts;
+- table view for contacts;
+- kanban view for opportunity pipeline;
+- dashboard counts by stage.
+
+### Booking / scheduling app
+
+Use modules: `identity`, `data`, `navigation`, `dashboard`, `calendar`, and optional `workflow`.
+
+Use one main entity with a required date field, optional end date, title/name, requester, notes, and status when approval is needed.
+
+Permissions should allow operators/admins to update all bookings and requesters/employees to update their own bookings when drag-and-drop rescheduling is expected.
+
+Recommended views:
+
+- calendar view for the dated entity;
+- table view for operations/admin;
+- form view for new requests/bookings.
+
 ## Operating Existing Apps
 
 - Use `list_internal_apps` before operating on an app when the slug is unknown.
 - Use `add_app_field` for requests like "add a field", "add notes", "add detailed reason", or "add email".
+- Use `add_app_view` for requests like "add a calendar view", "add kanban", "add board", "add agenda", or "add table/list view".
+- Use `extract_lookup_entity` for requests like "manage room names and connect them to the room select", "turn categories into a managed list", or "make clients/projects selectable from their own table".
 - Use `update_internal_app` to modify an existing app blueprint from chat.
 - Use `configure_app_capabilities` to configure app bridge permissions from chat.
 - Use `create_app_record` to add records after validating entity fields from the blueprint.

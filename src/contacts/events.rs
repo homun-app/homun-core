@@ -69,6 +69,8 @@ async fn scan_and_notify(
             message: message.clone(),
             deliver_to: None, // Deliver to owner's default channel
             automation_run_id: None,
+            auth_user_id: None,
+            profile_id: None,
         };
 
         if let Err(e) = event_tx.send(cron_event).await {
@@ -91,6 +93,8 @@ async fn scan_and_notify(
                     message: greeting,
                     deliver_to: Some(deliver_to),
                     automation_run_id: None,
+                    auth_user_id: None,
+                    profile_id: None,
                 };
                 let _ = event_tx.send(greet_event).await;
             }

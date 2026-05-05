@@ -356,7 +356,7 @@ impl BrowserTool {
             .call_mcp_on_tab(
                 tab,
                 "browser_evaluate",
-                json!({"function": js, "ref": ref_val}),
+                json!({"function": js, "target": ref_val, "ref": ref_val}),
             )
             .await
             .ok()?;
@@ -600,6 +600,52 @@ impl BrowserTool {
         }
     }
 
+    /// Build an element-target payload accepted by both recent and older
+    /// Playwright MCP versions. Recent servers use `target`; older versions
+    /// accepted `ref`.
+    fn mcp_ref_args(ref_val: &str) -> Value {
+        json!({
+            "target": ref_val,
+            "ref": ref_val
+        })
+    }
+
+    fn mcp_fill_field(name: &str, ref_val: &str, value: &str) -> Value {
+        json!({
+            "name": name,
+            "type": "textbox",
+            "target": ref_val,
+            "ref": ref_val,
+            "value": value
+        })
+    }
+
+    async fn auto_accept_privacy_banner(
+        &self,
+        tab: &crate::browser::tab_session::TabSession,
+        snapshot: &str,
+    ) -> Option<String> {
+        let accept_ref = detect_privacy_accept_ref(snapshot)?;
+        tracing::info!(
+            ref_id = %accept_ref,
+            "Auto-accepting visible privacy/cookie banner"
+        );
+
+        self.call_mcp_on_tab(tab, "browser_click", Self::mcp_ref_args(&accept_ref))
+            .await
+            .ok()?;
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        let snap = self
+            .call_mcp_on_tab(tab, "browser_snapshot", json!({}))
+            .await
+            .ok()?;
+        let compact = compact_browser_snapshot_staged(&snap, self.seen_results());
+        Some(format!(
+            "Auto-accepted visible privacy/cookie banner ({accept_ref}).\n\n{compact}"
+        ))
+    }
+
     /// Inject anti-detection (stealth) scripts into the browser context.
     ///
     /// Uses Playwright's `addInitScript` to patch browser properties that
@@ -779,6 +825,9 @@ impl BrowserTool {
 
         // Wait for the page to stabilize, then auto-snapshot.
         let mut snapshot = self.wait_for_stable_snapshot(tab).await;
+        if let Some(accepted_snapshot) = self.auto_accept_privacy_banner(tab, &snapshot).await {
+            snapshot = accepted_snapshot;
+        }
         tab.last_was_snapshot.store(true, Ordering::Relaxed);
 
         // Annotate visual form field order when form detected
@@ -893,6 +942,11 @@ impl BrowserTool {
             Ok(output) => {
                 tab.last_was_snapshot.store(true, Ordering::Relaxed);
                 let mut compact = compact_browser_snapshot_staged(&output, self.seen_results());
+                if let Some(accepted_snapshot) =
+                    self.auto_accept_privacy_banner(tab, &compact).await
+                {
+                    compact = accepted_snapshot;
+                }
                 // Annotate visual form field order when form detected
                 compact = self.annotate_form_order(tab, &compact).await;
                 // Detect hidden interactive elements on sparse pages
@@ -921,7 +975,7 @@ impl BrowserTool {
     ) -> Result<ToolResult> {
         let ref_val = Self::normalize_ref(args)?;
         let base_output = match self
-            .call_mcp_on_tab(tab, "browser_click", json!({"ref": ref_val}))
+            .call_mcp_on_tab(tab, "browser_click", Self::mcp_ref_args(&ref_val))
             .await
         {
             Ok(output) => compact_action_short(&output, "Clicked."),
@@ -938,6 +992,15 @@ impl BrowserTool {
                     {
                         let compact =
                             compact_browser_snapshot_staged(&snap_output, self.seen_results());
+                        if let Some(accepted_snapshot) =
+                            self.auto_accept_privacy_banner(tab, &compact).await
+                        {
+                            tab.last_was_snapshot.store(true, Ordering::Relaxed);
+                            return Ok(ToolResult::success(format!(
+                                "Click on {ref_val} was blocked by an overlay. \
+                                 {accepted_snapshot}"
+                            )));
+                        }
                         tab.last_was_snapshot.store(true, Ordering::Relaxed);
                         let hint = classify_browser_error(&error_msg);
                         return Ok(ToolResult::error(format!(
@@ -964,6 +1027,10 @@ impl BrowserTool {
         {
             Ok(snap_output) => {
                 let compact = compact_browser_snapshot_staged(&snap_output, self.seen_results());
+                let compact = self
+                    .auto_accept_privacy_banner(tab, &compact)
+                    .await
+                    .unwrap_or(compact);
                 tab.last_was_snapshot.store(true, Ordering::Relaxed);
 
                 // Update tracked URL from snapshot (catches redirects after click)
@@ -1009,7 +1076,7 @@ impl BrowserTool {
 
         // Click + select-all to clear any existing content before typing.
         let _ = self
-            .call_mcp_on_tab(tab, "browser_click", json!({"ref": ref_val}))
+            .call_mcp_on_tab(tab, "browser_click", Self::mcp_ref_args(&ref_val))
             .await;
         let _ = self
             .call_mcp_on_tab(tab, "browser_press_key", json!({"key": "ControlOrMeta+a"}))
@@ -1019,7 +1086,7 @@ impl BrowserTool {
             .call_mcp_on_tab(
                 tab,
                 "browser_type",
-                json!({"ref": ref_val, "text": text, "slowly": true}),
+                json!({"target": ref_val, "ref": ref_val, "text": text, "slowly": true}),
             )
             .await;
 
@@ -1066,12 +1133,7 @@ impl BrowserTool {
                 tab,
                 "browser_fill_form",
                 json!({
-                    "fields": [{
-                        "name": "field",
-                        "type": "textbox",
-                        "ref": ref_val,
-                        "value": text
-                    }]
+                    "fields": [Self::mcp_fill_field("field", &ref_val, text)]
                 }),
             )
             .await;
@@ -1082,13 +1144,17 @@ impl BrowserTool {
                 tracing::warn!("browser_fill_form failed, falling back to click+type: {e}");
                 // Fallback: click + select-all + type (3 calls)
                 let _ = self
-                    .call_mcp_on_tab(tab, "browser_click", json!({"ref": ref_val}))
+                    .call_mcp_on_tab(tab, "browser_click", Self::mcp_ref_args(&ref_val))
                     .await;
                 let _ = self
                     .call_mcp_on_tab(tab, "browser_press_key", json!({"key": "ControlOrMeta+a"}))
                     .await;
                 match self
-                    .call_mcp_on_tab(tab, "browser_type", json!({"ref": ref_val, "text": text}))
+                    .call_mcp_on_tab(
+                        tab,
+                        "browser_type",
+                        json!({"target": ref_val, "ref": ref_val, "text": text}),
+                    )
                     .await
                 {
                     Ok(output) => {
@@ -1151,12 +1217,11 @@ impl BrowserTool {
                     .and_then(|v| v.as_str())
                     .map(|s| s.trim_start_matches("ref=").to_string())?;
                 let value = f.get("value").and_then(|v| v.as_str())?;
-                Some(json!({
-                    "name": format!("field_{ref_val}"),
-                    "type": "textbox",
-                    "ref": ref_val,
-                    "value": value
-                }))
+                Some(Self::mcp_fill_field(
+                    &format!("field_{ref_val}"),
+                    &ref_val,
+                    value,
+                ))
             })
             .collect();
 
@@ -1207,7 +1272,7 @@ impl BrowserTool {
             .call_mcp_on_tab(
                 tab,
                 "browser_select_option",
-                json!({"ref": ref_val, "values": [value]}),
+                json!({"target": ref_val, "ref": ref_val, "values": [value]}),
             )
             .await
         {
@@ -1249,7 +1314,7 @@ impl BrowserTool {
     ) -> Result<ToolResult> {
         let ref_val = Self::normalize_ref(args)?;
         match self
-            .call_mcp_on_tab(tab, "browser_hover", json!({"ref": ref_val}))
+            .call_mcp_on_tab(tab, "browser_hover", Self::mcp_ref_args(&ref_val))
             .await
         {
             Ok(output) => Ok(ToolResult::success(compact_action_short(
@@ -1297,7 +1362,7 @@ impl BrowserTool {
         // If a ref is provided, click it first to focus the scrollable container
         if let Ok(ref_val) = Self::normalize_ref(args) {
             let _ = self
-                .call_mcp_on_tab(tab, "browser_click", json!({"ref": ref_val}))
+                .call_mcp_on_tab(tab, "browser_click", Self::mcp_ref_args(&ref_val))
                 .await;
         }
 
@@ -1342,6 +1407,8 @@ impl BrowserTool {
                 tab,
                 "browser_drag",
                 json!({
+                    "startTarget": start_ref,
+                    "endTarget": end_ref,
                     "startRef": start_ref,
                     "endRef": end_ref,
                     "startElement": "drag source",
@@ -2199,7 +2266,7 @@ impl BrowserTool {
             "screenshot" => peer.call_tool("browser_take_screenshot", json!({})).await?,
             "click" => {
                 let ref_val = args.get("ref").and_then(|v| v.as_str()).unwrap_or("");
-                peer.call_tool("browser_click", json!({"ref": ref_val}))
+                peer.call_tool("browser_click", Self::mcp_ref_args(ref_val))
                     .await?;
                 let snap = peer.call_tool("browser_snapshot", json!({})).await?;
                 compact_browser_snapshot(&snap)
@@ -2209,7 +2276,7 @@ impl BrowserTool {
                 let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("");
                 peer.call_tool(
                     "browser_type",
-                    json!({"ref": ref_val, "text": text, "slowly": true}),
+                    json!({"target": ref_val, "ref": ref_val, "text": text, "slowly": true}),
                 )
                 .await?;
                 let snap = peer.call_tool("browser_snapshot", json!({})).await?;
@@ -2222,8 +2289,11 @@ impl BrowserTool {
                     .and_then(|v| v.as_str())
                     .or_else(|| args.get("text").and_then(|v| v.as_str()))
                     .unwrap_or("");
-                peer.call_tool("browser_type", json!({"ref": ref_val, "text": value}))
-                    .await?;
+                peer.call_tool(
+                    "browser_type",
+                    json!({"target": ref_val, "ref": ref_val, "text": value}),
+                )
+                .await?;
                 let snap = peer.call_tool("browser_snapshot", json!({})).await?;
                 compact_browser_snapshot(&snap)
             }
@@ -2236,7 +2306,7 @@ impl BrowserTool {
                     .unwrap_or_default();
                 peer.call_tool(
                     "browser_select_option",
-                    json!({"ref": ref_val, "values": values}),
+                    json!({"target": ref_val, "ref": ref_val, "values": values}),
                 )
                 .await?
             }
@@ -2247,7 +2317,7 @@ impl BrowserTool {
             }
             "hover" => {
                 let ref_val = args.get("ref").and_then(|v| v.as_str()).unwrap_or("");
-                peer.call_tool("browser_hover", json!({"ref": ref_val}))
+                peer.call_tool("browser_hover", Self::mcp_ref_args(ref_val))
                     .await?
             }
             "scroll" => {
@@ -3052,6 +3122,104 @@ fn browser_error_result(action: &str, error: &anyhow::Error) -> ToolResult {
     ToolResult::error(format!("{action} failed: {raw}{hint}"))
 }
 
+fn detect_privacy_accept_ref(snapshot: &str) -> Option<String> {
+    let page_has_privacy_context = {
+        let lower = snapshot.to_ascii_lowercase();
+        lower.contains("cookie")
+            || lower.contains("privacy")
+            || lower.contains("consent")
+            || lower.contains("gdpr")
+            || lower.contains("preferenze privacy")
+            || lower.contains("informativa")
+    };
+
+    snapshot.lines().find_map(|line| {
+        if !line.contains("[ref=") {
+            return None;
+        }
+        let lower = line.to_ascii_lowercase();
+        if !lower.contains("button ") {
+            return None;
+        }
+        if is_negative_or_settings_privacy_choice(&lower) {
+            return None;
+        }
+        let label = extract_snapshot_label(line)
+            .unwrap_or(line)
+            .to_ascii_lowercase();
+        let strong_accept = is_strong_privacy_accept_label(&label);
+        let contextual_accept =
+            page_has_privacy_context && is_contextual_privacy_accept_label(&label);
+        if strong_accept || contextual_accept {
+            extract_ref_from_snapshot_line(line)
+        } else {
+            None
+        }
+    })
+}
+
+fn is_negative_or_settings_privacy_choice(lower: &str) -> bool {
+    [
+        "reject",
+        "refuse",
+        "decline",
+        "deny",
+        "rifiuta",
+        "nega",
+        "non accett",
+        "manage",
+        "settings",
+        "preferences",
+        "preferenze",
+        "personalizza",
+        "customize",
+        "configura",
+        "more options",
+        "privacy policy",
+        "informativa privacy",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+fn is_strong_privacy_accept_label(label: &str) -> bool {
+    [
+        "accept all",
+        "accept cookies",
+        "allow all",
+        "agree all",
+        "i agree",
+        "accetta tutto",
+        "accetta tutti",
+        "accetta i cookie",
+        "accetto",
+        "acconsento",
+    ]
+    .iter()
+    .any(|needle| label.contains(needle))
+}
+
+fn is_contextual_privacy_accept_label(label: &str) -> bool {
+    matches!(
+        label.trim(),
+        "accept" | "agree" | "allow" | "ok" | "okay" | "got it" | "continue" | "continua"
+    ) || label.contains("accetta")
+}
+
+fn extract_snapshot_label(line: &str) -> Option<&str> {
+    let start = line.find('"')?;
+    let rest = &line[start + 1..];
+    let end = rest.find('"')?;
+    Some(&rest[..end])
+}
+
+fn extract_ref_from_snapshot_line(line: &str) -> Option<String> {
+    let start = line.find("[ref=")? + "[ref=".len();
+    let rest = &line[start..];
+    let end = rest.find(']')?;
+    Some(rest[..end].to_string())
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -3082,6 +3250,80 @@ mod tests {
     fn test_normalize_ref_missing() {
         let args = json!({"action": "click"});
         assert!(BrowserTool::normalize_ref(&args).is_err());
+    }
+
+    #[test]
+    fn test_mcp_ref_args_include_latest_playwright_target() {
+        let args = BrowserTool::mcp_ref_args("e42");
+        assert_eq!(args.get("target").and_then(|v| v.as_str()), Some("e42"));
+        assert_eq!(args.get("ref").and_then(|v| v.as_str()), Some("e42"));
+    }
+
+    #[test]
+    fn test_mcp_fill_field_uses_latest_playwright_target() {
+        let field = BrowserTool::mcp_fill_field("station", "e7", "Napoli Centrale");
+        assert_eq!(field.get("target").and_then(|v| v.as_str()), Some("e7"));
+        assert_eq!(field.get("ref").and_then(|v| v.as_str()), Some("e7"));
+        assert_eq!(
+            field.get("value").and_then(|v| v.as_str()),
+            Some("Napoli Centrale")
+        );
+    }
+
+    #[test]
+    fn detects_strong_privacy_accept_button() {
+        let snapshot = r#"
+(6 interactive elements) Use ref="eN" exactly as shown.
+- dialog "Privacy preferences"
+  - button "Reject all" [ref=e1]
+  - button "Accept all" [ref=e2]
+  - button "Manage choices" [ref=e3]
+"#;
+
+        assert_eq!(detect_privacy_accept_ref(snapshot), Some("e2".to_string()));
+    }
+
+    #[test]
+    fn detects_italian_privacy_accept_button() {
+        let snapshot = r#"
+(4 interactive elements) Use ref="eN" exactly as shown.
+- dialog "Informativa cookie"
+  - button "Rifiuta tutti" [ref=e4]
+  - button "Accetta tutti" [ref=e5]
+"#;
+
+        assert_eq!(detect_privacy_accept_ref(snapshot), Some("e5".to_string()));
+    }
+
+    #[test]
+    fn does_not_choose_privacy_settings_or_policy_links() {
+        let snapshot = r#"
+(4 interactive elements) Use ref="eN" exactly as shown.
+- dialog "Privacy"
+  - button "Manage preferences" [ref=e1]
+  - link "Privacy policy" [ref=e2]
+  - button "Reject" [ref=e3]
+"#;
+
+        assert_eq!(detect_privacy_accept_ref(snapshot), None);
+    }
+
+    #[test]
+    fn contextual_ok_requires_privacy_context() {
+        let snapshot_without_context = r#"
+- dialog "Confirm delete"
+  - button "OK" [ref=e1]
+"#;
+        let snapshot_with_context = r#"
+- dialog "Cookie consent"
+  - button "OK" [ref=e2]
+"#;
+
+        assert_eq!(detect_privacy_accept_ref(snapshot_without_context), None);
+        assert_eq!(
+            detect_privacy_accept_ref(snapshot_with_context),
+            Some("e2".to_string())
+        );
     }
 
     #[test]

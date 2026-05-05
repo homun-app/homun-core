@@ -718,6 +718,11 @@ async fn chat_page(
                                 </div>
                                 <form class="chat-input" id="chat-form">
                                     <textarea id="chat-text" placeholder="Message Homun…" autocomplete="off" class="input chat-textarea" rows="1" autofocus></textarea>
+                                    <div class="chat-mode-pill" id="chat-mode-pill" hidden>
+                                        <span class="chat-mode-icon" id="chat-mode-icon"></span>
+                                        <span class="chat-mode-label" id="chat-mode-label"></span>
+                                        <button type="button" class="chat-mode-clear" id="chat-mode-clear" aria-label="Clear mode">&times;</button>
+                                    </div>
                                     <div class="chat-attachment-strip" id="chat-attachment-strip" hidden></div>
                                     <div class="chat-input-bottom">
                                         <div class="chat-input-actions-left">
@@ -746,6 +751,42 @@ async fn chat_page(
                                                 <span class="chat-tools-label" id="chat-tools-label">Tools</span>
                                                 <span class="chat-tools-dismiss" id="chat-tools-dismiss" hidden>&times;</span>
                                             </button>
+                                            <div class="chat-connected-wrap">
+                                                <button type="button" class="chat-tools-btn chat-connected-btn" id="btn-chat-connected" title="Connected tools" aria-haspopup="menu" aria-expanded="false">
+                                                    <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 6h4"/><path d="M7 12h4"/><path d="M5 9h8"/><circle cx="4" cy="6" r="1.5"/><circle cx="14" cy="12" r="1.5"/></svg>
+                                                    <span class="chat-tools-label">Strumenti collegati</span>
+                                                </button>
+                                                <div class="chat-capability-popover" id="chat-capability-popover" role="menu" hidden>
+                                                    <div class="chat-capability-popover-title">Strumenti collegati</div>
+                                                    <div class="chat-capability-strip" id="chat-capability-strip" aria-label="Connected capabilities">
+                                                        <a class="chat-capability-pill is-loading" id="cap-model" href="/chat" data-settings-section="setup">
+                                                            <span class="chat-capability-dot"></span>
+                                                            <span class="chat-capability-label">Model</span>
+                                                            <span class="chat-capability-value">checking</span>
+                                                        </a>
+                                                        <a class="chat-capability-pill is-loading" id="cap-browser" href="/chat" data-settings-section="browser">
+                                                            <span class="chat-capability-dot"></span>
+                                                            <span class="chat-capability-label">Browser</span>
+                                                            <span class="chat-capability-value">checking</span>
+                                                        </a>
+                                                        <a class="chat-capability-pill is-loading" id="cap-channels" href="/chat" data-settings-section="channels">
+                                                            <span class="chat-capability-dot"></span>
+                                                            <span class="chat-capability-label">Channels</span>
+                                                            <span class="chat-capability-value">checking</span>
+                                                        </a>
+                                                        <a class="chat-capability-pill is-loading" id="cap-skills" href="/skills">
+                                                            <span class="chat-capability-dot"></span>
+                                                            <span class="chat-capability-label">Skills</span>
+                                                            <span class="chat-capability-value">checking</span>
+                                                        </a>
+                                                        <a class="chat-capability-pill is-loading" id="cap-mcp" href="/mcp">
+                                                            <span class="chat-capability-dot"></span>
+                                                            <span class="chat-capability-label">Tools</span>
+                                                            <span class="chat-capability-value">checking</span>
+                                                        </a>
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
                                         <div class="chat-input-actions-right">
                                             <button type="button" class="chat-model-pill" id="chat-model-pill" title="Choose model">
@@ -761,6 +802,78 @@ async fn chat_page(
                                         </div>
                                     </div>
                                 </form>
+                            </div>
+                            <div class="chat-welcome-actions" id="chat-welcome-actions">
+                                <div class="chat-task-launcher" id="chat-task-launcher" aria-label="Start a task">
+                                    <button type="button" class="chat-task-chip" data-prompt="Crea un'app interna per ... Prima pianifica la struttura, chiedimi chiarimenti se ci sono dati dinamici, poi crea l'app con CRUD completo, ruoli, viste e database isolato.">
+                                        <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="12" height="10" rx="2"/><path d="M6 8h6M6 11h4"/></svg>
+                                        Crea app
+                                    </button>
+                                    <button type="button" class="chat-task-chip" data-prompt="Fai una ricerca approfondita su ... Usa fonti aggiornate e restituisci sintesi, rischi e prossime azioni.">
+                                        <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="4.5"/><path d="M11.5 11.5L15 15"/></svg>
+                                        Ricerca
+                                    </button>
+                                    <button type="button" class="chat-task-chip" data-prompt="Crea un briefing operativo su ... Evidenzia priorita, decisioni da prendere e prossime azioni.">
+                                        <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h6l2 2v10H5z"/><path d="M11 3v3h3"/><path d="M7 9h4M7 12h4"/></svg>
+                                        Briefing
+                                    </button>
+                                    <div class="chat-task-more-wrap">
+                                        <button type="button" class="chat-task-chip" id="chat-task-more" aria-haspopup="menu" aria-expanded="false">
+                                            Altro
+                                        </button>
+                                        <div class="chat-task-more-menu" id="chat-task-more-menu" role="menu" hidden>
+                                            <button type="button" role="menuitem" class="chat-task-more-item" data-prompt="Aiutami a collegare gli strumenti necessari per ... Dimmi quali skill, MCP o canali servono e guidami nella configurazione.">Collega strumenti</button>
+                                            <button type="button" role="menuitem" class="chat-task-more-item" data-prompt="Pianifica questa attivita: ... Trasformala in passi operativi, scadenze e automazioni utili.">Pianifica attivita</button>
+                                            <button type="button" role="menuitem" class="chat-task-more-item" data-prompt="Crea un workflow per ... Definisci trigger, passaggi, approvazioni, output e canali.">Crea workflow</button>
+                                            <button type="button" role="menuitem" class="chat-task-more-item" data-prompt="Analizza questo documento e restituisci sintesi, rischi, decisioni e prossime azioni.">Analizza documento</button>
+                                            <button type="button" role="menuitem" class="chat-task-more-item" data-prompt="Usa il browser per ... Naviga, verifica le informazioni e riportami il risultato.">Usa browser</button>
+                                            <button type="button" role="menuitem" class="chat-task-more-item" data-prompt="Aiutami a gestire la memoria: ... Verifica cosa e' salvato, cosa manca e cosa conviene ricordare.">Gestisci memoria</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <section class="chat-mode-panel" id="chat-mode-panel" hidden>
+                                    <div class="chat-mode-panel-header">
+                                        <div>
+                                            <div class="chat-mode-panel-kicker">Inizia con</div>
+                                            <h3 class="chat-mode-panel-title" id="chat-mode-panel-title">Attivita programmata</h3>
+                                        </div>
+                                        <div class="chat-mode-panel-actions">
+                                            <a class="chat-mode-action-btn" href="/automations" title="Apri calendario e automazioni">
+                                                <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="12" height="11" rx="2"/><path d="M6 2v4M12 2v4M3 8h12"/><circle cx="12" cy="12" r="1"/></svg>
+                                            </a>
+                                            <a class="chat-mode-action-btn chat-mode-action-primary" href="/automations">
+                                                <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v10M4 9h10"/></svg>
+                                                Nuova pianificazione
+                                            </a>
+                                        </div>
+                                    </div>
+                                    <div class="chat-mode-suggestions" id="chat-mode-suggestions">
+                                        <button type="button" class="chat-mode-suggestion" data-prompt="Ogni mattina alle 8:00 crea un briefing delle email importanti e mandamelo su Telegram.">
+                                            <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h10v8H4z"/><path d="M4 6l5 4 5-4"/></svg>
+                                            Ogni mattina crea un briefing e mandalo su Telegram
+                                        </button>
+                                        <button type="button" class="chat-mode-suggestion" data-prompt="Controlla ogni giorno questo sito e avvisami se cambia: ...">
+                                            <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="6"/><path d="M3 9h12M9 3a9 9 0 010 12M9 3a9 9 0 000 12"/></svg>
+                                            Controlla ogni giorno un sito e avvisami se cambia
+                                        </button>
+                                        <button type="button" class="chat-mode-suggestion" data-prompt="Genera ogni lunedi mattina un report settimanale dalle email e salvamelo nel workspace.">
+                                            <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h6l2 2v10H5z"/><path d="M7 10h4M7 13h3"/></svg>
+                                            Genera un report settimanale dalle email
+                                        </button>
+                                        <button type="button" class="chat-mode-suggestion" data-prompt="Ricordami ogni venerdi alle 16:00 di preparare il riepilogo settimanale.">
+                                            <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v5l3 2"/><circle cx="9" cy="9" r="6"/></svg>
+                                            Ricordami ogni venerdi di preparare il riepilogo
+                                        </button>
+                                        <button type="button" class="chat-mode-suggestion" data-prompt="Monitora quotidianamente notizie su questo cliente o concorrente e fammi un riepilogo: ...">
+                                            <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13l4-4 3 3 5-7"/><path d="M12 5h3v3"/></svg>
+                                            Monitora notizie su un cliente o concorrente
+                                        </button>
+                                        <button type="button" class="chat-mode-suggestion" data-prompt="Esegui questa skill ogni giorno alle 8:00 e inviami il risultato sul canale piu adatto: ...">
+                                            <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h6v4H6zM4 11h4v4H4zM10 11h4v4h-4z"/><path d="M9 7v2M6 9h6"/></svg>
+                                            Esegui una skill ogni giorno alle 8:00
+                                        </button>
+                                    </div>
+                                </section>
                             </div>
                         </div>
                         <input type="file" id="chat-image-input" accept="image/*" multiple hidden>
@@ -836,6 +949,7 @@ async fn automations_page() -> Html<String> {
                             <div class="page-title-group">
                                 <h1 class="page-title">Automations</h1>
                                 <span class="badge badge-info" id="automations-count">0</span>
+                                <p class="automation-page-subtitle">Recurring work that can use tools, skills, MCP servers, browser actions, approvals, and delivery channels.</p>
                             </div>
                             <div class="actions" style="display:flex;align-items:center;gap:8px">
                                 <button class="btn btn-primary btn-sm" id="btn-create-automation">
@@ -843,6 +957,16 @@ async fn automations_page() -> Html<String> {
                                 </button>
                                 <button class="btn btn-secondary btn-sm" id="btn-automations-refresh">Refresh</button>
                             </div>
+                        </div>
+
+                        <div class="automation-capability-row" aria-label="Automation capabilities">
+                            <span>Schedule</span>
+                            <span>Tools</span>
+                            <a href="/skills">Skills</a>
+                            <a href="/mcp">MCP</a>
+                            <span>Browser</span>
+                            <span>Approvals</span>
+                            <span>Channels</span>
                         </div>
 
                         <section class="section auto-list-section">
@@ -855,8 +979,13 @@ async fn automations_page() -> Html<String> {
 
                         <!-- Chat-style prompt bar for NLP creation -->
                         <div class="auto-prompt-bar" id="auto-prompt-bar">
+                            <div class="automation-demo-prompts" aria-label="Demo automation prompts">
+                                <button type="button" class="automation-demo-prompt" data-demo-prompt="Ogni mattina controlla le email importanti, riassumi e invia su Telegram.">Email digest to Telegram</button>
+                                <button type="button" class="automation-demo-prompt" data-demo-prompt="Ogni giorno controlla un sito e avvisami se cambia.">Website change monitor</button>
+                                <button type="button" class="automation-demo-prompt" data-demo-prompt="Ogni venerdi prepara un briefing e chiedi approvazione prima di inviarlo.">Approval briefing</button>
+                            </div>
                             <div class="auto-prompt-shell">
-                                <textarea id="auto-prompt-input" class="input auto-prompt-textarea" rows="1" placeholder="Describe an automation to create..." autocomplete="off"></textarea>
+                                <textarea id="auto-prompt-input" class="input auto-prompt-textarea" rows="1" placeholder="Describe the recurring process, schedule, tools, approvals, and delivery channel..." autocomplete="off"></textarea>
                                 <button id="btn-auto-prompt-send" class="btn btn-primary auto-prompt-send-btn" title="Generate automation from description">
                                     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
                                 </button>

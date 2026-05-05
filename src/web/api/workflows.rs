@@ -51,6 +51,7 @@ struct WorkflowListQuery {
 async fn list_workflows_api(
     Query(q): Query<WorkflowListQuery>,
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let engine = state.workflow_engine.as_ref().ok_or((
         StatusCode::SERVICE_UNAVAILABLE,
@@ -61,7 +62,7 @@ async fn list_workflows_api(
     let filter_profile_id = if let Some(ref slug) = q.profile {
         if let Some(ref db) = state.db {
             if !slug.is_empty() {
-                crate::profiles::db::load_profile_by_slug(db.pool(), slug)
+                crate::profiles::db::load_profile_by_slug_for_user(db.pool(), slug, &auth.user_id)
                     .await
                     .ok()
                     .flatten()
@@ -84,9 +85,12 @@ async fn list_workflows_api(
     // Filter by profile
     let workflows: Vec<_> = all_workflows
         .into_iter()
-        .filter(|w| match filter_profile_id {
-            Some(pid) => w.profile_id.is_none() || w.profile_id == Some(pid),
-            None => true,
+        .filter(|w| {
+            w.user_id.as_deref() == Some(auth.user_id.as_str())
+                && match filter_profile_id {
+                    Some(pid) => w.profile_id.is_none() || w.profile_id == Some(pid),
+                    None => true,
+                }
         })
         .collect();
 
@@ -131,8 +135,13 @@ async fn create_workflow_api(
         StatusCode::SERVICE_UNAVAILABLE,
         "Workflow engine not available".into(),
     ))?;
+    let profile_id = if let Some(db) = state.db.as_ref() {
+        resolve_default_profile_id(db, &auth.user_id).await
+    } else {
+        None
+    };
     let workflow_id = engine
-        .create_and_start(req, "web", "web", None, Some(&auth.user_id))
+        .create_and_start(req, "web", "web", profile_id, Some(&auth.user_id))
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
     Ok(Json(serde_json::json!({ "workflow_id": workflow_id })))
@@ -142,6 +151,7 @@ async fn create_workflow_api(
 async fn get_workflow_api(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let engine = state.workflow_engine.as_ref().ok_or((
         StatusCode::SERVICE_UNAVAILABLE,
@@ -152,6 +162,7 @@ async fn get_workflow_api(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, format!("Workflow {id} not found")))?;
+    ensure_workflow_owner(&workflow, &auth.user_id, &id)?;
     Ok(Json(serde_json::to_value(&workflow).unwrap_or_default()))
 }
 
@@ -166,6 +177,12 @@ async fn approve_workflow_api(
         StatusCode::SERVICE_UNAVAILABLE,
         "Workflow engine not available".into(),
     ))?;
+    let workflow = engine
+        .status(&id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, format!("Workflow {id} not found")))?;
+    ensure_workflow_owner(&workflow, &auth.user_id, &id)?;
     let msg = engine
         .approve_and_resume(&id)
         .await
@@ -184,6 +201,12 @@ async fn cancel_workflow_api(
         StatusCode::SERVICE_UNAVAILABLE,
         "Workflow engine not available".into(),
     ))?;
+    let workflow = engine
+        .status(&id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, format!("Workflow {id} not found")))?;
+    ensure_workflow_owner(&workflow, &auth.user_id, &id)?;
     let msg = engine
         .cancel(&id)
         .await
@@ -202,6 +225,12 @@ async fn delete_workflow_api(
         StatusCode::SERVICE_UNAVAILABLE,
         "Workflow engine not available".into(),
     ))?;
+    let workflow = engine
+        .status(&id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, format!("Workflow {id} not found")))?;
+    ensure_workflow_owner(&workflow, &auth.user_id, &id)?;
     let msg = engine
         .delete(&id)
         .await
@@ -220,9 +249,40 @@ async fn restart_workflow_api(
         StatusCode::SERVICE_UNAVAILABLE,
         "Workflow engine not available".into(),
     ))?;
+    let workflow = engine
+        .status(&id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, format!("Workflow {id} not found")))?;
+    ensure_workflow_owner(&workflow, &auth.user_id, &id)?;
     let msg = engine
         .restart(&id)
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
     Ok(Json(serde_json::json!({ "message": msg })))
+}
+
+async fn resolve_default_profile_id(db: &crate::storage::Database, user_id: &str) -> Option<i64> {
+    crate::profiles::db::load_profiles_for_user(db.pool(), user_id)
+        .await
+        .ok()
+        .and_then(|profiles| {
+            profiles
+                .iter()
+                .find(|profile| profile.is_default != 0)
+                .or_else(|| profiles.first())
+                .map(|profile| profile.id)
+        })
+}
+
+fn ensure_workflow_owner(
+    workflow: &crate::workflows::Workflow,
+    user_id: &str,
+    id: &str,
+) -> Result<(), (StatusCode, String)> {
+    if workflow.user_id.as_deref() == Some(user_id) {
+        Ok(())
+    } else {
+        Err((StatusCode::NOT_FOUND, format!("Workflow {id} not found")))
+    }
 }

@@ -3,5 +3,6 @@ pub mod bridge;
 pub mod db;
 pub mod external_auth;
 pub mod permissions;
+pub mod planning;
 pub mod runtime;
 pub mod validation;

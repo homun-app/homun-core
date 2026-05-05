@@ -155,6 +155,7 @@ body {
 .external-icon-button,
 .external-primary-action,
 .external-secondary-action,
+.external-danger-action,
 .external-tab,
 .external-metric {
     border: 0;
@@ -326,6 +327,22 @@ body {
     left: 7px;
     width: 14px;
     border-top: 1.8px solid #151515;
+}
+
+.external-tab-icon.icon-calendar::before {
+    top: 7px;
+    left: 6px;
+    width: 16px;
+    height: 15px;
+    border: 1.7px solid #151515;
+    border-radius: 4px;
+}
+
+.external-tab-icon.icon-calendar::after {
+    top: 11px;
+    left: 6px;
+    width: 16px;
+    border-top: 1.7px solid #151515;
 }
 
 .external-tab-label {
@@ -510,6 +527,233 @@ body {
     background: rgba(211, 91, 53, 0.07);
 }
 
+.external-kanban {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    padding: 0 14px 16px;
+}
+
+.external-kanban-column {
+    min-height: 240px;
+    padding: 12px;
+    border: 1px solid rgba(25, 23, 20, 0.1);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.48);
+}
+
+.external-kanban-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+
+.external-kanban-header h3 {
+    margin: 0;
+    color: #151515;
+    font-size: 13px;
+    font-weight: 650;
+}
+
+.external-kanban-header span {
+    min-width: 24px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: rgba(25, 23, 20, 0.08);
+    color: rgba(25, 23, 20, 0.64);
+    font-size: 12px;
+    text-align: center;
+}
+
+.external-kanban-card {
+    display: flex;
+    width: 100%;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 8px;
+    padding: 11px;
+    border: 1px solid rgba(25, 23, 20, 0.1);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.76);
+    color: #151515;
+    text-align: left;
+    cursor: pointer;
+}
+
+.external-kanban-card:hover,
+.external-kanban-card.selected {
+    border-color: rgba(211, 91, 53, 0.42);
+    box-shadow: 0 10px 24px rgba(25, 23, 20, 0.08);
+}
+
+.external-kanban-card strong {
+    font-size: 13px;
+}
+
+.external-kanban-card span,
+.external-kanban-empty {
+    color: rgba(25, 23, 20, 0.58);
+    font-size: 12px;
+}
+
+.external-calendar {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 0 14px 16px;
+}
+
+.external-calendar-item {
+    display: grid;
+    grid-template-columns: 112px minmax(0, 1fr);
+    gap: 14px;
+    align-items: center;
+    padding: 12px;
+    border: 1px solid rgba(25, 23, 20, 0.1);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.62);
+    color: #151515;
+    text-align: left;
+    cursor: pointer;
+}
+
+.external-calendar-item:hover,
+.external-calendar-item.selected {
+    border-color: rgba(211, 91, 53, 0.42);
+    box-shadow: 0 10px 24px rgba(25, 23, 20, 0.08);
+}
+
+.external-calendar-item time {
+    color: #b84c2c;
+    font-size: 12px;
+    font-weight: 650;
+}
+
+.external-calendar-item div {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.external-calendar-item strong {
+    overflow: hidden;
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.external-calendar-item span {
+    overflow: hidden;
+    color: rgba(25, 23, 20, 0.58);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.external-calendar-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.external-calendar-controls strong {
+    min-width: 140px;
+    color: #151515;
+    font-size: 13px;
+    text-align: center;
+}
+
+.external-calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(104px, 1fr));
+    gap: 1px;
+    overflow: hidden;
+    margin: 0 14px 16px;
+    border: 1px solid rgba(25, 23, 20, 0.1);
+    border-radius: 14px;
+    background: rgba(25, 23, 20, 0.08);
+}
+
+.external-calendar-weekday,
+.external-calendar-day {
+    min-width: 0;
+    background: rgba(255, 255, 255, 0.72);
+}
+
+.external-calendar-weekday {
+    padding: 9px 10px;
+    color: rgba(25, 23, 20, 0.58);
+    font-size: 11px;
+    font-weight: 650;
+    text-transform: uppercase;
+}
+
+.external-calendar-day {
+    min-height: 118px;
+    padding: 8px;
+}
+
+.external-calendar-day.is-muted {
+    background: rgba(255, 255, 255, 0.34);
+}
+
+.external-calendar-day.is-drop-target {
+    outline: 2px solid rgba(211, 91, 53, 0.56);
+    outline-offset: -3px;
+    background: rgba(211, 91, 53, 0.08);
+}
+
+.external-calendar-date {
+    display: block;
+    margin-bottom: 6px;
+    color: rgba(25, 23, 20, 0.66);
+    font-size: 12px;
+    font-weight: 650;
+}
+
+.external-calendar-event {
+    display: flex;
+    width: 100%;
+    flex-direction: column;
+    gap: 3px;
+    margin-bottom: 5px;
+    padding: 7px;
+    border: 1px solid rgba(211, 91, 53, 0.22);
+    border-radius: 8px;
+    background: rgba(255, 250, 246, 0.9);
+    color: #151515;
+    text-align: left;
+    cursor: grab;
+}
+
+.external-calendar-event:active {
+    cursor: grabbing;
+}
+
+.external-calendar-event:hover,
+.external-calendar-event.selected {
+    border-color: rgba(211, 91, 53, 0.52);
+    box-shadow: 0 8px 18px rgba(25, 23, 20, 0.08);
+}
+
+.external-calendar-event strong,
+.external-calendar-event span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.external-calendar-event strong {
+    font-size: 12px;
+}
+
+.external-calendar-event span {
+    color: rgba(25, 23, 20, 0.58);
+    font-size: 11px;
+}
+
 .external-status-pill {
     display: inline-flex;
     align-items: center;
@@ -554,6 +798,7 @@ body {
 .external-record-form,
 .external-field,
 .external-actions,
+.external-edit,
 .external-selected {
     display: flex;
     flex-direction: column;
@@ -646,6 +891,28 @@ body {
     background: rgba(255, 255, 255, 0.54);
     color: #151515;
     font-size: 12px;
+}
+
+.external-danger-action {
+    min-height: 34px;
+    padding: 7px 11px;
+    border: 1px solid #b42318;
+    background: rgba(254, 243, 242, 0.88);
+    color: #b42318;
+    font-size: 12px;
+}
+
+.external-edit {
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(25, 23, 20, 0.10);
+}
+
+.external-edit h3 {
+    margin: 0;
+    color: #111111;
+    font-size: 14px;
+    font-weight: 560;
 }
 
 .external-empty-state {

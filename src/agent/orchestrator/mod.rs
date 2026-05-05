@@ -48,6 +48,7 @@ impl TaskOrchestrator {
         blocked_tools: &[&str],
         thinking_override: Option<bool>,
         auth_user_id: Option<&str>,
+        forced_profile_id: Option<i64>,
     ) -> Result<String> {
         // Skip orchestration entirely if disabled.
         if intent::should_skip(config) {
@@ -61,6 +62,7 @@ impl TaskOrchestrator {
                 blocked_tools,
                 thinking_override,
                 auth_user_id,
+                forced_profile_id,
             )
             .await;
         }
@@ -81,6 +83,7 @@ impl TaskOrchestrator {
                     blocked_tools,
                     thinking_override,
                     auth_user_id,
+                    forced_profile_id,
                 )
                 .await
             }
@@ -96,6 +99,7 @@ impl TaskOrchestrator {
                     blocked_tools,
                     thinking_override,
                     auth_user_id,
+                    forced_profile_id,
                     &analysis,
                 )
                 .await
@@ -116,10 +120,11 @@ async fn passthrough(
     blocked_tools: &[&str],
     thinking_override: Option<bool>,
     auth_user_id: Option<&str>,
+    forced_profile_id: Option<i64>,
 ) -> Result<String> {
     if let Some(tx) = stream_tx {
         agent
-            .process_message_streaming_with_context(
+            .process_message_streaming_with_scope(
                 content,
                 session_key,
                 channel,
@@ -128,17 +133,19 @@ async fn passthrough(
                 blocked_tools,
                 thinking_override,
                 auth_user_id,
+                forced_profile_id,
             )
             .await
     } else {
         agent
-            .process_message_with_blocked_tools_and_user(
+            .process_message_with_scope(
                 content,
                 session_key,
                 channel,
                 chat_id,
                 blocked_tools,
                 auth_user_id,
+                forced_profile_id,
             )
             .await
     }
@@ -157,6 +164,7 @@ async fn orchestrate(
     blocked_tools: &[&str],
     thinking_override: Option<bool>,
     auth_user_id: Option<&str>,
+    forced_profile_id: Option<i64>,
     analysis: &IntentAnalysis,
 ) -> Result<String> {
     // Emit "planning" phase to UI.
@@ -180,6 +188,7 @@ async fn orchestrate(
                 blocked_tools,
                 thinking_override,
                 auth_user_id,
+                forced_profile_id,
             )
             .await;
         }
@@ -206,6 +215,7 @@ async fn orchestrate(
         chat_id,
         stream_tx.as_ref(),
         auth_user_id,
+        forced_profile_id,
     )
     .await;
 

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{AppendHeaders, Json};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, patch, post};
 use axum::Router;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -45,6 +45,11 @@ struct CreateRecordRequest {
     data: Value,
 }
 
+#[derive(Debug, Deserialize)]
+struct UpdateRecordRequest {
+    data: Value,
+}
+
 #[derive(Debug, Serialize)]
 struct ExternalRecordView {
     id: i64,
@@ -82,6 +87,10 @@ pub(super) fn public_routes() -> Router<Arc<AppState>> {
         .route(
             "/api/a/{slug}/entities/{entity}/records",
             get(list_records).post(create_record),
+        )
+        .route(
+            "/api/a/{slug}/entities/{entity}/records/{record_id}",
+            patch(update_record).delete(delete_record),
         )
         .route(
             "/api/a/{slug}/entities/{entity}/records/{record_id}/actions/{action}",
@@ -486,6 +495,151 @@ async fn create_record(
     app_pool.close().await;
 
     Ok((StatusCode::CREATED, Json(external_record_view(row)?)))
+}
+
+async fn update_record(
+    State(state): State<Arc<AppState>>,
+    Path((slug, entity_name, record_id)): Path<(String, String, i64)>,
+    headers: HeaderMap,
+    Json(body): Json<UpdateRecordRequest>,
+) -> Result<Json<ExternalRecordView>, ApiErr> {
+    let db = state
+        .db
+        .as_ref()
+        .ok_or_else(|| internal("Database not available"))?;
+    let (app, blueprint, app_pool, user) = require_app_user(&state, &slug, &headers).await?;
+    runtime::entity(&blueprint, &entity_name).map_err(bad_request)?;
+    let row = app_db::load_record(&app_pool, record_id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "Record not found"})),
+            )
+        })?;
+    if row.entity_name != entity_name {
+        app_pool.close().await;
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Record not found"})),
+        ));
+    }
+
+    match permissions::update_scope(&blueprint, &user.role, &entity_name) {
+        RecordScope::All => {}
+        RecordScope::Own
+            if row.created_by_user_id.as_deref() == Some(&user.app_user_id.to_string()) => {}
+        RecordScope::Own | RecordScope::None => {
+            app_pool.close().await;
+            return Err(forbidden("This role cannot update this record"));
+        }
+    }
+
+    let patch =
+        permissions::sanitize_update_input(&blueprint, &user.role, &entity_name, &body.data)
+            .map_err(bad_request)?;
+    let mut merged = serde_json::from_str::<Value>(&row.data_json).map_err(internal)?;
+    let target = merged
+        .as_object_mut()
+        .ok_or_else(|| internal("Stored record data is not a JSON object"))?;
+    if let Some(patch) = patch.as_object() {
+        for (key, value) in patch {
+            target.insert(key.clone(), value.clone());
+        }
+    }
+    let data = runtime::validate_existing_record_data(&blueprint, &entity_name, &merged)
+        .map_err(bad_request)?;
+    let status = record_status(&blueprint, &entity_name, &data);
+    app_db::update_record_data(&app_pool, record_id, &data, status.as_deref())
+        .await
+        .map_err(internal)?;
+    let actor_user_id = user.app_user_id.to_string();
+    let payload = json!({"entity": entity_name, "record_id": record_id, "fields": body.data});
+    app_db::insert_app_event(
+        &app_pool,
+        Some(record_id),
+        "record.updated",
+        &payload,
+        Some(actor_user_id.as_str()),
+    )
+    .await
+    .map_err(internal)?;
+    app_db::insert_internal_app_event(
+        db.pool(),
+        app.id,
+        Some(record_id),
+        "record.updated",
+        &payload,
+        Some(actor_user_id.as_str()),
+    )
+    .await
+    .map_err(internal)?;
+    let updated = app_db::load_record(&app_pool, record_id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| internal("Updated record was not found"))?;
+    app_pool.close().await;
+
+    Ok(Json(external_record_view(updated)?))
+}
+
+async fn delete_record(
+    State(state): State<Arc<AppState>>,
+    Path((slug, entity_name, record_id)): Path<(String, String, i64)>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiErr> {
+    let db = state
+        .db
+        .as_ref()
+        .ok_or_else(|| internal("Database not available"))?;
+    let (app, blueprint, app_pool, user) = require_app_user(&state, &slug, &headers).await?;
+    runtime::entity(&blueprint, &entity_name).map_err(bad_request)?;
+    let row = app_db::load_record(&app_pool, record_id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "Record not found"})),
+            )
+        })?;
+    if row.entity_name != entity_name {
+        app_pool.close().await;
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Record not found"})),
+        ));
+    }
+
+    match permissions::update_scope(&blueprint, &user.role, &entity_name) {
+        RecordScope::All => {}
+        RecordScope::Own
+            if row.created_by_user_id.as_deref() == Some(&user.app_user_id.to_string()) => {}
+        RecordScope::Own | RecordScope::None => {
+            app_pool.close().await;
+            return Err(forbidden("This role cannot delete this record"));
+        }
+    }
+
+    app_db::delete_record(&app_pool, record_id)
+        .await
+        .map_err(internal)?;
+    let actor_user_id = user.app_user_id.to_string();
+    let payload = json!({"entity": entity_name, "record_id": record_id});
+    app_db::insert_internal_app_event(
+        db.pool(),
+        app.id,
+        Some(record_id),
+        "record.deleted",
+        &payload,
+        Some(actor_user_id.as_str()),
+    )
+    .await
+    .map_err(internal)?;
+    app_pool.close().await;
+
+    Ok(Json(json!({"ok": true, "id": record_id})))
 }
 
 async fn run_action(

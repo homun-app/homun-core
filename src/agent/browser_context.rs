@@ -104,6 +104,7 @@ pub(crate) fn browser_follow_up_instruction(tool_output: &str) -> Option<String>
         && lower.contains("form still looks incomplete");
     let has_suggestions = lower.contains("visible suggestions:");
     let has_autocomplete = lower.contains("autocomplete/combobox")
+        || lower.contains("autocomplete dropdown appeared")
         || lower.contains("autocomplete still open")
         || lower.contains("combobox-style field");
     let has_date_picker = lower.contains("date picker appears to be open");

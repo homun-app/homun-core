@@ -32,6 +32,7 @@ pub async fn execute(
     chat_id: &str,
     stream_tx: Option<&mpsc::Sender<StreamChunk>>,
     auth_user_id: Option<&str>,
+    forced_profile_id: Option<i64>,
 ) -> Vec<SubtaskResult> {
     let mut results: HashMap<String, SubtaskResult> = HashMap::new();
 
@@ -79,6 +80,7 @@ pub async fn execute(
                     chat_id,
                     &subtask_desc,
                     auth_user_id,
+                    forced_profile_id,
                 )
                 .await;
                 results.insert(subtask_id.clone(), result.clone());
@@ -108,6 +110,7 @@ pub async fn execute(
                 let desc = subtask_desc.clone();
                 let sid = subtask_id.clone();
                 let auth_uid = auth_user_id.map(str::to_string);
+                let profile_id = forced_profile_id;
 
                 let handle = tokio::spawn(async move {
                     execute_single(
@@ -118,6 +121,7 @@ pub async fn execute(
                         &cid,
                         &desc,
                         auth_uid.as_deref(),
+                        profile_id,
                     )
                     .await
                 });
@@ -207,6 +211,7 @@ async fn execute_single(
     chat_id: &str,
     description: &str,
     auth_user_id: Option<&str>,
+    forced_profile_id: Option<i64>,
 ) -> SubtaskResult {
     let mut retries = 0u8;
     let mut last_error = String::new();
@@ -222,13 +227,14 @@ async fn execute_single(
         };
 
         match agent
-            .process_message_with_blocked_tools_and_user(
+            .process_message_with_scope(
                 &message,
                 session_key,
                 channel,
                 chat_id,
                 &[],
                 auth_user_id,
+                forced_profile_id,
             )
             .await
         {

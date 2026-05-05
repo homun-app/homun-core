@@ -304,13 +304,7 @@ pub(crate) async fn auto_compact_with_summary(
             .map(|n| format!(" ({n})"))
             .unwrap_or_default();
         context_text.push_str(&format!("[{role}{name_tag}]: "));
-        // Cap each message contribution to avoid huge inputs
-        if content.len() > 500 {
-            context_text.push_str(&content[..500]);
-            context_text.push_str("...");
-        } else {
-            context_text.push_str(content);
-        }
+        push_utf8_excerpt(&mut context_text, content, 500);
         context_text.push('\n');
         if context_text.len() > 10_000 {
             context_text.push_str("...(earlier messages omitted)\n");
@@ -366,6 +360,18 @@ pub(crate) async fn auto_compact_with_summary(
     );
 
     Ok(true)
+}
+
+fn push_utf8_excerpt(target: &mut String, content: &str, max_bytes: usize) {
+    if content.len() <= max_bytes {
+        target.push_str(content);
+        return;
+    }
+
+    let mut excerpt = content.to_string();
+    truncate_utf8_in_place(&mut excerpt, max_bytes);
+    target.push_str(&excerpt);
+    target.push_str("...");
 }
 
 // ── Level 3: Emergency compact ──────────────────────────────────────
@@ -567,6 +573,18 @@ mod tests {
         assert_eq!(compacted, 1); // only first tool msg compacted
         assert!(messages[1].content.as_ref().unwrap().starts_with('['));
         assert_eq!(messages[3].content.as_ref().unwrap().len(), 500); // preserved
+    }
+
+    #[test]
+    fn push_utf8_excerpt_does_not_panic_inside_multibyte_char() {
+        let content = format!("{}🇱🇺 after", "a".repeat(499));
+        let mut out = String::new();
+
+        push_utf8_excerpt(&mut out, &content, 500);
+
+        assert!(out.is_char_boundary(out.len()));
+        assert!(out.ends_with("..."));
+        assert!(out.starts_with(&"a".repeat(499)));
     }
 
     // ── emergency_compact tests ──────────────────────────────────

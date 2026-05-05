@@ -1458,17 +1458,20 @@ Body.
     #[test]
     fn test_parse_allowed_tools_comma_separated_raw_names() {
         let result = parse_allowed_tools(
-            "create_internal_app, list_internal_apps, update_internal_app, add_app_field, configure_app_capabilities, create_app_record, query_app_records, run_app_action",
+            "plan_internal_app, create_internal_app, list_internal_apps, update_internal_app, add_app_field, add_app_view, extract_lookup_entity, configure_app_capabilities, create_app_record, query_app_records, run_app_action",
         );
+        assert!(result.contains("plan_internal_app"));
         assert!(result.contains("create_internal_app"));
         assert!(result.contains("list_internal_apps"));
         assert!(result.contains("update_internal_app"));
         assert!(result.contains("add_app_field"));
+        assert!(result.contains("add_app_view"));
+        assert!(result.contains("extract_lookup_entity"));
         assert!(result.contains("configure_app_capabilities"));
         assert!(result.contains("create_app_record"));
         assert!(result.contains("query_app_records"));
         assert!(result.contains("run_app_action"));
-        assert_eq!(result.len(), 8);
+        assert_eq!(result.len(), 11);
     }
 
     #[test]
@@ -1483,8 +1486,11 @@ Body.
 
         let result = parse_allowed_tools(allowed_tools);
 
+        assert!(result.contains("plan_internal_app"));
         assert!(result.contains("create_internal_app"));
         assert!(result.contains("update_internal_app"));
+        assert!(result.contains("add_app_view"));
+        assert!(result.contains("extract_lookup_entity"));
         assert!(!result.contains("write_file"));
         assert!(!result.contains("edit_file"));
         assert!(!result.contains("shell"));

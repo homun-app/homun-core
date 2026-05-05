@@ -10,6 +10,7 @@ pub(crate) struct ToolExecutionSummary {
     pub name: String,
     pub signature: String,
     pub useful: bool,
+    pub is_error: bool,
 }
 
 /// Mutable state for the iteration budget manager.
@@ -21,11 +22,36 @@ pub(crate) struct IterationBudgetState {
     pub(crate) last_signature: Option<String>,
     pub(crate) stall_streak: u8,
     pub(crate) extensions_used: u8,
+    pub(crate) error_streak: u8,
     /// Rolling window of recent tool-call signatures for cycle detection.
     pub(crate) recent_signatures: Vec<String>,
     /// When a cycle is detected, stores the period (1 = same call repeated,
     /// 2 = A→B→A→B, 3 = A→B→C→A→B→C). Consumed by hint injection.
     pub(crate) cycle_detected: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BudgetExhaustionAction {
+    AutoExtend,
+    AskUser,
+    ForceFinalize,
+}
+
+pub(crate) fn budget_exhaustion_action(
+    has_explicit_plan: bool,
+    completed_steps: usize,
+    total_steps: usize,
+    state: &IterationBudgetState,
+) -> BudgetExhaustionAction {
+    if has_explicit_plan && total_steps > 0 && completed_steps >= total_steps {
+        return BudgetExhaustionAction::ForceFinalize;
+    }
+
+    if state.error_streak >= 3 || state.stall_streak >= 3 || state.cycle_detected.is_some() {
+        return BudgetExhaustionAction::AskUser;
+    }
+
+    BudgetExhaustionAction::AutoExtend
 }
 
 /// Build a deterministic signature for a tool call (name + serialized args).
@@ -68,6 +94,7 @@ pub(crate) fn maybe_extend_iteration_budget(
         .collect::<Vec<_>>()
         .join("|");
     let useful = tool_summaries.iter().any(|summary| summary.useful);
+    let errored = tool_summaries.iter().all(|summary| summary.is_error);
     let repeated_signature = state.last_signature.as_deref() == Some(signature.as_str());
 
     // Browser actions have their own loop detector in BrowserTaskPlanState.
@@ -78,8 +105,14 @@ pub(crate) fn maybe_extend_iteration_budget(
 
     if useful && !repeated_signature {
         state.stall_streak = 0;
+        state.error_streak = 0;
     } else if !is_browser {
         state.stall_streak = state.stall_streak.saturating_add(1);
+    }
+    if errored {
+        state.error_streak = state.error_streak.saturating_add(1);
+    } else if useful {
+        state.error_streak = 0;
     }
     state.last_signature = Some(signature.clone());
     // Cycle detection runs for ALL tools (including browser) as a safety net.
@@ -241,6 +274,7 @@ mod tests {
             name: "browser".to_string(),
             signature: sig.to_string(),
             useful: true,
+            is_error: false,
         }
     }
 
@@ -324,5 +358,75 @@ mod tests {
             .map(String::from)
             .collect();
         assert_eq!(detect_cycle(&sigs), None);
+    }
+
+    #[test]
+    fn budget_exhaustion_finalizes_when_explicit_plan_is_done() {
+        let state = IterationBudgetState::default();
+
+        let action = budget_exhaustion_action(true, 3, 3, &state);
+
+        assert_eq!(action, BudgetExhaustionAction::ForceFinalize);
+    }
+
+    #[test]
+    fn budget_exhaustion_auto_extends_when_progress_has_not_stalled() {
+        let state = IterationBudgetState::default();
+
+        let action = budget_exhaustion_action(true, 2, 3, &state);
+
+        assert_eq!(action, BudgetExhaustionAction::AutoExtend);
+    }
+
+    #[test]
+    fn budget_exhaustion_asks_user_when_cycle_detected() {
+        let mut state = IterationBudgetState::default();
+        state.cycle_detected = Some(2);
+
+        let action = budget_exhaustion_action(true, 2, 3, &state);
+
+        assert_eq!(action, BudgetExhaustionAction::AskUser);
+    }
+
+    #[test]
+    fn budget_exhaustion_asks_user_after_repeated_errors() {
+        let mut state = IterationBudgetState::default();
+        state.error_streak = 3;
+
+        let action = budget_exhaustion_action(false, 0, 0, &state);
+
+        assert_eq!(action, BudgetExhaustionAction::AskUser);
+    }
+
+    #[test]
+    fn repeated_tool_errors_trip_error_streak_until_useful_progress() {
+        let mut budget = 20u32;
+        let mut state = IterationBudgetState::default();
+        let errors = vec![ToolExecutionSummary {
+            name: "browser".to_string(),
+            signature: "browser:{\"action\":\"click\"}".to_string(),
+            useful: false,
+            is_error: true,
+        }];
+
+        for iteration in 1..=3 {
+            maybe_extend_iteration_budget(&mut budget, 100, 20, iteration, &errors, &mut state, 0);
+        }
+
+        assert_eq!(state.error_streak, 3);
+        assert_eq!(
+            budget_exhaustion_action(false, 0, 0, &state),
+            BudgetExhaustionAction::AskUser
+        );
+
+        let useful = vec![ToolExecutionSummary {
+            name: "browser".to_string(),
+            signature: "browser:{\"action\":\"snapshot\"}".to_string(),
+            useful: true,
+            is_error: false,
+        }];
+        maybe_extend_iteration_budget(&mut budget, 100, 20, 4, &useful, &mut state, 0);
+
+        assert_eq!(state.error_streak, 0);
     }
 }

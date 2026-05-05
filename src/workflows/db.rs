@@ -69,7 +69,7 @@ impl Database {
     pub async fn load_workflow(&self, id: &str) -> Result<Option<Workflow>> {
         let row = sqlx::query_as::<_, WorkflowRow>(
             "SELECT id, name, objective, status, created_by, deliver_to, automation_id, automation_run_id, context_json,
-                    current_step_idx, created_at, updated_at, completed_at, error, profile_id
+                    current_step_idx, created_at, updated_at, completed_at, error, profile_id, user_id
              FROM workflows WHERE id = ?",
         )
         .bind(id)
@@ -103,8 +103,8 @@ impl Database {
         let rows = if let Some(status) = status_filter {
             sqlx::query_as::<_, WorkflowRow>(
                 "SELECT id, name, objective, status, created_by, deliver_to, automation_id, automation_run_id, context_json,
-                        current_step_idx, created_at, updated_at, completed_at, error, profile_id
-                 FROM workflows WHERE status = ? ORDER BY created_at DESC",
+                        current_step_idx, created_at, updated_at, completed_at, error, profile_id, user_id
+                 FROM workflows WHERE status = ? AND automation_id IS NULL ORDER BY created_at DESC",
             )
             .bind(status)
             .fetch_all(self.pool())
@@ -112,8 +112,8 @@ impl Database {
         } else {
             sqlx::query_as::<_, WorkflowRow>(
                 "SELECT id, name, objective, status, created_by, deliver_to, automation_id, automation_run_id, context_json,
-                        current_step_idx, created_at, updated_at, completed_at, error, profile_id
-                 FROM workflows ORDER BY created_at DESC",
+                        current_step_idx, created_at, updated_at, completed_at, error, profile_id, user_id
+                 FROM workflows WHERE automation_id IS NULL ORDER BY created_at DESC",
             )
             .fetch_all(self.pool())
             .await?
@@ -131,7 +131,7 @@ impl Database {
     pub async fn load_resumable_workflows(&self) -> Result<Vec<Workflow>> {
         let rows = sqlx::query_as::<_, WorkflowRow>(
             "SELECT id, name, objective, status, created_by, deliver_to, automation_id, automation_run_id, context_json,
-                    current_step_idx, created_at, updated_at, completed_at, error, profile_id
+                    current_step_idx, created_at, updated_at, completed_at, error, profile_id, user_id
              FROM workflows WHERE status IN ('running', 'pending', 'paused')
              ORDER BY created_at ASC",
         )
@@ -326,6 +326,7 @@ struct WorkflowRow {
     completed_at: Option<String>,
     error: Option<String>,
     profile_id: Option<i64>,
+    user_id: Option<String>,
 }
 
 impl WorkflowRow {
@@ -347,6 +348,7 @@ impl WorkflowRow {
             completed_at: self.completed_at,
             error: self.error,
             profile_id: self.profile_id,
+            user_id: self.user_id,
         }
     }
 }
@@ -471,9 +473,15 @@ mod tests {
     async fn test_workflow_insert_and_load_roundtrip() {
         let (db, _dir) = test_db().await;
         let req = sample_request();
-        db.insert_workflow("wf-rt", &req, Some("web:test"), None, None)
-            .await
-            .unwrap();
+        db.insert_workflow(
+            "wf-rt",
+            &req,
+            Some("web:test"),
+            None,
+            Some(crate::user::DEFAULT_ADMIN_USER_ID),
+        )
+        .await
+        .unwrap();
 
         let wf = db.load_workflow("wf-rt").await.unwrap().unwrap();
         assert_eq!(wf.name, "Test Workflow");
@@ -482,6 +490,10 @@ mod tests {
         assert_eq!(wf.steps.len(), 1);
         assert!(wf.steps[0].approval_required);
         assert_eq!(wf.created_by.as_deref(), Some("web:test"));
+        assert_eq!(
+            wf.user_id.as_deref(),
+            Some(crate::user::DEFAULT_ADMIN_USER_ID)
+        );
         assert!(wf.automation_id.is_none());
     }
 
@@ -517,6 +529,57 @@ mod tests {
         let wf = db.load_workflow("wf-linked").await.unwrap().unwrap();
         assert_eq!(wf.automation_id.as_deref(), Some("auto-123"));
         assert_eq!(wf.automation_run_id.as_deref(), Some("run-456"));
+    }
+
+    #[tokio::test]
+    async fn test_list_workflows_excludes_automation_spawned_runs() {
+        let (db, _dir) = test_db().await;
+        let req = sample_request();
+
+        db.insert_workflow(
+            "wf-user",
+            &req,
+            None,
+            None,
+            Some(crate::user::DEFAULT_ADMIN_USER_ID),
+        )
+        .await
+        .unwrap();
+
+        db.insert_automation(
+            "auto-123",
+            "Test Auto",
+            "do stuff",
+            "every:3600",
+            true,
+            "active",
+            None,
+            "always",
+            None,
+            None,
+            Some(crate::user::DEFAULT_ADMIN_USER_ID),
+        )
+        .await
+        .unwrap();
+
+        let mut automation_req = sample_request();
+        automation_req.automation_id = Some("auto-123".to_string());
+        automation_req.automation_run_id = Some("run-456".to_string());
+        db.insert_workflow(
+            "wf-automation-run",
+            &automation_req,
+            None,
+            None,
+            Some(crate::user::DEFAULT_ADMIN_USER_ID),
+        )
+        .await
+        .unwrap();
+
+        let workflows = db.list_workflows(None).await.unwrap();
+        let ids: Vec<&str> = workflows.iter().map(|workflow| workflow.id.as_str()).collect();
+
+        assert!(ids.contains(&"wf-user"));
+        assert!(!ids.contains(&"wf-automation-run"));
     }
 
     #[tokio::test]

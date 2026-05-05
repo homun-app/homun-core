@@ -10,6 +10,7 @@
         search: '',
         relationRecords: {},
         appUsers: [],
+        editingAppUser: null,
         appVersions: [],
         bridgePolicy: null
     };
@@ -362,9 +363,24 @@
             var row = el('div', 'app-studio-user-row');
             var identity = el('div');
             identity.appendChild(el('strong', '', user.display_name || user.email));
-            identity.appendChild(el('span', '', user.email));
+            identity.appendChild(el('span', '', user.email + ' · ' + (user.status || 'active')));
             row.appendChild(identity);
             row.appendChild(el('span', 'app-status-pill', user.role));
+            var actions = el('div', 'app-studio-user-actions');
+            var edit = el('button', 'btn btn-secondary btn-sm', 'Edit');
+            edit.type = 'button';
+            edit.addEventListener('click', function () {
+                state.editingAppUser = user;
+                renderRuntime();
+            });
+            actions.appendChild(edit);
+            var remove = el('button', 'btn btn-danger btn-sm', 'Delete');
+            remove.type = 'button';
+            remove.addEventListener('click', function () {
+                deleteAppUser(user);
+            });
+            actions.appendChild(remove);
+            row.appendChild(actions);
             wrap.appendChild(row);
         });
         return wrap;
@@ -372,7 +388,8 @@
 
     function renderAppUserForm() {
         var form = el('form', 'app-studio-user-form');
-        form.appendChild(el('h3', '', 'Create user'));
+        var editing = state.editingAppUser;
+        form.appendChild(el('h3', '', editing ? 'Edit user' : 'Create user'));
         [
             ['email', 'Email', 'email'],
             ['display_name', 'Display name', 'text'],
@@ -384,8 +401,10 @@
             input.className = 'input';
             input.name = field[0];
             input.type = field[2];
-            input.required = true;
+            input.required = field[0] !== 'password' || !editing;
             if (field[0] === 'password') input.minLength = 8;
+            if (editing && field[0] !== 'password') input.value = editing[field[0]] || '';
+            if (editing && field[0] === 'password') input.placeholder = 'Leave blank to keep current password';
             label.appendChild(input);
             form.appendChild(label);
         });
@@ -400,36 +419,79 @@
             option.textContent = humanName(item);
             role.appendChild(option);
         });
+        if (editing) role.value = editing.role || 'employee';
         roleLabel.appendChild(role);
         form.appendChild(roleLabel);
 
+        var statusLabel = el('label', 'app-field');
+        statusLabel.appendChild(el('span', '', 'Status'));
+        var status = document.createElement('select');
+        status.className = 'input';
+        status.name = 'status';
+        ['active', 'disabled'].forEach(function (item) {
+            var option = document.createElement('option');
+            option.value = item;
+            option.textContent = humanName(item);
+            status.appendChild(option);
+        });
+        status.value = editing ? (editing.status || 'active') : 'active';
+        statusLabel.appendChild(status);
+        form.appendChild(statusLabel);
+
         var error = el('p', 'external-error');
-        var submit = el('button', 'btn btn-primary', 'Create user');
+        var submit = el('button', 'btn btn-primary', editing ? 'Save user' : 'Create user');
         submit.type = 'submit';
         form.appendChild(submit);
+        if (editing) {
+            var cancel = el('button', 'btn btn-secondary', 'Cancel');
+            cancel.type = 'button';
+            cancel.addEventListener('click', function () {
+                state.editingAppUser = null;
+                renderRuntime();
+            });
+            form.appendChild(cancel);
+        }
         form.appendChild(error);
         form.addEventListener('submit', function (event) {
             event.preventDefault();
             error.textContent = '';
             var data = new FormData(form);
-            api('/api/v1/apps/' + encodeURIComponent(state.app.slug) + '/users', {
-                method: 'POST',
+            var payload = {
+                email: data.get('email'),
+                display_name: data.get('display_name'),
+                password: data.get('password'),
+                role: data.get('role'),
+                status: data.get('status')
+            };
+            if (editing && !payload.password) delete payload.password;
+            api('/api/v1/apps/' + encodeURIComponent(state.app.slug) + '/users' + (editing ? '/' + encodeURIComponent(editing.id) : ''), {
+                method: editing ? 'PATCH' : 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    email: data.get('email'),
-                    display_name: data.get('display_name'),
-                    password: data.get('password'),
-                    role: data.get('role')
-                })
+                body: JSON.stringify(payload)
             }).then(function () {
                 form.reset();
-                if (window.showToast) window.showToast('App user created', 'success');
+                state.editingAppUser = null;
+                if (window.showToast) window.showToast(editing ? 'App user updated' : 'App user created', 'success');
                 return loadAppUsers();
             }).catch(function (err) {
                 error.textContent = err.message;
             });
         });
         return form;
+    }
+
+    function deleteAppUser(user) {
+        if (!state.app || !user) return;
+        if (!window.confirm('Delete app user "' + (user.display_name || user.email) + '"?')) return;
+        api('/api/v1/apps/' + encodeURIComponent(state.app.slug) + '/users/' + encodeURIComponent(user.id), {
+            method: 'DELETE'
+        }).then(function () {
+            if (state.editingAppUser && state.editingAppUser.id === user.id) state.editingAppUser = null;
+            if (window.showToast) window.showToast('App user deleted', 'success');
+            return loadAppUsers();
+        }).catch(function (err) {
+            if (window.showToast) window.showToast(err.message, 'error', 5000);
+        });
     }
 
     function defaultBridgePolicy() {

@@ -109,6 +109,9 @@ pub struct Workflow {
     /// Profile this workflow belongs to. None = global/unscoped.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile_id: Option<i64>,
+    /// User that owns this workflow.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

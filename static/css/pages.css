@@ -4821,6 +4821,13 @@
     border-bottom: 1px solid var(--border-subtle);
 }
 
+.app-studio-user-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+}
+
 .app-studio-user-row strong,
 .app-studio-user-row span {
     display: block;

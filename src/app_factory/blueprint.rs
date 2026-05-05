@@ -118,6 +118,8 @@ pub enum ViewType {
     Table,
     Form,
     Detail,
+    Kanban,
+    Calendar,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -272,5 +274,29 @@ mod tests {
             vec!["admin", "approver"]
         );
         assert_eq!(blueprint.navigation[0].view, "leave_requests");
+    }
+
+    #[test]
+    fn deserializes_kanban_and_calendar_view_types() {
+        let blueprint: AppBlueprint = serde_json::from_value(json!({
+            "version": 1,
+            "app": {"slug": "ticket-interni", "name": "Ticket Interni"},
+            "entities": [{
+                "name": "ticket",
+                "label": "Ticket",
+                "fields": [
+                    {"name": "title", "type": "string", "label": "Titolo"},
+                    {"name": "status", "type": "enum", "label": "Stato", "options": ["open", "closed"]}
+                ]
+            }],
+            "views": [
+                {"id": "ticket_board", "type": "kanban", "entity": "ticket", "name": "Board", "columns": ["title", "status"]},
+                {"id": "ticket_calendar", "type": "calendar", "entity": "ticket", "name": "Calendario", "columns": ["title"]}
+            ]
+        }))
+        .unwrap();
+
+        assert_eq!(blueprint.views[0].view_type, ViewType::Kanban);
+        assert_eq!(blueprint.views[1].view_type, ViewType::Calendar);
     }
 }

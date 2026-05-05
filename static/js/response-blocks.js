@@ -46,8 +46,20 @@ function iconX()        { return _svg(['M18 6L6 18', 'M6 6l12 12']); }
 function renderBlocks(blocks, container, sendFn) {
     if (!blocks || !blocks.length) return;
 
+    const blockIds = blocks.map((block) => block && block.id).filter(Boolean);
+    if (blockIds.length) {
+        const alreadyRenderedIds = new Set();
+        container.querySelectorAll('.response-blocks[data-block-ids]').forEach((el) => {
+            String(el.dataset.blockIds || '').split(/\s+/).filter(Boolean).forEach((id) => {
+                alreadyRenderedIds.add(id);
+            });
+        });
+        if (blockIds.every((id) => alreadyRenderedIds.has(id))) return;
+    }
+
     const wrapper = document.createElement('div');
     wrapper.className = 'response-blocks';
+    if (blockIds.length) wrapper.dataset.blockIds = blockIds.join(' ');
 
     for (const block of blocks) {
         const el = renderBlock(block, sendFn);

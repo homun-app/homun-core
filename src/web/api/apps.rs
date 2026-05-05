@@ -4,7 +4,7 @@ use std::sync::Arc;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Json;
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post};
 use axum::Router;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -46,11 +46,26 @@ struct CreateRecordRequest {
 }
 
 #[derive(Debug, Deserialize)]
+struct UpdateRecordRequest {
+    data: Value,
+}
+
+#[derive(Debug, Deserialize)]
 struct CreateAppUserRequest {
     email: String,
     display_name: String,
     password: String,
     role: String,
+    contact_id: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateAppUserRequest {
+    email: String,
+    display_name: String,
+    password: Option<String>,
+    role: String,
+    status: String,
     contact_id: Option<i64>,
 }
 
@@ -132,6 +147,10 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
             get(list_app_users).post(create_app_user),
         )
         .route(
+            "/v1/apps/{slug}/users/{app_user_id}",
+            patch(update_app_user).delete(delete_app_user),
+        )
+        .route(
             "/v1/apps/{slug}/bridge-policy",
             get(get_bridge_policy).put(update_bridge_policy),
         )
@@ -143,6 +162,10 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route(
             "/v1/apps/{slug}/entities/{entity}/records",
             get(list_records).post(create_record),
+        )
+        .route(
+            "/v1/apps/{slug}/entities/{entity}/records/{record_id}",
+            patch(update_record).delete(delete_record),
         )
         .route(
             "/v1/apps/{slug}/entities/{entity}/records/{record_id}/actions/{action}",
@@ -519,6 +542,88 @@ async fn create_app_user(
     Ok((StatusCode::CREATED, Json(app_user_view(user))))
 }
 
+async fn update_app_user(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+    Path((slug, app_user_id)): Path<(String, i64)>,
+    Json(body): Json<UpdateAppUserRequest>,
+) -> Result<Json<AppUserView>, ApiErr> {
+    require_write(&auth)?;
+    if !matches!(
+        body.role.as_str(),
+        "admin" | "approver" | "employee" | "viewer"
+    ) {
+        return Err(bad_request("Unsupported app role"));
+    }
+    if !matches!(body.status.as_str(), "active" | "disabled") {
+        return Err(bad_request("Unsupported app user status"));
+    }
+    if let Some(password) = body.password.as_deref() {
+        if !password.is_empty() && password.len() < 8 {
+            return Err(bad_request("Password must be at least 8 characters"));
+        }
+    }
+
+    let db = require_db(&state)?;
+    let (app, _) = load_owned_app(db, &auth, &slug).await?;
+    let password_hash = match body.password.as_deref().filter(|value| !value.is_empty()) {
+        Some(password) => Some(hash_password(password).map_err(internal)?),
+        None => None,
+    };
+    let app_pool = app_db::open_app_pool(std::path::Path::new(&app.db_path))
+        .await
+        .map_err(internal)?;
+    app_db::update_app_user(
+        &app_pool,
+        app_user_id,
+        &body.email,
+        &body.display_name,
+        &body.role,
+        &body.status,
+        body.contact_id,
+        password_hash.as_deref(),
+    )
+    .await
+    .map_err(internal)?;
+    let user = app_db::load_app_user(&app_pool, app_user_id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "App user not found"})),
+            )
+        })?;
+    app_pool.close().await;
+
+    Ok(Json(app_user_view(user)))
+}
+
+async fn delete_app_user(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+    Path((slug, app_user_id)): Path<(String, i64)>,
+) -> Result<Json<Value>, ApiErr> {
+    require_write(&auth)?;
+    let db = require_db(&state)?;
+    let (app, _) = load_owned_app(db, &auth, &slug).await?;
+    let app_pool = app_db::open_app_pool(std::path::Path::new(&app.db_path))
+        .await
+        .map_err(internal)?;
+    let deleted = app_db::delete_app_user(&app_pool, app_user_id)
+        .await
+        .map_err(internal)?;
+    app_pool.close().await;
+    if !deleted {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "App user not found"})),
+        ));
+    }
+
+    Ok(Json(json!({"ok": true, "id": app_user_id})))
+}
+
 async fn get_bridge_policy(
     State(state): State<Arc<AppState>>,
     axum::Extension(auth): axum::Extension<AuthUser>,
@@ -631,6 +736,119 @@ async fn create_record(
         })?;
     app_pool.close().await;
     Ok((StatusCode::CREATED, Json(record_view(row)?)))
+}
+
+async fn update_record(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+    Path((slug, entity_name, record_id)): Path<(String, String, i64)>,
+    Json(body): Json<UpdateRecordRequest>,
+) -> Result<Json<RecordView>, ApiErr> {
+    require_write(&auth)?;
+    let db = require_db(&state)?;
+    let (app, blueprint) = load_owned_app(db, &auth, &slug).await?;
+    runtime::entity(&blueprint, &entity_name).map_err(bad_request)?;
+    let app_pool = app_db::open_app_pool(std::path::Path::new(&app.db_path))
+        .await
+        .map_err(internal)?;
+    let row = app_db::load_record(&app_pool, record_id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "Record not found"})),
+            )
+        })?;
+    if row.entity_name != entity_name {
+        app_pool.close().await;
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Record not found"})),
+        ));
+    }
+
+    let data = runtime::validate_existing_record_data(&blueprint, &entity_name, &body.data)
+        .map_err(bad_request)?;
+    let status = record_status(&blueprint, &entity_name, &data);
+    app_db::update_record_data(&app_pool, record_id, &data, status.as_deref())
+        .await
+        .map_err(internal)?;
+    let payload = json!({"entity": entity_name, "record_id": record_id});
+    app_db::insert_app_event(
+        &app_pool,
+        Some(record_id),
+        "record.updated",
+        &payload,
+        Some(&auth.user_id),
+    )
+    .await
+    .map_err(internal)?;
+    app_db::insert_internal_app_event(
+        db.pool(),
+        app.id,
+        Some(record_id),
+        "record.updated",
+        &payload,
+        Some(&auth.user_id),
+    )
+    .await
+    .map_err(internal)?;
+    let updated = app_db::load_record(&app_pool, record_id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| internal("Updated record was not found"))?;
+    app_pool.close().await;
+
+    Ok(Json(record_view(updated)?))
+}
+
+async fn delete_record(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth): axum::Extension<AuthUser>,
+    Path((slug, entity_name, record_id)): Path<(String, String, i64)>,
+) -> Result<Json<Value>, ApiErr> {
+    require_write(&auth)?;
+    let db = require_db(&state)?;
+    let (app, blueprint) = load_owned_app(db, &auth, &slug).await?;
+    runtime::entity(&blueprint, &entity_name).map_err(bad_request)?;
+    let app_pool = app_db::open_app_pool(std::path::Path::new(&app.db_path))
+        .await
+        .map_err(internal)?;
+    let row = app_db::load_record(&app_pool, record_id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "Record not found"})),
+            )
+        })?;
+    if row.entity_name != entity_name {
+        app_pool.close().await;
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Record not found"})),
+        ));
+    }
+
+    app_db::delete_record(&app_pool, record_id)
+        .await
+        .map_err(internal)?;
+    let payload = json!({"entity": entity_name, "record_id": record_id});
+    app_db::insert_internal_app_event(
+        db.pool(),
+        app.id,
+        Some(record_id),
+        "record.deleted",
+        &payload,
+        Some(&auth.user_id),
+    )
+    .await
+    .map_err(internal)?;
+    app_pool.close().await;
+
+    Ok(Json(json!({"ok": true, "id": record_id})))
 }
 
 async fn run_action(

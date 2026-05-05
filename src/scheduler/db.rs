@@ -101,7 +101,7 @@ impl Database {
                     trigger_kind, trigger_value,
                     last_run, last_result, created_at, updated_at,
                     plan_json, dependencies_json, plan_version, validation_errors,
-                    workflow_steps_json, flow_json, profile_id";
+                    workflow_steps_json, flow_json, profile_id, user_id";
         let rows = match profile_id {
             Some(pid) => {
                 let sql = format!(
@@ -133,7 +133,7 @@ impl Database {
                     trigger_kind, trigger_value,
                     last_run, last_result, created_at, updated_at,
                     plan_json, dependencies_json, plan_version, validation_errors,
-                    workflow_steps_json, flow_json, profile_id
+                    workflow_steps_json, flow_json, profile_id, user_id
              FROM automations
              WHERE id = ?",
         )
@@ -141,6 +141,69 @@ impl Database {
         .fetch_optional(self.pool())
         .await
         .context("Failed to load automation")?;
+
+        Ok(row)
+    }
+
+    /// Load automations for one user, optionally filtered by profile.
+    pub async fn load_automations_for_user(
+        &self,
+        user_id: &str,
+        profile_id: Option<i64>,
+    ) -> Result<Vec<AutomationRow>> {
+        let cols = "id, name, prompt, schedule, enabled, status, deliver_to,
+                    trigger_kind, trigger_value,
+                    last_run, last_result, created_at, updated_at,
+                    plan_json, dependencies_json, plan_version, validation_errors,
+                    workflow_steps_json, flow_json, profile_id, user_id";
+        let rows = match profile_id {
+            Some(pid) => {
+                let sql = format!(
+                    "SELECT {cols} FROM automations \
+                     WHERE user_id = ? AND (profile_id IS NULL OR profile_id = ?) \
+                     ORDER BY created_at DESC"
+                );
+                sqlx::query_as::<_, AutomationRow>(&sql)
+                    .bind(user_id)
+                    .bind(pid)
+                    .fetch_all(self.pool())
+                    .await
+                    .context("Failed to load automations for user/profile")?
+            }
+            None => {
+                let sql = format!(
+                    "SELECT {cols} FROM automations WHERE user_id = ? ORDER BY created_at DESC"
+                );
+                sqlx::query_as::<_, AutomationRow>(&sql)
+                    .bind(user_id)
+                    .fetch_all(self.pool())
+                    .await
+                    .context("Failed to load automations for user")?
+            }
+        };
+        Ok(rows)
+    }
+
+    /// Load one automation by ID and owner user.
+    pub async fn load_automation_for_user(
+        &self,
+        id: &str,
+        user_id: &str,
+    ) -> Result<Option<AutomationRow>> {
+        let row = sqlx::query_as::<_, AutomationRow>(
+            "SELECT id, name, prompt, schedule, enabled, status, deliver_to,
+                    trigger_kind, trigger_value,
+                    last_run, last_result, created_at, updated_at,
+                    plan_json, dependencies_json, plan_version, validation_errors,
+                    workflow_steps_json, flow_json, profile_id, user_id
+             FROM automations
+             WHERE id = ? AND user_id = ?",
+        )
+        .bind(id)
+        .bind(user_id)
+        .fetch_optional(self.pool())
+        .await
+        .context("Failed to load automation for user")?;
 
         Ok(row)
     }

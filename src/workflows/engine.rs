@@ -479,7 +479,15 @@ async fn execute_step(
     );
 
     agent
-        .process_message(&prompt, &session_key, "workflow", &workflow.id)
+        .process_message_with_scope(
+            &prompt,
+            &session_key,
+            "workflow",
+            &workflow.id,
+            &[],
+            workflow.user_id.as_deref(),
+            workflow.profile_id,
+        )
         .await
 }
 

@@ -31,6 +31,31 @@ impl WorkflowTool {
     }
 }
 
+fn workflow_visible_to_context(workflow: &crate::workflows::Workflow, ctx: &ToolContext) -> bool {
+    if let Some(user_id) = ctx.user_id.as_deref() {
+        if workflow.user_id.as_deref() != Some(user_id) {
+            return false;
+        }
+    }
+    if let Some(profile_id) = ctx.profile_id {
+        workflow.profile_id.is_none() || workflow.profile_id == Some(profile_id)
+    } else {
+        true
+    }
+}
+
+async fn workflow_id_visible_to_context(
+    engine: &WorkflowEngine,
+    id: &str,
+    ctx: &ToolContext,
+) -> Result<bool> {
+    match engine.status(id).await {
+        Ok(Some(workflow)) => Ok(workflow_visible_to_context(&workflow, ctx)),
+        Ok(None) => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
 #[async_trait]
 impl Tool for WorkflowTool {
     fn name(&self) -> &str {
@@ -122,12 +147,12 @@ impl Tool for WorkflowTool {
 
         match action {
             "create" => self.handle_create(engine, &args, ctx).await,
-            "list" => self.handle_list(engine, &args).await,
-            "status" => self.handle_status(engine, &args).await,
-            "approve" => self.handle_approve(engine, &args).await,
-            "cancel" => self.handle_cancel(engine, &args).await,
-            "restart" => self.handle_restart(engine, &args).await,
-            "delete" => self.handle_delete(engine, &args).await,
+            "list" => self.handle_list(engine, &args, ctx).await,
+            "status" => self.handle_status(engine, &args, ctx).await,
+            "approve" => self.handle_approve(engine, &args, ctx).await,
+            "cancel" => self.handle_cancel(engine, &args, ctx).await,
+            "restart" => self.handle_restart(engine, &args, ctx).await,
+            "delete" => self.handle_delete(engine, &args, ctx).await,
             other => Ok(ToolResult::error(format!(
                 "Unknown action: {other}. Use create, list, status, approve, cancel, restart, or delete."
             ))),
@@ -199,7 +224,12 @@ impl WorkflowTool {
         }
     }
 
-    async fn handle_list(&self, engine: &WorkflowEngine, args: &Value) -> Result<ToolResult> {
+    async fn handle_list(
+        &self,
+        engine: &WorkflowEngine,
+        args: &Value,
+        ctx: &ToolContext,
+    ) -> Result<ToolResult> {
         let filter = args.get("filter").and_then(|v| v.as_str()).unwrap_or("all");
 
         let status_filter = match filter {
@@ -215,6 +245,10 @@ impl WorkflowTool {
             Ok(w) => w,
             Err(e) => return Ok(ToolResult::error(format!("Failed to list workflows: {e}"))),
         };
+        let workflows = workflows
+            .into_iter()
+            .filter(|wf| workflow_visible_to_context(wf, ctx))
+            .collect::<Vec<_>>();
 
         if workflows.is_empty() {
             return Ok(ToolResult::success(match filter {
@@ -244,7 +278,12 @@ impl WorkflowTool {
         Ok(ToolResult::success(lines.join("\n")))
     }
 
-    async fn handle_status(&self, engine: &WorkflowEngine, args: &Value) -> Result<ToolResult> {
+    async fn handle_status(
+        &self,
+        engine: &WorkflowEngine,
+        args: &Value,
+        ctx: &ToolContext,
+    ) -> Result<ToolResult> {
         let id = match args.get("workflow_id").and_then(|v| v.as_str()) {
             Some(id) => id,
             None => return Ok(ToolResult::error("Missing required field: workflow_id")),
@@ -255,6 +294,9 @@ impl WorkflowTool {
             Ok(None) => return Ok(ToolResult::error(format!("Workflow {id} not found"))),
             Err(e) => return Ok(ToolResult::error(format!("Failed to load workflow: {e}"))),
         };
+        if !workflow_visible_to_context(&workflow, ctx) {
+            return Ok(ToolResult::error(format!("Workflow {id} not found")));
+        }
 
         let mut lines = Vec::new();
         lines.push(format!("Workflow: {} ({})", workflow.name, workflow.id));
@@ -300,11 +342,19 @@ impl WorkflowTool {
         Ok(ToolResult::success(lines.join("\n")))
     }
 
-    async fn handle_approve(&self, engine: &WorkflowEngine, args: &Value) -> Result<ToolResult> {
+    async fn handle_approve(
+        &self,
+        engine: &WorkflowEngine,
+        args: &Value,
+        ctx: &ToolContext,
+    ) -> Result<ToolResult> {
         let id = match args.get("workflow_id").and_then(|v| v.as_str()) {
             Some(id) => id,
             None => return Ok(ToolResult::error("Missing required field: workflow_id")),
         };
+        if !workflow_id_visible_to_context(engine, id, ctx).await? {
+            return Ok(ToolResult::error(format!("Workflow {id} not found")));
+        }
 
         match engine.approve_and_resume(id).await {
             Ok(msg) => Ok(ToolResult::success(msg)),
@@ -314,11 +364,19 @@ impl WorkflowTool {
         }
     }
 
-    async fn handle_cancel(&self, engine: &WorkflowEngine, args: &Value) -> Result<ToolResult> {
+    async fn handle_cancel(
+        &self,
+        engine: &WorkflowEngine,
+        args: &Value,
+        ctx: &ToolContext,
+    ) -> Result<ToolResult> {
         let id = match args.get("workflow_id").and_then(|v| v.as_str()) {
             Some(id) => id,
             None => return Ok(ToolResult::error("Missing required field: workflow_id")),
         };
+        if !workflow_id_visible_to_context(engine, id, ctx).await? {
+            return Ok(ToolResult::error(format!("Workflow {id} not found")));
+        }
 
         match engine.cancel(id).await {
             Ok(msg) => Ok(ToolResult::success(msg)),
@@ -327,11 +385,19 @@ impl WorkflowTool {
     }
 
     /// Restart a completed/failed/cancelled workflow from step 0.
-    async fn handle_restart(&self, engine: &WorkflowEngine, args: &Value) -> Result<ToolResult> {
+    async fn handle_restart(
+        &self,
+        engine: &WorkflowEngine,
+        args: &Value,
+        ctx: &ToolContext,
+    ) -> Result<ToolResult> {
         let id = match args.get("workflow_id").and_then(|v| v.as_str()) {
             Some(id) => id,
             None => return Ok(ToolResult::error("Missing required field: workflow_id")),
         };
+        if !workflow_id_visible_to_context(engine, id, ctx).await? {
+            return Ok(ToolResult::error(format!("Workflow {id} not found")));
+        }
 
         match engine.restart(id).await {
             Ok(msg) => Ok(ToolResult::success(msg)),
@@ -342,11 +408,19 @@ impl WorkflowTool {
     }
 
     /// Delete a terminal (completed/failed/cancelled) workflow.
-    async fn handle_delete(&self, engine: &WorkflowEngine, args: &Value) -> Result<ToolResult> {
+    async fn handle_delete(
+        &self,
+        engine: &WorkflowEngine,
+        args: &Value,
+        ctx: &ToolContext,
+    ) -> Result<ToolResult> {
         let id = match args.get("workflow_id").and_then(|v| v.as_str()) {
             Some(id) => id,
             None => return Ok(ToolResult::error("Missing required field: workflow_id")),
         };
+        if !workflow_id_visible_to_context(engine, id, ctx).await? {
+            return Ok(ToolResult::error(format!("Workflow {id} not found")));
+        }
 
         match engine.delete(id).await {
             Ok(msg) => Ok(ToolResult::success(msg)),

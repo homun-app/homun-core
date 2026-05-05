@@ -62,6 +62,18 @@ const chatModalConfirm = document.getElementById('chat-modal-confirm');
 const chatMainEl = document.querySelector('.chat-main');
 const chatWelcomeGreeting = document.getElementById('chat-welcome-greeting');
 const chatWelcomePhrase = document.getElementById('chat-welcome-phrase');
+const chatTaskLauncher = document.getElementById('chat-task-launcher');
+const chatTaskMore = document.getElementById('chat-task-more');
+const chatTaskMoreMenu = document.getElementById('chat-task-more-menu');
+const chatModePill = document.getElementById('chat-mode-pill');
+const chatModeIcon = document.getElementById('chat-mode-icon');
+const chatModeLabel = document.getElementById('chat-mode-label');
+const chatModeClear = document.getElementById('chat-mode-clear');
+const chatModePanel = document.getElementById('chat-mode-panel');
+const chatModeSuggestions = document.getElementById('chat-mode-suggestions');
+const btnChatConnected = document.getElementById('btn-chat-connected');
+const chatCapabilityPopover = document.getElementById('chat-capability-popover');
+const chatCapabilityStrip = document.getElementById('chat-capability-strip');
 const chatDragOverlay = document.getElementById('chat-drag-overlay');
 const btnChatTools = document.getElementById('btn-chat-tools');
 const chatToolsLabel = document.getElementById('chat-tools-label');
@@ -94,6 +106,8 @@ let recognition = null;
 let activeToolMode = null;
 let currentPlanState = null;
 let planExpanded = false;
+let capabilityStatusLoaded = false;
+let activeChatMode = null;
 const GENERIC_PLAN_CONSTRAINTS = new Set([
     'Cover every requested option/source and compare them before finalizing.',
     'Treat date/time-sensitive details as current and verify them from fresh evidence.',
@@ -109,6 +123,7 @@ let activityController = null;
 
 // Pending rich blocks received before the final response
 let pendingBlocks = null;
+let liveBlocksContainerEl = null;
 
 // Tool call activity indicator element
 let toolIndicatorEl = null;
@@ -127,11 +142,15 @@ let activeRunId = null;
 
 // ─── Textarea auto-resize ────────────────────────────────────────
 
+const CHAT_TEXTAREA_MAX_HEIGHT = 280;
+
 /** Auto-resize textarea to fit content, up to a max height. */
 function autoResizeTextarea() {
     if (!chatText) return;
     chatText.style.height = 'auto';
-    chatText.style.height = Math.min(chatText.scrollHeight, 200) + 'px';
+    const nextHeight = Math.min(chatText.scrollHeight, CHAT_TEXTAREA_MAX_HEIGHT);
+    chatText.style.height = `${nextHeight}px`;
+    chatText.style.overflowY = chatText.scrollHeight > CHAT_TEXTAREA_MAX_HEIGHT ? 'auto' : 'hidden';
 }
 
 chatText?.addEventListener('input', autoResizeTextarea);
@@ -143,6 +162,219 @@ chatText?.addEventListener('keydown', (e) => {
         chatForm.dispatchEvent(new Event('submit'));
     }
 });
+
+function setComposerPrompt(prompt) {
+    if (!chatText || !prompt) return;
+    const current = chatText.value.trim();
+    chatText.value = current ? `${current}\n\n${prompt}` : prompt;
+    chatText.focus();
+    chatText.selectionStart = chatText.selectionEnd = chatText.value.length;
+    autoResizeTextarea();
+}
+
+const CHAT_MODES = {
+    automation: {
+        label: 'Attivita programmata',
+        placeholder: 'Descrivi cosa vuoi automatizzare, ad esempio "invia un riepilogo del mercato ogni giorno alle 8:00"',
+        icon: '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="12" height="11" rx="2"/><path d="M6 2v4M12 2v4M3 8h12"/></svg>',
+    },
+};
+
+function setChatMode(modeName) {
+    const mode = CHAT_MODES[modeName];
+    if (!mode || !chatText) return;
+    activeChatMode = modeName;
+    document.body.classList.toggle('chat-mode-active', true);
+    if (chatMainEl) chatMainEl.classList.toggle('has-active-mode', true);
+    chatText.placeholder = mode.placeholder;
+    if (chatModePill) chatModePill.hidden = true;
+    if (chatModePanel) chatModePanel.hidden = false;
+    chatText.focus();
+}
+
+function clearChatMode() {
+    activeChatMode = null;
+    document.body.classList.toggle('chat-mode-active', false);
+    if (chatMainEl) chatMainEl.classList.toggle('has-active-mode', false);
+    if (chatText) chatText.placeholder = 'Message Homun...';
+    if (chatModePill) chatModePill.hidden = true;
+    if (chatModePanel) chatModePanel.hidden = true;
+    clearToolMode({ keepText: true });
+}
+
+chatTaskLauncher?.addEventListener('click', (event) => {
+    const modeButton = event.target.closest('[data-chat-mode]');
+    if (modeButton) {
+        closeTaskMoreMenu();
+        setChatMode(modeButton.dataset.chatMode);
+        return;
+    }
+    const button = event.target.closest('[data-prompt]');
+    if (!button) return;
+    closeTaskMoreMenu();
+    setComposerPrompt(button.dataset.prompt || '');
+});
+
+chatModeSuggestions?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-prompt]');
+    if (!button) return;
+    setComposerPrompt(button.dataset.prompt || '');
+});
+
+chatModeClear?.addEventListener('click', clearChatMode);
+
+function closeTaskMoreMenu() {
+    if (!chatTaskMoreMenu || !chatTaskMore) return;
+    chatTaskMoreMenu.hidden = true;
+    chatTaskMore.setAttribute('aria-expanded', 'false');
+}
+
+function closeCapabilityPopover() {
+    if (!chatCapabilityPopover || !btnChatConnected) return;
+    chatCapabilityPopover.hidden = true;
+    btnChatConnected.setAttribute('aria-expanded', 'false');
+}
+
+function toggleCapabilityPopover() {
+    if (!chatCapabilityPopover || !btnChatConnected) return;
+    const nextOpen = chatCapabilityPopover.hidden;
+    chatCapabilityPopover.hidden = !nextOpen;
+    btnChatConnected.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+    if (nextOpen) loadCapabilityStatus();
+}
+
+function toggleTaskMoreMenu() {
+    if (!chatTaskMoreMenu || !chatTaskMore) return;
+    const nextOpen = chatTaskMoreMenu.hidden;
+    chatTaskMoreMenu.hidden = !nextOpen;
+    chatTaskMore.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+}
+
+chatTaskMore?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    closeCapabilityPopover();
+    toggleTaskMoreMenu();
+});
+
+btnChatConnected?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    closeTaskMoreMenu();
+    toggleCapabilityPopover();
+});
+
+document.addEventListener('click', (event) => {
+    if (chatTaskMoreMenu && !chatTaskMoreMenu.hidden) {
+        if (!event.target.closest('#chat-task-more-menu') && !event.target.closest('#chat-task-more')) {
+            closeTaskMoreMenu();
+        }
+    }
+    if (chatCapabilityPopover && !chatCapabilityPopover.hidden) {
+        if (!event.target.closest('#chat-capability-popover') && !event.target.closest('#btn-chat-connected')) {
+            closeCapabilityPopover();
+        }
+    }
+});
+
+document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+        closeTaskMoreMenu();
+        closeCapabilityPopover();
+    }
+});
+
+function openSettingsSection(section) {
+    if (!section) return;
+    if (typeof window.openSettingsModal === 'function') {
+        window.openSettingsModal(section);
+        return;
+    }
+    const settingsButton = document.querySelector('[data-settings-open], #settings-btn, button[title="Settings"], button[aria-label="Settings"]');
+    if (settingsButton) {
+        window.location.hash = `settings/${section}`;
+        settingsButton.click();
+        return;
+    }
+    window.location.hash = `settings/${section}`;
+}
+
+chatCapabilityStrip?.addEventListener('click', (event) => {
+    const link = event.target.closest('[data-settings-section]');
+    if (!link) return;
+    event.preventDefault();
+    openSettingsSection(link.dataset.settingsSection);
+});
+
+function setCapabilityPill(id, state, value, title) {
+    const pill = document.getElementById(id);
+    if (!pill) return;
+    pill.classList.remove('is-loading', 'is-ready', 'is-warning', 'is-offline');
+    pill.classList.add(`is-${state || 'offline'}`);
+    const valueEl = pill.querySelector('.chat-capability-value');
+    if (valueEl) valueEl.textContent = value || 'unknown';
+    if (title) pill.title = title;
+}
+
+function shortModelName(model) {
+    const raw = String(model || '').trim();
+    if (!raw) return 'not set';
+    const name = raw.split('/').pop() || raw;
+    return name.length > 18 ? `${name.slice(0, 17)}...` : name;
+}
+
+async function loadCapabilityStatus() {
+    if (capabilityStatusLoaded || !chatCapabilityStrip) return;
+    capabilityStatusLoaded = true;
+
+    const statusPromise = fetch('/api/v1/status').then((r) => r.ok ? r.json() : null).catch(() => null);
+    const mcpPromise = (window.McpLoader && typeof window.McpLoader.fetchServers === 'function')
+        ? window.McpLoader.fetchServers().catch(() => [])
+        : fetch('/api/v1/mcp/servers').then((r) => r.ok ? r.json() : []).catch(() => []);
+
+    const [status, mcpServers] = await Promise.all([statusPromise, mcpPromise]);
+
+    if (status && status.provider && status.provider !== 'none') {
+        setCapabilityPill('cap-model', 'ready', shortModelName(status.model), `Provider: ${status.provider}`);
+    } else {
+        setCapabilityPill('cap-model', 'warning', 'needs setup', 'Configure a model provider');
+    }
+
+    const channels = Array.isArray(status?.channels) ? status.channels : [];
+    const enabledChannels = channels.filter((channel) => channel && channel.enabled);
+    setCapabilityPill(
+        'cap-channels',
+        enabledChannels.length ? 'ready' : 'warning',
+        enabledChannels.length ? `${enabledChannels.length} active` : 'none active',
+        enabledChannels.map((channel) => channel.name).join(', ') || 'Configure delivery channels'
+    );
+
+    const skillsCount = Number(status?.skills_count || 0);
+    setCapabilityPill(
+        'cap-skills',
+        skillsCount ? 'ready' : 'warning',
+        skillsCount ? `${skillsCount} installed` : 'none',
+        'Open installed skills'
+    );
+
+    const servers = Array.isArray(mcpServers) ? mcpServers : [];
+    const enabledServers = servers.filter((server) => server && server.enabled !== false);
+    const browserReady = enabledServers.some((server) => {
+        const name = String(server.name || server.id || '').toLowerCase();
+        return name.includes('browser') || name.includes('playwright');
+    });
+
+    setCapabilityPill(
+        'cap-browser',
+        browserReady ? 'ready' : 'warning',
+        browserReady ? 'ready' : 'check',
+        browserReady ? 'Browser automation available' : 'Open browser settings'
+    );
+    setCapabilityPill(
+        'cap-mcp',
+        enabledServers.length ? 'ready' : 'warning',
+        enabledServers.length ? `${enabledServers.length} connected` : 'none',
+        enabledServers.map((server) => server.name).filter(Boolean).join(', ') || 'Open MCP servers'
+    );
+}
 
 /** Whether the user is near the bottom of the scroll area. */
 let userNearBottom = true;
@@ -568,6 +800,9 @@ function syncEmptyState() {
     if (isEmpty && chatWelcomePhrase) {
         chatWelcomePhrase.textContent = WELCOME_PHRASES[Math.floor(Math.random() * WELCOME_PHRASES.length)];
     }
+    if (isEmpty) {
+        loadCapabilityStatus();
+    }
 }
 
 function isUsefulPlanConstraint(item) {
@@ -745,6 +980,10 @@ function clearTransientRunUi() {
     }
     if (reasoningSectionEl) {
         reasoningSectionEl.remove();
+    }
+    if (liveBlocksContainerEl) {
+        liveBlocksContainerEl.remove();
+        liveBlocksContainerEl = null;
     }
     reasoningSectionEl = null;
     reasoningContentEl = null;
@@ -1310,12 +1549,8 @@ function addToolCallCard(toolCallData) {
     updateReasoningCount();
     currentToolCalls.push(toolCallData.id);
 
-    // Auto-expand for first few tools, then collapse to reduce noise
-    if (reasoningCount <= 3) {
-        reasoningSectionEl.classList.remove('collapsed');
-    } else {
-        reasoningSectionEl.classList.add('collapsed');
-    }
+    // Keep live tool progress visible; finalization collapses it once done.
+    reasoningSectionEl.classList.remove('collapsed');
 
     scrollThreadToBottom();
 }
@@ -1353,10 +1588,18 @@ function clearBrowserGallery() {
 }
 
 function endToolIndicator(toolName, toolCallData) {
-    activeTools = activeTools.filter(t => t !== toolName);
-    const completedCard = Array.from(document.querySelectorAll('.chat-tool-call'))
-        .reverse()
-        .find((card) => card.dataset.toolName === toolName && !card.classList.contains('is-complete'));
+    const activeIndex = activeTools.lastIndexOf(toolName);
+    if (activeIndex !== -1) {
+        activeTools.splice(activeIndex, 1);
+    }
+    const cardById = toolCallData?.id
+        ? document.getElementById(`tool-call-${toolCallData.id}`)
+        : null;
+    const completedCard = (cardById && !cardById.classList.contains('is-complete'))
+        ? cardById
+        : Array.from(document.querySelectorAll('.chat-tool-call'))
+            .reverse()
+            .find((card) => card.dataset.toolName === toolName && !card.classList.contains('is-complete'));
     if (completedCard) {
         window.HomunChatTools.markToolCallComplete(completedCard, toolCallData);
     }
@@ -1785,7 +2028,8 @@ function connect() {
                     // Dedup: skip if this block was already rendered by hydrateActiveRun
                     const blockId = pendingBlocks[0]?.id;
                     if (blockId && document.querySelector(`.approval-gate-container[data-block-id="${blockId}"]`)) {
-                        pendingBlocks = null;
+                        // Keep pendingBlocks so final markdown replacement can still
+                        // reattach the structured controls to the final assistant bubble.
                     } else {
                         const streamingEl = streamingController.getElement();
                         let target = streamingEl
@@ -1798,9 +2042,9 @@ function connect() {
                             target.className = 'chat-msg assistant approval-gate-container';
                             if (blockId) target.dataset.blockId = blockId;
                             messagesEl.appendChild(target);
+                            liveBlocksContainerEl = target;
                         }
                         renderBlocks(pendingBlocks, target, sendBlockResponse);
-                        pendingBlocks = null;
                         scrollThreadToBottom();
                     }
                 }
@@ -1907,6 +2151,10 @@ function finalizeStream(content) {
         addBrowserScreenshot(match[0]);
     }
 
+    if (liveBlocksContainerEl) {
+        liveBlocksContainerEl.remove();
+        liveBlocksContainerEl = null;
+    }
     streamingController.finalize(content, pendingBlocks);
     pendingBlocks = null;
 
@@ -2133,11 +2381,17 @@ function sendCurrentMessage() {
     ws.send(JSON.stringify(payload));
     chatText.value = '';
     chatText.style.height = 'auto';
+    chatText.style.overflowY = 'hidden';
     chatText.focus();
     pendingAttachments = [];
     pendingMcpServers = [];
     if (activeToolMode) {
         activeToolMode = null;
+        activeChatMode = null;
+        document.body.classList.toggle('chat-mode-active', false);
+        if (chatMainEl) chatMainEl.classList.toggle('has-active-mode', false);
+        if (chatModePill) chatModePill.hidden = true;
+        if (chatModePanel) chatModePanel.hidden = true;
         if (btnChatTools) btnChatTools.classList.remove('is-active');
         if (chatToolsLabel) chatToolsLabel.textContent = 'Tools';
         if (chatToolsDismiss) chatToolsDismiss.hidden = true;
@@ -2832,7 +3086,7 @@ function svgFromTemplate(tmpl) {
 
 const TOOLS_ITEMS = [
     { label: 'Create Skill', svg: '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v14"/><path d="M2 9h14"/></svg>', prompt: 'Create a new skill that ' },
-    { label: 'Create Automation', svg: '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L5 10l3 3 8-8z"/><path d="M2 16h4"/></svg>', prompt: 'Create a new automation that ' },
+    { label: 'Create Automation', svg: '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L5 10l3 3 8-8z"/><path d="M2 16h4"/></svg>', mode: 'automation' },
     { label: 'Create Workflow', svg: '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4" cy="9" r="2"/><circle cx="14" cy="5" r="2"/><circle cx="14" cy="13" r="2"/><path d="M6 9h4l2-4M10 9l2 4"/></svg>', prompt: 'Create a workflow that ' },
     { label: 'Browse Web', svg: '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="7"/><path d="M2 9h14"/><path d="M9 2a11 11 0 014 7 11 11 0 01-4 7 11 11 0 01-4-7 11 11 0 014-7z"/></svg>', prompt: 'Search with the browser for ' },
     { label: 'MCP Servers', svg: '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="14" height="5" rx="1"/><rect x="2" y="10" width="14" height="5" rx="1"/><circle cx="5" cy="5.5" r="0.8" fill="currentColor"/><circle cx="5" cy="12.5" r="0.8" fill="currentColor"/></svg>', prompt: null },
@@ -2855,7 +3109,10 @@ function openToolsDropdown() {
         btn.appendChild(span);
         btn.addEventListener('click', () => {
             closeToolsDropdown();
-            if (item.prompt) {
+            if (item.mode) {
+                activateToolMode(item.label);
+                setChatMode(item.mode);
+            } else if (item.prompt) {
                 insertPrompt(item.prompt, item.label);
             } else {
                 openMcpPickerFromTools();
@@ -2895,20 +3152,25 @@ function insertPrompt(text, label) {
     updateSendButtonState();
     // Activate tool mode indicator
     if (label) {
-        activeToolMode = label;
-        if (btnChatTools) btnChatTools.classList.add('is-active');
-        if (chatToolsLabel) chatToolsLabel.textContent = label;
-        if (chatToolsDismiss) chatToolsDismiss.hidden = false;
+        activateToolMode(label);
     }
 }
 
-function clearToolMode() {
+function activateToolMode(label) {
+    activeToolMode = label;
+    if (btnChatTools) btnChatTools.classList.add('is-active');
+    if (chatToolsLabel) chatToolsLabel.textContent = label;
+    if (chatToolsDismiss) chatToolsDismiss.hidden = false;
+}
+
+function clearToolMode(options) {
+    const keepText = Boolean(options && options.keepText);
     activeToolMode = null;
     if (btnChatTools) btnChatTools.classList.remove('is-active');
     if (chatToolsLabel) chatToolsLabel.textContent = 'Tools';
     if (chatToolsDismiss) chatToolsDismiss.hidden = true;
     if (chatText) {
-        chatText.value = '';
+        if (!keepText) chatText.value = '';
         chatText.focus();
     }
     updateSendButtonState();
@@ -2935,7 +3197,11 @@ btnChatTools?.addEventListener('click', (e) => {
 
 chatToolsDismiss?.addEventListener('click', (e) => {
     e.stopPropagation();
-    clearToolMode();
+    if (activeChatMode) {
+        clearChatMode();
+    } else {
+        clearToolMode();
+    }
 });
 
 // Tools dropdown also closes on outside click (via existing document click listener)
