@@ -25,7 +25,7 @@ use async_imap::Session;
 #[cfg(feature = "channel-email")]
 use futures::TryStreamExt;
 #[cfg(feature = "channel-email")]
-use lettre::message::SinglePart;
+use lettre::message::{header::ContentType, Attachment, MultiPart, SinglePart};
 #[cfg(feature = "channel-email")]
 use lettre::transport::smtp::authentication::Credentials;
 #[cfg(feature = "channel-email")]
@@ -895,20 +895,37 @@ async fn extract_email_attachment(
 // ---------------------------------------------------------------------------
 
 #[cfg(feature = "channel-email")]
-async fn send_email_account(
-    config: &EmailAccountConfig,
-    password: &str,
-    msg: &OutboundMessage,
-) -> Result<()> {
-    let (subject, body) = if msg.content.starts_with("Subject: ") {
-        if let Some(pos) = msg.content.find('\n') {
-            (&msg.content[9..pos], msg.content[pos + 1..].trim())
+fn split_email_subject_and_body(content: &str) -> (&str, &str) {
+    if content.starts_with("Subject: ") {
+        if let Some(pos) = content.find('\n') {
+            (&content[9..pos], content[pos + 1..].trim())
         } else {
-            ("Homun Response", msg.content.as_str())
+            ("Homun Response", content)
         }
     } else {
-        ("Homun Response", msg.content.as_str())
-    };
+        ("Homun Response", content)
+    }
+}
+
+#[cfg(feature = "channel-email")]
+fn attachment_content_type(path: &std::path::Path) -> ContentType {
+    match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("pdf") => ContentType::parse("application/pdf").unwrap(),
+        Some("html" | "htm") => ContentType::parse("text/html; charset=utf-8").unwrap(),
+        Some("md" | "markdown") => ContentType::parse("text/markdown; charset=utf-8").unwrap(),
+        Some("txt") => ContentType::parse("text/plain; charset=utf-8").unwrap(),
+        _ => ContentType::parse("application/octet-stream").unwrap(),
+    }
+}
+
+#[cfg(feature = "channel-email")]
+fn build_email_message(config: &EmailAccountConfig, msg: &OutboundMessage) -> Result<Message> {
+    let (subject, body) = split_email_subject_and_body(&msg.content);
 
     let mut builder = Message::builder()
         .from(
@@ -938,9 +955,38 @@ async fn send_email_account(
         builder = builder.subject(subject);
     }
 
-    let email = builder
-        .singlepart(SinglePart::plain(body.to_string()))
-        .context("Failed to build email")?;
+    let body_part = SinglePart::plain(body.to_string());
+    if let Some(ref file_path) = msg.file_path {
+        let path = std::path::Path::new(file_path);
+        let filename = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("attachment")
+            .to_string();
+        let bytes = std::fs::read(path)
+            .with_context(|| format!("Failed to read attachment '{}'", path.display()))?;
+        let attachment = Attachment::new(filename).body(bytes, attachment_content_type(path));
+        return builder
+            .multipart(
+                MultiPart::mixed()
+                    .singlepart(body_part)
+                    .singlepart(attachment),
+            )
+            .context("Failed to build email with attachment");
+    }
+
+    builder
+        .singlepart(body_part)
+        .context("Failed to build email")
+}
+
+#[cfg(feature = "channel-email")]
+async fn send_email_account(
+    config: &EmailAccountConfig,
+    password: &str,
+    msg: &OutboundMessage,
+) -> Result<()> {
+    let email = build_email_message(config, msg)?;
 
     let creds = Credentials::new(config.username.clone(), password.to_string());
 
@@ -1008,6 +1054,29 @@ mod tests {
             default_agent: String::new(),
             default_profile: String::new(),
         }
+    }
+
+    #[cfg(feature = "channel-email")]
+    #[test]
+    fn builds_email_with_attachment() {
+        let dir = tempfile::tempdir().unwrap();
+        let attachment = dir.path().join("report.pdf");
+        std::fs::write(&attachment, b"%PDF-1.4\n").unwrap();
+
+        let msg = OutboundMessage {
+            channel: "email".to_string(),
+            chat_id: "fabio@example.com".to_string(),
+            content: "Subject: Report\nAttached.".to_string(),
+            metadata: None,
+            file_path: Some(attachment.to_string_lossy().to_string()),
+        };
+
+        let email = build_email_message(&test_account(), &msg).unwrap();
+        let raw = String::from_utf8(email.formatted()).unwrap();
+
+        assert!(raw.contains("Subject: Report"));
+        assert!(raw.contains("Content-Disposition: attachment"));
+        assert!(raw.contains("filename=\"report.pdf\""));
     }
 
     #[test]

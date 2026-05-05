@@ -27,7 +27,7 @@ default = ["cli", "web-ui", "file-tools", "shell-tool", "web-tools", "cron-tool"
 
 # === Core Features ===
 cli = ["dep:clap", "dep:ratatui", "dep:crossterm"]
-web-ui = ["cli", "mcp", "browser", "dep:axum", "dep:tower", "dep:tower-http", "dep:rust-embed", "dep:mime_guess", "dep:pulldown-cmark",
+web-ui = ["cli", "mcp", "browser", "dep:axum", "dep:tower", "dep:tower-http", "dep:rust-embed", "dep:mime_guess",
            "dep:tokio-rustls", "dep:rustls-pki-types", "dep:rcgen", "dep:hyper-util"]
 file-tools = []
 shell-tool = []
@@ -144,7 +144,7 @@ tower = { version = "0.5", optional = true }
 tower-http = { version = "0.6", features = ["cors", "trace"], optional = true }
 rust-embed = { version = "8", features = ["compression"], optional = true }
 mime_guess = { version = "2", optional = true }
-pulldown-cmark = { version = "0.13", optional = true }
+pulldown-cmark = "0.13"
 hyper-util = { version = "0.1", features = ["tokio", "server-auto", "http1", "http2"], optional = true }
 
 # --- Shell tool feature ---

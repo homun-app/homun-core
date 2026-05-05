@@ -51,14 +51,15 @@ impl Channel for WhatsAppChannel {
         "whatsapp"
     }
 
-    /// Start the WhatsApp channel with automatic reconnect on failure.
+    /// Start one WhatsApp channel session.
     ///
     /// This does NOT initiate pairing. If the device has not been paired yet
     /// (no session in the SQLite store), it logs a warning and returns Ok.
     /// Use `homun config` (TUI) to pair the device first.
     ///
-    /// On disconnection or error, the bot reconnects with exponential backoff
-    /// (2s → 4s → 8s → ... → 120s cap). Backoff resets after a stable connection.
+    /// On disconnection or error this returns `Err`; the gateway-level
+    /// `spawn_monitored_channel` wrapper restarts the channel with a fresh
+    /// outbound receiver and exponential backoff.
     async fn start(
         &self,
         inbound_tx: mpsc::Sender<InboundMessage>,
@@ -93,36 +94,12 @@ impl Channel for WhatsAppChannel {
                 .with_context(|| format!("Failed to create directory {}", parent.display()))?;
         }
 
-        // Wrap outbound_rx for sharing across reconnect sessions
-        let outbound_rx = Arc::new(tokio::sync::Mutex::new(Some(outbound_rx)));
+        tracing::info!(
+            db_path = %self.config.db_path,
+            "WhatsApp channel starting session"
+        );
 
-        // Reconnect loop with exponential backoff
-        let mut backoff = Duration::from_secs(2);
-        const MAX_BACKOFF: Duration = Duration::from_secs(120);
-
-        loop {
-            tracing::info!(
-                db_path = %self.config.db_path,
-                "WhatsApp channel starting session (reconnect mode)"
-            );
-
-            match self.run_session(&inbound_tx, &outbound_rx, &db_path).await {
-                Ok(()) => {
-                    // Clean exit (e.g. logged out, channel closed)
-                    tracing::info!("WhatsApp session ended cleanly");
-                    return Ok(());
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        backoff_secs = backoff.as_secs(),
-                        "WhatsApp session failed, reconnecting after backoff"
-                    );
-                    tokio::time::sleep(backoff).await;
-                    backoff = (backoff * 2).min(MAX_BACKOFF);
-                }
-            }
-        }
+        self.run_session(&inbound_tx, outbound_rx, &db_path).await
     }
 }
 
@@ -131,7 +108,7 @@ impl WhatsAppChannel {
     async fn run_session(
         &self,
         inbound_tx: &mpsc::Sender<InboundMessage>,
-        outbound_rx: &Arc<tokio::sync::Mutex<Option<mpsc::Receiver<OutboundMessage>>>>,
+        mut outbound_rx: mpsc::Receiver<OutboundMessage>,
         db_path: &std::path::Path,
     ) -> Result<()> {
         // Initialize WhatsApp backend storage
@@ -255,18 +232,11 @@ impl WhatsAppChannel {
         let client = bot.client();
         let bot_handle = bot.run().await.context("Failed to start WhatsApp bot")?;
 
-        // Spawn outbound message loop (take the receiver — only first session gets it)
+        // Spawn outbound message loop for this gateway-managed session attempt.
         let outbound_client = client.clone();
         let sent_ids_for_outbound = sent_ids.clone();
-        let rx_arc = outbound_rx.clone();
         let outbound_handle = tokio::spawn(async move {
-            let mut guard = rx_arc.lock().await;
-            let rx = match guard.take() {
-                Some(rx) => rx,
-                None => return, // Already taken by previous session
-            };
-            let mut rx = rx;
-            while let Some(msg) = rx.recv().await {
+            while let Some(msg) = outbound_rx.recv().await {
                 if msg.channel != "whatsapp" {
                     continue;
                 }

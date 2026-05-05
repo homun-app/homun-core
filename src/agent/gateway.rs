@@ -1756,10 +1756,9 @@ impl Gateway {
                         );
                         if let Some(ch) = handle {
                             tracing::info!(channel = %channel, "Hot-started channel via command");
-                            cmd_senders
-                                .write()
-                                .await
-                                .push((ch.name.clone(), ch.outbound_tx));
+                            let mut senders = cmd_senders.write().await;
+                            senders.retain(|(name, _)| name != &ch.name);
+                            senders.push((ch.name.clone(), ch.outbound_tx));
                             // Keep the JoinHandle alive by leaking it (it self-manages via
                             // spawn_monitored_channel's restart loop).
                             std::mem::forget(ch.handle);
@@ -2850,24 +2849,67 @@ async fn route_outbound(
     };
 
     let senders_guard = senders.read().await;
+    let mut matched = false;
     let mut routed = false;
     for (name, tx) in senders_guard.iter() {
         if *name == sender_key || *name == channel_name {
-            if let Err(e) = tx.send(outbound).await {
+            matched = true;
+            if let Err(e) = tx.send(outbound.clone()).await {
                 tracing::error!(
                     channel = %name,
                     error = %e,
-                    "Failed to route outbound message"
+                    "Failed to route outbound message, trying next sender"
                 );
+                continue;
             } else {
                 tracing::info!(channel = %name, "Outbound message routed");
+                routed = true;
+                break;
             }
-            routed = true;
-            break;
         }
     }
-    if !routed {
+    if !matched {
         tracing::error!(channel = %channel_name, "No sender found for channel");
+    } else if !routed {
+        tracing::error!(channel = %channel_name, "All matching outbound senders failed");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn route_outbound_tries_next_sender_when_first_is_closed() {
+        let (closed_tx, closed_rx) = mpsc::channel::<OutboundMessage>(1);
+        drop(closed_rx);
+
+        let (open_tx, mut open_rx) = mpsc::channel::<OutboundMessage>(1);
+        let senders: SharedOutboundSenders = Arc::new(RwLock::new(vec![
+            ("whatsapp".to_string(), closed_tx),
+            ("whatsapp".to_string(), open_tx),
+        ]));
+
+        let known: KnownChatIds = Arc::new(std::sync::Mutex::new(HashSet::from([(
+            "whatsapp".to_string(),
+            "10832041742478@lid".to_string(),
+        )])));
+
+        let outbound = OutboundMessage {
+            channel: "whatsapp".to_string(),
+            chat_id: "10832041742478@lid".to_string(),
+            content: "ok".to_string(),
+            metadata: None,
+            file_path: None,
+        };
+
+        route_outbound(outbound, &senders, &known).await;
+
+        let routed = tokio::time::timeout(std::time::Duration::from_secs(1), open_rx.recv())
+            .await
+            .expect("message should be routed to the second sender")
+            .expect("second sender should receive the outbound message");
+        assert_eq!(routed.content, "ok");
     }
 }
 

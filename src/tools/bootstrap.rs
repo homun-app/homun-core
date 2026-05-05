@@ -3,9 +3,9 @@ use std::sync::Arc;
 use crate::config::Config;
 use crate::storage::Database;
 use crate::tools::{
-    app_factory::app_factory_tools, AutomationTool, ContactsTool, CreateSkillTool, EditFileTool,
-    ListDirTool, ReadFileTool, ShellTool, ToolRegistry, VaultTool, WebFetchTool, WebSearchTool,
-    WriteFileTool,
+    app_factory::app_factory_tools, AutomationTool, ContactsTool, CreateSkillTool,
+    DocumentConversionTool, EditFileTool, ListDirTool, ReadFileTool, ShellTool, ToolRegistry,
+    VaultTool, WebFetchTool, WebSearchTool, WriteFileTool,
 };
 
 #[cfg(feature = "channel-email")]
@@ -51,6 +51,10 @@ pub fn create_tool_registry(
         permissions.clone(),
     )));
     registry.register(Box::new(EditFileTool::with_permissions(
+        allowed_dir.clone(),
+        permissions.clone(),
+    )));
+    registry.register(Box::new(DocumentConversionTool::with_permissions(
         allowed_dir.clone(),
         permissions.clone(),
     )));

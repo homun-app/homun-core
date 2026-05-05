@@ -6,6 +6,7 @@ pub mod bootstrap;
 #[cfg(feature = "browser")]
 pub mod browser;
 pub mod contacts;
+pub mod document_conversion;
 #[cfg(feature = "channel-email")]
 pub mod email_inbox;
 pub mod file;
@@ -39,6 +40,7 @@ pub use automation::AutomationTool;
 #[cfg(feature = "browser")]
 pub use browser::{BrowserSession, BrowserTool};
 pub use contacts::ContactsTool;
+pub use document_conversion::DocumentConversionTool;
 #[cfg(feature = "channel-email")]
 pub use email_inbox::ReadEmailInboxTool;
 pub use file::{EditFileTool, ListDirTool, ReadFileTool, WriteFileTool};
