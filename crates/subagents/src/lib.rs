@@ -55,6 +55,12 @@ pub struct SubagentTask {
     pub budgets: TaskBudgets,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowTaskSpec {
+    pub task: SubagentTask,
+    pub depends_on: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SubagentStatus {
@@ -355,6 +361,112 @@ pub fn default_registry() -> Vec<AgentId> {
     ]
 }
 
+pub fn routine_startup_workflow(input: serde_json::Value) -> Vec<WorkflowTaskSpec> {
+    vec![
+        WorkflowTaskSpec {
+            task: workflow_task(
+                "routine.plan",
+                AgentId::Planner,
+                "Infer startup routine from local events",
+                "RoutineInference",
+                input.clone(),
+                vec![
+                    "routine_name",
+                    "intent",
+                    "confidence",
+                    "required_connectors",
+                    "missing_connectors",
+                    "requires_user_approval",
+                ],
+            ),
+            depends_on: vec![],
+        },
+        WorkflowTaskSpec {
+            task: workflow_task(
+                "routine.risk",
+                AgentId::Risk,
+                "Assess risk and approval needs for the proposed routine",
+                "RiskAssessment",
+                input.clone(),
+                vec!["risk_level", "requires_user_approval"],
+            ),
+            depends_on: vec!["routine.plan".to_string()],
+        },
+        WorkflowTaskSpec {
+            task: workflow_task(
+                "routine.memory",
+                AgentId::Memory,
+                "Extract durable memory candidates from the event batch",
+                "MemoryExtraction",
+                input.clone(),
+                vec!["memories"],
+            ),
+            depends_on: vec!["routine.risk".to_string()],
+        },
+        WorkflowTaskSpec {
+            task: workflow_task(
+                "routine.tool",
+                AgentId::Tool,
+                "Prepare tool calls needed by the routine without executing them",
+                "ToolPlan",
+                input.clone(),
+                vec!["tool_calls"],
+            ),
+            depends_on: vec!["routine.risk".to_string()],
+        },
+        WorkflowTaskSpec {
+            task: workflow_task(
+                "routine.review",
+                AgentId::Review,
+                "Review routine outputs before surfacing an automation proposal",
+                "SubagentReview",
+                input,
+                vec!["approved", "risk_level", "findings"],
+            ),
+            depends_on: vec!["routine.memory".to_string(), "routine.tool".to_string()],
+        },
+    ]
+}
+
+fn workflow_task(
+    task_id: &str,
+    agent_id: AgentId,
+    goal: &str,
+    contract: &str,
+    source_input: serde_json::Value,
+    required_keys: Vec<&str>,
+) -> SubagentTask {
+    SubagentTask {
+        task_id: task_id.to_string(),
+        parent_task_id: None,
+        agent_id,
+        goal: goal.to_string(),
+        input: serde_json::json!({
+            "prompt": workflow_prompt(goal, &source_input),
+            "source": source_input,
+            "required_keys": required_keys,
+        }),
+        contract: contract.to_string(),
+        permission_envelope: PermissionEnvelope {
+            connectors: vec![],
+            max_autonomy_level: 2,
+            allowed_actions: vec![AllowedAction::Read, AllowedAction::Draft],
+            requires_user_approval: true,
+        },
+        budgets: TaskBudgets {
+            timeout_seconds: 30,
+            max_tokens: 512,
+        },
+    }
+}
+
+fn workflow_prompt(goal: &str, source_input: &serde_json::Value) -> String {
+    format!(
+        "Goal: {goal}\nRespond only with valid JSON for the requested contract.\nInput: {}",
+        source_input
+    )
+}
+
 pub fn validate_task_permissions(task: &SubagentTask) -> Vec<String> {
     let mut errors = Vec::new();
     for action in &task.permission_envelope.allowed_actions {
@@ -530,6 +642,13 @@ impl<R: JsonRuntime> SubagentOrchestrator<R> {
         Ok(())
     }
 
+    pub fn add_workflow(&mut self, specs: Vec<WorkflowTaskSpec>) -> Result<(), String> {
+        for spec in specs {
+            self.add_task(spec.task, spec.depends_on)?;
+        }
+        Ok(())
+    }
+
     pub fn run_ready_once(&mut self) -> Vec<SubagentResult> {
         let ready_task_ids: Vec<String> = self
             .graph
@@ -567,5 +686,9 @@ impl<R: JsonRuntime> SubagentOrchestrator<R> {
 
     pub fn blocked_task_ids(&self) -> Vec<&str> {
         self.graph.blocked_task_ids()
+    }
+
+    pub fn ready_task_ids(&self) -> Vec<&str> {
+        self.graph.ready_task_ids()
     }
 }

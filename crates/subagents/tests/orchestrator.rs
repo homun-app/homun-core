@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 use local_first_subagents::{
     AgentId, GenerateJsonRequest, GenerateJsonResponse, JsonRuntime, PermissionEnvelope,
     RuntimeClientError, SubagentOrchestrator, SubagentRunner, SubagentStatus, SubagentTask,
-    TaskBudgets, TaskState, TokenMetrics,
+    TaskBudgets, TaskState, TokenMetrics, routine_startup_workflow,
 };
 
 struct FakeRuntime {
@@ -67,6 +67,25 @@ fn orchestrator_marks_failed_tasks_and_leaves_dependents_blocked() {
     assert_eq!(results[0].status, SubagentStatus::Failed);
     assert_eq!(orchestrator.state("plan"), Some(&TaskState::Failed));
     assert_eq!(orchestrator.blocked_task_ids(), vec!["risk"]);
+}
+
+#[test]
+fn orchestrator_adds_workflow_specs_to_graph() {
+    let runner = SubagentRunner::new(
+        FakeRuntime {
+            responses: RefCell::new(VecDeque::new()),
+        },
+        "local-model",
+    );
+    let mut orchestrator = SubagentOrchestrator::new(runner);
+
+    orchestrator
+        .add_workflow(routine_startup_workflow(serde_json::json!({"events": []})))
+        .unwrap();
+
+    assert_eq!(orchestrator.state("routine.plan"), Some(&TaskState::Pending));
+    assert_eq!(orchestrator.state("routine.review"), Some(&TaskState::Pending));
+    assert_eq!(orchestrator.ready_task_ids(), vec!["routine.plan"]);
 }
 
 fn task(task_id: &str, agent_id: AgentId) -> SubagentTask {

@@ -94,5 +94,16 @@ Perche': serve un primo coordinatore deterministicamente testabile prima di intr
 
 ## Prossimo blocco
 
-- Aggiungere un workflow builder MVP: `PlannerAgent -> RiskAgent -> MemoryAgent/ToolAgent -> ReviewAgent`.
-- Usarlo nei test per verificare la forma del grafo prevista da `PROJECT.md`.
+### Workflow MVP routine startup
+
+- Aggiunto `routine_startup_workflow`.
+- Il workflow produce la catena `PlannerAgent -> RiskAgent -> MemoryAgent/ToolAgent -> ReviewAgent`.
+- Aggiunto `WorkflowTaskSpec` per associare ogni `SubagentTask` alle sue dipendenze.
+- Aggiunto `SubagentOrchestrator::add_workflow`.
+
+Perche': `PROJECT.md` definisce questo workflow come MVP dei subagenti. Averlo come builder testato evita che la forma del grafo venga ricostruita a mano in UI o core.
+
+## Prossimo blocco
+
+- Aggiungere un primo test end-to-end locale Rust con runtime finto su tutto il workflow.
+- Poi aggiungere un comando/binario di smoke per eseguire il workflow contro il runtime Python reale quando il server e' attivo.
