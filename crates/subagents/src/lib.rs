@@ -445,6 +445,7 @@ fn workflow_task(
             "prompt": workflow_prompt(goal, &source_input, &required_keys),
             "source": source_input,
             "required_keys": required_keys,
+            "schema": contract_schema(contract),
         }),
         contract: contract.to_string(),
         permission_envelope: PermissionEnvelope {
@@ -466,6 +467,65 @@ fn workflow_prompt(goal: &str, source_input: &serde_json::Value, required_keys: 
         required_keys.join(", "),
         source_input
     )
+}
+
+fn contract_schema(contract: &str) -> serde_json::Value {
+    match contract {
+        "SubagentReview" => serde_json::json!({
+            "type": "object",
+            "required": ["approved", "risk_level", "findings"],
+            "properties": {
+                "approved": {"type": "boolean"},
+                "risk_level": {
+                    "type": "string",
+                    "enum": ["low", "medium", "high", "critical", "Low", "Medium", "High", "Critical"]
+                },
+                "requires_user_approval": {"type": "boolean"},
+                "findings": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["severity", "message"],
+                        "properties": {
+                            "severity": {
+                                "type": "string",
+                                "enum": ["info", "warning", "error"]
+                            },
+                            "message": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }),
+        "RiskAssessment" => serde_json::json!({
+            "type": "object",
+            "required": ["risk_level", "requires_user_approval"],
+            "properties": {
+                "risk_level": {
+                    "type": "string",
+                    "enum": ["low", "medium", "high", "critical", "Low", "Medium", "High", "Critical"]
+                },
+                "requires_user_approval": {"type": "boolean"}
+            }
+        }),
+        "MemoryExtraction" => serde_json::json!({
+            "type": "object",
+            "required": ["memories"],
+            "properties": {
+                "memories": {"type": "array"}
+            }
+        }),
+        "ToolPlan" => serde_json::json!({
+            "type": "object",
+            "required": ["tool_calls"],
+            "properties": {
+                "tool_calls": {"type": "array"}
+            }
+        }),
+        _ => serde_json::json!({
+            "type": "object"
+        }),
+    }
 }
 
 pub fn validate_task_permissions(task: &SubagentTask) -> Vec<String> {

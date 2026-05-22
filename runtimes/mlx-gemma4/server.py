@@ -415,30 +415,41 @@ def validate_json_payload(
 
 
 def validate_simple_schema(payload: Any, schema: dict[str, Any]) -> list[str]:
+    return validate_schema_node(payload, schema, path="")
+
+
+def validate_schema_node(payload: Any, schema: dict[str, Any], *, path: str) -> list[str]:
     errors: list[str] = []
     schema_type = schema.get("type")
     if schema_type and not matches_json_type(payload, schema_type):
-        errors.append(f"root expected {schema_type}, got {type(payload).__name__}")
+        label = path or "root"
+        errors.append(f"{label} expected {schema_type}, got {type(payload).__name__}")
         return errors
+
+    enum = schema.get("enum")
+    if enum is not None and payload not in enum:
+        label = path or "root"
+        errors.append(f"{label} must be one of {enum}")
 
     properties = schema.get("properties", {})
     if properties and isinstance(payload, dict):
         for key, rule in properties.items():
             if key not in payload:
                 continue
-            expected_type = rule.get("type") if isinstance(rule, dict) else None
-            if expected_type and not matches_json_type(payload[key], expected_type):
-                errors.append(
-                    f"{key} expected {expected_type}, got {type(payload[key]).__name__}"
-                )
+            if isinstance(rule, dict):
+                child_path = f"{path}.{key}" if path else key
+                errors.extend(validate_schema_node(payload[key], rule, path=child_path))
 
-            enum = rule.get("enum") if isinstance(rule, dict) else None
-            if enum is not None and payload[key] not in enum:
-                errors.append(f"{key} must be one of {enum}")
+    item_schema = schema.get("items")
+    if item_schema and isinstance(item_schema, dict) and isinstance(payload, list):
+        for index, item in enumerate(payload):
+            item_path = f"{path}[{index}]" if path else f"[{index}]"
+            errors.extend(validate_schema_node(item, item_schema, path=item_path))
 
     for key in schema.get("required", []):
         if not isinstance(payload, dict) or key not in payload:
-            errors.append(f"missing required key: {key}")
+            label = f"{path}.{key}" if path else key
+            errors.append(f"missing required key: {label}")
 
     return errors
 

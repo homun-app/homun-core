@@ -133,5 +133,17 @@ Nota emersa dallo smoke:
 
 ## Prossimo blocco
 
-- Rafforzare la validazione JSON del runtime Python per supportare schema annidato minimo (`properties`, `items`, `required`, `enum`).
-- Passare gli schemi dei contratti subagente nelle richieste generate dal workflow.
+### Validazione JSON annidata
+
+- Rafforzato il validatore del runtime Python.
+- Ora supporta ricorsivamente `type`, `properties`, `items`, `required`, `enum`.
+- I workflow Rust passano uno schema minimo nel campo `schema` di `GenerateJsonRequest`.
+- `SubagentReview.findings` viene validato come array di oggetti con `severity` e `message`.
+- Ripetuto lo smoke reale: workflow Rust + runtime Python/MLX, 5 task, 0 failed, 0 blocked.
+
+Perche': lo smoke precedente aveva mostrato un falso positivo: `findings` era un array di stringhe, mentre il contratto condiviso richiede oggetti. Questa modifica fa rispettare meglio i contratti senza introdurre ancora una dipendenza Python da `jsonschema`.
+
+## Prossimo blocco
+
+- Valutare se sostituire il validatore custom con `jsonschema` o tenerlo minimo.
+- Aggiungere persistenza audit SQLite per `SubagentResult` e `SubagentReview`.

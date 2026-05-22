@@ -49,6 +49,31 @@ class MlxGemma4ServerTests(unittest.TestCase):
 
         self.assertEqual(errors, ["missing required key: rischio"])
 
+    def test_validate_json_payload_reports_nested_array_item_errors(self):
+        server = load_server_module()
+
+        errors = server.validate_json_payload(
+            {"findings": ["plain text finding"]},
+            schema={
+                "type": "object",
+                "properties": {
+                    "findings": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["severity", "message"],
+                            "properties": {
+                                "severity": {"type": "string"},
+                                "message": {"type": "string"},
+                            },
+                        },
+                    }
+                },
+            },
+        )
+
+        self.assertEqual(errors, ["findings[0] expected object, got str"])
+
     def test_runtime_loads_model_only_once(self):
         server = load_server_module()
         calls = []

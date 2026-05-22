@@ -35,4 +35,11 @@ fn routine_startup_workflow_matches_project_mvp_shape() {
     assert_eq!(workflow[2].depends_on, vec!["routine.risk"]);
     assert_eq!(workflow[3].depends_on, vec!["routine.risk"]);
     assert_eq!(workflow[4].depends_on, vec!["routine.memory", "routine.tool"]);
+
+    let review_schema = &workflow[4].task.input["schema"];
+    assert_eq!(review_schema["properties"]["findings"]["type"], "array");
+    assert_eq!(
+        review_schema["properties"]["findings"]["items"]["required"],
+        serde_json::json!(["severity", "message"])
+    );
 }
