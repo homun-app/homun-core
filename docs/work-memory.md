@@ -70,5 +70,18 @@ Perche': il Subagent Manager deve usare il runtime Gemma come primitiva locale H
 
 ## Prossimo blocco
 
-- Creare un primo `SubagentRunner` che prende un `SubagentTask`, valida permessi, chiama `RuntimeClient.generate_json` e produce `SubagentResult`.
-- Mantenere il runner sincrono e minimale finche' non serve async/cancel reale.
+### SubagentRunner
+
+- Aggiunto `JsonRuntime` come trait, implementato da `RuntimeClient`.
+- Aggiunto `SubagentRunner` sincrono.
+- Il runner valida i permessi del `SubagentTask` prima di chiamare il runtime.
+- Il runner costruisce `GenerateJsonRequest` da `task.input`, `task.goal` e `task.budgets`.
+- Il runner produce sempre un `SubagentResult` auditabile, anche in caso di permessi invalidi o runtime error.
+
+Perche': questo e' il primo punto in cui i contratti dei subagenti diventano operativi. Il runner resta sincrono e testabile con un runtime finto; cancellazione, retry e parallelismo verranno aggiunti sopra questa base.
+
+## Prossimo blocco
+
+- Collegare `ExecutionGraph` e `SubagentRunner` in un orchestratore minimo.
+- Eseguire solo i task pronti, aggiornando stato a `succeeded` o `failed`.
+- Lasciare ancora fuori async/cancel reale: prima serve semantica chiara e testata.
