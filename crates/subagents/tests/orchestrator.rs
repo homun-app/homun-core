@@ -88,6 +88,36 @@ fn orchestrator_adds_workflow_specs_to_graph() {
     assert_eq!(orchestrator.ready_task_ids(), vec!["routine.plan"]);
 }
 
+#[test]
+fn orchestrator_runs_workflow_until_no_more_tasks_are_ready() {
+    let runner = SubagentRunner::new(
+        FakeRuntime {
+            responses: RefCell::new(VecDeque::from([
+                valid_response(),
+                valid_response(),
+                valid_response(),
+                valid_response(),
+                valid_response(),
+            ])),
+        },
+        "local-model",
+    );
+    let mut orchestrator = SubagentOrchestrator::new(runner);
+    orchestrator
+        .add_workflow(routine_startup_workflow(serde_json::json!({"events": []})))
+        .unwrap();
+
+    let results = orchestrator.run_until_blocked();
+
+    assert_eq!(results.len(), 5);
+    assert!(results
+        .iter()
+        .all(|result| result.status == SubagentStatus::Succeeded));
+    assert_eq!(orchestrator.state("routine.review"), Some(&TaskState::Succeeded));
+    assert!(orchestrator.ready_task_ids().is_empty());
+    assert!(orchestrator.blocked_task_ids().is_empty());
+}
+
 fn task(task_id: &str, agent_id: AgentId) -> SubagentTask {
     SubagentTask {
         task_id: task_id.to_string(),

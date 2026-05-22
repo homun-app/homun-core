@@ -105,5 +105,16 @@ Perche': `PROJECT.md` definisce questo workflow come MVP dei subagenti. Averlo c
 
 ## Prossimo blocco
 
-- Aggiungere un primo test end-to-end locale Rust con runtime finto su tutto il workflow.
-- Poi aggiungere un comando/binario di smoke per eseguire il workflow contro il runtime Python reale quando il server e' attivo.
+### Workflow execution end-to-end
+
+- Aggiunto `SubagentOrchestrator::run_until_blocked`.
+- Testato il workflow MVP completo con runtime finto.
+- L'orchestratore esegue `routine.plan`, poi `routine.risk`, poi `routine.memory` e `routine.tool`, infine `routine.review`.
+- L'esecuzione si ferma quando non ci sono piu' task pronti.
+
+Perche': prima di collegare il runtime reale serve dimostrare che la semantica del workflow e' corretta in memoria, senza dipendere da MLX o HTTP.
+
+## Prossimo blocco
+
+- Aggiungere un comando/binario di smoke per eseguire il workflow contro il runtime Python reale quando il server e' attivo.
+- Separare i test unitari dal smoke reale, per non rendere `make test` dipendente da Metal o da un server avviato.
