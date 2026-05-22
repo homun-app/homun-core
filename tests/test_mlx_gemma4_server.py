@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import pathlib
+import sys
 import unittest
 
 
@@ -10,11 +11,14 @@ SERVER_PATH = (
     / "mlx-gemma4"
     / "server.py"
 )
+CONTRACTS_PATH = pathlib.Path(__file__).resolve().parents[1] / "packages" / "shared-contracts"
+BENCHMARK_SCRIPT_PATH = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "gemma4_benchmark.py"
 
 
 def load_server_module():
     spec = importlib.util.spec_from_file_location("mlx_gemma4_server", SERVER_PATH)
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -88,6 +92,77 @@ class MlxGemma4ServerTests(unittest.TestCase):
                 "elapsed_seconds": 1.234,
             },
         )
+
+    def test_default_benchmark_preserves_validated_gemma4_eval_coverage(self):
+        server = load_server_module()
+
+        cases = server.default_benchmark_cases()
+
+        self.assertEqual(
+            [case.id for case in cases],
+            [
+                "italian_local_assistant",
+                "strict_json",
+                "routine_inference",
+                "memory_extraction",
+                "gemma4_tool_call",
+                "coding_patch",
+                "vision_desktop_summary",
+            ],
+        )
+
+
+class SharedContractTests(unittest.TestCase):
+    def test_subagent_contract_schemas_are_present_and_parseable(self):
+        expected = [
+            "subagents/subagent_task.schema.json",
+            "subagents/subagent_result.schema.json",
+            "subagents/subagent_review.schema.json",
+        ]
+
+        for relative_path in expected:
+            path = CONTRACTS_PATH / relative_path
+            with self.subTest(path=relative_path):
+                data = json.loads(path.read_text(encoding="utf-8"))
+                self.assertEqual(data["$schema"], "https://json-schema.org/draft/2020-12/schema")
+                self.assertEqual(data["type"], "object")
+                self.assertIn("required", data)
+
+
+class BenchmarkScriptTests(unittest.TestCase):
+    def test_report_rows_flatten_benchmark_result_for_jsonl(self):
+        spec = importlib.util.spec_from_file_location("gemma4_benchmark", BENCHMARK_SCRIPT_PATH)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+
+        rows = module.report_rows(
+            {
+                "rows": [
+                    {
+                        "id": "strict_json",
+                        "kind": "json",
+                        "valid": True,
+                        "errors": [],
+                        "output": {"ok": True},
+                        "raw_output": "{\"ok\": true}",
+                        "metrics": {
+                            "prompt_tokens": 1,
+                            "generation_tokens": 2,
+                            "prompt_tps": 3.0,
+                            "generation_tps": 4.0,
+                            "peak_memory_gb": 5.0,
+                            "elapsed_seconds": 6.0,
+                        },
+                    }
+                ]
+            }
+        )
+
+        self.assertEqual(rows[0]["id"], "strict_json")
+        self.assertTrue(rows[0]["passed"])
+        self.assertEqual(rows[0]["prompt_tokens"], 1)
+        self.assertEqual(rows[0]["output"], {"ok": True})
 
 
 if __name__ == "__main__":

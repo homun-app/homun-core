@@ -51,6 +51,9 @@ class BenchmarkCase(BaseModel):
     required_keys: list[str] = Field(default_factory=list)
     image_path: str | None = None
     tools: list[dict[str, Any]] | None = None
+    expected_json: dict[str, Any] | None = None
+    contains: list[str] = Field(default_factory=list)
+    required_tool_name: str | None = None
 
 
 class BenchmarkRequest(BaseModel):
@@ -249,13 +252,13 @@ def benchmark(request: BenchmarkRequest) -> dict[str, Any]:
             )
             try:
                 output: Any = runtime.parse_tool_call(generated["text"])
-                valid = True
-                errors: list[str] = []
+                errors = validate_tool_output(output, case)
+                valid = not errors
             except Exception as exc:
                 output = None
                 valid = False
                 errors = [f"invalid tool call: {exc}"]
-        else:
+        elif case.kind in {"json", "vision"}:
             image = case.image_path if case.kind == "vision" else None
             generated = runtime.generate_text(
                 case.prompt,
@@ -267,7 +270,21 @@ def benchmark(request: BenchmarkRequest) -> dict[str, Any]:
             output, errors = parse_and_validate_json(
                 generated["text"], required_keys=case.required_keys
             )
+            if output is not None:
+                errors.extend(validate_expected_json(output, case))
             valid = not errors
+        elif case.kind == "text":
+            generated = runtime.generate_text(
+                case.prompt,
+                max_tokens=case.max_tokens,
+                temperature=0.0,
+                tools=case.tools,
+            )
+            output = generated["text"]
+            errors = validate_text_output(output, case)
+            valid = not errors
+        else:
+            raise HTTPException(status_code=400, detail=f"unknown benchmark kind: {case.kind}")
 
         rows.append(
             {
@@ -474,10 +491,83 @@ def metrics_from_result(result: Any, elapsed_seconds: float) -> dict[str, Any]:
     }
 
 
+def validate_expected_json(payload: Any, case: BenchmarkCase) -> list[str]:
+    errors: list[str] = []
+    if not case.expected_json:
+        return errors
+    if not isinstance(payload, dict):
+        return ["json payload must be an object when expected_json is set"]
+    for key, value in case.expected_json.items():
+        if payload.get(key) != value:
+            errors.append(f"{key} expected {value!r}, got {payload.get(key)!r}")
+    return errors
+
+
+def validate_text_output(text: str, case: BenchmarkCase) -> list[str]:
+    if not text.strip():
+        return ["empty output"]
+    missing = [fragment for fragment in case.contains if fragment not in text]
+    return [f"missing text fragment: {fragment}" for fragment in missing]
+
+
+def validate_tool_output(output: dict[str, Any], case: BenchmarkCase) -> list[str]:
+    if case.required_tool_name and output.get("name") != case.required_tool_name:
+        return [f"wrong tool: {output.get('name')}"]
+    return []
+
+
+def make_vision_fixture(path: Path) -> Path:
+    if path.exists():
+        return path
+
+    from PIL import Image, ImageDraw, ImageFont
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    image = Image.new("RGB", (1200, 720), color=(246, 247, 249))
+    draw = ImageDraw.Draw(image)
+    font_title = ImageFont.load_default(size=42)
+    font = ImageFont.load_default(size=32)
+
+    draw.rectangle((40, 40, 1160, 680), outline=(40, 52, 68), width=4)
+    draw.text((80, 90), "PROJECT: Acme App", fill=(15, 23, 42), font=font_title)
+    draw.text((80, 180), "TRELLO: 3 assigned tasks", fill=(20, 83, 45), font=font)
+    draw.text((80, 250), "MATTERMOST: 2 unread messages", fill=(127, 29, 29), font=font)
+    draw.text((80, 320), "GIT: main branch clean", fill=(30, 64, 175), font=font)
+    draw.text((80, 430), "NEXT ACTION: review tasks before coding", fill=(15, 23, 42), font=font)
+    image.save(path)
+    return path
+
+
 def default_benchmark_cases() -> list[BenchmarkCase]:
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "trello_get_assigned_cards",
+                "description": "Legge le card Trello assegnate all'utente.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "board": {"type": "string"},
+                        "assignee": {"type": "string"},
+                    },
+                    "required": ["board", "assignee"],
+                },
+            },
+        }
+    ]
+    vision_fixture = make_vision_fixture(Path("reports/gemma4_vision_fixture.png"))
+
     return [
         BenchmarkCase(
+            id="italian_local_assistant",
+            kind="text",
+            prompt="Rispondi in italiano, massimo 12 parole: sei un assistente locale?",
+            max_tokens=40,
+        ),
+        BenchmarkCase(
             id="strict_json",
+            kind="json",
             prompt=(
                 "Rispondi solo con JSON valido, senza markdown. Schema: "
                 '{"locale": boolean, "messaggio": string, "rischio": "basso"|"medio"|"alto"}. '
@@ -485,15 +575,32 @@ def default_benchmark_cases() -> list[BenchmarkCase]:
             ),
             max_tokens=80,
             required_keys=["locale", "messaggio", "rischio"],
+            expected_json={"locale": True, "messaggio": "ok", "rischio": "basso"},
         ),
         BenchmarkCase(
             id="routine_inference",
+            kind="json",
             prompt=(
                 "Sei il planner di un personal assistant locale. Devi trasformare eventi desktop "
                 "in una proposta operativa. Rispondi solo JSON valido, senza markdown.\n"
-                "Schema obbligatorio: routine_name, intent, confidence, observed_apps, "
-                "required_connectors, missing_connectors, proposed_automation, "
-                "requires_user_approval.\n"
+                "Schema obbligatorio:\n"
+                "{"
+                '"routine_name": string, '
+                '"intent": string, '
+                '"confidence": number, '
+                '"observed_apps": string[], '
+                '"required_connectors": string[], '
+                '"missing_connectors": string[], '
+                '"proposed_automation": string, '
+                '"requires_user_approval": boolean'
+                "}\n"
+                "Regole:\n"
+                '- Se vedi trello.com, required_connectors deve includere "trello".\n'
+                '- Se vedi mattermost, required_connectors deve includere "mattermost".\n'
+                '- Se vedi git pull, required_connectors deve includere "git".\n'
+                "- missing_connectors deve contenere i connettori richiesti che non risultano già configurati.\n"
+                "- In questo scenario non ci sono connettori configurati.\n"
+                "- Non inventare 'none' o spiegazioni testuali dentro missing_connectors.\n\n"
                 "Eventi:\n"
                 "08:58 open_app Zed\n"
                 "08:59 open_folder /Clients/Acme/app\n"
@@ -512,6 +619,53 @@ def default_benchmark_cases() -> list[BenchmarkCase]:
                 "proposed_automation",
                 "requires_user_approval",
             ],
+        ),
+        BenchmarkCase(
+            id="memory_extraction",
+            kind="json",
+            prompt=(
+                "Estrai solo memorie durevoli dal testo. Rispondi JSON valido: "
+                '{"memories":[{"fact":string,"category":string,"confidence":number}]}.\n'
+                "Testo: Fabio lavora spesso sul progetto Acme la mattina. "
+                "Preferisce Zed come editor. Oggi è irritato perché il download è lento. "
+                "Il repository principale è /Clients/Acme/app."
+            ),
+            max_tokens=180,
+            required_keys=["memories"],
+        ),
+        BenchmarkCase(
+            id="gemma4_tool_call",
+            kind="tool",
+            tools=tools,
+            prompt=(
+                "Usa lo strumento disponibile per leggere le card Trello assegnate a Fabio "
+                "sul board Acme. Non spiegare, chiama lo strumento."
+            ),
+            max_tokens=120,
+            required_tool_name="trello_get_assigned_cards",
+        ),
+        BenchmarkCase(
+            id="coding_patch",
+            kind="text",
+            prompt=(
+                "Correggi questa funzione Python e restituisci solo il codice finale:\n"
+                "def average(xs):\n"
+                "    return sum(xs) / len(xs)\n\n"
+                "Requisiti: se xs è vuota restituisci None; non lanciare eccezioni."
+            ),
+            max_tokens=140,
+            contains=["def average", "None"],
+        ),
+        BenchmarkCase(
+            id="vision_desktop_summary",
+            kind="vision",
+            image_path=str(vision_fixture),
+            prompt=(
+                "Leggi l'immagine. Rispondi solo JSON valido con chiavi "
+                "project, trello_tasks, mattermost_unread, git_status."
+            ),
+            max_tokens=160,
+            required_keys=["project", "trello_tasks", "mattermost_unread", "git_status"],
         ),
     ]
 

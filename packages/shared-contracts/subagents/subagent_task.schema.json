@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local-first-personal-assistant/contracts/subagents/subagent_task.schema.json",
+  "title": "SubagentTask",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "task_id",
+    "agent_id",
+    "goal",
+    "input",
+    "contract",
+    "permission_envelope",
+    "budgets"
+  ],
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "parent_task_id": {
+      "type": ["string", "null"]
+    },
+    "agent_id": {
+      "type": "string",
+      "enum": [
+        "PlannerAgent",
+        "MemoryAgent",
+        "ToolAgent",
+        "VisionAgent",
+        "RiskAgent",
+        "AutomationAgent",
+        "ReviewAgent"
+      ]
+    },
+    "goal": {
+      "type": "string",
+      "minLength": 1
+    },
+    "input": {
+      "type": "object"
+    },
+    "contract": {
+      "type": "string",
+      "minLength": 1
+    },
+    "permission_envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "connectors",
+        "max_autonomy_level",
+        "allowed_actions",
+        "requires_user_approval"
+      ],
+      "properties": {
+        "connectors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "max_autonomy_level": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "allowed_actions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "read",
+              "draft",
+              "write_with_confirmation",
+              "approved_automation"
+            ]
+          }
+        },
+        "requires_user_approval": {
+          "type": "boolean"
+        }
+      }
+    },
+    "budgets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "timeout_seconds",
+        "max_tokens"
+      ],
+      "properties": {
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}

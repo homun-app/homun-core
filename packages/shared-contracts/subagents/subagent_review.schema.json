@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local-first-personal-assistant/contracts/subagents/subagent_review.schema.json",
+  "title": "SubagentReview",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "task_id",
+    "reviewer_agent_id",
+    "approved",
+    "risk_level",
+    "requires_user_approval",
+    "findings"
+  ],
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reviewer_agent_id": {
+      "type": "string",
+      "const": "ReviewAgent"
+    },
+    "approved": {
+      "type": "boolean"
+    },
+    "risk_level": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ]
+    },
+    "requires_user_approval": {
+      "type": "boolean"
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "severity",
+          "message"
+        ],
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": [
+              "info",
+              "warning",
+              "error"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

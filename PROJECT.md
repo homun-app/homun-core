@@ -28,6 +28,7 @@ Principi:
 - Memoria primaria: SQLite + grafo + wiki Markdown.
 - Graph/document memory: Graphify / GraphifyLabs.
 - Human-readable memory: Obsidian Wiki / LLM Wiki.
+- Orchestrazione: subagenti locali coordinati dal Rust Core, non dal runtime LLM.
 
 ### Test Gemma 4 locale
 
@@ -71,6 +72,13 @@ Tauri React UI
     -> Memory Manager
     -> Connector Manager
     -> Automation Engine
+    -> Subagent Manager
+      -> PlannerAgent
+      -> MemoryAgent
+      -> ToolAgent
+      -> VisionAgent
+      -> RiskAgent
+      -> ReviewAgent
     -> Local LLM Runtime
       -> Python sidecar
       -> MLX / mlx-vlm
@@ -113,6 +121,7 @@ Responsabilita':
 - validare output LLM.
 - eseguire tool solo con permessi corretti.
 - mantenere audit trail.
+- orchestrare subagenti locali con budget, timeout, permessi e memoria accessibile.
 
 API interne previste:
 
@@ -121,6 +130,9 @@ runtime.health()
 runtime.generate_json(contract, input)
 runtime.tool_call(tools, input)
 runtime.analyze_image(image, contract)
+subagents.dispatch(agent_id, task, permission_envelope)
+subagents.cancel(task_id)
+subagents.status(task_id)
 memory.write_event(event)
 memory.extract_candidates(event_batch)
 memory.upsert_entity(entity)
@@ -129,7 +141,72 @@ automation.propose(candidate)
 automation.execute_with_approval(id)
 ```
 
-### 3. Local LLM Runtime
+### 3. Subagent Manager
+
+Il Subagent Manager e' il coordinatore operativo dell'assistant. Non e' un modello e non e' un endpoint chat. Vive nel Rust Core e usa il runtime LLM locale come motore di inferenza dietro contratti rigidi.
+
+Responsabilita':
+
+- registrare subagenti disponibili e versionati.
+- assegnare task con input, contratto, budget token/tempo e livello di permesso.
+- eseguire subagenti in sequenza o in parallelo quando i task sono indipendenti.
+- cancellare task in corso e applicare timeout.
+- validare output JSON prima di passarli al passo successivo.
+- mantenere audit trail completo: input, contratto, agente, modello, output, metriche, decisione.
+- impedire che un subagente esegua direttamente azioni non autorizzate.
+
+Subagenti iniziali:
+
+- `PlannerAgent`: trasforma eventi e obiettivi in piani strutturati.
+- `MemoryAgent`: estrae memorie candidate, entita' e relazioni.
+- `ToolAgent`: produce tool call validate, senza eseguirle direttamente.
+- `VisionAgent`: analizza screenshot, finestre e immagini locali.
+- `RiskAgent`: valuta rischio, reversibilita' e necessita' di approvazione.
+- `AutomationAgent`: propone automazioni ricorrenti o semi-automatiche.
+- `ReviewAgent`: controlla coerenza, formato JSON, policy e rischio prima dell'esecuzione.
+
+Envelope minimo di un task subagente:
+
+```json
+{
+  "task_id": "task_2026_05_22_001",
+  "agent_id": "PlannerAgent",
+  "goal": "Infer routine from desktop events",
+  "input": {},
+  "contract": "RoutineInference",
+  "permission_envelope": {
+    "connectors": ["git", "trello", "mattermost"],
+    "max_autonomy_level": 2,
+    "allowed_actions": ["read", "draft"],
+    "requires_user_approval": true
+  },
+  "budgets": {
+    "timeout_seconds": 30,
+    "max_tokens": 512
+  }
+}
+```
+
+Regole:
+
+- Il runtime Python/MLX non decide autonomia, permessi o routing tra subagenti.
+- I subagenti non eseguono azioni irreversibili; producono piani, bozze, tool call o valutazioni.
+- Ogni output operativo passa da validazione e, per azioni reali, da `RiskAgent` o `ReviewAgent`.
+- I task paralleli devono essere ricostruibili e auditabili separatamente.
+- La memoria accessibile a un subagente e' esplicita e limitata al task.
+
+Workflow MVP:
+
+```text
+Event batch
+  -> PlannerAgent
+  -> RiskAgent
+  -> MemoryAgent + ToolAgent
+  -> ReviewAgent
+  -> approval center / automation proposal
+```
+
+### 4. Local LLM Runtime
 
 Runtime Mac iniziale:
 
@@ -164,7 +241,14 @@ Requisiti:
 - schema validation.
 - repair attempt per JSON invalido.
 
-### 4. Contratti LLM
+Il runtime espone primitive per i subagenti, non un'interfaccia di autonomia:
+
+- `generate_json`: inferenza vincolata a contratto.
+- `tool_call`: produzione di chiamate tool parseabili, non esecuzione tool.
+- `analyze_image`: analisi locale di immagini/screenshot.
+- `benchmark`: verifica regressioni dei contratti locali.
+
+### 5. Contratti LLM
 
 Ogni output operativo deve avere schema validato.
 
@@ -178,6 +262,9 @@ Contratti iniziali:
 - `AutomationProposal`
 - `VisionSummary`
 - `ConnectorRequirement`
+- `SubagentTask`
+- `SubagentResult`
+- `SubagentReview`
 
 Esempio `RoutineInference`:
 
@@ -487,6 +574,18 @@ Deliverable:
 - schema validation.
 - benchmark endpoint.
 
+### Fase 1.5 - Subagent Orchestration
+
+Deliverable:
+
+- registry subagenti locali.
+- task model con `SubagentTask`, `SubagentResult` e `SubagentReview`.
+- execution graph sequenziale/parallelo.
+- permission envelope per ogni task.
+- budget token/tempo e cancellazione task.
+- audit trail per ogni passaggio subagente.
+- workflow MVP: `PlannerAgent -> RiskAgent -> MemoryAgent/ToolAgent -> ReviewAgent`.
+
 ### Fase 2 - Memory Core
 
 Deliverable:
@@ -569,6 +668,7 @@ local-first-personal-assistant/
     connectors/
     automation/
     permissions/
+    subagents/
   runtimes/
     mlx-gemma4/
       server.py
@@ -610,12 +710,13 @@ local-first-personal-assistant/
 
 ## Prossima Azione Consigliata
 
-Creare il primo vero modulo:
+Consolidare la Fase 1 e preparare la Fase 1.5:
 
 ```text
 runtimes/mlx-gemma4/server.py
+crates/subagents/
 ```
 
-Deve caricare `mlx-community/gemma-4-e4b-it-4bit`, esporre `/health`, `/generate_json`, `/tool_call`, `/analyze_image`, e riusare i contratti gia' testati in `tests/gemma4_eval.py`.
+Il runtime Python deve rimanere una primitiva locale stabile. Il passo successivo e' definire i contratti `SubagentTask`, `SubagentResult` e `SubagentReview`, poi creare nel Rust Core un primo `Subagent Manager` capace di orchestrare planner, risk review, tool planning e memory extraction usando il runtime Gemma locale.
 
 Obiettivo: trasformare il test locale in un servizio stabile che il Rust core potra' avviare e interrogare.

@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local-first-personal-assistant/contracts/subagents/subagent_result.schema.json",
+  "title": "SubagentResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "task_id",
+    "agent_id",
+    "status",
+    "output",
+    "metrics",
+    "audit"
+  ],
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "agent_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "succeeded",
+        "failed",
+        "cancelled",
+        "timed_out"
+      ]
+    },
+    "output": {
+      "type": ["object", "array", "string", "null"]
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "prompt_tokens",
+        "generation_tokens",
+        "prompt_tps",
+        "generation_tps",
+        "peak_memory_gb",
+        "elapsed_seconds"
+      ],
+      "properties": {
+        "prompt_tokens": {
+          "type": "integer"
+        },
+        "generation_tokens": {
+          "type": "integer"
+        },
+        "prompt_tps": {
+          "type": "number"
+        },
+        "generation_tps": {
+          "type": "number"
+        },
+        "peak_memory_gb": {
+          "type": "number"
+        },
+        "elapsed_seconds": {
+          "type": "number"
+        }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model",
+        "contract",
+        "started_at",
+        "finished_at"
+      ],
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "contract": {
+          "type": "string"
+        },
+        "started_at": {
+          "type": "string"
+        },
+        "finished_at": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}
