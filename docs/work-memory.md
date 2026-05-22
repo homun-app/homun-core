@@ -116,5 +116,22 @@ Perche': prima di collegare il runtime reale serve dimostrare che la semantica d
 
 ## Prossimo blocco
 
-- Aggiungere un comando/binario di smoke per eseguire il workflow contro il runtime Python reale quando il server e' attivo.
-- Separare i test unitari dal smoke reale, per non rendere `make test` dipendente da Metal o da un server avviato.
+### Workflow smoke reale
+
+- Aggiunto binario Rust `workflow_smoke`.
+- Aggiunto target `make workflow-smoke`.
+- Il comando usa `RuntimeClient`, `SubagentRunner`, `SubagentOrchestrator` e `routine_startup_workflow`.
+- Lo smoke e' separato da `make test`, quindi non richiede Metal o server Python attivo durante i test unitari.
+- Eseguito contro il server Python/MLX reale su `127.0.0.1:8765`: 5 task eseguiti, 0 failed, 0 blocked.
+
+Perche': ora esiste una prima prova end-to-end locale: Rust orchestra subagenti, chiama il runtime Gemma via HTTP, riceve JSON validato e conserva metriche/audit per ogni task.
+
+Nota emersa dallo smoke:
+
+- La validazione attuale controlla chiavi richieste e tipi root semplici, ma non applica ancora completamente gli schemi JSON condivisi con vincoli annidati.
+- Esempio: `SubagentReview.findings` oggi passa come array, ma il contratto condiviso vorrebbe oggetti `{severity, message}`.
+
+## Prossimo blocco
+
+- Rafforzare la validazione JSON del runtime Python per supportare schema annidato minimo (`properties`, `items`, `required`, `enum`).
+- Passare gli schemi dei contratti subagente nelle richieste generate dal workflow.

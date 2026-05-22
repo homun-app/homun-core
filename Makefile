@@ -2,7 +2,7 @@ UV_ENV := .venv-mlx
 PYTHON := $(UV_ENV)/bin/python
 SERVER := runtimes/mlx-gemma4/server.py
 
-.PHONY: sync test test-python test-rust server health smoke-generate benchmark
+.PHONY: sync test test-python test-rust server health smoke-generate benchmark workflow-smoke
 
 sync:
 	UV_PROJECT_ENVIRONMENT=$(UV_ENV) uv sync
@@ -28,3 +28,6 @@ smoke-generate:
 
 benchmark:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/gemma4_benchmark.py
+
+workflow-smoke:
+	cargo run -p local-first-subagents --bin workflow_smoke

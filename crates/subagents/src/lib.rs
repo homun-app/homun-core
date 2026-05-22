@@ -442,7 +442,7 @@ fn workflow_task(
         agent_id,
         goal: goal.to_string(),
         input: serde_json::json!({
-            "prompt": workflow_prompt(goal, &source_input),
+            "prompt": workflow_prompt(goal, &source_input, &required_keys),
             "source": source_input,
             "required_keys": required_keys,
         }),
@@ -460,9 +460,10 @@ fn workflow_task(
     }
 }
 
-fn workflow_prompt(goal: &str, source_input: &serde_json::Value) -> String {
+fn workflow_prompt(goal: &str, source_input: &serde_json::Value, required_keys: &[&str]) -> String {
     format!(
-        "Goal: {goal}\nRespond only with valid JSON for the requested contract.\nInput: {}",
+        "Goal: {goal}\nRespond only with valid JSON. Required keys: {}.\nInput: {}",
+        required_keys.join(", "),
         source_input
     )
 }
