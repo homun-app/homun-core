@@ -1,0 +1,8 @@
+.venv/
+.venv-mlx/
+__pycache__/
+*.py[cod]
+.DS_Store
+.pytest_cache/
+.ruff_cache/
+reports/

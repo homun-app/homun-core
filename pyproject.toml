@@ -1,0 +1,16 @@
+[project]
+name = "local-first-personal-assistant"
+version = "0.1.0"
+description = "Local-first personal assistant with a persistent Gemma 4 MLX runtime."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "mlx>=0.23",
+    "mlx-vlm>=0.1",
+    "pillow>=10",
+    "pydantic>=2",
+    "uvicorn[standard]>=0.30",
+]
+
+[tool.uv]
+package = false
