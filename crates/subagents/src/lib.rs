@@ -765,3 +765,116 @@ impl<R: JsonRuntime> SubagentOrchestrator<R> {
         self.graph.ready_task_ids()
     }
 }
+
+pub struct AuditStore {
+    conn: rusqlite::Connection,
+}
+
+impl AuditStore {
+    pub fn open_in_memory() -> Result<Self, String> {
+        let conn = rusqlite::Connection::open_in_memory().map_err(|error| error.to_string())?;
+        let store = Self { conn };
+        store.init()?;
+        Ok(store)
+    }
+
+    pub fn open(path: impl AsRef<std::path::Path>) -> Result<Self, String> {
+        let conn = rusqlite::Connection::open(path).map_err(|error| error.to_string())?;
+        let store = Self { conn };
+        store.init()?;
+        Ok(store)
+    }
+
+    pub fn record_result(&self, result: &SubagentResult) -> Result<(), String> {
+        let output_json = serde_json::to_string(&result.output).map_err(|error| error.to_string())?;
+        let errors_json = serde_json::to_string(&result.errors).map_err(|error| error.to_string())?;
+        let metrics_json =
+            serde_json::to_string(&result.metrics).map_err(|error| error.to_string())?;
+        let audit_json = serde_json::to_string(&result.audit).map_err(|error| error.to_string())?;
+
+        self.conn
+            .execute(
+                "insert into subagent_results (
+                    task_id,
+                    agent_id,
+                    status,
+                    output_json,
+                    errors_json,
+                    metrics_json,
+                    audit_json
+                ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                (
+                    &result.task_id,
+                    agent_id_name(&result.agent_id),
+                    status_name(&result.status),
+                    output_json,
+                    errors_json,
+                    metrics_json,
+                    audit_json,
+                ),
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    pub fn result_count(&self) -> Result<u64, String> {
+        self.conn
+            .query_row("select count(*) from subagent_results", [], |row| row.get(0))
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn result_status(&self, task_id: &str) -> Result<Option<String>, String> {
+        let mut statement = self
+            .conn
+            .prepare("select status from subagent_results where task_id = ?1 order by id desc limit 1")
+            .map_err(|error| error.to_string())?;
+        let mut rows = statement
+            .query([task_id])
+            .map_err(|error| error.to_string())?;
+        match rows.next().map_err(|error| error.to_string())? {
+            Some(row) => row.get(0).map(Some).map_err(|error| error.to_string()),
+            None => Ok(None),
+        }
+    }
+
+    fn init(&self) -> Result<(), String> {
+        self.conn
+            .execute_batch(
+                "create table if not exists subagent_results (
+                    id integer primary key autoincrement,
+                    task_id text not null,
+                    agent_id text not null,
+                    status text not null,
+                    output_json text not null,
+                    errors_json text not null,
+                    metrics_json text not null,
+                    audit_json text not null,
+                    created_at text not null default current_timestamp
+                );
+                create index if not exists idx_subagent_results_task_id
+                    on subagent_results(task_id);",
+            )
+            .map_err(|error| error.to_string())
+    }
+}
+
+fn agent_id_name(agent_id: &AgentId) -> &'static str {
+    match agent_id {
+        AgentId::Planner => "PlannerAgent",
+        AgentId::Memory => "MemoryAgent",
+        AgentId::Tool => "ToolAgent",
+        AgentId::Vision => "VisionAgent",
+        AgentId::Risk => "RiskAgent",
+        AgentId::Automation => "AutomationAgent",
+        AgentId::Review => "ReviewAgent",
+    }
+}
+
+fn status_name(status: &SubagentStatus) -> &'static str {
+    match status {
+        SubagentStatus::Succeeded => "succeeded",
+        SubagentStatus::Failed => "failed",
+        SubagentStatus::Cancelled => "cancelled",
+        SubagentStatus::TimedOut => "timed_out",
+    }
+}

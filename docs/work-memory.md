@@ -145,5 +145,17 @@ Perche': lo smoke precedente aveva mostrato un falso positivo: `findings` era un
 
 ## Prossimo blocco
 
-- Valutare se sostituire il validatore custom con `jsonschema` o tenerlo minimo.
-- Aggiungere persistenza audit SQLite per `SubagentResult` e `SubagentReview`.
+### AuditStore SQLite
+
+- Aggiunto `AuditStore` nel crate subagenti.
+- Usa SQLite tramite `rusqlite` con feature `bundled`.
+- Crea tabella `subagent_results`.
+- Salva `task_id`, `agent_id`, `status`, output, errori, metriche e audit JSON.
+- Testato con database in-memory.
+
+Perche': audit e ricostruibilita' sono principi centrali del progetto. La prima persistenza riguarda i risultati dei subagenti, per poter spiegare cosa e' stato deciso da quale agente e con quali metriche.
+
+## Prossimo blocco
+
+- Collegare `AuditStore` all'orchestratore con una variante che registra automaticamente i risultati.
+- Aggiungere salvataggio di `SubagentReview` come vista/record dedicato o come risultato tipizzato.
