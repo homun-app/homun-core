@@ -461,6 +461,10 @@ impl ExecutionGraph {
         Ok(())
     }
 
+    pub fn state(&self, task_id: &str) -> Option<&TaskState> {
+        self.nodes.get(task_id).map(|node| &node.state)
+    }
+
     pub fn ready_task_ids(&self) -> Vec<&str> {
         self.nodes
             .values()
@@ -496,5 +500,72 @@ impl ExecutionGraph {
             })
             .map(|node| node.task_id.as_str())
             .collect()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SubagentOrchestrator<R> {
+    runner: SubagentRunner<R>,
+    graph: ExecutionGraph,
+    tasks: BTreeMap<String, SubagentTask>,
+}
+
+impl<R: JsonRuntime> SubagentOrchestrator<R> {
+    pub fn new(runner: SubagentRunner<R>) -> Self {
+        Self {
+            runner,
+            graph: ExecutionGraph::new(),
+            tasks: BTreeMap::new(),
+        }
+    }
+
+    pub fn add_task(
+        &mut self,
+        task: SubagentTask,
+        depends_on: Vec<String>,
+    ) -> Result<(), String> {
+        let node = TaskNode::new(task.task_id.clone(), task.agent_id.clone(), depends_on);
+        self.graph.add_node(node)?;
+        self.tasks.insert(task.task_id.clone(), task);
+        Ok(())
+    }
+
+    pub fn run_ready_once(&mut self) -> Vec<SubagentResult> {
+        let ready_task_ids: Vec<String> = self
+            .graph
+            .ready_task_ids()
+            .into_iter()
+            .map(ToString::to_string)
+            .collect();
+
+        let mut results = Vec::new();
+        for task_id in ready_task_ids {
+            if self.graph.set_state(&task_id, TaskState::Running).is_err() {
+                continue;
+            }
+            let Some(task) = self.tasks.get(&task_id) else {
+                let _ = self.graph.set_state(&task_id, TaskState::Failed);
+                continue;
+            };
+
+            let result = self.runner.run_generate_json(task);
+            let state = match result.status {
+                SubagentStatus::Succeeded => TaskState::Succeeded,
+                SubagentStatus::Cancelled => TaskState::Cancelled,
+                SubagentStatus::Failed | SubagentStatus::TimedOut => TaskState::Failed,
+            };
+            let _ = self.graph.set_state(&task_id, state);
+            results.push(result);
+        }
+
+        results
+    }
+
+    pub fn state(&self, task_id: &str) -> Option<&TaskState> {
+        self.graph.state(task_id)
+    }
+
+    pub fn blocked_task_ids(&self) -> Vec<&str> {
+        self.graph.blocked_task_ids()
     }
 }

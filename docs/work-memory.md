@@ -82,6 +82,17 @@ Perche': questo e' il primo punto in cui i contratti dei subagenti diventano ope
 
 ## Prossimo blocco
 
-- Collegare `ExecutionGraph` e `SubagentRunner` in un orchestratore minimo.
-- Eseguire solo i task pronti, aggiornando stato a `succeeded` o `failed`.
-- Lasciare ancora fuori async/cancel reale: prima serve semantica chiara e testata.
+### SubagentOrchestrator
+
+- Aggiunto `SubagentOrchestrator`.
+- L'orchestratore mantiene un `ExecutionGraph`, i `SubagentTask` e un `SubagentRunner`.
+- `run_ready_once()` esegue solo i task pronti.
+- Lo stato del grafo viene aggiornato a `running`, poi `succeeded`, `failed` o `cancelled`.
+- I task dipendenti restano bloccati quando una dipendenza fallisce.
+
+Perche': serve un primo coordinatore deterministicamente testabile prima di introdurre parallelismo, cancellazione reale o integrazione Tauri/Rust Core.
+
+## Prossimo blocco
+
+- Aggiungere un workflow builder MVP: `PlannerAgent -> RiskAgent -> MemoryAgent/ToolAgent -> ReviewAgent`.
+- Usarlo nei test per verificare la forma del grafo prevista da `PROJECT.md`.
