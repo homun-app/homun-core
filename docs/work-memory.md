@@ -157,5 +157,15 @@ Perche': audit e ricostruibilita' sono principi centrali del progetto. La prima 
 
 ## Prossimo blocco
 
-- Collegare `AuditStore` all'orchestratore con una variante che registra automaticamente i risultati.
+### AuditStore integrato nell'orchestratore
+
+- Aggiunto `SubagentOrchestrator::run_until_blocked_recording`.
+- Ogni `SubagentResult` prodotto dal workflow viene salvato in `AuditStore`.
+- Testato con runtime finto e SQLite in-memory.
+
+Perche': l'audit deve essere automatico nel percorso operativo, non un passaggio opzionale lasciato ai caller. Questo prepara il core Rust a ricostruire cosa ha fatto ogni subagente.
+
+## Prossimo blocco
+
 - Aggiungere salvataggio di `SubagentReview` come vista/record dedicato o come risultato tipizzato.
+- Aggiungere query audit utili: risultati per workflow, ultimo risultato per task, errori recenti.

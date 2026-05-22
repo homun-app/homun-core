@@ -753,6 +753,24 @@ impl<R: JsonRuntime> SubagentOrchestrator<R> {
         all_results
     }
 
+    pub fn run_until_blocked_recording(
+        &mut self,
+        audit_store: &AuditStore,
+    ) -> Result<Vec<SubagentResult>, String> {
+        let mut all_results = Vec::new();
+        loop {
+            let results = self.run_ready_once();
+            if results.is_empty() {
+                break;
+            }
+            for result in &results {
+                audit_store.record_result(result)?;
+            }
+            all_results.extend(results);
+        }
+        Ok(all_results)
+    }
+
     pub fn state(&self, task_id: &str) -> Option<&TaskState> {
         self.graph.state(task_id)
     }
