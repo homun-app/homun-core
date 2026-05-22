@@ -1,14 +1,20 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase")]
 pub enum AgentId {
+    #[serde(rename = "PlannerAgent")]
     Planner,
+    #[serde(rename = "MemoryAgent")]
     Memory,
+    #[serde(rename = "ToolAgent")]
     Tool,
+    #[serde(rename = "VisionAgent")]
     Vision,
+    #[serde(rename = "RiskAgent")]
     Risk,
+    #[serde(rename = "AutomationAgent")]
     Automation,
+    #[serde(rename = "ReviewAgent")]
     Review,
 }
 
@@ -45,6 +51,77 @@ pub struct SubagentTask {
     pub contract: String,
     pub permission_envelope: PermissionEnvelope,
     pub budgets: TaskBudgets,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SubagentStatus {
+    Succeeded,
+    Failed,
+    Cancelled,
+    TimedOut,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TokenMetrics {
+    pub prompt_tokens: u32,
+    pub generation_tokens: u32,
+    pub prompt_tps: f64,
+    pub generation_tps: f64,
+    pub peak_memory_gb: f64,
+    pub elapsed_seconds: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentAudit {
+    pub model: String,
+    pub contract: String,
+    pub started_at: String,
+    pub finished_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SubagentResult {
+    pub task_id: String,
+    pub agent_id: AgentId,
+    pub status: SubagentStatus,
+    pub output: serde_json::Value,
+    pub errors: Vec<String>,
+    pub metrics: TokenMetrics,
+    pub audit: AgentAudit,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RiskLevel {
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FindingSeverity {
+    Info,
+    Warning,
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Finding {
+    pub severity: FindingSeverity,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubagentReview {
+    pub task_id: String,
+    pub reviewer_agent_id: AgentId,
+    pub approved: bool,
+    pub risk_level: RiskLevel,
+    pub requires_user_approval: bool,
+    pub findings: Vec<Finding>,
 }
 
 pub fn default_registry() -> Vec<AgentId> {

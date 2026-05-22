@@ -1,6 +1,7 @@
 use local_first_subagents::{
-    default_registry, validate_task_permissions, AllowedAction, AgentId, PermissionEnvelope,
-    SubagentTask, TaskBudgets,
+    default_registry, validate_task_permissions, AgentAudit, AllowedAction, AgentId, Finding,
+    FindingSeverity, PermissionEnvelope, RiskLevel, SubagentResult, SubagentReview, SubagentStatus,
+    SubagentTask, TaskBudgets, TokenMetrics,
 };
 
 #[test]
@@ -43,4 +44,56 @@ fn task_permissions_reject_actions_above_autonomy_level() {
         errors,
         vec!["action write_with_confirmation requires autonomy level 3, task allows 1"]
     );
+}
+
+#[test]
+fn subagent_result_serializes_metrics_and_audit() {
+    let result = SubagentResult {
+        task_id: "task_1".to_string(),
+        agent_id: AgentId::Planner,
+        status: SubagentStatus::Succeeded,
+        output: serde_json::json!({"routine_name": "Acme"}),
+        errors: vec![],
+        metrics: TokenMetrics {
+            prompt_tokens: 10,
+            generation_tokens: 20,
+            prompt_tps: 100.0,
+            generation_tps: 25.0,
+            peak_memory_gb: 5.3,
+            elapsed_seconds: 1.2,
+        },
+        audit: AgentAudit {
+            model: "mlx-community/gemma-4-e4b-it-4bit".to_string(),
+            contract: "RoutineInference".to_string(),
+            started_at: "2026-05-22T20:00:00Z".to_string(),
+            finished_at: "2026-05-22T20:00:02Z".to_string(),
+        },
+    };
+
+    let json = serde_json::to_value(result).unwrap();
+
+    assert_eq!(json["status"], "succeeded");
+    assert_eq!(json["metrics"]["generation_tokens"], 20);
+    assert_eq!(json["audit"]["contract"], "RoutineInference");
+}
+
+#[test]
+fn subagent_review_marks_approval_and_risk() {
+    let review = SubagentReview {
+        task_id: "task_1".to_string(),
+        reviewer_agent_id: AgentId::Review,
+        approved: false,
+        risk_level: RiskLevel::High,
+        requires_user_approval: true,
+        findings: vec![Finding {
+            severity: FindingSeverity::Warning,
+            message: "Sending a remote update requires confirmation".to_string(),
+        }],
+    };
+
+    let json = serde_json::to_value(review).unwrap();
+
+    assert_eq!(json["reviewer_agent_id"], "ReviewAgent");
+    assert_eq!(json["risk_level"], "high");
+    assert_eq!(json["findings"][0]["severity"], "warning");
 }
