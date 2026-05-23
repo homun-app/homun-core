@@ -587,6 +587,61 @@ small {
   gap: 10px;
 }
 
+.timeline-header {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.timeline-header > div {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.timeline-header strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.timeline-header span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.timeline-toggle {
+  min-height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 9px 0 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  background: var(--surface);
+  white-space: nowrap;
+}
+
+.timeline-toggle:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+.timeline-toggle svg {
+  transition: transform 140ms ease;
+}
+
+.timeline-toggle-icon-open {
+  transform: rotate(180deg);
+}
+
+.inline-timeline.timeline-collapsed {
+  gap: 8px;
+}
+
 .timeline-step {
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr);

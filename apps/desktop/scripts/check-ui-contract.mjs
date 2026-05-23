@@ -46,7 +46,10 @@ assertNotContains("src/styles.css", ".drawer-footer {\n  border-top", "drawer fo
 assertContains("src/components/ChatView.tsx", "local-computer-card", "active task must expose a local computer activity card");
 assertContains("src/components/ChatView.tsx", "computer-detail-panel", "computer details must be progressive disclosure");
 assertContains("src/components/ChatView.tsx", "timeline-step", "assistant progress must be inline timeline");
-assertOccurrenceCount("src/components/ChatView.tsx", "<InlineTimeline session={computerSession} />", 1, "timeline must render once per thread, not under every assistant message");
+assertOccurrenceCount("src/components/ChatView.tsx", "<InlineTimeline", 1, "timeline must render once per thread, not under every assistant message");
+assertContains("src/components/ChatView.tsx", "timelineCollapsed", "computer timeline must keep collapsed state");
+assertContains("src/components/ChatView.tsx", "aria-expanded={!collapsed}", "computer timeline toggle must expose expansion state");
+assertContains("src/components/ChatView.tsx", "timeline-collapsed", "computer timeline must expose collapsed styling hook");
 assertContains("src/components/ChatView.tsx", "composer-surface", "prompt composer must have a stable anchored surface");
 assertContains("src/components/ChatView.tsx", "coreBridge.localComputerSession", "chat local computer card must load the Tauri read model");
 assertContains("src/components/ChatView.tsx", "coreBridge.submitUserPrompt", "composer must submit prompts to the Tauri core");

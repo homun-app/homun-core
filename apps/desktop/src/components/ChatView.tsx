@@ -68,6 +68,7 @@ export function ChatView({
   const [promptError, setPromptError] = useState<string | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
+  const [timelineCollapsed, setTimelineCollapsed] = useState(true);
   const conversationRef = useRef<HTMLDivElement>(null);
   const activeHealth = useMemo(
     () => health.filter((item) => item.status !== "attention").slice(0, 2),
@@ -270,7 +271,11 @@ export function ChatView({
             </article>
           ))}
 
-          <InlineTimeline session={computerSession} />
+          <InlineTimeline
+            collapsed={timelineCollapsed}
+            onToggle={() => setTimelineCollapsed((current) => !current)}
+            session={computerSession}
+          />
 
           <LocalComputerCard
             approvalsCount={approvalsCount}
@@ -314,10 +319,47 @@ function describeBridgeError(error: unknown): string {
   return error.message;
 }
 
-function InlineTimeline({ session }: { session: ComputerSession }) {
+function InlineTimeline({
+  collapsed,
+  onToggle,
+  session,
+}: {
+  collapsed: boolean;
+  onToggle: () => void;
+  session: ComputerSession;
+}) {
+  if (session.timeline.length === 0) {
+    return null;
+  }
+
+  const visibleTimeline = collapsed ? session.timeline.slice(-2) : session.timeline;
+
   return (
-    <div className="inline-timeline" aria-label="Avanzamento attività">
-      {session.timeline.map((item) => {
+    <div
+      className={`inline-timeline ${collapsed ? "timeline-collapsed" : ""}`}
+      aria-label="Avanzamento attività"
+    >
+      <div className="timeline-header">
+        <div>
+          <strong>Attività computer</strong>
+          <span>
+            {session.progressCurrent} / {session.progressTotal}
+          </span>
+        </div>
+        <button
+          className="timeline-toggle"
+          type="button"
+          aria-expanded={!collapsed}
+          onClick={onToggle}
+        >
+          <span>{collapsed ? "Mostra dettagli" : "Nascondi"}</span>
+          <ChevronDown
+            className={collapsed ? "" : "timeline-toggle-icon-open"}
+            size={15}
+          />
+        </button>
+      </div>
+      {visibleTimeline.map((item) => {
         const Icon = surfaceIcons[item.surface];
         return (
           <div className={`timeline-step ${item.status}`} key={item.id}>

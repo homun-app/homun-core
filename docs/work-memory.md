@@ -1135,6 +1135,23 @@ Perche': il composer non deve sembrare rotto per prompt banali. Finche' il Brain
 
 ## Prossimo blocco
 
+### Timeline Computer collapsabile
+
+- La timeline `InlineTimeline` della Chat ora e' collapsabile e parte chiusa di default.
+- In stato compatto mostra solo gli ultimi due eventi, mantenendo visibile lo stato operativo senza occupare troppo spazio nel thread.
+- Il toggle espone `aria-expanded` e permette di mostrare/nascondere i dettagli senza aprire il pannello Computer.
+- Aggiunti hook CSS dedicati (`timeline-collapsed`, `timeline-header`, `timeline-toggle`) per mantenere la UX sobria e non tecnica.
+- Aggiornato il contratto UI statico per rendere obbligatoria la timeline collapsabile e impedire regressioni verso timeline sempre aperta o duplicata.
+- Verifiche eseguite:
+  - RED: `npm run test:ui-contract` falliva per stato collapse mancante.
+  - GREEN: `npm run test:ui-contract`
+  - GREEN: `npm run typecheck`
+  - GREEN: `npm run build`
+
+Perche': la timeline e' utile per fiducia e audit, ma non deve diventare rumore visivo nella chat. Il default compatto segue la direzione Manus: informazioni progressive, dettagli disponibili on demand e canvas centrale piu' leggibile.
+
+## Prossimo blocco
+
 - Collegare Tasks/Approvals ai command `task_queue_snapshot` e `task_detail`.
 - Collegare Connections/Settings ai command capability/runtime esistenti.
 - Collegare il Browser Automation Runtime alla `LocalComputerSessionManager`, cosi' le azioni reali producono eventi, artifact e preview nella stessa card.

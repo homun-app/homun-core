@@ -184,6 +184,7 @@ Direzione UX aggiornata dopo analisi Manus live:
 - in una chat attiva il composer resta ancorato in basso al thread; nella home puo' stare centrale.
 - l'inspector non e' la modalita' principale: piano, attivita', computer, file, utilizzo e audit emergono tramite popover, menu contestuali, modal e activity card.
 - il task in esecuzione mostra timeline inline, stato sintetico e una Local Computer activity card con preview browser/shell/artifact.
+- la timeline Computer in chat deve essere collapsabile e partire compatta: ultimi eventi sempre visibili, dettagli completi solo on demand.
 - Settings e Plugin devono usare modalita' a piena area o modal dedicate, con menu interno e ritorno all'app, per non comprimere il workspace.
 
 ### 2. Rust Core
@@ -1232,3 +1233,5 @@ Runtime Python/MLX, memoria, subagenti, Durable Task Runtime, Capability Layer, 
 Nota UI/core: la sessione chat default deve restare neutra (`computer_active_prompt`) e non contenere dati demo di task specifici. Contesto come ricerche treni, prenotazioni o form deve entrare solo quando un prompt/task reale lo genera.
 
 Nota composer: fino al collegamento del Brain operativo, il core gestisce primitive locali deterministiche come ora/data e aritmetica semplice. I prompt generici restano `prompt_pending_brain`, ma la UI non deve duplicare la timeline Computer sotto ogni messaggio assistant.
+
+Nota UI timeline: la timeline Computer e' progress disclosure, non un log sempre aperto. Deve partire collassata, mostrare solo gli ultimi eventi e offrire espansione con stato accessibile (`aria-expanded`).
