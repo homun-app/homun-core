@@ -1259,6 +1259,54 @@ impl AuditStore {
         }
     }
 
+    pub fn latest_result(&self, task_id: &str) -> Result<Option<SubagentResult>, String> {
+        let mut statement = self
+            .conn
+            .prepare(
+                "select task_id, agent_id, status, output_json, errors_json, metrics_json, audit_json
+                 from subagent_results
+                 where task_id = ?1
+                 order by id desc
+                 limit 1",
+            )
+            .map_err(|error| error.to_string())?;
+        let mut rows = statement
+            .query([task_id])
+            .map_err(|error| error.to_string())?;
+
+        match rows.next().map_err(|error| error.to_string())? {
+            Some(row) => result_from_audit_row(row).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    pub fn recent_results_by_status(
+        &self,
+        status: SubagentStatus,
+        limit: u32,
+    ) -> Result<Vec<SubagentResult>, String> {
+        let mut statement = self
+            .conn
+            .prepare(
+                "select task_id, agent_id, status, output_json, errors_json, metrics_json, audit_json
+                 from subagent_results
+                 where status = ?1
+                 order by id desc
+                 limit ?2",
+            )
+            .map_err(|error| error.to_string())?;
+        let mut rows = statement
+            .query((status_name(&status), i64::from(limit)))
+            .map_err(|error| error.to_string())?;
+        let mut results = Vec::new();
+
+        while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+            results.push(result_from_audit_row(row)?);
+        }
+
+        Ok(results)
+    }
+
     fn init(&self) -> Result<(), String> {
         self.conn
             .execute_batch(
@@ -1298,5 +1346,48 @@ fn status_name(status: &SubagentStatus) -> &'static str {
         SubagentStatus::Failed => "failed",
         SubagentStatus::Cancelled => "cancelled",
         SubagentStatus::TimedOut => "timed_out",
+    }
+}
+
+fn result_from_audit_row(row: &rusqlite::Row<'_>) -> Result<SubagentResult, String> {
+    let task_id: String = row.get(0).map_err(|error| error.to_string())?;
+    let agent_id: String = row.get(1).map_err(|error| error.to_string())?;
+    let status: String = row.get(2).map_err(|error| error.to_string())?;
+    let output_json: String = row.get(3).map_err(|error| error.to_string())?;
+    let errors_json: String = row.get(4).map_err(|error| error.to_string())?;
+    let metrics_json: String = row.get(5).map_err(|error| error.to_string())?;
+    let audit_json: String = row.get(6).map_err(|error| error.to_string())?;
+
+    Ok(SubagentResult {
+        task_id,
+        agent_id: agent_id_from_name(&agent_id)?,
+        status: status_from_name(&status)?,
+        output: serde_json::from_str(&output_json).map_err(|error| error.to_string())?,
+        errors: serde_json::from_str(&errors_json).map_err(|error| error.to_string())?,
+        metrics: serde_json::from_str(&metrics_json).map_err(|error| error.to_string())?,
+        audit: serde_json::from_str(&audit_json).map_err(|error| error.to_string())?,
+    })
+}
+
+fn agent_id_from_name(agent_id: &str) -> Result<AgentId, String> {
+    match agent_id {
+        "PlannerAgent" => Ok(AgentId::Planner),
+        "MemoryAgent" => Ok(AgentId::Memory),
+        "ToolAgent" => Ok(AgentId::Tool),
+        "VisionAgent" => Ok(AgentId::Vision),
+        "RiskAgent" => Ok(AgentId::Risk),
+        "AutomationAgent" => Ok(AgentId::Automation),
+        "ReviewAgent" => Ok(AgentId::Review),
+        _ => Err(format!("unknown agent id {agent_id}")),
+    }
+}
+
+fn status_from_name(status: &str) -> Result<SubagentStatus, String> {
+    match status {
+        "succeeded" => Ok(SubagentStatus::Succeeded),
+        "failed" => Ok(SubagentStatus::Failed),
+        "cancelled" => Ok(SubagentStatus::Cancelled),
+        "timed_out" => Ok(SubagentStatus::TimedOut),
+        _ => Err(format!("unknown subagent status {status}")),
     }
 }

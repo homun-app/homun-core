@@ -18,6 +18,35 @@ fn audit_store_records_subagent_results() {
 }
 
 #[test]
+fn audit_store_returns_latest_result_for_task() {
+    let store = AuditStore::open_in_memory().unwrap();
+    store.record_result(&result("task_1")).unwrap();
+    store.record_result(&failed_result("task_1", "schema mismatch")).unwrap();
+
+    let latest = store.latest_result("task_1").unwrap().unwrap();
+
+    assert_eq!(latest.task_id, "task_1");
+    assert_eq!(latest.status, SubagentStatus::Failed);
+    assert_eq!(latest.errors, vec!["schema mismatch"]);
+}
+
+#[test]
+fn audit_store_filters_recent_results_by_status() {
+    let store = AuditStore::open_in_memory().unwrap();
+    store.record_result(&failed_result("task_1", "first failure")).unwrap();
+    store.record_result(&result("task_2")).unwrap();
+    store.record_result(&failed_result("task_3", "second failure")).unwrap();
+
+    let failed = store
+        .recent_results_by_status(SubagentStatus::Failed, 10)
+        .unwrap();
+
+    assert_eq!(failed.len(), 2);
+    assert_eq!(failed[0].task_id, "task_3");
+    assert_eq!(failed[1].task_id, "task_1");
+}
+
+#[test]
 fn orchestrator_records_results_while_running_until_blocked() {
     let store = AuditStore::open_in_memory().unwrap();
     let runner = SubagentRunner::new(
@@ -88,6 +117,25 @@ fn result(task_id: &str) -> SubagentResult {
         status: SubagentStatus::Succeeded,
         output: serde_json::json!({"ok": true}),
         errors: vec![],
+        metrics: TokenMetrics {
+            ..metrics()
+        },
+        audit: AgentAudit {
+            model: "local-model".to_string(),
+            contract: "RoutineInference".to_string(),
+            started_at: "unix:1".to_string(),
+            finished_at: "unix:2".to_string(),
+        },
+    }
+}
+
+fn failed_result(task_id: &str, error: &str) -> SubagentResult {
+    SubagentResult {
+        task_id: task_id.to_string(),
+        agent_id: AgentId::Planner,
+        status: SubagentStatus::Failed,
+        output: serde_json::Value::Null,
+        errors: vec![error.to_string()],
         metrics: TokenMetrics {
             ..metrics()
         },

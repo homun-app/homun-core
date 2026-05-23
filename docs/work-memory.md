@@ -63,6 +63,15 @@ Perche': OpenHuman applica enforcement server-side prima di inference/tool loop.
 
 Perche': OpenHuman distingue i tool mostrati al modello dai tool che il runtime puo' invocare davvero. Nel nostro progetto questo evita che la capacita' di ragionare su un'azione diventi automaticamente permesso operativo.
 
+### Query AuditStore
+
+- Aggiunto `AuditStore::latest_result`.
+- Aggiunto `AuditStore::recent_results_by_status`.
+- Aggiunta deserializzazione dei record audit in `SubagentResult`.
+- Testato recupero dell'ultimo risultato per task e filtro dei risultati recenti per stato.
+
+Perche': l'audit non deve solo registrare eventi, deve permettere al core e alla futura UI di spiegare cosa e' successo: ultimo esito di un task, errori recenti e stato operativo dei subagenti.
+
 ### Bootstrap progetto
 
 - Inizializzato il repository Git.
