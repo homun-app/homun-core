@@ -1,12 +1,13 @@
 use crate::{
     AccessDecisionKind, DataSensitivity, GraphifyArtifacts, GraphifyImport, GraphifyImportSummary,
+    GraphifyCli, GraphifyOperation, GraphifyQueryRequest, GraphifyQueryResult,
     MemoryAccessDecision, MemoryAccessRequest, MemoryContextItem, MemoryContextPack,
     MemoryCreateRequest, MemoryEntity, MemoryEvent, MemoryEvidence, MemoryExtraction,
     MemoryExtractionSummary, MemoryLifecycleRequest, MemoryPolicyEngine, MemoryRecord, MemoryRef,
     MemoryRefKind, MemoryRelation, MemorySearchPage, MemorySearchRequest, MemorySearchResult,
     MemoryStatus, MemoryUpdatePatch, PrivacyDomain,
     SQLiteMemoryStore, UserId, WikiFileStore, WikiPage, WorkspaceId, current_timestamp,
-    ensure_transition, parse_wiki_markdown, WikiCorrectionSyncReport,
+    ensure_artifacts_inside_root, ensure_transition, parse_wiki_markdown, WikiCorrectionSyncReport,
 };
 use std::str::FromStr;
 
@@ -532,6 +533,75 @@ impl MemoryFacade {
             privacy_domain,
             sensitivity,
         )
+    }
+
+    pub fn graphify_query(
+        &self,
+        request: GraphifyQueryRequest,
+    ) -> Result<GraphifyQueryResult, String> {
+        ensure_artifacts_inside_root(&request.artifacts, &request.allowed_output_root)?;
+        if matches!(request.operation, GraphifyOperation::Query { .. }) && !request.access.allow_export
+        {
+            self.store.record_access_decision(
+                &request.access,
+                &MemoryAccessDecision::deny("export_not_allowed"),
+            )?;
+            return Err("graphify query requires export permission".to_string());
+        }
+
+        let cli = GraphifyCli::new("graphify");
+        let command = match &request.operation {
+            GraphifyOperation::Query { question, budget } => {
+                cli.query_args(&request.artifacts, question, *budget)
+            }
+            GraphifyOperation::Path { source, target } => {
+                cli.path_args(&request.artifacts, source, target)
+            }
+            GraphifyOperation::Explain { label } => cli.explain_args(&request.artifacts, label),
+        };
+
+        let entity_refs = self
+            .store
+            .list_entities(&request.access.user_id, &request.access.workspace_id)?
+            .into_iter()
+            .filter(|entity| {
+                request
+                    .access
+                    .allowed_domains
+                    .iter()
+                    .any(|domain| domain == &entity.privacy_domain)
+                    && entity.sensitivity <= request.access.max_sensitivity
+            })
+            .map(|entity| entity.reference)
+            .collect::<Vec<_>>();
+        let relation_refs = self
+            .store
+            .list_relations(&request.access.user_id, &request.access.workspace_id)?
+            .into_iter()
+            .filter(|relation| {
+                request
+                    .access
+                    .allowed_domains
+                    .iter()
+                    .any(|domain| domain == &relation.privacy_domain)
+                    && relation.sensitivity <= request.access.max_sensitivity
+            })
+            .map(|relation| relation.reference)
+            .collect::<Vec<_>>();
+
+        self.store
+            .record_access_decision(&request.access, &MemoryAccessDecision::allow())?;
+        Ok(GraphifyQueryResult {
+            command,
+            summaries: vec![format!(
+                "Graphify {:?} scoped to {} entities and {} relations",
+                request.operation,
+                entity_refs.len(),
+                relation_refs.len()
+            )],
+            entity_refs,
+            relation_refs,
+        })
     }
 
     pub fn access_audit_count(&self) -> Result<u64, String> {

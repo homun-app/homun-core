@@ -2,12 +2,12 @@ use crate::{
     DataSensitivity, MemoryEntity, MemoryRef, MemoryRefKind, MemoryRelation, PrivacyDomain,
     SQLiteMemoryStore, UserId, WorkspaceId,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GraphifyArtifacts {
     pub output_dir: PathBuf,
     pub graph_json_path: PathBuf,
