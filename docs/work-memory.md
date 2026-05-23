@@ -850,6 +850,7 @@ Perche': ora il Brain non e' solo un router per la singola chiamata. Produce dec
 - L'inspector mostra Brain plan, task selezionato, approvazioni e runtime health senza esporre raw payload.
 - Verificata la direzione visuale Manus light + settings Codex: neutral grays, system blue, radius massimo 8px, niente dotted background permanente e niente card annidate.
 - Rifinita la UX dopo review visuale: canvas piu' adattivo su desktop, sidebar principale comprimibile, inspector comprimibile e Settings come modalita' shell dedicata che sostituisce la navigazione principale con menu impostazioni + ritorno all'app.
+- Seconda rifinitura ispirata a Manus: inspector nascosto di default e richiamabile da header/activity strip, sidebar ridotta alle voci primarie, impostazioni accessibili dal footer e pagina Plugin/Connettori resa piu' curata con feature card, search e griglia connettori.
 - Verifiche eseguite:
   - `npm run typecheck`
   - `npm run build`

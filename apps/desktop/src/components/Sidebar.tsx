@@ -1,9 +1,12 @@
 import {
   ArrowLeft,
   ChevronRight,
+  FolderPlus,
   PanelLeftClose,
   PanelLeftOpen,
   Search,
+  Settings,
+  SlidersHorizontal,
 } from "lucide-react";
 import { navItems, settingsSections } from "../data/mockData";
 import type { SettingsSectionId, ViewId } from "../types";
@@ -50,7 +53,7 @@ export function Sidebar({
       </div>
 
       <button className="primary-action" type="button" title="Nuovo task">
-        <span>Nuovo task</span>
+        <span>Nuovo compito</span>
         <ChevronRight size={16} />
       </button>
 
@@ -72,21 +75,47 @@ export function Sidebar({
         })}
       </nav>
 
-      <div className="sidebar-footer">
-        <span className="status-dot ready" />
+      <div className="sidebar-group">
+        <div className="sidebar-group-title">
+          <span>Progetti</span>
+          <button className="icon-button small-icon-button" type="button" aria-label="Nuovo progetto">
+            <FolderPlus size={15} />
+          </button>
+        </div>
+        <button className="sidebar-link" type="button">Local-first assistant</button>
+      </div>
+
+      <div className="sidebar-group">
+        <div className="sidebar-group-title">
+          <span>Tutti i compiti</span>
+          <SlidersHorizontal size={15} />
+        </div>
+        <button className="sidebar-link muted" type="button">Riepilogo Acme</button>
+        <button className="sidebar-link muted" type="button">Treni Napoli-Milano</button>
+      </div>
+
+      <div className="sidebar-footer compact">
         <div>
-          <strong>Runtime locale</strong>
+          <strong>Locale attivo</strong>
           <small>Gemma 4 pronto</small>
         </div>
       </div>
-      <button
-        className="secondary-sidebar-action"
-        type="button"
-        onClick={onToggleInspector}
-      >
-        <PanelLeftOpen size={16} />
-        <span>Inspector</span>
-      </button>
+      <div className="sidebar-bottom-nav">
+        <button className="icon-button" type="button" aria-label="Preferenze rapide">
+          <SlidersHorizontal size={17} />
+        </button>
+        <button
+          className="icon-button"
+          type="button"
+          aria-label="Impostazioni"
+          onClick={() => onNavigate("settings")}
+        >
+          <Settings size={17} />
+        </button>
+        <button className="icon-button" type="button" aria-label="Dettagli attività" onClick={onToggleInspector}>
+          <PanelLeftOpen size={17} />
+        </button>
+      </div>
     </aside>
   );
 }

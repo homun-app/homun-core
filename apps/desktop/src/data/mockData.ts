@@ -25,14 +25,10 @@ import type {
 } from "../types";
 
 export const navItems: NavItem[] = [
-  { id: "chat", label: "Chat", icon: MessageSquare },
-  { id: "tasks", label: "Task", icon: ListTodo, badge: "3" },
-  { id: "memory", label: "Memoria", icon: Database },
-  { id: "connections", label: "Connessioni", icon: Plug },
-  { id: "automations", label: "Automazioni", icon: CalendarClock },
-  { id: "browser", label: "Browser", icon: Globe2 },
-  { id: "brain", label: "Brain Audit", icon: Brain },
-  { id: "settings", label: "Impostazioni", icon: Settings },
+  { id: "chat", label: "Agent", icon: MessageSquare },
+  { id: "connections", label: "Plugin", icon: Plug },
+  { id: "automations", label: "Pianificato", icon: CalendarClock },
+  { id: "memory", label: "Libreria", icon: Database },
 ];
 
 export const chatMessages: ChatMessage[] = [

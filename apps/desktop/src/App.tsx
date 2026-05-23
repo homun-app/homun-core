@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { ChatView } from "./components/ChatView";
+import { ConnectionsView } from "./components/ConnectionsView";
 import { Inspector } from "./components/Inspector";
 import { Shell } from "./components/Shell";
 import { ShallowView } from "./components/ShallowView";
@@ -23,7 +24,7 @@ export default function App() {
     useState<SettingsSectionId>("privacy");
   const [selectedTaskId, setSelectedTaskId] = useState(tasks[1].id);
   const [isNavCollapsed, setIsNavCollapsed] = useState(false);
-  const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(false);
+  const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(true);
   const selectedTask = useMemo(
     () => tasks.find((task) => task.id === selectedTaskId) ?? tasks[0],
     [selectedTaskId],
@@ -54,7 +55,13 @@ export default function App() {
         aria-label="Area di lavoro principale"
       >
         {activeView === "chat" && (
-          <ChatView messages={chatMessages} health={runtimeHealth} />
+          <ChatView
+            approvalsCount={approvals.length}
+            messages={chatMessages}
+            health={runtimeHealth}
+            onShowDetails={() => setIsInspectorCollapsed((value) => !value)}
+            task={selectedTask}
+          />
         )}
         {activeView === "tasks" && (
           <TasksView
@@ -84,16 +91,7 @@ export default function App() {
           />
         )}
         {activeView === "connections" && (
-          <ShallowView
-            title="Connessioni"
-            eyebrow="Provider registry"
-            description="Connettori nativi, MCP, managed opt-in e skill installate restano filtrati dal Capability Layer."
-            stats={[
-              { label: "Connesse", value: "2" },
-              { label: "Disponibili", value: "1" },
-              { label: "Cloud off", value: "1" },
-            ]}
-          />
+          <ConnectionsView connections={connections} />
         )}
         {activeView === "automations" && (
           <ShallowView
@@ -132,14 +130,14 @@ export default function App() {
           />
         )}
       </main>
-      {!isSettings && (
+      {!isSettings && !isInspectorCollapsed && (
         <Inspector
           activeView={activeView}
           brainRun={brainRun}
           task={selectedTask}
           approvals={approvals}
           health={runtimeHealth}
-          isCollapsed={isInspectorCollapsed}
+          isCollapsed={false}
           onToggle={() => setIsInspectorCollapsed((value) => !value)}
         />
       )}
