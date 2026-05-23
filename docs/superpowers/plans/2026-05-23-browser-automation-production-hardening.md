@@ -37,11 +37,11 @@
 
 ### Task 2: User Profile Contract
 
-- [ ] Write failing tests for `browser.profiles` exposing `assistant` and attach-only `user`, and `browser.start` returning a manual-action error if user profile has no CDP endpoint.
-- [ ] Run targeted Vitest and verify failures.
-- [ ] Implement user profile metadata and guarded attach-only start path.
-- [ ] Run targeted Vitest until green.
-- [ ] Commit as `Add browser user profile contract`.
+- [x] Write failing tests for `browser.profiles` exposing `assistant` and attach-only `user`, and `browser.start` returning a manual-action error if user profile has no CDP endpoint.
+- [x] Run targeted Vitest and verify failures.
+- [x] Implement user profile metadata and guarded attach-only start path.
+- [x] Run targeted Vitest until green.
+- [x] Commit as `Add browser user profile contract`.
 
 ### Task 3: Rust Contracts, Capability Provider And Task UI
 

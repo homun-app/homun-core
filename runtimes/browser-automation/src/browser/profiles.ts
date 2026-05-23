@@ -18,6 +18,13 @@ export type BrowserProfileConfig = {
   executablePath: string;
 };
 
+export type BrowserProfileSummary = {
+  name: "assistant" | "user";
+  status: string;
+  headless: boolean;
+  mode: "managed" | "attach_only";
+};
+
 export async function resolveAssistantProfile(options?: {
   headless?: boolean;
   executablePath?: string;
@@ -30,6 +37,32 @@ export async function resolveAssistantProfile(options?: {
     headless: options?.headless ?? true,
     executablePath: await discoverChromiumExecutable(options?.executablePath),
   };
+}
+
+export function profileSummaries(params: {
+  assistantRunning: boolean;
+  userRunning: boolean;
+  assistantHeadless: boolean;
+  userCdpEndpoint?: string;
+}): BrowserProfileSummary[] {
+  return [
+    {
+      name: "assistant",
+      status: params.assistantRunning ? "running" : "stopped",
+      headless: params.assistantHeadless,
+      mode: "managed",
+    },
+    {
+      name: "user",
+      status: params.userRunning
+        ? "running"
+        : params.userCdpEndpoint
+          ? "available"
+          : "needs_cdp_endpoint",
+      headless: false,
+      mode: "attach_only",
+    },
+  ];
 }
 
 export async function discoverChromiumExecutable(explicit?: string): Promise<string> {

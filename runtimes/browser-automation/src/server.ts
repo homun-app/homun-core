@@ -15,6 +15,7 @@ const manager = new BrowserSessionManager({
   allowPrivateNetwork: process.env.BROWSER_AUTOMATION_ALLOW_PRIVATE_NETWORK === "1",
   artifactRoot: process.env.BROWSER_AUTOMATION_ARTIFACT_ROOT,
   uploadRoots: process.env.BROWSER_AUTOMATION_UPLOAD_ROOTS?.split(":").filter(Boolean),
+  userCdpEndpoint: process.env.BROWSER_AUTOMATION_USER_CDP_ENDPOINT,
 });
 
 export async function handleRequestLine(line: string): Promise<string> {
@@ -38,7 +39,9 @@ async function dispatch(request: BrowserRequest): Promise<unknown> {
     case "browser.profiles":
       return { profiles: await manager.profiles() };
     case "browser.start":
-      return await manager.start();
+      return await manager.start({
+        profile: optionalProfile(request.params, "profile"),
+      });
     case "browser.stop":
       await manager.stop();
       return { status: "stopped" };
@@ -167,6 +170,24 @@ function requireStringArray(params: Record<string, unknown> | undefined, key: st
     });
   }
   return value;
+}
+
+function optionalProfile(
+  params: Record<string, unknown> | undefined,
+  key: string,
+): "assistant" | "user" | undefined {
+  const value = params?.[key];
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === "assistant" || value === "user") {
+    return value;
+  }
+  throw new BrowserAutomationError({
+    code: "BROWSER_INVALID_REQUEST",
+    message: `${key} must be assistant or user`,
+    retryable: false,
+  });
 }
 
 async function main() {

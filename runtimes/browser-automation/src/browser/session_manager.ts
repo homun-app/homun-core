@@ -1,13 +1,18 @@
 import { mkdir, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { BrowserContext, Dialog, Locator, Page } from "playwright-core";
+import type { Browser, BrowserContext, Dialog, Locator, Page } from "playwright-core";
 import { chromium } from "playwright-core";
 import { BrowserAutomationError } from "../contracts.js";
 import { executeAction, requireRef, type BrowserActRequest } from "./actions.js";
 import { BrowserArtifactRoot } from "./artifacts.js";
 import { assertNavigationAllowed } from "./navigation_guard.js";
-import { resolveAssistantProfile, type BrowserProfileConfig } from "./profiles.js";
+import {
+  profileSummaries,
+  resolveAssistantProfile,
+  type BrowserProfileConfig,
+  type BrowserProfileSummary,
+} from "./profiles.js";
 import { createSnapshot, type BrowserRef } from "./snapshot.js";
 
 export type BrowserSessionOptions = {
@@ -17,6 +22,7 @@ export type BrowserSessionOptions = {
   profileRoot?: string;
   artifactRoot?: string;
   uploadRoots?: string[];
+  userCdpEndpoint?: string;
 };
 
 export type BrowserTab = {
@@ -50,6 +56,8 @@ type ArtifactMetadata = {
 export class BrowserSessionManager {
   private readonly options: BrowserSessionOptions;
   private context?: BrowserContext;
+  private attachedBrowser?: Browser;
+  private activeProfile: "assistant" | "user" = "assistant";
   private profile?: BrowserProfileConfig;
   private artifactRoot?: BrowserArtifactRoot;
   private pages = new Map<string, PageState>();
@@ -59,9 +67,13 @@ export class BrowserSessionManager {
     this.options = options ?? {};
   }
 
-  async start(): Promise<{ status: "started"; profile: string }> {
+  async start(params?: { profile?: "assistant" | "user" }): Promise<{ status: "started"; profile: string }> {
     if (this.context) {
-      return { status: "started", profile: "assistant" };
+      return { status: "started", profile: this.activeProfile };
+    }
+    const profile = params?.profile ?? "assistant";
+    if (profile === "user") {
+      return await this.startUserProfile();
     }
     this.profile = await resolveAssistantProfile(this.options);
     await mkdir(this.profile.userDataDir, { recursive: true });
@@ -70,18 +82,27 @@ export class BrowserSessionManager {
       executablePath: this.profile.executablePath,
       acceptDownloads: true,
     });
+    this.activeProfile = "assistant";
     return { status: "started", profile: this.profile.name };
   }
 
   async stop(): Promise<void> {
     await this.context?.close().catch(() => undefined);
+    await this.attachedBrowser?.close().catch(() => undefined);
     this.context = undefined;
+    this.attachedBrowser = undefined;
+    this.activeProfile = "assistant";
     this.pages.clear();
   }
 
-  async profiles(): Promise<Array<{ name: string; status: string; headless: boolean }>> {
+  async profiles(): Promise<BrowserProfileSummary[]> {
     const profile = this.profile ?? (await resolveAssistantProfile(this.options));
-    return [{ name: "assistant", status: this.context ? "running" : "stopped", headless: profile.headless }];
+    return profileSummaries({
+      assistantRunning: Boolean(this.context && this.activeProfile === "assistant"),
+      userRunning: Boolean(this.context && this.activeProfile === "user"),
+      assistantHeadless: profile.headless,
+      userCdpEndpoint: this.options.userCdpEndpoint,
+    });
   }
 
   async tabs(): Promise<BrowserTab[]> {
@@ -320,6 +341,23 @@ export class BrowserSessionManager {
       );
     }
     return this.artifactRoot;
+  }
+
+  private async startUserProfile(): Promise<{ status: "started"; profile: "user" }> {
+    if (!this.options.userCdpEndpoint) {
+      throw new BrowserAutomationError({
+        code: "BROWSER_USER_PROFILE_UNAVAILABLE",
+        message: "user profile requires BROWSER_AUTOMATION_USER_CDP_ENDPOINT",
+        retryable: false,
+        manualActionRequired: true,
+      });
+    }
+    this.attachedBrowser = await chromium.connectOverCDP(this.options.userCdpEndpoint);
+    this.context =
+      this.attachedBrowser.contexts()[0] ??
+      (await this.attachedBrowser.newContext({ acceptDownloads: true }));
+    this.activeProfile = "user";
+    return { status: "started", profile: "user" };
   }
 }
 
