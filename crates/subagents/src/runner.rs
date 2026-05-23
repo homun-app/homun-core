@@ -1,6 +1,7 @@
 use crate::{
-    AgentAudit, GenerateJsonRequest, JsonRuntime, PromptGuardVerdict, SubagentResult,
-    SubagentStatus, SubagentTask, TokenMetrics, guard_prompt, validate_task_permissions,
+    AgentAudit, GenerateJsonRequest, JsonRuntime, PromptGuardVerdict, SubagentError,
+    SubagentResult, SubagentStatus, SubagentTask, TokenMetrics, guard_prompt,
+    validate_task_permissions,
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -23,20 +24,47 @@ impl<R: JsonRuntime> SubagentRunner<R> {
 
     pub fn run_generate_json(&self, task: &SubagentTask) -> SubagentResult {
         let started_at = audit_timestamp();
+        if task_cancelled(task) {
+            return self.status_result(
+                task,
+                SubagentStatus::Cancelled,
+                vec![SubagentError::Cancelled("task cancelled before runtime call".to_string())],
+                started_at,
+            );
+        }
+        if task.budgets.timeout_seconds == 0 {
+            return self.status_result(
+                task,
+                SubagentStatus::TimedOut,
+                vec![SubagentError::Timeout(
+                    "task timeout budget expired before runtime call".to_string(),
+                )],
+                started_at,
+            );
+        }
         let permission_errors = validate_task_permissions(task);
         if !permission_errors.is_empty() {
-            return self.failed_result(task, permission_errors, started_at);
+            return self.status_result(
+                task,
+                SubagentStatus::Failed,
+                permission_errors
+                    .into_iter()
+                    .map(SubagentError::PermissionDenied)
+                    .collect(),
+                started_at,
+            );
         }
 
         let request = generate_json_request_from_task(task);
         let guard = guard_prompt(&request.prompt);
         if guard.verdict == PromptGuardVerdict::Block {
-            return self.failed_result(
+            return self.status_result(
                 task,
-                vec![format!(
+                SubagentStatus::Failed,
+                vec![SubagentError::PromptBlocked(format!(
                     "prompt injection blocked: {}",
                     guard.reasons.join(", ")
-                )],
+                ))],
                 started_at,
             );
         }
@@ -69,22 +97,28 @@ impl<R: JsonRuntime> SubagentRunner<R> {
                     finished_at: audit_timestamp(),
                 },
             },
-            Err(error) => self.failed_result(task, vec![format!("{error:?}")], started_at),
+            Err(error) => self.status_result(
+                task,
+                SubagentStatus::Failed,
+                vec![SubagentError::Runtime(format!("{error:?}"))],
+                started_at,
+            ),
         }
     }
 
-    fn failed_result(
+    fn status_result(
         &self,
         task: &SubagentTask,
-        errors: Vec<String>,
+        status: SubagentStatus,
+        errors: Vec<SubagentError>,
         started_at: String,
     ) -> SubagentResult {
         SubagentResult {
             task_id: task.task_id.clone(),
             agent_id: task.agent_id.clone(),
-            status: SubagentStatus::Failed,
+            status,
             output: serde_json::Value::Null,
-            errors,
+            errors: errors.into_iter().map(|error| error.to_string()).collect(),
             metrics: TokenMetrics::zero(),
             audit: AgentAudit {
                 model: self.model.clone(),
@@ -110,6 +144,12 @@ pub fn generate_json_request_from_task(task: &SubagentTask) -> GenerateJsonReque
             .get("temperature")
             .and_then(serde_json::Value::as_f64)
             .unwrap_or(0.0) as f32,
+        wait_if_busy: task
+            .input
+            .get("wait_if_busy")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true),
+        request_timeout_seconds: Some(task.budgets.timeout_seconds as f64),
         json_schema: task.input.get("schema").cloned(),
         required_keys: task
             .input
@@ -128,6 +168,13 @@ pub fn generate_json_request_from_task(task: &SubagentTask) -> GenerateJsonReque
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(true),
     }
+}
+
+fn task_cancelled(task: &SubagentTask) -> bool {
+    task.input
+        .get("cancelled")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
 }
 
 fn audit_timestamp() -> String {

@@ -1,5 +1,6 @@
 mod agents;
 mod audit;
+mod error;
 mod graph;
 mod orchestrator;
 mod permissions;
@@ -12,6 +13,7 @@ mod workflow;
 
 pub use agents::*;
 pub use audit::*;
+pub use error::*;
 pub use graph::*;
 pub use orchestrator::*;
 pub use permissions::*;

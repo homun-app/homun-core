@@ -237,6 +237,8 @@ pub struct GenerateJsonRequest {
     pub prompt: String,
     pub max_tokens: u32,
     pub temperature: f32,
+    pub wait_if_busy: bool,
+    pub request_timeout_seconds: Option<f64>,
     #[serde(rename = "schema", skip_serializing_if = "Option::is_none")]
     pub json_schema: Option<serde_json::Value>,
     pub required_keys: Vec<String>,

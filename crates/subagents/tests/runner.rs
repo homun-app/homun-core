@@ -87,6 +87,57 @@ fn runner_blocks_prompt_injection_before_calling_runtime() {
     assert_eq!(runner.runtime().requests.borrow().len(), 0);
 }
 
+#[test]
+fn runner_times_out_zero_budget_without_calling_runtime() {
+    let runtime = FakeRuntime {
+        requests: RefCell::new(vec![]),
+        response: valid_response(),
+    };
+    let runner = SubagentRunner::new(runtime, "local-model");
+    let mut task = task();
+    task.budgets.timeout_seconds = 0;
+
+    let result = runner.run_generate_json(&task);
+
+    assert_eq!(result.status, SubagentStatus::TimedOut);
+    assert_eq!(result.errors, vec!["task timeout budget expired before runtime call"]);
+    assert_eq!(runner.runtime().requests.borrow().len(), 0);
+}
+
+#[test]
+fn runner_cancels_task_without_calling_runtime() {
+    let runtime = FakeRuntime {
+        requests: RefCell::new(vec![]),
+        response: valid_response(),
+    };
+    let runner = SubagentRunner::new(runtime, "local-model");
+    let mut task = task();
+    task.input["cancelled"] = serde_json::json!(true);
+
+    let result = runner.run_generate_json(&task);
+
+    assert_eq!(result.status, SubagentStatus::Cancelled);
+    assert_eq!(result.errors, vec!["task cancelled before runtime call"]);
+    assert_eq!(runner.runtime().requests.borrow().len(), 0);
+}
+
+#[test]
+fn runner_sends_timeout_budget_to_runtime_request() {
+    let runtime = FakeRuntime {
+        requests: RefCell::new(vec![]),
+        response: valid_response(),
+    };
+    let runner = SubagentRunner::new(runtime, "local-model");
+    let task = task();
+
+    let result = runner.run_generate_json(&task);
+
+    assert_eq!(result.status, SubagentStatus::Succeeded);
+    let requests = runner.runtime().requests.borrow();
+    assert_eq!(requests[0].request_timeout_seconds, Some(30.0));
+    assert!(requests[0].wait_if_busy);
+}
+
 fn task() -> SubagentTask {
     SubagentTask {
         task_id: "task_1".to_string(),
