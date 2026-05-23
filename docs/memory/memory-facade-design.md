@@ -1,0 +1,143 @@
+# Memory Facade Design
+
+## Goal
+
+Build the memory layer as a complete local-first component with one facade and separate stores for operational SQLite data, graph relations, and human-readable wiki pages.
+
+## Principles
+
+- Language-agnostic and multilingual by default.
+- Multiuser and workspace-aware from the first schema.
+- Privacy domains are first-class, not metadata added later.
+- Every read goes through policy, anti-exfiltration and audit.
+- SQLite, graph and wiki remain separate backends linked by stable refs.
+- Sensitive payloads are encrypted at the application layer.
+- Deletes create tombstones and make refs non-returnable by default.
+
+## Memory Backends
+
+### SQLite Store
+
+Source of operational truth:
+
+- events
+- memory records
+- entities
+- relations
+- evidence
+- wiki page metadata
+- graph node metadata
+- access audit
+- tombstones
+
+### Graph Store
+
+MVP graph lives in SQLite as entities and relations. A future Graphify adapter can import technical/document graph nodes into the same ref model without owning personal memory.
+
+### Wiki Store
+
+Markdown files are human-readable projections of confirmed knowledge. The wiki does not receive raw events or secret payloads. Wiki writes are mediated by policy and linked back to DB refs through frontmatter.
+
+## Stable References
+
+All cross-backend links use `MemoryRef`.
+
+Examples:
+
+- `event:local:user_1:workspace_1:evt_...`
+- `memory:local:user_1:workspace_1:mem_...`
+- `entity:local:user_1:workspace_1:project:acme`
+- `relation:local:user_1:workspace_1:rel_...`
+- `wiki:local:user_1:workspace_1:Projects/Acme.md`
+- `graph:local:user_1:workspace_1:node_...`
+- `audit:local:user_1:workspace_1:access_...`
+
+Refs include user and workspace to prevent accidental cross-user reads.
+
+## Core Types
+
+- `UserId`
+- `WorkspaceId`
+- `PrivacyDomain`
+- `DataSensitivity`
+- `MemoryRef`
+- `MemoryEvent`
+- `MemoryRecord`
+- `MemoryEntity`
+- `MemoryRelation`
+- `MemoryEvidence`
+- `WikiPage`
+- `MemoryAccessRequest`
+- `MemoryAccessDecision`
+- `MemoryContextPack`
+
+## Policy And Anti-Exfiltration
+
+Every read request includes:
+
+- actor id
+- user id
+- workspace id
+- purpose
+- allowed privacy domains
+- max sensitivity
+- raw payload permission
+- export permission
+
+Policy outcomes:
+
+- `allow`
+- `redact`
+- `summarize_only`
+- `requires_user_approval`
+- `deny`
+
+Rules:
+
+- deny cross-user and cross-workspace reads.
+- deny domains outside the request.
+- deny sensitivity above request max.
+- redact secrets before returning context to agents.
+- block broad export unless explicitly allowed.
+- never write raw secret payloads into wiki pages.
+- audit both allowed and denied access.
+
+## Encryption
+
+Encryption is application-level:
+
+- metadata stays queryable where safe.
+- sensitive payload JSON is encrypted with XChaCha20-Poly1305.
+- encrypted values store nonce and ciphertext.
+- `KeyProvider` is abstract.
+- tests use `DevelopmentKeyProvider`.
+- OS keychain provider is a later adapter, not required for schema correctness.
+
+## CRUD Scope
+
+The facade exposes CRUD-style operations for:
+
+- events
+- memory records
+- entities
+- relations
+- evidence links
+- wiki pages
+
+Deletes are logical tombstones. Hard delete can be added later for user-requested erasure once cascading semantics are fully specified.
+
+## Testing Requirements
+
+Tests must cover:
+
+- CRUD isolation by user/workspace.
+- privacy domain filtering.
+- sensitivity filtering.
+- raw payload redaction.
+- secret redaction.
+- encrypted payload round-trip.
+- encrypted payload unreadable without the key.
+- wiki pages include refs and frontmatter.
+- wiki writes reject secret raw content.
+- context packs preserve refs.
+- access decisions are audited.
