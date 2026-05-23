@@ -1,5 +1,6 @@
 mod agents;
 mod audit;
+mod capability_bridge;
 mod error;
 mod graph;
 mod memory_agent;
@@ -14,6 +15,7 @@ mod workflow;
 
 pub use agents::*;
 pub use audit::*;
+pub use capability_bridge::*;
 pub use error::*;
 pub use graph::*;
 pub use memory_agent::*;
