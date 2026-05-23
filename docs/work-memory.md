@@ -613,4 +613,24 @@ Perche': questa slice rende il browser automation un componente operativo locale
 
 ## Prossimo blocco
 
-- Estendere il browser runtime con profilo attach-only `user`, download/upload/dialog/pdf/console reali e UI read model per task browser.
+### Browser automation production hardening
+
+- Creato piano `docs/superpowers/plans/2026-05-23-browser-automation-production-hardening.md`.
+- Esteso il sidecar Node/TypeScript per implementare tutti i metodi browser dichiarati nei contratti.
+- Aggiunti artifact reali per screenshot e PDF, sempre dentro artifact root confinata.
+- Aggiunto upload reale con file chooser armato e validazione degli upload roots.
+- Aggiunto download reale con salvataggio dentro artifact root confinata.
+- Aggiunto dialog handling (`accept`/`dismiss`, prompt text opzionale) e console ring buffer per pagina.
+- Aggiunta gestione tab `focus` e `close_tab`.
+- Aggiunto profilo attach-only `user`: richiede endpoint CDP locale esplicito, altrimenti produce manual-action.
+- Corretto il profilo `assistant` default per evitare collisioni di ProcessSingleton tra sidecar paralleli; la persistenza esplicita passa da `BROWSER_AUTOMATION_PROFILE_ROOT`.
+- Espanso `BrowserCapabilityProvider` con tutti i tool browser: profiles, console, focus, close_tab, screenshot, pdf, arm_file_chooser, respond_dialog, wait_download oltre ai tool gia' presenti.
+- Aggiornato `BrowserTaskExecutor` per checkpoint snapshot redatti con metadata browser utili alla UI.
+- Aggiornato `TaskUiReadModel` per esporre metadata browser senza esporre input raw.
+- Aggiunti test reali Playwright per artifact, console, dialog, upload, download, profili e tab lifecycle.
+
+Perche': il browser runtime ora ha primitive operative sufficienti per prenotazioni, compilazione form, download/upload e task lunghi orchestrati dal Durable Task Runtime. Il sidecar continua a non possedere autonomia, policy o durata del task: esegue primitive locali controllate, mentre Rust conserva capability, approval, checkpoint e scheduling.
+
+## Prossimo blocco
+
+- Costruire la prima UI/CLI di osservabilita' per task lunghi: coda, dettaglio task browser, checkpoint, approvazioni manuali e artifact browser.

@@ -53,9 +53,9 @@
 
 ### Task 4: Full Verification And Docs
 
-- [ ] Run `make browser-test`.
-- [ ] Run `cargo test --workspace`.
-- [ ] Run `make test`.
-- [ ] Update `PROJECT.md`, this plan and `docs/work-memory.md`.
-- [ ] Run `git diff --check`.
-- [ ] Commit as `Document production browser automation`.
+- [x] Run `make browser-test`.
+- [x] Run `cargo test --workspace`.
+- [x] Run `make test`.
+- [x] Update `PROJECT.md`, this plan and `docs/work-memory.md`.
+- [x] Run `git diff --check`.
+- [x] Commit as `Document production browser automation`.

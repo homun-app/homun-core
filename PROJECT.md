@@ -814,7 +814,7 @@ Implementato:
 
 ### Fase 6 - Browser Automation
 
-Stato: first production slice implementato.
+Stato: runtime/core production-ready implementato.
 
 Deliverable:
 
@@ -835,21 +835,28 @@ Implementato:
 - trasporto stdio JSON lines, senza control surface HTTP.
 - contratti tipizzati per request/response, errori retryable e manual action.
 - profilo managed `assistant`, browser discovery e launch Chromium.
+- profilo attach-only `user` via endpoint CDP locale esplicito; senza endpoint ritorna manual-action.
 - snapshot/ref loop su pagine reali, con refs invalidati dopo navigazione.
-- azioni atomiche iniziali: fill, type, click e wait.
+- azioni atomiche: fill, type, click e wait.
+- gestione tab: focus e close tab.
+- artifact reali: screenshot e PDF dentro artifact root confinata.
+- upload reale via file chooser armato e upload roots validate.
+- download reale salvato dentro artifact root confinata.
+- dialog handling con accept/dismiss e prompt text opzionale.
+- console ring buffer per pagina.
 - navigation guard per protocolli non supportati e private network opt-in.
 - artifact root confinement per output e upload roots.
+- profili default isolati per processo, con override esplicito `BROWSER_AUTOMATION_PROFILE_ROOT` per persistenza.
 - crate Rust `crates/browser-automation` con contratti serde, policy, artifact guard, client e sidecar session wrapper.
-- `BrowserCapabilityProvider` nel Capability Layer con tool policy-classified.
-- `BrowserTaskRuntimeBridge` e `BrowserTaskExecutor` con risorsa `browser_session`, checkpoint per snapshot, completed output e manual blocker -> approval.
-- test sidecar unitari, fixture Playwright reale, stdio integration, Rust contracts/policy/client/task executor e capability provider.
+- `BrowserCapabilityProvider` nel Capability Layer con tutti i tool browser policy-classified.
+- `BrowserTaskRuntimeBridge` e `BrowserTaskExecutor` con risorsa `browser_session`, checkpoint redatti per snapshot, completed output e manual blocker -> approval.
+- read model task con metadata browser UI-safe senza esporre input raw.
+- test sidecar unitari, fixture Playwright reale, stdio integration, Rust contracts/policy/client/task executor, capability provider e task UI.
 
 Non ancora incluso in questo slice:
 
-- profilo attach-only `user`.
-- upload/download/dialog/pdf/console reali.
 - UI Tauri per osservare/intervenire sui task browser.
-- install helper Playwright browser esplicito.
+- install helper Playwright browser esplicito e packaging desktop.
 
 ### Fase 7 - Desktop Observation MVP
 

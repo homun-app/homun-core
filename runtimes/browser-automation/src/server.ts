@@ -13,6 +13,7 @@ import { BrowserSessionManager } from "./browser/session_manager.js";
 const manager = new BrowserSessionManager({
   headless: process.env.BROWSER_AUTOMATION_HEADLESS !== "0",
   allowPrivateNetwork: process.env.BROWSER_AUTOMATION_ALLOW_PRIVATE_NETWORK === "1",
+  profileRoot: process.env.BROWSER_AUTOMATION_PROFILE_ROOT,
   artifactRoot: process.env.BROWSER_AUTOMATION_ARTIFACT_ROOT,
   uploadRoots: process.env.BROWSER_AUTOMATION_UPLOAD_ROOTS?.split(":").filter(Boolean),
   userCdpEndpoint: process.env.BROWSER_AUTOMATION_USER_CDP_ENDPOINT,

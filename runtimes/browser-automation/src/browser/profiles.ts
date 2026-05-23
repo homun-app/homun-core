@@ -33,7 +33,9 @@ export async function resolveAssistantProfile(options?: {
   return {
     name: "assistant",
     userDataDir:
-      options?.profileRoot ?? path.join(os.tmpdir(), "local-first-browser-automation", "assistant"),
+      options?.profileRoot ??
+      process.env.BROWSER_AUTOMATION_PROFILE_ROOT ??
+      path.join(os.tmpdir(), "local-first-browser-automation", `assistant-${process.pid}`),
     headless: options?.headless ?? true,
     executablePath: await discoverChromiumExecutable(options?.executablePath),
   };
