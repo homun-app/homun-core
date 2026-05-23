@@ -7,6 +7,7 @@ mod redaction;
 mod refs;
 mod store;
 mod types;
+mod ui;
 mod wiki;
 
 pub use crypto::*;
@@ -18,4 +19,5 @@ pub use redaction::*;
 pub use refs::*;
 pub use store::*;
 pub use types::*;
+pub use ui::*;
 pub use wiki::*;

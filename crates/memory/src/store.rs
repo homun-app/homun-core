@@ -179,6 +179,34 @@ impl SQLiteMemoryStore {
         Ok(memories)
     }
 
+    pub fn list_entities(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Vec<MemoryEntity>, String> {
+        let mut statement = self
+            .conn
+            .prepare(
+                "select ref, user_id, workspace_id, entity_type, name, canonical_key,
+                        aliases_json, privacy_domain, sensitivity, metadata_json
+                 from entities
+                 where user_id = ?1 and workspace_id = ?2
+                 order by ref",
+            )
+            .map_err(|error| error.to_string())?;
+        let mut rows = statement
+            .query((user_id.as_str(), workspace_id.as_str()))
+            .map_err(|error| error.to_string())?;
+        let mut entities = Vec::new();
+        while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+            let entity = entity_from_row(row)?;
+            if !self.is_tombstoned(&entity.reference, user_id, workspace_id)? {
+                entities.push(entity);
+            }
+        }
+        Ok(entities)
+    }
+
     pub fn upsert_entity(&self, entity: &MemoryEntity) -> Result<(), String> {
         self.conn
             .execute(
@@ -278,6 +306,34 @@ impl SQLiteMemoryStore {
         let mut relations = Vec::new();
         while let Some(row) = rows.next().map_err(|error| error.to_string())? {
             relations.push(relation_from_row(row)?);
+        }
+        Ok(relations)
+    }
+
+    pub fn list_relations(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Vec<MemoryRelation>, String> {
+        let mut statement = self
+            .conn
+            .prepare(
+                "select ref, user_id, workspace_id, source_ref, relation_type, target_ref,
+                        confidence, privacy_domain, sensitivity, evidence_json, metadata_json
+                 from relations
+                 where user_id = ?1 and workspace_id = ?2
+                 order by ref",
+            )
+            .map_err(|error| error.to_string())?;
+        let mut rows = statement
+            .query((user_id.as_str(), workspace_id.as_str()))
+            .map_err(|error| error.to_string())?;
+        let mut relations = Vec::new();
+        while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+            let relation = relation_from_row(row)?;
+            if !self.is_tombstoned(&relation.reference, user_id, workspace_id)? {
+                relations.push(relation);
+            }
         }
         Ok(relations)
     }
@@ -421,6 +477,34 @@ impl SQLiteMemoryStore {
             ),
             wiki_page_from_row,
         )
+    }
+
+    pub fn list_wiki_pages(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Vec<WikiPage>, String> {
+        let mut statement = self
+            .conn
+            .prepare(
+                "select ref, user_id, workspace_id, path, title, body, linked_refs_json,
+                        privacy_domain, sensitivity
+                 from wiki_pages
+                 where user_id = ?1 and workspace_id = ?2
+                 order by path",
+            )
+            .map_err(|error| error.to_string())?;
+        let mut rows = statement
+            .query((user_id.as_str(), workspace_id.as_str()))
+            .map_err(|error| error.to_string())?;
+        let mut pages = Vec::new();
+        while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+            let page = wiki_page_from_row(row)?;
+            if !self.is_tombstoned(&page.reference, user_id, workspace_id)? {
+                pages.push(page);
+            }
+        }
+        Ok(pages)
     }
 
     pub fn tombstone(

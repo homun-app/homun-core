@@ -61,6 +61,18 @@ Perche': Graphify produce un grafo tecnico/documentale richiamabile (`graph.json
 
 Perche': il runtime/subagente non deve scrivere direttamente nello store. L'output del `MemoryAgent` deve passare dalla facade, che conserva isolamento user/workspace, refs stabili, policy e auditabilita'.
 
+### Memory UI Read Model
+
+- Aggiunto `MemoryUiReadModel`.
+- Aggiunte viste UI-safe per dashboard, lista memorie, dettaglio memoria e privacy overview.
+- Aggiunti metodi read-only nello store per entita', relazioni e wiki pages.
+- La dashboard espone conteggi per status, privacy domain e sensitivity.
+- Il dettaglio memoria espone refs, evidenze, entita', relazioni e wiki pages collegate.
+- Le decisioni di visibilita' vengono auditate anche quando negano una memoria.
+- I payload raw degli eventi non vengono restituiti dalle viste UI.
+
+Perche': la UI Tauri/React ha bisogno di dati gia' pronti per schermate operative, ma non deve bypassare privacy, anti-esfiltrazione o audit leggendo direttamente tabelle grezze.
+
 ### Principi architetturali confermati
 
 - Il progetto e' language-agnostic e multilingua di default.

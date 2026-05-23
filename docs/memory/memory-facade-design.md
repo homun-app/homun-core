@@ -172,3 +172,14 @@ Tests must cover:
 - wiki writes reject secret raw content.
 - context packs preserve refs.
 - access decisions are audited.
+
+## UI Read Model
+
+The UI must not query raw tables directly. It uses `MemoryUiReadModel`, which builds policy-gated views for Tauri/React:
+
+- dashboard counts by memory status, privacy domain and sensitivity.
+- memory list items with summaries, refs and language hints.
+- memory detail with evidence refs, related entities, relations and wiki pages.
+- privacy overview across domains and sensitive records.
+
+The read model audits allowed and denied memory visibility decisions and never returns raw event payloads.

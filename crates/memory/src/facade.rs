@@ -1,9 +1,9 @@
 use crate::{
     AccessDecisionKind, DataSensitivity, GraphifyArtifacts, GraphifyImport, GraphifyImportSummary,
-    MemoryAccessRequest, MemoryContextItem, MemoryContextPack, MemoryEntity, MemoryEvent,
-    MemoryEvidence, MemoryExtraction, MemoryExtractionSummary, MemoryPolicyEngine, MemoryRecord,
-    MemoryRef, MemoryRefKind, MemoryRelation, MemoryStatus, PrivacyDomain, SQLiteMemoryStore,
-    UserId, WikiFileStore, WikiPage, WorkspaceId,
+    MemoryAccessDecision, MemoryAccessRequest, MemoryContextItem, MemoryContextPack, MemoryEntity,
+    MemoryEvent, MemoryEvidence, MemoryExtraction, MemoryExtractionSummary, MemoryPolicyEngine,
+    MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation, MemoryStatus, PrivacyDomain,
+    SQLiteMemoryStore, UserId, WikiFileStore, WikiPage, WorkspaceId,
 };
 use std::str::FromStr;
 
@@ -42,6 +42,10 @@ impl MemoryFacade {
 
     pub fn link_evidence(&self, evidence: &MemoryEvidence) -> Result<(), String> {
         self.store.link_evidence(evidence)
+    }
+
+    pub fn record_wiki_page_for_ui(&self, page: &WikiPage) -> Result<(), String> {
+        self.store.record_wiki_page(page)
     }
 
     pub fn apply_extraction(
@@ -216,6 +220,72 @@ impl MemoryFacade {
 
     pub fn access_audit_count(&self) -> Result<u64, String> {
         self.store.access_audit_count()
+    }
+
+    pub fn get_memory_for_ui(
+        &self,
+        reference: &MemoryRef,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Option<MemoryRecord>, String> {
+        self.store.get_memory(reference, user_id, workspace_id)
+    }
+
+    pub fn list_memories_for_ui(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Vec<MemoryRecord>, String> {
+        self.store.list_memories(user_id, workspace_id)
+    }
+
+    pub fn list_entities_for_ui(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Vec<MemoryEntity>, String> {
+        self.store.list_entities(user_id, workspace_id)
+    }
+
+    pub fn list_relations_for_ui(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Vec<MemoryRelation>, String> {
+        self.store.list_relations(user_id, workspace_id)
+    }
+
+    pub fn list_wiki_pages_for_ui(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Vec<WikiPage>, String> {
+        self.store.list_wiki_pages(user_id, workspace_id)
+    }
+
+    pub fn evidence_for_ui(
+        &self,
+        memory_ref: &MemoryRef,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Vec<MemoryEvidence>, String> {
+        self.store.evidence_for(memory_ref, user_id, workspace_id)
+    }
+
+    pub fn decide_memory_for_ui(
+        &self,
+        request: &MemoryAccessRequest,
+        memory: &MemoryRecord,
+    ) -> MemoryAccessDecision {
+        self.policy.decide_memory(request, memory)
+    }
+
+    pub fn audit_ui_decision(
+        &self,
+        request: &MemoryAccessRequest,
+        decision: &MemoryAccessDecision,
+    ) -> Result<MemoryRef, String> {
+        self.store.record_access_decision(request, decision)
     }
 
     fn context_item(&self, memory: &MemoryRecord) -> Result<MemoryContextItem, String> {
