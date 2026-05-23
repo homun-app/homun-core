@@ -594,5 +594,23 @@ Perche': browser automation e' una capacita' critica per operazioni reali come p
 
 ## Prossimo blocco
 
-- Scrivere il piano di implementazione browser automation partendo dalla spec.
-- Primo slice consigliato: contratti sidecar Node/TS, stdio JSON lines, managed `assistant` profile, snapshot/act su fixture locale, Rust client tipizzato e policy minima.
+### Browser automation first production slice
+
+- Creato piano `docs/superpowers/plans/2026-05-23-browser-automation.md`.
+- Creato runtime locale `runtimes/browser-automation` in Node/TypeScript con `playwright-core`.
+- Aggiunto trasporto stdio JSON lines per evitare una control surface HTTP prematura.
+- Aggiunti contratti sidecar per request/response, errori tipizzati, retry e manual action.
+- Aggiunti guardrail locali: navigation guard per protocolli e private network, artifact root confinement e upload roots.
+- Implementato profilo managed `assistant` con discovery di browser Chromium e launch Playwright.
+- Implementati tab label, snapshot/ref loop, invalidazione refs dopo navigazione e azioni atomiche iniziali (`fill`, `type`, `click`, `wait`).
+- Aggiunto test fixture reale: open pagina locale, snapshot, fill, submit, resnapshot e stale ref.
+- Creato crate Rust `crates/browser-automation` con contratti serde, policy, artifact guard, client e sidecar session wrapper.
+- Aggiunto `BrowserCapabilityProvider` nel Capability Layer con tool `browser.health`, `browser.tabs`, `browser.snapshot`, `browser.open`, `browser.navigate`, `browser.act`.
+- Aggiunto `BrowserTaskRuntimeBridge` e `BrowserTaskExecutor`: risorsa `browser_session`, snapshot come checkpoint, output come completed, manual blocker come `NeedsApproval`.
+- Aggiunti target Makefile `browser-sync`, `browser-test`, `test-browser`; `make test` ora include i test browser.
+
+Perche': questa slice rende il browser automation un componente operativo locale e testato, senza spostare autonomia o permessi nel sidecar. Il lato Node fa solo browser/CDP; Rust conserva policy, capability, durable task, checkpoint e approval.
+
+## Prossimo blocco
+
+- Estendere il browser runtime con profilo attach-only `user`, download/upload/dialog/pdf/console reali e UI read model per task browser.

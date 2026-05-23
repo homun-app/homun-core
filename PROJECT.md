@@ -814,6 +814,8 @@ Implementato:
 
 ### Fase 6 - Browser Automation
 
+Stato: first production slice implementato.
+
 Deliverable:
 
 - crate Rust `crates/browser-automation`.
@@ -826,6 +828,28 @@ Deliverable:
 - integrazione con Durable Task Runtime per ricerche, monitoraggi e operazioni di giorni.
 
 Regola: il browser engine esegue step controllati, ma non possiede la durata del task.
+
+Implementato:
+
+- runtime locale `runtimes/browser-automation` in Node/TypeScript con `playwright-core`.
+- trasporto stdio JSON lines, senza control surface HTTP.
+- contratti tipizzati per request/response, errori retryable e manual action.
+- profilo managed `assistant`, browser discovery e launch Chromium.
+- snapshot/ref loop su pagine reali, con refs invalidati dopo navigazione.
+- azioni atomiche iniziali: fill, type, click e wait.
+- navigation guard per protocolli non supportati e private network opt-in.
+- artifact root confinement per output e upload roots.
+- crate Rust `crates/browser-automation` con contratti serde, policy, artifact guard, client e sidecar session wrapper.
+- `BrowserCapabilityProvider` nel Capability Layer con tool policy-classified.
+- `BrowserTaskRuntimeBridge` e `BrowserTaskExecutor` con risorsa `browser_session`, checkpoint per snapshot, completed output e manual blocker -> approval.
+- test sidecar unitari, fixture Playwright reale, stdio integration, Rust contracts/policy/client/task executor e capability provider.
+
+Non ancora incluso in questo slice:
+
+- profilo attach-only `user`.
+- upload/download/dialog/pdf/console reali.
+- UI Tauri per osservare/intervenire sui task browser.
+- install helper Playwright browser esplicito.
 
 ### Fase 7 - Desktop Observation MVP
 

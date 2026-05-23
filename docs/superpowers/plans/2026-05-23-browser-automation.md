@@ -161,11 +161,11 @@ export type BrowserMethod =
 - Modify: `docs/superpowers/plans/2026-05-23-browser-automation.md`
 - Test: `runtimes/browser-automation/tests/integration_stdio.test.ts`
 
-- [ ] Add `browser-sync`, `browser-test` and `test-browser` Makefile targets.
-- [ ] Add stdio integration test that starts the sidecar process and calls `browser.health`.
-- [ ] Run `make browser-test`.
-- [ ] Run `cargo test --workspace`.
-- [ ] Run `make test`.
-- [ ] Update docs and work-memory with production-ready status and remaining non-goals.
-- [ ] Mark this plan complete.
-- [ ] Commit as `Document browser automation runtime`.
+- [x] Add `browser-sync`, `browser-test` and `test-browser` Makefile targets.
+- [x] Add stdio integration test that starts the sidecar process and calls `browser.health`.
+- [x] Run `make browser-test`.
+- [x] Run `cargo test --workspace`.
+- [x] Run `make test`.
+- [x] Update docs and work-memory with production-ready status and remaining non-goals.
+- [x] Mark this plan complete.
+- [x] Commit as `Document browser automation runtime`.
