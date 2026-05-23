@@ -1,6 +1,7 @@
 mod crypto;
 mod facade;
 mod graph;
+mod graphify;
 mod policy;
 mod redaction;
 mod refs;
@@ -11,6 +12,7 @@ mod wiki;
 pub use crypto::*;
 pub use facade::*;
 pub use graph::*;
+pub use graphify::*;
 pub use policy::*;
 pub use redaction::*;
 pub use refs::*;

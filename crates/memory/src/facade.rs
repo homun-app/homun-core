@@ -1,7 +1,8 @@
 use crate::{
-    AccessDecisionKind, MemoryAccessRequest, MemoryContextItem, MemoryContextPack, MemoryEntity,
-    MemoryEvent, MemoryEvidence, MemoryPolicyEngine, MemoryRecord, MemoryRelation,
-    SQLiteMemoryStore, WikiFileStore, WikiPage,
+    AccessDecisionKind, DataSensitivity, GraphifyArtifacts, GraphifyImport, GraphifyImportSummary,
+    MemoryAccessRequest, MemoryContextItem, MemoryContextPack, MemoryEntity, MemoryEvent,
+    MemoryEvidence, MemoryPolicyEngine, MemoryRecord, MemoryRelation, PrivacyDomain,
+    SQLiteMemoryStore, UserId, WikiFileStore, WikiPage, WorkspaceId,
 };
 
 pub struct MemoryWikiProjection {
@@ -90,6 +91,23 @@ impl MemoryFacade {
         projection: &MemoryWikiProjection,
     ) -> Result<(), String> {
         wiki.write_page(&self.store, &projection.page)
+    }
+
+    pub fn import_graphify_artifacts(
+        &self,
+        artifacts: &GraphifyArtifacts,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        privacy_domain: PrivacyDomain,
+        sensitivity: DataSensitivity,
+    ) -> Result<GraphifyImportSummary, String> {
+        GraphifyImport::new(&self.store).import_artifacts(
+            artifacts,
+            user_id,
+            workspace_id,
+            privacy_domain,
+            sensitivity,
+        )
     }
 
     pub fn access_audit_count(&self) -> Result<u64, String> {

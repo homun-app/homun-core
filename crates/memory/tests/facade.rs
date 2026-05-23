@@ -1,8 +1,9 @@
 use local_first_memory::{
-    DataSensitivity, MemoryAccessRequest, MemoryEvent, MemoryEvidence, MemoryFacade, MemoryRecord,
-    MemoryRef, MemoryRefKind, MemoryStatus, MemoryWikiProjection, PrivacyDomain, SQLiteMemoryStore,
-    UserId, WikiFileStore, WikiPage, WorkspaceId,
+    DataSensitivity, GraphifyArtifacts, MemoryAccessRequest, MemoryEvent, MemoryEvidence,
+    MemoryFacade, MemoryRecord, MemoryRef, MemoryRefKind, MemoryStatus, MemoryWikiProjection,
+    PrivacyDomain, SQLiteMemoryStore, UserId, WikiFileStore, WikiPage, WorkspaceId,
 };
+use std::fs;
 
 #[test]
 fn facade_builds_policy_gated_context_pack_with_refs_and_evidence() {
@@ -70,6 +71,48 @@ fn facade_projects_confirmed_memory_to_wiki() {
     facade
         .project_to_wiki(&wiki, &MemoryWikiProjection { page })
         .unwrap();
+}
+
+#[test]
+fn facade_imports_graphify_artifacts_through_memory_boundary() {
+    let root = std::env::temp_dir().join(format!("facade-graphify-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("GRAPH_REPORT.md"), "# Graph Report\n").unwrap();
+    fs::write(root.join("graph.html"), "<html></html>\n").unwrap();
+    fs::write(
+        root.join("graph.json"),
+        serde_json::json!({
+            "nodes": [
+                {"id": "memory_facade", "label": "MemoryFacade", "community": 1},
+                {"id": "sqlite_store", "label": "SQLiteMemoryStore", "community": 1}
+            ],
+            "links": [
+                {
+                    "source": "memory_facade",
+                    "target": "sqlite_store",
+                    "relation": "uses",
+                    "confidence": "EXTRACTED"
+                }
+            ]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let artifacts = GraphifyArtifacts::from_output_dir(&root).unwrap();
+    let facade = MemoryFacade::new(SQLiteMemoryStore::open_in_memory().unwrap());
+
+    let summary = facade
+        .import_graphify_artifacts(
+            &artifacts,
+            &UserId::new("user_1"),
+            &WorkspaceId::new("workspace_1"),
+            PrivacyDomain::new("technical"),
+            DataSensitivity::Internal,
+        )
+        .unwrap();
+
+    assert_eq!(summary.nodes_imported, 2);
+    assert_eq!(summary.edges_imported, 1);
 }
 
 fn request(domains: Vec<&str>) -> MemoryAccessRequest {

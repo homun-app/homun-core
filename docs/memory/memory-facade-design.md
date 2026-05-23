@@ -43,6 +43,18 @@ Graphify adapter rules:
 - The facade keeps personal memory policy, privacy domains, anti-exfiltration and user/workspace isolation; Graphify does not bypass those rules.
 - Graphify imports technical/document graph knowledge. It does not become the sole personal-memory database.
 
+Inspected Graphify reference:
+
+- Repository: `safishamsi/graphify`.
+- Commit inspected: `990ac706d823bf92275333433fde4ef4782a9139`.
+- Pipeline: `detect() -> extract() -> build_graph() -> cluster() -> analyze() -> report() -> export()`.
+- Extractors emit plain JSON fragments with `nodes` and `edges`.
+- Exported `graph.json` uses NetworkX node-link JSON with `nodes` and `links`.
+- Nodes carry fields such as `id`, `label`, `source_file`, `source_location`, `community` and optional extra metadata.
+- Links carry `source`, `target`, `relation`, `confidence`, optional `context` and optional extra metadata.
+- Confidence labels are `EXTRACTED`, `INFERRED`, `AMBIGUOUS`.
+- LLM-facing usage is query-first: `graphify query`, `graphify path`, `graphify explain` should be preferred over loading the entire report for focused questions.
+
 ### Wiki Store
 
 Markdown files are human-readable projections of confirmed knowledge. The wiki does not receive raw events or secret payloads. Wiki writes are mediated by policy and linked back to DB refs through frontmatter.

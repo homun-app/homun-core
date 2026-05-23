@@ -439,6 +439,9 @@ Regole adapter:
 - Gli id edge Graphify vengono conservati in `MemoryRelation.metadata`.
 - Gli output `graphify-out/graph.json`, `GRAPH_REPORT.md` e `graph.html` sono artefatti richiamabili, non fonti che bypassano policy e privacy domains.
 - Query/path/explain di Graphify saranno esposti attraverso un adapter del Memory Core, non chiamati direttamente dai subagenti.
+- Il formato importato e' NetworkX node-link JSON: `nodes` + `links`.
+- I confidence label Graphify (`EXTRACTED`, `INFERRED`, `AMBIGUOUS`) vengono conservati nei metadati e mappati a score interni.
+- L'interfaccia LLM deve restare query-first: usare `graphify query`, `graphify path`, `graphify explain` per contesto mirato prima di leggere report interi.
 
 ### Obsidian Wiki / LLM Wiki
 

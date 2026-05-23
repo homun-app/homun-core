@@ -35,11 +35,18 @@ Perche': la memoria e' un pezzo separato e va completata come componente autonom
 ### Graphify come backend grafo
 
 - Confermato che il backend grafo target e' `safishamsi/graphify`.
+- Clonato e ispezionato Graphify a commit `990ac706d823bf92275333433fde4ef4782a9139`.
+- Verificata la pipeline `detect -> extract -> build_graph -> cluster -> analyze -> report -> export`.
+- Verificato che `graph.json` usa formato NetworkX node-link con `nodes` e `links`.
+- Verificata l'interfaccia LLM query-first: `graphify query`, `graphify path`, `graphify explain`.
 - Aggiornato il design memoria con regole adapter Graphify.
 - Aggiornato `PROJECT.md` per chiarire che Graphify e' il motore scelto per memoria tecnica/documentale.
 - Aggiunto `metadata` anche a `MemoryRelation`.
 - Lo store SQLite salva ora `relations.metadata_json`.
 - I test coprono metadati Graphify su edge: `graphify_edge_id`, node ids e path artefatti.
+- Aggiunto adapter `GraphifyImport` per importare artifact `graphify-out` nel Memory Core.
+- Aggiunto `GraphifyCli` per costruire comandi query/path/explain senza far leggere report interi ai caller.
+- Esposto import Graphify da `MemoryFacade`.
 
 Perche': Graphify produce un grafo tecnico/documentale richiamabile (`graph.json`, `GRAPH_REPORT.md`, `graph.html`). Le nostre entita' e relazioni devono poter conservare mapping verso quei nodi/edge senza permettere a Graphify di bypassare policy, privacy domains, multiutente e anti-esfiltrazione.
 
