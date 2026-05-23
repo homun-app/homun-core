@@ -11,6 +11,7 @@ mod store;
 mod types;
 mod ui;
 mod wiki;
+mod wiki_sync;
 
 pub use crypto::*;
 pub use facade::*;
@@ -25,3 +26,4 @@ pub use store::*;
 pub use types::*;
 pub use ui::*;
 pub use wiki::*;
+pub use wiki_sync::*;

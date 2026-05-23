@@ -6,7 +6,7 @@ use crate::{
     MemoryRefKind, MemoryRelation, MemorySearchPage, MemorySearchRequest, MemorySearchResult,
     MemoryStatus, MemoryUpdatePatch, PrivacyDomain,
     SQLiteMemoryStore, UserId, WikiFileStore, WikiPage, WorkspaceId, current_timestamp,
-    ensure_transition,
+    ensure_transition, parse_wiki_markdown, WikiCorrectionSyncReport,
 };
 use std::str::FromStr;
 
@@ -435,6 +435,86 @@ impl MemoryFacade {
         projection: &MemoryWikiProjection,
     ) -> Result<(), String> {
         wiki.write_page(&self.store, &projection.page)
+    }
+
+    pub fn import_wiki_correction(
+        &self,
+        request: &MemoryLifecycleRequest,
+        markdown: &str,
+    ) -> Result<WikiCorrectionSyncReport, String> {
+        let parsed = parse_wiki_markdown(markdown)?;
+        if parsed.user_id != request.user_id || parsed.workspace_id != request.workspace_id {
+            self.audit_lifecycle(
+                request,
+                AccessDecisionKind::Deny,
+                vec!["scope_mismatch".to_string()],
+            )?;
+            return Err("cannot import wiki correction outside user/workspace".to_string());
+        }
+        let Some(correction_of) = parsed.linked_refs.first().cloned() else {
+            return Ok(WikiCorrectionSyncReport {
+                created_candidates: 0,
+                unchanged: 0,
+                conflicted: 0,
+                rejected: 1,
+                candidate_refs: vec![],
+            });
+        };
+
+        if let Some(existing_page) =
+            self.store
+                .get_wiki_page(&parsed.wiki_ref, &request.user_id, &request.workspace_id)?
+        {
+            if existing_page.body.trim() == parsed.body.trim() {
+                self.audit_lifecycle(request, AccessDecisionKind::Allow, vec![])?;
+                return Ok(WikiCorrectionSyncReport {
+                    created_candidates: 0,
+                    unchanged: 1,
+                    conflicted: 0,
+                    rejected: 0,
+                    candidate_refs: vec![],
+                });
+            }
+        }
+
+        let now = current_timestamp();
+        let candidate_ref = MemoryRef::generated(
+            MemoryRefKind::Memory,
+            request.user_id.clone(),
+            request.workspace_id.clone(),
+        );
+        let candidate = MemoryRecord {
+            reference: candidate_ref.clone(),
+            user_id: request.user_id.clone(),
+            workspace_id: request.workspace_id.clone(),
+            memory_type: "wiki_correction".to_string(),
+            text: parsed.body,
+            aliases: vec![parsed.title],
+            language_hints: vec![],
+            confidence: 0.5,
+            status: MemoryStatus::Candidate,
+            privacy_domain: parsed.privacy_domain,
+            sensitivity: parsed.sensitivity,
+            metadata: serde_json::json!({
+                "source": "wiki_sync",
+                "wiki_ref": parsed.wiki_ref.to_string()
+            }),
+            created_at: now.clone(),
+            updated_at: now.clone(),
+            last_seen_at: Some(now),
+            supersedes: vec![],
+            superseded_by: None,
+            correction_of: Some(correction_of),
+        };
+        self.store.upsert_memory(&candidate)?;
+        self.audit_lifecycle(request, AccessDecisionKind::Allow, vec![])?;
+        Ok(WikiCorrectionSyncReport {
+            created_candidates: 1,
+            unchanged: 0,
+            conflicted: 0,
+            rejected: 0,
+            candidate_refs: vec![candidate_ref],
+        })
     }
 
     pub fn import_graphify_artifacts(
