@@ -124,6 +124,7 @@ impl CapabilityFacade {
             return Err(error_from_denial(decision.reasons));
         }
 
+        validate_arguments(&tool.input_schema, &call.arguments)?;
         let result = provider.call_tool(&call)?;
         self.audit.record(CapabilityAuditEvent {
             user_id: context.user_id.clone(),
@@ -164,4 +165,65 @@ fn error_from_denial(reasons: Vec<String>) -> CapabilityError {
     } else {
         CapabilityError::PolicyDenied(first)
     }
+}
+
+fn validate_arguments(
+    schema: &serde_json::Value,
+    arguments: &serde_json::Value,
+) -> CapabilityResult<()> {
+    if schema.get("type").and_then(|value| value.as_str()) == Some("object")
+        && !arguments.is_object()
+    {
+        return Err(CapabilityError::SchemaValidationFailed(
+            "arguments must be object".to_string(),
+        ));
+    }
+
+    if let Some(required) = schema.get("required").and_then(|value| value.as_array()) {
+        for field in required.iter().filter_map(|value| value.as_str()) {
+            if arguments.get(field).is_none() {
+                return Err(CapabilityError::SchemaValidationFailed(format!(
+                    "{field} is required"
+                )));
+            }
+        }
+    }
+
+    if let Some(properties) = schema.get("properties").and_then(|value| value.as_object()) {
+        for (field, field_schema) in properties {
+            let Some(value) = arguments.get(field) else {
+                continue;
+            };
+            match field_schema.get("type").and_then(|value| value.as_str()) {
+                Some("string") if !value.is_string() => {
+                    return Err(CapabilityError::SchemaValidationFailed(format!(
+                        "{field} must be string"
+                    )));
+                }
+                Some("number") if !value.is_number() => {
+                    return Err(CapabilityError::SchemaValidationFailed(format!(
+                        "{field} must be number"
+                    )));
+                }
+                Some("boolean") if !value.is_boolean() => {
+                    return Err(CapabilityError::SchemaValidationFailed(format!(
+                        "{field} must be boolean"
+                    )));
+                }
+                Some("array") if !value.is_array() => {
+                    return Err(CapabilityError::SchemaValidationFailed(format!(
+                        "{field} must be array"
+                    )));
+                }
+                Some("object") if !value.is_object() => {
+                    return Err(CapabilityError::SchemaValidationFailed(format!(
+                        "{field} must be object"
+                    )));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    Ok(())
 }

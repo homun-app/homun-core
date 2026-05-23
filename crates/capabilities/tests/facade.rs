@@ -1,7 +1,8 @@
 use local_first_capabilities::{
     ActionClass, CapabilityCall, CapabilityConnection, CapabilityError, CapabilityFacade,
-    CapabilityPolicy, CapabilityProviderKind, CapabilityTool, ConnectionStatus, FakeCapabilityProvider,
-    InMemoryCapabilityAudit, PolicyContext, ProviderId, UserId, WorkspaceId,
+    CapabilityPolicy, CapabilityProviderKind, CapabilityTool, ConnectionStatus,
+    FakeCapabilityProvider, InMemoryCapabilityAudit, PolicyContext, ProviderId, UserId,
+    WorkspaceId,
 };
 
 #[test]
@@ -94,6 +95,34 @@ fn facade_denies_managed_tool_without_cloud_permission() {
 }
 
 #[test]
+fn facade_rejects_tool_arguments_that_do_not_match_schema() {
+    let mut facade = test_facade();
+    facade.register_provider(FakeCapabilityProvider::new(
+        ProviderId::new("github"),
+        CapabilityProviderKind::Native,
+        true,
+        None,
+        vec![search_tool_with_schema()],
+    ));
+
+    let error = facade
+        .call_tool(
+            &policy_context(false),
+            CapabilityCall {
+                provider_id: ProviderId::new("github"),
+                tool_name: "github.search".to_string(),
+                arguments: serde_json::json!({"query": 42}),
+            },
+        )
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        CapabilityError::SchemaValidationFailed("query must be string".to_string())
+    );
+}
+
+#[test]
 fn facade_filters_connections_by_user_and_workspace() {
     let mut provider = FakeCapabilityProvider::new(
         ProviderId::new("github"),
@@ -142,6 +171,25 @@ fn tool(name: impl Into<String>, action: ActionClass) -> CapabilityTool {
         privacy_domains: vec!["work".to_string()],
         sensitivity: "private".to_string(),
         input_schema: serde_json::json!({"type": "object"}),
+    }
+}
+
+fn search_tool_with_schema() -> CapabilityTool {
+    CapabilityTool {
+        name: "github.search".to_string(),
+        provider_id: ProviderId::new("github"),
+        provider_kind: CapabilityProviderKind::Native,
+        action: ActionClass::Read,
+        description: "Search GitHub".to_string(),
+        privacy_domains: vec!["work".to_string()],
+        sensitivity: "private".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"}
+            },
+            "required": ["query"]
+        }),
     }
 }
 

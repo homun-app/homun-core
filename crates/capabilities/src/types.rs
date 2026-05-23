@@ -139,6 +139,24 @@ pub struct CapabilityCallResult {
     pub output: serde_json::Value,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TriggerStatus {
+    Active,
+    Disabled,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CapabilityTrigger {
+    pub id: String,
+    pub provider_id: ProviderId,
+    pub name: String,
+    pub status: TriggerStatus,
+    pub privacy_domains: Vec<String>,
+    pub config: serde_json::Value,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SkillPermissions {
     pub network: Vec<String>,
