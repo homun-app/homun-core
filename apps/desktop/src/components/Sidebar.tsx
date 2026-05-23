@@ -169,6 +169,20 @@ export function NavDrawer({
       </div>
 
       <footer className="drawer-footer">
+        <div className="drawer-persistent-actions" aria-label="Azioni persistenti">
+          <button className="drawer-footer-action" type="button">
+            <Bell size={16} />
+            <span>Notifiche</span>
+          </button>
+          <button
+            className="drawer-footer-action drawer-settings-action"
+            type="button"
+            onClick={() => onNavigate("settings")}
+          >
+            <Settings size={16} />
+            <span>Impostazioni</span>
+          </button>
+        </div>
         <button className="invite-card" type="button">
           <Grid2X2 size={16} />
           <span>

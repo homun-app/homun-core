@@ -348,6 +348,30 @@ small {
 .drawer-footer {
   border-top: 1px solid var(--line);
   padding-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.drawer-persistent-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.drawer-footer-action {
+  min-height: 36px;
+  border-radius: var(--radius);
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #3b4149;
+  background: transparent;
+}
+
+.drawer-footer-action:hover {
+  background: var(--surface-hover);
 }
 
 .invite-card {
