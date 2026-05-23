@@ -60,5 +60,13 @@ fn relation(source_ref: MemoryRef, target_ref: MemoryRef) -> MemoryRelation {
         privacy_domain: PrivacyDomain::new("work"),
         sensitivity: DataSensitivity::Private,
         evidence: vec![],
+        metadata: serde_json::json!({
+            "adapter": "graphify",
+            "graphify_edge_id": "edge_project_acme_uses_tool_zed",
+            "graphify_source_node_id": "node_project_acme",
+            "graphify_target_node_id": "node_tool_zed",
+            "graph_json_path": "graphify-out/graph.json",
+            "report_path": "graphify-out/GRAPH_REPORT.md"
+        }),
     }
 }

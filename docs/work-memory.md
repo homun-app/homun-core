@@ -32,6 +32,17 @@ Perche': il progetto deve imparare da implementazioni esistenti senza perdere id
 
 Perche': la memoria e' un pezzo separato e va completata come componente autonomo. La facade unisce SQLite, grafo e wiki senza fonderli, mantenendo refs stabili, isolamento user/workspace, privacy domains, anti-esfiltrazione, crittografia e audit.
 
+### Graphify come backend grafo
+
+- Confermato che il backend grafo target e' `safishamsi/graphify`.
+- Aggiornato il design memoria con regole adapter Graphify.
+- Aggiornato `PROJECT.md` per chiarire che Graphify e' il motore scelto per memoria tecnica/documentale.
+- Aggiunto `metadata` anche a `MemoryRelation`.
+- Lo store SQLite salva ora `relations.metadata_json`.
+- I test coprono metadati Graphify su edge: `graphify_edge_id`, node ids e path artefatti.
+
+Perche': Graphify produce un grafo tecnico/documentale richiamabile (`graph.json`, `GRAPH_REPORT.md`, `graph.html`). Le nostre entita' e relazioni devono poter conservare mapping verso quei nodi/edge senza permettere a Graphify di bypassare policy, privacy domains, multiutente e anti-esfiltrazione.
+
 ### Principi architetturali confermati
 
 - Il progetto e' language-agnostic e multilingua di default.

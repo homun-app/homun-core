@@ -232,8 +232,8 @@ impl SQLiteMemoryStore {
             .execute(
                 "insert or replace into relations (
                     ref, user_id, workspace_id, source_ref, relation_type, target_ref,
-                    confidence, privacy_domain, sensitivity, evidence_json
-                ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                    confidence, privacy_domain, sensitivity, evidence_json, metadata_json
+                ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                 (
                     relation.reference.to_string(),
                     relation.user_id.as_str(),
@@ -245,6 +245,7 @@ impl SQLiteMemoryStore {
                     relation.privacy_domain.as_str(),
                     enum_name(&relation.sensitivity)?,
                     serde_json::to_string(&relation.evidence).map_err(|error| error.to_string())?,
+                    serde_json::to_string(&relation.metadata).map_err(|error| error.to_string())?,
                 ),
             )
             .map_err(|error| error.to_string())?;
@@ -261,7 +262,7 @@ impl SQLiteMemoryStore {
             .conn
             .prepare(
                 "select ref, user_id, workspace_id, source_ref, relation_type, target_ref,
-                        confidence, privacy_domain, sensitivity, evidence_json
+                        confidence, privacy_domain, sensitivity, evidence_json, metadata_json
                  from relations
                  where source_ref = ?1 and user_id = ?2 and workspace_id = ?3
                  order by ref",
@@ -590,7 +591,8 @@ impl SQLiteMemoryStore {
                     confidence real not null,
                     privacy_domain text not null,
                     sensitivity text not null,
-                    evidence_json text not null
+                    evidence_json text not null,
+                    metadata_json text not null
                 );
                 create index if not exists idx_relations_source on relations(user_id, workspace_id, source_ref);
 
@@ -720,6 +722,11 @@ fn relation_from_row(row: &Row<'_>) -> Result<MemoryRelation, String> {
         sensitivity: enum_from_name(row.get::<_, String>(8).map_err(|error| error.to_string())?)?,
         evidence: serde_json::from_str(
             &row.get::<_, String>(9).map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?,
+        metadata: serde_json::from_str(
+            &row.get::<_, String>(10)
+                .map_err(|error| error.to_string())?,
         )
         .map_err(|error| error.to_string())?,
     })

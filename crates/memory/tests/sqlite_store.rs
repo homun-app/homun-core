@@ -191,6 +191,10 @@ fn relation(
         privacy_domain: PrivacyDomain::new("work"),
         sensitivity: DataSensitivity::Private,
         evidence: vec![],
+        metadata: serde_json::json!({
+            "adapter": "graphify",
+            "graphify_edge_id": key
+        }),
     }
 }
 

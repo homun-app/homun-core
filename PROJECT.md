@@ -404,7 +404,7 @@ automation_candidates(id, routine_id, proposal_json, risk_level, status, created
 
 ### Graphify / GraphifyLabs
 
-Graphify non va perso. E' il motore per la memoria tecnica e documentale.
+Graphify (`safishamsi/graphify`) non va perso. E' il motore scelto per la memoria tecnica e documentale.
 
 Ruolo:
 
@@ -432,6 +432,13 @@ Project Acme
 ```
 
 Graphify resta separato dalla memoria personale grezza. Non deve diventare l'unico database della persona.
+
+Regole adapter:
+
+- Gli id nodo Graphify vengono conservati in `MemoryEntity.metadata`.
+- Gli id edge Graphify vengono conservati in `MemoryRelation.metadata`.
+- Gli output `graphify-out/graph.json`, `GRAPH_REPORT.md` e `graph.html` sono artefatti richiamabili, non fonti che bypassano policy e privacy domains.
+- Query/path/explain di Graphify saranno esposti attraverso un adapter del Memory Core, non chiamati direttamente dai subagenti.
 
 ### Obsidian Wiki / LLM Wiki
 

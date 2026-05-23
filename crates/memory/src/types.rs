@@ -133,6 +133,7 @@ pub struct MemoryRelation {
     pub privacy_domain: PrivacyDomain,
     pub sensitivity: DataSensitivity,
     pub evidence: Vec<MemoryRef>,
+    pub metadata: serde_json::Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

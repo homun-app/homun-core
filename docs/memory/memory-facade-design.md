@@ -32,7 +32,16 @@ Source of operational truth:
 
 ### Graph Store
 
-MVP graph lives in SQLite as entities and relations. A future Graphify adapter can import technical/document graph nodes into the same ref model without owning personal memory.
+MVP graph lives in SQLite as entities and relations, but the graph backend target is Graphify (`safishamsi/graphify`). Graphify remains the engine for technical/document/code graphs and produces queryable graph artifacts such as `graphify-out/graph.json`, `GRAPH_REPORT.md` and `graph.html`.
+
+Graphify adapter rules:
+
+- Graphify node ids map to `MemoryEntity.metadata.graphify_node_id`.
+- Graphify edge ids map to `MemoryRelation.metadata.graphify_edge_id`.
+- Imported edges keep `metadata.adapter = "graphify"`.
+- Artifact paths are stored as metadata, for example `graph_json_path` and `report_path`.
+- The facade keeps personal memory policy, privacy domains, anti-exfiltration and user/workspace isolation; Graphify does not bypass those rules.
+- Graphify imports technical/document graph knowledge. It does not become the sole personal-memory database.
 
 ### Wiki Store
 
