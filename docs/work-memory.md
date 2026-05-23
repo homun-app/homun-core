@@ -934,5 +934,40 @@ Perche': il progetto aveva gia' definito il percorso corretto: osservare eventi,
 
 ## Prossimo blocco
 
-- Implementare il crate/read model reale `local-computer-session` e cablare la UI a Tauri commands per sessioni computer, task runtime, approvals e health, mantenendo la struttura rail/drawer + activity card.
-- Cablare `LearningUiReadModel` alla UI Tauri con commands reali e azioni di feedback utente: conferma, correzione, rifiuto e preparazione automazione.
+### Tauri Core Bridge V1
+
+- Aggiunto stato applicativo locale in `apps/desktop/src-tauri/src/state.rs`.
+- Aggiunti command Tauri in `apps/desktop/src-tauri/src/commands.rs`.
+- Separati DTO e mapping in `apps/desktop/src-tauri/src/models.rs`.
+- Separato bootstrap seeded locale in `apps/desktop/src-tauri/src/seed.rs`.
+- Il bridge inizializza componenti core reali con store locali seeded:
+  - `TaskStore` + `TaskUiReadModel`
+  - `MemoryFacade` + `MemoryUiReadModel`
+  - `ProcessManager` + `SidecarProcessCatalog`
+  - `CapabilityRegistryStore`
+- Esposti command:
+  - `core_bridge_status`
+  - `runtime_health_snapshot`
+  - `process_check_health`
+  - `process_start`
+  - `process_stop`
+  - `task_queue_snapshot`
+  - `task_detail`
+  - `memory_dashboard_snapshot`
+  - `capability_snapshot`
+- Aggiunti DTO serializzabili e redatti per evitare di esporre raw input, `secret_ref`, env, log raw o payload sensibili.
+- Aggiunto wrapper TypeScript `apps/desktop/src/lib/coreBridge.ts` separato dai componenti React.
+- Aggiornato `PROJECT.md` con lo stato reale del bridge.
+- Verifiche eseguite:
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`
+  - `npm run typecheck`
+  - `npm run build`
+  - `cargo test --workspace`
+
+Perche': prima di cablare l'auto-apprendimento serve un confine stabile tra UI e Rust Core. La UI deve poter leggere task, approvals, memoria, processi e capability da command reali, ma l'apprendimento resta ultimo perche' deve basarsi su eventi reali generati da browser, shell, task runtime e osservazione desktop.
+
+## Prossimo blocco
+
+- Implementare il crate/read model reale `local-computer-session` e cablarlo al bridge Tauri, mantenendo activity card, timeline, browser/shell/artifact/log e takeover come singolo concetto operativo.
+- Collegare gradualmente Chat, Tasks, Memory, Connections e Settings ai command reali esistenti.
+- Lasciare `LearningUiReadModel` e azioni di feedback utente per la fine, quando gli eventi PC reali saranno disponibili.

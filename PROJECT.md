@@ -169,6 +169,9 @@ Implementato:
 - Viste shallow navigabili: Memoria, Connessioni, Automazioni, Browser e Brain Audit.
 - View-model mock separati dai componenti, allineati a task queue, run Brain, health runtime, memoria e provider/connection read model.
 - Inspector e task detail mostrano dati redatti, senza raw prompt, raw payload, raw tool args o raw output.
+- Tauri Core Bridge V1 in `apps/desktop/src-tauri`: stato applicativo locale, command Rust e DTO serializzabili/redatti per status core, health processi, task queue/detail, memory dashboard e capability snapshot.
+- Wrapper TypeScript `apps/desktop/src/lib/coreBridge.ts` separato dai componenti, cosi' i mock UI possono essere sostituiti da `invoke(...)` senza riscrivere le schermate.
+- Il bridge espone solo read model UI-safe: task detail usa checkpoint redatti, capability snapshot omette `secret_ref`, memory dashboard passa da `MemoryUiReadModel` e process health non espone env o log raw.
 
 Direzione UX aggiornata dopo analisi Manus live:
 
@@ -1198,7 +1201,7 @@ local-first-personal-assistant/
 
 ## Prossima Azione Consigliata
 
-Prima consolidare la direzione UI/runtime Local Computer, poi cablare progressivamente la UI Tauri ai read model reali del Rust Core:
+Completare il read model reale Local Computer Session e collegare progressivamente le schermate React ai Tauri commands gia' introdotti:
 
 ```text
 apps/desktop/
@@ -1209,4 +1212,4 @@ crates/browser-automation/
 crates/task-runtime/
 ```
 
-Runtime Python/MLX, memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager, Secrets/Keychain, Skill/Plugin Registry, Skill Runtime Sandbox, process adapter trusted, WASM adapter non trusted e Assistant Orchestrator Brain hanno una base operativa testata. Il primo slice UI esiste con mock realistici, ma la direzione visuale e' stata aggiornata: prima va introdotto il modello Local Computer e la UI va portata verso rail/drawer, chat attiva con activity card e progressive disclosure; poi i mock vanno sostituiti con Tauri commands/read model reali.
+Runtime Python/MLX, memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager, Secrets/Keychain, Skill/Plugin Registry, Skill Runtime Sandbox, process adapter trusted, WASM adapter non trusted e Assistant Orchestrator Brain hanno una base operativa testata. La UI Tauri esiste con direzione rail/drawer, chat attiva, activity card e progressive disclosure. Il primo Tauri Core Bridge espone read model reali per task, memoria, processi e capability; resta da introdurre il modello Local Computer persistente e poi sostituire i mock React con i command reali senza cablare ancora l'auto-apprendimento.
