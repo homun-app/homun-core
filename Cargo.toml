@@ -6,5 +6,6 @@ members = [
     "crates/task-runtime",
     "crates/browser-automation",
     "crates/process-manager",
+    "crates/secrets",
 ]
 resolver = "3"
