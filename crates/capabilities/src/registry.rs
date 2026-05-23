@@ -1,10 +1,11 @@
 use crate::{
-    ActionClass, CapabilityError, CapabilityProviderKind, CapabilityResult,
-    ManagedProviderMetadata, PolicyContext, ProviderId, UserId, WorkspaceId,
+    ActionClass, CapabilityError, CapabilityProviderKind, CapabilityResult, CapabilityTool,
+    ConnectionStatus, ManagedProviderMetadata, PolicyContext, ProviderId, UserId, WorkspaceId,
 };
 use local_first_task_runtime::ResourceClass;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::BTreeSet;
 use std::path::Path;
 use time::OffsetDateTime;
@@ -116,6 +117,96 @@ impl CapabilityProviderGrant {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CapabilityConnectionConfig {
+    pub connection_id: String,
+    pub provider_id: ProviderId,
+    pub user_id: UserId,
+    pub workspace_id: WorkspaceId,
+    pub status: ConnectionStatus,
+    pub display_name: String,
+    pub privacy_domains: Vec<String>,
+    pub secret_ref: String,
+    pub metadata: Value,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
+}
+
+impl CapabilityConnectionConfig {
+    pub fn new(
+        connection_id: impl Into<String>,
+        provider_id: ProviderId,
+        user_id: UserId,
+        workspace_id: WorkspaceId,
+        display_name: impl Into<String>,
+        secret_ref: impl Into<String>,
+    ) -> Self {
+        let now = OffsetDateTime::now_utc();
+        Self {
+            connection_id: connection_id.into(),
+            provider_id,
+            user_id,
+            workspace_id,
+            status: ConnectionStatus::Active,
+            display_name: display_name.into(),
+            privacy_domains: Vec::new(),
+            secret_ref: secret_ref.into(),
+            metadata: Value::Object(Default::default()),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    pub fn with_privacy_domains(mut self, privacy_domains: Vec<String>) -> Self {
+        self.privacy_domains = privacy_domains;
+        self
+    }
+
+    pub fn with_metadata(mut self, metadata: Value) -> Self {
+        self.metadata = strip_secret_metadata(metadata);
+        self
+    }
+
+    fn sanitized(&self) -> Self {
+        let mut sanitized = self.clone();
+        sanitized.metadata = strip_secret_metadata(sanitized.metadata);
+        sanitized
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CachedCapabilityTool {
+    pub tool: CapabilityTool,
+    pub cached_at: OffsetDateTime,
+}
+
+impl CachedCapabilityTool {
+    pub fn new(
+        provider_id: ProviderId,
+        tool_name: impl Into<String>,
+        provider_kind: CapabilityProviderKind,
+        action: ActionClass,
+        description: impl Into<String>,
+        privacy_domains: Vec<String>,
+        sensitivity: impl Into<String>,
+        input_schema: Value,
+    ) -> Self {
+        Self {
+            tool: CapabilityTool {
+                name: tool_name.into(),
+                provider_id,
+                provider_kind,
+                action,
+                description: description.into(),
+                privacy_domains,
+                sensitivity: sensitivity.into(),
+                input_schema,
+            },
+            cached_at: OffsetDateTime::now_utc(),
+        }
+    }
+}
+
 pub struct CapabilityRegistryStore {
     connection: Connection,
 }
@@ -173,6 +264,33 @@ impl CapabilityRegistryStore {
 
                 CREATE INDEX IF NOT EXISTS idx_capability_provider_grants_scope
                     ON capability_provider_grants(user_id, workspace_id, enabled);
+
+                CREATE TABLE IF NOT EXISTS capability_connection_configs (
+                    connection_id TEXT PRIMARY KEY,
+                    provider_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    display_name TEXT NOT NULL,
+                    secret_ref TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL,
+                    connection_json TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_capability_connection_configs_scope
+                    ON capability_connection_configs(user_id, workspace_id, provider_id, status);
+
+                CREATE TABLE IF NOT EXISTS capability_tool_cache (
+                    provider_id TEXT NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    provider_kind TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    tool_json TEXT NOT NULL,
+                    cached_at INTEGER NOT NULL,
+                    PRIMARY KEY (provider_id, tool_name)
+                );
 
                 INSERT INTO capability_registry_metadata(key, value)
                 VALUES ('schema_version', '1')
@@ -326,6 +444,145 @@ impl CapabilityRegistryStore {
         Ok(grants)
     }
 
+    pub fn upsert_connection_config(
+        &self,
+        config: &CapabilityConnectionConfig,
+    ) -> CapabilityResult<()> {
+        let config = config.sanitized();
+        self.connection
+            .execute(
+                "
+                INSERT INTO capability_connection_configs (
+                    connection_id,
+                    provider_id,
+                    user_id,
+                    workspace_id,
+                    status,
+                    display_name,
+                    secret_ref,
+                    metadata_json,
+                    connection_json,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                ON CONFLICT(connection_id) DO UPDATE SET
+                    provider_id = excluded.provider_id,
+                    user_id = excluded.user_id,
+                    workspace_id = excluded.workspace_id,
+                    status = excluded.status,
+                    display_name = excluded.display_name,
+                    secret_ref = excluded.secret_ref,
+                    metadata_json = excluded.metadata_json,
+                    connection_json = excluded.connection_json,
+                    updated_at = excluded.updated_at
+                ",
+                params![
+                    config.connection_id,
+                    config.provider_id.as_str(),
+                    config.user_id.as_str(),
+                    config.workspace_id.as_str(),
+                    enum_value(config.status)?,
+                    config.display_name,
+                    config.secret_ref,
+                    serde_json::to_string(&config.metadata).map_err(to_json_error)?,
+                    serde_json::to_string(&config).map_err(to_json_error)?,
+                    config.created_at.unix_timestamp(),
+                    OffsetDateTime::now_utc().unix_timestamp(),
+                ],
+            )
+            .map_err(to_store_error)?;
+        Ok(())
+    }
+
+    pub fn connection_configs(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> CapabilityResult<Vec<CapabilityConnectionConfig>> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "
+                SELECT connection_json
+                FROM capability_connection_configs
+                WHERE user_id = ?1 AND workspace_id = ?2
+                ORDER BY provider_id ASC, display_name ASC, connection_id ASC
+                ",
+            )
+            .map_err(to_store_error)?;
+        let rows = statement
+            .query_map(params![user_id.as_str(), workspace_id.as_str()], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(to_store_error)?;
+
+        let mut connections = Vec::new();
+        for row in rows {
+            connections
+                .push(serde_json::from_str(&row.map_err(to_store_error)?).map_err(to_json_error)?);
+        }
+        Ok(connections)
+    }
+
+    pub fn upsert_cached_tool(&self, cached: &CachedCapabilityTool) -> CapabilityResult<()> {
+        self.connection
+            .execute(
+                "
+                INSERT INTO capability_tool_cache (
+                    provider_id,
+                    tool_name,
+                    provider_kind,
+                    action,
+                    tool_json,
+                    cached_at
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                ON CONFLICT(provider_id, tool_name) DO UPDATE SET
+                    provider_kind = excluded.provider_kind,
+                    action = excluded.action,
+                    tool_json = excluded.tool_json,
+                    cached_at = excluded.cached_at
+                ",
+                params![
+                    cached.tool.provider_id.as_str(),
+                    cached.tool.name,
+                    provider_kind_value(cached.tool.provider_kind)?,
+                    enum_value(cached.tool.action)?,
+                    serde_json::to_string(cached).map_err(to_json_error)?,
+                    cached.cached_at.unix_timestamp(),
+                ],
+            )
+            .map_err(to_store_error)?;
+        Ok(())
+    }
+
+    pub fn cached_tools(
+        &self,
+        provider_id: &ProviderId,
+    ) -> CapabilityResult<Vec<CachedCapabilityTool>> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "
+                SELECT tool_json
+                FROM capability_tool_cache
+                WHERE provider_id = ?1
+                ORDER BY tool_name ASC
+                ",
+            )
+            .map_err(to_store_error)?;
+        let rows = statement
+            .query_map(params![provider_id.as_str()], |row| row.get::<_, String>(0))
+            .map_err(to_store_error)?;
+
+        let mut tools = Vec::new();
+        for row in rows {
+            tools.push(serde_json::from_str(&row.map_err(to_store_error)?).map_err(to_json_error)?);
+        }
+        Ok(tools)
+    }
+
     pub fn policy_context(
         &self,
         user_id: &UserId,
@@ -377,13 +634,46 @@ fn default_resource_for_kind(kind: CapabilityProviderKind) -> ResourceClass {
 }
 
 fn provider_kind_value(kind: CapabilityProviderKind) -> CapabilityResult<String> {
-    serde_json::to_value(kind)
+    enum_value(kind)
+}
+
+fn enum_value<T: Serialize>(value: T) -> CapabilityResult<String> {
+    serde_json::to_value(value)
         .map_err(to_json_error)?
         .as_str()
         .map(str::to_string)
         .ok_or_else(|| {
             CapabilityError::ToolExecutionFailed("provider kind is not string".to_string())
         })
+}
+
+fn strip_secret_metadata(value: Value) -> Value {
+    match value {
+        Value::Object(object) => Value::Object(
+            object
+                .into_iter()
+                .filter_map(|(key, value)| {
+                    if is_secret_metadata_key(&key) {
+                        None
+                    } else {
+                        Some((key, strip_secret_metadata(value)))
+                    }
+                })
+                .collect(),
+        ),
+        Value::Array(values) => {
+            Value::Array(values.into_iter().map(strip_secret_metadata).collect())
+        }
+        value => value,
+    }
+}
+
+fn is_secret_metadata_key(key: &str) -> bool {
+    let normalized = key.to_ascii_lowercase();
+    matches!(
+        normalized.as_str(),
+        "access_token" | "refresh_token" | "api_key" | "password" | "secret"
+    )
 }
 
 fn option_json<T: Serialize>(value: &Option<T>) -> CapabilityResult<Option<String>> {

@@ -1,7 +1,7 @@
 use local_first_capabilities::{
-    ActionClass, CapabilityProviderConfig, CapabilityProviderGrant, CapabilityProviderKind,
-    CapabilityRegistryStore, DataBoundary, ManagedProviderMetadata, ProviderId, UserId,
-    WorkspaceId,
+    ActionClass, CachedCapabilityTool, CapabilityConnectionConfig, CapabilityProviderConfig,
+    CapabilityProviderGrant, CapabilityProviderKind, CapabilityRegistryStore, ConnectionStatus,
+    DataBoundary, ManagedProviderMetadata, ProviderId, UserId, WorkspaceId,
 };
 use local_first_task_runtime::ResourceClass;
 
@@ -113,6 +113,60 @@ fn registry_excludes_disabled_grants_and_requires_managed_opt_in() {
 
     assert_eq!(context.enabled_providers, vec![ProviderId::new("composio")]);
     assert!(context.allow_managed_cloud);
+}
+
+#[test]
+fn registry_round_trips_connection_metadata_with_secret_ref_only() {
+    let store = CapabilityRegistryStore::open_in_memory().unwrap();
+    let connection = CapabilityConnectionConfig::new(
+        "conn_1",
+        ProviderId::new("github"),
+        UserId::new("user_1"),
+        WorkspaceId::new("workspace_1"),
+        "GitHub Work",
+        "keychain://github/conn_1",
+    )
+    .with_privacy_domains(vec!["work".to_string()])
+    .with_metadata(serde_json::json!({"account": "fabio", "api_key": "must_not_store"}));
+
+    store.upsert_connection_config(&connection).unwrap();
+    let loaded = store
+        .connection_configs(&UserId::new("user_1"), &WorkspaceId::new("workspace_1"))
+        .unwrap();
+
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].connection_id, "conn_1");
+    assert_eq!(loaded[0].status, ConnectionStatus::Active);
+    assert_eq!(loaded[0].secret_ref, "keychain://github/conn_1");
+    assert_eq!(loaded[0].metadata["account"], "fabio");
+    assert!(loaded[0].metadata.get("api_key").is_none());
+}
+
+#[test]
+fn registry_round_trips_tool_cache_for_provider() {
+    let store = CapabilityRegistryStore::open_in_memory().unwrap();
+    let cached = CachedCapabilityTool::new(
+        ProviderId::new("github"),
+        "github.search",
+        CapabilityProviderKind::Native,
+        ActionClass::Read,
+        "Search GitHub",
+        vec!["work".to_string()],
+        "private",
+        serde_json::json!({
+            "type": "object",
+            "required": ["query"],
+            "properties": {"query": {"type": "string"}}
+        }),
+    );
+
+    store.upsert_cached_tool(&cached).unwrap();
+    let tools = store.cached_tools(&ProviderId::new("github")).unwrap();
+
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0].tool.name, "github.search");
+    assert_eq!(tools[0].tool.provider_id, ProviderId::new("github"));
+    assert_eq!(tools[0].tool.input_schema["required"][0], "query");
 }
 
 fn provider_config(
