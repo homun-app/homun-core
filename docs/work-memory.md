@@ -50,6 +50,17 @@ Perche': la memoria e' un pezzo separato e va completata come componente autonom
 
 Perche': Graphify produce un grafo tecnico/documentale richiamabile (`graph.json`, `GRAPH_REPORT.md`, `graph.html`). Le nostre entita' e relazioni devono poter conservare mapping verso quei nodi/edge senza permettere a Graphify di bypassare policy, privacy domains, multiutente e anti-esfiltrazione.
 
+### Import output MemoryAgent
+
+- Aggiunto contratto `MemoryExtraction`.
+- Aggiunti `ExtractedMemory`, `ExtractedEntity`, `ExtractedRelation`.
+- Aggiunto `MemoryExtractionSummary`.
+- Aggiunto `MemoryFacade::apply_extraction`.
+- L'import crea memorie confermate, upserta entita', salva relazioni e collega evidenze.
+- Testato che un output JSON del `MemoryAgent` diventi context pack richiamabile con evidence refs.
+
+Perche': il runtime/subagente non deve scrivere direttamente nello store. L'output del `MemoryAgent` deve passare dalla facade, che conserva isolamento user/workspace, refs stabili, policy e auditabilita'.
+
 ### Principi architetturali confermati
 
 - Il progetto e' language-agnostic e multilingua di default.

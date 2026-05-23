@@ -1,9 +1,11 @@
 use crate::{
     AccessDecisionKind, DataSensitivity, GraphifyArtifacts, GraphifyImport, GraphifyImportSummary,
     MemoryAccessRequest, MemoryContextItem, MemoryContextPack, MemoryEntity, MemoryEvent,
-    MemoryEvidence, MemoryPolicyEngine, MemoryRecord, MemoryRelation, PrivacyDomain,
-    SQLiteMemoryStore, UserId, WikiFileStore, WikiPage, WorkspaceId,
+    MemoryEvidence, MemoryExtraction, MemoryExtractionSummary, MemoryPolicyEngine, MemoryRecord,
+    MemoryRef, MemoryRefKind, MemoryRelation, MemoryStatus, PrivacyDomain, SQLiteMemoryStore,
+    UserId, WikiFileStore, WikiPage, WorkspaceId,
 };
+use std::str::FromStr;
 
 pub struct MemoryWikiProjection {
     pub page: WikiPage,
@@ -40,6 +42,108 @@ impl MemoryFacade {
 
     pub fn link_evidence(&self, evidence: &MemoryEvidence) -> Result<(), String> {
         self.store.link_evidence(evidence)
+    }
+
+    pub fn apply_extraction(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        extraction: MemoryExtraction,
+    ) -> Result<MemoryExtractionSummary, String> {
+        let mut memory_refs = Vec::new();
+        let mut entity_refs = Vec::new();
+        let mut relation_refs = Vec::new();
+        let mut evidence_links_imported = 0;
+
+        for extracted in extraction.memories {
+            let reference =
+                MemoryRef::generated(MemoryRefKind::Memory, user_id.clone(), workspace_id.clone());
+            let evidence_refs = extracted.evidence_refs.clone();
+            let memory = MemoryRecord {
+                reference: reference.clone(),
+                user_id: user_id.clone(),
+                workspace_id: workspace_id.clone(),
+                memory_type: extracted.memory_type,
+                text: extracted.text,
+                aliases: extracted.aliases,
+                language_hints: extracted.language_hints,
+                confidence: extracted.confidence,
+                status: MemoryStatus::Confirmed,
+                privacy_domain: extracted.privacy_domain,
+                sensitivity: extracted.sensitivity,
+                metadata: extracted.metadata,
+            };
+            self.store.upsert_memory(&memory)?;
+            for evidence_ref in evidence_refs {
+                self.store.link_evidence(&MemoryEvidence {
+                    memory_ref: reference.clone(),
+                    evidence_ref: MemoryRef::from_str(&evidence_ref)?,
+                    note: "MemoryAgent extraction evidence".to_string(),
+                })?;
+                evidence_links_imported += 1;
+            }
+            memory_refs.push(reference);
+        }
+
+        for extracted in extraction.entities {
+            let reference = MemoryRef::new(
+                MemoryRefKind::Entity,
+                user_id.clone(),
+                workspace_id.clone(),
+                extracted.canonical_key.clone(),
+            );
+            let entity = MemoryEntity {
+                reference: reference.clone(),
+                user_id: user_id.clone(),
+                workspace_id: workspace_id.clone(),
+                entity_type: extracted.entity_type,
+                name: extracted.name,
+                canonical_key: extracted.canonical_key,
+                aliases: extracted.aliases,
+                privacy_domain: extracted.privacy_domain,
+                sensitivity: extracted.sensitivity,
+                metadata: extracted.metadata,
+            };
+            self.store.upsert_entity(&entity)?;
+            entity_refs.push(reference);
+        }
+
+        for extracted in extraction.relations {
+            let reference = MemoryRef::generated(
+                MemoryRefKind::Relation,
+                user_id.clone(),
+                workspace_id.clone(),
+            );
+            let relation = MemoryRelation {
+                reference: reference.clone(),
+                user_id: user_id.clone(),
+                workspace_id: workspace_id.clone(),
+                source_ref: MemoryRef::from_str(&extracted.source_ref)?,
+                relation_type: extracted.relation_type,
+                target_ref: MemoryRef::from_str(&extracted.target_ref)?,
+                confidence: extracted.confidence,
+                privacy_domain: extracted.privacy_domain,
+                sensitivity: extracted.sensitivity,
+                evidence: extracted
+                    .evidence_refs
+                    .iter()
+                    .map(|reference| MemoryRef::from_str(reference))
+                    .collect::<Result<Vec<_>, _>>()?,
+                metadata: extracted.metadata,
+            };
+            self.store.upsert_relation(&relation)?;
+            relation_refs.push(reference);
+        }
+
+        Ok(MemoryExtractionSummary {
+            memories_imported: memory_refs.len(),
+            entities_imported: entity_refs.len(),
+            relations_imported: relation_refs.len(),
+            evidence_links_imported,
+            memory_refs,
+            entity_refs,
+            relation_refs,
+        })
     }
 
     pub fn context_pack(&self, request: &MemoryAccessRequest) -> Result<MemoryContextPack, String> {

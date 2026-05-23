@@ -147,6 +147,16 @@ The facade exposes CRUD-style operations for:
 
 Deletes are logical tombstones. Hard delete can be added later for user-requested erasure once cascading semantics are fully specified.
 
+## MemoryAgent Extraction Contract
+
+The MemoryAgent returns JSON that maps into `MemoryExtraction`:
+
+- `memories[]`: consolidated facts with `memory_type`, `text`, aliases, language hints, confidence, privacy domain, sensitivity, evidence refs and metadata.
+- `entities[]`: graph nodes with `entity_type`, `name`, `canonical_key`, aliases, privacy domain, sensitivity and metadata.
+- `relations[]`: graph edges with source/target refs, relation type, confidence, privacy domain, sensitivity, evidence refs and metadata.
+
+`MemoryFacade::apply_extraction` is the only path that imports this output. It creates confirmed memory records, upserts entities, stores relations, links evidence and returns refs in `MemoryExtractionSummary`.
+
 ## Testing Requirements
 
 Tests must cover:

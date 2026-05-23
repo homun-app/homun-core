@@ -173,3 +173,74 @@ pub struct MemoryContextPack {
     pub items: Vec<MemoryContextItem>,
     pub redacted: bool,
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MemoryExtraction {
+    #[serde(default)]
+    pub memories: Vec<ExtractedMemory>,
+    #[serde(default)]
+    pub entities: Vec<ExtractedEntity>,
+    #[serde(default)]
+    pub relations: Vec<ExtractedRelation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExtractedMemory {
+    pub memory_type: String,
+    pub text: String,
+    #[serde(default)]
+    pub aliases: Vec<String>,
+    #[serde(default)]
+    pub language_hints: Vec<String>,
+    #[serde(default = "default_confidence")]
+    pub confidence: f64,
+    pub privacy_domain: PrivacyDomain,
+    pub sensitivity: DataSensitivity,
+    #[serde(default)]
+    pub evidence_refs: Vec<String>,
+    #[serde(default)]
+    pub metadata: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExtractedEntity {
+    pub entity_type: String,
+    pub name: String,
+    pub canonical_key: String,
+    #[serde(default)]
+    pub aliases: Vec<String>,
+    pub privacy_domain: PrivacyDomain,
+    pub sensitivity: DataSensitivity,
+    #[serde(default)]
+    pub metadata: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExtractedRelation {
+    pub source_ref: String,
+    pub relation_type: String,
+    pub target_ref: String,
+    #[serde(default = "default_confidence")]
+    pub confidence: f64,
+    pub privacy_domain: PrivacyDomain,
+    pub sensitivity: DataSensitivity,
+    #[serde(default)]
+    pub evidence_refs: Vec<String>,
+    #[serde(default)]
+    pub metadata: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryExtractionSummary {
+    pub memories_imported: usize,
+    pub entities_imported: usize,
+    pub relations_imported: usize,
+    pub evidence_links_imported: usize,
+    pub memory_refs: Vec<MemoryRef>,
+    pub entity_refs: Vec<MemoryRef>,
+    pub relation_refs: Vec<MemoryRef>,
+}
+
+fn default_confidence() -> f64 {
+    0.5
+}
