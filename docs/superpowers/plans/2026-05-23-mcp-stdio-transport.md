@@ -17,11 +17,11 @@
 - Create: `crates/capabilities/src/bin/fake_mcp_stdio.rs`
 - Test: `crates/capabilities/tests/mcp_stdio.rs`
 
-- [ ] Add failing tests for persistent stdio request/response and initialized notification.
-- [ ] Run `cargo test -p local-first-capabilities --test mcp_stdio` and verify missing API failures.
-- [ ] Implement `McpStdioConfig` and `McpStdioTransport`.
-- [ ] Run `cargo test -p local-first-capabilities --test mcp_stdio`.
-- [ ] Commit as `Add MCP stdio transport`.
+- [x] Add failing tests for persistent stdio request/response and initialized notification.
+- [x] Run `cargo test -p local-first-capabilities --test mcp_stdio` and verify missing API failures.
+- [x] Implement `McpStdioConfig` and `McpStdioTransport`.
+- [x] Run `cargo test -p local-first-capabilities --test mcp_stdio`.
+- [x] Commit as `Add MCP stdio transport`.
 
 ## Task 2: Verification And Memory
 
@@ -29,7 +29,7 @@
 - Modify: `docs/work-memory.md`
 - Modify: `docs/superpowers/plans/2026-05-23-mcp-stdio-transport.md`
 
-- [ ] Mark completed plan items.
-- [ ] Update work memory with stdio transport boundary.
-- [ ] Run `make test`.
-- [ ] Commit as `Document MCP stdio transport`.
+- [x] Mark completed plan items.
+- [x] Update work memory with stdio transport boundary.
+- [x] Run `make test`.
+- [x] Commit as `Document MCP stdio transport`.

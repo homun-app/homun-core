@@ -443,7 +443,19 @@ Perche': i subagenti non devono conoscere Composio, MCP o provider specifici. De
 
 Perche': MCP e' il primo moltiplicatore locale per evitare di scrivere ogni integrazione a mano. Il transport resta separato cosi' potremo aggiungere stdio persistente o HTTP streamable senza cambiare il contratto del Capability Layer.
 
+### MCP stdio transport
+
+- Aggiunto `McpStdioConfig`.
+- Aggiunto `McpStdioTransport`.
+- Il transport avvia un processo locale persistente con stdin/stdout piped.
+- Ogni request invia JSON-RPC 2.0 newline-delimited con id incrementale.
+- Le notification vengono inviate senza attendere risposta.
+- Il drop del transport termina il processo figlio.
+- Aggiunto binario fixture `fake_mcp_stdio` per testare un processo reale.
+- Il test verifica initialize, `tools/list` e `tools/call` sullo stesso processo.
+
+Perche': ora MCP non e' solo un contratto in memoria. Abbiamo il primo transport locale reale, ancora vendor-neutral e senza Composio, pronto per registrare server MCP stdio scelti dall'utente.
+
 ## Prossimo blocco
 
-- Implementare transport MCP stdio persistente con process lifecycle locale.
 - Solo dopo, aggiungere adapter Composio managed opt-in.

@@ -12,12 +12,8 @@ fn stdio_transport_keeps_process_alive_across_requests() {
         env: vec![],
     })
     .unwrap();
-    let provider = McpCapabilityProvider::new(
-        ProviderId::new("fixture-mcp"),
-        true,
-        transport,
-        vec![],
-    );
+    let provider =
+        McpCapabilityProvider::new(ProviderId::new("fixture-mcp"), true, transport, vec![]);
 
     let initialized = provider.initialize("2025-06-18").unwrap();
     let tools = provider.list_tools().unwrap();

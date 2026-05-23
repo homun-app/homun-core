@@ -186,7 +186,10 @@ impl McpTransport for McpStdioTransport {
                     "mcp_stdio_error:{error}"
                 )));
             }
-            return Ok(response.get("result").cloned().unwrap_or(serde_json::Value::Null));
+            return Ok(response
+                .get("result")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null));
         }
     }
 
