@@ -148,6 +148,16 @@ Tecnologie:
 
 La UI non deve essere una landing page. La prima schermata deve essere il prodotto operativo.
 
+Implementato:
+
+- `apps/desktop` con shell Tauri 2 + React + TypeScript + Vite.
+- UI light-first in direzione Manus pulita, con struttura settings ispirata a Codex.
+- Layout operativo con sidebar sinistra, canvas centrale e inspector destro contestuale.
+- Viste complete di primo slice: Chat, Task/Approval center e Settings privacy/runtime/connettori.
+- Viste shallow navigabili: Memoria, Connessioni, Automazioni, Browser e Brain Audit.
+- View-model mock separati dai componenti, allineati a task queue, run Brain, health runtime, memoria e provider/connection read model.
+- Inspector e task detail mostrano dati redatti, senza raw prompt, raw payload, raw tool args o raw output.
+
 ### 2. Rust Core
 
 Responsabilita':
@@ -215,9 +225,9 @@ Implementato:
 Non ancora incluso:
 
 - policy di restart/backoff eseguita automaticamente in background.
-- UI Tauri per vedere processi, logs e health.
+- UI live per logs/process timeline dettagliata; il primo slice desktop mostra solo health sintetico mock.
 - adapter WASI con preopen/capability host controllate e SDK language-friendly per creare skill non trusted senza scrivere WAT/Rust manuale.
-- UI/audit timeline dedicata per visualizzare i piani Brain gia' persistiti.
+- cablaggio Tauri commands verso read model reali e audit timeline persistita.
 - embeddings locali opzionali per tool retrieval semantico; il primo slice usa FTS/BM25 deterministico.
 
 API interne previste:
@@ -1040,7 +1050,7 @@ local-first-personal-assistant/
 
 ## Prossima Azione Consigliata
 
-Ragionare e progettare la prima UI Tauri operativa sopra i componenti locali gia' chiusi:
+Cablaggio progressivo della UI Tauri ai read model reali del Rust Core:
 
 ```text
 apps/desktop/
@@ -1048,4 +1058,4 @@ apps/desktop/src/
 apps/desktop/src-tauri/
 ```
 
-Runtime Python/MLX, memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager, Secrets/Keychain, Skill/Plugin Registry, Skill Runtime Sandbox, process adapter trusted, WASM adapter non trusted e Assistant Orchestrator Brain hanno una base operativa testata. Il prossimo blocco deve decidere come esporre questi componenti nella UI: chat operativa, task queue, approval center, memoria, audit Brain, connettori, process/log viewer e settings privacy.
+Runtime Python/MLX, memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager, Secrets/Keychain, Skill/Plugin Registry, Skill Runtime Sandbox, process adapter trusted, WASM adapter non trusted e Assistant Orchestrator Brain hanno una base operativa testata. Il primo slice UI ora esiste con mock realistici; il prossimo blocco deve sostituire i mock con Tauri commands/read model reali senza cambiare la struttura visuale.

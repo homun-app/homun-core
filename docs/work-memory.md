@@ -838,4 +838,24 @@ Perche': ora il Brain non e' solo un router per la singola chiamata. Produce dec
 
 ## Prossimo blocco
 
-- UI Tauri operativa: progettare chat, task queue, approval center, memoria, audit Brain, connettori, process/log viewer e settings privacy sopra i read model gia' disponibili.
+### UI Tauri V1 operativa
+
+- Creato `apps/desktop` con Tauri 2, React, TypeScript e Vite.
+- Aggiunta shell light-first con sidebar sinistra, workspace centrale e inspector destro contestuale.
+- Implementata home Chat come prima schermata prodotto, non landing page.
+- Implementate viste complete per Chat, Task/Approval center e Settings.
+- Aggiunte viste shallow navigabili per Memoria, Connessioni, Automazioni, Browser e Brain Audit.
+- Separati i mock TypeScript dai componenti in `src/data/mockData.ts`.
+- Allineati i mock ai read model gia' previsti: task queue, task detail redatto, run Brain, memory summary, runtime health e provider/connection list.
+- L'inspector mostra Brain plan, task selezionato, approvazioni e runtime health senza esporre raw payload.
+- Verificata la direzione visuale Manus light + settings Codex: neutral grays, system blue, radius massimo 8px, niente dotted background permanente e niente card annidate.
+- Verifiche eseguite:
+  - `npm run typecheck`
+  - `npm run build`
+  - screenshot browser desktop e mobile su Chat/Settings/Tasks
+
+Perche': la UI e' il primo punto di fiducia del prodotto. Serviva un prototipo operativo abbastanza fedele da giudicare look and feel, densita', privacy/approval flow e layout responsive prima di cablare i Tauri commands reali.
+
+## Prossimo blocco
+
+- Desktop backend bridge: sostituire i mock UI con Tauri commands/read model reali per health processi, task queue, approvals, Brain audit, memory summary e capability connections.
