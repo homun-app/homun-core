@@ -5,7 +5,10 @@ use crate::models::{
     capability_connection_item, capability_tool_item, component, desktop_task_detail,
     desktop_task_queue, runtime_process_item, runtime_process_item_with_snapshot,
 };
-use crate::prompt_submission::{self, PromptBrain, PromptSubmissionResult, RuntimePromptBrain};
+use crate::prompt_submission::{
+    self, PromptBrain, PromptExecutionPlan, PromptSubmissionResult, PromptTaskPlanner,
+    RuntimePromptBrain, RuntimePromptTaskPlanner,
+};
 use crate::seed::{seed_capabilities, seed_memories, seed_tasks};
 use local_first_capabilities::{
     CapabilityRegistryStore, ProviderId, UserId as CapabilityUserId,
@@ -24,7 +27,8 @@ use local_first_process_manager::{
 };
 use local_first_subagents::RuntimeClient;
 use local_first_task_runtime::{
-    TaskStore, TaskUiReadModel, UserId as TaskUserId, WorkspaceId as TaskWorkspaceId,
+    ApprovalGate, ResourceClass, ResourceRequirement, TaskRecord, TaskStore, TaskUiReadModel,
+    UserId as TaskUserId, WorkspaceId as TaskWorkspaceId,
 };
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -276,27 +280,132 @@ impl DesktopCoreState {
         prompt: &str,
     ) -> Result<PromptSubmissionResult, String> {
         let mut brain = RuntimePromptBrain::new(RuntimeClient::new(&self.brain_runtime_url));
-        self.submit_user_prompt_with_brain(session_id, prompt, &mut brain)
+        let mut planner =
+            RuntimePromptTaskPlanner::new(RuntimeClient::new(&self.brain_runtime_url));
+        self.submit_user_prompt_with_brain_and_planner(session_id, prompt, &mut brain, &mut planner)
     }
 
-    fn submit_user_prompt_with_brain(
+    fn submit_user_prompt_with_brain_and_planner(
         &self,
         session_id: &str,
         prompt: &str,
         brain: &mut impl PromptBrain,
+        planner: &mut impl PromptTaskPlanner,
     ) -> Result<PromptSubmissionResult, String> {
         let manager = self
             .local_computer
             .lock()
             .map_err(|_| "local computer lock poisoned".to_string())?;
-        prompt_submission::submit_user_prompt(
+        let result = prompt_submission::submit_user_prompt(
             &manager,
             brain,
+            planner,
             &self.user_id,
             &self.workspace_id,
             session_id,
             prompt,
-        )
+        )?;
+        drop(manager);
+        if let Some(plan) = &result.plan {
+            self.enqueue_prompt_plan(session_id, plan)?;
+        }
+        Ok(result)
+    }
+
+    fn enqueue_prompt_plan(
+        &self,
+        session_id: &str,
+        plan: &PromptExecutionPlan,
+    ) -> Result<(), String> {
+        let store = self
+            .task_store
+            .lock()
+            .map_err(|_| "task store lock poisoned".to_string())?;
+        let user_id = TaskUserId::new(&self.user_id);
+        let workspace_id = TaskWorkspaceId::new(&self.workspace_id);
+        let approval_gate = ApprovalGate::new();
+        for step in &plan.steps {
+            let task_id = format!(
+                "prompt_{}_{}",
+                sanitize_task_id(session_id),
+                sanitize_task_id(&step.step_id)
+            );
+            let task = TaskRecord::new(
+                task_id.clone(),
+                user_id.clone(),
+                workspace_id.clone(),
+                format!("prompt_plan.{}", step.action_kind),
+                step.title.clone(),
+                serde_json::json!({
+                    "source": "prompt_plan",
+                    "session_id": session_id,
+                    "plan_title": plan.title,
+                    "step_id": step.step_id,
+                    "surface": step.surface,
+                    "action_kind": step.action_kind,
+                    "payload_redacted": true
+                }),
+            )
+            .with_resource(ResourceRequirement::new(
+                resource_for_plan_surface(&step.surface),
+                1,
+            ));
+            store.insert_task(&task).map_err(to_string_error)?;
+            store
+                .append_checkpoint(
+                    &task.task_id,
+                    &user_id,
+                    &workspace_id,
+                    serde_json::json!({"raw_prompt_stored": false, "plan_step": step}),
+                    serde_json::json!({
+                        "plan": {
+                            "title": plan.title,
+                            "risk_level": plan.risk_level
+                        },
+                        "step": {
+                            "step_id": step.step_id,
+                            "title": step.title,
+                            "detail": step.detail,
+                            "surface": step.surface,
+                            "action_kind": step.action_kind,
+                            "requires_user_approval": step.requires_user_approval
+                        },
+                        "payload_redacted": true
+                    }),
+                )
+                .map_err(to_string_error)?;
+            if step.requires_user_approval {
+                approval_gate
+                    .request_approval(
+                        &store,
+                        &task.task_id,
+                        &user_id,
+                        &workspace_id,
+                        "prompt_plan.approve_step",
+                        &plan.risk_level,
+                        "local_first",
+                        "Conferma esplicita richiesta prima di login, acquisto, invio o pagamento.",
+                    )
+                    .map_err(to_string_error)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+fn sanitize_task_id(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+        .collect()
+}
+
+fn resource_for_plan_surface(surface: &str) -> ResourceClass {
+    match surface {
+        "browser" => ResourceClass::BrowserSession,
+        "shell" => ResourceClass::ShellProcess,
+        "files" => ResourceClass::FilesystemIo,
+        _ => ResourceClass::BackgroundMaintenance,
     }
 }
 
@@ -353,15 +462,78 @@ fn seed_local_computer_session(manager: &LocalComputerSessionManager) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prompt_submission::BrainUnderstanding;
+    use crate::prompt_submission::{BrainUnderstanding, PromptPlanStep, PromptTaskPlanner};
 
     struct StaticBrain {
         understanding: BrainUnderstanding,
     }
 
+    struct StaticPlanner {
+        plan: PromptExecutionPlan,
+    }
+
     impl PromptBrain for StaticBrain {
         fn understand(&mut self, _prompt: &str) -> Result<BrainUnderstanding, String> {
             Ok(self.understanding.clone())
+        }
+    }
+
+    impl PromptTaskPlanner for StaticPlanner {
+        fn plan(&mut self, _prompt: &str, _summary: &str) -> Result<PromptExecutionPlan, String> {
+            Ok(self.plan.clone())
+        }
+    }
+
+    fn inert_planner() -> StaticPlanner {
+        StaticPlanner {
+            plan: PromptExecutionPlan {
+                title: "Non usato".to_string(),
+                summary: "Non usato".to_string(),
+                risk_level: "low".to_string(),
+                steps: vec![PromptPlanStep {
+                    step_id: "noop".to_string(),
+                    title: "Non usato".to_string(),
+                    detail: "Non usato".to_string(),
+                    surface: "logs".to_string(),
+                    action_kind: "final_response".to_string(),
+                    requires_user_approval: false,
+                }],
+            },
+        }
+    }
+
+    fn train_plan() -> PromptExecutionPlan {
+        PromptExecutionPlan {
+            title: "Prenotazione treno Napoli-Milano".to_string(),
+            summary: "Cercare opzioni alta velocita e preparare conferma utente.".to_string(),
+            risk_level: "medium".to_string(),
+            steps: vec![
+                PromptPlanStep {
+                    step_id: "search_trains".to_string(),
+                    title: "Cercare treni disponibili".to_string(),
+                    detail: "Usare il browser locale per cercare tratte compatibili.".to_string(),
+                    surface: "browser".to_string(),
+                    action_kind: "research".to_string(),
+                    requires_user_approval: false,
+                },
+                PromptPlanStep {
+                    step_id: "compare_options".to_string(),
+                    title: "Confrontare opzioni".to_string(),
+                    detail: "Preparare una shortlist redatta con orari e vincoli.".to_string(),
+                    surface: "browser".to_string(),
+                    action_kind: "compare_options".to_string(),
+                    requires_user_approval: false,
+                },
+                PromptPlanStep {
+                    step_id: "approval_before_payment".to_string(),
+                    title: "Conferma prima del pagamento".to_string(),
+                    detail: "Bloccare login, acquisto o pagamento senza conferma esplicita."
+                        .to_string(),
+                    surface: "logs".to_string(),
+                    action_kind: "approval_gate".to_string(),
+                    requires_user_approval: true,
+                },
+            ],
         }
     }
 
@@ -496,9 +668,15 @@ mod tests {
                 reason: Some("richiesta ora locale".to_string()),
             },
         };
+        let mut planner = inert_planner();
 
         let result = state
-            .submit_user_prompt_with_brain("computer_active_prompt", "che ore sono?", &mut brain)
+            .submit_user_prompt_with_brain_and_planner(
+                "computer_active_prompt",
+                "che ore sono?",
+                &mut brain,
+                &mut planner,
+            )
             .unwrap();
         let serialized = serde_json::to_string(&result).unwrap();
 
@@ -533,9 +711,15 @@ mod tests {
                 reason: Some("calcolo locale".to_string()),
             },
         };
+        let mut planner = inert_planner();
 
         let result = state
-            .submit_user_prompt_with_brain("computer_active_prompt", "quanto fa 6*3", &mut brain)
+            .submit_user_prompt_with_brain_and_planner(
+                "computer_active_prompt",
+                "quanto fa 6*3",
+                &mut brain,
+                &mut planner,
+            )
             .unwrap();
         let serialized = serde_json::to_string(&result).unwrap();
 
@@ -546,6 +730,53 @@ mod tests {
             })
         );
         assert!(!serialized.contains("quanto fa 6*3"));
+        assert!(!serialized.contains("prompt_pending_brain"));
+    }
+
+    #[test]
+    fn planning_prompt_enqueues_tasks_and_approval_gate() {
+        let state = state();
+        let mut brain = StaticBrain {
+            understanding: BrainUnderstanding::NeedsPlanning {
+                summary: "Prenotare un treno con conferma prima del pagamento".to_string(),
+                reason: Some("Richiede browser e approval".to_string()),
+            },
+        };
+        let mut planner = StaticPlanner { plan: train_plan() };
+
+        let result = state
+            .submit_user_prompt_with_brain_and_planner(
+                "computer_active_prompt",
+                "prenota un treno",
+                &mut brain,
+                &mut planner,
+            )
+            .unwrap();
+        let serialized = serde_json::to_string(&result).unwrap();
+        let snapshot = state.task_queue_snapshot().unwrap();
+
+        assert!(result.plan.is_some());
+        assert!(result.assistant_message.text.contains("piano operativo"));
+        assert!(
+            result
+                .computer_session
+                .timeline
+                .iter()
+                .any(|item| item.kind == "operational_plan_created")
+        );
+        assert!(
+            snapshot
+                .queued
+                .iter()
+                .any(|task| task.kind == "prompt_plan.research")
+        );
+        assert!(
+            snapshot
+                .waiting_approvals
+                .iter()
+                .any(|approval| approval.action == "prompt_plan.approve_step")
+        );
+        assert!(!serialized.contains("prenota un treno"));
         assert!(!serialized.contains("prompt_pending_brain"));
     }
 }

@@ -12,6 +12,7 @@ pub struct PromptSubmissionResult {
     pub user_message: PromptMessage,
     pub assistant_message: PromptMessage,
     pub computer_session: ComputerSessionSnapshot,
+    pub plan: Option<PromptExecutionPlan>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -23,8 +24,30 @@ pub struct PromptMessage {
     pub metadata: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PromptExecutionPlan {
+    pub title: String,
+    pub summary: String,
+    pub risk_level: String,
+    pub steps: Vec<PromptPlanStep>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PromptPlanStep {
+    pub step_id: String,
+    pub title: String,
+    pub detail: String,
+    pub surface: String,
+    pub action_kind: String,
+    pub requires_user_approval: bool,
+}
+
 pub trait PromptBrain {
     fn understand(&mut self, prompt: &str) -> Result<BrainUnderstanding, String>;
+}
+
+pub trait PromptTaskPlanner {
+    fn plan(&mut self, prompt: &str, summary: &str) -> Result<PromptExecutionPlan, String>;
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -69,7 +92,17 @@ pub struct RuntimePromptBrain<R> {
     runtime: R,
 }
 
+pub struct RuntimePromptTaskPlanner<R> {
+    runtime: R,
+}
+
 impl<R> RuntimePromptBrain<R> {
+    pub fn new(runtime: R) -> Self {
+        Self { runtime }
+    }
+}
+
+impl<R> RuntimePromptTaskPlanner<R> {
     pub fn new(runtime: R) -> Self {
         Self { runtime }
     }
@@ -104,9 +137,44 @@ impl<R: JsonRuntime> PromptBrain for RuntimePromptBrain<R> {
     }
 }
 
+impl<R: JsonRuntime> PromptTaskPlanner for RuntimePromptTaskPlanner<R> {
+    fn plan(&mut self, prompt: &str, summary: &str) -> Result<PromptExecutionPlan, String> {
+        let request = GenerateJsonRequest {
+            prompt: planner_prompt(prompt, summary),
+            max_tokens: 768,
+            temperature: 0.0,
+            wait_if_busy: true,
+            request_timeout_seconds: Some(45.0),
+            json_schema: Some(planner_schema()),
+            required_keys: vec![
+                "title".to_string(),
+                "summary".to_string(),
+                "risk_level".to_string(),
+                "steps".to_string(),
+            ],
+            repair: true,
+        };
+        let response = self
+            .runtime
+            .generate_json(&request)
+            .map_err(|error| format!("planner_runtime_unavailable:{error:?}"))?;
+        if !response.valid {
+            return Err(format!(
+                "planner_invalid_json:{}",
+                response.errors.join("; ")
+            ));
+        }
+        let plan = serde_json::from_value(response.json)
+            .map_err(|error| format!("planner_plan_invalid:{error}"))?;
+        validate_prompt_plan(&plan)?;
+        Ok(plan)
+    }
+}
+
 pub fn submit_user_prompt(
     manager: &LocalComputerSessionManager,
     brain: &mut impl PromptBrain,
+    planner: &mut impl PromptTaskPlanner,
     user_id: &str,
     workspace_id: &str,
     session_id: &str,
@@ -159,6 +227,7 @@ pub fn submit_user_prompt(
                 session_id,
                 "Il Brain locale non e' raggiungibile. Avvia il runtime Gemma 4 locale e riprova."
                     .to_string(),
+                None,
             );
         }
     };
@@ -178,6 +247,7 @@ pub fn submit_user_prompt(
         approval_required: false,
     })?;
 
+    let mut plan = None;
     let assistant_text = match understanding {
         BrainUnderstanding::LocalCalculation {
             calculation_left,
@@ -252,28 +322,72 @@ pub fn submit_user_prompt(
         | BrainUnderstanding::Refuse { answer, .. } => answer,
         BrainUnderstanding::AskClarification { question, .. } => question,
         BrainUnderstanding::NeedsPlanning { summary, .. } => {
+            let operational_plan = planner.plan(prompt, &summary)?;
+            if operational_plan
+                .steps
+                .iter()
+                .any(|step| step.surface == "browser")
+            {
+                manager.start_surface(session_id, SurfaceKind::Browser, "Browser locale")?;
+            }
             manager.append_event(ComputerEventCreate {
                 session_id: session_id.to_string(),
                 surface: SurfaceKind::Logs,
-                kind: "prompt_pending_brain".to_string(),
-                status: "waiting".to_string(),
-                title: "Prompt pronto per il Brain".to_string(),
-                subtitle: "Il composer e' cablato; il planner operativo sara' il prossimo layer."
-                    .to_string(),
+                kind: "operational_plan_created".to_string(),
+                status: "done".to_string(),
+                title: "Piano operativo creato".to_string(),
+                subtitle: format!(
+                    "{} step, rischio {}",
+                    operational_plan.steps.len(),
+                    operational_plan.risk_level
+                ),
                 payload: serde_json::json!({
                     "raw_prompt_stored": false,
-                    "needs_brain": true
+                    "plan_title": operational_plan.title,
+                    "step_count": operational_plan.steps.len(),
+                    "approval_steps": operational_plan.steps.iter().filter(|step| step.requires_user_approval).count()
                 }),
                 artifact_refs: vec![],
-                approval_required: false,
+                approval_required: operational_plan
+                    .steps
+                    .iter()
+                    .any(|step| step.requires_user_approval),
             })?;
+            for step in &operational_plan.steps {
+                manager.append_event(ComputerEventCreate {
+                    session_id: session_id.to_string(),
+                    surface: surface_from_plan_step(step),
+                    kind: "operational_plan_step_ready".to_string(),
+                    status: "waiting".to_string(),
+                    title: step.title.clone(),
+                    subtitle: step.detail.clone(),
+                    payload: serde_json::json!({
+                        "raw_prompt_stored": false,
+                        "step_id": step.step_id,
+                        "action_kind": step.action_kind,
+                        "requires_user_approval": step.requires_user_approval
+                    }),
+                    artifact_refs: vec![],
+                    approval_required: step.requires_user_approval,
+                })?;
+            }
+            let step_count = operational_plan.steps.len();
+            let title = operational_plan.title.clone();
+            plan = Some(operational_plan);
             format!(
-                "Ho capito la richiesta e serve il planner operativo: {summary}. Il collegamento ai task/tool completi e' il prossimo layer."
+                "Ho creato un piano operativo: {title}. Ho preparato {step_count} step e blocchero' login, acquisto o pagamento finche' non dai conferma esplicita."
             )
         }
     };
 
-    prompt_result(manager, user_id, workspace_id, session_id, assistant_text)
+    prompt_result(
+        manager,
+        user_id,
+        workspace_id,
+        session_id,
+        assistant_text,
+        plan,
+    )
 }
 
 fn prompt_result(
@@ -282,6 +396,7 @@ fn prompt_result(
     workspace_id: &str,
     session_id: &str,
     assistant_text: String,
+    plan: Option<PromptExecutionPlan>,
 ) -> Result<PromptSubmissionResult, String> {
     let computer_session = manager
         .read_model()
@@ -304,6 +419,7 @@ fn prompt_result(
             metadata: Some("Tauri core locale".to_string()),
         },
         computer_session,
+        plan,
     })
 }
 
@@ -376,6 +492,74 @@ fn brain_schema() -> serde_json::Value {
             "calculation_right": {"type": ["integer", "null"]}
         }
     })
+}
+
+fn planner_prompt(prompt: &str, summary: &str) -> String {
+    format!(
+        "You are the local-first assistant operational task planner.\n\
+         Create a safe executable plan for the user's request. Do not perform the task.\n\
+         Return only JSON matching the schema.\n\
+         Use short UI-safe titles and details. Do not include secrets, payment data, credentials, raw forms, or raw prompt text.\n\
+         For booking, purchasing, sending, posting, deleting, or changing external state, add a step with requires_user_approval=true before the risky action.\n\
+         For browser research or form filling, use surface=browser. For shell checks, use surface=shell. For files/artifacts, use surface=files. Otherwise use surface=logs.\n\
+         action_kind must be one of research, compare_options, draft, approval_gate, browser_action, shell_check, artifact, final_response.\n\
+         User request summary: {summary}\n\
+         User request: {prompt}"
+    )
+}
+
+fn planner_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "object",
+        "required": ["title", "summary", "risk_level", "steps"],
+        "properties": {
+            "title": {"type": "string"},
+            "summary": {"type": "string"},
+            "risk_level": {"type": "string", "enum": ["low", "medium", "high"]},
+            "steps": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["step_id", "title", "detail", "surface", "action_kind", "requires_user_approval"],
+                    "properties": {
+                        "step_id": {"type": "string"},
+                        "title": {"type": "string"},
+                        "detail": {"type": "string"},
+                        "surface": {"type": "string", "enum": ["browser", "shell", "files", "logs"]},
+                        "action_kind": {"type": "string", "enum": ["research", "compare_options", "draft", "approval_gate", "browser_action", "shell_check", "artifact", "final_response"]},
+                        "requires_user_approval": {"type": "boolean"}
+                    }
+                }
+            }
+        }
+    })
+}
+
+fn validate_prompt_plan(plan: &PromptExecutionPlan) -> Result<(), String> {
+    if plan.title.trim().is_empty() {
+        return Err("planner_plan_empty_title".to_string());
+    }
+    if plan.steps.is_empty() {
+        return Err("planner_plan_empty_steps".to_string());
+    }
+    if plan.steps.len() > 12 {
+        return Err(format!("planner_plan_too_many_steps:{}", plan.steps.len()));
+    }
+    for step in &plan.steps {
+        if step.step_id.trim().is_empty() || step.title.trim().is_empty() {
+            return Err("planner_plan_invalid_step".to_string());
+        }
+    }
+    Ok(())
+}
+
+fn surface_from_plan_step(step: &PromptPlanStep) -> SurfaceKind {
+    match step.surface.as_str() {
+        "browser" => SurfaceKind::Browser,
+        "shell" => SurfaceKind::Shell,
+        "files" => SurfaceKind::Files,
+        _ => SurfaceKind::Logs,
+    }
 }
 
 struct DateCommandOutput {
@@ -465,9 +649,72 @@ mod tests {
         understanding: BrainUnderstanding,
     }
 
+    struct StaticPlanner {
+        plan: PromptExecutionPlan,
+    }
+
     impl PromptBrain for StaticBrain {
         fn understand(&mut self, _prompt: &str) -> Result<BrainUnderstanding, String> {
             Ok(self.understanding.clone())
+        }
+    }
+
+    impl PromptTaskPlanner for StaticPlanner {
+        fn plan(&mut self, _prompt: &str, _summary: &str) -> Result<PromptExecutionPlan, String> {
+            Ok(self.plan.clone())
+        }
+    }
+
+    fn inert_planner() -> StaticPlanner {
+        StaticPlanner {
+            plan: PromptExecutionPlan {
+                title: "Non usato".to_string(),
+                summary: "Non usato".to_string(),
+                risk_level: "low".to_string(),
+                steps: vec![PromptPlanStep {
+                    step_id: "noop".to_string(),
+                    title: "Non usato".to_string(),
+                    detail: "Non usato".to_string(),
+                    surface: "logs".to_string(),
+                    action_kind: "final_response".to_string(),
+                    requires_user_approval: false,
+                }],
+            },
+        }
+    }
+
+    fn train_plan() -> PromptExecutionPlan {
+        PromptExecutionPlan {
+            title: "Prenotazione treno Napoli-Milano".to_string(),
+            summary: "Cercare opzioni alta velocita e preparare conferma utente.".to_string(),
+            risk_level: "medium".to_string(),
+            steps: vec![
+                PromptPlanStep {
+                    step_id: "search_trains".to_string(),
+                    title: "Cercare treni disponibili".to_string(),
+                    detail: "Usare il browser locale per cercare tratte compatibili.".to_string(),
+                    surface: "browser".to_string(),
+                    action_kind: "research".to_string(),
+                    requires_user_approval: false,
+                },
+                PromptPlanStep {
+                    step_id: "compare_options".to_string(),
+                    title: "Confrontare opzioni".to_string(),
+                    detail: "Preparare una shortlist redatta con orari e vincoli.".to_string(),
+                    surface: "browser".to_string(),
+                    action_kind: "compare_options".to_string(),
+                    requires_user_approval: false,
+                },
+                PromptPlanStep {
+                    step_id: "approval_before_payment".to_string(),
+                    title: "Conferma prima del pagamento".to_string(),
+                    detail: "Bloccare login, acquisto o pagamento senza conferma esplicita."
+                        .to_string(),
+                    surface: "logs".to_string(),
+                    action_kind: "approval_gate".to_string(),
+                    requires_user_approval: true,
+                },
+            ],
         }
     }
 
@@ -498,10 +745,12 @@ mod tests {
                 reason: Some("The user asks for the current local time.".to_string()),
             },
         };
+        let mut planner = inert_planner();
 
         let result = submit_user_prompt(
             &manager,
             &mut brain,
+            &mut planner,
             "user_1",
             "workspace_1",
             "session_1",
@@ -539,10 +788,12 @@ mod tests {
                 reason: Some("The user asks for arithmetic.".to_string()),
             },
         };
+        let mut planner = inert_planner();
 
         let result = submit_user_prompt(
             &manager,
             &mut brain,
+            &mut planner,
             "user_1",
             "workspace_1",
             "session_1",
@@ -553,6 +804,49 @@ mod tests {
 
         assert_eq!(result.assistant_message.text, "6 * 3 fa 18.");
         assert!(!serialized.contains("what is six times three?"));
+        assert!(!serialized.contains("prompt_pending_brain"));
+    }
+
+    #[test]
+    fn planning_request_creates_operational_plan_and_timeline_steps() {
+        let manager = manager();
+        let mut brain = StaticBrain {
+            understanding: BrainUnderstanding::NeedsPlanning {
+                summary: "Prenotare un treno con conferma prima del pagamento".to_string(),
+                reason: Some("Richiede browser e approval".to_string()),
+            },
+        };
+        let mut planner = StaticPlanner { plan: train_plan() };
+
+        let result = submit_user_prompt(
+            &manager,
+            &mut brain,
+            &mut planner,
+            "user_1",
+            "workspace_1",
+            "session_1",
+            "prenota un treno",
+        )
+        .unwrap();
+        let serialized = serde_json::to_string(&result).unwrap();
+
+        let plan = result.plan.unwrap();
+        assert_eq!(plan.steps.len(), 3);
+        assert!(plan.steps.iter().any(|step| step.requires_user_approval));
+        assert!(
+            result
+                .computer_session
+                .timeline
+                .iter()
+                .any(|item| item.kind == "operational_plan_created")
+        );
+        assert!(
+            result
+                .computer_session
+                .timeline
+                .iter()
+                .any(|item| item.kind == "operational_plan_step_ready" && item.approval_required)
+        );
         assert!(!serialized.contains("prompt_pending_brain"));
     }
 }

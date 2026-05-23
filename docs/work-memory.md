@@ -1169,6 +1169,41 @@ Perche': la comprensione deve essere language-agnostic e centralizzata. Regex o 
 
 ## Prossimo blocco
 
+### Planner operativo per task da prompt
+
+- `needs_planning` non resta piu' solo `prompt_pending_brain`.
+- Aggiunto `PromptTaskPlanner` nel Tauri Core.
+- Aggiunto `RuntimePromptTaskPlanner`, che usa Gemma locale via `/generate_json` per produrre un piano operativo strutturato.
+- Aggiunti contratti UI-safe:
+  - `PromptExecutionPlan`
+  - `PromptPlanStep`
+  - `title`, `summary`, `risk_level`
+  - step con `surface`, `action_kind`, `requires_user_approval`
+- `submit_user_prompt` ora:
+  - comprende la richiesta con `PromptBrain`;
+  - se la route e' `needs_planning`, chiede un piano al planner;
+  - registra `operational_plan_created` nella Local Computer Session;
+  - registra gli step come `operational_plan_step_ready`;
+  - avvia la surface Browser se almeno uno step usa `surface=browser`.
+- `DesktopCoreState` materializza il piano nel Durable Task Runtime:
+  - un task per ogni step;
+  - checkpoint redatto per ogni task;
+  - resource class coerente con la surface (`browser_session`, `shell_process`, `filesystem_io`, `background_maintenance`);
+  - approval gate reale via `ApprovalGate` per step con `requires_user_approval=true`.
+- Aggiornato il type bridge TypeScript con `CorePromptExecutionPlan`.
+- Test live con Gemma su richiesta:
+  - `Prenota un treno da Napoli a Milano il 10 giugno 2026 alle 08:30, preferibilmente alta velocità, senza completare il pagamento senza conferma.`
+  - output valido: piano da 5 step con ricerca browser, confronto opzioni, conferma selezione, booking draft e approval finale prima del pagamento.
+- Verifiche eseguite:
+  - RED/GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml planning`
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`
+  - GREEN: `npm run test:ui-contract`
+  - GREEN: `npm run typecheck`
+
+Perche': capire la richiesta non basta. Per essere utile il sistema deve trasformare una richiesta naturale in lavoro persistente, visibile e governato: piano, task, risorse e approval. Il primo livello non completa ancora una prenotazione reale, ma crea task durevoli e blocchi di sicurezza reali che il runtime browser potra' eseguire nel layer successivo.
+
+## Prossimo blocco
+
 ### Timeline Computer collapsabile
 
 - La timeline `InlineTimeline` della Chat ora e' collapsabile e parte chiusa di default.

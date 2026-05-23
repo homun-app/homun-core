@@ -162,6 +162,23 @@ export interface CorePromptSubmissionResult {
   user_message: CorePromptMessage;
   assistant_message: CorePromptMessage;
   computer_session: CoreComputerSessionSnapshot;
+  plan: CorePromptExecutionPlan | null;
+}
+
+export interface CorePromptExecutionPlan {
+  title: string;
+  summary: string;
+  risk_level: string;
+  steps: CorePromptPlanStep[];
+}
+
+export interface CorePromptPlanStep {
+  step_id: string;
+  title: string;
+  detail: string;
+  surface: string;
+  action_kind: string;
+  requires_user_approval: boolean;
 }
 
 export const coreBridge = {
