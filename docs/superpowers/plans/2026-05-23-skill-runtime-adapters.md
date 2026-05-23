@@ -24,14 +24,14 @@
 - [x] Run `cargo test -p local-first-skill-runtime --test process_runner config`.
 - [x] Implement `ProcessSkillRunnerConfig`.
 - [x] Run targeted tests until green.
-- [ ] Commit as `Add process skill runner config`.
+- [x] Commit as `Add process skill runner config`.
 
 ### Task 2: Process Runner Protocol
 
-- [ ] Write failing tests for stdin/stdout JSON protocol, env clearing, timeout and bad output.
-- [ ] Run `cargo test -p local-first-skill-runtime --test process_runner`.
-- [ ] Implement `ProcessSkillRunner`.
-- [ ] Run targeted tests until green.
+- [x] Write failing tests for stdin/stdout JSON protocol, env clearing, timeout and bad output.
+- [x] Run `cargo test -p local-first-skill-runtime --test process_runner`.
+- [x] Implement `ProcessSkillRunner`.
+- [x] Run targeted tests until green.
 - [ ] Commit as `Add process skill runner`.
 
 ### Task 3: Verification And Docs

@@ -1,13 +1,16 @@
-use crate::{SkillRuntimeError, SkillRuntimeResult};
+use crate::{
+    SkillRunner, SkillRuntimeError, SkillRuntimeOutput, SkillRuntimeRequest, SkillRuntimeResult,
+};
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcessSkillRunnerConfig {
     executable: PathBuf,
     working_dir: PathBuf,
-    executable_roots: Vec<PathBuf>,
-    working_roots: Vec<PathBuf>,
     env: BTreeMap<String, String>,
 }
 
@@ -37,8 +40,6 @@ impl ProcessSkillRunnerConfig {
         Ok(Self {
             executable,
             working_dir,
-            executable_roots,
-            working_roots,
             env: BTreeMap::new(),
         })
     }
@@ -72,6 +73,66 @@ impl ProcessSkillRunner {
     }
 }
 
+impl SkillRunner for ProcessSkillRunner {
+    fn run(&self, request: &SkillRuntimeRequest) -> SkillRuntimeResult<SkillRuntimeOutput> {
+        let input = serde_json::to_vec(request)
+            .map_err(|error| SkillRuntimeError::RunnerFailed(error.to_string()))?;
+        let mut child = Command::new(self.config.executable())
+            .current_dir(self.config.working_dir())
+            .env_clear()
+            .envs(self.config.env())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| SkillRuntimeError::RunnerFailed(format!("process_spawn:{error}")))?;
+
+        let mut stdin = child.stdin.take().ok_or_else(|| {
+            SkillRuntimeError::RunnerFailed("process_stdin_unavailable".to_string())
+        })?;
+        stdin
+            .write_all(&input)
+            .map_err(|error| SkillRuntimeError::RunnerFailed(format!("process_stdin:{error}")))?;
+        drop(stdin);
+
+        let deadline = Instant::now() + Duration::from_secs(request.limits.timeout_seconds);
+        loop {
+            if child
+                .try_wait()
+                .map_err(|error| SkillRuntimeError::RunnerFailed(format!("process_wait:{error}")))?
+                .is_some()
+            {
+                break;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(SkillRuntimeError::RunnerFailed(
+                    "process_timeout".to_string(),
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        let output = child
+            .wait_with_output()
+            .map_err(|error| SkillRuntimeError::RunnerFailed(format!("process_output:{error}")))?;
+        if !output.status.success() {
+            return Err(SkillRuntimeError::RunnerFailed(format!(
+                "process_exit:{}:{}",
+                output.status.code().unwrap_or(-1),
+                sanitize_stderr(&output.stderr)
+            )));
+        }
+        if output.stdout.len() > request.limits.max_output_bytes {
+            return Err(SkillRuntimeError::OutputTooLarge(output.stdout.len()));
+        }
+        serde_json::from_slice(&output.stdout).map_err(|error| {
+            SkillRuntimeError::RunnerFailed(format!("process_output_json:{error}"))
+        })
+    }
+}
+
 fn canonicalize_roots(roots: Vec<PathBuf>, error: &str) -> SkillRuntimeResult<Vec<PathBuf>> {
     roots
         .into_iter()
@@ -86,4 +147,12 @@ fn canonicalize_path(path: PathBuf, error: &str) -> SkillRuntimeResult<PathBuf> 
 
 fn is_inside_any_root(path: &Path, roots: &[PathBuf]) -> bool {
     roots.iter().any(|root| path.starts_with(root))
+}
+
+fn sanitize_stderr(stderr: &[u8]) -> String {
+    String::from_utf8_lossy(stderr)
+        .trim()
+        .chars()
+        .take(512)
+        .collect()
 }
