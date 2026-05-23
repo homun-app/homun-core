@@ -1,4 +1,7 @@
-use crate::{AgentId, RiskLevel, SubagentResult, SubagentReview, SubagentStatus};
+use crate::{
+    AgentId, RiskLevel, SubagentResult, SubagentReview, SubagentStatus, WorkflowRunStatus,
+    WorkflowRunSummary,
+};
 
 pub struct AuditStore {
     conn: rusqlite::Connection,
@@ -20,6 +23,22 @@ impl AuditStore {
     }
 
     pub fn record_result(&self, result: &SubagentResult) -> Result<(), String> {
+        self.record_result_with_workflow_run(None, result)
+    }
+
+    pub fn record_result_for_workflow(
+        &self,
+        run_id: &str,
+        result: &SubagentResult,
+    ) -> Result<(), String> {
+        self.record_result_with_workflow_run(Some(run_id), result)
+    }
+
+    fn record_result_with_workflow_run(
+        &self,
+        workflow_run_id: Option<&str>,
+        result: &SubagentResult,
+    ) -> Result<(), String> {
         let output_json =
             serde_json::to_string(&result.output).map_err(|error| error.to_string())?;
         let errors_json =
@@ -31,6 +50,7 @@ impl AuditStore {
         self.conn
             .execute(
                 "insert into subagent_results (
+                    workflow_run_id,
                     task_id,
                     agent_id,
                     status,
@@ -38,8 +58,9 @@ impl AuditStore {
                     errors_json,
                     metrics_json,
                     audit_json
-                ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 (
+                    workflow_run_id,
                     &result.task_id,
                     agent_id_name(&result.agent_id),
                     status_name(&result.status),
@@ -78,6 +99,77 @@ impl AuditStore {
             )
             .map_err(|error| error.to_string())?;
         Ok(())
+    }
+
+    pub fn start_workflow_run(
+        &self,
+        run_id: &str,
+        workflow_name: &str,
+        task_count: u32,
+    ) -> Result<(), String> {
+        self.conn
+            .execute(
+                "insert or replace into workflow_runs (
+                    run_id, workflow_name, status, task_count, started_at, finished_at
+                ) values (?1, ?2, ?3, ?4, current_timestamp, null)",
+                (
+                    run_id,
+                    workflow_name,
+                    workflow_run_status_name(&WorkflowRunStatus::Running),
+                    task_count,
+                ),
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    pub fn finish_workflow_run(
+        &self,
+        run_id: &str,
+        status: WorkflowRunStatus,
+    ) -> Result<(), String> {
+        self.conn
+            .execute(
+                "update workflow_runs
+                 set status = ?2, finished_at = current_timestamp
+                 where run_id = ?1",
+                (run_id, workflow_run_status_name(&status)),
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    pub fn workflow_run_status(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<WorkflowRunSummary>, String> {
+        let mut statement = self
+            .conn
+            .prepare(
+                "select run_id, workflow_name, status, task_count, started_at, finished_at
+                 from workflow_runs
+                 where run_id = ?1",
+            )
+            .map_err(|error| error.to_string())?;
+        let mut rows = statement
+            .query([run_id])
+            .map_err(|error| error.to_string())?;
+        let Some(row) = rows.next().map_err(|error| error.to_string())? else {
+            return Ok(None);
+        };
+        let run_id: String = row.get(0).map_err(|error| error.to_string())?;
+        let recorded_result_count = self.result_count_for_run_prefix(&run_id)?;
+        Ok(Some(WorkflowRunSummary {
+            run_id,
+            workflow_name: row.get(1).map_err(|error| error.to_string())?,
+            status: workflow_run_status_from_name(
+                &row.get::<_, String>(2).map_err(|error| error.to_string())?,
+            )?,
+            task_count: row.get(3).map_err(|error| error.to_string())?,
+            recorded_result_count,
+            started_at: row.get(4).map_err(|error| error.to_string())?,
+            finished_at: row.get(5).map_err(|error| error.to_string())?,
+        }))
     }
 
     pub fn result_count(&self) -> Result<u64, String> {
@@ -186,6 +278,7 @@ impl AuditStore {
             .execute_batch(
                 "create table if not exists subagent_results (
                     id integer primary key autoincrement,
+                    workflow_run_id text,
                     task_id text not null,
                     agent_id text not null,
                     status text not null,
@@ -197,6 +290,8 @@ impl AuditStore {
                 );
                 create index if not exists idx_subagent_results_task_id
                     on subagent_results(task_id);
+                create index if not exists idx_subagent_results_workflow_run_id
+                    on subagent_results(workflow_run_id);
 
                 create table if not exists subagent_reviews (
                     id integer primary key autoincrement,
@@ -209,7 +304,49 @@ impl AuditStore {
                     created_at text not null default current_timestamp
                 );
                 create index if not exists idx_subagent_reviews_task_id
-                    on subagent_reviews(task_id);",
+                    on subagent_reviews(task_id);
+
+                create table if not exists workflow_runs (
+                    run_id text primary key,
+                    workflow_name text not null,
+                    status text not null,
+                    task_count integer not null,
+                    started_at text not null default current_timestamp,
+                    finished_at text
+                );",
+            )
+            .map_err(|error| error.to_string())?;
+        self.ensure_column(
+            "subagent_results",
+            "workflow_run_id",
+            "alter table subagent_results add column workflow_run_id text",
+        )
+    }
+
+    fn ensure_column(&self, table: &str, column: &str, alter_sql: &str) -> Result<(), String> {
+        let mut statement = self
+            .conn
+            .prepare(&format!("pragma table_info({table})"))
+            .map_err(|error| error.to_string())?;
+        let mut rows = statement.query([]).map_err(|error| error.to_string())?;
+        while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+            let existing: String = row.get(1).map_err(|error| error.to_string())?;
+            if existing == column {
+                return Ok(());
+            }
+        }
+        self.conn
+            .execute(alter_sql, [])
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    fn result_count_for_run_prefix(&self, run_id: &str) -> Result<u32, String> {
+        self.conn
+            .query_row(
+                "select count(*) from subagent_results where workflow_run_id = ?1",
+                [run_id],
+                |row| row.get(0),
             )
             .map_err(|error| error.to_string())
     }
@@ -303,6 +440,27 @@ fn status_from_name(status: &str) -> Result<SubagentStatus, String> {
         "cancelled" => Ok(SubagentStatus::Cancelled),
         "timed_out" => Ok(SubagentStatus::TimedOut),
         _ => Err(format!("unknown subagent status {status}")),
+    }
+}
+
+fn workflow_run_status_name(status: &WorkflowRunStatus) -> &'static str {
+    match status {
+        WorkflowRunStatus::Running => "running",
+        WorkflowRunStatus::Succeeded => "succeeded",
+        WorkflowRunStatus::Failed => "failed",
+        WorkflowRunStatus::Blocked => "blocked",
+        WorkflowRunStatus::Cancelled => "cancelled",
+    }
+}
+
+fn workflow_run_status_from_name(status: &str) -> Result<WorkflowRunStatus, String> {
+    match status {
+        "running" => Ok(WorkflowRunStatus::Running),
+        "succeeded" => Ok(WorkflowRunStatus::Succeeded),
+        "failed" => Ok(WorkflowRunStatus::Failed),
+        "blocked" => Ok(WorkflowRunStatus::Blocked),
+        "cancelled" => Ok(WorkflowRunStatus::Cancelled),
+        _ => Err(format!("unknown workflow run status {status}")),
     }
 }
 

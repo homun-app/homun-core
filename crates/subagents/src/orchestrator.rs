@@ -1,6 +1,6 @@
 use crate::{
     AuditStore, ExecutionGraph, JsonRuntime, SubagentResult, SubagentRunner, SubagentStatus,
-    SubagentTask, TaskNode, TaskState, WorkflowTaskSpec,
+    SubagentTask, TaskNode, TaskState, WorkflowRunStatus, WorkflowTaskSpec,
 };
 use std::collections::BTreeMap;
 
@@ -92,6 +92,43 @@ impl<R: JsonRuntime> SubagentOrchestrator<R> {
             all_results.extend(results);
         }
         Ok(all_results)
+    }
+
+    pub fn run_workflow_recording(
+        &mut self,
+        run_id: &str,
+        workflow_name: &str,
+        audit_store: &AuditStore,
+    ) -> Result<Vec<SubagentResult>, String> {
+        audit_store.start_workflow_run(run_id, workflow_name, self.tasks.len() as u32)?;
+        let mut results = Vec::new();
+        loop {
+            let batch = self.run_ready_once();
+            if batch.is_empty() {
+                break;
+            }
+            for result in &batch {
+                audit_store.record_result_for_workflow(run_id, result)?;
+            }
+            results.extend(batch);
+        }
+        let status = if results
+            .iter()
+            .any(|result| result.status == SubagentStatus::Cancelled)
+        {
+            WorkflowRunStatus::Cancelled
+        } else if results
+            .iter()
+            .any(|result| matches!(result.status, SubagentStatus::Failed | SubagentStatus::TimedOut))
+        {
+            WorkflowRunStatus::Failed
+        } else if !self.blocked_task_ids().is_empty() {
+            WorkflowRunStatus::Blocked
+        } else {
+            WorkflowRunStatus::Succeeded
+        };
+        audit_store.finish_workflow_run(run_id, status)?;
+        Ok(results)
     }
 
     pub fn state(&self, task_id: &str) -> Option<&TaskState> {

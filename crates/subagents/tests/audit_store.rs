@@ -2,6 +2,7 @@ use local_first_subagents::{
     AgentAudit, AgentId, AuditStore, GenerateJsonRequest, GenerateJsonResponse, JsonRuntime,
     PermissionEnvelope, RiskLevel, RuntimeClientError, SubagentOrchestrator, SubagentResult,
     SubagentReview, SubagentRunner, SubagentStatus, SubagentTask, TaskBudgets, TokenMetrics,
+    WorkflowRunStatus,
 };
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -90,6 +91,51 @@ fn orchestrator_records_results_while_running_until_blocked() {
         store.result_status("task_1").unwrap(),
         Some("succeeded".to_string())
     );
+}
+
+#[test]
+fn audit_store_records_workflow_run_status_for_ui() {
+    let store = AuditStore::open_in_memory().unwrap();
+
+    store
+        .start_workflow_run("run_1", "routine_startup", 2)
+        .unwrap();
+    store
+        .record_result_for_workflow("run_1", &result("task_1"))
+        .unwrap();
+    store
+        .finish_workflow_run("run_1", WorkflowRunStatus::Succeeded)
+        .unwrap();
+
+    let status = store.workflow_run_status("run_1").unwrap().unwrap();
+
+    assert_eq!(status.run_id, "run_1");
+    assert_eq!(status.workflow_name, "routine_startup");
+    assert_eq!(status.status, WorkflowRunStatus::Succeeded);
+    assert_eq!(status.task_count, 2);
+    assert_eq!(status.recorded_result_count, 1);
+}
+
+#[test]
+fn orchestrator_records_workflow_run_while_running_tasks() {
+    let store = AuditStore::open_in_memory().unwrap();
+    let runner = SubagentRunner::new(
+        FakeRuntime {
+            responses: RefCell::new(VecDeque::from([valid_response()])),
+        },
+        "local-model",
+    );
+    let mut orchestrator = SubagentOrchestrator::new(runner);
+    orchestrator.add_task(task("task_1"), vec![]).unwrap();
+
+    let results = orchestrator
+        .run_workflow_recording("run_1", "single_task", &store)
+        .unwrap();
+
+    assert_eq!(results.len(), 1);
+    let status = store.workflow_run_status("run_1").unwrap().unwrap();
+    assert_eq!(status.status, WorkflowRunStatus::Succeeded);
+    assert_eq!(status.recorded_result_count, 1);
 }
 
 struct FakeRuntime {

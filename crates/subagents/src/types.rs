@@ -170,6 +170,27 @@ pub enum SubagentStatus {
     TimedOut,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkflowRunStatus {
+    Running,
+    Succeeded,
+    Failed,
+    Blocked,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkflowRunSummary {
+    pub run_id: String,
+    pub workflow_name: String,
+    pub status: WorkflowRunStatus,
+    pub task_count: u32,
+    pub recorded_result_count: u32,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TokenMetrics {
     pub prompt_tokens: u32,
