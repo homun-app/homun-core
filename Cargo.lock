@@ -793,6 +793,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "local-first-skill-runtime"
+version = "0.1.0"
+dependencies = [
+ "local-first-capabilities",
+ "local-first-task-runtime",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "time",
+ "url",
+]
+
+[[package]]
 name = "local-first-subagents"
 version = "0.1.0"
 dependencies = [

@@ -29,10 +29,10 @@
 
 ### Task 1: Contracts And Sandbox Policy
 
-- [ ] Write failing tests for runtime request/output contracts and sandbox denial of undeclared network/filesystem access.
-- [ ] Run `cargo test -p local-first-skill-runtime --test contracts --test policy` and verify failures.
-- [ ] Implement crate skeleton, error types, contracts and `SkillSandboxPolicy`.
-- [ ] Run targeted tests until green.
+- [x] Write failing tests for runtime request/output contracts and sandbox denial of undeclared network/filesystem access.
+- [x] Run `cargo test -p local-first-skill-runtime --test contracts --test policy` and verify failures.
+- [x] Implement crate skeleton, error types, contracts and `SkillSandboxPolicy`.
+- [x] Run targeted tests until green.
 - [ ] Commit as `Add skill runtime contracts`.
 
 ### Task 2: Runner And Executable Provider
