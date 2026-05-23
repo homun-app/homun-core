@@ -38,11 +38,11 @@
 
 ### Task 2: Encrypted File Store And Keychain Boundary
 
-- [ ] Write failing tests for encrypted file round trip, no plaintext on disk, wrong-key failure and system keychain unsupported-safe boundary.
-- [ ] Run targeted tests and verify failures.
-- [ ] Implement XChaCha20Poly1305 encryption, encrypted file store and system keychain wrapper.
-- [ ] Run targeted tests until green.
-- [ ] Commit as `Add encrypted secret store`.
+- [x] Write failing tests for encrypted file round trip, no plaintext on disk, wrong-key failure and system keychain unsupported-safe boundary.
+- [x] Run targeted tests and verify failures.
+- [x] Implement XChaCha20Poly1305 encryption, encrypted file store and system keychain wrapper.
+- [x] Run targeted tests until green.
+- [x] Commit as `Add encrypted secret store`.
 
 ### Task 3: Capability Registry Integration
 
