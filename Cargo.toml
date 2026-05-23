@@ -1,3 +1,8 @@
 [workspace]
-members = ["crates/memory", "crates/subagents", "crates/capabilities"]
+members = [
+    "crates/memory",
+    "crates/subagents",
+    "crates/capabilities",
+    "crates/task-runtime",
+]
 resolver = "3"
