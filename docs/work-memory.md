@@ -579,5 +579,20 @@ Perche': capability, MCP e provider managed non possono restare configurati solo
 
 ## Prossimo blocco
 
-- Progettare e implementare il modulo `browser-automation` come capability separata, usando il Durable Task Runtime per durata, code, retry, risorse e approvazioni.
-- Integrare `BrowserCapabilityProvider` nel Capability Layer con policy per dominio, privacy domain, handoff per CAPTCHA/2FA/pagamenti e azioni atomiche auditabili.
+### Browser automation design con OpenClaw come riferimento
+
+- Analizzato OpenClaw a commit `bcf756ce36397febcdc92fdbea825824c72d3427`.
+- Confermata licenza MIT, quindi possiamo portare/adattare codice mantenendo attribution.
+- Confermato il problema Playwright/Rust: Playwright non ha binding Rust ufficiale, quindi non va usato direttamente dal core Rust.
+- Decisione: usare un sidecar locale Node/TypeScript con `playwright-core`, supervisionato dal Rust Core.
+- Decisione: copiare/adattare il piu' possibile dal modello OpenClaw per browser profile, Playwright/CDP, snapshot/refs, azioni atomiche, tab tracking, navigation guard, artifact roots e manual blockers.
+- Decisione: non copiare Gateway/plugin/session/policy OpenClaw; quei ruoli restano in Durable Task Runtime, Capability Layer, Provider Registry e audit locali.
+- Creata spec `docs/superpowers/specs/2026-05-23-browser-automation-design.md`.
+- Aggiornato `PROJECT.md` con OpenClaw come riferimento browser e con il runtime sidecar Node/TS.
+
+Perche': browser automation e' una capacita' critica per operazioni reali come prenotazioni, compilazione form, ricerche complesse e task di giorni. Serve massima compatibilita' con Playwright ufficiale, ma senza spostare permessi, privacy, scheduling o audit fuori dal Rust Core.
+
+## Prossimo blocco
+
+- Scrivere il piano di implementazione browser automation partendo dalla spec.
+- Primo slice consigliato: contratti sidecar Node/TS, stdio JSON lines, managed `assistant` profile, snapshot/act su fixture locale, Rust client tipizzato e policy minima.

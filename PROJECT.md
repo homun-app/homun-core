@@ -42,6 +42,7 @@ Principi:
 - Capability Layer: provider-neutral contracts for channels, native connectors, MCP, skills and optional managed integration aggregators.
 - Managed integrations: Composio/Zapier/Pipedream style providers are allowed only as explicit opt-in adapters, never as implicit core dependencies.
 - Capability provider registry: provider config, grant user/workspace, connessioni, tool cache e policy context devono essere persistenti in SQLite locale.
+- Browser automation: OpenClaw e' il riferimento principale per profili browser, Playwright/CDP, snapshot/refs, azioni atomiche, tab tracking, navigation guard e manual blockers. Lo stack operativo sara' sidecar locale Node/TypeScript con `playwright-core`, orchestrato dal Rust Core.
 
 ### Test Gemma 4 locale
 
@@ -111,6 +112,10 @@ Tauri React UI
       -> Python sidecar
       -> MLX / mlx-vlm
       -> Gemma 4
+    -> Browser Automation Runtime
+      -> Node/TypeScript sidecar
+      -> playwright-core
+      -> Chromium CDP
 ```
 
 ## Componenti
@@ -918,6 +923,7 @@ local-first-personal-assistant/
 ## Riferimenti
 
 - OpenHuman, spunto di riferimento da studiare e adattare, non da copiare: https://github.com/tinyhumansai/openhuman
+- OpenClaw, riferimento principale per browser automation, da adattare con attribution MIT: https://github.com/openclaw/openclaw
 - Graphify repo: https://github.com/safishamsi/graphify
 - GraphifyLabs: https://graphifylabs.ai/
 - Obsidian Wiki: https://github.com/Ar9av/obsidian-wiki
