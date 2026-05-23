@@ -889,7 +889,7 @@ Perche': l'esperienza utente e' parte centrale del prodotto. Se browser e shell 
 - Aggiunto contract test statico `npm run test:ui-contract` per impedire regressioni su rail/drawer, activity card, detail panel, timeline e assenza dell'inspector nella shell.
 - Corretto comportamento responsive: su viewport mobile il drawer parte chiuso, su altezze ridotte il thread torna al fondo e il composer resta utilizzabile.
 - Rifinito comportamento sidebar: quando il drawer testuale e' aperto la rail di icone sparisce; quando il drawer viene chiuso resta solo la rail compatta.
-- Aggiunte azioni persistenti nel drawer aperto per non perdere Notifiche e Impostazioni quando la rail e' nascosta.
+- Aggiunte azioni persistenti nel drawer aperto per non perdere Notifiche e Impostazioni quando la rail e' nascosta; poi ridotte a sole icone in fondo, allineate a sinistra, senza riga divisoria, e rimossa la card Local Computer dalla sidebar.
 - Verifiche eseguite:
   - `npm run test:ui-contract`
   - `npm run typecheck`

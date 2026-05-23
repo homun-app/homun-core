@@ -28,6 +28,13 @@ assertContains("src/components/Shell.tsx", "{!drawerOpen && (", "rail must only 
 assertContains("src/components/Shell.tsx", "{drawerOpen && !isSettings && (", "main drawer must render when open");
 assertContains("src/components/Sidebar.tsx", "drawer-persistent-actions", "open drawer must retain persistent actions");
 assertContains("src/components/Sidebar.tsx", "drawer-settings-action", "open drawer must retain settings access");
+assertContains("src/components/Sidebar.tsx", "aria-label=\"Notifiche\"", "drawer notifications must remain accessible by icon");
+assertContains("src/components/Sidebar.tsx", "aria-label=\"Impostazioni\"", "drawer settings must remain accessible by icon");
+assertNotContains("src/components/Sidebar.tsx", "<span>Notifiche</span>", "drawer persistent actions must be icon-only");
+assertNotContains("src/components/Sidebar.tsx", "<span>Impostazioni</span>", "drawer persistent actions must be icon-only");
+assertNotContains("src/components/Sidebar.tsx", "Local Computer", "local computer must not live in the sidebar");
+assertContains("src/styles.css", "justify-content: flex-start;", "drawer footer icons must align left");
+assertNotContains("src/styles.css", ".drawer-footer {\n  border-top", "drawer footer must not have a divider line");
 assertContains("src/components/ChatView.tsx", "local-computer-card", "active task must expose a local computer activity card");
 assertContains("src/components/ChatView.tsx", "computer-detail-panel", "computer details must be progressive disclosure");
 assertContains("src/components/ChatView.tsx", "timeline-step", "assistant progress must be inline timeline");

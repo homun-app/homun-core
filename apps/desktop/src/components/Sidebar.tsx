@@ -2,7 +2,6 @@ import {
   ArrowLeft,
   Bell,
   FolderPlus,
-  Grid2X2,
   PanelLeftClose,
   PanelLeftOpen,
   Search,
@@ -170,26 +169,19 @@ export function NavDrawer({
 
       <footer className="drawer-footer">
         <div className="drawer-persistent-actions" aria-label="Azioni persistenti">
-          <button className="drawer-footer-action" type="button">
+          <button className="drawer-footer-action" type="button" aria-label="Notifiche" title="Notifiche">
             <Bell size={16} />
-            <span>Notifiche</span>
           </button>
           <button
             className="drawer-footer-action drawer-settings-action"
             type="button"
+            aria-label="Impostazioni"
+            title="Impostazioni"
             onClick={() => onNavigate("settings")}
           >
             <Settings size={16} />
-            <span>Impostazioni</span>
           </button>
         </div>
-        <button className="invite-card" type="button">
-          <Grid2X2 size={16} />
-          <span>
-            <strong>Local Computer</strong>
-            <small>Browser, shell, file e log</small>
-          </span>
-        </button>
       </footer>
     </aside>
   );
