@@ -1,6 +1,8 @@
-use crate::{SkillRuntimeError, SkillRuntimeResult};
+use crate::{
+    SkillRunner, SkillRuntimeError, SkillRuntimeOutput, SkillRuntimeRequest, SkillRuntimeResult,
+};
 use std::path::{Path, PathBuf};
-use wasmtime::{Config, Engine, Module};
+use wasmtime::{Config, Engine, Instance, Memory, Module, Store, TypedFunc};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WasmSkillRunnerConfig {
@@ -70,6 +72,47 @@ impl WasmSkillRunner {
     }
 }
 
+impl SkillRunner for WasmSkillRunner {
+    fn run(&self, request: &SkillRuntimeRequest) -> SkillRuntimeResult<SkillRuntimeOutput> {
+        let engine = wasm_engine()?;
+        let module = Module::from_file(&engine, self.config.module_path())
+            .map_err(|error| SkillRuntimeError::RunnerFailed(format!("wasm_compile:{error}")))?;
+        if module.imports().next().is_some() {
+            return Err(SkillRuntimeError::RunnerFailed(
+                "wasm_imports_not_allowed".to_string(),
+            ));
+        }
+
+        let mut store = Store::new(&engine, ());
+        store
+            .set_fuel(self.config.max_fuel())
+            .map_err(|error| SkillRuntimeError::RunnerFailed(format!("wasm_fuel:{error}")))?;
+        let instance = Instance::new(&mut store, &module, &[]).map_err(|error| {
+            SkillRuntimeError::RunnerFailed(format!("wasm_instantiate:{error}"))
+        })?;
+        let memory = instance.get_memory(&mut store, "memory").ok_or_else(|| {
+            SkillRuntimeError::RunnerFailed("wasm_memory_export_missing".to_string())
+        })?;
+        if memory.size(&store) > u64::from(self.config.max_memory_pages()) {
+            return Err(SkillRuntimeError::RunnerFailed(
+                "wasm_memory_too_large".to_string(),
+            ));
+        }
+
+        let request_json = serde_json::to_vec(request)
+            .map_err(|error| SkillRuntimeError::RunnerFailed(error.to_string()))?;
+        write_guest_input(&mut store, &memory, &request_json)?;
+
+        let run = instance
+            .get_typed_func::<(i32, i32), i64>(&mut store, "run")
+            .map_err(|_| SkillRuntimeError::RunnerFailed("wasm_run_export_missing".to_string()))?;
+        let packed = call_run(&mut store, &run, request_json.len())?;
+        let output = read_guest_output(&store, &memory, packed, request.limits.max_output_bytes)?;
+        serde_json::from_slice(&output)
+            .map_err(|error| SkillRuntimeError::RunnerFailed(format!("wasm_output_json:{error}")))
+    }
+}
+
 fn compile_module(path: &Path) -> SkillRuntimeResult<Module> {
     Module::from_file(&wasm_engine()?, path)
         .map_err(|error| SkillRuntimeError::RunnerFailed(format!("wasm_compile:{error}")))
@@ -96,4 +139,55 @@ fn canonicalize_path(path: PathBuf, error: &str) -> SkillRuntimeResult<PathBuf> 
 
 fn is_inside_any_root(path: &Path, roots: &[PathBuf]) -> bool {
     roots.iter().any(|root| path.starts_with(root))
+}
+
+fn write_guest_input(
+    store: &mut Store<()>,
+    memory: &Memory,
+    request_json: &[u8],
+) -> SkillRuntimeResult<()> {
+    let memory_len = memory.data_size(&mut *store);
+    if request_json.len() > memory_len {
+        return Err(SkillRuntimeError::RunnerFailed(
+            "wasm_input_too_large".to_string(),
+        ));
+    }
+    memory
+        .write(store, 0, request_json)
+        .map_err(|error| SkillRuntimeError::RunnerFailed(format!("wasm_input:{error}")))
+}
+
+fn call_run(
+    store: &mut Store<()>,
+    run: &TypedFunc<(i32, i32), i64>,
+    input_len: usize,
+) -> SkillRuntimeResult<i64> {
+    let input_len = i32::try_from(input_len)
+        .map_err(|_| SkillRuntimeError::RunnerFailed("wasm_input_too_large".to_string()))?;
+    run.call(store, (0, input_len))
+        .map_err(|error| SkillRuntimeError::RunnerFailed(format!("wasm_trap:{error}")))
+}
+
+fn read_guest_output(
+    store: &Store<()>,
+    memory: &Memory,
+    packed: i64,
+    max_output_bytes: usize,
+) -> SkillRuntimeResult<Vec<u8>> {
+    let packed = u64::try_from(packed)
+        .map_err(|_| SkillRuntimeError::RunnerFailed("wasm_output_pointer_invalid".to_string()))?;
+    let output_ptr = (packed >> 32) as usize;
+    let output_len = (packed & 0xffff_ffff) as usize;
+    if output_len > max_output_bytes {
+        return Err(SkillRuntimeError::OutputTooLarge(output_len));
+    }
+    let output_end = output_ptr
+        .checked_add(output_len)
+        .ok_or_else(|| SkillRuntimeError::RunnerFailed("wasm_output_out_of_bounds".to_string()))?;
+    if output_end > memory.data_size(store) {
+        return Err(SkillRuntimeError::RunnerFailed(
+            "wasm_output_out_of_bounds".to_string(),
+        ));
+    }
+    Ok(memory.data(store)[output_ptr..output_end].to_vec())
 }

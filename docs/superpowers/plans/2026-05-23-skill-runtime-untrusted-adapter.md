@@ -25,14 +25,14 @@
 - [x] Run `cargo test -p local-first-skill-runtime --test wasm_runner config`.
 - [x] Implement `WasmSkillRunnerConfig` and import inspection.
 - [x] Run targeted tests until green.
-- [ ] Commit as `Add wasm skill runner config`.
+- [x] Commit as `Add wasm skill runner config`.
 
 ### Task 2: WASM Protocol And Fuel
 
-- [ ] Write failing tests for memory/run protocol, output limits and fuel exhaustion.
-- [ ] Run `cargo test -p local-first-skill-runtime --test wasm_runner`.
-- [ ] Implement `WasmSkillRunner`.
-- [ ] Run targeted tests until green.
+- [x] Write failing tests for memory/run protocol, output limits and fuel exhaustion.
+- [x] Run `cargo test -p local-first-skill-runtime --test wasm_runner`.
+- [x] Implement `WasmSkillRunner`.
+- [x] Run targeted tests until green.
 - [ ] Commit as `Add wasm skill runner`.
 
 ### Task 3: Verification And Docs
