@@ -1,4 +1,5 @@
 mod audit;
+mod browser_provider;
 mod channel;
 mod composio;
 mod error;
@@ -11,6 +12,7 @@ mod task_runtime_bridge;
 mod types;
 
 pub use audit::{CapabilityAuditEvent, InMemoryCapabilityAudit};
+pub use browser_provider::BrowserCapabilityProvider;
 pub use channel::{
     ChannelCapabilities, ChannelMessage, ChannelProvider, FakeChannelProvider,
     OutboundChannelMessage,

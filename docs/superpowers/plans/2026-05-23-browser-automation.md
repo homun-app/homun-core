@@ -134,11 +134,11 @@ export type BrowserMethod =
 - Create: `crates/capabilities/src/browser_provider.rs`
 - Test: `crates/capabilities/tests/browser_provider.rs`
 
-- [ ] Write failing tests for browser tool listing, action classes and policy-gated tool call.
-- [ ] Run `cargo test -p local-first-capabilities --test browser_provider`.
-- [ ] Implement `BrowserCapabilityProvider` over a trait-backed browser client.
-- [ ] Run the targeted test.
-- [ ] Commit as `Add browser capability provider`.
+- [x] Write failing tests for browser tool listing, action classes and policy-gated tool call.
+- [x] Run `cargo test -p local-first-capabilities --test browser_provider`.
+- [x] Implement `BrowserCapabilityProvider` over a trait-backed browser client.
+- [x] Run the targeted test.
+- [x] Commit as `Add browser capability provider`.
 
 ### Task 6: Durable Task Executor
 

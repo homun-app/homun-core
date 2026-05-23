@@ -628,6 +628,7 @@ dependencies = [
 name = "local-first-capabilities"
 version = "0.1.0"
 dependencies = [
+ "local-first-browser-automation",
  "local-first-task-runtime",
  "rusqlite",
  "serde",
