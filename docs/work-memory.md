@@ -430,7 +430,20 @@ Perche': questo crea il confine interno prima di integrare MCP o Composio. Subag
 
 Perche': i subagenti non devono conoscere Composio, MCP o provider specifici. Devono passare dal Capability Layer, che applica permessi, privacy domain, autonomia e boundary cloud in modo uniforme.
 
+### MCP Capability Provider
+
+- Aggiunto `McpTransport` come boundary testabile per JSON-RPC MCP.
+- Aggiunto `McpCapabilityProvider`.
+- Aggiunto `McpToolPolicy` per assegnare action class, privacy domains e sensitivity ai tool MCP.
+- Aggiunto `InMemoryMcpTransport` per test locali senza server MCP esterno.
+- `tools/list` viene mappato in `CapabilityTool`.
+- `tools/call` viene mappato in `CapabilityCallResult`.
+- `initialize` invia poi `notifications/initialized`.
+- I trigger MCP non sono ancora supportati e ritornano errore tipizzato.
+
+Perche': MCP e' il primo moltiplicatore locale per evitare di scrivere ogni integrazione a mano. Il transport resta separato cosi' potremo aggiungere stdio persistente o HTTP streamable senza cambiare il contratto del Capability Layer.
+
 ## Prossimo blocco
 
-- Implementare `McpCapabilityProvider` come primo provider reale locale.
+- Implementare transport MCP stdio persistente con process lifecycle locale.
 - Solo dopo, aggiungere adapter Composio managed opt-in.

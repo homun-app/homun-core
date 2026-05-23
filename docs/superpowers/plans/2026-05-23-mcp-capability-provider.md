@@ -17,13 +17,13 @@
 - Modify: `crates/capabilities/src/lib.rs`
 - Test: `crates/capabilities/tests/mcp_provider.rs`
 
-- [ ] Add failing tests for mapping MCP `tools/list` into `CapabilityTool`.
-- [ ] Add failing tests for invoking MCP `tools/call` through `CapabilityProvider::call_tool`.
-- [ ] Add failing tests for initialized notification tracking.
-- [ ] Run `cargo test -p local-first-capabilities --test mcp_provider` and verify missing API failures.
-- [ ] Implement `McpTransport`, `McpCapabilityProvider`, `McpToolPolicy`, and `InMemoryMcpTransport`.
-- [ ] Run `cargo test -p local-first-capabilities --test mcp_provider`.
-- [ ] Commit as `Add MCP capability provider`.
+- [x] Add failing tests for mapping MCP `tools/list` into `CapabilityTool`.
+- [x] Add failing tests for invoking MCP `tools/call` through `CapabilityProvider::call_tool`.
+- [x] Add failing tests for initialized notification tracking.
+- [x] Run `cargo test -p local-first-capabilities --test mcp_provider` and verify missing API failures.
+- [x] Implement `McpTransport`, `McpCapabilityProvider`, `McpToolPolicy`, and `InMemoryMcpTransport`.
+- [x] Run `cargo test -p local-first-capabilities --test mcp_provider`.
+- [x] Commit as `Add MCP capability provider`.
 
 ## Task 2: Verification And Memory
 
@@ -31,7 +31,7 @@
 - Modify: `docs/work-memory.md`
 - Modify: `docs/superpowers/plans/2026-05-23-mcp-capability-provider.md`
 
-- [ ] Mark completed plan items.
-- [ ] Update work memory with MCP provider boundary.
-- [ ] Run `make test`.
-- [ ] Commit as `Document MCP capability provider`.
+- [x] Mark completed plan items.
+- [x] Update work memory with MCP provider boundary.
+- [x] Run `make test`.
+- [x] Commit as `Document MCP capability provider`.

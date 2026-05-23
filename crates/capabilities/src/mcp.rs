@@ -194,7 +194,10 @@ impl<T: McpTransport> CapabilityProvider for McpCapabilityProvider<T> {
 }
 
 impl<T: McpTransport> McpCapabilityProvider<T> {
-    fn capability_tool_from_mcp(&self, tool: &serde_json::Value) -> CapabilityResult<CapabilityTool> {
+    fn capability_tool_from_mcp(
+        &self,
+        tool: &serde_json::Value,
+    ) -> CapabilityResult<CapabilityTool> {
         let name = tool
             .get("name")
             .and_then(|value| value.as_str())

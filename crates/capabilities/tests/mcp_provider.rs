@@ -5,21 +5,20 @@ use local_first_capabilities::{
 
 #[test]
 fn mcp_provider_maps_tools_list_to_capability_tools() {
-    let transport = InMemoryMcpTransport::new()
-        .with_response(
-            "tools/list",
-            serde_json::json!({
-                "tools": [{
-                    "name": "filesystem.read_file",
-                    "description": "Read a local file",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {"path": {"type": "string"}},
-                        "required": ["path"]
-                    }
-                }]
-            }),
-        );
+    let transport = InMemoryMcpTransport::new().with_response(
+        "tools/list",
+        serde_json::json!({
+            "tools": [{
+                "name": "filesystem.read_file",
+                "description": "Read a local file",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"]
+                }
+            }]
+        }),
+    );
     let provider = McpCapabilityProvider::new(
         ProviderId::new("local-filesystem-mcp"),
         true,
@@ -86,12 +85,7 @@ fn mcp_provider_sends_initialized_notification_after_initialize() {
             "serverInfo": {"name": "fake", "version": "0.1.0"}
         }),
     );
-    let provider = McpCapabilityProvider::new(
-        ProviderId::new("fake-mcp"),
-        true,
-        transport,
-        vec![],
-    );
+    let provider = McpCapabilityProvider::new(ProviderId::new("fake-mcp"), true, transport, vec![]);
 
     let initialized = provider.initialize("2025-06-18").unwrap();
 
