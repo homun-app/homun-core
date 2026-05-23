@@ -10,7 +10,9 @@ serde_json = "1"
 thiserror = "2"
 time = { version = "0.3", features = ["serde"] }
 url = "2"
+wasmtime = "45"
 
 [dev-dependencies]
 local-first-task-runtime = { path = "../task-runtime" }
 tempfile = "3"
+wat = "1.250"

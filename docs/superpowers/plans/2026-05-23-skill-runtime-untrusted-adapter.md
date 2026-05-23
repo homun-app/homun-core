@@ -21,10 +21,10 @@
 
 ### Task 1: WASM Config And Import Rejection
 
-- [ ] Write failing tests for module root validation and rejecting modules with imports.
-- [ ] Run `cargo test -p local-first-skill-runtime --test wasm_runner config`.
-- [ ] Implement `WasmSkillRunnerConfig` and import inspection.
-- [ ] Run targeted tests until green.
+- [x] Write failing tests for module root validation and rejecting modules with imports.
+- [x] Run `cargo test -p local-first-skill-runtime --test wasm_runner config`.
+- [x] Implement `WasmSkillRunnerConfig` and import inspection.
+- [x] Run targeted tests until green.
 - [ ] Commit as `Add wasm skill runner config`.
 
 ### Task 2: WASM Protocol And Fuel
