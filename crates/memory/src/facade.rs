@@ -2,14 +2,14 @@ use crate::{
     AccessDecisionKind, DataSensitivity, GraphifyArtifacts, GraphifyCli, GraphifyImport,
     GraphifyImportSummary, GraphifyOperation, GraphifyQueryRequest, GraphifyQueryResult,
     MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryContextItem,
-    MemoryContextPack, MemoryCreateRequest, MemoryEntity, MemoryEvent, MemoryEvidence,
-    MemoryError, MemoryExtraction, MemoryExtractionSummary, MemoryHealth, MemoryLifecycleRequest,
+    MemoryContextPack, MemoryCreateRequest, MemoryEntity, MemoryError, MemoryEvent, MemoryEvidence,
+    MemoryExtraction, MemoryExtractionSummary, MemoryHealth, MemoryLifecycleRequest,
     MemoryMaintenanceReport, MemoryPolicyEngine, MemoryRecord, MemoryRef, MemoryRefKind,
-    MemoryRelation, MemorySearchPage, MemorySearchRequest, MemorySearchResult, MemoryStatus,
-    MemoryResult, MemoryUpdatePatch, PrivacyDomain, SQLiteMemoryStore, UserId,
-    RoutineInference, RoutineInferenceSummary, RoutineRecord, RoutineStatus,
-    WikiCorrectionSyncReport, WikiFileStore, WikiPage, WorkspaceId, current_timestamp,
-    ensure_artifacts_inside_root, ensure_transition, parse_wiki_markdown,
+    MemoryRelation, MemoryResult, MemorySearchPage, MemorySearchRequest, MemorySearchResult,
+    MemoryStatus, MemoryUpdatePatch, PrivacyDomain, RoutineInference, RoutineInferenceSummary,
+    RoutineRecord, RoutineStatus, SQLiteMemoryStore, UserId, WikiCorrectionSyncReport,
+    WikiFileStore, WikiPage, WorkspaceId, current_timestamp, ensure_artifacts_inside_root,
+    ensure_transition, parse_wiki_markdown,
 };
 use std::path::Path;
 use std::str::FromStr;
@@ -337,8 +337,11 @@ impl MemoryFacade {
         let mut routine_refs = Vec::new();
         for extracted in inference.routines {
             let now = current_timestamp();
-            let reference =
-                MemoryRef::generated(MemoryRefKind::Routine, user_id.clone(), workspace_id.clone());
+            let reference = MemoryRef::generated(
+                MemoryRefKind::Routine,
+                user_id.clone(),
+                workspace_id.clone(),
+            );
             let routine = RoutineRecord {
                 reference: reference.clone(),
                 user_id: user_id.clone(),
@@ -411,10 +414,7 @@ impl MemoryFacade {
         })
     }
 
-    pub fn search_memories(
-        &self,
-        request: MemorySearchRequest,
-    ) -> MemoryResult<MemorySearchPage> {
+    pub fn search_memories(&self, request: MemorySearchRequest) -> MemoryResult<MemorySearchPage> {
         let refs = self.store.search_memory_refs(
             &request.access.user_id,
             &request.access.workspace_id,

@@ -27,7 +27,11 @@ fn facade_imports_routine_inference_candidates_with_evidence() {
     .unwrap();
 
     let summary = facade
-        .apply_routine_inference(&UserId::new("user_1"), &WorkspaceId::new("workspace_1"), inference)
+        .apply_routine_inference(
+            &UserId::new("user_1"),
+            &WorkspaceId::new("workspace_1"),
+            inference,
+        )
         .unwrap();
 
     assert_eq!(summary.routines_imported, 1);

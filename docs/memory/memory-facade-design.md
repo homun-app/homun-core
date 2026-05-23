@@ -8,7 +8,7 @@ Build the memory layer as a complete local-first component with one facade and s
 
 - Language-agnostic and multilingual by default.
 - Multiuser and workspace-aware from the first schema.
-- Privacy domains are first-class, not metadata added later.
+- Privacy domains are first-class, not metadata added after the fact.
 - Every read goes through policy, anti-exfiltration and audit.
 - SQLite, graph and wiki remain separate backends linked by stable refs.
 - Sensitive payloads are encrypted at the application layer.
@@ -29,6 +29,9 @@ Source of operational truth:
 - graph node metadata
 - access audit
 - tombstones
+- schema metadata
+- routines
+- SQLite FTS index
 
 ### Graph Store
 
@@ -54,10 +57,13 @@ Inspected Graphify reference:
 - Links carry `source`, `target`, `relation`, `confidence`, optional `context` and optional extra metadata.
 - Confidence labels are `EXTRACTED`, `INFERRED`, `AMBIGUOUS`.
 - LLM-facing usage is query-first: `graphify query`, `graphify path`, `graphify explain` should be preferred over loading the entire report for focused questions.
+- Query/path/explain are exposed through `MemoryFacade::graphify_query`, which validates artifact roots, applies policy and returns scoped refs instead of broad graph dumps.
 
 ### Wiki Store
 
 Markdown files are human-readable projections of confirmed knowledge. The wiki does not receive raw events or secret payloads. Wiki writes are mediated by policy and linked back to DB refs through frontmatter.
+
+Markdown corrections return through `MemoryFacade::import_wiki_correction`. Changed wiki bodies create candidate memories linked with `correction_of`; unchanged pages do not create candidates; secret content is rejected.
 
 ## Stable References
 
@@ -91,6 +97,14 @@ Refs include user and workspace to prevent accidental cross-user reads.
 - `MemoryAccessRequest`
 - `MemoryAccessDecision`
 - `MemoryContextPack`
+- `MemoryLifecycleRequest`
+- `MemorySearchRequest`
+- `MemorySearchPage`
+- `RoutineInference`
+- `WikiCorrectionSyncReport`
+- `GraphifyQueryRequest`
+- `MemoryHealth`
+- `MemoryError`
 
 ## Policy And Anti-Exfiltration
 
@@ -132,11 +146,11 @@ Encryption is application-level:
 - encrypted values store nonce and ciphertext.
 - `KeyProvider` is abstract.
 - tests use `DevelopmentKeyProvider`.
-- OS keychain provider is a later adapter, not required for schema correctness.
+- OS keychain provider is a separate adapter, not required for schema correctness.
 
-## CRUD Scope
+## Lifecycle Scope
 
-The facade exposes CRUD-style operations for:
+The facade exposes CRUD-style operations and lifecycle transitions for:
 
 - events
 - memory records
@@ -144,8 +158,19 @@ The facade exposes CRUD-style operations for:
 - relations
 - evidence links
 - wiki pages
+- routine candidates
 
-Deletes are logical tombstones. Hard delete can be added later for user-requested erasure once cascading semantics are fully specified.
+Memory records support:
+
+- create candidate.
+- update text, aliases, language hints, confidence, privacy domain, sensitivity, metadata and `last_seen_at`.
+- confirm.
+- reject.
+- mark stale.
+- merge with `supersedes` and `superseded_by`.
+- delete through tombstone.
+
+Deletes are logical tombstones. Hard delete belongs to an explicit local erasure flow with fully specified cascading semantics.
 
 ## MemoryAgent Extraction Contract
 
@@ -156,6 +181,39 @@ The MemoryAgent returns JSON that maps into `MemoryExtraction`:
 - `relations[]`: graph edges with source/target refs, relation type, confidence, privacy domain, sensitivity, evidence refs and metadata.
 
 `MemoryFacade::apply_extraction` is the only path that imports this output. It creates confirmed memory records, upserts entities, stores relations, links evidence and returns refs in `MemoryExtractionSummary`.
+
+## Routine Inference Contract
+
+Routine inference imports candidate routines through `MemoryFacade::apply_routine_inference`.
+
+The contract preserves:
+
+- name.
+- intent.
+- confidence.
+- schedule hint JSON.
+- privacy domain.
+- sensitivity.
+- evidence refs.
+- metadata.
+
+Routine refs use `routine:local:<user>:<workspace>:<id>` and remain separate from automation execution.
+
+## Search And Retrieval
+
+`MemoryFacade::search_memories` is the production retrieval boundary for text memory search. It uses SQLite FTS5, then applies policy filtering, status/type filters, pagination and access audit. Results return refs and summaries, not raw event payloads.
+
+Local embeddings can be added behind the same request/result contract.
+
+## Operations
+
+The memory facade exposes operational support:
+
+- `memory_health` for schema version and counts.
+- `backup_to` for local file-backed SQLite backup.
+- `SQLiteMemoryStore::restore_from_backup` for local restore.
+- `run_memory_maintenance` for integrity check and FTS rebuild.
+- `MemoryError` / `MemoryResult` for typed facade boundary errors.
 
 ## Testing Requirements
 
@@ -172,6 +230,14 @@ Tests must cover:
 - wiki writes reject secret raw content.
 - context packs preserve refs.
 - access decisions are audited.
+- schema migration is idempotent.
+- lifecycle transitions are audited and reject invalid transitions.
+- FTS search filters privacy, sensitivity, status and type.
+- wiki corrections create candidate updates.
+- Graphify query/path/explain is policy-gated.
+- backup/restore preserves encrypted payload behavior.
+- routine inference creates candidate routine refs.
+- maintenance checks integrity and rebuilds FTS.
 
 ## UI Read Model
 

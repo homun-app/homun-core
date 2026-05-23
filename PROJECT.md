@@ -617,12 +617,15 @@ Deliverable:
 
 Deliverable:
 
-- SQLite schema.
+- SQLite schema versionato con migrazioni idempotenti.
 - event log.
 - entities/relations graph model.
 - memory extraction contract.
 - routine inference contract.
 - evidence tracking.
+- lifecycle memorie: candidate, confirmed, rejected, stale, deleted.
+- search FTS locale con policy, ranking deterministico e paginazione.
+- backup/restore locale, health e maintenance.
 
 ### Fase 3 - Graphify Integration
 
@@ -630,7 +633,7 @@ Deliverable:
 
 - install/runtime strategy per `graphifyy`.
 - import graph output.
-- query API.
+- query/path/explain API policy-gated.
 - project/codebase graph.
 - link fra Graphify nodes e nostro entity graph.
 

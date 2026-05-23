@@ -73,6 +73,23 @@ Perche': il runtime/subagente non deve scrivere direttamente nello store. L'outp
 
 Perche': la UI Tauri/React ha bisogno di dati gia' pronti per schermate operative, ma non deve bypassare privacy, anti-esfiltrazione o audit leggendo direttamente tabelle grezze.
 
+### Memory production-ready closure
+
+- Creata spec `docs/superpowers/specs/2026-05-23-production-memory-design.md`.
+- Creato piano `docs/superpowers/plans/2026-05-23-production-memory.md`.
+- Aggiunto branch `fabio/production-memory` per isolare la chiusura.
+- Aggiunto schema metadata con versione `2` e migrazioni idempotenti.
+- Esteso `MemoryRecord` con `created_at`, `updated_at`, `last_seen_at`, `supersedes`, `superseded_by`, `correction_of`.
+- Aggiunta API lifecycle auditata sulla facade: create candidate, update, confirm, reject, stale, merge, delete/tombstone.
+- Aggiunto SQLite FTS5 per `search_memories`, con filtri policy, status, tipo, ranking deterministico e paginazione.
+- Aggiunta wiki correction sync: Markdown modificato -> candidate correction con `correction_of`, senza overwrite silenzioso.
+- Aggiunta API Graphify query/path/explain policy-gated con validazione root locale e ritorno di refs scoped.
+- Aggiunte operations: health, backup locale, restore locale, maintenance integrity check + FTS rebuild.
+- Aggiunto `MemoryError` / `MemoryResult` come boundary error tipizzato per la facade.
+- Aggiunto contratto routine inference con `RoutineRecord`, `RoutineInference` e import via `MemoryFacade::apply_routine_inference`.
+
+Perche': per considerare chiusa la memoria non bastava l'MVP. Servivano lifecycle completo, retrieval, sync bidirezionale minima, Graphify query sicura, operabilita' locale, errori tipizzati e copertura del contratto routine previsto dalla Fase 2.
+
 ### Principi architetturali confermati
 
 - Il progetto e' language-agnostic e multilingua di default.
