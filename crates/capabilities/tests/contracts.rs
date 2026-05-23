@@ -1,6 +1,6 @@
 use local_first_capabilities::{
     ActionClass, CapabilityProviderKind, CapabilityTool, DataBoundary, ManagedProviderMetadata,
-    ProviderId, SkillManifest, SkillPermissions, UserId, WorkspaceId,
+    ProviderId, SkillManifest, SkillPermissions, SkillToolManifest, UserId, WorkspaceId,
 };
 
 #[test]
@@ -63,7 +63,14 @@ fn skill_manifest_declares_permissions_without_runtime_execution() {
         version: "0.1.0".to_string(),
         description: "Local GitHub tools".to_string(),
         runtime: "quickjs".to_string(),
-        tools: vec!["github.list_issues".to_string()],
+        tools: vec![SkillToolManifest {
+            name: "github.list_issues".to_string(),
+            description: "List GitHub issues".to_string(),
+            action: ActionClass::Read,
+            privacy_domains: vec!["work".to_string()],
+            sensitivity: "private".to_string(),
+            input_schema: serde_json::json!({"type": "object"}),
+        }],
         permissions: SkillPermissions {
             network: vec!["api.github.com".to_string()],
             filesystem: vec![],
@@ -75,6 +82,7 @@ fn skill_manifest_declares_permissions_without_runtime_execution() {
     let decoded: SkillManifest = serde_json::from_str(&encoded).unwrap();
 
     assert_eq!(decoded.id, "github-local");
+    assert_eq!(decoded.tools[0].name, "github.list_issues");
     assert_eq!(decoded.permissions.network, vec!["api.github.com"]);
     assert_eq!(decoded.permissions.privacy_domains, vec!["work"]);
 }

@@ -21,10 +21,10 @@
 
 ### Task 1: Skill And Plugin Contracts
 
-- [ ] Write failing contract tests for `SkillToolManifest`, `PluginManifest`, `SkillInstallRecord` and `PluginInstallRecord`.
-- [ ] Run `cargo test -p local-first-capabilities --test skill_plugin_registry contracts_serialize_skill_plugin_manifests`.
-- [ ] Implement the contract types in `types.rs`.
-- [ ] Run targeted test until green.
+- [x] Write failing contract tests for `SkillToolManifest`, `PluginManifest`, `SkillInstallRecord` and `PluginInstallRecord`.
+- [x] Run `cargo test -p local-first-capabilities --test skill_plugin_registry contracts_serialize_skill_plugin_manifests`.
+- [x] Implement the contract types in `types.rs`.
+- [x] Run targeted test until green.
 - [ ] Commit as `Add skill plugin contracts`.
 
 ### Task 2: SQLite Registry

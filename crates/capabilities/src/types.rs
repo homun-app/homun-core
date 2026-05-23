@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct UserId(String);
@@ -164,12 +165,156 @@ pub struct SkillPermissions {
     pub privacy_domains: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SkillToolManifest {
+    pub name: String,
+    pub description: String,
+    pub action: ActionClass,
+    pub privacy_domains: Vec<String>,
+    pub sensitivity: String,
+    pub input_schema: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SkillManifest {
     pub id: String,
     pub version: String,
     pub description: String,
     pub runtime: String,
-    pub tools: Vec<String>,
+    pub tools: Vec<SkillToolManifest>,
     pub permissions: SkillPermissions,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginManifest {
+    pub id: String,
+    pub version: String,
+    pub display_name: String,
+    pub skills: Vec<SkillManifest>,
+}
+
+impl PluginManifest {
+    pub fn new(
+        id: impl Into<String>,
+        version: impl Into<String>,
+        display_name: impl Into<String>,
+        skills: Vec<SkillManifest>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            version: version.into(),
+            display_name: display_name.into(),
+            skills,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillTrustLevel {
+    Untrusted,
+    Reviewed,
+    TrustedLocal,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkillInstallRecord {
+    pub user_id: UserId,
+    pub workspace_id: WorkspaceId,
+    pub skill_id: String,
+    pub version: String,
+    pub source_path: String,
+    pub trust_level: SkillTrustLevel,
+    pub manifest_hash: Option<String>,
+    pub enabled: bool,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
+}
+
+impl SkillInstallRecord {
+    pub fn new(
+        user_id: UserId,
+        workspace_id: WorkspaceId,
+        skill_id: impl Into<String>,
+        version: impl Into<String>,
+        source_path: impl Into<String>,
+        trust_level: SkillTrustLevel,
+    ) -> Self {
+        let now = OffsetDateTime::now_utc();
+        Self {
+            user_id,
+            workspace_id,
+            skill_id: skill_id.into(),
+            version: version.into(),
+            source_path: source_path.into(),
+            trust_level,
+            manifest_hash: None,
+            enabled: true,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    pub fn disabled(mut self) -> Self {
+        self.enabled = false;
+        self
+    }
+
+    pub fn with_manifest_hash(mut self, manifest_hash: impl Into<String>) -> Self {
+        self.manifest_hash = Some(manifest_hash.into());
+        self
+    }
+
+    pub fn provider_id(&self) -> ProviderId {
+        ProviderId::new(format!("skill:{}", self.skill_id))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginInstallRecord {
+    pub user_id: UserId,
+    pub workspace_id: WorkspaceId,
+    pub plugin_id: String,
+    pub version: String,
+    pub source_path: String,
+    pub trust_level: SkillTrustLevel,
+    pub manifest_hash: Option<String>,
+    pub enabled: bool,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
+}
+
+impl PluginInstallRecord {
+    pub fn new(
+        user_id: UserId,
+        workspace_id: WorkspaceId,
+        plugin_id: impl Into<String>,
+        version: impl Into<String>,
+        source_path: impl Into<String>,
+        trust_level: SkillTrustLevel,
+    ) -> Self {
+        let now = OffsetDateTime::now_utc();
+        Self {
+            user_id,
+            workspace_id,
+            plugin_id: plugin_id.into(),
+            version: version.into(),
+            source_path: source_path.into(),
+            trust_level,
+            manifest_hash: None,
+            enabled: true,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    pub fn disabled(mut self) -> Self {
+        self.enabled = false;
+        self
+    }
+
+    pub fn with_manifest_hash(mut self, manifest_hash: impl Into<String>) -> Self {
+        self.manifest_hash = Some(manifest_hash.into());
+        self
+    }
 }
