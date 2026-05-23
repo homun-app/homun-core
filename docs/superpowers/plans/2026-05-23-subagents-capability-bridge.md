@@ -18,13 +18,13 @@
 - Create: `crates/subagents/src/capability_bridge.rs`
 - Test: `crates/subagents/tests/capability_bridge.rs`
 
-- [ ] Add failing tests for mapping task permissions into `PolicyContext`.
-- [ ] Add failing tests for model-visible versus executable capability tools with `ToolAgent`.
-- [ ] Add failing tests for managed provider denial unless cloud opt-in is set.
-- [ ] Run `cargo test -p local-first-subagents --test capability_bridge` and verify missing API failures.
-- [ ] Implement bridge conversion and access planning.
-- [ ] Run `cargo test -p local-first-subagents --test capability_bridge`.
-- [ ] Commit as `Connect subagents to capability policy`.
+- [x] Add failing tests for mapping task permissions into `PolicyContext`.
+- [x] Add failing tests for model-visible versus executable capability tools with `ToolAgent`.
+- [x] Add failing tests for managed provider denial unless cloud opt-in is set.
+- [x] Run `cargo test -p local-first-subagents --test capability_bridge` and verify missing API failures.
+- [x] Implement bridge conversion and access planning.
+- [x] Run `cargo test -p local-first-subagents --test capability_bridge`.
+- [x] Commit as `Connect subagents to capability policy`.
 
 ## Task 2: Verification And Memory
 
@@ -32,7 +32,7 @@
 - Modify: `docs/work-memory.md`
 - Modify: `docs/superpowers/plans/2026-05-23-subagents-capability-bridge.md`
 
-- [ ] Mark completed plan items.
-- [ ] Update work memory with the bridge decision.
-- [ ] Run `make test`.
-- [ ] Commit as `Document subagent capability bridge`.
+- [x] Mark completed plan items.
+- [x] Update work memory with the bridge decision.
+- [x] Run `make test`.
+- [x] Commit as `Document subagent capability bridge`.

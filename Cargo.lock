@@ -630,6 +630,7 @@ dependencies = [
 name = "local-first-subagents"
 version = "0.1.0"
 dependencies = [
+ "local-first-capabilities",
  "local-first-memory",
  "reqwest",
  "rusqlite",

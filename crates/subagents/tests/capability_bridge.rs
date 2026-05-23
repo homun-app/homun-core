@@ -32,7 +32,10 @@ fn bridge_maps_task_permissions_into_capability_policy_context() {
         context.enabled_providers,
         vec![ProviderId::new("github"), ProviderId::new("composio")]
     );
-    assert_eq!(context.allowed_actions, vec![ActionClass::Read, ActionClass::Draft]);
+    assert_eq!(
+        context.allowed_actions,
+        vec![ActionClass::Read, ActionClass::Draft]
+    );
     assert_eq!(context.max_autonomy_level, 3);
     assert!(context.allow_managed_cloud);
 }
@@ -47,14 +50,24 @@ fn bridge_separates_visible_and_executable_capability_tools() {
         requires_user_approval: true,
     });
     let tools = vec![
-        capability_tool("calendar.read", "calendar", CapabilityProviderKind::Native, ActionClass::Read),
+        capability_tool(
+            "calendar.read",
+            "calendar",
+            CapabilityProviderKind::Native,
+            ActionClass::Read,
+        ),
         capability_tool(
             "calendar.create",
             "calendar",
             CapabilityProviderKind::Native,
             ActionClass::WriteWithConfirmation,
         ),
-        capability_tool("mail.draft", "mail", CapabilityProviderKind::Native, ActionClass::Draft),
+        capability_tool(
+            "mail.draft",
+            "mail",
+            CapabilityProviderKind::Native,
+            ActionClass::Draft,
+        ),
     ];
 
     let access = plan_capability_access(

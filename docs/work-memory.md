@@ -419,8 +419,18 @@ Perche': costruire manualmente decine o centinaia di integrazioni richiederebbe 
 
 Perche': questo crea il confine interno prima di integrare MCP o Composio. Subagenti e UI potranno parlare con un layer stabile, mentre provider nativi, MCP, managed, browser e skill restano intercambiabili e policy-gated.
 
+### Subagents capability bridge
+
+- Aggiunta dependency `local-first-capabilities` in `crates/subagents`.
+- Aggiunto modulo `capability_bridge`.
+- `capability_policy_context_for_task` trasforma `PermissionEnvelope` in `PolicyContext`.
+- `plan_capability_access` usa `CapabilityPolicy` e `CapabilityTool` per produrre tool visibili/eseguibili.
+- Il vecchio `plan_tool_access` resta disponibile per compatibilita' durante la migrazione.
+- I test coprono mapping permessi, separazione visible/executable e blocco managed cloud senza opt-in.
+
+Perche': i subagenti non devono conoscere Composio, MCP o provider specifici. Devono passare dal Capability Layer, che applica permessi, privacy domain, autonomia e boundary cloud in modo uniforme.
+
 ## Prossimo blocco
 
-- Collegare `crates/capabilities` a `crates/subagents` sostituendo/affiancando l'attuale tool access interno.
 - Implementare `McpCapabilityProvider` come primo provider reale locale.
 - Solo dopo, aggiungere adapter Composio managed opt-in.

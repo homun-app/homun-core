@@ -1,6 +1,4 @@
-use crate::{
-    AgentDefinition, AllowedAction, SubagentTask, ToolScope, required_autonomy_level,
-};
+use crate::{AgentDefinition, AllowedAction, SubagentTask, ToolScope, required_autonomy_level};
 use local_first_capabilities::{
     ActionClass, CapabilityPolicy, CapabilityTool, PolicyContext, ProviderId, ToolAccessPlan,
     UserId, WorkspaceId,
@@ -120,6 +118,8 @@ fn required_autonomy_level_for_capability(action: ActionClass) -> u8 {
         ActionClass::WriteWithConfirmation => {
             required_autonomy_level(&AllowedAction::WriteWithConfirmation)
         }
-        ActionClass::ApprovedAutomation => required_autonomy_level(&AllowedAction::ApprovedAutomation),
+        ActionClass::ApprovedAutomation => {
+            required_autonomy_level(&AllowedAction::ApprovedAutomation)
+        }
     }
 }
