@@ -105,6 +105,40 @@ pub struct CapabilityTool {
     pub input_schema: serde_json::Value,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectionStatus {
+    Active,
+    Expired,
+    Failed,
+    Disabled,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapabilityConnection {
+    pub id: String,
+    pub provider_id: ProviderId,
+    pub user_id: UserId,
+    pub workspace_id: WorkspaceId,
+    pub status: ConnectionStatus,
+    pub display_name: String,
+    pub privacy_domains: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CapabilityCall {
+    pub provider_id: ProviderId,
+    pub tool_name: String,
+    pub arguments: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CapabilityCallResult {
+    pub provider_id: ProviderId,
+    pub tool_name: String,
+    pub output: serde_json::Value,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SkillPermissions {
     pub network: Vec<String>,
