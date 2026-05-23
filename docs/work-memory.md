@@ -1073,11 +1073,9 @@ Perche': ora l'utente puo' fare un test reale end-to-end dentro la app Tauri: no
   - registra evento `user_prompt_received`;
   - payload UI sempre redatto;
   - conserva solo conteggio caratteri e metadati operativi.
-- Primo handler deterministico reale:
-  - se il prompt chiede ora/data, esegue `date '+%Y-%m-%d %H:%M:%S %Z'`;
-  - registra output terminale redatto nella Local Computer Session;
-  - risponde in chat con il valore ottenuto localmente.
-- Per prompt generici registra lo stato `prompt_pending_brain`, perche' il planner Brain operativo resta il prossimo layer.
+- Primo handler deterministico reale storico:
+  - in questo step iniziale il core riconosceva ora/data prima del Brain;
+  - questo comportamento e' stato sostituito nel blocco "Composer compreso dal Brain".
 - Aggiunto test Rust `submit_user_prompt_runs_local_time_request_without_storing_raw_prompt`.
 - Aggiornato il contratto UI per imporre che il composer usi il command Tauri reale.
 - Rigenerata e aperta la app Tauri debug.
@@ -1131,7 +1129,33 @@ Perche': il composer reale funzionava, ma la UX era contaminata da dati seeded d
   - GREEN: `npm run build`
   - GREEN: `npm run tauri -- build --debug --bundles app --no-sign`
 
-Perche': il composer non deve sembrare rotto per prompt banali. Finche' il Brain operativo non e' collegato, il core deve almeno gestire primitive locali deterministiche e la UI non deve duplicare la timeline sotto ogni risposta.
+Perche': il composer non deve sembrare rotto per prompt banali. Questo e' stato lo step intermedio prima del collegamento al Brain; la UI inoltre non deve duplicare la timeline sotto ogni risposta.
+
+## Prossimo blocco
+
+### Composer compreso dal Brain
+
+- Introdotto il trait `PromptBrain` nel Tauri Core.
+- Introdotto `BrainUnderstanding`, JSON strutturato e validato con route:
+  - `direct_answer`
+  - `local_time`
+  - `local_calculation`
+  - `needs_planning`
+  - `ask_clarification`
+  - `refuse`
+- Introdotto `RuntimePromptBrain`, che chiama il runtime locale Gemma 4 via `JsonRuntime` su `http://127.0.0.1:8765/generate_json`.
+- `submit_user_prompt` non interpreta piu' semanticamente il prompt con regole testuali locali.
+- Ora/data e calcoli vengono eseguiti solo dopo che il Brain ha restituito una route strutturata.
+- I test usano un Brain finto per provare il contratto senza dipendere dal runtime MLX live:
+  - prompt inglese `what time is it?` classificato come `local_time`;
+  - prompt inglese in parole `what is six times three?` classificato come `local_calculation`.
+- Se il Brain locale non e' raggiungibile, il core registra `brain_understanding_failed` e risponde chiedendo di avviare Gemma 4, senza tornare a riconoscimenti euristici nascosti.
+- Verifiche eseguite:
+  - RED: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml prompt_submission::tests::english_time_request_is_understood_by_brain_not_prompt_text_rules` falliva per trait/tipi mancanti.
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml prompt_submission::tests`
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`
+
+Perche': la comprensione deve essere language-agnostic e centralizzata. Regex o keyword nel composer creano casi incoerenti tra italiano, inglese e richieste naturali; il core deve invece chiedere al Brain un'intenzione strutturata, validarla e poi eseguire solo azioni locali/policy-safe.
 
 ## Prossimo blocco
 
@@ -1155,5 +1179,5 @@ Perche': la timeline e' utile per fiducia e audit, ma non deve diventare rumore 
 - Collegare Tasks/Approvals ai command `task_queue_snapshot` e `task_detail`.
 - Collegare Connections/Settings ai command capability/runtime esistenti.
 - Collegare il Browser Automation Runtime alla `LocalComputerSessionManager`, cosi' le azioni reali producono eventi, artifact e preview nella stessa card.
-- Collegare il composer al Brain operativo per trasformare prompt generici in piani/tool/task invece dell'attuale `prompt_pending_brain`.
+- Collegare `needs_planning` del composer al planner OrchestratorBrain completo per trasformare prompt generici in piani/tool/task invece dell'attuale stato di attesa `prompt_pending_brain`.
 - Lasciare `LearningUiReadModel` e azioni di feedback utente per la fine, quando gli eventi PC reali saranno disponibili.

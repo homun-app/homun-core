@@ -5,7 +5,7 @@ use crate::models::{
     capability_connection_item, capability_tool_item, component, desktop_task_detail,
     desktop_task_queue, runtime_process_item, runtime_process_item_with_snapshot,
 };
-use crate::prompt_submission::{self, PromptSubmissionResult};
+use crate::prompt_submission::{self, PromptBrain, PromptSubmissionResult, RuntimePromptBrain};
 use crate::seed::{seed_capabilities, seed_memories, seed_tasks};
 use local_first_capabilities::{
     CapabilityRegistryStore, ProviderId, UserId as CapabilityUserId,
@@ -22,6 +22,7 @@ use local_first_memory::{
 use local_first_process_manager::{
     LocalProcessSupervisor, ProcessManager, ProcessRegistryStore, SidecarProcessCatalog,
 };
+use local_first_subagents::RuntimeClient;
 use local_first_task_runtime::{
     TaskStore, TaskUiReadModel, UserId as TaskUserId, WorkspaceId as TaskWorkspaceId,
 };
@@ -42,6 +43,7 @@ pub struct DesktopCoreState {
     process_manager: Mutex<ProcessManager<LocalProcessSupervisor>>,
     capability_store: Mutex<CapabilityRegistryStore>,
     local_computer: Mutex<LocalComputerSessionManager>,
+    brain_runtime_url: String,
 }
 
 impl DesktopCoreState {
@@ -83,6 +85,7 @@ impl DesktopCoreState {
             process_manager: Mutex::new(process_manager),
             capability_store: Mutex::new(capability_store),
             local_computer: Mutex::new(local_computer),
+            brain_runtime_url: "http://127.0.0.1:8765".to_string(),
         })
     }
 
@@ -272,12 +275,23 @@ impl DesktopCoreState {
         session_id: &str,
         prompt: &str,
     ) -> Result<PromptSubmissionResult, String> {
+        let mut brain = RuntimePromptBrain::new(RuntimeClient::new(&self.brain_runtime_url));
+        self.submit_user_prompt_with_brain(session_id, prompt, &mut brain)
+    }
+
+    fn submit_user_prompt_with_brain(
+        &self,
+        session_id: &str,
+        prompt: &str,
+        brain: &mut impl PromptBrain,
+    ) -> Result<PromptSubmissionResult, String> {
         let manager = self
             .local_computer
             .lock()
             .map_err(|_| "local computer lock poisoned".to_string())?;
         prompt_submission::submit_user_prompt(
             &manager,
+            brain,
             &self.user_id,
             &self.workspace_id,
             session_id,
@@ -339,6 +353,17 @@ fn seed_local_computer_session(manager: &LocalComputerSessionManager) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::prompt_submission::BrainUnderstanding;
+
+    struct StaticBrain {
+        understanding: BrainUnderstanding,
+    }
+
+    impl PromptBrain for StaticBrain {
+        fn understand(&mut self, _prompt: &str) -> Result<BrainUnderstanding, String> {
+            Ok(self.understanding.clone())
+        }
+    }
 
     fn state() -> DesktopCoreState {
         DesktopCoreState::seeded(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.."))
@@ -466,9 +491,14 @@ mod tests {
     #[test]
     fn submit_user_prompt_runs_local_time_request_without_storing_raw_prompt() {
         let state = state();
+        let mut brain = StaticBrain {
+            understanding: BrainUnderstanding::LocalTime {
+                reason: Some("richiesta ora locale".to_string()),
+            },
+        };
 
         let result = state
-            .submit_user_prompt("computer_active_prompt", "che ore sono?")
+            .submit_user_prompt_with_brain("computer_active_prompt", "che ore sono?", &mut brain)
             .unwrap();
         let serialized = serde_json::to_string(&result).unwrap();
 
@@ -495,9 +525,17 @@ mod tests {
     #[test]
     fn submit_user_prompt_answers_simple_arithmetic_locally() {
         let state = state();
+        let mut brain = StaticBrain {
+            understanding: BrainUnderstanding::LocalCalculation {
+                left: 6,
+                operator: "*".to_string(),
+                right: 3,
+                reason: Some("calcolo locale".to_string()),
+            },
+        };
 
         let result = state
-            .submit_user_prompt("computer_active_prompt", "quanto fa 6*3")
+            .submit_user_prompt_with_brain("computer_active_prompt", "quanto fa 6*3", &mut brain)
             .unwrap();
         let serialized = serde_json::to_string(&result).unwrap();
 

@@ -12,6 +12,7 @@ local-first-capabilities = { path = "../../../crates/capabilities" }
 local-first-local-computer-session = { path = "../../../crates/local-computer-session" }
 local-first-memory = { path = "../../../crates/memory" }
 local-first-process-manager = { path = "../../../crates/process-manager" }
+local-first-subagents = { path = "../../../crates/subagents" }
 local-first-task-runtime = { path = "../../../crates/task-runtime" }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }

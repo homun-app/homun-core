@@ -1,6 +1,8 @@
 use local_first_local_computer_session::{
     ComputerEventCreate, ComputerSessionSnapshot, LocalComputerSessionManager, SurfaceKind,
 };
+use local_first_subagents::{GenerateJsonRequest, JsonRuntime};
+use serde::Deserialize;
 use serde::Serialize;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -21,8 +23,85 @@ pub struct PromptMessage {
     pub metadata: Option<String>,
 }
 
+pub trait PromptBrain {
+    fn understand(&mut self, prompt: &str) -> Result<BrainUnderstanding, String>;
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(tag = "route", rename_all = "snake_case")]
+pub enum BrainUnderstanding {
+    DirectAnswer {
+        answer: String,
+        #[serde(default)]
+        reason: Option<String>,
+        #[serde(default)]
+        confidence: Option<f64>,
+    },
+    LocalTime {
+        #[serde(default)]
+        reason: Option<String>,
+    },
+    LocalCalculation {
+        left: i64,
+        operator: String,
+        right: i64,
+        #[serde(default)]
+        reason: Option<String>,
+    },
+    NeedsPlanning {
+        summary: String,
+        #[serde(default)]
+        reason: Option<String>,
+    },
+    AskClarification {
+        question: String,
+        #[serde(default)]
+        reason: Option<String>,
+    },
+    Refuse {
+        answer: String,
+        #[serde(default)]
+        reason: Option<String>,
+    },
+}
+
+pub struct RuntimePromptBrain<R> {
+    runtime: R,
+}
+
+impl<R> RuntimePromptBrain<R> {
+    pub fn new(runtime: R) -> Self {
+        Self { runtime }
+    }
+}
+
+impl<R: JsonRuntime> PromptBrain for RuntimePromptBrain<R> {
+    fn understand(&mut self, prompt: &str) -> Result<BrainUnderstanding, String> {
+        let request = GenerateJsonRequest {
+            prompt: brain_prompt(prompt),
+            max_tokens: 384,
+            temperature: 0.0,
+            wait_if_busy: true,
+            request_timeout_seconds: Some(30.0),
+            json_schema: Some(brain_schema()),
+            required_keys: vec!["route".to_string()],
+            repair: true,
+        };
+        let response = self
+            .runtime
+            .generate_json(&request)
+            .map_err(|error| format!("brain_runtime_unavailable:{error:?}"))?;
+        if !response.valid {
+            return Err(format!("brain_invalid_json:{}", response.errors.join("; ")));
+        }
+        serde_json::from_value(response.json)
+            .map_err(|error| format!("brain_understanding_invalid:{error}"))
+    }
+}
+
 pub fn submit_user_prompt(
     manager: &LocalComputerSessionManager,
+    brain: &mut impl PromptBrain,
     user_id: &str,
     workspace_id: &str,
     session_id: &str,
@@ -51,82 +130,154 @@ pub fn submit_user_prompt(
         approval_required: false,
     })?;
 
-    let assistant_text = if let Some(calculation) = parse_simple_calculation(prompt) {
-        manager.append_event(ComputerEventCreate {
-            session_id: session_id.to_string(),
-            surface: SurfaceKind::Logs,
-            kind: "local_calculation_completed".to_string(),
-            status: "done".to_string(),
-            title: "Calcolo locale completato".to_string(),
-            subtitle: calculation.redacted_expression(),
-            payload: serde_json::json!({
-                "raw_prompt_stored": false,
-                "operation": calculation.operator_label(),
-            }),
-            artifact_refs: vec![],
-            approval_required: false,
-        })?;
-        format!(
-            "{} {} {} fa {}.",
-            calculation.left,
-            calculation.operator,
-            calculation.right,
-            calculation.result()
-        )
-    } else if requests_local_time(prompt) {
-        manager.start_surface(session_id, SurfaceKind::Shell, "Terminale locale")?;
-        manager.append_event(ComputerEventCreate {
-            session_id: session_id.to_string(),
-            surface: SurfaceKind::Shell,
-            kind: "computer_action_started".to_string(),
-            status: "running".to_string(),
-            title: "Verificare ora locale".to_string(),
-            subtitle: "Esecuzione read-only tramite comando date".to_string(),
-            payload: serde_json::json!({ "command": "date" }),
-            artifact_refs: vec![],
-            approval_required: false,
-        })?;
-        let date_output = run_date_command()?;
-        manager.append_terminal_output(
-            session_id,
-            user_id,
-            workspace_id,
-            &date_output.transcript,
-        )?;
-        manager.append_event(ComputerEventCreate {
-            session_id: session_id.to_string(),
-            surface: SurfaceKind::Shell,
-            kind: "computer_action_completed".to_string(),
-            status: "done".to_string(),
-            title: "Ora locale verificata".to_string(),
-            subtitle: "Risultato ottenuto localmente dalla shell".to_string(),
-            payload: serde_json::json!({ "command": "date", "output": "redacted" }),
-            artifact_refs: vec![],
-            approval_required: false,
-        })?;
-        format!(
-            "Ho verificato localmente dalla shell: {}.",
-            date_output.value
-        )
-    } else {
-        manager.append_event(ComputerEventCreate {
-            session_id: session_id.to_string(),
-            surface: SurfaceKind::Logs,
-            kind: "prompt_pending_brain".to_string(),
-            status: "waiting".to_string(),
-            title: "Prompt pronto per il Brain".to_string(),
-            subtitle: "Il composer e' cablato; il planner operativo sara' il prossimo layer."
-                .to_string(),
-            payload: serde_json::json!({
-                "raw_prompt_stored": false,
-                "needs_brain": true
-            }),
-            artifact_refs: vec![],
-            approval_required: false,
-        })?;
-        "Ho ricevuto il prompt nel core locale. Il prossimo passaggio e' collegarlo al Brain per decidere strumenti, task e browser.".to_string()
+    let understanding = match brain.understand(prompt) {
+        Ok(understanding) => understanding,
+        Err(error) => {
+            manager.append_event(ComputerEventCreate {
+                session_id: session_id.to_string(),
+                surface: SurfaceKind::Logs,
+                kind: "brain_understanding_failed".to_string(),
+                status: "waiting".to_string(),
+                title: "Brain locale non raggiungibile".to_string(),
+                subtitle: "Avvia il runtime Gemma 4 locale per comprendere il prompt.".to_string(),
+                payload: serde_json::json!({
+                    "raw_prompt_stored": false,
+                    "error": error
+                }),
+                artifact_refs: vec![],
+                approval_required: false,
+            })?;
+            return prompt_result(
+                manager,
+                user_id,
+                workspace_id,
+                session_id,
+                "Il Brain locale non e' raggiungibile. Avvia il runtime Gemma 4 locale e riprova."
+                    .to_string(),
+            );
+        }
     };
 
+    manager.append_event(ComputerEventCreate {
+        session_id: session_id.to_string(),
+        surface: SurfaceKind::Logs,
+        kind: "brain_understanding_completed".to_string(),
+        status: "done".to_string(),
+        title: "Prompt compreso dal Brain".to_string(),
+        subtitle: understanding.redacted_summary(),
+        payload: serde_json::json!({
+            "raw_prompt_stored": false,
+            "route": understanding.route_name()
+        }),
+        artifact_refs: vec![],
+        approval_required: false,
+    })?;
+
+    let assistant_text = match understanding {
+        BrainUnderstanding::LocalCalculation {
+            left,
+            operator,
+            right,
+            ..
+        } => {
+            let calculation = SimpleCalculation {
+                left,
+                operator: normalize_brain_operator(&operator)?,
+                right,
+            };
+            manager.append_event(ComputerEventCreate {
+                session_id: session_id.to_string(),
+                surface: SurfaceKind::Logs,
+                kind: "local_calculation_completed".to_string(),
+                status: "done".to_string(),
+                title: "Calcolo locale completato".to_string(),
+                subtitle: calculation.redacted_expression(),
+                payload: serde_json::json!({
+                    "raw_prompt_stored": false,
+                    "operation": calculation.operator_label(),
+                }),
+                artifact_refs: vec![],
+                approval_required: false,
+            })?;
+            format!(
+                "{} {} {} fa {}.",
+                calculation.left,
+                calculation.operator,
+                calculation.right,
+                calculation.result()
+            )
+        }
+        BrainUnderstanding::LocalTime { .. } => {
+            manager.start_surface(session_id, SurfaceKind::Shell, "Terminale locale")?;
+            manager.append_event(ComputerEventCreate {
+                session_id: session_id.to_string(),
+                surface: SurfaceKind::Shell,
+                kind: "computer_action_started".to_string(),
+                status: "running".to_string(),
+                title: "Verificare ora locale".to_string(),
+                subtitle: "Esecuzione read-only tramite comando date".to_string(),
+                payload: serde_json::json!({ "command": "date" }),
+                artifact_refs: vec![],
+                approval_required: false,
+            })?;
+            let date_output = run_date_command()?;
+            manager.append_terminal_output(
+                session_id,
+                user_id,
+                workspace_id,
+                &date_output.transcript,
+            )?;
+            manager.append_event(ComputerEventCreate {
+                session_id: session_id.to_string(),
+                surface: SurfaceKind::Shell,
+                kind: "computer_action_completed".to_string(),
+                status: "done".to_string(),
+                title: "Ora locale verificata".to_string(),
+                subtitle: "Risultato ottenuto localmente dalla shell".to_string(),
+                payload: serde_json::json!({ "command": "date", "output": "redacted" }),
+                artifact_refs: vec![],
+                approval_required: false,
+            })?;
+            format!(
+                "Ho verificato localmente dalla shell: {}.",
+                date_output.value
+            )
+        }
+        BrainUnderstanding::DirectAnswer { answer, .. }
+        | BrainUnderstanding::Refuse { answer, .. } => answer,
+        BrainUnderstanding::AskClarification { question, .. } => question,
+        BrainUnderstanding::NeedsPlanning { summary, .. } => {
+            manager.append_event(ComputerEventCreate {
+                session_id: session_id.to_string(),
+                surface: SurfaceKind::Logs,
+                kind: "prompt_pending_brain".to_string(),
+                status: "waiting".to_string(),
+                title: "Prompt pronto per il Brain".to_string(),
+                subtitle: "Il composer e' cablato; il planner operativo sara' il prossimo layer."
+                    .to_string(),
+                payload: serde_json::json!({
+                    "raw_prompt_stored": false,
+                    "needs_brain": true
+                }),
+                artifact_refs: vec![],
+                approval_required: false,
+            })?;
+            format!(
+                "Ho capito la richiesta e serve il planner operativo: {summary}. Il collegamento ai task/tool completi e' il prossimo layer."
+            )
+        }
+    };
+
+    prompt_result(manager, user_id, workspace_id, session_id, assistant_text)
+}
+
+fn prompt_result(
+    manager: &LocalComputerSessionManager,
+    user_id: &str,
+    workspace_id: &str,
+    session_id: &str,
+    assistant_text: String,
+) -> Result<PromptSubmissionResult, String> {
     let computer_session = manager
         .read_model()
         .snapshot(session_id, user_id, workspace_id)?
@@ -148,6 +299,75 @@ pub fn submit_user_prompt(
             metadata: Some("Tauri core locale".to_string()),
         },
         computer_session,
+    })
+}
+
+impl BrainUnderstanding {
+    fn route_name(&self) -> &'static str {
+        match self {
+            BrainUnderstanding::DirectAnswer { .. } => "direct_answer",
+            BrainUnderstanding::LocalTime { .. } => "local_time",
+            BrainUnderstanding::LocalCalculation { .. } => "local_calculation",
+            BrainUnderstanding::NeedsPlanning { .. } => "needs_planning",
+            BrainUnderstanding::AskClarification { .. } => "ask_clarification",
+            BrainUnderstanding::Refuse { .. } => "refuse",
+        }
+    }
+
+    fn redacted_summary(&self) -> String {
+        match self {
+            BrainUnderstanding::DirectAnswer { .. } => "Risposta diretta".to_string(),
+            BrainUnderstanding::LocalTime { .. } => "Richiesta ora/data locale".to_string(),
+            BrainUnderstanding::LocalCalculation { .. } => "Calcolo locale".to_string(),
+            BrainUnderstanding::NeedsPlanning { .. } => "Richiesta da pianificare".to_string(),
+            BrainUnderstanding::AskClarification { .. } => "Serve chiarimento".to_string(),
+            BrainUnderstanding::Refuse { .. } => "Richiesta rifiutata".to_string(),
+        }
+    }
+}
+
+fn brain_prompt(prompt: &str) -> String {
+    format!(
+        "You are the local-first assistant request understanding brain.\n\
+         Classify the user's request language-agnostically. Do not execute tools.\n\
+         Return only JSON matching the schema.\n\
+         Use local_time for requests asking the current local time or date.\n\
+         Use local_calculation for simple arithmetic even when written in words.\n\
+         Use direct_answer only when no fresh system state or tool is needed.\n\
+         Use needs_planning for browser, shell, connector, memory, automation, or multi-step work.\n\
+         Never include the raw user prompt in the JSON.\n\
+         User request: {prompt}"
+    )
+}
+
+fn brain_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "object",
+        "required": ["route"],
+        "properties": {
+            "route": {
+                "type": "string",
+                "enum": [
+                    "direct_answer",
+                    "local_time",
+                    "local_calculation",
+                    "needs_planning",
+                    "ask_clarification",
+                    "refuse"
+                ]
+            },
+            "answer": {"type": ["string", "null"]},
+            "question": {"type": ["string", "null"]},
+            "summary": {"type": ["string", "null"]},
+            "reason": {"type": ["string", "null"]},
+            "confidence": {"type": ["number", "null"]},
+            "left": {"type": ["integer", "null"]},
+            "operator": {
+                "type": ["string", "null"],
+                "enum": ["+", "-", "*", "/", "add", "subtract", "multiply", "divide", "plus", "minus", "times", "x", null]
+            },
+            "right": {"type": ["integer", "null"]}
+        }
     })
 }
 
@@ -173,13 +393,6 @@ fn run_date_command() -> Result<DateCommandOutput, String> {
         value: stdout.clone(),
         transcript: format!("prompt % date '+%Y-%m-%d %H:%M:%S %Z'\n{stdout}"),
     })
-}
-
-fn requests_local_time(prompt: &str) -> bool {
-    let normalized = prompt.to_lowercase();
-    ["ore", "ora", "orario", "time", "date", "data"]
-        .iter()
-        .any(|needle| normalized.contains(needle))
 }
 
 struct SimpleCalculation {
@@ -219,56 +432,13 @@ impl SimpleCalculation {
     }
 }
 
-fn parse_simple_calculation(prompt: &str) -> Option<SimpleCalculation> {
-    let chars: Vec<char> = prompt.chars().collect();
-    for index in 0..chars.len() {
-        if !chars[index].is_ascii_digit() {
-            continue;
-        }
-        let (left, mut cursor) = parse_integer(&chars, index)?;
-        cursor = skip_spaces(&chars, cursor);
-        let operator = normalize_operator(*chars.get(cursor)?)?;
-        cursor += 1;
-        cursor = skip_spaces(&chars, cursor);
-        let (right, _) = parse_integer(&chars, cursor)?;
-        return Some(SimpleCalculation {
-            left,
-            operator,
-            right,
-        });
-    }
-    None
-}
-
-fn parse_integer(chars: &[char], start: usize) -> Option<(i64, usize)> {
-    let mut cursor = start;
-    let mut value = String::new();
-    while let Some(char) = chars.get(cursor) {
-        if !char.is_ascii_digit() {
-            break;
-        }
-        value.push(*char);
-        cursor += 1;
-    }
-    if value.is_empty() {
-        return None;
-    }
-    value.parse::<i64>().ok().map(|number| (number, cursor))
-}
-
-fn skip_spaces(chars: &[char], mut cursor: usize) -> usize {
-    while chars.get(cursor).is_some_and(|char| char.is_whitespace()) {
-        cursor += 1;
-    }
-    cursor
-}
-
-fn normalize_operator(operator: char) -> Option<char> {
-    match operator {
-        '+' | '-' | '*' | '/' => Some(operator),
-        'x' | 'X' | '×' => Some('*'),
-        ':' | '÷' => Some('/'),
-        _ => None,
+fn normalize_brain_operator(operator: &str) -> Result<char, String> {
+    match operator.trim().to_lowercase().as_str() {
+        "+" | "add" | "plus" => Ok('+'),
+        "-" | "subtract" | "minus" => Ok('-'),
+        "*" | "multiply" | "times" | "x" => Ok('*'),
+        "/" | "divide" => Ok('/'),
+        other => Err(format!("unsupported brain calculation operator: {other}")),
     }
 }
 
@@ -277,4 +447,105 @@ fn timestamp_nanos() -> u128 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use local_first_local_computer_session::{ComputerSessionCreate, LocalComputerSessionStore};
+
+    struct StaticBrain {
+        understanding: BrainUnderstanding,
+    }
+
+    impl PromptBrain for StaticBrain {
+        fn understand(&mut self, _prompt: &str) -> Result<BrainUnderstanding, String> {
+            Ok(self.understanding.clone())
+        }
+    }
+
+    fn manager() -> LocalComputerSessionManager {
+        let manager =
+            LocalComputerSessionManager::new(LocalComputerSessionStore::open_in_memory().unwrap());
+        manager
+            .create_session(ComputerSessionCreate {
+                session_id: "session_1".to_string(),
+                task_id: "task_1".to_string(),
+                workflow_id: None,
+                user_id: "user_1".to_string(),
+                workspace_id: "workspace_1".to_string(),
+                title: "Computer locale".to_string(),
+                subtitle: "Test".to_string(),
+                risk_level: "low".to_string(),
+                progress_total: 2,
+            })
+            .unwrap();
+        manager
+    }
+
+    #[test]
+    fn english_time_request_is_understood_by_brain_not_prompt_text_rules() {
+        let manager = manager();
+        let mut brain = StaticBrain {
+            understanding: BrainUnderstanding::LocalTime {
+                reason: Some("The user asks for the current local time.".to_string()),
+            },
+        };
+
+        let result = submit_user_prompt(
+            &manager,
+            &mut brain,
+            "user_1",
+            "workspace_1",
+            "session_1",
+            "what time is it?",
+        )
+        .unwrap();
+        let serialized = serde_json::to_string(&result).unwrap();
+
+        assert!(result.assistant_message.text.contains("localmente"));
+        assert!(!serialized.contains("what time is it?"));
+        assert!(
+            result
+                .computer_session
+                .timeline
+                .iter()
+                .any(|item| item.kind == "brain_understanding_completed")
+        );
+        assert!(
+            result
+                .computer_session
+                .terminal_excerpt_redacted
+                .iter()
+                .any(|line| line.contains("prompt % date"))
+        );
+    }
+
+    #[test]
+    fn calculation_words_are_understood_from_brain_structured_output() {
+        let manager = manager();
+        let mut brain = StaticBrain {
+            understanding: BrainUnderstanding::LocalCalculation {
+                left: 6,
+                operator: "*".to_string(),
+                right: 3,
+                reason: Some("The user asks for arithmetic.".to_string()),
+            },
+        };
+
+        let result = submit_user_prompt(
+            &manager,
+            &mut brain,
+            "user_1",
+            "workspace_1",
+            "session_1",
+            "what is six times three?",
+        )
+        .unwrap();
+        let serialized = serde_json::to_string(&result).unwrap();
+
+        assert_eq!(result.assistant_message.text, "6 * 3 fa 18.");
+        assert!(!serialized.contains("what is six times three?"));
+        assert!(!serialized.contains("prompt_pending_brain"));
+    }
 }
