@@ -373,8 +373,11 @@ small {
 }
 
 .chat-view {
-  min-height: calc(100vh - 56px);
-  padding-top: clamp(32px, 7vh, 82px);
+  height: calc(100vh - 56px);
+  min-height: 620px;
+  padding-top: clamp(24px, 5vh, 56px);
+  display: flex;
+  flex-direction: column;
 }
 
 .tasks-view {
@@ -478,13 +481,31 @@ small {
 
 .suggestion-row {
   justify-content: center;
-  margin: 20px 0 28px;
+  margin: 0 0 12px;
 }
 
 .conversation {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
   display: flex;
   flex-direction: column;
   gap: 14px;
+  padding: 8px 0 24px;
+}
+
+.composer-dock {
+  position: sticky;
+  bottom: -1px;
+  z-index: 3;
+  margin-top: auto;
+  padding: 18px 0 0;
+  background: linear-gradient(
+    180deg,
+    rgba(247, 247, 245, 0) 0%,
+    var(--bg) 26%,
+    var(--bg) 100%
+  );
 }
 
 .message {
@@ -979,7 +1000,7 @@ small {
   .workspace {
     height: auto;
     min-height: calc(100vh - 420px);
-    padding: 20px 14px;
+    padding: 20px 14px 260px;
   }
 
   .inspector {
@@ -1011,9 +1032,28 @@ small {
     flex-direction: column;
   }
 
+  .suggestion-row {
+    display: none;
+  }
+
   .settings-view,
   .chat-view {
+    height: auto;
     min-height: auto;
     padding-top: 0;
+  }
+
+  .conversation {
+    flex: none;
+    overflow: visible;
+  }
+
+  .composer-dock {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    padding: 12px 14px max(12px, env(safe-area-inset-bottom));
+    box-shadow: 0 -18px 42px rgba(24, 30, 40, 0.08);
   }
 }
