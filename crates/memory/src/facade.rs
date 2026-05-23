@@ -1,12 +1,13 @@
 use crate::{
     AccessDecisionKind, DataSensitivity, GraphifyArtifacts, GraphifyImport, GraphifyImportSummary,
-    MemoryAccessDecision, MemoryAccessRequest, MemoryContextItem, MemoryContextPack, MemoryEntity,
-    MemoryEvent, MemoryEvidence, MemoryExtraction, MemoryExtractionSummary, MemoryPolicyEngine,
-    MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation, MemoryStatus, PrivacyDomain,
-    SQLiteMemoryStore, UserId, WikiFileStore, WikiPage, WorkspaceId,
+    MemoryAccessDecision, MemoryAccessRequest, MemoryContextItem, MemoryContextPack,
+    MemoryCreateRequest, MemoryEntity, MemoryEvent, MemoryEvidence, MemoryExtraction,
+    MemoryExtractionSummary, MemoryLifecycleRequest, MemoryPolicyEngine, MemoryRecord, MemoryRef,
+    MemoryRefKind, MemoryRelation, MemoryStatus, MemoryUpdatePatch, PrivacyDomain,
+    SQLiteMemoryStore, UserId, WikiFileStore, WikiPage, WorkspaceId, current_timestamp,
+    ensure_transition,
 };
 use std::str::FromStr;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct MemoryWikiProjection {
     pub page: WikiPage,
@@ -43,6 +44,168 @@ impl MemoryFacade {
 
     pub fn link_evidence(&self, evidence: &MemoryEvidence) -> Result<(), String> {
         self.store.link_evidence(evidence)
+    }
+
+    pub fn create_memory_candidate(
+        &self,
+        create: MemoryCreateRequest,
+    ) -> Result<MemoryRecord, String> {
+        let now = current_timestamp();
+        let reference = MemoryRef::generated(
+            MemoryRefKind::Memory,
+            create.request.user_id.clone(),
+            create.request.workspace_id.clone(),
+        );
+        let memory = MemoryRecord {
+            reference: reference.clone(),
+            user_id: create.request.user_id.clone(),
+            workspace_id: create.request.workspace_id.clone(),
+            memory_type: create.memory_type,
+            text: create.text,
+            aliases: create.aliases,
+            language_hints: create.language_hints,
+            confidence: create.confidence,
+            status: MemoryStatus::Candidate,
+            privacy_domain: create.privacy_domain,
+            sensitivity: create.sensitivity,
+            metadata: create.metadata,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+            last_seen_at: Some(now),
+            supersedes: vec![],
+            superseded_by: None,
+            correction_of: None,
+        };
+        self.store.upsert_memory(&memory)?;
+        for evidence_ref in create.evidence_refs {
+            self.store.link_evidence(&MemoryEvidence {
+                memory_ref: reference.clone(),
+                evidence_ref,
+                note: "Lifecycle create evidence".to_string(),
+            })?;
+        }
+        self.audit_lifecycle(&create.request, AccessDecisionKind::Allow, vec![])?;
+        Ok(memory)
+    }
+
+    pub fn update_memory(
+        &self,
+        request: &MemoryLifecycleRequest,
+        reference: &MemoryRef,
+        patch: MemoryUpdatePatch,
+    ) -> Result<MemoryRecord, String> {
+        let mut memory = self.load_lifecycle_memory(request, reference)?;
+        if let Some(text) = patch.text {
+            memory.text = text;
+        }
+        if let Some(aliases) = patch.aliases {
+            memory.aliases = aliases;
+        }
+        if let Some(language_hints) = patch.language_hints {
+            memory.language_hints = language_hints;
+        }
+        if let Some(confidence) = patch.confidence {
+            memory.confidence = confidence;
+        }
+        if let Some(privacy_domain) = patch.privacy_domain {
+            memory.privacy_domain = privacy_domain;
+        }
+        if let Some(sensitivity) = patch.sensitivity {
+            memory.sensitivity = sensitivity;
+        }
+        if let Some(metadata) = patch.metadata {
+            memory.metadata = metadata;
+        }
+        if let Some(last_seen_at) = patch.last_seen_at {
+            memory.last_seen_at = Some(last_seen_at);
+        }
+        memory.updated_at = current_timestamp();
+        self.store.upsert_memory(&memory)?;
+        self.audit_lifecycle(request, AccessDecisionKind::Allow, vec![])?;
+        Ok(memory)
+    }
+
+    pub fn confirm_memory(
+        &self,
+        request: &MemoryLifecycleRequest,
+        reference: &MemoryRef,
+        reason: &str,
+    ) -> Result<MemoryRecord, String> {
+        self.transition_memory(request, reference, MemoryStatus::Confirmed, reason)
+    }
+
+    pub fn reject_memory(
+        &self,
+        request: &MemoryLifecycleRequest,
+        reference: &MemoryRef,
+        reason: &str,
+    ) -> Result<MemoryRecord, String> {
+        self.transition_memory(request, reference, MemoryStatus::Rejected, reason)
+    }
+
+    pub fn mark_memory_stale(
+        &self,
+        request: &MemoryLifecycleRequest,
+        reference: &MemoryRef,
+        reason: &str,
+    ) -> Result<MemoryRecord, String> {
+        self.transition_memory(request, reference, MemoryStatus::Stale, reason)
+    }
+
+    pub fn merge_memories(
+        &self,
+        request: &MemoryLifecycleRequest,
+        canonical_ref: &MemoryRef,
+        source_refs: Vec<MemoryRef>,
+        reason: &str,
+    ) -> Result<MemoryRecord, String> {
+        let mut canonical = self.load_lifecycle_memory(request, canonical_ref)?;
+        let now = current_timestamp();
+        for source_ref in source_refs {
+            let mut source = self.load_lifecycle_memory(request, &source_ref)?;
+            if !canonical.supersedes.contains(&source.reference) {
+                canonical.supersedes.push(source.reference.clone());
+            }
+            source.superseded_by = Some(canonical.reference.clone());
+            source.updated_at = now.clone();
+            source.metadata = merge_reason(source.metadata, reason);
+            self.store.upsert_memory(&source)?;
+        }
+        canonical.updated_at = now;
+        canonical.metadata = merge_reason(canonical.metadata, reason);
+        self.store.upsert_memory(&canonical)?;
+        self.audit_lifecycle(request, AccessDecisionKind::Allow, vec![])?;
+        Ok(canonical)
+    }
+
+    pub fn delete_memory(
+        &self,
+        request: &MemoryLifecycleRequest,
+        reference: &MemoryRef,
+        reason: &str,
+    ) -> Result<(), String> {
+        if reference.user_id != request.user_id || reference.workspace_id != request.workspace_id {
+            self.audit_lifecycle(
+                request,
+                AccessDecisionKind::Deny,
+                vec!["scope_mismatch".to_string()],
+            )?;
+            return Err("cannot access ref outside user/workspace".to_string());
+        }
+        if let Some(mut memory) =
+            self.store
+                .get_memory(reference, &request.user_id, &request.workspace_id)?
+        {
+            ensure_transition(memory.status, MemoryStatus::Deleted)?;
+            memory.status = MemoryStatus::Deleted;
+            memory.updated_at = current_timestamp();
+            memory.metadata = merge_reason(memory.metadata, reason);
+            self.store.upsert_memory(&memory)?;
+        }
+        self.store
+            .tombstone(reference, &request.user_id, &request.workspace_id, reason)?;
+        self.audit_lifecycle(request, AccessDecisionKind::Allow, vec![])?;
+        Ok(())
     }
 
     pub fn record_wiki_page_for_ui(&self, page: &WikiPage) -> Result<(), String> {
@@ -311,12 +474,72 @@ impl MemoryFacade {
             evidence,
         })
     }
+
+    fn transition_memory(
+        &self,
+        request: &MemoryLifecycleRequest,
+        reference: &MemoryRef,
+        status: MemoryStatus,
+        reason: &str,
+    ) -> Result<MemoryRecord, String> {
+        let mut memory = self.load_lifecycle_memory(request, reference)?;
+        ensure_transition(memory.status, status)?;
+        memory.status = status;
+        memory.updated_at = current_timestamp();
+        memory.metadata = merge_reason(memory.metadata, reason);
+        self.store.upsert_memory(&memory)?;
+        self.audit_lifecycle(request, AccessDecisionKind::Allow, vec![])?;
+        Ok(memory)
+    }
+
+    fn load_lifecycle_memory(
+        &self,
+        request: &MemoryLifecycleRequest,
+        reference: &MemoryRef,
+    ) -> Result<MemoryRecord, String> {
+        if reference.user_id != request.user_id || reference.workspace_id != request.workspace_id {
+            self.audit_lifecycle(
+                request,
+                AccessDecisionKind::Deny,
+                vec!["scope_mismatch".to_string()],
+            )?;
+            return Err("cannot access ref outside user/workspace".to_string());
+        }
+        self.store
+            .get_memory(reference, &request.user_id, &request.workspace_id)?
+            .ok_or_else(|| "memory not found".to_string())
+    }
+
+    fn audit_lifecycle(
+        &self,
+        request: &MemoryLifecycleRequest,
+        kind: AccessDecisionKind,
+        reasons: Vec<String>,
+    ) -> Result<MemoryRef, String> {
+        let access_request = MemoryAccessRequest {
+            actor_id: request.actor_id.clone(),
+            user_id: request.user_id.clone(),
+            workspace_id: request.workspace_id.clone(),
+            purpose: request.purpose.clone(),
+            allowed_domains: vec![],
+            max_sensitivity: DataSensitivity::Secret,
+            allow_raw_payload: false,
+            allow_export: false,
+            broad_query: false,
+        };
+        self.store
+            .record_access_decision(&access_request, &MemoryAccessDecision { kind, reasons })
+    }
 }
 
-fn current_timestamp() -> String {
-    let seconds = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or_default();
-    format!("unix:{seconds}")
+fn merge_reason(mut metadata: serde_json::Value, reason: &str) -> serde_json::Value {
+    if let Some(object) = metadata.as_object_mut() {
+        object.insert(
+            "last_lifecycle_reason".to_string(),
+            serde_json::Value::String(reason.to_string()),
+        );
+        metadata
+    } else {
+        serde_json::json!({ "previous_metadata": metadata, "last_lifecycle_reason": reason })
+    }
 }
