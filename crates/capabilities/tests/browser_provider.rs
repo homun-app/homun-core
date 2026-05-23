@@ -26,6 +26,7 @@ fn browser_provider_lists_policy_classified_tools() {
     let provider = BrowserCapabilityProvider::new(FakeBrowserTransport::default());
 
     let tools = provider.list_tools().unwrap();
+    let tool_names: Vec<_> = tools.iter().map(|tool| tool.name.as_str()).collect();
     let snapshot = tools
         .iter()
         .find(|tool| tool.name == "browser.snapshot")
@@ -37,6 +38,26 @@ fn browser_provider_lists_policy_classified_tools() {
 
     assert_eq!(provider.id(), &ProviderId::new("browser"));
     assert_eq!(provider.kind(), CapabilityProviderKind::Browser);
+    assert_eq!(
+        tool_names,
+        vec![
+            "browser.health",
+            "browser.profiles",
+            "browser.tabs",
+            "browser.snapshot",
+            "browser.console",
+            "browser.open",
+            "browser.focus",
+            "browser.close_tab",
+            "browser.navigate",
+            "browser.screenshot",
+            "browser.pdf",
+            "browser.act",
+            "browser.arm_file_chooser",
+            "browser.respond_dialog",
+            "browser.wait_download",
+        ]
+    );
     assert_eq!(snapshot.action, ActionClass::Read);
     assert_eq!(act.action, ActionClass::WriteWithConfirmation);
     assert_eq!(snapshot.privacy_domains, vec!["browser"]);

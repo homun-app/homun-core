@@ -18,6 +18,33 @@ fn browser_request_serializes_sidecar_method_names() {
 }
 
 #[test]
+fn all_browser_methods_serialize_to_sidecar_names() {
+    let methods = [
+        (BrowserMethod::Health, "browser.health"),
+        (BrowserMethod::Profiles, "browser.profiles"),
+        (BrowserMethod::Start, "browser.start"),
+        (BrowserMethod::Stop, "browser.stop"),
+        (BrowserMethod::Tabs, "browser.tabs"),
+        (BrowserMethod::Open, "browser.open"),
+        (BrowserMethod::Focus, "browser.focus"),
+        (BrowserMethod::CloseTab, "browser.close_tab"),
+        (BrowserMethod::Navigate, "browser.navigate"),
+        (BrowserMethod::Snapshot, "browser.snapshot"),
+        (BrowserMethod::Screenshot, "browser.screenshot"),
+        (BrowserMethod::Act, "browser.act"),
+        (BrowserMethod::ArmFileChooser, "browser.arm_file_chooser"),
+        (BrowserMethod::RespondDialog, "browser.respond_dialog"),
+        (BrowserMethod::WaitDownload, "browser.wait_download"),
+        (BrowserMethod::Console, "browser.console"),
+        (BrowserMethod::Pdf, "browser.pdf"),
+    ];
+
+    for (method, expected) in methods {
+        assert_eq!(serde_json::to_value(method).unwrap(), expected);
+    }
+}
+
+#[test]
 fn browser_response_deserializes_success_and_error_envelopes() {
     let success: BrowserResponse = serde_json::from_value(serde_json::json!({
         "id": "req_1",

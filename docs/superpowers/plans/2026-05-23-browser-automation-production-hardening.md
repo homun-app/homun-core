@@ -45,11 +45,11 @@
 
 ### Task 3: Rust Contracts, Capability Provider And Task UI
 
-- [ ] Write failing Rust tests for full browser method serialization, expanded capability tool listing, browser task checkpoint metadata and browser task UI detail.
-- [ ] Run targeted Rust tests and verify failures.
-- [ ] Implement expanded capability mapping and browser-specific UI metadata without exposing raw input.
-- [ ] Run targeted Rust tests until green.
-- [ ] Commit as `Expose production browser capabilities`.
+- [x] Write failing Rust tests for full browser method serialization, expanded capability tool listing, browser task checkpoint metadata and browser task UI detail.
+- [x] Run targeted Rust tests and verify failures.
+- [x] Implement expanded capability mapping and browser-specific UI metadata without exposing raw input.
+- [x] Run targeted Rust tests until green.
+- [x] Commit as `Expose production browser capabilities`.
 
 ### Task 4: Full Verification And Docs
 

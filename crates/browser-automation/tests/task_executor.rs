@@ -66,7 +66,13 @@ fn executor_checkpoints_snapshot_results() {
         result,
         ExecutorResult::Checkpoint {
             payload: serde_json::json!({"snapshot": "page", "refs": []}),
-            redacted_payload: serde_json::json!({"snapshot": "page", "refs": []}),
+            redacted_payload: serde_json::json!({
+                "browser": {
+                    "method": "browser.snapshot",
+                    "target_id": "booking"
+                },
+                "result": {"snapshot": "page", "refs": []}
+            }),
         }
     );
 }

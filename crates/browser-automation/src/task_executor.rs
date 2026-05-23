@@ -71,14 +71,14 @@ impl<T: BrowserTransport> TaskExecutor for BrowserTaskExecutor<T> {
             .unwrap_or_else(|| Value::Object(Default::default()));
         let response = self
             .client
-            .call_response(method, params)
+            .call_response(method, params.clone())
             .map_err(|error| TaskRuntimeError::Store(error.to_string()))?;
         match response {
             BrowserResponse::Success {
                 ok: true, result, ..
             } if method == BrowserMethod::Snapshot => Ok(ExecutorResult::Checkpoint {
                 payload: result.clone(),
-                redacted_payload: result,
+                redacted_payload: browser_redacted_checkpoint(method, &params, result),
             }),
             BrowserResponse::Success {
                 ok: true, result, ..
@@ -99,4 +99,20 @@ impl<T: BrowserTransport> TaskExecutor for BrowserTaskExecutor<T> {
             }),
         }
     }
+}
+
+fn browser_redacted_checkpoint(method: BrowserMethod, params: &Value, result: Value) -> Value {
+    let method_name = serde_json::to_value(method).unwrap_or(Value::Null);
+    let target_id = params.get("target_id").cloned().unwrap_or(Value::Null);
+    let mut browser = serde_json::json!({
+        "method": method_name,
+        "target_id": target_id,
+    });
+    if let Some(url) = result.get("url") {
+        browser["url"] = url.clone();
+    }
+    serde_json::json!({
+        "browser": browser,
+        "result": result,
+    })
 }

@@ -113,6 +113,61 @@ fn ui_task_detail_uses_redacted_checkpoint_and_omits_raw_input() {
     assert!(!detail.exposes_raw_input);
 }
 
+#[test]
+fn ui_task_detail_exposes_browser_metadata_without_raw_input() {
+    let store = TaskStore::open_in_memory().unwrap();
+    let user = UserId::new("user_1");
+    let workspace = WorkspaceId::new("workspace_1");
+    let task = TaskRecord::new(
+        "browser_task_1",
+        user.clone(),
+        workspace.clone(),
+        "browser_automation",
+        "Inspect booking page",
+        json!({
+            "method": "browser.snapshot",
+            "params": {
+                "target_id": "booking",
+                "secret": "raw input must stay hidden"
+            }
+        }),
+    );
+    store.insert_task(&task).unwrap();
+    store
+        .append_checkpoint(
+            &TaskId::new("browser_task_1"),
+            &user,
+            &workspace,
+            json!({"snapshot": "raw page text"}),
+            json!({
+                "browser": {
+                    "method": "browser.snapshot",
+                    "target_id": "booking",
+                    "url": "https://example.test/booking"
+                },
+                "result": {"snapshot": "summary"}
+            }),
+        )
+        .unwrap();
+
+    let detail = TaskUiReadModel::new(&store)
+        .task_detail(&TaskId::new("browser_task_1"), &user, &workspace)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        detail.runtime_metadata,
+        Some(json!({
+            "browser": {
+                "method": "browser.snapshot",
+                "target_id": "booking",
+                "url": "https://example.test/booking"
+            }
+        }))
+    );
+    assert!(!detail.exposes_raw_input);
+}
+
 fn task(id: &str, user: &UserId, workspace: &WorkspaceId) -> TaskRecord {
     TaskRecord::new(
         id,

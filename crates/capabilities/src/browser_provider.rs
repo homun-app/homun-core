@@ -43,6 +43,7 @@ impl<T: BrowserTransport> CapabilityProvider for BrowserCapabilityProvider<T> {
     fn list_tools(&self) -> CapabilityResult<Vec<CapabilityTool>> {
         Ok(vec![
             tool("browser.health", ActionClass::Read, "Browser health"),
+            tool("browser.profiles", ActionClass::Read, "List browser profiles"),
             tool("browser.tabs", ActionClass::Read, "List browser tabs"),
             tool(
                 "browser.snapshot",
@@ -50,9 +51,24 @@ impl<T: BrowserTransport> CapabilityProvider for BrowserCapabilityProvider<T> {
                 "Snapshot current page",
             ),
             tool(
+                "browser.console",
+                ActionClass::Read,
+                "Read browser console messages",
+            ),
+            tool(
                 "browser.open",
                 ActionClass::WriteWithConfirmation,
                 "Open URL",
+            ),
+            tool(
+                "browser.focus",
+                ActionClass::WriteWithConfirmation,
+                "Focus browser tab",
+            ),
+            tool(
+                "browser.close_tab",
+                ActionClass::WriteWithConfirmation,
+                "Close browser tab",
             ),
             tool(
                 "browser.navigate",
@@ -60,9 +76,34 @@ impl<T: BrowserTransport> CapabilityProvider for BrowserCapabilityProvider<T> {
                 "Navigate tab",
             ),
             tool(
+                "browser.screenshot",
+                ActionClass::WriteWithConfirmation,
+                "Capture screenshot artifact",
+            ),
+            tool(
+                "browser.pdf",
+                ActionClass::WriteWithConfirmation,
+                "Capture PDF artifact",
+            ),
+            tool(
                 "browser.act",
                 ActionClass::WriteWithConfirmation,
                 "Execute browser action",
+            ),
+            tool(
+                "browser.arm_file_chooser",
+                ActionClass::WriteWithConfirmation,
+                "Arm file chooser upload",
+            ),
+            tool(
+                "browser.respond_dialog",
+                ActionClass::WriteWithConfirmation,
+                "Respond to browser dialog",
+            ),
+            tool(
+                "browser.wait_download",
+                ActionClass::WriteWithConfirmation,
+                "Wait for and save download",
             ),
         ])
     }
@@ -117,11 +158,20 @@ fn tool(name: &str, action: ActionClass, description: &str) -> CapabilityTool {
 fn method_for_tool(tool_name: &str) -> CapabilityResult<BrowserMethod> {
     match tool_name {
         "browser.health" => Ok(BrowserMethod::Health),
+        "browser.profiles" => Ok(BrowserMethod::Profiles),
         "browser.tabs" => Ok(BrowserMethod::Tabs),
         "browser.snapshot" => Ok(BrowserMethod::Snapshot),
+        "browser.console" => Ok(BrowserMethod::Console),
         "browser.open" => Ok(BrowserMethod::Open),
+        "browser.focus" => Ok(BrowserMethod::Focus),
+        "browser.close_tab" => Ok(BrowserMethod::CloseTab),
         "browser.navigate" => Ok(BrowserMethod::Navigate),
+        "browser.screenshot" => Ok(BrowserMethod::Screenshot),
+        "browser.pdf" => Ok(BrowserMethod::Pdf),
         "browser.act" => Ok(BrowserMethod::Act),
+        "browser.arm_file_chooser" => Ok(BrowserMethod::ArmFileChooser),
+        "browser.respond_dialog" => Ok(BrowserMethod::RespondDialog),
+        "browser.wait_download" => Ok(BrowserMethod::WaitDownload),
         _ => Err(CapabilityError::ToolExecutionFailed(format!(
             "tool_not_found:{tool_name}"
         ))),

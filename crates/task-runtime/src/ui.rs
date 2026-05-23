@@ -38,6 +38,7 @@ pub struct TaskUiDetail {
     pub priority: TaskPriority,
     pub blocked_reason: Option<String>,
     pub latest_checkpoint: Option<Value>,
+    pub runtime_metadata: Option<Value>,
     pub exposes_raw_input: bool,
 }
 
@@ -106,6 +107,7 @@ impl<'a> TaskUiReadModel<'a> {
             .store
             .latest_checkpoint(task_id, user_id, workspace_id)?
             .map(|checkpoint| checkpoint.redacted_payload);
+        let runtime_metadata = runtime_metadata_for_task(&task, latest_checkpoint.as_ref());
         Ok(Some(TaskUiDetail {
             task_id: task.task_id,
             kind: task.kind,
@@ -114,6 +116,7 @@ impl<'a> TaskUiReadModel<'a> {
             priority: task.priority,
             blocked_reason: task.blocked_reason,
             latest_checkpoint,
+            runtime_metadata,
             exposes_raw_input: false,
         }))
     }
@@ -132,6 +135,30 @@ impl<'a> TaskUiReadModel<'a> {
         }
         Ok(usage)
     }
+}
+
+fn runtime_metadata_for_task(task: &crate::TaskRecord, checkpoint: Option<&Value>) -> Option<Value> {
+    if task.kind != "browser_automation" {
+        return None;
+    }
+    let mut browser = checkpoint
+        .and_then(|value| value.get("browser"))
+        .cloned()
+        .unwrap_or_else(|| {
+            serde_json::json!({
+                "method": task.input_json.get("method").cloned().unwrap_or(Value::Null),
+                "target_id": task
+                    .input_json
+                    .get("params")
+                    .and_then(|params| params.get("target_id"))
+                    .cloned()
+                    .unwrap_or(Value::Null),
+            })
+        });
+    if browser.get("method").is_none() {
+        browser["method"] = task.input_json.get("method").cloned().unwrap_or(Value::Null);
+    }
+    Some(serde_json::json!({ "browser": browser }))
 }
 
 impl TaskUiItem {
