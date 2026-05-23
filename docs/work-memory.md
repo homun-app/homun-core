@@ -473,4 +473,25 @@ Perche': Composio serve a scalare rapidamente la copertura integrazioni, ma deve
 
 ## Prossimo blocco
 
-- Aggiungere registry/config persistente dei provider capability.
+### Durable Task Runtime come fondamento trasversale
+
+- Rivalutata la roadmap dopo aver chiarito due requisiti:
+  - browser automation deve supportare form, prenotazioni, ricerche complesse e operazioni multi-step.
+  - i task lunghi di ore o giorni non sono specifici del browser, ma devono valere per tutto il sistema.
+- Decisione: introdurre un crate centrale `crates/task-runtime`.
+- Il Durable Task Runtime gestira' task indipendenti, workflow, code, priorita', resource governor, lease/heartbeat, checkpoint, retry/backoff, pause/resume/cancel e approval gates.
+- Le risorse iniziali da governare sono: `llm_inference`, `browser_session`, `network_io`, `filesystem_io`, `connector_api`, `memory_indexing`, `graph_indexing`, `user_wait`, `background_maintenance`.
+- I task multipli potranno essere eseguiti in parallelo solo quando priorita', dipendenze e risorse lo permettono.
+- Browser automation restera' un modulo separato, ma usera' il Durable Task Runtime per prenotazioni, compilazione form, monitoraggi e task di giorni.
+- Aggiornato `PROJECT.md` con la nuova fase `Durable Task Runtime`, la fase `Browser Automation` separata e la roadmap successiva.
+- Aggiornata la spec del Capability Layer per chiarire che provider e capability non possiedono scheduling, retry o checkpoint.
+- Aggiornata la spec runtime/subagenti per chiarire che i subagenti restano responsabili degli step, mentre la durata globale passa al task runtime.
+- Creati:
+  - `docs/superpowers/specs/2026-05-23-durable-task-runtime-design.md`
+  - `docs/superpowers/plans/2026-05-23-durable-task-runtime.md`
+
+Perche': senza un task runtime centrale, browser automation, subagenti, connettori e manutenzioni finirebbero per duplicare code, retry, limiti risorse, approvazioni e recovery. Questo blocco va chiuso prima del browser reale.
+
+## Prossimo blocco
+
+- Implementare `crates/task-runtime` seguendo `docs/superpowers/plans/2026-05-23-durable-task-runtime.md`.

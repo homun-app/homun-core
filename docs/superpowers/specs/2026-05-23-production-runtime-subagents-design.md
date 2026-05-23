@@ -4,6 +4,8 @@
 
 Bring the local Gemma runtime and Rust subagent manager to the same production-ready standard as the memory component: local-first, auditable, cancellable, typed at public boundaries and testable without cloud services.
 
+This design covers the immediate runtime/subagent boundary. Durable multi-day execution, global queues, resource governance and crash-resumable workflow state now belong to the separate Durable Task Runtime design.
+
 ## Runtime Definition Of Done
 
 The Python/MLX runtime is production-ready when:
@@ -30,6 +32,7 @@ The Rust subagent manager is production-ready when:
 - memory access for `MemoryAgent` is explicit and goes through the memory facade contracts.
 - audit is automatic for success, failure, timeout and cancellation.
 - tests cover recovery, cancellation, timeout, invalid permissions and audit queries.
+- long-running or resumable workflows can be mounted onto the Durable Task Runtime instead of relying on the in-memory orchestrator.
 
 ## Boundaries
 
@@ -37,8 +40,11 @@ The runtime remains a local Python sidecar. It does not decide autonomy, permiss
 
 The runtime remains cloud-free and Ollama-free.
 
+The subagent crate owns agent contracts and step execution. It does not own global scheduling, cross-provider resource limits or multi-day task lifecycle. Those concerns are delegated upward to `crates/task-runtime`.
+
 ## Implementation Order
 
 1. Harden the Python runtime first because the subagent runner depends on it.
 2. Harden Rust subagents after runtime behavior is stable.
 3. Connect `MemoryAgent` to the production memory facade after both runtime and subagent boundaries are stable.
+4. Connect subagent workflows to the Durable Task Runtime for queueing, approvals, checkpointing and resume.

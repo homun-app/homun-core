@@ -21,6 +21,7 @@ OpenHuman is the architectural reference for this area, not code to copy. The us
 - broad app coverage is delegated to an integration aggregator.
 - each connection has auth state, tool schema discovery, execution and optional triggers.
 - webviews and browser automation are fallback surfaces when APIs are weak or unavailable.
+- long-running work is coordinated by a Durable Task Runtime, not by individual providers.
 
 The parts we intentionally adapt differently:
 
@@ -54,6 +55,7 @@ In scope:
 - policy enforcement before tool visibility and execution.
 - audit events for every capability operation.
 - local-first privacy labels for managed/cloud providers.
+- resource declarations that let the Durable Task Runtime schedule expensive tools safely.
 
 Out of scope for the first implementation:
 
@@ -62,6 +64,7 @@ Out of scope for the first implementation:
 - complete provider catalog.
 - hosted webhook receiver.
 - copying OpenHuman code.
+- durable scheduling, retry, queue management and checkpoint persistence.
 
 ## Component Model
 
@@ -112,6 +115,8 @@ Initial concrete providers:
 - `ManagedCapabilityProvider`: interface only at first; Composio is the first intended adapter.
 - `BrowserCapabilityProvider`: interface only at first; Playwright/webview implementation later.
 - `SkillCapabilityProvider`: manifest and registry only at first.
+
+Capability providers expose what can be done. They do not decide when work should run. Expensive or long-running calls declare resource needs so the Durable Task Runtime can queue, throttle or block them before execution.
 
 ### Channels
 
@@ -192,6 +197,29 @@ ToolAgent proposes call
 
 Subagents never hold provider clients. They emit proposed calls or structured requests; the core executes only approved calls.
 
+### Long-Running Tool Work
+
+Operations that may run for minutes, hours or days must be wrapped in a durable task before provider execution. Examples:
+
+- browser booking or form workflows.
+- repeated availability checks.
+- connector sync jobs.
+- Graphify indexing.
+- large filesystem scans.
+- managed-provider triggers that fan out into multiple actions.
+
+The Capability Layer remains the provider-neutral execution boundary. The Durable Task Runtime owns queueing, priority, resource governance, checkpointing, retry/backoff, pause/resume/cancel and user-approval waits.
+
+```text
+Durable Task Runtime
+  -> CapabilityFacade
+  -> CapabilityProvider.call_tool()
+  -> redaction / audit
+  -> checkpoint result
+```
+
+Provider calls should be small and resumable where possible. If a provider has to perform a large operation, it must return enough structured state for the task runtime to explain progress and recover safely.
+
 ### Managed Provider Boundary
 
 Managed providers are allowed only when the user enables them. Every managed provider must declare:
@@ -217,6 +245,8 @@ The UI must show this as a privacy boundary, not as an invisible implementation 
 - user/workspace policy grants.
 - audit events.
 - OAuth/API-key references.
+
+Scheduling state is intentionally excluded from the capability store. Task state, queues, leases, resource budgets and checkpoints belong to `crates/task-runtime`.
 
 Secrets should not be embedded in plain JSON payloads. Initial implementation can mirror the memory crate's application-level encryption pattern.
 

@@ -82,6 +82,15 @@ Tauri React UI
     -> Process Manager
     -> Event Collector
     -> Memory Manager
+    -> Durable Task Runtime
+      -> Task Store
+      -> Queue Manager
+      -> Scheduler
+      -> Priority Manager
+      -> Resource Governor
+      -> Lease / Heartbeat
+      -> Checkpoints
+      -> Approval Gates
     -> Capability Manager
       -> Channels
       -> Native Connectors
@@ -154,11 +163,85 @@ memory.write_event(event)
 memory.extract_candidates(event_batch)
 memory.upsert_entity(entity)
 memory.upsert_relation(relation)
+task.create(task_spec)
+task.enqueue(task_id, priority, resource_requirements)
+task.pause(task_id)
+task.resume(task_id)
+task.cancel(task_id)
+task.status(task_id)
+task.list_queue(user_id, workspace_id)
+task.record_checkpoint(task_id, checkpoint)
 automation.propose(candidate)
 automation.execute_with_approval(id)
 ```
 
-### 3. Subagent Manager
+### 3. Durable Task Runtime
+
+Il Durable Task Runtime e' il coordinatore durevole del lavoro operativo. Non appartiene al browser, ai connettori o ai subagenti: e' un componente centrale del Rust Core che permette task indipendenti, workflow, code, priorita', limiti risorse, checkpoint e ripresa dopo crash o riavvio.
+
+Responsabilita':
+
+- creare task persistenti multiutente/workspace.
+- gestire task singoli e workflow con dipendenze.
+- eseguire task multipli indipendenti in parallelo quando le risorse lo permettono.
+- applicare code e priorita' quando i task sono troppi.
+- proteggere risorse locali: LLM, browser session, rete, filesystem, Graphify, connettori e manutenzioni background.
+- mantenere lease/heartbeat per evitare doppie esecuzioni.
+- salvare checkpoint, retry, backoff, errori e audit.
+- sospendere task in attesa di tempo, evento esterno, risorsa o approvazione utente.
+- esporre viste UI-safe su task in esecuzione, in coda, bloccati e completati.
+
+Stati:
+
+```text
+queued
+pending
+running
+waiting_time
+waiting_external_event
+waiting_user_approval
+waiting_resource
+paused
+completed
+failed
+cancelled
+expired
+```
+
+Priorita':
+
+```text
+critical
+high
+normal
+low
+background
+```
+
+Classi risorsa iniziali:
+
+```text
+llm_inference
+browser_session
+network_io
+filesystem_io
+connector_api
+memory_indexing
+graph_indexing
+user_wait
+background_maintenance
+```
+
+Regole:
+
+- Nessun executor decide autonomamente quando partire.
+- Il runtime LLM rimane a concorrenza bassa o single-flight.
+- Browser automation, Graphify e connettori remoti passano dal Resource Governor.
+- Un task lungo di ore o giorni deve essere ricostruibile da store, checkpoint e audit.
+- I task ad alto rischio entrano in `waiting_user_approval` prima dell'azione reale.
+- Le policy di privacy e permessi restano esterne al task runtime, ma il task runtime deve conservarne gli esiti e bloccare l'esecuzione quando richiesto.
+
+### 4. Subagent Manager
 
 Il Subagent Manager e' il coordinatore operativo dell'assistant. Non e' un modello e non e' un endpoint chat. Vive nel Rust Core e usa il runtime LLM locale come motore di inferenza dietro contratti rigidi.
 
@@ -221,6 +304,7 @@ Regole:
 - Gli output di `MemoryAgent` entrano nella memoria solo tramite `MemoryFacade`.
 - Timeout e cancellazione devono bloccare la chiamata al runtime quando il task e' gia' scaduto o annullato.
 - I workflow devono avere stato persistito e consultabile dalla UI, non solo risultati task isolati.
+- I workflow lunghi o riprendibili devono essere eseguiti sopra il Durable Task Runtime, non solo nell'orchestratore in-memory.
 
 Workflow MVP:
 
@@ -233,7 +317,7 @@ Event batch
   -> approval center / automation proposal
 ```
 
-### 4. Local LLM Runtime
+### 5. Local LLM Runtime
 
 Runtime Mac iniziale:
 
@@ -275,7 +359,7 @@ Il runtime espone primitive per i subagenti, non un'interfaccia di autonomia:
 - `analyze_image`: analisi locale di immagini/screenshot.
 - `benchmark`: verifica regressioni dei contratti locali.
 
-### 5. Contratti LLM
+### 6. Contratti LLM
 
 Ogni output operativo deve avere schema validato.
 
@@ -552,6 +636,7 @@ Strategia:
 - provider managed esterni per copertura ampia, opt-in e policy-gated.
 - skill locali per estendere il sistema senza modificare il core.
 - fallback browser automation solo quando non esiste API affidabile.
+- i task lunghi, paralleli o sospesi non vivono nei connettori: vengono sempre orchestrati dal Durable Task Runtime.
 
 Permessi per connettore:
 
@@ -636,6 +721,7 @@ Deliverable:
 - workflow run persistence e status UI-readable.
 - import output `MemoryAgent` nella `MemoryFacade`.
 - workflow MVP: `PlannerAgent -> RiskAgent -> MemoryAgent/ToolAgent -> ReviewAgent`.
+- bridge verso Durable Task Runtime per workflow persistenti e riprendibili.
 
 ### Fase 2 - Memory Core
 
@@ -671,7 +757,41 @@ Deliverable:
 - wiki updater.
 - bidirectional sync minima: DB -> Markdown, Markdown corrections -> DB candidate updates.
 
-### Fase 5 - Desktop Observation MVP
+### Fase 5 - Durable Task Runtime
+
+Deliverable:
+
+- crate Rust `crates/task-runtime`.
+- task store SQLite con migrazioni idempotenti.
+- task indipendenti e workflow persistenti con dipendenze.
+- queue manager con priorita' `critical`, `high`, `normal`, `low`, `background`.
+- resource governor con limiti globali, per utente/workspace e per classe risorsa.
+- stati task completi: `queued`, `pending`, `running`, `waiting_time`, `waiting_external_event`, `waiting_user_approval`, `waiting_resource`, `paused`, `completed`, `failed`, `cancelled`, `expired`.
+- lease/heartbeat per worker e recovery dopo crash.
+- retry/backoff e scadenze.
+- checkpoint serializzati e audit.
+- pause/resume/cancel.
+- read model UI-safe per coda, task attivi, task bloccati e motivi di blocco.
+- adapter iniziali per subagenti e capability fake.
+
+Regola: questo componente va chiuso prima di browser automation, per evitare che scheduling, retry, code e resume vengano duplicati nei singoli executor.
+
+### Fase 6 - Browser Automation
+
+Deliverable:
+
+- crate Rust `crates/browser-automation`.
+- sessioni browser locali e policy per dominio.
+- osservazione pagina, DOM extraction e screenshot.
+- azioni atomiche: navigate, click, type, select, upload, download, submit.
+- compilazione form e prenotazioni con step approvati.
+- handoff per CAPTCHA, 2FA, pagamenti e dati sensibili.
+- adapter `BrowserCapabilityProvider` nel Capability Layer.
+- integrazione con Durable Task Runtime per ricerche, monitoraggi e operazioni di giorni.
+
+Regola: il browser engine esegue step controllati, ma non possiede la durata del task.
+
+### Fase 7 - Desktop Observation MVP
 
 Deliverable:
 
@@ -683,10 +803,11 @@ Deliverable:
 - event batching.
 - routine proposal.
 
-### Fase 6 - Tauri UI
+### Fase 8 - Tauri UI
 
 Deliverable:
 
+- task queue e task detail.
 - inbox assistant.
 - chat.
 - routine detected.
@@ -695,7 +816,7 @@ Deliverable:
 - approval center.
 - settings/privacy.
 
-### Fase 7 - First Automation
+### Fase 9 - First Automation
 
 Use case:
 
@@ -708,6 +829,19 @@ Avvio lavoro Acme
   -> open Zed/project
 ```
 
+### Fase 10 - Production Hardening
+
+Deliverable:
+
+- process supervision dei sidecar.
+- secrets in keychain/secure storage.
+- migrations e recovery testate.
+- export/delete globale dei dati utente.
+- osservabilita' locale.
+- limiti risorse reali per LLM, browser, Graphify e connettori.
+- test end-to-end su workflow durevoli.
+- packaging Tauri per macOS, Windows e Linux.
+
 ## Struttura Repository Proposta
 
 ```text
@@ -719,8 +853,10 @@ local-first-personal-assistant/
   crates/
     core/
     memory/
+    task-runtime/
     connectors/
     capabilities/
+    browser-automation/
     automation/
     permissions/
     subagents/
@@ -766,13 +902,12 @@ local-first-personal-assistant/
 
 ## Prossima Azione Consigliata
 
-Consolidare la Fase 1 e preparare la Fase 1.5:
+Consolidare il Durable Task Runtime come fondamento trasversale:
 
 ```text
-runtimes/mlx-gemma4/server.py
-crates/subagents/
+crates/task-runtime/
+docs/superpowers/specs/2026-05-23-durable-task-runtime-design.md
+docs/superpowers/plans/2026-05-23-durable-task-runtime.md
 ```
 
-Il runtime Python deve rimanere una primitiva locale stabile. Il passo successivo e' definire i contratti `SubagentTask`, `SubagentResult` e `SubagentReview`, poi creare nel Rust Core un primo `Subagent Manager` capace di orchestrare planner, risk review, tool planning e memory extraction usando il runtime Gemma locale.
-
-Obiettivo: trasformare il test locale in un servizio stabile che il Rust core potra' avviare e interrogare.
+Il runtime Python/MLX, la memoria, i subagenti e il Capability Layer hanno gia' una base operativa. Il prossimo collo di bottiglia architetturale e' la durata del lavoro: task multipli, code, priorita', risorse, checkpoint, approvazioni e ripresa dopo crash. Questo va risolto nel Rust Core prima di implementare browser automation reale.
