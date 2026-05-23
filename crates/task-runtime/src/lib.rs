@@ -10,6 +10,7 @@ pub mod resources;
 pub mod scheduler;
 pub mod store;
 pub mod types;
+pub mod ui;
 
 pub use approval::{ApprovalGate, ApprovalRequest, ApprovalStatus};
 pub use checkpoint::{RetryController, TaskCheckpoint};
@@ -24,3 +25,4 @@ pub use types::{
     ResourceClass, ResourceRequirement, RetryPolicy, TaskId, TaskPriority, TaskRecord, TaskStatus,
     UserId, WorkflowId, WorkspaceId,
 };
+pub use ui::{TaskQueueSnapshot, TaskUiDetail, TaskUiItem, TaskUiReadModel};
