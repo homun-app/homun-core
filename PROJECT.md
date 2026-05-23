@@ -637,6 +637,7 @@ Strategia:
 - skill locali per estendere il sistema senza modificare il core.
 - fallback browser automation solo quando non esiste API affidabile.
 - i task lunghi, paralleli o sospesi non vivono nei connettori: vengono sempre orchestrati dal Durable Task Runtime.
+- le capability/tool call possono essere montate su `TaskRuntime` tramite bridge dedicato.
 
 Permessi per connettore:
 
@@ -798,6 +799,7 @@ Implementato:
 - approval gates.
 - `TaskExecutor` e `TaskRuntime` facade con executor finto testabile.
 - read model UI-safe per coda, task attivi, blocchi, approvazioni, risorse e checkpoint redatti.
+- bridge subagenti e capability/tool call verso `TaskRuntime`.
 
 ### Fase 6 - Browser Automation
 

@@ -540,6 +540,27 @@ Perche': ora il progetto ha un fondamento durevole riusabile da subagenti, capab
 
 Perche': il Subagent Manager ora puo' appoggiarsi al task runtime per code, risorse, lease, retry, checkpoint e recovery invece di restare confinato all'orchestratore in-memory.
 
+### Capability bridge verso Durable Task Runtime
+
+- Creato design `docs/superpowers/specs/2026-05-23-capability-task-runtime-bridge-design.md`.
+- Creato piano `docs/superpowers/plans/2026-05-23-capability-task-runtime-bridge.md`.
+- Aggiunta dipendenza `local-first-task-runtime` al crate `crates/capabilities`.
+- Aggiunto modulo `task_runtime_bridge`.
+- `CapabilityTaskRuntimeBridge` converte `CapabilityCall` + `PolicyContext` in `TaskRecord` durevoli.
+- Il payload task conserva `PolicyContext` e `CapabilityCall`.
+- `TaskRecord.permission_context` conserva il contesto policy per audit/UI.
+- Le risorse vengono assegnate in base al provider kind:
+  - native -> `filesystem_io`
+  - MCP/managed -> `connector_api`
+  - browser -> `browser_session`
+  - skill -> `background_maintenance`
+- Aggiunto `CapabilityTaskExecutor`, adapter `TaskExecutor` che possiede una `CapabilityFacade` e chiama `call_tool`.
+- Successo tool -> `ExecutorResult::Completed`.
+- Errore/denial tool -> `ExecutorResult::RetryableFailure`, quindi retry/backoff restano nel task runtime.
+- Test coprono enqueue, resource mapping, esecuzione riuscita e denial managed-cloud.
+
+Perche': ora anche connettori, MCP e provider managed possono usare code, lease, limiti risorse e retry comuni, invece di vivere come chiamate immediate fuori dal runtime durevole.
+
 ## Prossimo blocco
 
-- Integrare Capability Layer e/o provider registry persistente sopra `TaskRuntime`, cosi' anche tool call e connettori possono essere eseguiti come task durevoli.
+- Aggiungere provider registry/config persistente, cosi' capability e managed provider possono essere abilitati per user/workspace e usati dai task durevoli senza configurazione in memoria.
