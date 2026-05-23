@@ -709,4 +709,28 @@ Perche': skill e plugin non possono essere solo file o convenzioni esterne. Ora 
 
 ## Prossimo blocco
 
-- Progettare e implementare Skill Runtime Sandbox: esecuzione locale confinata, permessi filesystem/network applicati, audit, checkpoint e bridge verso Durable Task Runtime.
+### Skill Runtime Sandbox
+
+- Creato design `docs/superpowers/specs/2026-05-23-skill-runtime-sandbox-design.md`.
+- Creato piano `docs/superpowers/plans/2026-05-23-skill-runtime-sandbox.md`.
+- Aggiunto crate Rust `crates/skill-runtime` al workspace.
+- Aggiunti contratti `SkillRuntimeRequest`, `SkillRuntimeOutput`, `SkillExecutionTrace`, `SkillRuntimeLimits` e `SkillAccess`.
+- Aggiunto `SkillSandboxPolicy` deny-by-default.
+- La policy valida tool presente nel manifest, schema JSON base, host network dichiarati e path filesystem dentro root dichiarate.
+- La policy ricontrolla anche la trace del runner dopo l'esecuzione e blocca output oltre `max_output_bytes`.
+- Aggiunto trait `SkillRunner`, che e' il boundary per adapter futuri WASM/QuickJS/process.
+- Aggiunto `InMemorySkillRunner` per handler locali/test deterministici senza accesso OS.
+- Aggiunto `SkillRuntime`: valida richiesta, esegue runner, valida trace/output.
+- Aggiunto `SkillRuntimeCapabilityProvider`: espone skill eseguibili come provider capability `skill`.
+- Verificato il percorso con `CapabilityFacade`: policy/audit capability restano il punto unico di enforcement.
+- Verificato il percorso durevole con `CapabilityTaskRuntimeBridge` e `CapabilityTaskExecutor`: una skill tool call viene enqueued e completata come task con risorsa `background_maintenance`.
+- Verifiche eseguite:
+  - `cargo test -p local-first-skill-runtime`
+  - `cargo test --workspace`
+  - `make test`
+
+Perche': ora skill/plugin non sono solo manifest installabili. Possono essere eseguiti dietro un boundary locale, permission-aware e orchestrabile, senza aprire esecuzione arbitraria non confinata. Gli adapter reali per codice non trusted devono implementare `SkillRunner` e dimostrare isolamento runtime/OS con test dedicati.
+
+## Prossimo blocco
+
+- Skill Runtime Adapter Hardening: scegliere e implementare adapter reale per skill non trusted, probabilmente WASM/QuickJS o process runner confinato, con test di isolamento filesystem/network oltre alla policy contrattuale.

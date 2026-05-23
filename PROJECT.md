@@ -179,12 +179,19 @@ Implementato:
 - registrazione plugin con skill bundled, senza salvare codice eseguibile nel DB.
 - `SkillCapabilityProvider` read-only: espone solo tool di skill installate e abilitate nello scope corrente come normali `CapabilityTool` con provider kind `skill`.
 - esecuzione diretta delle skill disabilitata finche' non esiste un runtime sandbox dedicato; il provider restituisce `skill_execution_unavailable`.
+- crate `crates/skill-runtime` per eseguire skill attraverso un boundary sandbox locale.
+- contratti `SkillRuntimeRequest`, `SkillRuntimeOutput`, `SkillExecutionTrace`, `SkillRuntimeLimits` e `SkillAccess`.
+- `SkillSandboxPolicy` deny-by-default: valida tool manifest, schema JSON base, host network dichiarati e path filesystem confinati.
+- validazione post-run della trace del runner e limite dimensione output.
+- trait `SkillRunner` e `InMemorySkillRunner` per handler locali/test deterministici senza accesso OS.
+- `SkillRuntimeCapabilityProvider` eseguibile: integra `SkillRuntime` con `CapabilityFacade`, audit e policy capability esistenti.
+- integrazione verificata con `CapabilityTaskRuntimeBridge` e `CapabilityTaskExecutor`: le skill girano come task durevoli con risorsa `background_maintenance`.
 
 Non ancora incluso:
 
 - policy di restart/backoff eseguita automaticamente in background.
 - UI Tauri per vedere processi, logs e health.
-- runtime sandbox per esecuzione skill/plugin.
+- adapter WASM/QuickJS/process con isolamento OS/runtime per plugin non trusted.
 
 API interne previste:
 
@@ -1003,14 +1010,15 @@ local-first-personal-assistant/
 
 ## Prossima Azione Consigliata
 
-Progettare e implementare il blocco Skill Runtime Sandbox:
+Progettare e implementare il blocco Skill Runtime Adapter Hardening:
 
 ```text
 crates/skill-runtime/
-crates/capabilities/src/skill_plugin.rs
-crates/capabilities/tests/skill_runtime_bridge.rs
-docs/superpowers/specs/2026-05-23-skill-runtime-sandbox-design.md
-docs/superpowers/plans/2026-05-23-skill-runtime-sandbox.md
+crates/skill-runtime/src/process_runner.rs
+crates/skill-runtime/src/wasm_runner.rs
+crates/skill-runtime/tests/adapter_confinement.rs
+docs/superpowers/specs/2026-05-23-skill-runtime-adapters-design.md
+docs/superpowers/plans/2026-05-23-skill-runtime-adapters.md
 ```
 
-Runtime Python/MLX, memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager, Secrets/Keychain e Skill/Plugin Registry hanno una base operativa testata. Il prossimo blocco serve a eseguire skill locali in modo confinato, con permessi filesystem/network applicati, audit, checkpoint e bridge verso Durable Task Runtime.
+Runtime Python/MLX, memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager, Secrets/Keychain, Skill/Plugin Registry e Skill Runtime Sandbox hanno una base operativa testata. Il prossimo blocco serve a scegliere e implementare un adapter reale per skill non trusted, con isolamento verificabile oltre al boundary contrattuale gia' presente.

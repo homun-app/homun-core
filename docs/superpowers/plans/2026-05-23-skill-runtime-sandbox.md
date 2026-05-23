@@ -49,13 +49,13 @@
 - [x] Run `cargo test -p local-first-skill-runtime --test task_runtime_bridge` and verify failure.
 - [x] Add any missing bridge helpers needed for the skill runtime provider.
 - [x] Run targeted test until green.
-- [ ] Commit as `Integrate skill runtime with task runtime`.
+- [x] Commit as `Integrate skill runtime with task runtime`.
 
 ### Task 4: Verification And Docs
 
-- [ ] Run `cargo test -p local-first-skill-runtime`.
-- [ ] Run `cargo test --workspace`.
-- [ ] Run `make test`.
-- [ ] Update `PROJECT.md`, this plan and `docs/work-memory.md`.
-- [ ] Run `git diff --check`.
-- [ ] Commit as `Document skill runtime sandbox`.
+- [x] Run `cargo test -p local-first-skill-runtime`.
+- [x] Run `cargo test --workspace`.
+- [x] Run `make test`.
+- [x] Update `PROJECT.md`, this plan and `docs/work-memory.md`.
+- [x] Run `git diff --check`.
+- [x] Commit as `Document skill runtime sandbox`.
