@@ -3,6 +3,8 @@
 pub mod approval;
 pub mod checkpoint;
 pub mod error;
+pub mod executor;
+pub mod facade;
 pub mod lease;
 pub mod resources;
 pub mod scheduler;
@@ -12,6 +14,8 @@ pub mod types;
 pub use approval::{ApprovalGate, ApprovalRequest, ApprovalStatus};
 pub use checkpoint::{RetryController, TaskCheckpoint};
 pub use error::{TaskRuntimeError, TaskRuntimeResult};
+pub use executor::{ExecutorResult, FakeTaskExecutor, TaskExecutor};
+pub use facade::{RunReadySummary, TaskRuntime};
 pub use lease::LeaseManager;
 pub use resources::{ResourceGovernor, ResourceLimits};
 pub use scheduler::TaskScheduler;
