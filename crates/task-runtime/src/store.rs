@@ -52,6 +52,18 @@ impl TaskStore {
             CREATE INDEX IF NOT EXISTS idx_tasks_scope_status
                 ON tasks(user_id, workspace_id, status, priority, created_at);
 
+            CREATE TABLE IF NOT EXISTS task_dependencies (
+                task_id TEXT NOT NULL,
+                depends_on_task_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY (task_id, depends_on_task_id, user_id, workspace_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_task_dependencies_scope
+                ON task_dependencies(user_id, workspace_id, task_id);
+
             INSERT INTO task_runtime_metadata(key, value)
             VALUES ('schema_version', '1')
             ON CONFLICT(key) DO UPDATE SET value = excluded.value;
@@ -176,6 +188,62 @@ impl TaskStore {
             tasks.push(serde_json::from_str::<TaskRecord>(&row?)?);
         }
         Ok(tasks)
+    }
+
+    pub fn add_dependency(
+        &self,
+        task_id: &TaskId,
+        depends_on_task_id: &TaskId,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> TaskRuntimeResult<()> {
+        self.connection.execute(
+            "
+            INSERT INTO task_dependencies (
+                task_id,
+                depends_on_task_id,
+                user_id,
+                workspace_id,
+                created_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(task_id, depends_on_task_id, user_id, workspace_id) DO NOTHING
+            ",
+            params![
+                task_id.as_str(),
+                depends_on_task_id.as_str(),
+                user_id.as_str(),
+                workspace_id.as_str(),
+                OffsetDateTime::now_utc().unix_timestamp(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn dependencies_for(
+        &self,
+        task_id: &TaskId,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> TaskRuntimeResult<Vec<TaskId>> {
+        let mut statement = self.connection.prepare(
+            "
+            SELECT depends_on_task_id
+            FROM task_dependencies
+            WHERE task_id = ?1 AND user_id = ?2 AND workspace_id = ?3
+            ORDER BY created_at ASC, depends_on_task_id ASC
+            ",
+        )?;
+        let rows = statement.query_map(
+            params![task_id.as_str(), user_id.as_str(), workspace_id.as_str()],
+            |row| row.get::<_, String>(0),
+        )?;
+
+        let mut dependencies = Vec::new();
+        for row in rows {
+            dependencies.push(TaskId::new(row?));
+        }
+        Ok(dependencies)
     }
 }
 
