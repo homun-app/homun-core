@@ -1,17 +1,17 @@
 use crate::{
-    AccessDecisionKind, DataSensitivity, GraphifyArtifacts, GraphifyImport, GraphifyImportSummary,
-    GraphifyCli, GraphifyOperation, GraphifyQueryRequest, GraphifyQueryResult,
-    MemoryAccessDecision, MemoryAccessRequest, MemoryContextItem, MemoryContextPack,
-    MemoryCreateRequest, MemoryEntity, MemoryEvent, MemoryEvidence, MemoryExtraction,
-    MemoryExtractionSummary, MemoryHealth, MemoryLifecycleRequest, MemoryMaintenanceReport,
-    MemoryBackupReport, MemoryPolicyEngine, MemoryRecord, MemoryRef, MemoryRefKind,
-    MemoryRelation, MemorySearchPage, MemorySearchRequest, MemorySearchResult,
-    MemoryStatus, MemoryUpdatePatch, PrivacyDomain,
-    SQLiteMemoryStore, UserId, WikiFileStore, WikiPage, WorkspaceId, current_timestamp,
-    ensure_artifacts_inside_root, ensure_transition, parse_wiki_markdown, WikiCorrectionSyncReport,
+    AccessDecisionKind, DataSensitivity, GraphifyArtifacts, GraphifyCli, GraphifyImport,
+    GraphifyImportSummary, GraphifyOperation, GraphifyQueryRequest, GraphifyQueryResult,
+    MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryContextItem,
+    MemoryContextPack, MemoryCreateRequest, MemoryEntity, MemoryEvent, MemoryEvidence,
+    MemoryExtraction, MemoryExtractionSummary, MemoryHealth, MemoryLifecycleRequest,
+    MemoryMaintenanceReport, MemoryPolicyEngine, MemoryRecord, MemoryRef, MemoryRefKind,
+    MemoryRelation, MemorySearchPage, MemorySearchRequest, MemorySearchResult, MemoryStatus,
+    MemoryUpdatePatch, PrivacyDomain, SQLiteMemoryStore, UserId, WikiCorrectionSyncReport,
+    WikiFileStore, WikiPage, WorkspaceId, current_timestamp, ensure_artifacts_inside_root,
+    ensure_transition, parse_wiki_markdown,
 };
-use std::str::FromStr;
 use std::path::Path;
+use std::str::FromStr;
 
 pub struct MemoryWikiProjection {
     pub page: WikiPage,
@@ -542,7 +542,8 @@ impl MemoryFacade {
         request: GraphifyQueryRequest,
     ) -> Result<GraphifyQueryResult, String> {
         ensure_artifacts_inside_root(&request.artifacts, &request.allowed_output_root)?;
-        if matches!(request.operation, GraphifyOperation::Query { .. }) && !request.access.allow_export
+        if matches!(request.operation, GraphifyOperation::Query { .. })
+            && !request.access.allow_export
         {
             self.store.record_access_decision(
                 &request.access,

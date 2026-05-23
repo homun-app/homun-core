@@ -108,7 +108,8 @@ impl SQLiteMemoryStore {
         self.conn
             .execute_batch("pragma wal_checkpoint(full);")
             .map_err(|error| error.to_string())?;
-        let bytes_copied = fs::copy(source_path, &destination_path).map_err(|error| error.to_string())?;
+        let bytes_copied =
+            fs::copy(source_path, &destination_path).map_err(|error| error.to_string())?;
         Ok(MemoryBackupReport {
             source_path: source_path.clone(),
             destination_path,
@@ -129,7 +130,8 @@ impl SQLiteMemoryStore {
         if let Some(parent) = target_path.parent() {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
-        let bytes_copied = fs::copy(&backup_path, &target_path).map_err(|error| error.to_string())?;
+        let bytes_copied =
+            fs::copy(&backup_path, &target_path).map_err(|error| error.to_string())?;
         Ok(MemoryBackupReport {
             source_path: backup_path,
             destination_path: target_path,
@@ -230,8 +232,7 @@ impl SQLiteMemoryStore {
                     &memory.created_at,
                     &memory.updated_at,
                     memory.last_seen_at.as_deref(),
-                    serde_json::to_string(&memory.supersedes)
-                        .map_err(|error| error.to_string())?,
+                    serde_json::to_string(&memory.supersedes).map_err(|error| error.to_string())?,
                     memory.superseded_by.as_ref().map(ToString::to_string),
                     memory.correction_of.as_ref().map(ToString::to_string),
                 ],
@@ -319,7 +320,9 @@ impl SQLiteMemoryStore {
             .map_err(|error| error.to_string())?;
         let mut refs = Vec::new();
         while let Some(row) = rows.next().map_err(|error| error.to_string())? {
-            refs.push(parse_ref(row.get::<_, String>(0).map_err(|error| error.to_string())?)?);
+            refs.push(parse_ref(
+                row.get::<_, String>(0).map_err(|error| error.to_string())?,
+            )?);
         }
         Ok(refs)
     }
@@ -1050,7 +1053,10 @@ fn memory_from_row(row: &Row<'_>) -> Result<MemoryRecord, String> {
         created_at: row.get(12).map_err(|error| error.to_string())?,
         updated_at: row.get(13).map_err(|error| error.to_string())?,
         last_seen_at: row.get(14).map_err(|error| error.to_string())?,
-        supersedes: parse_refs_json(row.get::<_, String>(15).map_err(|error| error.to_string())?)?,
+        supersedes: parse_refs_json(
+            row.get::<_, String>(15)
+                .map_err(|error| error.to_string())?,
+        )?,
         superseded_by: parse_optional_ref(row.get(16).map_err(|error| error.to_string())?)?,
         correction_of: parse_optional_ref(row.get(17).map_err(|error| error.to_string())?)?,
     })

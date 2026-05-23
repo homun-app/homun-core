@@ -1,6 +1,4 @@
-use crate::{
-    DataSensitivity, MemoryRef, MemoryStatus, PrivacyDomain, UserId, WorkspaceId,
-};
+use crate::{DataSensitivity, MemoryRef, MemoryStatus, PrivacyDomain, UserId, WorkspaceId};
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -50,10 +48,7 @@ pub(crate) fn current_timestamp() -> String {
     format!("unix:{seconds}.{nanos:09}")
 }
 
-pub(crate) fn ensure_transition(
-    current: MemoryStatus,
-    next: MemoryStatus,
-) -> Result<(), String> {
+pub(crate) fn ensure_transition(current: MemoryStatus, next: MemoryStatus) -> Result<(), String> {
     match (current, next) {
         (MemoryStatus::Candidate, MemoryStatus::Confirmed)
         | (MemoryStatus::Candidate, MemoryStatus::Rejected)

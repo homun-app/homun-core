@@ -7,7 +7,9 @@ use std::path::PathBuf;
 #[test]
 fn health_reports_schema_and_counts() {
     let facade = MemoryFacade::new(SQLiteMemoryStore::open_in_memory().unwrap());
-    facade.record_event(&event(DataSensitivity::Private)).unwrap();
+    facade
+        .record_event(&event(DataSensitivity::Private))
+        .unwrap();
 
     let health = facade.memory_health().unwrap();
 
@@ -23,7 +25,9 @@ fn file_backed_store_backs_up_and_restores_locally() {
     let restored_path = unique_db_path("restored");
     {
         let facade = MemoryFacade::new(SQLiteMemoryStore::open(&source_path).unwrap());
-        facade.record_event(&event(DataSensitivity::Private)).unwrap();
+        facade
+            .record_event(&event(DataSensitivity::Private))
+            .unwrap();
         let report = facade.backup_to(&backup_path).unwrap();
         assert!(report.bytes_copied > 0);
     }
@@ -61,7 +65,9 @@ fn restored_encrypted_payload_fails_with_wrong_key() {
             )
             .unwrap(),
         );
-        facade.record_event(&event(DataSensitivity::Secret)).unwrap();
+        facade
+            .record_event(&event(DataSensitivity::Secret))
+            .unwrap();
         facade.backup_to(&backup_path).unwrap();
     }
 

@@ -1,6 +1,6 @@
 use local_first_memory::{
-    DataSensitivity, GraphifyArtifacts, GraphifyOperation, GraphifyQueryRequest, MemoryAccessRequest,
-    MemoryFacade, PrivacyDomain, SQLiteMemoryStore, UserId, WorkspaceId,
+    DataSensitivity, GraphifyArtifacts, GraphifyOperation, GraphifyQueryRequest,
+    MemoryAccessRequest, MemoryFacade, PrivacyDomain, SQLiteMemoryStore, UserId, WorkspaceId,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -60,10 +60,8 @@ fn graphify_path_returns_policy_scoped_refs_and_command_args() {
 fn graphify_query_rejects_artifacts_outside_allowed_root() {
     let facade = MemoryFacade::new(SQLiteMemoryStore::open_in_memory().unwrap());
     let artifacts = graphify_fixture();
-    let outside = std::env::temp_dir().join(format!(
-        "local-first-memory-other-{}",
-        uuid::Uuid::new_v4()
-    ));
+    let outside =
+        std::env::temp_dir().join(format!("local-first-memory-other-{}", uuid::Uuid::new_v4()));
     fs::create_dir_all(&outside).unwrap();
 
     let error = facade
@@ -77,7 +75,10 @@ fn graphify_query_rejects_artifacts_outside_allowed_root() {
         })
         .unwrap_err();
 
-    assert_eq!(error, "graphify artifacts must stay inside allowed output root");
+    assert_eq!(
+        error,
+        "graphify artifacts must stay inside allowed output root"
+    );
 }
 
 fn access(allow_export: bool) -> MemoryAccessRequest {

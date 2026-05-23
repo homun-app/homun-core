@@ -1,6 +1,4 @@
-use crate::{
-    DataSensitivity, MemoryAccessRequest, MemoryRef, MemoryStatus, PrivacyDomain,
-};
+use crate::{DataSensitivity, MemoryAccessRequest, MemoryRef, MemoryStatus, PrivacyDomain};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

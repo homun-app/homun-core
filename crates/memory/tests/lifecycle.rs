@@ -26,7 +26,10 @@ fn facade_creates_and_updates_candidate_memory_with_audit() {
 
     assert_eq!(created.status, MemoryStatus::Candidate);
     assert_eq!(created.created_at, created.updated_at);
-    assert_eq!(created.last_seen_at.as_deref(), Some(created.created_at.as_str()));
+    assert_eq!(
+        created.last_seen_at.as_deref(),
+        Some(created.created_at.as_str())
+    );
 
     let updated = facade
         .update_memory(
@@ -50,7 +53,10 @@ fn facade_creates_and_updates_candidate_memory_with_audit() {
     assert_eq!(updated.confidence, 0.92);
     assert_eq!(updated.created_at, created.created_at);
     assert_ne!(updated.updated_at, created.updated_at);
-    assert_eq!(updated.last_seen_at.as_deref(), Some("2026-05-23T09:00:00Z"));
+    assert_eq!(
+        updated.last_seen_at.as_deref(),
+        Some("2026-05-23T09:00:00Z")
+    );
     assert_eq!(facade.access_audit_count().unwrap(), 2);
 }
 
@@ -92,7 +98,11 @@ fn facade_merges_memories_and_tracks_supersession_refs() {
 
     assert_eq!(merged.supersedes, vec![duplicate.reference.clone()]);
     let loaded_duplicate = facade
-        .get_memory_for_ui(&duplicate.reference, &request.user_id, &request.workspace_id)
+        .get_memory_for_ui(
+            &duplicate.reference,
+            &request.user_id,
+            &request.workspace_id,
+        )
         .unwrap()
         .unwrap();
     assert_eq!(loaded_duplicate.superseded_by, Some(canonical.reference));
@@ -112,7 +122,10 @@ fn facade_tombstones_memory_and_rejects_cross_user_delete() {
     };
 
     let denied = facade.delete_memory(&other_user_request, &memory.reference, "wrong user");
-    assert_eq!(denied.unwrap_err(), "cannot access ref outside user/workspace");
+    assert_eq!(
+        denied.unwrap_err(),
+        "cannot access ref outside user/workspace"
+    );
 
     facade
         .delete_memory(&request, &memory.reference, "user deleted")

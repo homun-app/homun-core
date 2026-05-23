@@ -24,7 +24,11 @@ fn wiki_markdown_change_becomes_candidate_correction() {
     assert_eq!(report.created_candidates, 1);
     assert_eq!(report.unchanged, 0);
     let candidate = facade
-        .get_memory_for_ui(&report.candidate_refs[0], &memory.user_id, &memory.workspace_id)
+        .get_memory_for_ui(
+            &report.candidate_refs[0],
+            &memory.user_id,
+            &memory.workspace_id,
+        )
         .unwrap()
         .unwrap();
     assert_eq!(candidate.status, MemoryStatus::Candidate);
@@ -56,7 +60,9 @@ fn wiki_correction_rejects_secret_body() {
     let page = wiki_page(memory.reference, "Fabio prefers Zed");
     let markdown = markdown_for(&page, "api_key = sk-secret");
 
-    let error = facade.import_wiki_correction(&request(), &markdown).unwrap_err();
+    let error = facade
+        .import_wiki_correction(&request(), &markdown)
+        .unwrap_err();
 
     assert_eq!(error, "wiki correction contains raw secret content");
 }
