@@ -9,7 +9,6 @@ interface ShellProps {
   onBackFromSettings: () => void;
   onNavigate: (view: ViewId) => void;
   onSelectSettingsSection: (section: SettingsSectionId) => void;
-  onToggleInspector: () => void;
   onToggleNav: () => void;
   settingsSection: SettingsSectionId;
   children: ReactNode;
@@ -23,7 +22,6 @@ export function Shell({
   onBackFromSettings,
   onNavigate,
   onSelectSettingsSection,
-  onToggleInspector,
   onToggleNav,
   settingsSection,
 }: ShellProps) {
@@ -54,7 +52,6 @@ export function Shell({
           isCollapsed={isNavCollapsed}
           onNavigate={onNavigate}
           onToggle={onToggleNav}
-          onToggleInspector={onToggleInspector}
         />
       )}
       {children}

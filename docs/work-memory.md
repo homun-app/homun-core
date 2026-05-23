@@ -851,12 +851,14 @@ Perche': ora il Brain non e' solo un router per la singola chiamata. Produce dec
 - Verificata la direzione visuale Manus light + settings Codex: neutral grays, system blue, radius massimo 8px, niente dotted background permanente e niente card annidate.
 - Rifinita la UX dopo review visuale: canvas piu' adattivo su desktop, sidebar principale comprimibile, inspector comprimibile e Settings come modalita' shell dedicata che sostituisce la navigazione principale con menu impostazioni + ritorno all'app.
 - Seconda rifinitura ispirata a Manus: inspector nascosto di default e richiamabile da header/activity strip, sidebar ridotta alle voci primarie, impostazioni accessibili dal footer e pagina Plugin/Connettori resa piu' curata con feature card, search e griglia connettori.
+- Terza rifinitura layout: composer trattato come overlay ancorato dentro la chat invece che come elemento del flow, conversazione con scroll interno e auto-scroll React, sidebar a griglia con footer ancorato, un solo entry point impostazioni e icone centrate nello stato compresso con slot fissi.
+- Aggiunte micro-interazioni non invasive: transizioni su shell/sidebar, feedback active/focus sul composer, ingresso leggero del dock e dei messaggi, rispettando `prefers-reduced-motion`.
 - Verifiche eseguite:
   - `npm run typecheck`
   - `npm run build`
   - screenshot browser desktop e mobile su Chat/Settings/Tasks
 
-Perche': la UI e' il primo punto di fiducia del prodotto. Serviva un prototipo operativo abbastanza fedele da giudicare look and feel, densita', privacy/approval flow e layout responsive prima di cablare i Tauri commands reali.
+Perche': la UI e' il primo punto di fiducia del prodotto. Serviva un prototipo operativo abbastanza fedele da giudicare look and feel, densita', privacy/approval flow e layout responsive prima di cablare i Tauri commands reali. In particolare il prompt non deve mai essere spinto fuori dalla chat e la navigazione deve restare stabile anche con altezze ridotte.
 
 ## Prossimo blocco
 

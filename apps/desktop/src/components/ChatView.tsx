@@ -10,6 +10,7 @@ import {
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
+import { useEffect, useRef } from "react";
 import type { ChatMessage, RuntimeHealth, TaskItem } from "../types";
 
 interface ChatViewProps {
@@ -27,6 +28,14 @@ export function ChatView({
   onShowDetails,
   task,
 }: ChatViewProps) {
+  const conversationRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const node = conversationRef.current;
+    if (!node) return;
+    node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
+  }, [messages]);
+
   return (
     <section className="chat-view" aria-labelledby="chat-title">
       <header className="chat-topbar">
@@ -58,7 +67,7 @@ export function ChatView({
         </div>
       </div>
 
-      <div className="conversation" aria-label="Conversazione recente">
+      <div className="conversation" aria-label="Conversazione recente" ref={conversationRef}>
         {messages.map((message) => (
           <article className={`message ${message.role}`} key={message.id}>
             <p>{message.text}</p>

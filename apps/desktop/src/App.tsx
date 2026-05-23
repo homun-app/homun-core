@@ -45,7 +45,6 @@ export default function App() {
       isNavCollapsed={isNavCollapsed}
       onBackFromSettings={() => setActiveView(previousView)}
       onNavigate={handleNavigate}
-      onToggleInspector={() => setIsInspectorCollapsed((value) => !value)}
       onToggleNav={() => setIsNavCollapsed((value) => !value)}
       onSelectSettingsSection={setSettingsSection}
       settingsSection={settingsSection}

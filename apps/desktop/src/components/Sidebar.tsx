@@ -1,12 +1,12 @@
 import {
   ArrowLeft,
-  ChevronRight,
   FolderPlus,
   PanelLeftClose,
   PanelLeftOpen,
   Search,
   Settings,
   SlidersHorizontal,
+  SquarePen,
 } from "lucide-react";
 import { navItems, settingsSections } from "../data/mockData";
 import type { SettingsSectionId, ViewId } from "../types";
@@ -16,7 +16,6 @@ interface SidebarProps {
   isCollapsed: boolean;
   onNavigate: (view: ViewId) => void;
   onToggle: () => void;
-  onToggleInspector: () => void;
 }
 
 export function Sidebar({
@@ -24,7 +23,6 @@ export function Sidebar({
   isCollapsed,
   onNavigate,
   onToggle,
-  onToggleInspector,
 }: SidebarProps) {
   return (
     <aside className="sidebar" aria-label="Navigazione principale">
@@ -53,67 +51,65 @@ export function Sidebar({
       </div>
 
       <button className="primary-action" type="button" title="Nuovo task">
+        <SquarePen size={17} />
         <span>Nuovo compito</span>
-        <ChevronRight size={16} />
       </button>
 
-      <nav className="nav-list">
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          return (
-            <button
-              className={`nav-item ${activeView === item.id ? "active" : ""}`}
-              key={item.id}
-              type="button"
-              onClick={() => onNavigate(item.id)}
-            >
-              <Icon size={17} />
-              <span>{item.label}</span>
-              {item.badge && <strong>{item.badge}</strong>}
+      <div className="sidebar-scroll">
+        <nav className="nav-list">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                className={`nav-item ${activeView === item.id ? "active" : ""}`}
+                key={item.id}
+                type="button"
+                onClick={() => onNavigate(item.id)}
+              >
+                <Icon size={17} />
+                <span>{item.label}</span>
+                {item.badge && <strong>{item.badge}</strong>}
+              </button>
+            );
+          })}
+        </nav>
+
+        <div className="sidebar-group">
+          <div className="sidebar-group-title">
+            <span>Progetti</span>
+            <button className="icon-button small-icon-button" type="button" aria-label="Nuovo progetto">
+              <FolderPlus size={15} />
             </button>
-          );
-        })}
-      </nav>
-
-      <div className="sidebar-group">
-        <div className="sidebar-group-title">
-          <span>Progetti</span>
-          <button className="icon-button small-icon-button" type="button" aria-label="Nuovo progetto">
-            <FolderPlus size={15} />
-          </button>
+          </div>
+          <button className="sidebar-link" type="button">Local-first assistant</button>
         </div>
-        <button className="sidebar-link" type="button">Local-first assistant</button>
-      </div>
 
-      <div className="sidebar-group">
-        <div className="sidebar-group-title">
-          <span>Tutti i compiti</span>
-          <SlidersHorizontal size={15} />
-        </div>
-        <button className="sidebar-link muted" type="button">Riepilogo Acme</button>
-        <button className="sidebar-link muted" type="button">Treni Napoli-Milano</button>
-      </div>
-
-      <div className="sidebar-footer compact">
-        <div>
-          <strong>Locale attivo</strong>
-          <small>Gemma 4 pronto</small>
+        <div className="sidebar-group">
+          <div className="sidebar-group-title">
+            <span>Tutti i compiti</span>
+            <SlidersHorizontal size={15} />
+          </div>
+          <button className="sidebar-link muted" type="button">Riepilogo Acme</button>
+          <button className="sidebar-link muted" type="button">Treni Napoli-Milano</button>
         </div>
       </div>
-      <div className="sidebar-bottom-nav">
-        <button className="icon-button" type="button" aria-label="Preferenze rapide">
-          <SlidersHorizontal size={17} />
-        </button>
+
+      <div className="sidebar-bottom">
+        <div className="sidebar-footer compact">
+          <span className="status-dot ready" />
+          <div>
+            <strong>Locale attivo</strong>
+            <small>Gemma 4 pronto</small>
+          </div>
+        </div>
         <button
-          className="icon-button"
+          className="settings-row-button"
           type="button"
           aria-label="Impostazioni"
           onClick={() => onNavigate("settings")}
         >
           <Settings size={17} />
-        </button>
-        <button className="icon-button" type="button" aria-label="Dettagli attività" onClick={onToggleInspector}>
-          <PanelLeftOpen size={17} />
+          <span>Impostazioni</span>
         </button>
       </div>
     </aside>
@@ -158,27 +154,29 @@ export function SettingsSidebar({
         </button>
       </div>
 
-      <button className="back-button" type="button" onClick={onBack}>
-        <ArrowLeft size={16} />
-        <span>Torna all'app</span>
-      </button>
+      <div className="sidebar-scroll">
+        <button className="back-button" type="button" onClick={onBack}>
+          <ArrowLeft size={16} />
+          <span>Torna all'app</span>
+        </button>
 
-      <nav className="nav-list settings-nav-list">
-        {settingsSections.map((item) => {
-          const Icon = item.icon;
-          return (
-            <button
-              className={`nav-item ${activeSection === item.id ? "active" : ""}`}
-              key={item.id}
-              type="button"
-              onClick={() => onSelect(item.id)}
-            >
-              <Icon size={17} />
-              <span>{item.label}</span>
-            </button>
-          );
-        })}
-      </nav>
+        <nav className="nav-list settings-nav-list">
+          {settingsSections.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                className={`nav-item ${activeSection === item.id ? "active" : ""}`}
+                key={item.id}
+                type="button"
+                onClick={() => onSelect(item.id)}
+              >
+                <Icon size={17} />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+      </div>
     </aside>
   );
 }

@@ -57,6 +57,7 @@ button {
   display: grid;
   grid-template-columns: 248px minmax(0, 1fr) 336px;
   background: var(--bg);
+  transition: grid-template-columns 180ms ease;
 }
 
 .app-shell.nav-collapsed {
@@ -82,13 +83,20 @@ button {
 .sidebar {
   height: 100vh;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   padding: 14px 12px;
   border-right: 1px solid var(--line);
   background: #eeeeef;
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
+  display: grid;
+  grid-template-rows: 18px auto auto minmax(0, 1fr) auto;
+  gap: 16px;
+  transition:
+    width 180ms ease,
+    padding 180ms ease;
+}
+
+.settings-sidebar {
+  grid-template-rows: 18px auto minmax(0, 1fr);
 }
 
 .window-controls {
@@ -209,7 +217,8 @@ h4 {
   color: var(--text);
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
+  gap: 10px;
   padding: 0 12px;
   box-shadow: inset 0 0 0 1px var(--line-soft);
 }
@@ -236,6 +245,15 @@ h4 {
   gap: 3px;
 }
 
+.sidebar-scroll {
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding-right: 2px;
+}
+
 .nav-item,
 .settings-nav-item {
   height: 38px;
@@ -248,6 +266,17 @@ h4 {
   gap: 10px;
   align-items: center;
   text-align: left;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease,
+    transform 140ms ease;
+}
+
+.nav-item:active,
+.settings-nav-item:active,
+.primary-action:active,
+.settings-row-button:active {
+  transform: scale(0.98);
 }
 
 .nav-item span {
@@ -275,7 +304,6 @@ h4 {
 }
 
 .sidebar-footer {
-  margin-top: auto;
   display: flex;
   gap: 10px;
   align-items: center;
@@ -287,6 +315,14 @@ h4 {
 .sidebar-footer.compact {
   background: transparent;
   padding: 0 10px;
+}
+
+.sidebar-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
 }
 
 .sidebar-group {
@@ -337,6 +373,25 @@ h4 {
   height: 30px;
 }
 
+.settings-row-button {
+  height: 36px;
+  border-radius: var(--radius);
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  background: transparent;
+  text-align: left;
+  transition:
+    background-color 140ms ease,
+    transform 140ms ease;
+}
+
+.settings-row-button:hover {
+  background: var(--surface-muted);
+}
+
 .back-button {
   height: 36px;
   margin-bottom: 0;
@@ -355,7 +410,7 @@ h4 {
 }
 
 .nav-collapsed .sidebar {
-  padding-inline: 10px;
+  padding-inline: 12px;
 }
 
 .nav-collapsed .window-controls {
@@ -364,6 +419,7 @@ h4 {
 
 .nav-collapsed .brand-block {
   justify-content: center;
+  width: 48px;
 }
 
 .nav-collapsed .brand-block > div,
@@ -374,6 +430,7 @@ h4 {
 .nav-collapsed .sidebar-footer div,
 .nav-collapsed .sidebar-group,
 .nav-collapsed .secondary-sidebar-action span,
+.nav-collapsed .settings-row-button span,
 .nav-collapsed .back-button span {
   display: none;
 }
@@ -382,16 +439,25 @@ h4 {
 .nav-collapsed .nav-item,
 .nav-collapsed .settings-nav-item,
 .nav-collapsed .back-button,
-.nav-collapsed .secondary-sidebar-action {
+.nav-collapsed .secondary-sidebar-action,
+.nav-collapsed .settings-row-button {
   width: 48px;
   justify-content: center;
   grid-template-columns: 1fr;
   padding: 0;
 }
 
-.nav-collapsed .sidebar-footer {
+.nav-collapsed .sidebar-footer,
+.nav-collapsed .sidebar-bottom {
   width: 48px;
   justify-content: center;
+  align-items: center;
+}
+
+.nav-collapsed .sidebar-scroll {
+  width: 48px;
+  align-items: center;
+  padding-right: 0;
 }
 
 .sidebar-footer strong,
@@ -426,16 +492,19 @@ small {
   margin: 0 auto;
 }
 
-.chat-view,
-.connections-view {
+.chat-view {
   height: calc(100vh - 56px);
   min-height: 620px;
   padding-top: clamp(12px, 3vh, 28px);
-  display: flex;
-  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
 }
 
 .connections-view {
+  height: calc(100vh - 56px);
+  min-height: 620px;
   width: min(100%, 980px);
   margin: 0 auto;
   overflow: auto;
@@ -566,6 +635,16 @@ small {
   background: var(--surface);
   box-shadow: var(--shadow);
   overflow: hidden;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.prompt-panel:focus-within {
+  border-color: rgba(10, 132, 255, 0.42);
+  box-shadow: 0 18px 54px rgba(24, 30, 40, 0.11);
+  transform: translateY(-1px);
 }
 
 .prompt-panel textarea {
@@ -610,12 +689,11 @@ small {
 
 .conversation {
   min-height: 0;
-  flex: 1;
   overflow: auto;
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 8px 0 24px;
+  padding: 8px 0 270px;
 }
 
 .activity-strip {
@@ -641,10 +719,11 @@ small {
 }
 
 .composer-dock {
-  position: sticky;
-  bottom: -1px;
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
   z-index: 3;
-  margin-top: auto;
   padding: 18px 0 0;
   background: linear-gradient(
     180deg,
@@ -652,6 +731,7 @@ small {
     var(--bg) 26%,
     var(--bg) 100%
   );
+  animation: dock-in 180ms ease both;
 }
 
 .message {
@@ -660,6 +740,7 @@ small {
   border-radius: var(--radius);
   background: var(--surface);
   box-shadow: inset 0 0 0 1px var(--line-soft);
+  animation: message-in 180ms ease both;
 }
 
 .message.user {
@@ -1065,6 +1146,15 @@ small {
   padding: 16px;
   background: var(--surface);
   box-shadow: inset 0 0 0 1px var(--line-soft);
+  transition:
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.feature-card:hover,
+.connector-row:hover {
+  box-shadow: inset 0 0 0 1px var(--line), 0 12px 32px rgba(24, 30, 40, 0.07);
+  transform: translateY(-1px);
 }
 
 .feature-card strong,
@@ -1133,6 +1223,42 @@ small {
   align-items: center;
   background: var(--surface);
   box-shadow: inset 0 0 0 1px var(--line-soft);
+  transition:
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+@keyframes dock-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes message-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 .connector-icon,
