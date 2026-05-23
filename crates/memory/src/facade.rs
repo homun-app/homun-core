@@ -3,13 +3,15 @@ use crate::{
     GraphifyCli, GraphifyOperation, GraphifyQueryRequest, GraphifyQueryResult,
     MemoryAccessDecision, MemoryAccessRequest, MemoryContextItem, MemoryContextPack,
     MemoryCreateRequest, MemoryEntity, MemoryEvent, MemoryEvidence, MemoryExtraction,
-    MemoryExtractionSummary, MemoryLifecycleRequest, MemoryPolicyEngine, MemoryRecord, MemoryRef,
-    MemoryRefKind, MemoryRelation, MemorySearchPage, MemorySearchRequest, MemorySearchResult,
+    MemoryExtractionSummary, MemoryHealth, MemoryLifecycleRequest, MemoryMaintenanceReport,
+    MemoryBackupReport, MemoryPolicyEngine, MemoryRecord, MemoryRef, MemoryRefKind,
+    MemoryRelation, MemorySearchPage, MemorySearchRequest, MemorySearchResult,
     MemoryStatus, MemoryUpdatePatch, PrivacyDomain,
     SQLiteMemoryStore, UserId, WikiFileStore, WikiPage, WorkspaceId, current_timestamp,
     ensure_artifacts_inside_root, ensure_transition, parse_wiki_markdown, WikiCorrectionSyncReport,
 };
 use std::str::FromStr;
+use std::path::Path;
 
 pub struct MemoryWikiProjection {
     pub page: WikiPage,
@@ -606,6 +608,18 @@ impl MemoryFacade {
 
     pub fn access_audit_count(&self) -> Result<u64, String> {
         self.store.access_audit_count()
+    }
+
+    pub fn memory_health(&self) -> Result<MemoryHealth, String> {
+        self.store.health()
+    }
+
+    pub fn backup_to(&self, destination: impl AsRef<Path>) -> Result<MemoryBackupReport, String> {
+        self.store.backup_to(destination)
+    }
+
+    pub fn run_memory_maintenance(&self) -> Result<MemoryMaintenanceReport, String> {
+        self.store.run_maintenance()
     }
 
     pub fn get_memory_for_ui(

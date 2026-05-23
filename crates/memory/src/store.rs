@@ -1,10 +1,12 @@
 use crate::{
     DataSensitivity, EncryptedJson, KeyProvider, MemoryAccessDecision, MemoryAccessRequest,
-    MemoryEntity, MemoryEvent, MemoryEvidence, MemoryRecord, MemoryRef, MemoryRefKind,
-    MemoryRelation, PrivacyDomain, UserId, WikiPage, WorkspaceId, decrypt_json, encrypt_json,
+    MemoryBackupReport, MemoryEntity, MemoryEvent, MemoryEvidence, MemoryHealth,
+    MemoryMaintenanceReport, MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation,
+    MemoryRestoreMode, PrivacyDomain, UserId, WikiPage, WorkspaceId, decrypt_json, encrypt_json,
 };
 use rusqlite::{Connection, Row, params};
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 const SCHEMA_VERSION: u32 = 2;
@@ -12,6 +14,7 @@ const SCHEMA_VERSION: u32 = 2;
 pub struct SQLiteMemoryStore {
     conn: Connection,
     key_provider: Option<Box<dyn KeyProvider>>,
+    db_path: Option<PathBuf>,
 }
 
 impl SQLiteMemoryStore {
@@ -20,6 +23,7 @@ impl SQLiteMemoryStore {
         let store = Self {
             conn,
             key_provider: None,
+            db_path: None,
         };
         store.init()?;
         Ok(store)
@@ -32,16 +36,34 @@ impl SQLiteMemoryStore {
         let store = Self {
             conn,
             key_provider: Some(key_provider),
+            db_path: None,
         };
         store.init()?;
         Ok(store)
     }
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self, String> {
-        let conn = Connection::open(path).map_err(|error| error.to_string())?;
+        let path = path.as_ref().to_path_buf();
+        let conn = Connection::open(&path).map_err(|error| error.to_string())?;
         let store = Self {
             conn,
             key_provider: None,
+            db_path: Some(path),
+        };
+        store.init()?;
+        Ok(store)
+    }
+
+    pub fn open_with_key_provider(
+        path: impl AsRef<Path>,
+        key_provider: Box<dyn KeyProvider>,
+    ) -> Result<Self, String> {
+        let path = path.as_ref().to_path_buf();
+        let conn = Connection::open(&path).map_err(|error| error.to_string())?;
+        let store = Self {
+            conn,
+            key_provider: Some(key_provider),
+            db_path: Some(path),
         };
         store.init()?;
         Ok(store)
@@ -61,6 +83,70 @@ impl SQLiteMemoryStore {
             .map_err(|error| error.to_string())?
             .parse::<u32>()
             .map_err(|error| error.to_string())
+    }
+
+    pub fn health(&self) -> Result<MemoryHealth, String> {
+        Ok(MemoryHealth {
+            schema_version: self.schema_version()?,
+            total_events: self.count_table("memory_events")?,
+            total_memories: self.count_table("memories")?,
+            total_entities: self.count_table("entities")?,
+            total_relations: self.count_table("relations")?,
+            total_wiki_pages: self.count_table("wiki_pages")?,
+            access_audit_count: self.access_audit_count()?,
+        })
+    }
+
+    pub fn backup_to(&self, destination: impl AsRef<Path>) -> Result<MemoryBackupReport, String> {
+        let Some(source_path) = &self.db_path else {
+            return Err("memory backup requires file-backed store".to_string());
+        };
+        let destination_path = destination.as_ref().to_path_buf();
+        if let Some(parent) = destination_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        self.conn
+            .execute_batch("pragma wal_checkpoint(full);")
+            .map_err(|error| error.to_string())?;
+        let bytes_copied = fs::copy(source_path, &destination_path).map_err(|error| error.to_string())?;
+        Ok(MemoryBackupReport {
+            source_path: source_path.clone(),
+            destination_path,
+            bytes_copied,
+        })
+    }
+
+    pub fn restore_from_backup(
+        backup_path: impl AsRef<Path>,
+        target_path: impl AsRef<Path>,
+        mode: MemoryRestoreMode,
+    ) -> Result<MemoryBackupReport, String> {
+        let backup_path = backup_path.as_ref().to_path_buf();
+        let target_path = target_path.as_ref().to_path_buf();
+        if target_path.exists() && mode == MemoryRestoreMode::RefuseIfTargetExists {
+            return Err("restore target already exists".to_string());
+        }
+        if let Some(parent) = target_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let bytes_copied = fs::copy(&backup_path, &target_path).map_err(|error| error.to_string())?;
+        Ok(MemoryBackupReport {
+            source_path: backup_path,
+            destination_path: target_path,
+            bytes_copied,
+        })
+    }
+
+    pub fn run_maintenance(&self) -> Result<MemoryMaintenanceReport, String> {
+        let integrity: String = self
+            .conn
+            .query_row("pragma integrity_check", [], |row| row.get(0))
+            .map_err(|error| error.to_string())?;
+        self.rebuild_memory_search_index()?;
+        Ok(MemoryMaintenanceReport {
+            integrity_ok: integrity == "ok",
+            fts_rebuilt: true,
+        })
     }
 
     pub fn record_event(&self, event: &MemoryEvent) -> Result<(), String> {
@@ -863,6 +949,13 @@ impl SQLiteMemoryStore {
             .execute(alter_sql, [])
             .map_err(|error| error.to_string())?;
         Ok(())
+    }
+
+    fn count_table(&self, table: &str) -> Result<u64, String> {
+        let sql = format!("select count(*) from {table}");
+        self.conn
+            .query_row(&sql, [], |row| row.get(0))
+            .map_err(|error| error.to_string())
     }
 
     fn index_memory(&self, memory: &MemoryRecord) -> Result<(), String> {
