@@ -37,11 +37,11 @@
 
 ### Task 2: Logs, Health And Fake Supervisor
 
-- [ ] Write failing tests for bounded log buffer, injected health probe, and fake supervisor lifecycle through `ProcessManager`.
-- [ ] Run targeted tests and verify failures.
-- [ ] Implement log buffer, health evaluator, supervisor trait, fake supervisor and manager facade.
-- [ ] Run targeted tests until green.
-- [ ] Commit as `Add process manager facade`.
+- [x] Write failing tests for bounded log buffer, injected health probe, and fake supervisor lifecycle through `ProcessManager`.
+- [x] Run targeted tests and verify failures.
+- [x] Implement log buffer, health evaluator, supervisor trait, fake supervisor and manager facade.
+- [x] Run targeted tests until green.
+- [x] Commit as `Add process manager facade`.
 
 ### Task 3: Local Process Supervisor
 
