@@ -13,6 +13,37 @@ Questo file e' la memoria operativa del lavoro svolto nel repository. Va aggiorn
 
 Perche': il progetto deve imparare da implementazioni esistenti senza perdere identita' architetturale e vincoli locali.
 
+## 2026-05-23
+
+### Analisi mirata OpenHuman
+
+- Clonato OpenHuman in `/tmp/openhuman-reference` solo per lettura.
+- Ispezionato commit `934546b2b3ae20271c2cd82b95e8221efb199568`.
+- Letti README, flow agent/subagent/tool, delegation policy, memory client reference, prompt injection guard, agent definitions e tool filtering.
+- Creato ADR `docs/decisions/0001-openhuman-as-reference.md`.
+
+Pattern da adattare:
+
+- agent definitions data-driven.
+- policy direct-first prima della delegazione.
+- separazione tra tool visibili al modello e tool realmente eseguibili dal runtime.
+- subagent runner isolato dal parent session.
+- memory facade unica.
+- prompt-injection guard prima di inference/tool loop.
+- compressione/sintesi dei risultati grandi.
+
+Perche': OpenHuman e' utile come repertorio di soluzioni concrete, ma ogni idea deve essere adattata ai nostri vincoli: local-first, Rust Core, MLX/Gemma, subagenti auditabili e deny-by-default.
+
+### AgentDefinition registry e direct-first policy
+
+- Aggiunto `AgentDefinition` nel crate subagenti.
+- Aggiunti `AgentTier` e `ToolScope`.
+- Aggiunto `default_agent_definitions()` per i nostri agenti iniziali.
+- Aggiunta validazione della gerarchia: i worker non delegano, i reasoning agent non delegano ad altri reasoning agent.
+- Aggiunta `DelegationPolicy` direct-first tramite `DelegationInput` e `DelegationDecision`.
+
+Perche': OpenHuman mostra che hardcodare agenti e deleghe nel runner rende difficile governare tool, limiti e routing. Noi adattiamo il pattern mantenendo contratti piccoli, testati e coerenti con il nostro Rust Core.
+
 ### Bootstrap progetto
 
 - Inizializzato il repository Git.

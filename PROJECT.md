@@ -173,6 +173,13 @@ Subagenti iniziali:
 - `AutomationAgent`: propone automazioni ricorrenti o semi-automatiche.
 - `ReviewAgent`: controlla coerenza, formato JSON, policy e rischio prima dell'esecuzione.
 
+Pattern adattati da OpenHuman:
+
+- definizioni agenti data-driven con `id`, `display_name`, `when_to_use`, tier, scope tool e limiti runtime.
+- policy direct-first: rispondere direttamente quando possibile, usare tool diretti prima dei subagenti, delegare solo lavori specialistici.
+- separazione tra strumenti visibili al modello e capacita' eseguibili dal runtime.
+- subagenti isolati dal parent session: producono risultati compatti, validati e auditabili.
+
 Envelope minimo di un task subagente:
 
 ```json
