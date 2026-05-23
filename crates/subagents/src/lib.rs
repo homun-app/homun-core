@@ -1239,9 +1239,42 @@ impl AuditStore {
         Ok(())
     }
 
+    pub fn record_review(&self, review: &SubagentReview) -> Result<(), String> {
+        let findings_json =
+            serde_json::to_string(&review.findings).map_err(|error| error.to_string())?;
+
+        self.conn
+            .execute(
+                "insert into subagent_reviews (
+                    task_id,
+                    reviewer_agent_id,
+                    approved,
+                    risk_level,
+                    requires_user_approval,
+                    findings_json
+                ) values (?1, ?2, ?3, ?4, ?5, ?6)",
+                (
+                    &review.task_id,
+                    agent_id_name(&review.reviewer_agent_id),
+                    review.approved,
+                    risk_level_name(&review.risk_level),
+                    review.requires_user_approval,
+                    findings_json,
+                ),
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
     pub fn result_count(&self) -> Result<u64, String> {
         self.conn
             .query_row("select count(*) from subagent_results", [], |row| row.get(0))
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn review_count(&self) -> Result<u64, String> {
+        self.conn
+            .query_row("select count(*) from subagent_reviews", [], |row| row.get(0))
             .map_err(|error| error.to_string())
     }
 
@@ -1307,6 +1340,27 @@ impl AuditStore {
         Ok(results)
     }
 
+    pub fn latest_review(&self, task_id: &str) -> Result<Option<SubagentReview>, String> {
+        let mut statement = self
+            .conn
+            .prepare(
+                "select task_id, reviewer_agent_id, approved, risk_level, requires_user_approval, findings_json
+                 from subagent_reviews
+                 where task_id = ?1
+                 order by id desc
+                 limit 1",
+            )
+            .map_err(|error| error.to_string())?;
+        let mut rows = statement
+            .query([task_id])
+            .map_err(|error| error.to_string())?;
+
+        match rows.next().map_err(|error| error.to_string())? {
+            Some(row) => review_from_audit_row(row).map(Some),
+            None => Ok(None),
+        }
+    }
+
     fn init(&self) -> Result<(), String> {
         self.conn
             .execute_batch(
@@ -1322,7 +1376,20 @@ impl AuditStore {
                     created_at text not null default current_timestamp
                 );
                 create index if not exists idx_subagent_results_task_id
-                    on subagent_results(task_id);",
+                    on subagent_results(task_id);
+
+                create table if not exists subagent_reviews (
+                    id integer primary key autoincrement,
+                    task_id text not null,
+                    reviewer_agent_id text not null,
+                    approved integer not null,
+                    risk_level text not null,
+                    requires_user_approval integer not null,
+                    findings_json text not null,
+                    created_at text not null default current_timestamp
+                );
+                create index if not exists idx_subagent_reviews_task_id
+                    on subagent_reviews(task_id);",
             )
             .map_err(|error| error.to_string())
     }
@@ -1349,6 +1416,15 @@ fn status_name(status: &SubagentStatus) -> &'static str {
     }
 }
 
+fn risk_level_name(risk_level: &RiskLevel) -> &'static str {
+    match risk_level {
+        RiskLevel::Low => "low",
+        RiskLevel::Medium => "medium",
+        RiskLevel::High => "high",
+        RiskLevel::Critical => "critical",
+    }
+}
+
 fn result_from_audit_row(row: &rusqlite::Row<'_>) -> Result<SubagentResult, String> {
     let task_id: String = row.get(0).map_err(|error| error.to_string())?;
     let agent_id: String = row.get(1).map_err(|error| error.to_string())?;
@@ -1366,6 +1442,24 @@ fn result_from_audit_row(row: &rusqlite::Row<'_>) -> Result<SubagentResult, Stri
         errors: serde_json::from_str(&errors_json).map_err(|error| error.to_string())?,
         metrics: serde_json::from_str(&metrics_json).map_err(|error| error.to_string())?,
         audit: serde_json::from_str(&audit_json).map_err(|error| error.to_string())?,
+    })
+}
+
+fn review_from_audit_row(row: &rusqlite::Row<'_>) -> Result<SubagentReview, String> {
+    let task_id: String = row.get(0).map_err(|error| error.to_string())?;
+    let reviewer_agent_id: String = row.get(1).map_err(|error| error.to_string())?;
+    let approved: bool = row.get(2).map_err(|error| error.to_string())?;
+    let risk_level: String = row.get(3).map_err(|error| error.to_string())?;
+    let requires_user_approval: bool = row.get(4).map_err(|error| error.to_string())?;
+    let findings_json: String = row.get(5).map_err(|error| error.to_string())?;
+
+    Ok(SubagentReview {
+        task_id,
+        reviewer_agent_id: agent_id_from_name(&reviewer_agent_id)?,
+        approved,
+        risk_level: risk_level_from_name(&risk_level)?,
+        requires_user_approval,
+        findings: serde_json::from_str(&findings_json).map_err(|error| error.to_string())?,
     })
 }
 
@@ -1389,5 +1483,15 @@ fn status_from_name(status: &str) -> Result<SubagentStatus, String> {
         "cancelled" => Ok(SubagentStatus::Cancelled),
         "timed_out" => Ok(SubagentStatus::TimedOut),
         _ => Err(format!("unknown subagent status {status}")),
+    }
+}
+
+fn risk_level_from_name(risk_level: &str) -> Result<RiskLevel, String> {
+    match risk_level {
+        "low" => Ok(RiskLevel::Low),
+        "medium" => Ok(RiskLevel::Medium),
+        "high" => Ok(RiskLevel::High),
+        "critical" => Ok(RiskLevel::Critical),
+        _ => Err(format!("unknown risk level {risk_level}")),
     }
 }

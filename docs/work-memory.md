@@ -72,6 +72,15 @@ Perche': OpenHuman distingue i tool mostrati al modello dai tool che il runtime 
 
 Perche': l'audit non deve solo registrare eventi, deve permettere al core e alla futura UI di spiegare cosa e' successo: ultimo esito di un task, errori recenti e stato operativo dei subagenti.
 
+### Review audit dedicate
+
+- Aggiunta tabella SQLite `subagent_reviews`.
+- Aggiunto `AuditStore::record_review`.
+- Aggiunti `AuditStore::review_count` e `AuditStore::latest_review`.
+- Testato che l'ultima review di un task sia recuperabile con reviewer, approvazione, rischio, richiesta approvazione e findings.
+
+Perche': `SubagentReview` e' un oggetto di controllo distinto dal normale output del modello. Salvarlo come record dedicato rendera' piu' semplice costruire viste di approvazione, spiegazioni e blocchi operativi prima di azioni rischiose.
+
 ### Bootstrap progetto
 
 - Inizializzato il repository Git.
