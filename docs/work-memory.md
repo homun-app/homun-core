@@ -15,6 +15,23 @@ Perche': il progetto deve imparare da implementazioni esistenti senza perdere id
 
 ## 2026-05-23
 
+### Memory Facade completa
+
+- Creato design `docs/memory/memory-facade-design.md`.
+- Creato piano operativo `docs/superpowers/plans/2026-05-23-memory-facade.md`.
+- Aggiunto crate `crates/memory`.
+- Aggiunti contratti multilingua e multiutente: `MemoryRef`, eventi, memorie, entita', relazioni, evidenze, wiki page e context pack.
+- Aggiunto `SQLiteMemoryStore` con CRUD per eventi, memorie, entita', relazioni, evidenze, wiki metadata, audit accessi e tombstone logici.
+- Aggiunta policy anti-esfiltrazione per domini privacy, sensibilita', payload raw ed export ampio.
+- Aggiunta redaction ricorsiva di segreti.
+- Aggiunta crittografia applicativa XChaCha20-Poly1305 per payload sensibili tramite `KeyProvider`.
+- Aggiunto graph MVP sopra entita'/relazioni SQLite.
+- Aggiunto wiki Markdown adapter con frontmatter refs e blocco di contenuti raw secret.
+- Aggiunta `MemoryFacade` per context pack policy-gated, auditati e richiamabili dai subagenti.
+- Testato il crate memoria con contratti, SQLite, policy, crypto, graph, wiki e facade.
+
+Perche': la memoria e' un pezzo separato e va completata come componente autonomo. La facade unisce SQLite, grafo e wiki senza fonderli, mantenendo refs stabili, isolamento user/workspace, privacy domains, anti-esfiltrazione, crittografia e audit.
+
 ### Principi architetturali confermati
 
 - Il progetto e' language-agnostic e multilingua di default.
