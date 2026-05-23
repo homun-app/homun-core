@@ -619,6 +619,7 @@ name = "local-first-capabilities"
 version = "0.1.0"
 dependencies = [
  "local-first-task-runtime",
+ "rusqlite",
  "serde",
  "serde_json",
  "time",

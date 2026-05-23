@@ -6,6 +6,7 @@ mod facade;
 mod mcp;
 mod policy;
 mod provider;
+mod registry;
 mod task_runtime_bridge;
 mod types;
 
@@ -26,5 +27,6 @@ pub use mcp::{
 };
 pub use policy::{CapabilityPolicy, PolicyContext, ToolAccessDecision};
 pub use provider::{CapabilityProvider, FakeCapabilityProvider};
+pub use registry::*;
 pub use task_runtime_bridge::*;
 pub use types::*;
