@@ -6,6 +6,7 @@ use crate::{
     SQLiteMemoryStore, UserId, WikiFileStore, WikiPage, WorkspaceId,
 };
 use std::str::FromStr;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct MemoryWikiProjection {
     pub page: WikiPage,
@@ -63,6 +64,7 @@ impl MemoryFacade {
             let reference =
                 MemoryRef::generated(MemoryRefKind::Memory, user_id.clone(), workspace_id.clone());
             let evidence_refs = extracted.evidence_refs.clone();
+            let now = current_timestamp();
             let memory = MemoryRecord {
                 reference: reference.clone(),
                 user_id: user_id.clone(),
@@ -76,6 +78,12 @@ impl MemoryFacade {
                 privacy_domain: extracted.privacy_domain,
                 sensitivity: extracted.sensitivity,
                 metadata: extracted.metadata,
+                created_at: now.clone(),
+                updated_at: now.clone(),
+                last_seen_at: Some(now),
+                supersedes: vec![],
+                superseded_by: None,
+                correction_of: None,
             };
             self.store.upsert_memory(&memory)?;
             for evidence_ref in evidence_refs {
@@ -303,4 +311,12 @@ impl MemoryFacade {
             evidence,
         })
     }
+}
+
+fn current_timestamp() -> String {
+    let seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default();
+    format!("unix:{seconds}")
 }

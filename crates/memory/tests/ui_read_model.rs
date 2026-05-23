@@ -135,6 +135,12 @@ fn memory(key: &str, domain: &str, sensitivity: DataSensitivity) -> MemoryRecord
         privacy_domain: PrivacyDomain::new(domain),
         sensitivity,
         metadata: serde_json::json!({}),
+        created_at: "2026-05-23T08:00:00Z".to_string(),
+        updated_at: "2026-05-23T08:00:00Z".to_string(),
+        last_seen_at: None,
+        supersedes: vec![],
+        superseded_by: None,
+        correction_of: None,
     }
 }
 

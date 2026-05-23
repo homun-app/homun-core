@@ -3,9 +3,11 @@ use crate::{
     MemoryEntity, MemoryEvent, MemoryEvidence, MemoryRecord, MemoryRef, MemoryRefKind,
     MemoryRelation, PrivacyDomain, UserId, WikiPage, WorkspaceId, decrypt_json, encrypt_json,
 };
-use rusqlite::{Connection, Row};
+use rusqlite::{Connection, Row, params};
 use std::path::Path;
 use std::str::FromStr;
+
+const SCHEMA_VERSION: u32 = 2;
 
 pub struct SQLiteMemoryStore {
     conn: Connection,
@@ -43,6 +45,22 @@ impl SQLiteMemoryStore {
         };
         store.init()?;
         Ok(store)
+    }
+
+    pub fn run_migrations(&self) -> Result<(), String> {
+        self.init()
+    }
+
+    pub fn schema_version(&self) -> Result<u32, String> {
+        self.conn
+            .query_row(
+                "select value from schema_metadata where key = 'schema_version'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(|error| error.to_string())?
+            .parse::<u32>()
+            .map_err(|error| error.to_string())
     }
 
     pub fn record_event(&self, event: &MemoryEvent) -> Result<(), String> {
@@ -103,9 +121,13 @@ impl SQLiteMemoryStore {
                 "insert or replace into memories (
                     ref, user_id, workspace_id, memory_type, text, aliases_json,
                     language_hints_json, confidence, status, privacy_domain, sensitivity,
-                    metadata_json
-                ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-                (
+                    metadata_json, created_at, updated_at, last_seen_at, supersedes_json,
+                    superseded_by, correction_of
+                ) values (
+                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+                    ?16, ?17, ?18
+                )",
+                params![
                     memory.reference.to_string(),
                     memory.user_id.as_str(),
                     memory.workspace_id.as_str(),
@@ -119,7 +141,14 @@ impl SQLiteMemoryStore {
                     memory.privacy_domain.as_str(),
                     enum_name(&memory.sensitivity)?,
                     serde_json::to_string(&memory.metadata).map_err(|error| error.to_string())?,
-                ),
+                    &memory.created_at,
+                    &memory.updated_at,
+                    memory.last_seen_at.as_deref(),
+                    serde_json::to_string(&memory.supersedes)
+                        .map_err(|error| error.to_string())?,
+                    memory.superseded_by.as_ref().map(ToString::to_string),
+                    memory.correction_of.as_ref().map(ToString::to_string),
+                ],
             )
             .map_err(|error| error.to_string())?;
         Ok(())
@@ -138,7 +167,8 @@ impl SQLiteMemoryStore {
             &self.conn,
             "select ref, user_id, workspace_id, memory_type, text, aliases_json,
                     language_hints_json, confidence, status, privacy_domain, sensitivity,
-                    metadata_json
+                    metadata_json, created_at, updated_at, last_seen_at, supersedes_json,
+                    superseded_by, correction_of
              from memories
              where ref = ?1 and user_id = ?2 and workspace_id = ?3",
             (
@@ -160,7 +190,8 @@ impl SQLiteMemoryStore {
             .prepare(
                 "select ref, user_id, workspace_id, memory_type, text, aliases_json,
                         language_hints_json, confidence, status, privacy_domain, sensitivity,
-                        metadata_json
+                        metadata_json, created_at, updated_at, last_seen_at, supersedes_json,
+                        superseded_by, correction_of
                  from memories
                  where user_id = ?1 and workspace_id = ?2
                  order by ref",
@@ -621,7 +652,12 @@ impl SQLiteMemoryStore {
     fn init(&self) -> Result<(), String> {
         self.conn
             .execute_batch(
-                "create table if not exists memory_events (
+                "create table if not exists schema_metadata (
+                    key text primary key,
+                    value text not null
+                );
+
+                create table if not exists memory_events (
                     ref text primary key,
                     user_id text not null,
                     workspace_id text not null,
@@ -646,7 +682,13 @@ impl SQLiteMemoryStore {
                     status text not null,
                     privacy_domain text not null,
                     sensitivity text not null,
-                    metadata_json text not null
+                    metadata_json text not null,
+                    created_at text not null default current_timestamp,
+                    updated_at text not null default current_timestamp,
+                    last_seen_at text,
+                    supersedes_json text not null default '[]',
+                    superseded_by text,
+                    correction_of text
                 );
                 create index if not exists idx_memories_scope on memories(user_id, workspace_id);
 
@@ -718,7 +760,62 @@ impl SQLiteMemoryStore {
                     created_at text not null default current_timestamp
                 );",
             )
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+        self.ensure_column(
+            "memories",
+            "created_at",
+            "alter table memories add column created_at text not null default ''",
+        )?;
+        self.ensure_column(
+            "memories",
+            "updated_at",
+            "alter table memories add column updated_at text not null default ''",
+        )?;
+        self.ensure_column(
+            "memories",
+            "last_seen_at",
+            "alter table memories add column last_seen_at text",
+        )?;
+        self.ensure_column(
+            "memories",
+            "supersedes_json",
+            "alter table memories add column supersedes_json text not null default '[]'",
+        )?;
+        self.ensure_column(
+            "memories",
+            "superseded_by",
+            "alter table memories add column superseded_by text",
+        )?;
+        self.ensure_column(
+            "memories",
+            "correction_of",
+            "alter table memories add column correction_of text",
+        )?;
+        self.conn
+            .execute(
+                "insert or replace into schema_metadata (key, value) values ('schema_version', ?1)",
+                [SCHEMA_VERSION.to_string()],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    fn ensure_column(&self, table: &str, column: &str, alter_sql: &str) -> Result<(), String> {
+        let mut statement = self
+            .conn
+            .prepare(&format!("pragma table_info({table})"))
+            .map_err(|error| error.to_string())?;
+        let mut rows = statement.query([]).map_err(|error| error.to_string())?;
+        while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+            let existing: String = row.get(1).map_err(|error| error.to_string())?;
+            if existing == column {
+                return Ok(());
+            }
+        }
+        self.conn
+            .execute(alter_sql, [])
+            .map_err(|error| error.to_string())?;
+        Ok(())
     }
 }
 
@@ -767,6 +864,12 @@ fn memory_from_row(row: &Row<'_>) -> Result<MemoryRecord, String> {
                 .map_err(|error| error.to_string())?,
         )
         .map_err(|error| error.to_string())?,
+        created_at: row.get(12).map_err(|error| error.to_string())?,
+        updated_at: row.get(13).map_err(|error| error.to_string())?,
+        last_seen_at: row.get(14).map_err(|error| error.to_string())?,
+        supersedes: parse_refs_json(row.get::<_, String>(15).map_err(|error| error.to_string())?)?,
+        superseded_by: parse_optional_ref(row.get(16).map_err(|error| error.to_string())?)?,
+        correction_of: parse_optional_ref(row.get(17).map_err(|error| error.to_string())?)?,
     })
 }
 
@@ -837,6 +940,14 @@ fn wiki_page_from_row(row: &Row<'_>) -> Result<WikiPage, String> {
 
 fn parse_ref(value: String) -> Result<MemoryRef, String> {
     MemoryRef::from_str(&value)
+}
+
+fn parse_optional_ref(value: Option<String>) -> Result<Option<MemoryRef>, String> {
+    value.as_deref().map(MemoryRef::from_str).transpose()
+}
+
+fn parse_refs_json(value: String) -> Result<Vec<MemoryRef>, String> {
+    serde_json::from_str(&value).map_err(|error| error.to_string())
 }
 
 fn enum_name<T: serde::Serialize>(value: &T) -> Result<String, String> {

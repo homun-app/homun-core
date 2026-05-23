@@ -105,6 +105,12 @@ pub struct MemoryRecord {
     pub privacy_domain: PrivacyDomain,
     pub sensitivity: DataSensitivity,
     pub metadata: serde_json::Value,
+    pub created_at: String,
+    pub updated_at: String,
+    pub last_seen_at: Option<String>,
+    pub supersedes: Vec<MemoryRef>,
+    pub superseded_by: Option<MemoryRef>,
+    pub correction_of: Option<MemoryRef>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
