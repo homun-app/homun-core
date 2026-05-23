@@ -633,4 +633,21 @@ Perche': il browser runtime ora ha primitive operative sufficienti per prenotazi
 
 ## Prossimo blocco
 
-- Costruire la prima UI/CLI di osservabilita' per task lunghi: coda, dettaglio task browser, checkpoint, approvazioni manuali e artifact browser.
+### Process Manager Rust
+
+- Creato design `docs/superpowers/specs/2026-05-23-process-manager-design.md`.
+- Creato piano `docs/superpowers/plans/2026-05-23-process-manager.md`.
+- Aggiunto crate `crates/process-manager` al workspace.
+- Aggiunti contratti per `ProcessSpec`, `ProcessKind`, `HealthCheck`, `RestartPolicy`, `ProcessStatus` e `ProcessSnapshot`.
+- Aggiunto `ProcessRegistryStore` SQLite con migrazioni idempotenti per specs e latest snapshots.
+- Aggiunto `LogBuffer` bounded con stream stdout/stderr.
+- Aggiunto health evaluator con `process_alive` e `http_get`, tramite `HealthProbe` iniettabile.
+- Aggiunto `ProcessManager` facade con register/start/stop/check_health/detail.
+- Aggiunto `FakeProcessSupervisor` per test deterministici.
+- Aggiunto `LocalProcessSupervisor` con spawn reale, start idempotente, stop/kill, snapshot exit e capture stdout/stderr.
+
+Perche': LLM runtime, browser sidecar e MCP server non devono essere avviati ad hoc da ogni componente. Serve un boundary comune nel Rust Core che gestisca lifecycle, health, logs e stato UI-safe, lasciando scheduling e retry dei task al Durable Task Runtime.
+
+## Prossimo blocco
+
+- Collegare Process Manager alle config concrete dei sidecar LLM, browser e MCP, poi passare a Secrets/Keychain.

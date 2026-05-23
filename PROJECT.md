@@ -156,6 +156,22 @@ Responsabilita':
 - mantenere audit trail.
 - orchestrare subagenti locali con budget, timeout, permessi e memoria accessibile.
 
+Implementato:
+
+- crate `crates/process-manager` per supervisione processi locali.
+- contratti `ProcessSpec`, `ProcessKind`, `HealthCheck`, `RestartPolicy`, `ProcessStatus` e `ProcessSnapshot`.
+- registry SQLite locale per spec di processo e ultimo snapshot lifecycle.
+- `ProcessManager` facade con register/start/stop/health/detail.
+- `FakeProcessSupervisor` per test deterministici.
+- `LocalProcessSupervisor` con spawn reale, idempotent start, stop/kill, snapshot exit e capture stdout/stderr in log ring bounded.
+- health check `process_alive` e `http_get` tramite probe iniettabile.
+
+Non ancora incluso:
+
+- wiring automatico dei sidecar esistenti al Process Manager nel binario desktop.
+- policy di restart/backoff eseguita automaticamente in background.
+- UI Tauri per vedere processi, logs e health.
+
 API interne previste:
 
 ```text
@@ -921,6 +937,7 @@ local-first-personal-assistant/
     core/
     memory/
     task-runtime/
+    process-manager/
     connectors/
     capabilities/
     browser-automation/
