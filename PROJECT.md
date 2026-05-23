@@ -211,6 +211,9 @@ Regole:
 - Ogni output operativo passa da validazione e, per azioni reali, da `RiskAgent` o `ReviewAgent`.
 - I task paralleli devono essere ricostruibili e auditabili separatamente.
 - La memoria accessibile a un subagente e' esplicita e limitata al task.
+- Gli output di `MemoryAgent` entrano nella memoria solo tramite `MemoryFacade`.
+- Timeout e cancellazione devono bloccare la chiamata al runtime quando il task e' gia' scaduto o annullato.
+- I workflow devono avere stato persistito e consultabile dalla UI, non solo risultati task isolati.
 
 Workflow MVP:
 
@@ -597,8 +600,11 @@ Deliverable:
 - server Python/MLX persistente.
 - API HTTP locale.
 - model load una volta sola.
-- streaming.
 - schema validation.
+- error response stabile.
+- health operativo con readiness, configurazione locale e stato concorrenza.
+- busy/deadline handling.
+- validazione path immagini locali.
 - benchmark endpoint.
 
 ### Fase 1.5 - Subagent Orchestration
@@ -611,6 +617,8 @@ Deliverable:
 - permission envelope per ogni task.
 - budget token/tempo e cancellazione task.
 - audit trail per ogni passaggio subagente.
+- workflow run persistence e status UI-readable.
+- import output `MemoryAgent` nella `MemoryFacade`.
 - workflow MVP: `PlannerAgent -> RiskAgent -> MemoryAgent/ToolAgent -> ReviewAgent`.
 
 ### Fase 2 - Memory Core

@@ -28,7 +28,9 @@ impl<R: JsonRuntime> SubagentRunner<R> {
             return self.status_result(
                 task,
                 SubagentStatus::Cancelled,
-                vec![SubagentError::Cancelled("task cancelled before runtime call".to_string())],
+                vec![SubagentError::Cancelled(
+                    "task cancelled before runtime call".to_string(),
+                )],
                 started_at,
             );
         }

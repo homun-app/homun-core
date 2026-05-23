@@ -117,10 +117,12 @@ impl<R: JsonRuntime> SubagentOrchestrator<R> {
             .any(|result| result.status == SubagentStatus::Cancelled)
         {
             WorkflowRunStatus::Cancelled
-        } else if results
-            .iter()
-            .any(|result| matches!(result.status, SubagentStatus::Failed | SubagentStatus::TimedOut))
-        {
+        } else if results.iter().any(|result| {
+            matches!(
+                result.status,
+                SubagentStatus::Failed | SubagentStatus::TimedOut
+            )
+        }) {
             WorkflowRunStatus::Failed
         } else if !self.blocked_task_ids().is_empty() {
             WorkflowRunStatus::Blocked

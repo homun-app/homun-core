@@ -100,7 +100,10 @@ fn runner_times_out_zero_budget_without_calling_runtime() {
     let result = runner.run_generate_json(&task);
 
     assert_eq!(result.status, SubagentStatus::TimedOut);
-    assert_eq!(result.errors, vec!["task timeout budget expired before runtime call"]);
+    assert_eq!(
+        result.errors,
+        vec!["task timeout budget expired before runtime call"]
+    );
     assert_eq!(runner.runtime().requests.borrow().len(), 0);
 }
 

@@ -11,7 +11,11 @@ fn memory_agent_imports_extraction_and_routine_inference_through_facade() {
     let result = memory_agent_result();
 
     let summary = importer
-        .import_result(&UserId::new("user_1"), &WorkspaceId::new("workspace_1"), &result)
+        .import_result(
+            &UserId::new("user_1"),
+            &WorkspaceId::new("workspace_1"),
+            &result,
+        )
         .unwrap();
 
     assert_eq!(summary.memories_imported, 1);
@@ -27,10 +31,17 @@ fn memory_agent_import_rejects_non_memory_agent_results() {
     result.agent_id = AgentId::Planner;
 
     let error = importer
-        .import_result(&UserId::new("user_1"), &WorkspaceId::new("workspace_1"), &result)
+        .import_result(
+            &UserId::new("user_1"),
+            &WorkspaceId::new("workspace_1"),
+            &result,
+        )
         .unwrap_err();
 
-    assert_eq!(error, "only MemoryAgent results can be imported into memory");
+    assert_eq!(
+        error,
+        "only MemoryAgent results can be imported into memory"
+    );
 }
 
 fn memory_agent_result() -> SubagentResult {
@@ -39,24 +50,30 @@ fn memory_agent_result() -> SubagentResult {
         agent_id: AgentId::Memory,
         status: SubagentStatus::Succeeded,
         output: serde_json::to_value(MemoryAgentImport {
-            memory_extraction: Some(serde_json::from_value(serde_json::json!({
-                "memories": [{
-                    "memory_type": "preference",
-                    "text": "Fabio prefers Zed",
-                    "privacy_domain": "work",
-                    "sensitivity": "private",
-                    "metadata": {}
-                }]
-            })).unwrap()),
-            routine_inference: Some(serde_json::from_value(serde_json::json!({
-                "routines": [{
-                    "name": "Morning startup",
-                    "intent": "Open project workspace",
-                    "privacy_domain": "work",
-                    "sensitivity": "private",
-                    "metadata": {}
-                }]
-            })).unwrap()),
+            memory_extraction: Some(
+                serde_json::from_value(serde_json::json!({
+                    "memories": [{
+                        "memory_type": "preference",
+                        "text": "Fabio prefers Zed",
+                        "privacy_domain": "work",
+                        "sensitivity": "private",
+                        "metadata": {}
+                    }]
+                }))
+                .unwrap(),
+            ),
+            routine_inference: Some(
+                serde_json::from_value(serde_json::json!({
+                    "routines": [{
+                        "name": "Morning startup",
+                        "intent": "Open project workspace",
+                        "privacy_domain": "work",
+                        "sensitivity": "private",
+                        "metadata": {}
+                    }]
+                }))
+                .unwrap(),
+            ),
         })
         .unwrap(),
         errors: vec![],

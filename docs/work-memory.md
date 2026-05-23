@@ -202,6 +202,21 @@ Perche': il progetto deve essere riproducibile localmente e non dipendere dalla 
 
 Perche': `PROJECT.md` stabilisce che Gemma 4 deve essere un sidecar Python/MLX persistente, non una CLI lanciata a ogni prompt e non un servizio cloud.
 
+### Runtime locale Gemma 4 production hardening
+
+- Aggiunta `RuntimeConfig` da env.
+- `/health` espone configurazione locale, shutdown enabled, busy policy e allowed image roots.
+- Aggiunto error payload stabile `{error: {code, message, retryable}}`.
+- Aggiunto `RuntimeServiceError` con status HTTP coerente.
+- Aggiunti `wait_if_busy` e `request_timeout_seconds` alle richieste.
+- Il runtime puo' rifiutare richieste quando e' busy, invece di accodarle implicitamente.
+- I deadline scaduti vengono respinti prima della generazione.
+- I path immagine possono essere vincolati a root locali consentite.
+- `/benchmark` espone summary aggregata delle metriche.
+- `/shutdown` e' disabilitato di default e abilitabile via env.
+
+Perche': il runtime e' la dipendenza operativa dei subagenti. Deve fallire in modo tipizzato, rispettare deadline/concorrenza e restare local-first anche su immagini e shutdown.
+
 ### Benchmark parity
 
 - Portati nel server i 7 casi validati della suite storica Gemma 4.
@@ -259,6 +274,16 @@ Perche': il Subagent Manager deve usare il runtime Gemma come primitiva locale H
 - Il runner produce sempre un `SubagentResult` auditabile, anche in caso di permessi invalidi o runtime error.
 
 Perche': questo e' il primo punto in cui i contratti dei subagenti diventano operativi. Il runner resta sincrono e testabile con un runtime finto; cancellazione, retry e parallelismo verranno aggiunti sopra questa base.
+
+### SubagentRunner production hardening
+
+- Aggiunto `SubagentError`.
+- Il runner blocca task gia' cancellati prima di chiamare il runtime.
+- Il runner marca `timed_out` se `timeout_seconds` e' gia' scaduto.
+- `GenerateJsonRequest` porta `wait_if_busy` e `request_timeout_seconds` al runtime.
+- I test verificano che timeout/cancel non raggiungano il runtime finto.
+
+Perche': cancellazione e timeout devono essere enforce reali, non solo campi descrittivi nel contratto.
 
 ## Prossimo blocco
 
@@ -345,7 +370,28 @@ Perche': audit e ricostruibilita' sono principi centrali del progetto. La prima 
 
 Perche': l'audit deve essere automatico nel percorso operativo, non un passaggio opzionale lasciato ai caller. Questo prepara il core Rust a ricostruire cosa ha fatto ogni subagente.
 
+### Workflow status production hardening
+
+- Aggiunto `WorkflowRunStatus`.
+- Aggiunto `WorkflowRunSummary`.
+- `AuditStore` crea e aggiorna `workflow_runs`.
+- Aggiunti `start_workflow_run`, `finish_workflow_run`, `workflow_run_status`.
+- Aggiunto `SubagentOrchestrator::run_workflow_recording`.
+- I risultati possono essere associati a `workflow_run_id`.
+
+Perche': la UI e il core devono sapere lo stato di una run completa, non solo l'ultimo risultato di un task.
+
+### MemoryAgent bridge
+
+- Aggiunto dependency `local-first-memory` in `crates/subagents`.
+- Aggiunto `MemoryAgentImport`.
+- Aggiunto `MemoryAgentImporter`.
+- L'import accetta solo risultati prodotti da `MemoryAgent`.
+- L'import applica `MemoryExtraction` e `RoutineInference` passando da `MemoryFacade`.
+
+Perche': il `MemoryAgent` non deve scrivere nello store direttamente. Anche nel flusso subagenti, la memoria resta protetta da facade, policy, refs stabili e contratti production-ready.
+
 ## Prossimo blocco
 
 - Aggiungere salvataggio di `SubagentReview` come vista/record dedicato o come risultato tipizzato.
-- Aggiungere query audit utili: risultati per workflow, ultimo risultato per task, errori recenti.
+- Collegare il workflow runtime/subagenti alla futura UI Tauri.

@@ -139,10 +139,7 @@ impl AuditStore {
         Ok(())
     }
 
-    pub fn workflow_run_status(
-        &self,
-        run_id: &str,
-    ) -> Result<Option<WorkflowRunSummary>, String> {
+    pub fn workflow_run_status(&self, run_id: &str) -> Result<Option<WorkflowRunSummary>, String> {
         let mut statement = self
             .conn
             .prepare(
