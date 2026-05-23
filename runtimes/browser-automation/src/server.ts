@@ -13,6 +13,8 @@ import { BrowserSessionManager } from "./browser/session_manager.js";
 const manager = new BrowserSessionManager({
   headless: process.env.BROWSER_AUTOMATION_HEADLESS !== "0",
   allowPrivateNetwork: process.env.BROWSER_AUTOMATION_ALLOW_PRIVATE_NETWORK === "1",
+  artifactRoot: process.env.BROWSER_AUTOMATION_ARTIFACT_ROOT,
+  uploadRoots: process.env.BROWSER_AUTOMATION_UPLOAD_ROOTS?.split(":").filter(Boolean),
 });
 
 export async function handleRequestLine(line: string): Promise<string> {
@@ -42,6 +44,14 @@ async function dispatch(request: BrowserRequest): Promise<unknown> {
       return { status: "stopped" };
     case "browser.tabs":
       return { tabs: await manager.tabs() };
+    case "browser.focus":
+      return await manager.focus({
+        targetId: requireString(request.params, "target_id"),
+      });
+    case "browser.close_tab":
+      return await manager.closeTab({
+        targetId: requireString(request.params, "target_id"),
+      });
     case "browser.open":
       return await manager.open({
         url: requireString(request.params, "url"),
@@ -61,6 +71,42 @@ async function dispatch(request: BrowserRequest): Promise<unknown> {
         ...(request.params ?? {}),
         targetId: requireString(request.params, "target_id"),
       } as never);
+    case "browser.screenshot":
+      return await manager.screenshot({
+        targetId: requireString(request.params, "target_id"),
+        fileName: requireString(request.params, "file_name"),
+        fullPage: optionalBoolean(request.params, "full_page"),
+      });
+    case "browser.arm_file_chooser":
+      return await manager.armFileChooser({
+        targetId: requireString(request.params, "target_id"),
+        files: requireStringArray(request.params, "files"),
+      });
+    case "browser.respond_dialog":
+      return await manager.respondDialog({
+        targetId: requireString(request.params, "target_id"),
+        accept: optionalBoolean(request.params, "accept") ?? true,
+        promptText: optionalString(request.params, "prompt_text"),
+        timeoutMs: optionalNumber(request.params, "timeout_ms"),
+      });
+    case "browser.wait_download":
+      return await manager.waitDownload({
+        targetId: requireString(request.params, "target_id"),
+        fileName: optionalString(request.params, "file_name"),
+        action: optionalObject(request.params, "action") as never,
+        timeoutMs: optionalNumber(request.params, "timeout_ms"),
+      });
+    case "browser.console":
+      return await manager.console({
+        targetId: requireString(request.params, "target_id"),
+        limit: optionalNumber(request.params, "limit"),
+      });
+    case "browser.pdf":
+      return await manager.pdf({
+        targetId: requireString(request.params, "target_id"),
+        fileName: requireString(request.params, "file_name"),
+        format: optionalString(request.params, "format"),
+      });
     default:
       throw new BrowserAutomationError({
         code: "BROWSER_NOT_IMPLEMENTED",
@@ -85,6 +131,42 @@ function requireString(params: Record<string, unknown> | undefined, key: string)
 function optionalString(params: Record<string, unknown> | undefined, key: string): string | undefined {
   const value = params?.[key];
   return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function optionalBoolean(params: Record<string, unknown> | undefined, key: string): boolean | undefined {
+  const value = params?.[key];
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function optionalNumber(params: Record<string, unknown> | undefined, key: string): number | undefined {
+  const value = params?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function optionalObject(
+  params: Record<string, unknown> | undefined,
+  key: string,
+): Record<string, unknown> | undefined {
+  const value = params?.[key];
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function requireStringArray(params: Record<string, unknown> | undefined, key: string): string[] {
+  const value = params?.[key];
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    !value.every((entry) => typeof entry === "string" && entry.trim() !== "")
+  ) {
+    throw new BrowserAutomationError({
+      code: "BROWSER_INVALID_REQUEST",
+      message: `${key} must be a non-empty string array`,
+      retryable: false,
+    });
+  }
+  return value;
 }
 
 async function main() {

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Browser Automation Advanced Fixture</title>
+  </head>
+  <body>
+    <button id="dialog" type="button">Open dialog</button>
+    <input id="file" type="file" aria-label="Upload document" />
+    <button id="log" type="button">Log event</button>
+    <a id="download" download="note.txt" href="data:text/plain;base64,aGVsbG8gYnJvd3Nlcg==">Download note</a>
+    <p id="status">Ready</p>
+    <script>
+      console.log("fixture-loaded");
+      document.querySelector("#dialog").addEventListener("click", () => {
+        alert("confirm booking");
+        document.querySelector("#status").textContent = "Dialog opened";
+      });
+      document.querySelector("#file").addEventListener("change", (event) => {
+        const file = event.target.files[0];
+        document.querySelector("#status").textContent = file ? `Uploaded ${file.name}` : "No file";
+      });
+      document.querySelector("#log").addEventListener("click", () => {
+        console.warn("button-log");
+      });
+    </script>
+  </body>
+</html>

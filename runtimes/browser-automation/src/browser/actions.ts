@@ -61,7 +61,7 @@ export async function executeAction(
   }
 }
 
-function requireRef(refs: Map<string, Locator>, ref: string): Locator {
+export function requireRef(refs: Map<string, Locator>, ref: string): Locator {
   const locator = refs.get(ref);
   if (!locator) {
     throw new BrowserAutomationError({
