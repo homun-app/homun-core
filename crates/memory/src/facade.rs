@@ -3,12 +3,12 @@ use crate::{
     GraphifyImportSummary, GraphifyOperation, GraphifyQueryRequest, GraphifyQueryResult,
     MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryContextItem,
     MemoryContextPack, MemoryCreateRequest, MemoryEntity, MemoryEvent, MemoryEvidence,
-    MemoryExtraction, MemoryExtractionSummary, MemoryHealth, MemoryLifecycleRequest,
+    MemoryError, MemoryExtraction, MemoryExtractionSummary, MemoryHealth, MemoryLifecycleRequest,
     MemoryMaintenanceReport, MemoryPolicyEngine, MemoryRecord, MemoryRef, MemoryRefKind,
     MemoryRelation, MemorySearchPage, MemorySearchRequest, MemorySearchResult, MemoryStatus,
-    MemoryUpdatePatch, PrivacyDomain, SQLiteMemoryStore, UserId, WikiCorrectionSyncReport,
-    WikiFileStore, WikiPage, WorkspaceId, current_timestamp, ensure_artifacts_inside_root,
-    ensure_transition, parse_wiki_markdown,
+    MemoryResult, MemoryUpdatePatch, PrivacyDomain, SQLiteMemoryStore, UserId,
+    WikiCorrectionSyncReport, WikiFileStore, WikiPage, WorkspaceId, current_timestamp,
+    ensure_artifacts_inside_root, ensure_transition, parse_wiki_markdown,
 };
 use std::path::Path;
 use std::str::FromStr;
@@ -30,30 +30,30 @@ impl MemoryFacade {
         }
     }
 
-    pub fn record_event(&self, event: &MemoryEvent) -> Result<(), String> {
-        self.store.record_event(event)
+    pub fn record_event(&self, event: &MemoryEvent) -> MemoryResult<()> {
+        Ok(self.store.record_event(event)?)
     }
 
-    pub fn upsert_memory(&self, memory: &MemoryRecord) -> Result<(), String> {
-        self.store.upsert_memory(memory)
+    pub fn upsert_memory(&self, memory: &MemoryRecord) -> MemoryResult<()> {
+        Ok(self.store.upsert_memory(memory)?)
     }
 
-    pub fn upsert_entity(&self, entity: &MemoryEntity) -> Result<(), String> {
-        self.store.upsert_entity(entity)
+    pub fn upsert_entity(&self, entity: &MemoryEntity) -> MemoryResult<()> {
+        Ok(self.store.upsert_entity(entity)?)
     }
 
-    pub fn upsert_relation(&self, relation: &MemoryRelation) -> Result<(), String> {
-        self.store.upsert_relation(relation)
+    pub fn upsert_relation(&self, relation: &MemoryRelation) -> MemoryResult<()> {
+        Ok(self.store.upsert_relation(relation)?)
     }
 
-    pub fn link_evidence(&self, evidence: &MemoryEvidence) -> Result<(), String> {
-        self.store.link_evidence(evidence)
+    pub fn link_evidence(&self, evidence: &MemoryEvidence) -> MemoryResult<()> {
+        Ok(self.store.link_evidence(evidence)?)
     }
 
     pub fn create_memory_candidate(
         &self,
         create: MemoryCreateRequest,
-    ) -> Result<MemoryRecord, String> {
+    ) -> MemoryResult<MemoryRecord> {
         let now = current_timestamp();
         let reference = MemoryRef::generated(
             MemoryRefKind::Memory,
@@ -97,7 +97,7 @@ impl MemoryFacade {
         request: &MemoryLifecycleRequest,
         reference: &MemoryRef,
         patch: MemoryUpdatePatch,
-    ) -> Result<MemoryRecord, String> {
+    ) -> MemoryResult<MemoryRecord> {
         let mut memory = self.load_lifecycle_memory(request, reference)?;
         if let Some(text) = patch.text {
             memory.text = text;
@@ -134,7 +134,7 @@ impl MemoryFacade {
         request: &MemoryLifecycleRequest,
         reference: &MemoryRef,
         reason: &str,
-    ) -> Result<MemoryRecord, String> {
+    ) -> MemoryResult<MemoryRecord> {
         self.transition_memory(request, reference, MemoryStatus::Confirmed, reason)
     }
 
@@ -143,7 +143,7 @@ impl MemoryFacade {
         request: &MemoryLifecycleRequest,
         reference: &MemoryRef,
         reason: &str,
-    ) -> Result<MemoryRecord, String> {
+    ) -> MemoryResult<MemoryRecord> {
         self.transition_memory(request, reference, MemoryStatus::Rejected, reason)
     }
 
@@ -152,7 +152,7 @@ impl MemoryFacade {
         request: &MemoryLifecycleRequest,
         reference: &MemoryRef,
         reason: &str,
-    ) -> Result<MemoryRecord, String> {
+    ) -> MemoryResult<MemoryRecord> {
         self.transition_memory(request, reference, MemoryStatus::Stale, reason)
     }
 
@@ -162,7 +162,7 @@ impl MemoryFacade {
         canonical_ref: &MemoryRef,
         source_refs: Vec<MemoryRef>,
         reason: &str,
-    ) -> Result<MemoryRecord, String> {
+    ) -> MemoryResult<MemoryRecord> {
         let mut canonical = self.load_lifecycle_memory(request, canonical_ref)?;
         let now = current_timestamp();
         for source_ref in source_refs {
@@ -187,14 +187,16 @@ impl MemoryFacade {
         request: &MemoryLifecycleRequest,
         reference: &MemoryRef,
         reason: &str,
-    ) -> Result<(), String> {
+    ) -> MemoryResult<()> {
         if reference.user_id != request.user_id || reference.workspace_id != request.workspace_id {
             self.audit_lifecycle(
                 request,
                 AccessDecisionKind::Deny,
                 vec!["scope_mismatch".to_string()],
             )?;
-            return Err("cannot access ref outside user/workspace".to_string());
+            return Err(MemoryError::validation(
+                "cannot access ref outside user/workspace",
+            ));
         }
         if let Some(mut memory) =
             self.store
@@ -212,8 +214,8 @@ impl MemoryFacade {
         Ok(())
     }
 
-    pub fn record_wiki_page_for_ui(&self, page: &WikiPage) -> Result<(), String> {
-        self.store.record_wiki_page(page)
+    pub fn record_wiki_page_for_ui(&self, page: &WikiPage) -> MemoryResult<()> {
+        Ok(self.store.record_wiki_page(page)?)
     }
 
     pub fn apply_extraction(
@@ -221,7 +223,7 @@ impl MemoryFacade {
         user_id: &UserId,
         workspace_id: &WorkspaceId,
         extraction: MemoryExtraction,
-    ) -> Result<MemoryExtractionSummary, String> {
+    ) -> MemoryResult<MemoryExtractionSummary> {
         let mut memory_refs = Vec::new();
         let mut entity_refs = Vec::new();
         let mut relation_refs = Vec::new();
@@ -325,7 +327,7 @@ impl MemoryFacade {
         })
     }
 
-    pub fn context_pack(&self, request: &MemoryAccessRequest) -> Result<MemoryContextPack, String> {
+    pub fn context_pack(&self, request: &MemoryAccessRequest) -> MemoryResult<MemoryContextPack> {
         let export_decision = self.policy.decide_export(request);
         if export_decision.kind == AccessDecisionKind::Deny {
             self.store
@@ -371,7 +373,7 @@ impl MemoryFacade {
     pub fn search_memories(
         &self,
         request: MemorySearchRequest,
-    ) -> Result<MemorySearchPage, String> {
+    ) -> MemoryResult<MemorySearchPage> {
         let refs = self.store.search_memory_refs(
             &request.access.user_id,
             &request.access.workspace_id,
@@ -436,15 +438,15 @@ impl MemoryFacade {
         &self,
         wiki: &WikiFileStore,
         projection: &MemoryWikiProjection,
-    ) -> Result<(), String> {
-        wiki.write_page(&self.store, &projection.page)
+    ) -> MemoryResult<()> {
+        Ok(wiki.write_page(&self.store, &projection.page)?)
     }
 
     pub fn import_wiki_correction(
         &self,
         request: &MemoryLifecycleRequest,
         markdown: &str,
-    ) -> Result<WikiCorrectionSyncReport, String> {
+    ) -> MemoryResult<WikiCorrectionSyncReport> {
         let parsed = parse_wiki_markdown(markdown)?;
         if parsed.user_id != request.user_id || parsed.workspace_id != request.workspace_id {
             self.audit_lifecycle(
@@ -452,7 +454,9 @@ impl MemoryFacade {
                 AccessDecisionKind::Deny,
                 vec!["scope_mismatch".to_string()],
             )?;
-            return Err("cannot import wiki correction outside user/workspace".to_string());
+            return Err(MemoryError::validation(
+                "cannot import wiki correction outside user/workspace",
+            ));
         }
         let Some(correction_of) = parsed.linked_refs.first().cloned() else {
             return Ok(WikiCorrectionSyncReport {
@@ -527,20 +531,20 @@ impl MemoryFacade {
         workspace_id: &WorkspaceId,
         privacy_domain: PrivacyDomain,
         sensitivity: DataSensitivity,
-    ) -> Result<GraphifyImportSummary, String> {
-        GraphifyImport::new(&self.store).import_artifacts(
+    ) -> MemoryResult<GraphifyImportSummary> {
+        Ok(GraphifyImport::new(&self.store).import_artifacts(
             artifacts,
             user_id,
             workspace_id,
             privacy_domain,
             sensitivity,
-        )
+        )?)
     }
 
     pub fn graphify_query(
         &self,
         request: GraphifyQueryRequest,
-    ) -> Result<GraphifyQueryResult, String> {
+    ) -> MemoryResult<GraphifyQueryResult> {
         ensure_artifacts_inside_root(&request.artifacts, &request.allowed_output_root)?;
         if matches!(request.operation, GraphifyOperation::Query { .. })
             && !request.access.allow_export
@@ -549,7 +553,9 @@ impl MemoryFacade {
                 &request.access,
                 &MemoryAccessDecision::deny("export_not_allowed"),
             )?;
-            return Err("graphify query requires export permission".to_string());
+            return Err(MemoryError::policy(
+                "graphify query requires export permission",
+            ));
         }
 
         let cli = GraphifyCli::new("graphify");
@@ -607,20 +613,20 @@ impl MemoryFacade {
         })
     }
 
-    pub fn access_audit_count(&self) -> Result<u64, String> {
-        self.store.access_audit_count()
+    pub fn access_audit_count(&self) -> MemoryResult<u64> {
+        Ok(self.store.access_audit_count()?)
     }
 
-    pub fn memory_health(&self) -> Result<MemoryHealth, String> {
-        self.store.health()
+    pub fn memory_health(&self) -> MemoryResult<MemoryHealth> {
+        Ok(self.store.health()?)
     }
 
-    pub fn backup_to(&self, destination: impl AsRef<Path>) -> Result<MemoryBackupReport, String> {
-        self.store.backup_to(destination)
+    pub fn backup_to(&self, destination: impl AsRef<Path>) -> MemoryResult<MemoryBackupReport> {
+        Ok(self.store.backup_to(destination)?)
     }
 
-    pub fn run_memory_maintenance(&self) -> Result<MemoryMaintenanceReport, String> {
-        self.store.run_maintenance()
+    pub fn run_memory_maintenance(&self) -> MemoryResult<MemoryMaintenanceReport> {
+        Ok(self.store.run_maintenance()?)
     }
 
     pub fn get_memory_for_ui(
@@ -685,11 +691,11 @@ impl MemoryFacade {
         &self,
         request: &MemoryAccessRequest,
         decision: &MemoryAccessDecision,
-    ) -> Result<MemoryRef, String> {
-        self.store.record_access_decision(request, decision)
+    ) -> MemoryResult<MemoryRef> {
+        Ok(self.store.record_access_decision(request, decision)?)
     }
 
-    fn context_item(&self, memory: &MemoryRecord) -> Result<MemoryContextItem, String> {
+    fn context_item(&self, memory: &MemoryRecord) -> MemoryResult<MemoryContextItem> {
         let evidence = self
             .store
             .evidence_for(&memory.reference, &memory.user_id, &memory.workspace_id)?
@@ -711,7 +717,7 @@ impl MemoryFacade {
         reference: &MemoryRef,
         status: MemoryStatus,
         reason: &str,
-    ) -> Result<MemoryRecord, String> {
+    ) -> MemoryResult<MemoryRecord> {
         let mut memory = self.load_lifecycle_memory(request, reference)?;
         ensure_transition(memory.status, status)?;
         memory.status = status;
@@ -726,18 +732,21 @@ impl MemoryFacade {
         &self,
         request: &MemoryLifecycleRequest,
         reference: &MemoryRef,
-    ) -> Result<MemoryRecord, String> {
+    ) -> MemoryResult<MemoryRecord> {
         if reference.user_id != request.user_id || reference.workspace_id != request.workspace_id {
             self.audit_lifecycle(
                 request,
                 AccessDecisionKind::Deny,
                 vec!["scope_mismatch".to_string()],
             )?;
-            return Err("cannot access ref outside user/workspace".to_string());
+            return Err(MemoryError::validation(
+                "cannot access ref outside user/workspace",
+            ));
         }
-        self.store
+        Ok(self
+            .store
             .get_memory(reference, &request.user_id, &request.workspace_id)?
-            .ok_or_else(|| "memory not found".to_string())
+            .ok_or_else(|| MemoryError::not_found("memory not found"))?)
     }
 
     fn audit_lifecycle(
@@ -745,7 +754,7 @@ impl MemoryFacade {
         request: &MemoryLifecycleRequest,
         kind: AccessDecisionKind,
         reasons: Vec<String>,
-    ) -> Result<MemoryRef, String> {
+    ) -> MemoryResult<MemoryRef> {
         let access_request = MemoryAccessRequest {
             actor_id: request.actor_id.clone(),
             user_id: request.user_id.clone(),
@@ -757,8 +766,9 @@ impl MemoryFacade {
             allow_export: false,
             broad_query: false,
         };
-        self.store
-            .record_access_decision(&access_request, &MemoryAccessDecision { kind, reasons })
+        Ok(self
+            .store
+            .record_access_decision(&access_request, &MemoryAccessDecision { kind, reasons })?)
     }
 }
 

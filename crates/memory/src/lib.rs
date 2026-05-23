@@ -1,4 +1,5 @@
 mod crypto;
+mod error;
 mod facade;
 mod graph;
 mod graphify;
@@ -16,6 +17,7 @@ mod wiki;
 mod wiki_sync;
 
 pub use crypto::*;
+pub use error::*;
 pub use facade::*;
 pub use graph::*;
 pub use graphify::*;
