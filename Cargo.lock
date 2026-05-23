@@ -615,6 +615,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
+name = "local-first-browser-automation"
+version = "0.1.0"
+dependencies = [
+ "local-first-task-runtime",
+ "serde",
+ "serde_json",
+ "time",
+]
+
+[[package]]
 name = "local-first-capabilities"
 version = "0.1.0"
 dependencies = [

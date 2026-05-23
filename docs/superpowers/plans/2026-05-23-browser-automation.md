@@ -120,11 +120,11 @@ export type BrowserMethod =
 - Test: `crates/browser-automation/tests/policy.rs`
 - Test: `crates/browser-automation/tests/client.rs`
 
-- [ ] Write failing Rust tests for serde contracts, policy denies and client envelope parsing.
-- [ ] Run `cargo test -p local-first-browser-automation`.
-- [ ] Implement types, policy, artifacts, client and sidecar process wrapper.
-- [ ] Run `cargo test -p local-first-browser-automation`.
-- [ ] Commit as `Add Rust browser automation client`.
+- [x] Write failing Rust tests for serde contracts, policy denies and client envelope parsing.
+- [x] Run `cargo test -p local-first-browser-automation`.
+- [x] Implement types, policy, artifacts, client and sidecar process wrapper.
+- [x] Run `cargo test -p local-first-browser-automation`.
+- [x] Commit as `Add Rust browser automation client`.
 
 ### Task 5: Capability Provider
 

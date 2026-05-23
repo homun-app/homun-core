@@ -4,5 +4,6 @@ members = [
     "crates/subagents",
     "crates/capabilities",
     "crates/task-runtime",
+    "crates/browser-automation",
 ]
 resolver = "3"
