@@ -207,14 +207,17 @@ Implementato:
 - esecuzione immediata limitata a tool `read`/`draft` brevi, non managed-cloud e non browser mutativi.
 - write, browser mutativo, managed provider e operazioni non immediate vengono accodati nel Durable Task Runtime tramite `CapabilityTaskRuntimeBridge`.
 - adapter `MemoryContextProvider` per agganciare `MemoryFacade` senza esporre il Brain allo storage interno della memoria.
+- hardening Brain con `OrchestratorAuditStore` SQLite locale per persistere run riuscite e failure planner.
+- `OrchestratorUiReadModel` con dettagli redatti: espone route, step, tool/agent id, contract, argument keys, metriche e task summary senza raw prompt, raw arguments o raw output.
+- materializzazione `subagent_task` in `SubagentTask` durevoli tramite `SubagentTaskRuntimeBridge`, con dependency DAG persistito nel `TaskStore`.
+- validazione policy per azioni subagent: il planner non puo' chiedere azioni fuori dal `PolicyContext`.
 
 Non ancora incluso:
 
 - policy di restart/backoff eseguita automaticamente in background.
 - UI Tauri per vedere processi, logs e health.
 - adapter WASI con preopen/capability host controllate e SDK language-friendly per creare skill non trusted senza scrivere WAT/Rust manuale.
-- materializzazione completa dei workflow subagent dal Brain oltre alle capability call.
-- UI/audit timeline dedicata per spiegare piani, tool caricati e decisioni del Brain.
+- UI/audit timeline dedicata per visualizzare i piani Brain gia' persistiti.
 - embeddings locali opzionali per tool retrieval semantico; il primo slice usa FTS/BM25 deterministico.
 
 API interne previste:
@@ -1037,14 +1040,12 @@ local-first-personal-assistant/
 
 ## Prossima Azione Consigliata
 
-Progettare e implementare il blocco Assistant Orchestrator Brain Hardening:
+Ragionare e progettare la prima UI Tauri operativa sopra i componenti locali gia' chiusi:
 
 ```text
-crates/orchestrator/
-crates/orchestrator/src/audit.rs
-crates/orchestrator/src/subagent_workflow.rs
-crates/orchestrator/tests/subagent_workflow.rs
-crates/orchestrator/tests/audit.rs
+apps/desktop/
+apps/desktop/src/
+apps/desktop/src-tauri/
 ```
 
-Runtime Python/MLX, memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager, Secrets/Keychain, Skill/Plugin Registry, Skill Runtime Sandbox, process adapter trusted, WASM adapter non trusted e primo Orchestrator Brain hanno una base operativa testata. Il prossimo blocco deve rafforzare il Brain con audit persistente, UI-safe read model e materializzazione dei workflow subagent, cosi' le decisioni del cervello restano spiegabili oltre la singola chiamata.
+Runtime Python/MLX, memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager, Secrets/Keychain, Skill/Plugin Registry, Skill Runtime Sandbox, process adapter trusted, WASM adapter non trusted e Assistant Orchestrator Brain hanno una base operativa testata. Il prossimo blocco deve decidere come esporre questi componenti nella UI: chat operativa, task queue, approval center, memoria, audit Brain, connettori, process/log viewer e settings privacy.

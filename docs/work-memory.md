@@ -814,4 +814,28 @@ Perche': il modello non deve vedere tutti i tool e non deve decidere da solo cos
 
 ## Prossimo blocco
 
-- Assistant Orchestrator Brain Hardening: audit persistente, read model UI-safe dei piani, materializzazione completa dei workflow subagent e integrazione runtime/app.
+### Assistant Orchestrator Brain Hardening
+
+- Creato design `docs/superpowers/specs/2026-05-23-assistant-orchestrator-brain-hardening-design.md`.
+- Creato piano `docs/superpowers/plans/2026-05-23-assistant-orchestrator-brain-hardening.md`.
+- Aggiunto `OrchestratorAuditStore` in `crates/orchestrator/src/audit.rs`.
+- Lo store audit usa SQLite locale e migrazioni idempotenti per persistere run Brain riuscite e failure planner.
+- Aggiunto `OrchestratorUiReadModel` in `crates/orchestrator/src/ui.rs`.
+- Il read model espone route, status, step, tool/agent id, contract, metriche, memory refs e task summary senza raw user message, raw tool arguments o raw tool output.
+- Esteso `PlanStep` con campi subagent: `agent_id`, `goal`, `contract`, `allowed_actions`, `requires_user_approval`, `timeout_seconds`, `max_tokens`.
+- Esteso `OrchestratorOutcome` con `enqueued_subagent_tasks`.
+- Aggiunto `subagent_workflow.rs` per convertire `subagent_task` in `SubagentTask` durevoli tramite `SubagentTaskRuntimeBridge`.
+- Le azioni richieste dai subagenti vengono validate contro il `PolicyContext`.
+- Le dipendenze tra step subagent e step capability gia' accodati vengono persistite nel `TaskStore`.
+- Aggiornato planner prompt/schema per dichiarare esplicitamente i campi subagent.
+- Aggiunti test:
+  - `crates/orchestrator/tests/audit.rs`
+  - `crates/orchestrator/tests/subagent_workflow.rs`
+- Verifiche eseguite finora:
+  - `cargo test -p local-first-orchestrator`
+
+Perche': ora il Brain non e' solo un router per la singola chiamata. Produce decisioni persistenti e leggibili dalla futura UI, mantenendo separato cio' che serve all'esecuzione raw da cio' che puo' essere mostrato in modo sicuro.
+
+## Prossimo blocco
+
+- UI Tauri operativa: progettare chat, task queue, approval center, memoria, audit Brain, connettori, process/log viewer e settings privacy sopra i read model gia' disponibili.

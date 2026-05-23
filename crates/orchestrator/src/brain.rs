@@ -1,12 +1,14 @@
 use crate::{
-    EnqueuedTaskSummary, ExecutionPlan, MemoryContextProvider, OrchestratorAudit,
-    OrchestratorError, OrchestratorOutcome, OrchestratorRequest, OrchestratorResult,
-    OrchestratorRoute, PlanStep, PlanStepKind, ToolCard, ToolSearchIndexStore,
+    EnqueuedSubagentTaskSummary, EnqueuedTaskSummary, ExecutionPlan, MemoryContextProvider,
+    OrchestratorAudit, OrchestratorAuditStore, OrchestratorError, OrchestratorOutcome,
+    OrchestratorRequest, OrchestratorResult, OrchestratorRoute, PlanStep, PlanStepKind, ToolCard,
+    ToolSearchIndexStore,
     execution::{
         can_execute_immediately, provider_id_for_step, task_id_for_step, task_user_id,
         task_workspace_id, tool_for_step, tool_name_for_step,
     },
     planner::{planner_prompt, planner_schema},
+    subagent_workflow::{enqueue_subagent_spec, subagent_workflow_spec},
 };
 use local_first_capabilities::{
     CapabilityCall, CapabilityCallResult, CapabilityFacade, CapabilityTool, PolicyContext,
@@ -14,7 +16,7 @@ use local_first_capabilities::{
 };
 use local_first_subagents::{GenerateJsonRequest, JsonRuntime, TokenMetrics};
 use local_first_task_runtime::{TaskId, TaskStore};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub struct OrchestratorBrain<R, M> {
     runtime: R,
@@ -23,6 +25,8 @@ pub struct OrchestratorBrain<R, M> {
     tool_index: ToolSearchIndexStore,
     task_store: TaskStore,
     task_bridge: local_first_capabilities::CapabilityTaskRuntimeBridge,
+    subagent_bridge: local_first_subagents::SubagentTaskRuntimeBridge,
+    audit_store: Option<OrchestratorAuditStore>,
 }
 
 impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
@@ -40,7 +44,14 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
             tool_index,
             task_store,
             task_bridge: local_first_capabilities::CapabilityTaskRuntimeBridge::new(),
+            subagent_bridge: local_first_subagents::SubagentTaskRuntimeBridge::new(),
+            audit_store: None,
         }
+    }
+
+    pub fn with_audit_store(mut self, audit_store: OrchestratorAuditStore) -> Self {
+        self.audit_store = Some(audit_store);
+        self
     }
 
     pub fn runtime(&self) -> &R {
@@ -51,7 +62,28 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
         &self.task_store
     }
 
+    pub fn audit_store(&self) -> Option<&OrchestratorAuditStore> {
+        self.audit_store.as_ref()
+    }
+
     pub fn run(&mut self, request: OrchestratorRequest) -> OrchestratorResult<OrchestratorOutcome> {
+        let audit_request = request.clone();
+        let result = self.run_inner(request);
+        if let Some(audit_store) = &self.audit_store {
+            match &result {
+                Ok(outcome) => audit_store.record_outcome(&audit_request, outcome)?,
+                Err(error) => {
+                    let _ = audit_store.record_failure(&audit_request, error);
+                }
+            }
+        }
+        result
+    }
+
+    fn run_inner(
+        &mut self,
+        request: OrchestratorRequest,
+    ) -> OrchestratorResult<OrchestratorOutcome> {
         let access = self.capabilities.list_tools(&request.policy_context)?;
         self.tool_index.rebuild_from_tools(&access.visible_tools)?;
         let memory = self.memory.load_context(&request)?;
@@ -62,15 +94,30 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
 
         let mut immediate_results = Vec::new();
         let mut enqueued_tasks = Vec::new();
+        let mut enqueued_subagent_tasks = Vec::new();
+        let mut durable_step_task_ids = BTreeMap::new();
         for step in &plan.steps {
-            if step.kind != PlanStepKind::CapabilityCall {
-                continue;
-            }
-            let tool = tool_for_step(step, &loaded_tools)?;
-            if can_execute_immediately(step, tool, &access.executable_tools) {
-                immediate_results.push(self.execute_immediate(&request.policy_context, step)?);
-            } else {
-                enqueued_tasks.push(self.enqueue_step(&request, step, tool)?);
+            match step.kind {
+                PlanStepKind::CapabilityCall => {
+                    let tool = tool_for_step(step, &loaded_tools)?;
+                    if can_execute_immediately(step, tool, &access.executable_tools) {
+                        immediate_results
+                            .push(self.execute_immediate(&request.policy_context, step)?);
+                    } else {
+                        let summary = self.enqueue_step(&request, step, tool)?;
+                        durable_step_task_ids
+                            .insert(step.step_id.clone(), summary.task_id.as_str().to_string());
+                        enqueued_tasks.push(summary);
+                    }
+                }
+                PlanStepKind::SubagentTask => {
+                    let spec = subagent_workflow_spec(&request, step, &durable_step_task_ids)?;
+                    let summary = self.enqueue_subagent_step(&request, step, spec)?;
+                    durable_step_task_ids
+                        .insert(step.step_id.clone(), summary.task_id.as_str().to_string());
+                    enqueued_subagent_tasks.push(summary);
+                }
+                PlanStepKind::MemoryLookup | PlanStepKind::DirectAnswer => {}
             }
         }
 
@@ -85,11 +132,13 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
                 loaded_tool_count: loaded_cards.len(),
                 immediate_execution_count: immediate_results.len(),
                 enqueued_task_count: enqueued_tasks.len(),
+                subagent_task_count: enqueued_subagent_tasks.len(),
                 planner_rounds,
             },
             loaded_tools: loaded_cards,
             immediate_results,
             enqueued_tasks,
+            enqueued_subagent_tasks,
             blocked_reason: None,
             metrics,
             plan,
@@ -239,6 +288,25 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
             }
             if step.kind == PlanStepKind::CapabilityCall {
                 let _ = tool_for_step(step, loaded_tools)?;
+            } else if step.kind == PlanStepKind::SubagentTask {
+                if step.agent_id.is_none() {
+                    return Err(OrchestratorError::Planner(format!(
+                        "subagent_step_missing_agent:{}",
+                        step.step_id
+                    )));
+                }
+                if step.goal.is_none() {
+                    return Err(OrchestratorError::Planner(format!(
+                        "subagent_step_missing_goal:{}",
+                        step.step_id
+                    )));
+                }
+                if step.contract.is_none() {
+                    return Err(OrchestratorError::Planner(format!(
+                        "subagent_step_missing_contract:{}",
+                        step.step_id
+                    )));
+                }
             }
         }
         Ok(())
@@ -309,5 +377,14 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
             provider_id,
             tool_name,
         })
+    }
+
+    fn enqueue_subagent_step(
+        &self,
+        request: &OrchestratorRequest,
+        step: &PlanStep,
+        spec: local_first_subagents::WorkflowTaskSpec,
+    ) -> OrchestratorResult<EnqueuedSubagentTaskSummary> {
+        enqueue_subagent_spec(&self.subagent_bridge, &self.task_store, request, step, spec)
     }
 }

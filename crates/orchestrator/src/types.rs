@@ -1,7 +1,7 @@
 use local_first_capabilities::{
     CapabilityCallResult, CapabilityProviderKind, CapabilityTool, PolicyContext, ProviderId,
 };
-use local_first_subagents::TokenMetrics;
+use local_first_subagents::{AgentId, AllowedAction, TokenMetrics};
 use local_first_task_runtime::TaskId;
 use serde::{Deserialize, Serialize};
 
@@ -42,6 +42,7 @@ pub struct OrchestratorOutcome {
     pub memory_refs: Vec<String>,
     pub immediate_results: Vec<CapabilityCallResult>,
     pub enqueued_tasks: Vec<EnqueuedTaskSummary>,
+    pub enqueued_subagent_tasks: Vec<EnqueuedSubagentTaskSummary>,
     pub blocked_reason: Option<String>,
     pub metrics: TokenMetrics,
     pub audit: OrchestratorAudit,
@@ -53,6 +54,7 @@ pub struct OrchestratorAudit {
     pub loaded_tool_count: usize,
     pub immediate_execution_count: usize,
     pub enqueued_task_count: usize,
+    pub subagent_task_count: usize,
     pub planner_rounds: usize,
 }
 
@@ -98,13 +100,29 @@ pub struct PlanStep {
     pub kind: PlanStepKind,
     #[serde(default)]
     pub depends_on: Vec<String>,
+    #[serde(default)]
     pub provider_id: Option<String>,
+    #[serde(default)]
     pub tool_name: Option<String>,
     #[serde(default)]
     pub arguments: serde_json::Value,
     pub execution_policy: StepExecutionPolicy,
     pub risk_level: String,
     pub expected_duration_seconds: u64,
+    #[serde(default)]
+    pub agent_id: Option<AgentId>,
+    #[serde(default)]
+    pub goal: Option<String>,
+    #[serde(default)]
+    pub contract: Option<String>,
+    #[serde(default)]
+    pub allowed_actions: Vec<AllowedAction>,
+    #[serde(default)]
+    pub requires_user_approval: Option<bool>,
+    #[serde(default)]
+    pub timeout_seconds: Option<u64>,
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -157,6 +175,14 @@ pub struct EnqueuedTaskSummary {
     pub task_id: TaskId,
     pub provider_id: ProviderId,
     pub tool_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EnqueuedSubagentTaskSummary {
+    pub step_id: String,
+    pub task_id: TaskId,
+    pub agent_id: AgentId,
+    pub contract: String,
 }
 
 fn schema_hash(schema: &serde_json::Value) -> String {
