@@ -20,10 +20,10 @@
 
 ### Task 1: Process Runner Config Guardrails
 
-- [ ] Write failing tests for executable root and working-directory root validation.
-- [ ] Run `cargo test -p local-first-skill-runtime --test process_runner config`.
-- [ ] Implement `ProcessSkillRunnerConfig`.
-- [ ] Run targeted tests until green.
+- [x] Write failing tests for executable root and working-directory root validation.
+- [x] Run `cargo test -p local-first-skill-runtime --test process_runner config`.
+- [x] Implement `ProcessSkillRunnerConfig`.
+- [x] Run targeted tests until green.
 - [ ] Commit as `Add process skill runner config`.
 
 ### Task 2: Process Runner Protocol
