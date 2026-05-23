@@ -1,8 +1,11 @@
 import importlib.util
 import json
+import os
 import pathlib
 import sys
+import threading
 import unittest
+from unittest import mock
 
 
 SERVER_PATH = (
@@ -135,6 +138,144 @@ class MlxGemma4ServerTests(unittest.TestCase):
                 "vision_desktop_summary",
             ],
         )
+
+    def test_runtime_config_reads_local_operational_environment(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "GEMMA4_MODEL": "local-model",
+                "GEMMA4_ALLOWED_IMAGE_ROOTS": "/tmp/images:/tmp/other",
+                "GEMMA4_ENABLE_SHUTDOWN": "0",
+                "GEMMA4_REJECT_WHEN_BUSY": "1",
+                "GEMMA4_REQUEST_TIMEOUT_SECONDS": "7",
+            },
+            clear=False,
+        ):
+            server = load_server_module()
+
+            config = server.RuntimeConfig.from_env()
+
+        self.assertEqual(config.model_name, "local-model")
+        self.assertEqual([str(path) for path in config.allowed_image_roots], ["/tmp/images", "/tmp/other"])
+        self.assertFalse(config.shutdown_enabled)
+        self.assertTrue(config.reject_when_busy)
+        self.assertEqual(config.default_request_timeout_seconds, 7.0)
+
+    def test_error_payload_has_stable_shape(self):
+        server = load_server_module()
+
+        payload = server.error_payload("runtime_busy", "Runtime is busy", retryable=True)
+
+        self.assertEqual(
+            payload,
+            {
+                "error": {
+                    "code": "runtime_busy",
+                    "message": "Runtime is busy",
+                    "retryable": True,
+                }
+            },
+        )
+
+    def test_runtime_rejects_busy_generation_when_wait_is_false(self):
+        server = load_server_module()
+        runtime = server.GemmaRuntime(
+            model_name="local-test-model",
+            loader=lambda _: ("model", type("Processor", (), {})()),
+            generator=lambda *args, **kwargs: None,
+            template_applier=lambda *args, **kwargs: "prompt",
+        )
+        self.assertTrue(runtime._generation_lock.acquire(blocking=False))
+        try:
+            with self.assertRaises(server.RuntimeServiceError) as raised:
+                runtime.generate_text(
+                    "hello",
+                    max_tokens=1,
+                    wait_if_busy=False,
+                    request_timeout_seconds=0.1,
+                )
+        finally:
+            runtime._generation_lock.release()
+
+        self.assertEqual(raised.exception.code, "runtime_busy")
+        self.assertEqual(raised.exception.status_code, 429)
+
+    def test_runtime_rejects_expired_deadline_before_generation(self):
+        server = load_server_module()
+        runtime = server.GemmaRuntime(
+            model_name="local-test-model",
+            loader=lambda _: ("model", type("Processor", (), {})()),
+            generator=lambda *args, **kwargs: None,
+            template_applier=lambda *args, **kwargs: "prompt",
+        )
+
+        with self.assertRaises(server.RuntimeServiceError) as raised:
+            runtime.generate_text("hello", max_tokens=1, request_timeout_seconds=0)
+
+        self.assertEqual(raised.exception.code, "request_timeout")
+        self.assertEqual(raised.exception.status_code, 408)
+
+    def test_image_paths_must_stay_inside_configured_roots(self):
+        server = load_server_module()
+        root = pathlib.Path("/tmp/local-first-images").resolve()
+        config = server.RuntimeConfig(
+            model_name="local-test-model",
+            allowed_image_roots=[root],
+        )
+
+        valid = server.validate_local_image_path(root / "screen.png", config)
+
+        self.assertEqual(valid, root / "screen.png")
+        with self.assertRaises(server.RuntimeServiceError) as raised:
+            server.validate_local_image_path("/etc/passwd", config)
+        self.assertEqual(raised.exception.code, "image_path_not_allowed")
+
+    def test_benchmark_summary_aggregates_runtime_metrics(self):
+        server = load_server_module()
+        rows = [
+            {
+                "valid": True,
+                "metrics": {
+                    "prompt_tokens": 10,
+                    "generation_tokens": 5,
+                    "prompt_tps": 100.0,
+                    "generation_tps": 20.0,
+                    "peak_memory_gb": 3.5,
+                    "elapsed_seconds": 1.2,
+                },
+            },
+            {
+                "valid": False,
+                "metrics": {
+                    "prompt_tokens": 2,
+                    "generation_tokens": 1,
+                    "prompt_tps": 50.0,
+                    "generation_tps": 10.0,
+                    "peak_memory_gb": 4.0,
+                    "elapsed_seconds": 0.8,
+                },
+            },
+        ]
+
+        summary = server.benchmark_summary(rows)
+
+        self.assertEqual(summary["prompt_tokens"], 12)
+        self.assertEqual(summary["generation_tokens"], 6)
+        self.assertEqual(summary["peak_memory_gb"], 4.0)
+        self.assertEqual(summary["elapsed_seconds"], 2.0)
+
+    def test_shutdown_can_be_disabled(self):
+        server = load_server_module()
+        original_config = server.runtime.config
+        server.runtime.config = server.RuntimeConfig(shutdown_enabled=False)
+        try:
+            with self.assertRaises(server.HTTPException) as raised:
+                server.shutdown()
+        finally:
+            server.runtime.config = original_config
+
+        self.assertEqual(raised.exception.status_code, 403)
+        self.assertEqual(raised.exception.detail["error"]["code"], "shutdown_disabled")
 
 
 class SharedContractTests(unittest.TestCase):

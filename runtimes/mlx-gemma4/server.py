@@ -7,10 +7,12 @@ import re
 import signal
 import threading
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -18,13 +20,92 @@ DEFAULT_MODEL = "mlx-community/gemma-4-e4b-it-4bit"
 STARTED_AT = time.time()
 
 
-app = FastAPI(title="Local Gemma 4 MLX Runtime", version="0.1.0")
+app = FastAPI(title="Local Gemma 4 MLX Runtime", version="0.2.0")
+
+
+@dataclass
+class RuntimeConfig:
+    model_name: str = DEFAULT_MODEL
+    allowed_image_roots: list[Path] = field(default_factory=list)
+    shutdown_enabled: bool = False
+    reject_when_busy: bool = False
+    default_request_timeout_seconds: float = 120.0
+
+    @classmethod
+    def from_env(cls) -> "RuntimeConfig":
+        roots = [
+            Path(value).expanduser()
+            for value in os.environ.get("GEMMA4_ALLOWED_IMAGE_ROOTS", "").split(":")
+            if value
+        ]
+        return cls(
+            model_name=os.environ.get("GEMMA4_MODEL", DEFAULT_MODEL),
+            allowed_image_roots=roots,
+            shutdown_enabled=env_bool("GEMMA4_ENABLE_SHUTDOWN", default=False),
+            reject_when_busy=env_bool("GEMMA4_REJECT_WHEN_BUSY", default=False),
+            default_request_timeout_seconds=float(
+                os.environ.get("GEMMA4_REQUEST_TIMEOUT_SECONDS", "120")
+            ),
+        )
+
+
+class RuntimeServiceError(Exception):
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        status_code: int = 500,
+        retryable: bool = False,
+    ):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.status_code = status_code
+        self.retryable = retryable
+
+
+def env_bool(name: str, *, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def error_payload(code: str, message: str, *, retryable: bool = False) -> dict[str, Any]:
+    return {
+        "error": {
+            "code": code,
+            "message": message,
+            "retryable": retryable,
+        }
+    }
+
+
+def validate_local_image_path(path: str | Path, config: RuntimeConfig) -> Path:
+    image_path = Path(path).expanduser()
+    if not config.allowed_image_roots:
+        return image_path
+
+    resolved = image_path.resolve(strict=False)
+    for root in config.allowed_image_roots:
+        resolved_root = root.expanduser().resolve(strict=False)
+        if resolved == resolved_root or resolved_root in resolved.parents:
+            return resolved
+
+    raise RuntimeServiceError(
+        "image_path_not_allowed",
+        "Image path is outside configured local roots",
+        status_code=400,
+    )
 
 
 class GenerateRequest(BaseModel):
     prompt: str
     max_tokens: int = Field(default=512, ge=1, le=4096)
     temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    wait_if_busy: bool = True
+    request_timeout_seconds: float | None = Field(default=None, ge=0.0, le=3600.0)
 
 
 class GenerateJsonRequest(GenerateRequest):
@@ -64,12 +145,14 @@ class GemmaRuntime:
     def __init__(
         self,
         model_name: str = DEFAULT_MODEL,
+        config: RuntimeConfig | None = None,
         loader: Any | None = None,
         generator: Any | None = None,
         template_applier: Any | None = None,
         tool_parser: Any | None = None,
     ):
-        self.model_name = model_name
+        self.config = config or RuntimeConfig(model_name=model_name)
+        self.model_name = self.config.model_name
         self.loader = loader
         self.generator = generator
         self.template_applier = template_applier
@@ -112,11 +195,38 @@ class GemmaRuntime:
         temperature: float = 0.0,
         image: str | None = None,
         tools: list[dict[str, Any]] | None = None,
+        wait_if_busy: bool | None = None,
+        request_timeout_seconds: float | None = None,
     ) -> dict[str, Any]:
-        model, processor = self.get_model()
-        mx, apply_chat_template, generate = self._mlx_functions()
+        timeout = self.config.default_request_timeout_seconds
+        if request_timeout_seconds is not None:
+            timeout = request_timeout_seconds
+        if timeout <= 0:
+            raise RuntimeServiceError(
+                "request_timeout",
+                "Request deadline expired before generation started",
+                status_code=408,
+                retryable=True,
+            )
 
-        with self._generation_lock:
+        wait = wait_if_busy
+        if wait is None:
+            wait = not self.config.reject_when_busy
+        if wait:
+            acquired = self._generation_lock.acquire(timeout=timeout)
+        else:
+            acquired = self._generation_lock.acquire(blocking=False)
+        if not acquired:
+            raise RuntimeServiceError(
+                "runtime_busy",
+                "Runtime is busy",
+                status_code=429,
+                retryable=True,
+            )
+
+        try:
+            model, processor = self.get_model()
+            mx, apply_chat_template, generate = self._mlx_functions()
             mx.reset_peak_memory()
             prompt_kwargs: dict[str, Any] = {}
             if tools is not None:
@@ -141,6 +251,8 @@ class GemmaRuntime:
                 verbose=False,
             )
             elapsed = time.perf_counter() - started
+        finally:
+            self._generation_lock.release()
 
         return {
             "text": result.text.strip(),
@@ -169,7 +281,17 @@ class GemmaRuntime:
         return mx, self.template_applier, self.generator
 
 
-runtime = GemmaRuntime(model_name=os.environ.get("GEMMA4_MODEL", DEFAULT_MODEL))
+runtime = GemmaRuntime(config=RuntimeConfig.from_env())
+
+
+@app.exception_handler(RuntimeServiceError)
+def runtime_service_error_handler(
+    _request: Request, exc: RuntimeServiceError
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=error_payload(exc.code, exc.message, retryable=exc.retryable),
+    )
 
 
 @app.get("/health")
@@ -181,6 +303,9 @@ def health() -> dict[str, Any]:
         "load_seconds": runtime.load_seconds,
         "uptime_seconds": round(time.time() - STARTED_AT, 3),
         "local_first": True,
+        "shutdown_enabled": runtime.config.shutdown_enabled,
+        "reject_when_busy": runtime.config.reject_when_busy,
+        "allowed_image_roots": [str(path) for path in runtime.config.allowed_image_roots],
     }
 
 
@@ -190,6 +315,8 @@ def generate(request: GenerateRequest) -> dict[str, Any]:
         request.prompt,
         max_tokens=request.max_tokens,
         temperature=request.temperature,
+        wait_if_busy=request.wait_if_busy,
+        request_timeout_seconds=request.request_timeout_seconds,
     )
 
 
@@ -205,6 +332,8 @@ def tool_call(request: ToolCallRequest) -> dict[str, Any]:
         max_tokens=request.max_tokens,
         temperature=request.temperature,
         tools=request.tools,
+        wait_if_busy=request.wait_if_busy,
+        request_timeout_seconds=request.request_timeout_seconds,
     )
     try:
         call = runtime.parse_tool_call(generated["text"])
@@ -221,15 +350,20 @@ def tool_call(request: ToolCallRequest) -> dict[str, Any]:
 
 @app.post("/analyze_image")
 def analyze_image(request: AnalyzeImageRequest) -> dict[str, Any]:
-    image_path = Path(request.image_path).expanduser()
+    image_path = validate_local_image_path(request.image_path, runtime.config)
     if not image_path.exists():
-        raise HTTPException(status_code=400, detail=f"image not found: {image_path}")
+        raise HTTPException(
+            status_code=400,
+            detail=error_payload("image_not_found", f"image not found: {image_path}")["error"],
+        )
 
     generated = runtime.generate_text(
         request.prompt,
         max_tokens=request.max_tokens,
         temperature=request.temperature,
         image=str(image_path),
+        wait_if_busy=request.wait_if_busy,
+        request_timeout_seconds=request.request_timeout_seconds,
     )
     return validated_json_response(
         generated,
@@ -302,11 +436,21 @@ def benchmark(request: BenchmarkRequest) -> dict[str, Any]:
         "passed": sum(1 for row in rows if row["valid"]),
         "total": len(rows),
         "rows": rows,
+        "summary": benchmark_summary(rows),
     }
 
 
 @app.post("/shutdown")
 def shutdown() -> dict[str, Any]:
+    if not runtime.config.shutdown_enabled:
+        raise HTTPException(
+            status_code=403,
+            detail=error_payload(
+                "shutdown_disabled",
+                "Shutdown endpoint is disabled",
+                retryable=False,
+            ),
+        )
     threading.Timer(0.2, lambda: os.kill(os.getpid(), signal.SIGTERM)).start()
     return {"ok": True}
 
@@ -316,6 +460,8 @@ def generate_json_response(request: GenerateJsonRequest) -> dict[str, Any]:
         request.prompt,
         max_tokens=request.max_tokens,
         temperature=request.temperature,
+        wait_if_busy=request.wait_if_busy,
+        request_timeout_seconds=request.request_timeout_seconds,
     )
     return validated_json_response(
         generated,
@@ -347,6 +493,8 @@ def validated_json_response(
             repair_prompt,
             max_tokens=repair_source.max_tokens,
             temperature=0.0,
+            wait_if_busy=repair_source.wait_if_busy,
+            request_timeout_seconds=repair_source.request_timeout_seconds,
         )
         output, errors = parse_and_validate_json(
             repaired_generation["text"], schema=schema, required_keys=required_keys
@@ -499,6 +647,22 @@ def metrics_from_result(result: Any, elapsed_seconds: float) -> dict[str, Any]:
         "generation_tps": round(result.generation_tps, 3),
         "peak_memory_gb": round(result.peak_memory, 3),
         "elapsed_seconds": round(elapsed_seconds, 3),
+    }
+
+
+def benchmark_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    metrics = [row.get("metrics", {}) for row in rows]
+    return {
+        "prompt_tokens": sum(int(row.get("prompt_tokens", 0)) for row in metrics),
+        "generation_tokens": sum(int(row.get("generation_tokens", 0)) for row in metrics),
+        "peak_memory_gb": round(
+            max((float(row.get("peak_memory_gb", 0.0)) for row in metrics), default=0.0),
+            3,
+        ),
+        "elapsed_seconds": round(
+            sum(float(row.get("elapsed_seconds", 0.0)) for row in metrics),
+            3,
+        ),
     }
 
 
