@@ -186,12 +186,15 @@ Implementato:
 - trait `SkillRunner` e `InMemorySkillRunner` per handler locali/test deterministici senza accesso OS.
 - `SkillRuntimeCapabilityProvider` eseguibile: integra `SkillRuntime` con `CapabilityFacade`, audit e policy capability esistenti.
 - integrazione verificata con `CapabilityTaskRuntimeBridge` e `CapabilityTaskExecutor`: le skill girano come task durevoli con risorsa `background_maintenance`.
+- `ProcessSkillRunnerConfig` per adapter process trusted/locali: executable e working dir devono stare dentro root consentite.
+- `ProcessSkillRunner` avvia processi senza shell, con env ereditato cancellato, env esplicito, request JSON su stdin, output JSON su stdout, stderr catturato e timeout con kill.
+- il process runner applica limite stdout e delega a `SkillRuntime` la validazione finale di trace/output.
 
 Non ancora incluso:
 
 - policy di restart/backoff eseguita automaticamente in background.
 - UI Tauri per vedere processi, logs e health.
-- adapter WASM/QuickJS/process con isolamento OS/runtime per plugin non trusted.
+- adapter WASM/QuickJS con isolamento runtime forte per plugin non trusted.
 
 API interne previste:
 
@@ -1010,15 +1013,14 @@ local-first-personal-assistant/
 
 ## Prossima Azione Consigliata
 
-Progettare e implementare il blocco Skill Runtime Adapter Hardening:
+Progettare e implementare il blocco Skill Runtime Untrusted Adapter:
 
 ```text
 crates/skill-runtime/
-crates/skill-runtime/src/process_runner.rs
 crates/skill-runtime/src/wasm_runner.rs
 crates/skill-runtime/tests/adapter_confinement.rs
-docs/superpowers/specs/2026-05-23-skill-runtime-adapters-design.md
-docs/superpowers/plans/2026-05-23-skill-runtime-adapters.md
+docs/superpowers/specs/2026-05-23-skill-runtime-untrusted-adapter-design.md
+docs/superpowers/plans/2026-05-23-skill-runtime-untrusted-adapter.md
 ```
 
-Runtime Python/MLX, memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager, Secrets/Keychain, Skill/Plugin Registry e Skill Runtime Sandbox hanno una base operativa testata. Il prossimo blocco serve a scegliere e implementare un adapter reale per skill non trusted, con isolamento verificabile oltre al boundary contrattuale gia' presente.
+Runtime Python/MLX, memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager, Secrets/Keychain, Skill/Plugin Registry, Skill Runtime Sandbox e process adapter trusted hanno una base operativa testata. Il prossimo blocco serve a implementare un adapter per skill non trusted con isolamento runtime verificabile, invece del solo hardening process-level.

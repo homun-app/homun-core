@@ -733,4 +733,31 @@ Perche': ora skill/plugin non sono solo manifest installabili. Possono essere es
 
 ## Prossimo blocco
 
-- Skill Runtime Adapter Hardening: scegliere e implementare adapter reale per skill non trusted, probabilmente WASM/QuickJS o process runner confinato, con test di isolamento filesystem/network oltre alla policy contrattuale.
+### Skill Runtime Adapter Hardening
+
+- Creato design `docs/superpowers/specs/2026-05-23-skill-runtime-adapters-design.md`.
+- Creato piano `docs/superpowers/plans/2026-05-23-skill-runtime-adapters.md`.
+- Aggiunto `ProcessSkillRunnerConfig` in `crates/skill-runtime/src/process_runner.rs`.
+- Il config rifiuta executable fuori dalle root consentite.
+- Il config rifiuta working directory fuori dalle root consentite.
+- Il config canonicalizza executable, working dir e root prima dell'uso.
+- Il config parte con env vuoto e accetta solo env espliciti via `with_env`.
+- Aggiunto `ProcessSkillRunner`.
+- Il runner avvia executable direttamente con `Command::new`, senza shell.
+- Il runner cancella l'ambiente ereditato con `env_clear`.
+- Il runner scrive `SkillRuntimeRequest` JSON su stdin.
+- Il runner legge `SkillRuntimeOutput` JSON da stdout.
+- Il runner cattura stderr e lo trasforma in errore audit-safe su exit non-zero.
+- Il runner uccide il processo su timeout.
+- Il runner blocca stdout oltre `max_output_bytes`.
+- La validazione post-run resta in `SkillRuntime`, quindi trace network/filesystem e output passano dallo stesso boundary gia' usato da `InMemorySkillRunner`.
+- Verifiche eseguite:
+  - `cargo test -p local-first-skill-runtime`
+  - `cargo test --workspace`
+  - `make test`
+
+Perche': ora possiamo eseguire handler locali fidati o wrapper controllati come processi esterni senza shell, senza env ereditato e con protocollo JSON stabile. Questo non e' ancora isolamento forte per codice scaricato/non trusted: per quello serve il prossimo adapter WASM/QuickJS o equivalente, con confinement runtime verificabile.
+
+## Prossimo blocco
+
+- Skill Runtime Untrusted Adapter: implementare un adapter WASM/QuickJS per skill non trusted, con test che dimostrano isolamento filesystem/network oltre alla policy contrattuale.
