@@ -1,5 +1,7 @@
 use crate::{
-    CapabilityError, CapabilityResult, PluginInstallRecord, PluginManifest, SkillInstallRecord,
+    CapabilityCall, CapabilityCallResult, CapabilityConnection, CapabilityError,
+    CapabilityProvider, CapabilityProviderKind, CapabilityResult, CapabilityTool,
+    CapabilityTrigger, PluginInstallRecord, PluginManifest, ProviderId, SkillInstallRecord,
     SkillManifest, UserId, WorkspaceId,
 };
 use rusqlite::{Connection, OptionalExtension, params};
@@ -219,6 +221,27 @@ impl SkillPluginRegistryStore {
         )
     }
 
+    pub fn enabled_skill_providers(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> CapabilityResult<Vec<SkillCapabilityProvider>> {
+        let installs = self.skill_installs(user_id, workspace_id)?;
+        let mut providers = Vec::new();
+        for install in installs.into_iter().filter(|install| install.enabled) {
+            let manifest = self
+                .skill_manifest(&install.skill_id, &install.version)?
+                .ok_or_else(|| {
+                    CapabilityError::ProviderUnavailable(format!(
+                        "skill_manifest_not_found:{}@{}",
+                        install.skill_id, install.version
+                    ))
+                })?;
+            providers.push(SkillCapabilityProvider::new(manifest));
+        }
+        Ok(providers)
+    }
+
     pub fn upsert_plugin_manifest(&self, manifest: &PluginManifest) -> CapabilityResult<()> {
         let now = OffsetDateTime::now_utc().unix_timestamp();
         self.connection
@@ -367,4 +390,82 @@ fn to_store_error(error: rusqlite::Error) -> CapabilityError {
 
 fn to_json_error(error: serde_json::Error) -> CapabilityError {
     CapabilityError::ToolExecutionFailed(format!("skill_plugin_registry_json:{error}"))
+}
+
+#[derive(Debug, Clone)]
+pub struct SkillCapabilityProvider {
+    id: ProviderId,
+    manifest: SkillManifest,
+}
+
+impl SkillCapabilityProvider {
+    pub fn new(manifest: SkillManifest) -> Self {
+        Self {
+            id: ProviderId::new(format!("skill:{}", manifest.id)),
+            manifest,
+        }
+    }
+}
+
+impl CapabilityProvider for SkillCapabilityProvider {
+    fn id(&self) -> &ProviderId {
+        &self.id
+    }
+
+    fn kind(&self) -> CapabilityProviderKind {
+        CapabilityProviderKind::Skill
+    }
+
+    fn is_enabled(&self) -> bool {
+        true
+    }
+
+    fn managed_metadata(&self) -> Option<&crate::ManagedProviderMetadata> {
+        None
+    }
+
+    fn list_tools(&self) -> CapabilityResult<Vec<CapabilityTool>> {
+        Ok(self
+            .manifest
+            .tools
+            .iter()
+            .map(|tool| CapabilityTool {
+                name: tool.name.clone(),
+                provider_id: self.id.clone(),
+                provider_kind: CapabilityProviderKind::Skill,
+                action: tool.action,
+                description: tool.description.clone(),
+                privacy_domains: tool.privacy_domains.clone(),
+                sensitivity: tool.sensitivity.clone(),
+                input_schema: tool.input_schema.clone(),
+            })
+            .collect())
+    }
+
+    fn list_connections(&self) -> CapabilityResult<Vec<CapabilityConnection>> {
+        Ok(Vec::new())
+    }
+
+    fn call_tool(&self, call: &CapabilityCall) -> CapabilityResult<CapabilityCallResult> {
+        Err(CapabilityError::ProviderUnavailable(format!(
+            "skill_execution_unavailable:{}",
+            call.tool_name
+        )))
+    }
+
+    fn list_triggers(&self) -> CapabilityResult<Vec<CapabilityTrigger>> {
+        Ok(Vec::new())
+    }
+
+    fn enable_trigger(&mut self, trigger_id: &str) -> CapabilityResult<()> {
+        Err(CapabilityError::TriggerFailed(format!(
+            "skill_trigger_unavailable:{trigger_id}"
+        )))
+    }
+
+    fn disable_trigger(&mut self, trigger_id: &str) -> CapabilityResult<()> {
+        Err(CapabilityError::TriggerFailed(format!(
+            "skill_trigger_unavailable:{trigger_id}"
+        )))
+    }
 }

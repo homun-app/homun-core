@@ -33,14 +33,14 @@
 - [x] Run targeted tests and verify failures.
 - [x] Implement `SkillPluginRegistryStore` in `skill_plugin.rs`.
 - [x] Run targeted tests until green.
-- [ ] Commit as `Add skill plugin registry`.
+- [x] Commit as `Add skill plugin registry`.
 
 ### Task 3: Capability Provider Integration
 
-- [ ] Write failing tests that `SkillCapabilityProvider` exposes only enabled install tools and policy filters them through `CapabilityFacade`.
-- [ ] Run targeted tests and verify failures.
-- [ ] Implement `SkillCapabilityProvider` and export it.
-- [ ] Run targeted tests until green.
+- [x] Write failing tests that `SkillCapabilityProvider` exposes only enabled install tools and policy filters them through `CapabilityFacade`.
+- [x] Run targeted tests and verify failures.
+- [x] Implement `SkillCapabilityProvider` and export it.
+- [x] Run targeted tests until green.
 - [ ] Commit as `Expose skill plugin capabilities`.
 
 ### Task 4: Verification And Docs
