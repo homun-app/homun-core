@@ -44,6 +44,7 @@ Principi:
 - Capability provider registry: provider config, grant user/workspace, connessioni, tool cache e policy context devono essere persistenti in SQLite locale.
 - Browser automation: OpenClaw e' il riferimento principale per profili browser, Playwright/CDP, snapshot/refs, azioni atomiche, tab tracking, navigation guard e manual blockers. Lo stack operativo sara' sidecar locale Node/TypeScript con `playwright-core`, orchestrato dal Rust Core.
 - Orchestrator Brain: router ibrido nel Rust Core con registry tool lazy. Il modello vede card compatte e solo pochi tool detail caricati on demand; Rust resta owner di policy, execution, queue, approval e audit.
+- Local Computer Session: la UX di riferimento e' Manus per task operativi visibili, ma adattata al nostro local-first. Non e' solo browser: e' una sessione locale multi-superficie con browser, shell/terminal, file/artifact e log, governata dal Rust Core e mostrata in chat con timeline inline, activity card, preview/thumbnail, progress, approvals e takeover controllato.
 
 ### Test Gemma 4 locale
 
@@ -106,6 +107,19 @@ Tauri React UI
       -> Memory Context Loader
       -> Plan Validator
       -> Execution Router
+    -> Local Computer Session Manager
+      -> Computer Session Store
+      -> Surface Event Stream
+      -> Preview Frame Store
+      -> Takeover / Manual Control Gate
+      -> Browser Surface
+        -> Node/TypeScript sidecar
+        -> playwright-core
+        -> Chromium CDP
+      -> Shell Surface
+        -> controlled process runner
+      -> Artifact / Log Surface
+        -> local files, transcripts, checkpoints
     -> Automation Engine
     -> Subagent Manager
       -> PlannerAgent
@@ -119,9 +133,7 @@ Tauri React UI
       -> MLX / mlx-vlm
       -> Gemma 4
     -> Browser Automation Runtime
-      -> Node/TypeScript sidecar
-      -> playwright-core
-      -> Chromium CDP
+      -> implementation surface of Local Computer Session
 ```
 
 ## Componenti
@@ -152,11 +164,20 @@ Implementato:
 
 - `apps/desktop` con shell Tauri 2 + React + TypeScript + Vite.
 - UI light-first in direzione Manus pulita, con struttura settings ispirata a Codex.
-- Layout operativo con sidebar sinistra, canvas centrale e inspector destro contestuale.
+- Primo layout operativo con sidebar sinistra, canvas centrale e inspector destro contestuale.
 - Viste complete di primo slice: Chat, Task/Approval center e Settings privacy/runtime/connettori.
 - Viste shallow navigabili: Memoria, Connessioni, Automazioni, Browser e Brain Audit.
 - View-model mock separati dai componenti, allineati a task queue, run Brain, health runtime, memoria e provider/connection read model.
 - Inspector e task detail mostrano dati redatti, senza raw prompt, raw payload, raw tool args o raw output.
+
+Direzione UX aggiornata dopo analisi Manus live:
+
+- la home resta una chat operativa pulita, non una dashboard.
+- la navigazione primaria deve essere rail-first con drawer espandibile on demand, non una sidebar densa sempre aperta.
+- in una chat attiva il composer resta ancorato in basso al thread; nella home puo' stare centrale.
+- l'inspector non e' la modalita' principale: piano, attivita', computer, file, utilizzo e audit emergono tramite popover, menu contestuali, modal e activity card.
+- il task in esecuzione mostra timeline inline, stato sintetico e una Local Computer activity card con preview browser/shell/artifact.
+- Settings e Plugin devono usare modalita' a piena area o modal dedicate, con menu interno e ritorno all'app, per non comprimere il workspace.
 
 ### 2. Rust Core
 
@@ -252,6 +273,13 @@ task.cancel(task_id)
 task.status(task_id)
 task.list_queue(user_id, workspace_id)
 task.record_checkpoint(task_id, checkpoint)
+computer.session(task_id)
+computer.timeline(session_id)
+computer.preview(session_id)
+computer.pause(session_id)
+computer.resume(session_id)
+computer.request_takeover(session_id)
+computer.release_takeover(session_id)
 orchestrator.plan_and_execute(request)
 orchestrator.search_tools(query, policy_context)
 orchestrator.validate_plan(plan)
@@ -307,6 +335,8 @@ Classi risorsa iniziali:
 ```text
 llm_inference
 browser_session
+shell_process
+computer_session
 network_io
 filesystem_io
 connector_api
@@ -320,12 +350,93 @@ Regole:
 
 - Nessun executor decide autonomamente quando partire.
 - Il runtime LLM rimane a concorrenza bassa o single-flight.
-- Browser automation, Graphify e connettori remoti passano dal Resource Governor.
+- Browser automation, shell process, Local Computer Session, Graphify e connettori remoti passano dal Resource Governor.
 - Un task lungo di ore o giorni deve essere ricostruibile da store, checkpoint e audit.
 - I task ad alto rischio entrano in `waiting_user_approval` prima dell'azione reale.
 - Le policy di privacy e permessi restano esterne al task runtime, ma il task runtime deve conservarne gli esiti e bloccare l'esecuzione quando richiesto.
 
-### 4. Subagent Manager
+### 4. Local Computer Session
+
+La Local Computer Session e' il modo in cui l'assistant rende visibile e governabile cio' che sta facendo sul computer durante un task durevole.
+
+Non e' una feature browser separata. E' una sessione operativa locale, legata a `task_id` e `workflow_id`, che puo' includere piu' superfici:
+
+- `browser`: pagine, tab, snapshot, screenshot, download/upload, navigazione e form.
+- `shell`: comandi controllati, terminal excerpt, exit status, cwd, durata e output redatto.
+- `artifacts`: file prodotti, PDF, screenshot, esportazioni, log e transcript.
+- `logs`: eventi di avanzamento, warning, errori, checkpoint e decisioni policy.
+- `desktop`: futura superficie opzionale per osservazione/controllo OS, soggetta a permessi macOS/Windows/Linux specifici.
+
+Responsabilita':
+
+- unificare browser automation, shell runner e artifact/log preview sotto una sola sessione task.
+- produrre eventi UI-safe in streaming e checkpoint persistenti.
+- conservare thumbnail/preview bounded e redatte.
+- mostrare stato e progress senza esporre payload raw.
+- gestire pause, resume, cancel, takeover manuale e approvazioni.
+- distinguere azioni read-only, draft, write-with-confirmation e approved automation.
+- delegare scheduling, lease, retry e giorni di durata al Durable Task Runtime.
+
+Read model minimo:
+
+```text
+computer_session_id
+task_id
+workflow_id
+status
+active_surface
+surfaces[]
+activity_title
+progress_current
+progress_total
+elapsed_seconds
+preview_frame_ref
+current_url
+terminal_excerpt
+artifact_refs[]
+timeline[]
+approval_state
+takeover_state
+risk_level
+```
+
+Eventi principali:
+
+```text
+computer_session_started
+computer_surface_started
+computer_action_started
+computer_action_completed
+computer_frame_captured
+computer_terminal_output
+computer_checkpoint_recorded
+computer_waiting_approval
+computer_takeover_requested
+computer_takeover_started
+computer_takeover_completed
+computer_session_completed
+computer_session_failed
+```
+
+Regole:
+
+- il Brain pianifica e spiega, ma non controlla direttamente browser o shell.
+- il Durable Task Runtime possiede stato lungo, queue, priorita' e risorse.
+- il Local Computer Session Manager possiede il read model operativo e le preview.
+- ogni superficie ha policy dedicata, ma audit e UX sono unificati.
+- la shell non esegue comandi liberi senza classificazione rischio, allow/deny policy e redaction.
+- login, 2FA, CAPTCHA, pagamenti, invii, prenotazioni, deploy, cancellazioni e condivisioni esterne bloccano su approvazione o takeover.
+- il takeover manuale deve essere esplicito e reversibile a livello UI: l'utente vede cosa sta controllando e quando restituisce il controllo all'assistant.
+
+UX:
+
+- nella chat il progresso appare come timeline inline sobria, non come log tecnico.
+- la Local Computer activity card mostra titolo, superficie attiva, preview, elapsed time e step `n / total`.
+- il dettaglio computer si apre on demand come panel o modal, con tab per Browser, Terminale, File e Log.
+- l'activity card resta agganciata al task e sopravvive a reload/crash tramite checkpoint.
+- i dati sensibili vengono redatti prima di entrare nel read model UI.
+
+### 5. Subagent Manager
 
 Il Subagent Manager e' il coordinatore operativo dell'assistant. Non e' un modello e non e' un endpoint chat. Vive nel Rust Core e usa il runtime LLM locale come motore di inferenza dietro contratti rigidi.
 
@@ -401,7 +512,7 @@ Event batch
   -> approval center / automation proposal
 ```
 
-### 5. Local LLM Runtime
+### 6. Local LLM Runtime
 
 Runtime Mac iniziale:
 
@@ -443,7 +554,7 @@ Il runtime espone primitive per i subagenti, non un'interfaccia di autonomia:
 - `analyze_image`: analisi locale di immagini/screenshot.
 - `benchmark`: verifica regressioni dei contratti locali.
 
-### 6. Contratti LLM
+### 7. Contratti LLM
 
 Ogni output operativo deve avere schema validato.
 
@@ -892,7 +1003,7 @@ Implementato:
 
 ### Fase 6 - Browser Automation
 
-Stato: runtime/core production-ready implementato.
+Stato: runtime/core production-ready implementato come superficie browser della futura Local Computer Session.
 
 Deliverable:
 
@@ -906,6 +1017,7 @@ Deliverable:
 - integrazione con Durable Task Runtime per ricerche, monitoraggi e operazioni di giorni.
 
 Regola: il browser engine esegue step controllati, ma non possiede la durata del task.
+La UI non deve trattarlo come pannello isolato: browser automation viene mostrata dentro la Local Computer Session insieme a shell, artifact e log.
 
 Implementato:
 
@@ -933,8 +1045,26 @@ Implementato:
 
 Non ancora incluso in questo slice:
 
-- UI Tauri per osservare/intervenire sui task browser.
+- UI Tauri per osservare/intervenire sui task browser dentro la Local Computer Session.
 - install helper Playwright browser esplicito e packaging desktop.
+
+### Fase 6.5 - Local Computer Session
+
+Stato: specifica prodotto/architettura aggiornata dopo analisi Manus live.
+
+Deliverable:
+
+- crate o modulo Rust per `LocalComputerSessionManager`.
+- store SQLite per sessioni, superfici, timeline, preview refs, terminal excerpts e artifact refs.
+- event stream UI-safe per browser, shell, file/artifact e log.
+- shell surface controllata con allow/deny policy, cwd confinato, redaction e transcript bounded.
+- integrazione browser surface con `crates/browser-automation`.
+- integrazione con Durable Task Runtime per task di ore/giorni, retry, queue, approvals e resource limits.
+- integrazione con Brain/Capability Layer: il Brain richiede azioni, il core classifica, il task runtime esegue, la sessione computer visualizza.
+- read model Tauri per activity card, timeline inline, computer detail panel e takeover.
+- test di redaction su terminale/log/artifact e test UI che impediscono esposizione di raw payload.
+
+Regola: il "computer" del prodotto e' multi-superficie. Browser e shell sono due viste dello stesso lavoro operativo, non due feature scollegate.
 
 ### Fase 7 - Desktop Observation MVP
 
@@ -955,11 +1085,18 @@ Deliverable:
 - task queue e task detail.
 - inbox assistant.
 - chat.
+- chat home centrale e active-task thread con composer sticky in basso.
+- rail primaria con drawer espandibile on demand.
+- Local Computer activity card con preview browser/shell/artifact.
+- computer detail panel/modal con Browser, Terminale, File e Log.
+- timeline inline di piano e avanzamento.
 - routine detected.
 - connectors needed.
 - memories learned.
 - approval center.
 - settings/privacy.
+- plugin/connectors page curata con search, sezioni connettori/skill e create menu.
+- settings come area dedicata o modal ampia con menu interno, non pannello compresso.
 
 ### Fase 9 - First Automation
 
@@ -999,6 +1136,7 @@ local-first-personal-assistant/
     core/
     memory/
     task-runtime/
+    local-computer-session/
     process-manager/
     secrets/
     connectors/
@@ -1035,6 +1173,7 @@ local-first-personal-assistant/
 
 - OpenHuman, spunto di riferimento da studiare e adattare, non da copiare: https://github.com/tinyhumansai/openhuman
 - OpenClaw, riferimento principale per browser automation, da adattare con attribution MIT: https://github.com/openclaw/openclaw
+- Manus, riferimento UX da studiare per chat operativa, task visibili, Local Computer, popover e progressive disclosure; non base tecnica da copiare: https://manus.im/app
 - Graphify repo: https://github.com/safishamsi/graphify
 - GraphifyLabs: https://graphifylabs.ai/
 - Obsidian Wiki: https://github.com/Ar9av/obsidian-wiki
@@ -1050,12 +1189,15 @@ local-first-personal-assistant/
 
 ## Prossima Azione Consigliata
 
-Cablaggio progressivo della UI Tauri ai read model reali del Rust Core:
+Prima consolidare la direzione UI/runtime Local Computer, poi cablare progressivamente la UI Tauri ai read model reali del Rust Core:
 
 ```text
 apps/desktop/
 apps/desktop/src/
 apps/desktop/src-tauri/
+crates/local-computer-session/
+crates/browser-automation/
+crates/task-runtime/
 ```
 
-Runtime Python/MLX, memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager, Secrets/Keychain, Skill/Plugin Registry, Skill Runtime Sandbox, process adapter trusted, WASM adapter non trusted e Assistant Orchestrator Brain hanno una base operativa testata. Il primo slice UI ora esiste con mock realistici; il prossimo blocco deve sostituire i mock con Tauri commands/read model reali senza cambiare la struttura visuale.
+Runtime Python/MLX, memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager, Secrets/Keychain, Skill/Plugin Registry, Skill Runtime Sandbox, process adapter trusted, WASM adapter non trusted e Assistant Orchestrator Brain hanno una base operativa testata. Il primo slice UI esiste con mock realistici, ma la direzione visuale e' stata aggiornata: prima va introdotto il modello Local Computer e la UI va portata verso rail/drawer, chat attiva con activity card e progressive disclosure; poi i mock vanno sostituiti con Tauri commands/read model reali.

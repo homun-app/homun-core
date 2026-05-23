@@ -862,4 +862,20 @@ Perche': la UI e' il primo punto di fiducia del prodotto. Serviva un prototipo o
 
 ## Prossimo blocco
 
-- Desktop backend bridge: sostituire i mock UI con Tauri commands/read model reali per health processi, task queue, approvals, Brain audit, memory summary e capability connections.
+### Local Computer Session e direzione UX Manus
+
+- Navigata e analizzata Manus live dopo login per capire interazioni reali, menu, chat attiva, plugin, pianificazione, activity card e computer panel.
+- Confermato che Manus e' un riferimento UX, non una base tecnica da copiare.
+- Confermato che il "computer" non e' solo browser: deve includere anche shell/terminale, file/artifact e log.
+- Creato ADR `docs/decisions/0002-local-computer-session-ux.md`.
+- Creata spec `docs/superpowers/specs/2026-05-23-local-computer-session-ux-design.md`.
+- Aggiornato `PROJECT.md` con `Local Computer Session Manager`, superfici Browser/Shell/Artifact/Log, risorse `computer_session` e `shell_process`, Fase 6.5 e nuova direzione UI.
+- La chat deve diventare rail/drawer + thread centrale + activity card, con dettagli on demand tramite popover/modal/panel.
+- L'inspector non deve essere il default: piano, utilizzo, file, computer e audit devono apparire solo quando l'utente li chiede o quando un task richiede attenzione.
+- Il prossimo cablaggio UI non deve collegare direttamente i mock a task/browser: prima serve il read model Local Computer per evitare di cementare una UX sbagliata.
+
+Perche': l'esperienza utente e' parte centrale del prodotto. Se browser e shell restano pannelli tecnici separati, l'assistant sembra grezzo e difficile da fidare. Una sessione computer locale, visibile e redatta, permette di mostrare lavoro reale, approvazioni e takeover senza sacrificare local-first, audit e policy.
+
+## Prossimo blocco
+
+- Local Computer Session: implementare store/read model/event stream e aggiornare la UI Tauri verso rail/drawer, chat attiva con activity card, computer detail panel e progressive disclosure. Dopo questo, cablare health processi, task queue, approvals, Brain audit, memory summary e capability connections ai read model reali.
