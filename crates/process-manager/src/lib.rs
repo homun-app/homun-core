@@ -13,7 +13,7 @@ pub use health::{DefaultHealthProbe, HealthProbe, HealthProbeResult, evaluate_he
 pub use log_buffer::{LogBuffer, LogEntry, LogStream};
 pub use manager::{ProcessDetail, ProcessManager};
 pub use store::ProcessRegistryStore;
-pub use supervisor::{FakeProcessSupervisor, ProcessSupervisor};
+pub use supervisor::{FakeProcessSupervisor, LocalProcessSupervisor, ProcessSupervisor};
 pub use types::{
     HealthCheck, ProcessKind, ProcessSnapshot, ProcessSpec, ProcessStatus, RestartPolicy,
 };

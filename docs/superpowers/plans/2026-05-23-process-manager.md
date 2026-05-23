@@ -45,11 +45,11 @@
 
 ### Task 3: Local Process Supervisor
 
-- [ ] Write failing integration test that spawns a real short-lived local process, captures output, observes exit and exposes snapshots.
-- [ ] Run targeted test and verify failure.
-- [ ] Implement local process supervisor with stdout/stderr capture, idempotent start, stop/kill and status polling.
-- [ ] Run targeted test until green.
-- [ ] Commit as `Add local process supervisor`.
+- [x] Write failing integration test that spawns a real short-lived local process, captures output, observes exit and exposes snapshots.
+- [x] Run targeted test and verify failure.
+- [x] Implement local process supervisor with stdout/stderr capture, idempotent start, stop/kill and status polling.
+- [x] Run targeted test until green.
+- [x] Commit as `Add local process supervisor`.
 
 ### Task 4: Verification And Docs
 
