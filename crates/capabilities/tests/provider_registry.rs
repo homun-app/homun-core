@@ -1,7 +1,9 @@
 use local_first_capabilities::{
-    ActionClass, CachedCapabilityTool, CapabilityConnectionConfig, CapabilityProviderConfig,
-    CapabilityProviderGrant, CapabilityProviderKind, CapabilityRegistryStore, ConnectionStatus,
-    DataBoundary, ManagedProviderMetadata, ProviderId, UserId, WorkspaceId,
+    ActionClass, CachedCapabilityTool, CapabilityConnectionConfig, CapabilityFacade,
+    CapabilityPolicy, CapabilityProviderConfig, CapabilityProviderGrant, CapabilityProviderKind,
+    CapabilityRegistryStore, CapabilityTool, ConnectionStatus, DataBoundary,
+    FakeCapabilityProvider, InMemoryCapabilityAudit, ManagedProviderMetadata, ProviderId, UserId,
+    WorkspaceId,
 };
 use local_first_task_runtime::ResourceClass;
 
@@ -169,6 +171,49 @@ fn registry_round_trips_tool_cache_for_provider() {
     assert_eq!(tools[0].tool.input_schema["required"][0], "query");
 }
 
+#[test]
+fn registry_policy_context_filters_facade_tools() {
+    let store = CapabilityRegistryStore::open_in_memory().unwrap();
+    store
+        .upsert_provider_config(&provider_config("github", CapabilityProviderKind::Native))
+        .unwrap();
+    store
+        .upsert_provider_grant(
+            &CapabilityProviderGrant::new(
+                ProviderId::new("github"),
+                UserId::new("user_1"),
+                WorkspaceId::new("workspace_1"),
+            )
+            .with_privacy_domains(vec!["work".to_string()])
+            .with_allowed_actions(vec![ActionClass::Read])
+            .with_max_autonomy_level(1),
+        )
+        .unwrap();
+
+    let mut facade = CapabilityFacade::new(CapabilityPolicy::new(), InMemoryCapabilityAudit::new());
+    facade.register_provider(FakeCapabilityProvider::new(
+        ProviderId::new("github"),
+        CapabilityProviderKind::Native,
+        true,
+        None,
+        vec![
+            tool("github.search", ActionClass::Read),
+            tool("github.create_issue", ActionClass::WriteWithConfirmation),
+        ],
+    ));
+
+    let context = store
+        .policy_context(&UserId::new("user_1"), &WorkspaceId::new("workspace_1"))
+        .unwrap();
+    let access = facade.list_tools(&context).unwrap();
+
+    assert_eq!(
+        access.visible_tool_names(),
+        vec!["github.create_issue", "github.search"]
+    );
+    assert_eq!(access.executable_tool_names(), vec!["github.search"]);
+}
+
 fn provider_config(
     provider_id: impl Into<String>,
     provider_kind: CapabilityProviderKind,
@@ -179,4 +224,17 @@ fn provider_config(
         "Provider".to_string(),
         false,
     )
+}
+
+fn tool(name: impl Into<String>, action: ActionClass) -> CapabilityTool {
+    CapabilityTool {
+        name: name.into(),
+        provider_id: ProviderId::new("github"),
+        provider_kind: CapabilityProviderKind::Native,
+        action,
+        description: "GitHub tool".to_string(),
+        privacy_domains: vec!["work".to_string()],
+        sensitivity: "private".to_string(),
+        input_schema: serde_json::json!({"type": "object"}),
+    }
 }

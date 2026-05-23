@@ -18,10 +18,10 @@
 - Create: `crates/capabilities/src/registry.rs`
 - Test: `crates/capabilities/tests/provider_registry.rs`
 
-- [ ] Write failing tests for schema, provider config roundtrip, grant policy context and disabled grants.
-- [ ] Implement registry contract types and SQLite store.
-- [ ] Run `cargo test -p local-first-capabilities --test provider_registry`.
-- [ ] Commit as `Add capability provider registry store`.
+- [x] Write failing tests for schema, provider config roundtrip, grant policy context and disabled grants.
+- [x] Implement registry contract types and SQLite store.
+- [x] Run `cargo test -p local-first-capabilities --test provider_registry`.
+- [x] Commit as `Add capability provider registry store`.
 
 ### Task 2: Connections, Tool Cache And Resource Hints
 
@@ -29,10 +29,10 @@
 - Modify: `crates/capabilities/src/registry.rs`
 - Test: `crates/capabilities/tests/provider_registry.rs`
 
-- [ ] Write failing tests for connection secret refs, tool cache and resource hints.
-- [ ] Implement connection config, tool cache and provider resource/rate metadata.
-- [ ] Run `cargo test -p local-first-capabilities --test provider_registry`.
-- [ ] Commit as `Add capability registry metadata cache`.
+- [x] Write failing tests for connection secret refs, tool cache and resource hints.
+- [x] Implement connection config, tool cache and provider resource/rate metadata.
+- [x] Run `cargo test -p local-first-capabilities --test provider_registry`.
+- [x] Commit as `Add capability registry metadata cache`.
 
 ### Task 3: Facade Integration And Docs
 
@@ -42,9 +42,8 @@
 - Modify: `docs/work-memory.md`
 - Modify: `docs/superpowers/plans/2026-05-23-capability-provider-registry.md`
 
-- [ ] Write integration test using registry-derived `PolicyContext` with `CapabilityFacade`.
-- [ ] Mark completed plan steps.
-- [ ] Update work memory.
-- [ ] Run `make test`.
-- [ ] Commit as `Document capability provider registry`.
-
+- [x] Write integration test using registry-derived `PolicyContext` with `CapabilityFacade`.
+- [x] Mark completed plan steps.
+- [x] Update work memory.
+- [x] Run `make test`.
+- [x] Commit as `Document capability provider registry`.

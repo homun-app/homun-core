@@ -563,4 +563,21 @@ Perche': ora anche connettori, MCP e provider managed possono usare code, lease,
 
 ## Prossimo blocco
 
-- Aggiungere provider registry/config persistente, cosi' capability e managed provider possono essere abilitati per user/workspace e usati dai task durevoli senza configurazione in memoria.
+### Capability provider registry persistente
+
+- Creato design `docs/superpowers/specs/2026-05-23-capability-provider-registry-design.md`.
+- Creato piano `docs/superpowers/plans/2026-05-23-capability-provider-registry.md`.
+- Aggiunta `CapabilityRegistryStore` SQLite nel crate `crates/capabilities`.
+- La registry salva config provider, tipo provider, metadata managed, hint risorsa e rate limit.
+- Aggiunti grant user/workspace con privacy domains, action consentite, autonomia massima, opt-in managed cloud e abilitazione/disabilitazione.
+- La registry deriva `PolicyContext` dai grant abilitati e lo usa con `CapabilityFacade`.
+- Aggiunte connection config persistenti con `secret_ref` separato: i segreti restano fuori dal DB e i metadata vengono sanitizzati da token/password/api key.
+- Aggiunta cache strumenti per provider con schema input, action class, privacy domains, sensitivity e provider kind.
+- Test coprono migrazioni idempotenti, config provider, grant policy, managed opt-in, connessioni secret-ref-only, tool cache e integrazione Facade.
+
+Perche': capability, MCP e provider managed non possono restare configurati solo in memoria. Serve una registry locale, multiutente/workspace e policy-aware per abilitare provider, collegare account, mostrare tool alla UI/subagenti e mandare tool call durevoli nel Task Runtime senza dipendere da un vendor.
+
+## Prossimo blocco
+
+- Progettare e implementare il modulo `browser-automation` come capability separata, usando il Durable Task Runtime per durata, code, retry, risorse e approvazioni.
+- Integrare `BrowserCapabilityProvider` nel Capability Layer con policy per dominio, privacy domain, handoff per CAPTCHA/2FA/pagamenti e azioni atomiche auditabili.

@@ -41,6 +41,7 @@ Principi:
 - Orchestrazione: subagenti locali coordinati dal Rust Core, non dal runtime LLM.
 - Capability Layer: provider-neutral contracts for channels, native connectors, MCP, skills and optional managed integration aggregators.
 - Managed integrations: Composio/Zapier/Pipedream style providers are allowed only as explicit opt-in adapters, never as implicit core dependencies.
+- Capability provider registry: provider config, grant user/workspace, connessioni, tool cache e policy context devono essere persistenti in SQLite locale.
 
 ### Test Gemma 4 locale
 
@@ -92,6 +93,7 @@ Tauri React UI
       -> Checkpoints
       -> Approval Gates
     -> Capability Manager
+      -> Provider Registry
       -> Channels
       -> Native Connectors
       -> MCP Adapter
@@ -638,6 +640,8 @@ Strategia:
 - fallback browser automation solo quando non esiste API affidabile.
 - i task lunghi, paralleli o sospesi non vivono nei connettori: vengono sempre orchestrati dal Durable Task Runtime.
 - le capability/tool call possono essere montate su `TaskRuntime` tramite bridge dedicato.
+- provider, connessioni, grant e tool cache vengono registrati in SQLite locale tramite `CapabilityRegistryStore`.
+- i segreti dei connettori restano in keychain/secure storage e nel DB viene salvato solo un `secret_ref`.
 
 Permessi per connettore:
 
@@ -800,6 +804,8 @@ Implementato:
 - `TaskExecutor` e `TaskRuntime` facade con executor finto testabile.
 - read model UI-safe per coda, task attivi, blocchi, approvazioni, risorse e checkpoint redatti.
 - bridge subagenti e capability/tool call verso `TaskRuntime`.
+- provider registry persistente nel Capability Layer con config provider, grant user/workspace, connection config secret-ref-only e tool cache.
+- `CapabilityRegistryStore` deriva `PolicyContext` usabile direttamente da `CapabilityFacade`.
 
 ### Fase 6 - Browser Automation
 
@@ -927,12 +933,13 @@ local-first-personal-assistant/
 
 ## Prossima Azione Consigliata
 
-Consolidare il Durable Task Runtime come fondamento trasversale:
+Progettare e implementare il modulo Browser Automation come capability separata:
 
 ```text
-crates/task-runtime/
-docs/superpowers/specs/2026-05-23-durable-task-runtime-design.md
-docs/superpowers/plans/2026-05-23-durable-task-runtime.md
+crates/browser-automation/
+crates/capabilities/src/browser.rs
+docs/superpowers/specs/2026-05-23-browser-automation-design.md
+docs/superpowers/plans/2026-05-23-browser-automation.md
 ```
 
-Il runtime Python/MLX, la memoria, i subagenti e il Capability Layer hanno gia' una base operativa. Il prossimo collo di bottiglia architetturale e' la durata del lavoro: task multipli, code, priorita', risorse, checkpoint, approvazioni e ripresa dopo crash. Questo va risolto nel Rust Core prima di implementare browser automation reale.
+Il runtime Python/MLX, la memoria, i subagenti, il Durable Task Runtime e il Capability Layer hanno una base operativa. Il prossimo blocco e' il browser locale: navigazione, DOM/screenshot, form, prenotazioni, task lunghi e handoff sensibili, sempre dietro policy, audit, registry provider e Resource Governor.
