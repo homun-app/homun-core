@@ -150,6 +150,20 @@ export interface CoreComputerSessionSnapshot {
   updated_at: string;
 }
 
+export interface CorePromptMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  text: string;
+  timestamp: string;
+  metadata: string | null;
+}
+
+export interface CorePromptSubmissionResult {
+  user_message: CorePromptMessage;
+  assistant_message: CorePromptMessage;
+  computer_session: CoreComputerSessionSnapshot;
+}
+
 export const coreBridge = {
   status: () => invoke<CoreBridgeStatus>("core_bridge_status"),
   runtimeHealth: () =>
@@ -177,5 +191,10 @@ export const coreBridge = {
   runLocalComputerSmokeTest: (sessionId: string) =>
     invoke<CoreComputerSessionSnapshot>("local_computer_run_smoke_test", {
       sessionId,
+    }),
+  submitUserPrompt: (sessionId: string, prompt: string) =>
+    invoke<CorePromptSubmissionResult>("submit_user_prompt", {
+      sessionId,
+      prompt,
     }),
 };

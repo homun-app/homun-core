@@ -2,6 +2,7 @@ use crate::models::{
     BridgeStatus, CapabilitySnapshot, DesktopTaskDetail, DesktopTaskQueueSnapshot,
     RuntimeHealthSnapshot, RuntimeProcessItem,
 };
+use crate::prompt_submission::PromptSubmissionResult;
 use crate::state::DesktopCoreState;
 use local_first_local_computer_session::ComputerSessionSnapshot;
 use local_first_memory::MemoryDashboard;
@@ -85,4 +86,13 @@ pub fn local_computer_run_smoke_test(
     session_id: String,
 ) -> Result<ComputerSessionSnapshot, String> {
     state.run_local_computer_smoke_test(&session_id)
+}
+
+#[tauri::command]
+pub fn submit_user_prompt(
+    state: tauri::State<'_, DesktopCoreState>,
+    session_id: String,
+    prompt: String,
+) -> Result<PromptSubmissionResult, String> {
+    state.submit_user_prompt(&session_id, &prompt)
 }

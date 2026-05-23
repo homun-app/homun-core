@@ -40,6 +40,7 @@ assertContains("src/components/ChatView.tsx", "computer-detail-panel", "computer
 assertContains("src/components/ChatView.tsx", "timeline-step", "assistant progress must be inline timeline");
 assertContains("src/components/ChatView.tsx", "composer-surface", "prompt composer must have a stable anchored surface");
 assertContains("src/components/ChatView.tsx", "coreBridge.localComputerSession", "chat local computer card must load the Tauri read model");
+assertContains("src/components/ChatView.tsx", "coreBridge.submitUserPrompt", "composer must submit prompts to the Tauri core");
 assertContains("src/components/ChatView.tsx", "coreBridge.runLocalComputerSmokeTest", "chat must expose a real local computer smoke test action");
 assertContains("src/components/ChatView.tsx", "mapCoreComputerSession", "chat local computer card must map the core snapshot before rendering");
 assertContains("src/lib/localComputerViewModel.ts", "payload_redacted", "local computer UI mapping must preserve redaction contract");

@@ -17,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent } from "react";
 import { coreBridge } from "../lib/coreBridge";
 import {
   createLoadingComputerSession,
@@ -53,6 +54,7 @@ export function ChatView({
   health,
   task,
 }: ChatViewProps) {
+  const [threadMessages, setThreadMessages] = useState<ChatMessage[]>(() => messages);
   const [computerSession, setComputerSession] = useState<ComputerSession>(() =>
     createLoadingComputerSession(computerSessionId),
   );
@@ -62,6 +64,8 @@ export function ChatView({
   );
   const [smokeTestRunning, setSmokeTestRunning] = useState(false);
   const [smokeTestError, setSmokeTestError] = useState<string | null>(null);
+  const [promptSubmitting, setPromptSubmitting] = useState(false);
+  const [promptError, setPromptError] = useState<string | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const conversationRef = useRef<HTMLDivElement>(null);
@@ -81,6 +85,53 @@ export function ChatView({
       setSmokeTestError(describeBridgeError(error));
     } finally {
       setSmokeTestRunning(false);
+    }
+  }
+
+  async function submitPrompt(prompt: string) {
+    const text = prompt.trim();
+    if (!text) return;
+
+    setPromptSubmitting(true);
+    setPromptError(null);
+    setThreadMessages((current) => [
+      ...current,
+      {
+        id: `local_user_${Date.now()}`,
+        role: "user",
+        text,
+        timestamp: "ora",
+        metadata: "Inviato al core locale",
+      },
+    ]);
+
+    try {
+      const result = await coreBridge.submitUserPrompt(computerSessionId, text);
+      setComputerSession(mapCoreComputerSession(result.computer_session));
+      setThreadMessages((current) => [
+        ...current,
+        {
+          id: result.assistant_message.id,
+          role: result.assistant_message.role,
+          text: result.assistant_message.text,
+          timestamp: result.assistant_message.timestamp,
+          metadata: result.assistant_message.metadata ?? undefined,
+        },
+      ]);
+    } catch (error) {
+      const message = describeBridgeError(error);
+      setPromptError(message);
+      setThreadMessages((current) => [
+        ...current,
+        {
+          id: `local_error_${Date.now()}`,
+          role: "system",
+          text: message,
+          timestamp: "ora",
+        },
+      ]);
+    } finally {
+      setPromptSubmitting(false);
     }
   }
 
@@ -142,7 +193,7 @@ export function ChatView({
       window.clearTimeout(timeout);
       window.removeEventListener("resize", handleResize);
     };
-  }, [messages, detailsOpen]);
+  }, [threadMessages, detailsOpen]);
 
   return (
     <section className="chat-view active-task-layout" aria-labelledby="chat-title">
@@ -202,7 +253,7 @@ export function ChatView({
 
       <div className="thread-scroll" aria-label="Thread attivo" ref={conversationRef}>
         <div className="thread-content">
-          {messages.map((message) => (
+          {threadMessages.map((message) => (
             <article className={`message ${message.role}`} key={message.id}>
               {message.role !== "user" && (
                 <header className="assistant-label">
@@ -243,7 +294,11 @@ export function ChatView({
         />
       )}
 
-      <Composer />
+      <Composer
+        disabled={promptSubmitting}
+        error={promptError}
+        onSubmit={submitPrompt}
+      />
     </section>
   );
 }
@@ -473,12 +528,33 @@ function ComputerDetailPanel({
   );
 }
 
-function Composer() {
+function Composer({
+  disabled,
+  error,
+  onSubmit,
+}: {
+  disabled: boolean;
+  error: string | null;
+  onSubmit: (prompt: string) => void;
+}) {
+  const [value, setValue] = useState("");
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const prompt = value.trim();
+    if (!prompt || disabled) return;
+    setValue("");
+    onSubmit(prompt);
+  }
+
   return (
-    <form className="composer-surface" aria-label="Prompt operativo">
+    <form className="composer-surface" aria-label="Prompt operativo" onSubmit={handleSubmit}>
       <textarea
         aria-label="Richiesta per l'assistente"
+        disabled={disabled}
+        onChange={(event) => setValue(event.target.value)}
         placeholder="Invia un messaggio o aggiungi istruzioni al task"
+        value={value}
       />
       <div className="composer-toolbar">
         <div className="composer-actions">
@@ -494,7 +570,8 @@ function Composer() {
           <button className="icon-button" type="button" aria-label="Dettatura">
             <Mic size={17} />
           </button>
-          <button className="send-button" type="button" aria-label="Invia">
+          {error && <span className="composer-error">{error}</span>}
+          <button className="send-button" disabled={disabled || !value.trim()} type="submit" aria-label="Invia">
             <ArrowUp size={18} />
           </button>
         </div>

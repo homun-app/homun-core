@@ -5,6 +5,7 @@ use crate::models::{
     capability_connection_item, capability_tool_item, component, desktop_task_detail,
     desktop_task_queue, runtime_process_item, runtime_process_item_with_snapshot,
 };
+use crate::prompt_submission::{self, PromptSubmissionResult};
 use crate::seed::{seed_capabilities, seed_memories, seed_tasks};
 use local_first_capabilities::{
     CapabilityRegistryStore, ProviderId, UserId as CapabilityUserId,
@@ -265,6 +266,24 @@ impl DesktopCoreState {
             session_id,
         )
     }
+
+    pub fn submit_user_prompt(
+        &self,
+        session_id: &str,
+        prompt: &str,
+    ) -> Result<PromptSubmissionResult, String> {
+        let manager = self
+            .local_computer
+            .lock()
+            .map_err(|_| "local computer lock poisoned".to_string())?;
+        prompt_submission::submit_user_prompt(
+            &manager,
+            &self.user_id,
+            &self.workspace_id,
+            session_id,
+            prompt,
+        )
+    }
 }
 
 fn memory_access_request(user_id: &str, workspace_id: &str) -> MemoryAccessRequest {
@@ -460,5 +479,34 @@ mod tests {
         );
         assert!(snapshot.progress_current >= 2);
         assert!(!serialized.contains("raw_payload"));
+    }
+
+    #[test]
+    fn submit_user_prompt_runs_local_time_request_without_storing_raw_prompt() {
+        let state = state();
+
+        let result = state
+            .submit_user_prompt("computer_train_search", "che ore sono?")
+            .unwrap();
+        let serialized = serde_json::to_string(&result).unwrap();
+
+        assert_eq!(result.user_message.role, "user");
+        assert_eq!(result.assistant_message.role, "assistant");
+        assert!(result.assistant_message.text.contains("localmente"));
+        assert!(
+            result
+                .computer_session
+                .terminal_excerpt_redacted
+                .iter()
+                .any(|line| line.contains("prompt % date"))
+        );
+        assert!(!serialized.contains("che ore sono?"));
+        assert!(
+            result
+                .computer_session
+                .timeline
+                .iter()
+                .any(|item| { item.kind == "user_prompt_received" && item.payload_redacted })
+        );
     }
 }

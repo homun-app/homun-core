@@ -1063,7 +1063,39 @@ Perche': ora l'utente puo' fare un test reale end-to-end dentro la app Tauri: no
 
 ## Prossimo blocco
 
+### Composer cablato al Tauri Core
+
+- Aggiunto modulo `apps/desktop/src-tauri/src/prompt_submission.rs`.
+- Aggiunto command Tauri `submit_user_prompt`.
+- Il composer React ora invia il prompt a `coreBridge.submitUserPrompt(...)`.
+- La UI aggiunge il messaggio utente localmente e riceve dal core una risposta assistant.
+- Il core non salva il prompt raw nel read model:
+  - registra evento `user_prompt_received`;
+  - payload UI sempre redatto;
+  - conserva solo conteggio caratteri e metadati operativi.
+- Primo handler deterministico reale:
+  - se il prompt chiede ora/data, esegue `date '+%Y-%m-%d %H:%M:%S %Z'`;
+  - registra output terminale redatto nella Local Computer Session;
+  - risponde in chat con il valore ottenuto localmente.
+- Per prompt generici registra lo stato `prompt_pending_brain`, perche' il planner Brain operativo resta il prossimo layer.
+- Aggiunto test Rust `submit_user_prompt_runs_local_time_request_without_storing_raw_prompt`.
+- Aggiornato il contratto UI per imporre che il composer usi il command Tauri reale.
+- Rigenerata e aperta la app Tauri debug.
+- Verifiche eseguite:
+  - RED: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml submit_user_prompt_runs_local_time_request_without_storing_raw_prompt` falliva per metodo mancante.
+  - RED: `npm run test:ui-contract` falliva per command UI mancante.
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`
+  - GREEN: `npm run typecheck`
+  - GREEN: `npm run test:ui-contract`
+  - GREEN: `npm run build`
+  - GREEN: `npm run tauri -- build --debug --bundles app --no-sign`
+
+Perche': ora l'utente puo' digitare davvero un prompt nella app. Non e' ancora il Brain completo, ma il circuito UI -> Tauri Core -> shell locale -> Local Computer Session -> chat e' reale e testabile.
+
+## Prossimo blocco
+
 - Collegare Tasks/Approvals ai command `task_queue_snapshot` e `task_detail`.
 - Collegare Connections/Settings ai command capability/runtime esistenti.
 - Collegare il Browser Automation Runtime alla `LocalComputerSessionManager`, cosi' le azioni reali producono eventi, artifact e preview nella stessa card.
+- Collegare il composer al Brain operativo per trasformare prompt generici in piani/tool/task invece dell'attuale `prompt_pending_brain`.
 - Lasciare `LearningUiReadModel` e azioni di feedback utente per la fine, quando gli eventi PC reali saranno disponibili.

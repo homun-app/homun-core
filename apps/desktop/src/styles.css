@@ -1023,6 +1023,15 @@ small {
   min-width: 0;
 }
 
+.composer-error {
+  max-width: 240px;
+  color: var(--danger);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .tool-chip,
 .suggestion-chip {
   min-height: 32px;
