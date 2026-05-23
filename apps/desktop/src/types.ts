@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react";
 
 export type ViewId =
   | "chat"
+  | "learning"
   | "tasks"
   | "memory"
   | "connections"
@@ -131,6 +132,28 @@ export interface MemorySummary {
   confirmed: number;
   candidates: number;
   domains: Array<{ label: string; count: number }>;
+}
+
+export interface LearningInsight {
+  id: string;
+  title: string;
+  summary: string;
+  domain: string;
+  cadence: string;
+  confidence: number;
+  status: "confirmed" | "candidate" | "needs_review";
+  evidence: string[];
+}
+
+export interface AutomationProposal {
+  id: string;
+  title: string;
+  summary: string;
+  trigger: string;
+  actions: string[];
+  autonomyLevel: number;
+  risk: "low" | "medium" | "high";
+  status: "ready" | "needs_connector" | "needs_approval";
 }
 
 export interface ConnectionItem {

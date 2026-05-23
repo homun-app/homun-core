@@ -1012,7 +1012,8 @@ small {
 .tasks-view,
 .connections-view,
 .settings-view,
-.shallow-view {
+.shallow-view,
+.learning-view {
   width: min(100%, 980px);
   margin: 0 auto;
 }
@@ -1333,6 +1334,12 @@ small {
   line-height: 1.55;
 }
 
+.eyebrow {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .stat-grid {
   margin-top: 22px;
   display: grid;
@@ -1352,6 +1359,212 @@ small {
 
 .stat-card span {
   color: var(--muted);
+}
+
+.learning-view {
+  width: min(100%, 1120px);
+  padding-bottom: 44px;
+}
+
+.learning-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 28px;
+  align-items: end;
+  margin-bottom: 28px;
+}
+
+.learning-header h2 {
+  margin-bottom: 10px;
+}
+
+.learning-summary {
+  min-width: 360px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: hidden;
+}
+
+.learning-summary span {
+  min-height: 72px;
+  padding: 13px 14px;
+  border-right: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.learning-summary span:last-child {
+  border-right: 0;
+}
+
+.learning-summary strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text);
+  font-size: 24px;
+}
+
+.learning-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(340px, 0.95fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.learning-section-title {
+  min-height: 48px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.habit-list,
+.automation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.habit-card,
+.automation-proposal {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 15px;
+  background: var(--surface);
+}
+
+.habit-card header,
+.automation-proposal header,
+.automation-actions,
+.learning-meta,
+.automation-trigger,
+.privacy-control {
+  display: flex;
+  align-items: center;
+}
+
+.habit-card header,
+.automation-proposal header {
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.habit-card h4,
+.automation-proposal h4 {
+  margin: 0 0 7px;
+  font-size: 15px;
+}
+
+.habit-card p,
+.automation-proposal p {
+  margin-bottom: 12px;
+  color: #3f434a;
+  line-height: 1.5;
+}
+
+.learning-status,
+.proposal-state {
+  min-height: 24px;
+  border-radius: 999px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+}
+
+.learning-status.confirmed,
+.proposal-state.ready {
+  color: #1f7638;
+  background: var(--green-soft);
+}
+
+.learning-status.candidate,
+.learning-status.needs_review,
+.proposal-state.needs_approval,
+.proposal-state.needs_connector {
+  color: #7a4f00;
+  background: var(--amber-soft);
+}
+
+.learning-meta {
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.learning-meta span,
+.automation-trigger {
+  min-height: 26px;
+  border-radius: 999px;
+  padding: 0 9px;
+  color: var(--muted);
+  background: var(--surface-muted);
+  font-size: 12px;
+}
+
+.evidence-list,
+.automation-proposal ul {
+  margin: 0 0 14px;
+  padding-left: 18px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.evidence-list li,
+.automation-proposal li {
+  margin-bottom: 5px;
+}
+
+.privacy-control {
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.privacy-control button {
+  min-height: 32px;
+  border-radius: 999px;
+  padding: 0 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text);
+  background: var(--surface-muted);
+}
+
+.privacy-control button:hover {
+  background: var(--surface-hover);
+}
+
+.automation-trigger {
+  width: fit-content;
+  gap: 7px;
+  margin-bottom: 12px;
+  color: #315f9d;
+  background: var(--blue-soft);
+}
+
+.automation-actions {
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.automation-actions > button {
+  gap: 6px;
+}
+
+.risk-badge.low {
+  color: #1f7638;
+  background: var(--green-soft);
 }
 
 @keyframes spin {
@@ -1479,12 +1692,29 @@ small {
   .feature-strip,
   .connector-grid,
   .settings-grid,
-  .stat-grid {
+  .stat-grid,
+  .learning-header,
+  .learning-overview,
+  .learning-summary {
     grid-template-columns: 1fr;
   }
 
+  .learning-summary {
+    min-width: 0;
+  }
+
+  .learning-summary span {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .learning-summary span:last-child {
+    border-bottom: 0;
+  }
+
   .page-heading,
-  .topbar {
+  .topbar,
+  .learning-header {
     align-items: flex-start;
     flex-direction: column;
   }

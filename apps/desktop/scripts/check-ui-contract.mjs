@@ -39,7 +39,15 @@ assertContains("src/components/ChatView.tsx", "local-computer-card", "active tas
 assertContains("src/components/ChatView.tsx", "computer-detail-panel", "computer details must be progressive disclosure");
 assertContains("src/components/ChatView.tsx", "timeline-step", "assistant progress must be inline timeline");
 assertContains("src/components/ChatView.tsx", "composer-surface", "prompt composer must have a stable anchored surface");
+assertContains("src/types.ts", "\"learning\"", "auto-learning must be a first-class view");
+assertContains("src/data/mockData.ts", "learningInsights", "auto-learning insights must live in separated mock data");
+assertContains("src/components/LearningView.tsx", "learning-view", "auto-learning must have a dedicated page");
+assertContains("src/components/LearningView.tsx", "habit-card", "learning page must expose learned habits");
+assertContains("src/components/LearningView.tsx", "automation-proposal", "learning page must expose possible automations");
+assertContains("src/components/LearningView.tsx", "evidence-list", "learning page must show why something was learned");
+assertContains("src/components/LearningView.tsx", "privacy-control", "learning page must expose correction/privacy controls");
 assertContains("src/styles.css", ".active-task-layout", "active task view must use a dedicated layout");
+assertContains("src/styles.css", ".learning-view", "learning page must have dedicated layout styles");
 assertContains("src/styles.css", "@media (max-width: 860px)", "responsive shell must define tablet/mobile behavior");
 assertNotContains("src/App.tsx", "Inspector", "inspector must not be part of default app shell");
 assertNotContains("src/App.tsx", "isInspectorCollapsed", "inspector state must not drive layout");

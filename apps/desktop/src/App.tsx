@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChatView } from "./components/ChatView";
 import { ConnectionsView } from "./components/ConnectionsView";
+import { LearningView } from "./components/LearningView";
 import { Shell } from "./components/Shell";
 import { ShallowView } from "./components/ShallowView";
 import { SettingsView } from "./components/SettingsView";
@@ -11,6 +12,8 @@ import {
   chatMessages,
   computerSession,
   connections,
+  automationProposals,
+  learningInsights,
   memorySummary,
   runtimeHealth,
   tasks,
@@ -76,6 +79,12 @@ export default function App() {
             approvals={approvals}
             selectedTaskId={selectedTask.id}
             onSelectTask={setSelectedTaskId}
+          />
+        )}
+        {activeView === "learning" && (
+          <LearningView
+            insights={learningInsights}
+            proposals={automationProposals}
           />
         )}
         {activeView === "settings" && (

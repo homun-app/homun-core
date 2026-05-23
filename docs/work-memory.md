@@ -900,4 +900,18 @@ Perche': la UI doveva seguire la nuova specifica Manus-inspired senza mantenere 
 
 ## Prossimo blocco
 
+### Auto-apprendimento come pagina fondativa
+
+- Aggiunta la view `Apprendimento` come sezione di primo livello nella UI desktop.
+- Separati i mock in `learningInsights` e `automationProposals`, pronti per essere sostituiti da read model Tauri.
+- La pagina mostra cosa il sistema pensa di aver imparato: titolo, dominio privacy, cadenza, confidenza, stato e prove redatte.
+- Ogni insight espone controlli espliciti: confermare, correggere o ignorare. Questo evita che l'auto-apprendimento diventi una scatola nera.
+- Aggiunta una sezione di automatismi possibili con trigger, azioni previste, livello di autonomia, rischio e stato di attivazione.
+- Esteso il contratto statico UI per rendere obbligatori view dedicata, habit card, automation proposal, evidence list, privacy control e layout dedicato.
+
+Perche': l'auto-apprendimento e' una differenza centrale del prodotto, ma deve essere governabile. La UI deve rendere visibile non solo l'automazione proposta, ma anche il motivo per cui il sistema l'ha dedotta e il modo per correggerla prima che diventi comportamento.
+
+## Prossimo blocco
+
 - Implementare il crate/read model reale `local-computer-session` e cablare la UI a Tauri commands per sessioni computer, task runtime, approvals e health, mantenendo la struttura rail/drawer + activity card.
+- Definire il read model reale per auto-apprendimento: insight, prove redatte, feedback utente, domini privacy e proposte di automazione.

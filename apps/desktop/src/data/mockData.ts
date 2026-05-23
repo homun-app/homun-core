@@ -14,10 +14,12 @@ import {
 } from "lucide-react";
 import type {
   ApprovalItem,
+  AutomationProposal,
   BrainRunDetail,
   ChatMessage,
   ComputerSession,
   ConnectionItem,
+  LearningInsight,
   MemorySummary,
   NavItem,
   RuntimeHealth,
@@ -27,6 +29,7 @@ import type {
 
 export const navItems: NavItem[] = [
   { id: "chat", label: "Nuovo compito", icon: MessageSquare },
+  { id: "learning", label: "Apprendimento", icon: Brain },
   { id: "connections", label: "Plugin", icon: Plug },
   { id: "automations", label: "Pianificato", icon: CalendarClock },
   { id: "memory", label: "Libreria", icon: Database },
@@ -237,6 +240,102 @@ export const memorySummary: MemorySummary = {
     { label: "browser", count: 24 },
   ],
 };
+
+export const learningInsights: LearningInsight[] = [
+  {
+    id: "morning_project_start",
+    title: "Avvio spesso dal progetto attivo",
+    summary:
+      "Quando inizi una sessione di lavoro chiedi prima stato git, task aperti e prossima azione utile.",
+    domain: "work",
+    cadence: "Mattina, giorni feriali",
+    confidence: 0.84,
+    status: "confirmed",
+    evidence: [
+      "6 sessioni locali con apertura progetto e controllo task",
+      "3 richieste consecutive hanno privilegiato stato, piano e verifica",
+      "Nessun dato raw salvato: solo metadati e riferimenti redatti",
+    ],
+  },
+  {
+    id: "travel_compare_before_booking",
+    title: "Vuoi confronto prima di acquistare",
+    summary:
+      "Sulle ricerche viaggio preferisci vedere opzioni, fonti e tradeoff prima di login, pagamento o prenotazione.",
+    domain: "personal",
+    cadence: "Quando emergono viaggi o prenotazioni",
+    confidence: 0.78,
+    status: "candidate",
+    evidence: [
+      "2 task browser hanno fermato il flusso prima di azioni sensibili",
+      "Le approval policy hanno bloccato pagamento e invio dati personali",
+      "La memoria contiene solo tratta, data e preferenza di confronto",
+    ],
+  },
+  {
+    id: "local_first_defaults",
+    title: "Preferenza local-first forte",
+    summary:
+      "Cloud e provider gestiti restano disattivati finche' non concedi un opt-in esplicito per il singolo dominio.",
+    domain: "privacy",
+    cadence: "Sempre",
+    confidence: 0.92,
+    status: "confirmed",
+    evidence: [
+      "Runtime locale Gemma 4 selezionato come default",
+      "Managed cloud marcato come disabilitato in health e settings",
+      "Le azioni write richiedono conferma utente",
+    ],
+  },
+];
+
+export const automationProposals: AutomationProposal[] = [
+  {
+    id: "daily_project_briefing",
+    title: "Briefing mattutino progetto",
+    summary:
+      "Preparare ogni mattina un riepilogo locale di git, task aperti, note recenti e blocker.",
+    trigger: "Giorni feriali alle 08:45 o quando apri il progetto",
+    actions: [
+      "Legge repository e task locali",
+      "Richiama memoria lavoro redatta",
+      "Propone la prossima azione senza inviare nulla",
+    ],
+    autonomyLevel: 2,
+    risk: "low",
+    status: "ready",
+  },
+  {
+    id: "travel_watchlist",
+    title: "Monitor offerte viaggio",
+    summary:
+      "Sorvegliare una tratta e avvisarti quando prezzo, orario o disponibilita' cambiano in modo rilevante.",
+    trigger: "Quando salvi una tratta con data futura",
+    actions: [
+      "Apre il browser locale in background",
+      "Confronta risultati con snapshot precedenti",
+      "Chiede approvazione prima di login o acquisto",
+    ],
+    autonomyLevel: 3,
+    risk: "medium",
+    status: "needs_approval",
+  },
+  {
+    id: "memory_candidate_review",
+    title: "Review settimanale delle abitudini",
+    summary:
+      "Mostrare cosa il sistema pensa di aver imparato e permetterti di confermare, correggere o cancellare.",
+    trigger: "Ogni venerdi' pomeriggio",
+    actions: [
+      "Raggruppa insight candidati per dominio privacy",
+      "Evidenzia prove redatte e livello confidenza",
+      "Applica solo le correzioni confermate",
+    ],
+    autonomyLevel: 1,
+    risk: "low",
+    status: "ready",
+  },
+];
 
 export const connections: ConnectionItem[] = [
   {
