@@ -146,11 +146,11 @@ export type BrowserMethod =
 - Modify: `crates/browser-automation/src/task_executor.rs`
 - Test: `crates/browser-automation/tests/task_executor.rs`
 
-- [ ] Write failing tests for browser task resource declaration, checkpoint result, manual blocker mapping and completed action output.
-- [ ] Run `cargo test -p local-first-browser-automation --test task_executor`.
-- [ ] Implement `BrowserTaskExecutor` and task payload contracts.
-- [ ] Run the targeted test.
-- [ ] Commit as `Add browser task executor`.
+- [x] Write failing tests for browser task resource declaration, checkpoint result, manual blocker mapping and completed action output.
+- [x] Run `cargo test -p local-first-browser-automation --test task_executor`.
+- [x] Implement `BrowserTaskExecutor` and task payload contracts.
+- [x] Run the targeted test.
+- [x] Commit as `Add browser task executor`.
 
 ### Task 7: Integration, Makefile And Docs
 

@@ -26,6 +26,14 @@ impl<T: BrowserTransport> BrowserAutomationClient<T> {
     }
 
     pub fn call(&self, method: BrowserMethod, params: Value) -> BrowserResult<Value> {
+        Ok(self.call_response(method, params)?.result()?.clone())
+    }
+
+    pub fn call_response(
+        &self,
+        method: BrowserMethod,
+        params: Value,
+    ) -> BrowserResult<BrowserResponse> {
         let id = format!("browser_req_{}", self.next_id.get());
         self.next_id.set(self.next_id.get() + 1);
         let request = BrowserRequest::new(id.clone(), method, params);
@@ -38,6 +46,6 @@ impl<T: BrowserTransport> BrowserAutomationClient<T> {
                 id
             )));
         }
-        Ok(response.result()?.clone())
+        Ok(response)
     }
 }
