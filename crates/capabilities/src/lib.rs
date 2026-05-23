@@ -6,6 +6,7 @@ mod facade;
 mod mcp;
 mod policy;
 mod provider;
+mod task_runtime_bridge;
 mod types;
 
 pub use audit::{CapabilityAuditEvent, InMemoryCapabilityAudit};
@@ -25,4 +26,5 @@ pub use mcp::{
 };
 pub use policy::{CapabilityPolicy, PolicyContext, ToolAccessDecision};
 pub use provider::{CapabilityProvider, FakeCapabilityProvider};
+pub use task_runtime_bridge::*;
 pub use types::*;
