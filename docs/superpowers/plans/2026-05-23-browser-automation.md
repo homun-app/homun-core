@@ -98,12 +98,12 @@ export type BrowserMethod =
 - Test: `runtimes/browser-automation/tests/browser_fixture.test.ts`
 - Test fixture: `runtimes/browser-automation/tests/fixtures/form.html`
 
-- [ ] Write failing fixture test for `start -> open -> snapshot -> fill -> click submit -> snapshot`.
-- [ ] Write failing test for stale ref after navigation.
-- [ ] Run browser fixture tests and verify missing engine failures.
-- [ ] Implement managed `assistant` profile, browser discovery/launch, tab labels, snapshot refs and atomic actions.
-- [ ] Run browser fixture tests.
-- [ ] Commit as `Add browser sidecar engine`.
+- [x] Write failing fixture test for `start -> open -> snapshot -> fill -> click submit -> snapshot`.
+- [x] Write failing test for stale ref after navigation.
+- [x] Run browser fixture tests and verify missing engine failures.
+- [x] Implement managed `assistant` profile, browser discovery/launch, tab labels, snapshot refs and atomic actions.
+- [x] Run browser fixture tests.
+- [x] Commit as `Add browser sidecar engine`.
 
 ### Task 4: Rust Browser Automation Crate
 

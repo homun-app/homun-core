@@ -8,6 +8,12 @@ import {
   parseRequestLine,
   serializeResponseLine,
 } from "./contracts.js";
+import { BrowserSessionManager } from "./browser/session_manager.js";
+
+const manager = new BrowserSessionManager({
+  headless: process.env.BROWSER_AUTOMATION_HEADLESS !== "0",
+  allowPrivateNetwork: process.env.BROWSER_AUTOMATION_ALLOW_PRIVATE_NETWORK === "1",
+});
 
 export async function handleRequestLine(line: string): Promise<string> {
   let request: BrowserRequest | undefined;
@@ -27,6 +33,34 @@ async function dispatch(request: BrowserRequest): Promise<unknown> {
         status: "ready",
         transport: "stdio",
       };
+    case "browser.profiles":
+      return { profiles: await manager.profiles() };
+    case "browser.start":
+      return await manager.start();
+    case "browser.stop":
+      await manager.stop();
+      return { status: "stopped" };
+    case "browser.tabs":
+      return { tabs: await manager.tabs() };
+    case "browser.open":
+      return await manager.open({
+        url: requireString(request.params, "url"),
+        label: optionalString(request.params, "label"),
+      });
+    case "browser.navigate":
+      return await manager.navigate({
+        targetId: requireString(request.params, "target_id"),
+        url: requireString(request.params, "url"),
+      });
+    case "browser.snapshot":
+      return await manager.snapshot({
+        targetId: requireString(request.params, "target_id"),
+      });
+    case "browser.act":
+      return await manager.act({
+        ...(request.params ?? {}),
+        targetId: requireString(request.params, "target_id"),
+      } as never);
     default:
       throw new BrowserAutomationError({
         code: "BROWSER_NOT_IMPLEMENTED",
@@ -34,6 +68,23 @@ async function dispatch(request: BrowserRequest): Promise<unknown> {
         retryable: false,
       });
   }
+}
+
+function requireString(params: Record<string, unknown> | undefined, key: string): string {
+  const value = params?.[key];
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new BrowserAutomationError({
+      code: "BROWSER_INVALID_REQUEST",
+      message: `${key} is required`,
+      retryable: false,
+    });
+  }
+  return value;
+}
+
+function optionalString(params: Record<string, unknown> | undefined, key: string): string | undefined {
+  const value = params?.[key];
+  return typeof value === "string" && value.trim() ? value : undefined;
 }
 
 async function main() {
