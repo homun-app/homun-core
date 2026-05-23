@@ -42,9 +42,9 @@ pub enum BrainUnderstanding {
         reason: Option<String>,
     },
     LocalCalculation {
-        left: i64,
-        operator: String,
-        right: i64,
+        calculation_left: i64,
+        calculation_operator: String,
+        calculation_right: i64,
         #[serde(default)]
         reason: Option<String>,
     },
@@ -84,7 +84,12 @@ impl<R: JsonRuntime> PromptBrain for RuntimePromptBrain<R> {
             wait_if_busy: true,
             request_timeout_seconds: Some(30.0),
             json_schema: Some(brain_schema()),
-            required_keys: vec!["route".to_string()],
+            required_keys: vec![
+                "route".to_string(),
+                "calculation_left".to_string(),
+                "calculation_operator".to_string(),
+                "calculation_right".to_string(),
+            ],
             repair: true,
         };
         let response = self
@@ -175,15 +180,15 @@ pub fn submit_user_prompt(
 
     let assistant_text = match understanding {
         BrainUnderstanding::LocalCalculation {
-            left,
-            operator,
-            right,
+            calculation_left,
+            calculation_operator,
+            calculation_right,
             ..
         } => {
             let calculation = SimpleCalculation {
-                left,
-                operator: normalize_brain_operator(&operator)?,
-                right,
+                left: calculation_left,
+                operator: normalize_brain_operator(&calculation_operator)?,
+                right: calculation_right,
             };
             manager.append_event(ComputerEventCreate {
                 session_id: session_id.to_string(),
@@ -335,6 +340,8 @@ fn brain_prompt(prompt: &str) -> String {
          Use local_calculation for simple arithmetic even when written in words.\n\
          Use direct_answer only when no fresh system state or tool is needed.\n\
          Use needs_planning for browser, shell, connector, memory, automation, or multi-step work.\n\
+         Always include calculation_left, calculation_operator and calculation_right. For non-calculation routes set them to null.\n\
+         For local_calculation, calculation_left and calculation_right must be integers and calculation_operator must be one of +, -, *, /.\n\
          Never include the raw user prompt in the JSON.\n\
          User request: {prompt}"
     )
@@ -343,7 +350,7 @@ fn brain_prompt(prompt: &str) -> String {
 fn brain_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "object",
-        "required": ["route"],
+        "required": ["route", "calculation_left", "calculation_operator", "calculation_right"],
         "properties": {
             "route": {
                 "type": "string",
@@ -361,12 +368,12 @@ fn brain_schema() -> serde_json::Value {
             "summary": {"type": ["string", "null"]},
             "reason": {"type": ["string", "null"]},
             "confidence": {"type": ["number", "null"]},
-            "left": {"type": ["integer", "null"]},
-            "operator": {
+            "calculation_left": {"type": ["integer", "null"]},
+            "calculation_operator": {
                 "type": ["string", "null"],
                 "enum": ["+", "-", "*", "/", "add", "subtract", "multiply", "divide", "plus", "minus", "times", "x", null]
             },
-            "right": {"type": ["integer", "null"]}
+            "calculation_right": {"type": ["integer", "null"]}
         }
     })
 }
@@ -526,9 +533,9 @@ mod tests {
         let manager = manager();
         let mut brain = StaticBrain {
             understanding: BrainUnderstanding::LocalCalculation {
-                left: 6,
-                operator: "*".to_string(),
-                right: 3,
+                calculation_left: 6,
+                calculation_operator: "*".to_string(),
+                calculation_right: 3,
                 reason: Some("The user asks for arithmetic.".to_string()),
             },
         };

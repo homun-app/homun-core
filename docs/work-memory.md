@@ -1150,6 +1150,16 @@ Perche': il composer non deve sembrare rotto per prompt banali. Questo e' stato 
   - prompt inglese `what time is it?` classificato come `local_time`;
   - prompt inglese in parole `what is six times three?` classificato come `local_calculation`.
 - Se il Brain locale non e' raggiungibile, il core registra `brain_understanding_failed` e risponde chiedendo di avviare Gemma 4, senza tornare a riconoscimenti euristici nascosti.
+- Dopo test live su Gemma, i campi di calcolo sono stati rinominati da `left/operator/right` a `calculation_left/calculation_operator/calculation_right`: `left/right` venivano interpretati dal modello come origine/destinazione in prompt di viaggio.
+- Verifica live su `http://127.0.0.1:8765/generate_json` con modello gia' caricato:
+  - `che ore sono?` -> `local_time`
+  - `what time is it?` -> `local_time`
+  - `quanto fa 6*3?` -> `local_calculation` con `6 * 3`
+  - `what is six times three?` -> `local_calculation` con `6 * 3`
+  - `quanto fa sette per otto?` -> `local_calculation` con `7 * 8`
+  - `cerca un treno da Napoli a Milano per il 10 giugno` -> `needs_planning`
+  - `send an email to Marco tomorrow morning with the meeting summary` -> `needs_planning`
+  - `spiegami in una frase cos'e' una sessione computer locale` -> `direct_answer`
 - Verifiche eseguite:
   - RED: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml prompt_submission::tests::english_time_request_is_understood_by_brain_not_prompt_text_rules` falliva per trait/tipi mancanti.
   - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml prompt_submission::tests`

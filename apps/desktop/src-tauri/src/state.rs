@@ -527,9 +527,9 @@ mod tests {
         let state = state();
         let mut brain = StaticBrain {
             understanding: BrainUnderstanding::LocalCalculation {
-                left: 6,
-                operator: "*".to_string(),
-                right: 3,
+                calculation_left: 6,
+                calculation_operator: "*".to_string(),
+                calculation_right: 3,
                 reason: Some("calcolo locale".to_string()),
             },
         };

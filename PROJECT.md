@@ -1234,4 +1234,6 @@ Nota UI/core: la sessione chat default deve restare neutra (`computer_active_pro
 
 Nota composer: il core non deve comprendere richieste tramite regex o keyword locali. Il composer passa dal `PromptBrain`, che restituisce un'intenzione strutturata e validata; solo dopo il core esegue handler locali. La route `needs_planning` resta da collegare al planner OrchestratorBrain completo.
 
+Nota Brain understanding: i campi per calcoli devono essere espliciti (`calculation_left`, `calculation_operator`, `calculation_right`), non generici (`left/right`), per evitare che il modello li usi come origine/destinazione o altri concetti non aritmetici.
+
 Nota UI timeline: la timeline Computer e' progress disclosure, non un log sempre aperto. Deve partire collassata, mostrare solo gli ultimi eventi e offrire espansione con stato accessibile (`aria-expanded`).
