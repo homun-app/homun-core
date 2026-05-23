@@ -522,4 +522,24 @@ Perche': ora il progetto ha un fondamento durevole riusabile da subagenti, capab
 
 ## Prossimo blocco
 
-- Integrare i workflow subagenti con `crates/task-runtime`, cosi' gli step del Subagent Manager possono diventare task persistenti, accodati, riprendibili e bloccabili su approvazione.
+### Subagents bridge verso Durable Task Runtime
+
+- Creato design `docs/superpowers/specs/2026-05-23-subagents-task-runtime-bridge-design.md`.
+- Creato piano `docs/superpowers/plans/2026-05-23-subagents-task-runtime-bridge.md`.
+- Aggiunta dipendenza `local-first-task-runtime` al crate `crates/subagents`.
+- Aggiunto modulo `task_runtime_bridge`.
+- `SubagentTaskRuntimeBridge` converte `WorkflowTaskSpec` e `SubagentTask` in `TaskRecord` durevoli.
+- Le dipendenze workflow vengono persistite con `TaskStore::add_dependency`.
+- Il payload completo del `SubagentTask` viene conservato in `TaskRecord.input_json`.
+- Il `PermissionEnvelope` viene conservato in `TaskRecord.permission_context`.
+- Ogni task subagente dichiara `ResourceClass::LlmInference` con 1 unita'.
+- Aggiunto `SubagentTaskExecutor`, adapter `TaskExecutor` che ricostruisce il `SubagentTask` e chiama `SubagentRunner`.
+- I successi diventano `ExecutorResult::Completed` con `SubagentResult` serializzato.
+- Failed/timed out/cancelled diventano `ExecutorResult::RetryableFailure`.
+- I test coprono enqueue workflow, dipendenze, resource declaration, completamento durable e failure retryable.
+
+Perche': il Subagent Manager ora puo' appoggiarsi al task runtime per code, risorse, lease, retry, checkpoint e recovery invece di restare confinato all'orchestratore in-memory.
+
+## Prossimo blocco
+
+- Integrare Capability Layer e/o provider registry persistente sopra `TaskRuntime`, cosi' anche tool call e connettori possono essere eseguiti come task durevoli.

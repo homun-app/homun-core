@@ -723,6 +723,15 @@ Deliverable:
 - workflow MVP: `PlannerAgent -> RiskAgent -> MemoryAgent/ToolAgent -> ReviewAgent`.
 - bridge verso Durable Task Runtime per workflow persistenti e riprendibili.
 
+Implementato bridge Durable Task Runtime:
+
+- `SubagentTaskRuntimeBridge` converte `WorkflowTaskSpec` in `TaskRecord`.
+- Le dipendenze workflow vengono salvate in `TaskStore`.
+- Ogni task subagente dichiara risorsa `llm_inference`.
+- `SubagentTaskExecutor` implementa `TaskExecutor` e chiama `SubagentRunner`.
+- I risultati riusciti diventano durable task completati.
+- I risultati falliti, timeout o cancellati diventano failure retryable del task runtime.
+
 ### Fase 2 - Memory Core
 
 Deliverable:
