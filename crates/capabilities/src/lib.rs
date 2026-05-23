@@ -2,6 +2,7 @@ mod audit;
 mod channel;
 mod error;
 mod facade;
+mod mcp;
 mod policy;
 mod provider;
 mod types;
@@ -13,6 +14,7 @@ pub use channel::{
 };
 pub use error::{CapabilityError, CapabilityResult};
 pub use facade::{CapabilityFacade, ToolAccessPlan};
+pub use mcp::{InMemoryMcpTransport, McpCapabilityProvider, McpToolPolicy, McpTransport};
 pub use policy::{CapabilityPolicy, PolicyContext, ToolAccessDecision};
 pub use provider::{CapabilityProvider, FakeCapabilityProvider};
 pub use types::*;
