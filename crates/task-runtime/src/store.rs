@@ -1,8 +1,9 @@
 use crate::{
-    ResourceClass, TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus, UserId,
-    WorkspaceId,
+    ResourceClass, TaskCheckpoint, TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult,
+    TaskStatus, UserId, WorkspaceId,
 };
 use rusqlite::{Connection, OptionalExtension, params};
+use serde_json::Value;
 use std::path::Path;
 use time::OffsetDateTime;
 
@@ -78,6 +79,20 @@ impl TaskStore {
 
             CREATE INDEX IF NOT EXISTS idx_resource_reservations_scope
                 ON resource_reservations(user_id, workspace_id, resource_class);
+
+            CREATE TABLE IF NOT EXISTS task_checkpoints (
+                checkpoint_id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
+                payload_json TEXT NOT NULL,
+                redacted_payload_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_task_checkpoints_task
+                ON task_checkpoints(user_id, workspace_id, task_id, sequence);
 
             INSERT INTO task_runtime_metadata(key, value)
             VALUES ('schema_version', '1')
@@ -329,6 +344,132 @@ impl TaskStore {
             |row| row.get(0),
         )?;
         Ok(units.unwrap_or_default() as u32)
+    }
+
+    pub fn append_checkpoint(
+        &self,
+        task_id: &TaskId,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        payload: Value,
+        redacted_payload: Value,
+    ) -> TaskRuntimeResult<TaskCheckpoint> {
+        let sequence = self.next_checkpoint_sequence(task_id, user_id, workspace_id)?;
+        let checkpoint = TaskCheckpoint::new(
+            uuid::Uuid::new_v4().to_string(),
+            task_id.clone(),
+            user_id.clone(),
+            workspace_id.clone(),
+            sequence,
+            payload,
+            redacted_payload,
+        );
+        self.connection.execute(
+            "
+            INSERT INTO task_checkpoints (
+                checkpoint_id,
+                task_id,
+                user_id,
+                workspace_id,
+                sequence,
+                payload_json,
+                redacted_payload_json,
+                created_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            ",
+            params![
+                checkpoint.checkpoint_id,
+                checkpoint.task_id.as_str(),
+                checkpoint.user_id.as_str(),
+                checkpoint.workspace_id.as_str(),
+                checkpoint.sequence,
+                serde_json::to_string(&checkpoint.payload)?,
+                serde_json::to_string(&checkpoint.redacted_payload)?,
+                checkpoint.created_at.unix_timestamp(),
+            ],
+        )?;
+
+        if let Some(mut task) = self.get_task(task_id, user_id, workspace_id)? {
+            task.checkpoint_json = Some(checkpoint.redacted_payload.clone());
+            task.updated_at = checkpoint.created_at;
+            self.insert_task(&task)?;
+        }
+
+        Ok(checkpoint)
+    }
+
+    pub fn latest_checkpoint(
+        &self,
+        task_id: &TaskId,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> TaskRuntimeResult<Option<TaskCheckpoint>> {
+        self.connection
+            .query_row(
+                "
+                SELECT
+                    checkpoint_id,
+                    sequence,
+                    payload_json,
+                    redacted_payload_json,
+                    created_at
+                FROM task_checkpoints
+                WHERE task_id = ?1 AND user_id = ?2 AND workspace_id = ?3
+                ORDER BY sequence DESC
+                LIMIT 1
+                ",
+                params![task_id.as_str(), user_id.as_str(), workspace_id.as_str()],
+                |row| {
+                    let checkpoint_id: String = row.get(0)?;
+                    let sequence: u32 = row.get(1)?;
+                    let payload_json: String = row.get(2)?;
+                    let redacted_payload_json: String = row.get(3)?;
+                    let created_at: i64 = row.get(4)?;
+                    Ok((
+                        checkpoint_id,
+                        sequence,
+                        payload_json,
+                        redacted_payload_json,
+                        created_at,
+                    ))
+                },
+            )
+            .optional()?
+            .map(
+                |(checkpoint_id, sequence, payload_json, redacted_payload_json, created_at)| {
+                    Ok(TaskCheckpoint {
+                        checkpoint_id,
+                        task_id: task_id.clone(),
+                        user_id: user_id.clone(),
+                        workspace_id: workspace_id.clone(),
+                        sequence,
+                        payload: serde_json::from_str(&payload_json)?,
+                        redacted_payload: serde_json::from_str(&redacted_payload_json)?,
+                        created_at: OffsetDateTime::from_unix_timestamp(created_at)
+                            .map_err(|error| TaskRuntimeError::Store(error.to_string()))?,
+                    })
+                },
+            )
+            .transpose()
+    }
+
+    fn next_checkpoint_sequence(
+        &self,
+        task_id: &TaskId,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> TaskRuntimeResult<u32> {
+        let sequence: Option<i64> = self.connection.query_row(
+            "
+            SELECT MAX(sequence)
+            FROM task_checkpoints
+            WHERE task_id = ?1 AND user_id = ?2 AND workspace_id = ?3
+            ",
+            params![task_id.as_str(), user_id.as_str(), workspace_id.as_str()],
+            |row| row.get(0),
+        )?;
+        Ok(sequence.unwrap_or_default() as u32 + 1)
     }
 }
 
