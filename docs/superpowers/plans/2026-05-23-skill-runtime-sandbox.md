@@ -41,14 +41,14 @@
 - [x] Run `cargo test -p local-first-skill-runtime --test provider` and verify failures.
 - [x] Implement `SkillRunner`, `InMemorySkillRunner`, `SkillRuntime` and `SkillRuntimeCapabilityProvider`.
 - [x] Run targeted tests until green.
-- [ ] Commit as `Add skill runtime provider`.
+- [x] Commit as `Add skill runtime provider`.
 
 ### Task 3: Durable Task Runtime Integration
 
-- [ ] Write failing integration test that enqueues a skill tool through `CapabilityTaskRuntimeBridge` and completes it via `CapabilityTaskExecutor`.
-- [ ] Run `cargo test -p local-first-skill-runtime --test task_runtime_bridge` and verify failure.
-- [ ] Add any missing bridge helpers needed for the skill runtime provider.
-- [ ] Run targeted test until green.
+- [x] Write failing integration test that enqueues a skill tool through `CapabilityTaskRuntimeBridge` and completes it via `CapabilityTaskExecutor`.
+- [x] Run `cargo test -p local-first-skill-runtime --test task_runtime_bridge` and verify failure.
+- [x] Add any missing bridge helpers needed for the skill runtime provider.
+- [x] Run targeted test until green.
 - [ ] Commit as `Integrate skill runtime with task runtime`.
 
 ### Task 4: Verification And Docs
