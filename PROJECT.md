@@ -39,6 +39,8 @@ Principi:
 - Graph/document memory: Graphify / GraphifyLabs.
 - Human-readable memory: Obsidian Wiki / LLM Wiki.
 - Orchestrazione: subagenti locali coordinati dal Rust Core, non dal runtime LLM.
+- Capability Layer: provider-neutral contracts for channels, native connectors, MCP, skills and optional managed integration aggregators.
+- Managed integrations: Composio/Zapier/Pipedream style providers are allowed only as explicit opt-in adapters, never as implicit core dependencies.
 
 ### Test Gemma 4 locale
 
@@ -80,7 +82,12 @@ Tauri React UI
     -> Process Manager
     -> Event Collector
     -> Memory Manager
-    -> Connector Manager
+    -> Capability Manager
+      -> Channels
+      -> Native Connectors
+      -> MCP Adapter
+      -> Skill Registry
+      -> Managed Provider Adapters
     -> Automation Engine
     -> Subagent Manager
       -> PlannerAgent
@@ -517,6 +524,14 @@ Output atteso:
 
 ## Connettori
 
+Decisione architetturale:
+
+- Separare `channels`, `integrations`, `skills` e `browser automation`.
+- Usare un Capability Layer provider-neutral nel Rust Core.
+- Usare provider managed tipo Composio, Zapier MCP o Pipedream MCP come acceleratori opzionali per copertura ampia.
+- Non far dipendere `ToolAgent`, subagenti o memoria direttamente da Composio o da un vendor specifico.
+- Ogni provider cloud deve essere esplicitamente abilitato dall'utente e marcato come boundary non local-first.
+
 Ordine consigliato:
 
 1. Git locale.
@@ -534,7 +549,8 @@ Strategia:
 
 - connettori nativi per il core indispensabile.
 - MCP client universale.
-- marketplace esterni per copertura ampia.
+- provider managed esterni per copertura ampia, opt-in e policy-gated.
+- skill locali per estendere il sistema senza modificare il core.
 - fallback browser automation solo quando non esiste API affidabile.
 
 Permessi per connettore:
@@ -704,6 +720,7 @@ local-first-personal-assistant/
     core/
     memory/
     connectors/
+    capabilities/
     automation/
     permissions/
     subagents/
@@ -719,6 +736,7 @@ local-first-personal-assistant/
     graphify/
     obsidian-wiki/
     mcp/
+    managed-providers/
   docs/
     architecture/
     decisions/

@@ -393,5 +393,19 @@ Perche': il `MemoryAgent` non deve scrivere nello store direttamente. Anche nel 
 
 ## Prossimo blocco
 
-- Aggiungere salvataggio di `SubagentReview` come vista/record dedicato o come risultato tipizzato.
-- Collegare il workflow runtime/subagenti alla futura UI Tauri.
+### Capability Layer design
+
+- Analizzato OpenHuman per la parte canali/integrazioni/skill.
+- Chiarita la separazione tra `channels`, `integrations`, `skills`, MCP e browser automation.
+- Decisione: copiare l'architettura, non il codice.
+- Decisione: usare provider esterni tipo Composio/Zapier/Pipedream come acceleratori opzionali, non come dipendenza core.
+- Creato design in `docs/superpowers/specs/2026-05-23-capability-layer-design.md`.
+- Aggiornato `PROJECT.md` con `Capability Layer`, managed providers opt-in e separazione channels/integrations/skills.
+
+Perche': costruire manualmente decine o centinaia di integrazioni richiederebbe troppo tempo. Il progetto deve scalare usando MCP e provider managed quando l'utente li abilita, mantenendo pero' policy, audit, memoria e subagenti sotto controllo locale.
+
+## Prossimo blocco
+
+- Rivedere e approvare la spec Capability Layer.
+- Scrivere il piano di implementazione per `crates/capabilities`.
+- Implementare prima contratti, fake provider, policy e audit senza chiamate live a Composio.
