@@ -1,0 +1,20 @@
+{
+  "name": "@local-first-personal-assistant/browser-automation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "start": "tsx src/server.ts"
+  },
+  "dependencies": {
+    "playwright-core": "1.60.0"
+  },
+  "devDependencies": {
+    "@types/node": "25.0.0",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3",
+    "vitest": "4.0.14"
+  }
+}

@@ -41,12 +41,12 @@
 - Create: `runtimes/browser-automation/src/browser/errors.ts`
 - Test: `runtimes/browser-automation/tests/contracts.test.ts`
 
-- [ ] Write failing Vitest tests for JSON-line envelopes, success responses and typed browser errors.
-- [ ] Run `cd runtimes/browser-automation && npm test -- contracts.test.ts` and verify missing modules fail.
-- [ ] Implement package config, TypeScript config, contracts and typed errors.
-- [ ] Run `cd runtimes/browser-automation && npm install`.
-- [ ] Run `cd runtimes/browser-automation && npm test -- contracts.test.ts`.
-- [ ] Commit as `Add browser sidecar contracts`.
+- [x] Write failing Vitest tests for JSON-line envelopes, success responses and typed browser errors.
+- [x] Run `cd runtimes/browser-automation && npm test -- contracts.test.ts` and verify missing modules fail.
+- [x] Implement package config, TypeScript config, contracts and typed errors.
+- [x] Run `cd runtimes/browser-automation && npm install`.
+- [x] Run `cd runtimes/browser-automation && npm test -- contracts.test.ts`.
+- [x] Commit as `Add browser sidecar contracts`.
 
 Expected contract names:
 
