@@ -125,6 +125,22 @@ pub enum ResourceClass {
     BackgroundMaintenance,
 }
 
+impl ResourceClass {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ResourceClass::LlmInference => "llm_inference",
+            ResourceClass::BrowserSession => "browser_session",
+            ResourceClass::NetworkIo => "network_io",
+            ResourceClass::FilesystemIo => "filesystem_io",
+            ResourceClass::ConnectorApi => "connector_api",
+            ResourceClass::MemoryIndexing => "memory_indexing",
+            ResourceClass::GraphIndexing => "graph_indexing",
+            ResourceClass::UserWait => "user_wait",
+            ResourceClass::BackgroundMaintenance => "background_maintenance",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResourceRequirement {
     pub class: ResourceClass,

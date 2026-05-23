@@ -1,5 +1,6 @@
 use crate::{
-    TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus, UserId, WorkspaceId,
+    ResourceClass, TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus, UserId,
+    WorkspaceId,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::Path;
@@ -63,6 +64,20 @@ impl TaskStore {
 
             CREATE INDEX IF NOT EXISTS idx_task_dependencies_scope
                 ON task_dependencies(user_id, workspace_id, task_id);
+
+            CREATE TABLE IF NOT EXISTS resource_reservations (
+                task_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                resource_class TEXT NOT NULL,
+                units INTEGER NOT NULL,
+                owner TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY (task_id, user_id, workspace_id, resource_class)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_resource_reservations_scope
+                ON resource_reservations(user_id, workspace_id, resource_class);
 
             INSERT INTO task_runtime_metadata(key, value)
             VALUES ('schema_version', '1')
@@ -244,6 +259,76 @@ impl TaskStore {
             dependencies.push(TaskId::new(row?));
         }
         Ok(dependencies)
+    }
+
+    pub fn reserve_resources(&self, task: &TaskRecord, owner: &str) -> TaskRuntimeResult<()> {
+        for requirement in &task.resource_requirements {
+            self.connection.execute(
+                "
+                INSERT INTO resource_reservations (
+                    task_id,
+                    user_id,
+                    workspace_id,
+                    resource_class,
+                    units,
+                    owner,
+                    created_at
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                ON CONFLICT(task_id, user_id, workspace_id, resource_class) DO UPDATE SET
+                    units = excluded.units,
+                    owner = excluded.owner,
+                    created_at = excluded.created_at
+                ",
+                params![
+                    task.task_id.as_str(),
+                    task.user_id.as_str(),
+                    task.workspace_id.as_str(),
+                    requirement.class.as_str(),
+                    requirement.units,
+                    owner,
+                    OffsetDateTime::now_utc().unix_timestamp(),
+                ],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn release_resources(&self, task: &TaskRecord) -> TaskRuntimeResult<()> {
+        self.connection.execute(
+            "
+            DELETE FROM resource_reservations
+            WHERE task_id = ?1 AND user_id = ?2 AND workspace_id = ?3
+            ",
+            params![
+                task.task_id.as_str(),
+                task.user_id.as_str(),
+                task.workspace_id.as_str(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn resource_usage(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        resource_class: ResourceClass,
+    ) -> TaskRuntimeResult<u32> {
+        let units: Option<i64> = self.connection.query_row(
+            "
+            SELECT SUM(units)
+            FROM resource_reservations
+            WHERE user_id = ?1 AND workspace_id = ?2 AND resource_class = ?3
+            ",
+            params![
+                user_id.as_str(),
+                workspace_id.as_str(),
+                resource_class.as_str()
+            ],
+            |row| row.get(0),
+        )?;
+        Ok(units.unwrap_or_default() as u32)
     }
 }
 
