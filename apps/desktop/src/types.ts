@@ -10,6 +10,13 @@ export type ViewId =
   | "brain"
   | "settings";
 
+export type SettingsSectionId =
+  | "general"
+  | "privacy"
+  | "runtime"
+  | "connections"
+  | "audit";
+
 export type TaskStatus =
   | "queued"
   | "running"

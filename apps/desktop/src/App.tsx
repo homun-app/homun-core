@@ -14,19 +14,45 @@ import {
   runtimeHealth,
   tasks,
 } from "./data/mockData";
-import type { ViewId } from "./types";
+import type { SettingsSectionId, ViewId } from "./types";
 
 export default function App() {
   const [activeView, setActiveView] = useState<ViewId>("chat");
+  const [previousView, setPreviousView] = useState<ViewId>("chat");
+  const [settingsSection, setSettingsSection] =
+    useState<SettingsSectionId>("privacy");
   const [selectedTaskId, setSelectedTaskId] = useState(tasks[1].id);
+  const [isNavCollapsed, setIsNavCollapsed] = useState(false);
+  const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(false);
   const selectedTask = useMemo(
     () => tasks.find((task) => task.id === selectedTaskId) ?? tasks[0],
     [selectedTaskId],
   );
+  const isSettings = activeView === "settings";
+
+  function handleNavigate(view: ViewId) {
+    if (view === "settings" && activeView !== "settings") {
+      setPreviousView(activeView);
+    }
+    setActiveView(view);
+  }
 
   return (
-    <Shell activeView={activeView} onNavigate={setActiveView}>
-      <main className="workspace" aria-label="Area di lavoro principale">
+    <Shell
+      activeView={activeView}
+      isInspectorCollapsed={isInspectorCollapsed}
+      isNavCollapsed={isNavCollapsed}
+      onBackFromSettings={() => setActiveView(previousView)}
+      onNavigate={handleNavigate}
+      onToggleInspector={() => setIsInspectorCollapsed((value) => !value)}
+      onToggleNav={() => setIsNavCollapsed((value) => !value)}
+      onSelectSettingsSection={setSettingsSection}
+      settingsSection={settingsSection}
+    >
+      <main
+        className={`workspace ${isSettings ? "settings-workspace" : ""}`}
+        aria-label="Area di lavoro principale"
+      >
         {activeView === "chat" && (
           <ChatView messages={chatMessages} health={runtimeHealth} />
         )}
@@ -39,7 +65,11 @@ export default function App() {
           />
         )}
         {activeView === "settings" && (
-          <SettingsView health={runtimeHealth} connections={connections} />
+          <SettingsView
+            health={runtimeHealth}
+            connections={connections}
+            section={settingsSection}
+          />
         )}
         {activeView === "memory" && (
           <ShallowView
@@ -102,13 +132,17 @@ export default function App() {
           />
         )}
       </main>
-      <Inspector
-        activeView={activeView}
-        brainRun={brainRun}
-        task={selectedTask}
-        approvals={approvals}
-        health={runtimeHealth}
-      />
+      {!isSettings && (
+        <Inspector
+          activeView={activeView}
+          brainRun={brainRun}
+          task={selectedTask}
+          approvals={approvals}
+          health={runtimeHealth}
+          isCollapsed={isInspectorCollapsed}
+          onToggle={() => setIsInspectorCollapsed((value) => !value)}
+        />
+      )}
     </Shell>
   );
 }

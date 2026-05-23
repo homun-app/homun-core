@@ -1,4 +1,12 @@
-import { AlertTriangle, CheckCircle2, Clock3, Cpu, ListChecks } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Clock3,
+  Cpu,
+  ListChecks,
+  PanelRightClose,
+  PanelRightOpen,
+} from "lucide-react";
 import type { ApprovalItem, BrainRunDetail, RuntimeHealth, TaskItem, ViewId } from "../types";
 
 interface InspectorProps {
@@ -7,14 +15,50 @@ interface InspectorProps {
   task: TaskItem;
   approvals: ApprovalItem[];
   health: RuntimeHealth[];
+  isCollapsed: boolean;
+  onToggle: () => void;
 }
 
-export function Inspector({ activeView, brainRun, task, approvals, health }: InspectorProps) {
+export function Inspector({
+  activeView,
+  brainRun,
+  task,
+  approvals,
+  health,
+  isCollapsed,
+  onToggle,
+}: InspectorProps) {
+  if (isCollapsed) {
+    return (
+      <aside className="inspector inspector-rail" aria-label="Pannello contestuale compresso">
+        <button
+          className="icon-button"
+          type="button"
+          aria-label="Espandi inspector"
+          onClick={onToggle}
+        >
+          <PanelRightOpen size={18} />
+        </button>
+        <span>Contesto</span>
+      </aside>
+    );
+  }
+
   return (
     <aside className="inspector" aria-label="Pannello contestuale">
       <header>
-        <p className="eyebrow">Contesto</p>
-        <h2>{activeView === "settings" ? "Sistema" : "Esecuzione"}</h2>
+        <div>
+          <p className="eyebrow">Contesto</p>
+          <h2>{activeView === "settings" ? "Sistema" : "Esecuzione"}</h2>
+        </div>
+        <button
+          className="icon-button"
+          type="button"
+          aria-label="Comprimi inspector"
+          onClick={onToggle}
+        >
+          <PanelRightClose size={18} />
+        </button>
       </header>
 
       <section className="inspector-section">

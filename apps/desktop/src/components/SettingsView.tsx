@@ -1,38 +1,16 @@
-import { useState } from "react";
 import { CheckCircle2, ChevronRight } from "lucide-react";
 import { settingsSections } from "../data/mockData";
-import type { ConnectionItem, RuntimeHealth } from "../types";
+import type { ConnectionItem, RuntimeHealth, SettingsSectionId } from "../types";
 
 interface SettingsViewProps {
   health: RuntimeHealth[];
   connections: ConnectionItem[];
+  section: SettingsSectionId;
 }
 
-export function SettingsView({ health, connections }: SettingsViewProps) {
-  const [section, setSection] = useState(settingsSections[1].id);
-
+export function SettingsView({ health, connections, section }: SettingsViewProps) {
   return (
     <section className="settings-view" aria-labelledby="settings-title">
-      <aside className="settings-nav" aria-label="Sezioni impostazioni">
-        <button className="back-button" type="button">
-          Torna all'app
-        </button>
-        {settingsSections.map((item) => {
-          const Icon = item.icon;
-          return (
-            <button
-              className={`settings-nav-item ${section === item.id ? "active" : ""}`}
-              key={item.id}
-              type="button"
-              onClick={() => setSection(item.id)}
-            >
-              <Icon size={17} />
-              {item.label}
-            </button>
-          );
-        })}
-      </aside>
-
       <div className="settings-content">
         <header>
           <p className="eyebrow">Impostazioni</p>

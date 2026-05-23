@@ -20,6 +20,7 @@ import type {
   MemorySummary,
   NavItem,
   RuntimeHealth,
+  SettingsSectionId,
   TaskItem,
 } from "../types";
 
@@ -187,7 +188,11 @@ export const connections: ConnectionItem[] = [
   },
 ];
 
-export const settingsSections = [
+export const settingsSections: Array<{
+  id: SettingsSectionId;
+  label: string;
+  icon: typeof Monitor;
+}> = [
   { id: "general", label: "Generali", icon: Monitor },
   { id: "privacy", label: "Privacy e autonomia", icon: KeyRound },
   { id: "runtime", label: "Runtime locale", icon: Bot },

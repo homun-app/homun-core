@@ -849,6 +849,7 @@ Perche': ora il Brain non e' solo un router per la singola chiamata. Produce dec
 - Allineati i mock ai read model gia' previsti: task queue, task detail redatto, run Brain, memory summary, runtime health e provider/connection list.
 - L'inspector mostra Brain plan, task selezionato, approvazioni e runtime health senza esporre raw payload.
 - Verificata la direzione visuale Manus light + settings Codex: neutral grays, system blue, radius massimo 8px, niente dotted background permanente e niente card annidate.
+- Rifinita la UX dopo review visuale: canvas piu' adattivo su desktop, sidebar principale comprimibile, inspector comprimibile e Settings come modalita' shell dedicata che sostituisce la navigazione principale con menu impostazioni + ritorno all'app.
 - Verifiche eseguite:
   - `npm run typecheck`
   - `npm run build`
