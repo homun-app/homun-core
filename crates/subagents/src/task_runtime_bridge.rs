@@ -1,7 +1,11 @@
-use crate::{AgentId, AllowedAction, SubagentTask, WorkflowTaskSpec};
+use crate::{
+    AgentId, AllowedAction, JsonRuntime, SubagentResult, SubagentRunner, SubagentStatus,
+    SubagentTask, WorkflowTaskSpec,
+};
 use local_first_task_runtime::{
-    ResourceClass, ResourceRequirement, RetryPolicy, TaskId, TaskRecord, TaskRuntimeResult,
-    TaskStore, UserId, WorkflowId, WorkspaceId,
+    ExecutorResult, ResourceClass, ResourceRequirement, RetryPolicy, TaskCheckpoint, TaskExecutor,
+    TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStore, UserId, WorkflowId,
+    WorkspaceId,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,5 +112,62 @@ fn risk_level_for_actions(actions: &[AllowedAction]) -> String {
         "medium".to_string()
     } else {
         "low".to_string()
+    }
+}
+
+pub struct SubagentTaskExecutor<R> {
+    runner: SubagentRunner<R>,
+}
+
+impl<R: JsonRuntime> SubagentTaskExecutor<R> {
+    pub fn new(runtime: R) -> Self {
+        Self {
+            runner: SubagentRunner::new(runtime, "local-model"),
+        }
+    }
+
+    pub fn with_runner(runner: SubagentRunner<R>) -> Self {
+        Self { runner }
+    }
+}
+
+impl<R: JsonRuntime> TaskExecutor for SubagentTaskExecutor<R> {
+    fn executor_id(&self) -> &str {
+        "subagent-task-executor"
+    }
+
+    fn execute_step(
+        &mut self,
+        task: &TaskRecord,
+        _checkpoint: Option<TaskCheckpoint>,
+    ) -> TaskRuntimeResult<ExecutorResult> {
+        let subagent_task: SubagentTask = serde_json::from_value(task.input_json.clone())
+            .map_err(|error| TaskRuntimeError::Store(error.to_string()))?;
+        let result = self.runner.run_generate_json(&subagent_task);
+        map_subagent_result(result)
+    }
+}
+
+fn map_subagent_result(result: SubagentResult) -> TaskRuntimeResult<ExecutorResult> {
+    match result.status {
+        SubagentStatus::Succeeded => Ok(ExecutorResult::Completed {
+            output: serde_json::to_value(result)?,
+        }),
+        SubagentStatus::Failed | SubagentStatus::TimedOut | SubagentStatus::Cancelled => {
+            Ok(ExecutorResult::RetryableFailure {
+                reason: failure_reason(&result),
+            })
+        }
+    }
+}
+
+fn failure_reason(result: &SubagentResult) -> String {
+    if result.errors.is_empty() {
+        format!(
+            "subagent {:?} returned {:?}",
+            result.agent_id, result.status
+        )
+    } else {
+        result.errors.join("; ")
     }
 }
