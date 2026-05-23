@@ -17,14 +17,14 @@
 - Modify: `crates/capabilities/src/lib.rs`
 - Test: `crates/capabilities/tests/composio_provider.rs`
 
-- [ ] Add failing tests for managed metadata.
-- [ ] Add failing tests for mapping Composio tools to `CapabilityTool`.
-- [ ] Add failing tests for tool execution request/response mapping.
-- [ ] Add failing tests for connection and trigger mapping.
-- [ ] Run `cargo test -p local-first-capabilities --test composio_provider` and verify missing API failures.
-- [ ] Implement `ComposioTransport`, `ComposioCapabilityProvider`, `ComposioProviderConfig`, `ComposioToolPolicy`, and `InMemoryComposioTransport`.
-- [ ] Run `cargo test -p local-first-capabilities --test composio_provider`.
-- [ ] Commit as `Add Composio managed provider`.
+- [x] Add failing tests for managed metadata.
+- [x] Add failing tests for mapping Composio tools to `CapabilityTool`.
+- [x] Add failing tests for tool execution request/response mapping.
+- [x] Add failing tests for connection and trigger mapping.
+- [x] Run `cargo test -p local-first-capabilities --test composio_provider` and verify missing API failures.
+- [x] Implement `ComposioTransport`, `ComposioCapabilityProvider`, `ComposioProviderConfig`, `ComposioToolPolicy`, and `InMemoryComposioTransport`.
+- [x] Run `cargo test -p local-first-capabilities --test composio_provider`.
+- [x] Commit as `Add Composio managed provider`.
 
 ## Task 2: Verification And Memory
 
@@ -32,7 +32,7 @@
 - Modify: `docs/work-memory.md`
 - Modify: `docs/superpowers/plans/2026-05-23-composio-managed-provider.md`
 
-- [ ] Mark completed plan items.
-- [ ] Update work memory with Composio managed boundary.
-- [ ] Run `make test`.
-- [ ] Commit as `Document Composio managed provider`.
+- [x] Mark completed plan items.
+- [x] Update work memory with Composio managed boundary.
+- [x] Run `make test`.
+- [x] Commit as `Document Composio managed provider`.

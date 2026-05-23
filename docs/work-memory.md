@@ -456,6 +456,21 @@ Perche': MCP e' il primo moltiplicatore locale per evitare di scrivere ogni inte
 
 Perche': ora MCP non e' solo un contratto in memoria. Abbiamo il primo transport locale reale, ancora vendor-neutral e senza Composio, pronto per registrare server MCP stdio scelti dall'utente.
 
+### Composio managed provider
+
+- Aggiunto `ComposioTransport` come boundary per chiamate Composio senza legare il core a un client specifico.
+- Aggiunto `ComposioCapabilityProvider`.
+- Aggiunto `ComposioProviderConfig` user/workspace scoped.
+- Aggiunto `ComposioToolPolicy` per action class, privacy domains e sensitivity.
+- Aggiunto `InMemoryComposioTransport` per test locali senza API key o chiamate cloud.
+- Il provider dichiara `DataBoundary::ManagedCloud` e auth mode `composio_connect_or_api_key`.
+- Mappa tool Composio in `CapabilityTool`.
+- Mappa connected accounts in `CapabilityConnection`.
+- Mappa triggers in `CapabilityTrigger`.
+- Esegue tool con payload che include `user_id` e `arguments`.
+
+Perche': Composio serve a scalare rapidamente la copertura integrazioni, ma deve restare un provider managed opt-in dietro policy/audit locali. Questo adapter prepara l'integrazione reale senza rompere il principio local-first di default.
+
 ## Prossimo blocco
 
-- Solo dopo, aggiungere adapter Composio managed opt-in.
+- Aggiungere registry/config persistente dei provider capability.

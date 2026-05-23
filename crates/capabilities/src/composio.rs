@@ -44,7 +44,8 @@ impl InMemoryComposioTransport {
         path: impl Into<String>,
         response: serde_json::Value,
     ) -> Self {
-        self.responses.insert((method.into(), path.into()), response);
+        self.responses
+            .insert((method.into(), path.into()), response);
         self
     }
 
@@ -253,7 +254,9 @@ impl<T: ComposioTransport> ComposioCapabilityProvider<T> {
             name: name.to_string(),
             provider_id: self.config.provider_id.clone(),
             provider_kind: CapabilityProviderKind::Managed,
-            action: policy.map(|policy| policy.action).unwrap_or(ActionClass::Read),
+            action: policy
+                .map(|policy| policy.action)
+                .unwrap_or(ActionClass::Read),
             description: tool
                 .get("description")
                 .and_then(|value| value.as_str())

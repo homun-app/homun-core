@@ -64,10 +64,7 @@ fn composio_provider_executes_tool_with_user_scoped_payload() {
         .unwrap();
 
     assert_eq!(result.output["data"]["email"], "fabio@example.com");
-    assert_eq!(
-        provider.transport().requests()[0].body["user_id"],
-        "user_1"
-    );
+    assert_eq!(provider.transport().requests()[0].body["user_id"], "user_1");
     assert_eq!(
         provider.transport().requests()[0].body["arguments"],
         serde_json::json!({})
@@ -115,8 +112,16 @@ fn composio_provider_maps_and_toggles_triggers() {
                 }]
             }),
         )
-        .with_response("POST", "/triggers/tr_1/enable", serde_json::json!({"ok": true}))
-        .with_response("POST", "/triggers/tr_1/disable", serde_json::json!({"ok": true}));
+        .with_response(
+            "POST",
+            "/triggers/tr_1/enable",
+            serde_json::json!({"ok": true}),
+        )
+        .with_response(
+            "POST",
+            "/triggers/tr_1/disable",
+            serde_json::json!({"ok": true}),
+        );
     let mut provider = composio_provider(transport);
 
     let triggers = provider.list_triggers().unwrap();
@@ -126,8 +131,14 @@ fn composio_provider_maps_and_toggles_triggers() {
     assert_eq!(triggers[0].id, "tr_1");
     assert_eq!(triggers[0].name, "GMAIL_NEW_GMAIL_MESSAGE");
     assert_eq!(triggers[0].status, TriggerStatus::Active);
-    assert_eq!(provider.transport().requests()[1].path, "/triggers/tr_1/enable");
-    assert_eq!(provider.transport().requests()[2].path, "/triggers/tr_1/disable");
+    assert_eq!(
+        provider.transport().requests()[1].path,
+        "/triggers/tr_1/enable"
+    );
+    assert_eq!(
+        provider.transport().requests()[2].path,
+        "/triggers/tr_1/disable"
+    );
 }
 
 fn composio_provider(
