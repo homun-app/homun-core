@@ -81,12 +81,12 @@ export type BrowserMethod =
 - Test: `runtimes/browser-automation/tests/artifacts.test.ts`
 - Test: `runtimes/browser-automation/tests/server.test.ts`
 
-- [ ] Write failing tests that block `file:`, `data:`, `javascript:`, loopback/private network without opt-in and artifact path traversal.
-- [ ] Write failing server test that sends one JSON line and receives a matching `id`.
-- [ ] Run targeted npm tests and verify failures.
-- [ ] Implement navigation guard, artifact root resolver and stdio server dispatch.
-- [ ] Run targeted npm tests.
-- [ ] Commit as `Add browser sidecar policy server`.
+- [x] Write failing tests that block `file:`, `data:`, `javascript:`, loopback/private network without opt-in and artifact path traversal.
+- [x] Write failing server test that sends one JSON line and receives a matching `id`.
+- [x] Run targeted npm tests and verify failures.
+- [x] Implement navigation guard, artifact root resolver and stdio server dispatch.
+- [x] Run targeted npm tests.
+- [x] Commit as `Add browser sidecar policy server`.
 
 ### Task 3: Sidecar Browser Engine
 
