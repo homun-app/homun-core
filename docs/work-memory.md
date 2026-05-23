@@ -1114,6 +1114,27 @@ Perche': il composer reale funzionava, ma la UX era contaminata da dati seeded d
 
 ## Prossimo blocco
 
+### Fix prompt locali e timeline chat
+
+- Aggiunto handler locale per aritmetica binaria semplice nel command `submit_user_prompt`.
+- `quanto fa 6*3` ora risponde `6 * 3 fa 18.` senza cadere nel placeholder `prompt_pending_brain`.
+- Il calcolo registra evento `local_calculation_completed` nel read model con payload redatto.
+- La timeline `InlineTimeline` non viene piu' renderizzata sotto ogni messaggio assistant; ora appare una sola volta nel thread prima della card Computer.
+- Aggiunto test Rust `submit_user_prompt_answers_simple_arithmetic_locally`.
+- Aggiornato contratto UI statico per impedire che la timeline venga reintrodotta come elemento ripetuto per ogni messaggio.
+- Rigenerata e aperta la app Tauri debug.
+- Verifiche eseguite:
+  - RED: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml submit_user_prompt_answers_simple_arithmetic_locally` falliva per fallback Brain.
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`
+  - GREEN: `npm run test:ui-contract`
+  - GREEN: `npm run typecheck`
+  - GREEN: `npm run build`
+  - GREEN: `npm run tauri -- build --debug --bundles app --no-sign`
+
+Perche': il composer non deve sembrare rotto per prompt banali. Finche' il Brain operativo non e' collegato, il core deve almeno gestire primitive locali deterministiche e la UI non deve duplicare la timeline sotto ogni risposta.
+
+## Prossimo blocco
+
 - Collegare Tasks/Approvals ai command `task_queue_snapshot` e `task_detail`.
 - Collegare Connections/Settings ai command capability/runtime esistenti.
 - Collegare il Browser Automation Runtime alla `LocalComputerSessionManager`, cosi' le azioni reali producono eventi, artifact e preview nella stessa card.

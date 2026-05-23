@@ -51,7 +51,29 @@ pub fn submit_user_prompt(
         approval_required: false,
     })?;
 
-    let assistant_text = if requests_local_time(prompt) {
+    let assistant_text = if let Some(calculation) = parse_simple_calculation(prompt) {
+        manager.append_event(ComputerEventCreate {
+            session_id: session_id.to_string(),
+            surface: SurfaceKind::Logs,
+            kind: "local_calculation_completed".to_string(),
+            status: "done".to_string(),
+            title: "Calcolo locale completato".to_string(),
+            subtitle: calculation.redacted_expression(),
+            payload: serde_json::json!({
+                "raw_prompt_stored": false,
+                "operation": calculation.operator_label(),
+            }),
+            artifact_refs: vec![],
+            approval_required: false,
+        })?;
+        format!(
+            "{} {} {} fa {}.",
+            calculation.left,
+            calculation.operator,
+            calculation.right,
+            calculation.result()
+        )
+    } else if requests_local_time(prompt) {
         manager.start_surface(session_id, SurfaceKind::Shell, "Terminale locale")?;
         manager.append_event(ComputerEventCreate {
             session_id: session_id.to_string(),
@@ -158,6 +180,96 @@ fn requests_local_time(prompt: &str) -> bool {
     ["ore", "ora", "orario", "time", "date", "data"]
         .iter()
         .any(|needle| normalized.contains(needle))
+}
+
+struct SimpleCalculation {
+    left: i64,
+    operator: char,
+    right: i64,
+}
+
+impl SimpleCalculation {
+    fn result(&self) -> String {
+        match self.operator {
+            '+' => (self.left + self.right).to_string(),
+            '-' => (self.left - self.right).to_string(),
+            '*' => (self.left * self.right).to_string(),
+            '/' if self.right == 0 => "undefined".to_string(),
+            '/' if self.left % self.right == 0 => (self.left / self.right).to_string(),
+            '/' => format!("{:.4}", self.left as f64 / self.right as f64),
+            _ => "unsupported".to_string(),
+        }
+    }
+
+    fn redacted_expression(&self) -> String {
+        format!(
+            "Espressione aritmetica locale: {} {} {}",
+            self.left, self.operator, self.right
+        )
+    }
+
+    fn operator_label(&self) -> &'static str {
+        match self.operator {
+            '+' => "add",
+            '-' => "subtract",
+            '*' => "multiply",
+            '/' => "divide",
+            _ => "unknown",
+        }
+    }
+}
+
+fn parse_simple_calculation(prompt: &str) -> Option<SimpleCalculation> {
+    let chars: Vec<char> = prompt.chars().collect();
+    for index in 0..chars.len() {
+        if !chars[index].is_ascii_digit() {
+            continue;
+        }
+        let (left, mut cursor) = parse_integer(&chars, index)?;
+        cursor = skip_spaces(&chars, cursor);
+        let operator = normalize_operator(*chars.get(cursor)?)?;
+        cursor += 1;
+        cursor = skip_spaces(&chars, cursor);
+        let (right, _) = parse_integer(&chars, cursor)?;
+        return Some(SimpleCalculation {
+            left,
+            operator,
+            right,
+        });
+    }
+    None
+}
+
+fn parse_integer(chars: &[char], start: usize) -> Option<(i64, usize)> {
+    let mut cursor = start;
+    let mut value = String::new();
+    while let Some(char) = chars.get(cursor) {
+        if !char.is_ascii_digit() {
+            break;
+        }
+        value.push(*char);
+        cursor += 1;
+    }
+    if value.is_empty() {
+        return None;
+    }
+    value.parse::<i64>().ok().map(|number| (number, cursor))
+}
+
+fn skip_spaces(chars: &[char], mut cursor: usize) -> usize {
+    while chars.get(cursor).is_some_and(|char| char.is_whitespace()) {
+        cursor += 1;
+    }
+    cursor
+}
+
+fn normalize_operator(operator: char) -> Option<char> {
+    match operator {
+        '+' | '-' | '*' | '/' => Some(operator),
+        'x' | 'X' | '×' => Some('*'),
+        ':' | '÷' => Some('/'),
+        _ => None,
+    }
 }
 
 fn timestamp_nanos() -> u128 {

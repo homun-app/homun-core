@@ -263,15 +263,14 @@ export function ChatView({
                 </header>
               )}
               <p>{message.text}</p>
-              {message.role === "assistant" && (
-                <InlineTimeline session={computerSession} />
-              )}
               <footer>
                 <span>{message.timestamp}</span>
                 {message.metadata && <span>{message.metadata}</span>}
               </footer>
             </article>
           ))}
+
+          <InlineTimeline session={computerSession} />
 
           <LocalComputerCard
             approvalsCount={approvalsCount}

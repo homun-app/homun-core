@@ -22,6 +22,14 @@ function assertNotContains(file, text, description) {
   }
 }
 
+function assertOccurrenceCount(file, text, count, description) {
+  const source = read(file);
+  const actual = source.split(text).length - 1;
+  if (actual !== count) {
+    throw new Error(`${description}: expected ${file} to contain ${text} ${count} time(s), found ${actual}`);
+  }
+}
+
 assertContains("src/components/Sidebar.tsx", "navigation-rail", "primary navigation must be rail-first");
 assertContains("src/components/Sidebar.tsx", "nav-drawer", "expanded navigation must be a drawer");
 assertContains("src/components/Shell.tsx", "{!drawerOpen && (", "rail must only render when the drawer is closed");
@@ -38,6 +46,7 @@ assertNotContains("src/styles.css", ".drawer-footer {\n  border-top", "drawer fo
 assertContains("src/components/ChatView.tsx", "local-computer-card", "active task must expose a local computer activity card");
 assertContains("src/components/ChatView.tsx", "computer-detail-panel", "computer details must be progressive disclosure");
 assertContains("src/components/ChatView.tsx", "timeline-step", "assistant progress must be inline timeline");
+assertOccurrenceCount("src/components/ChatView.tsx", "<InlineTimeline session={computerSession} />", 1, "timeline must render once per thread, not under every assistant message");
 assertContains("src/components/ChatView.tsx", "composer-surface", "prompt composer must have a stable anchored surface");
 assertContains("src/components/ChatView.tsx", "coreBridge.localComputerSession", "chat local computer card must load the Tauri read model");
 assertContains("src/components/ChatView.tsx", "coreBridge.submitUserPrompt", "composer must submit prompts to the Tauri core");

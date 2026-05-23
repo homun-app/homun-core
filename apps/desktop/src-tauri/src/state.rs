@@ -491,4 +491,23 @@ mod tests {
                 .any(|item| { item.kind == "user_prompt_received" && item.payload_redacted })
         );
     }
+
+    #[test]
+    fn submit_user_prompt_answers_simple_arithmetic_locally() {
+        let state = state();
+
+        let result = state
+            .submit_user_prompt("computer_active_prompt", "quanto fa 6*3")
+            .unwrap();
+        let serialized = serde_json::to_string(&result).unwrap();
+
+        assert_eq!(result.assistant_message.text, "6 * 3 fa 18.");
+        assert!(
+            result.computer_session.timeline.iter().any(|item| {
+                item.kind == "local_calculation_completed" && item.payload_redacted
+            })
+        );
+        assert!(!serialized.contains("quanto fa 6*3"));
+        assert!(!serialized.contains("prompt_pending_brain"));
+    }
 }
