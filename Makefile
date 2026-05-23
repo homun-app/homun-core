@@ -13,7 +13,7 @@ test-python:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest tests/test_mlx_gemma4_server.py
 
 test-rust:
-	cargo test -p local-first-subagents
+	cargo test --workspace
 
 server:
 	$(PYTHON) $(SERVER)
