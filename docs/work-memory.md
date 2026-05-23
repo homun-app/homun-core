@@ -789,3 +789,29 @@ Perche': ora le skill non trusted possono girare dentro un runtime senza accesso
 ## Prossimo blocco
 
 - Assistant Orchestrator Brain: creare il cervello deterministico che decide quando usare memoria, browser, MCP, connettori, skill, subagenti o risposta diretta, generando piani auditabili e task durevoli invece di lasciare il routing solo al prompt del modello.
+
+## Prossimo blocco
+
+### Assistant Orchestrator Brain
+
+- Creato design `docs/superpowers/specs/2026-05-23-assistant-orchestrator-brain-design.md`.
+- Creato piano `docs/superpowers/plans/2026-05-23-assistant-orchestrator-brain.md`.
+- Aggiunto crate Rust `crates/orchestrator` al workspace.
+- Aggiunti contratti `OrchestratorRequest`, `ExecutionPlan`, `PlanStep`, `OrchestratorOutcome`, `ToolCard` e `OrchestratorAudit`.
+- Aggiunto `ToolSearchIndexStore` SQLite FTS5/BM25 per registry tool lazy.
+- Le `ToolCard` espongono provider, action, descrizione, privacy domain, sensitivity e schema hash, ma non lo schema input completo.
+- Il Brain carica tutti i tool detail solo se il catalogo visibile e' piccolo; con cataloghi grandi carica un subset limitato e consente un solo retry `needs_more_tools`.
+- Aggiunto `MemoryContextProvider` con provider noop/statici e adapter per `MemoryFacade`.
+- Aggiunto `OrchestratorBrain`: costruisce prompt JSON locale, valida il piano e blocca tool non caricati o inventati dal modello.
+- Le risposte dirette non creano task quando non servono capability.
+- Le capability `read`/`draft` brevi e locali possono essere eseguite subito via `CapabilityFacade`.
+- Write, browser mutativo, managed provider e step non immediati vengono accodati tramite `CapabilityTaskRuntimeBridge`.
+- Aggiunta gestione iniziale di DAG: gli step possono dichiarare dipendenze e le dipendenze tra task accodati vengono registrate nel `TaskStore`.
+- Verifiche eseguite finora:
+  - `cargo test -p local-first-orchestrator`
+
+Perche': il modello non deve vedere tutti i tool e non deve decidere da solo cosa puo' eseguire. Ora il cervello usa un pattern simile a tool search/deferred loading: catalogo compatto, pochi detail caricati, piano JSON validato e enforcement finale nel Rust Core.
+
+## Prossimo blocco
+
+- Assistant Orchestrator Brain Hardening: audit persistente, read model UI-safe dei piani, materializzazione completa dei workflow subagent e integrazione runtime/app.

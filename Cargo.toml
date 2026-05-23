@@ -8,5 +8,6 @@ members = [
     "crates/process-manager",
     "crates/secrets",
     "crates/skill-runtime",
+    "crates/orchestrator",
 ]
 resolver = "3"

@@ -43,6 +43,7 @@ Principi:
 - Managed integrations: Composio/Zapier/Pipedream style providers are allowed only as explicit opt-in adapters, never as implicit core dependencies.
 - Capability provider registry: provider config, grant user/workspace, connessioni, tool cache e policy context devono essere persistenti in SQLite locale.
 - Browser automation: OpenClaw e' il riferimento principale per profili browser, Playwright/CDP, snapshot/refs, azioni atomiche, tab tracking, navigation guard e manual blockers. Lo stack operativo sara' sidecar locale Node/TypeScript con `playwright-core`, orchestrato dal Rust Core.
+- Orchestrator Brain: router ibrido nel Rust Core con registry tool lazy. Il modello vede card compatte e solo pochi tool detail caricati on demand; Rust resta owner di policy, execution, queue, approval e audit.
 
 ### Test Gemma 4 locale
 
@@ -100,6 +101,11 @@ Tauri React UI
       -> MCP Adapter
       -> Skill Registry
       -> Managed Provider Adapters
+    -> Assistant Orchestrator Brain
+      -> Tool Search Index
+      -> Memory Context Loader
+      -> Plan Validator
+      -> Execution Router
     -> Automation Engine
     -> Subagent Manager
       -> PlannerAgent
@@ -194,12 +200,22 @@ Implementato:
 - i moduli WASM con import host/WASI vengono rifiutati: nessun accesso a filesystem, rete o host API e' disponibile by construction.
 - protocollo guest minimo: memoria export `memory`, funzione export `run(ptr, len) -> i64`, input JSON scritto a offset 0 e output JSON restituito come pointer/length packed.
 - il runner valida dimensione output, bounds di memoria guest, JSON di risposta e poi delega a `SkillRuntime` la validazione finale di trace/output.
+- crate `crates/orchestrator` per l'Assistant Orchestrator Brain.
+- `ToolSearchIndexStore` SQLite FTS5/BM25 per registry tool lazy: card compatte senza schema completo, detail caricati solo per i candidati.
+- `OrchestratorBrain` con planner JSON locale, memory context, validazione DAG e controllo tool anti-hallucination.
+- risposta diretta senza task quando non servono capability, con reason/confidence nel piano.
+- esecuzione immediata limitata a tool `read`/`draft` brevi, non managed-cloud e non browser mutativi.
+- write, browser mutativo, managed provider e operazioni non immediate vengono accodati nel Durable Task Runtime tramite `CapabilityTaskRuntimeBridge`.
+- adapter `MemoryContextProvider` per agganciare `MemoryFacade` senza esporre il Brain allo storage interno della memoria.
 
 Non ancora incluso:
 
 - policy di restart/backoff eseguita automaticamente in background.
 - UI Tauri per vedere processi, logs e health.
 - adapter WASI con preopen/capability host controllate e SDK language-friendly per creare skill non trusted senza scrivere WAT/Rust manuale.
+- materializzazione completa dei workflow subagent dal Brain oltre alle capability call.
+- UI/audit timeline dedicata per spiegare piani, tool caricati e decisioni del Brain.
+- embeddings locali opzionali per tool retrieval semantico; il primo slice usa FTS/BM25 deterministico.
 
 API interne previste:
 
@@ -223,6 +239,9 @@ task.cancel(task_id)
 task.status(task_id)
 task.list_queue(user_id, workspace_id)
 task.record_checkpoint(task_id, checkpoint)
+orchestrator.plan_and_execute(request)
+orchestrator.search_tools(query, policy_context)
+orchestrator.validate_plan(plan)
 automation.propose(candidate)
 automation.execute_with_approval(id)
 ```
@@ -1018,16 +1037,14 @@ local-first-personal-assistant/
 
 ## Prossima Azione Consigliata
 
-Progettare e implementare il blocco Assistant Orchestrator Brain:
+Progettare e implementare il blocco Assistant Orchestrator Brain Hardening:
 
 ```text
 crates/orchestrator/
-crates/orchestrator/src/planner.rs
-crates/orchestrator/src/router.rs
-crates/orchestrator/src/execution_plan.rs
-crates/orchestrator/tests/
-docs/superpowers/specs/2026-05-23-assistant-orchestrator-brain-design.md
-docs/superpowers/plans/2026-05-23-assistant-orchestrator-brain.md
+crates/orchestrator/src/audit.rs
+crates/orchestrator/src/subagent_workflow.rs
+crates/orchestrator/tests/subagent_workflow.rs
+crates/orchestrator/tests/audit.rs
 ```
 
-Runtime Python/MLX, memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager, Secrets/Keychain, Skill/Plugin Registry, Skill Runtime Sandbox, process adapter trusted e WASM adapter non trusted hanno una base operativa testata. Il prossimo blocco deve creare il cervello deterministico che decide se rispondere direttamente, usare memoria, browser, MCP, connettori, skill o subagenti, producendo piani auditabili e task durevoli invece di lasciare questa scelta al solo prompt del modello.
+Runtime Python/MLX, memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager, Secrets/Keychain, Skill/Plugin Registry, Skill Runtime Sandbox, process adapter trusted, WASM adapter non trusted e primo Orchestrator Brain hanno una base operativa testata. Il prossimo blocco deve rafforzare il Brain con audit persistente, UI-safe read model e materializzazione dei workflow subagent, cosi' le decisioni del cervello restano spiegabili oltre la singola chiamata.
