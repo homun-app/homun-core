@@ -33,14 +33,14 @@
 - [x] Run `cargo test -p local-first-skill-runtime --test contracts --test policy` and verify failures.
 - [x] Implement crate skeleton, error types, contracts and `SkillSandboxPolicy`.
 - [x] Run targeted tests until green.
-- [ ] Commit as `Add skill runtime contracts`.
+- [x] Commit as `Add skill runtime contracts`.
 
 ### Task 2: Runner And Executable Provider
 
-- [ ] Write failing tests for `InMemorySkillRunner`, post-run trace validation and `SkillRuntimeCapabilityProvider`.
-- [ ] Run `cargo test -p local-first-skill-runtime --test provider` and verify failures.
-- [ ] Implement `SkillRunner`, `InMemorySkillRunner`, `SkillRuntime` and `SkillRuntimeCapabilityProvider`.
-- [ ] Run targeted tests until green.
+- [x] Write failing tests for `InMemorySkillRunner`, post-run trace validation and `SkillRuntimeCapabilityProvider`.
+- [x] Run `cargo test -p local-first-skill-runtime --test provider` and verify failures.
+- [x] Implement `SkillRunner`, `InMemorySkillRunner`, `SkillRuntime` and `SkillRuntimeCapabilityProvider`.
+- [x] Run targeted tests until green.
 - [ ] Commit as `Add skill runtime provider`.
 
 ### Task 3: Durable Task Runtime Integration
