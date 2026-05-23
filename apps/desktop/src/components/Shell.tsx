@@ -1,15 +1,14 @@
 import type { ReactNode } from "react";
-import { SettingsSidebar, Sidebar } from "./Sidebar";
+import { NavDrawer, NavigationRail, SettingsDrawer } from "./Sidebar";
 import type { SettingsSectionId, ViewId } from "../types";
 
 interface ShellProps {
   activeView: ViewId;
-  isInspectorCollapsed: boolean;
-  isNavCollapsed: boolean;
+  drawerOpen: boolean;
   onBackFromSettings: () => void;
   onNavigate: (view: ViewId) => void;
   onSelectSettingsSection: (section: SettingsSectionId) => void;
-  onToggleNav: () => void;
+  onToggleDrawer: () => void;
   settingsSection: SettingsSectionId;
   children: ReactNode;
 }
@@ -17,12 +16,11 @@ interface ShellProps {
 export function Shell({
   activeView,
   children,
-  isInspectorCollapsed,
-  isNavCollapsed,
+  drawerOpen,
   onBackFromSettings,
   onNavigate,
   onSelectSettingsSection,
-  onToggleNav,
+  onToggleDrawer,
   settingsSection,
 }: ShellProps) {
   const isSettings = activeView === "settings";
@@ -31,27 +29,30 @@ export function Shell({
     <div
       className={[
         "app-shell",
+        drawerOpen ? "drawer-open" : "drawer-closed",
         isSettings ? "settings-mode" : "",
-        isNavCollapsed ? "nav-collapsed" : "",
-        isInspectorCollapsed ? "inspector-collapsed" : "",
       ]
         .filter(Boolean)
         .join(" ")}
     >
-      {isSettings ? (
-        <SettingsSidebar
+      <NavigationRail
+        activeView={activeView}
+        drawerOpen={drawerOpen}
+        onNavigate={onNavigate}
+        onToggleDrawer={onToggleDrawer}
+      />
+      {drawerOpen && !isSettings && (
+        <NavDrawer
+          activeView={activeView}
+          onNavigate={onNavigate}
+          onToggleDrawer={onToggleDrawer}
+        />
+      )}
+      {drawerOpen && isSettings && (
+        <SettingsDrawer
           activeSection={settingsSection}
-          isCollapsed={isNavCollapsed}
           onBack={onBackFromSettings}
           onSelect={onSelectSettingsSection}
-          onToggle={onToggleNav}
-        />
-      ) : (
-        <Sidebar
-          activeView={activeView}
-          isCollapsed={isNavCollapsed}
-          onNavigate={onNavigate}
-          onToggle={onToggleNav}
         />
       )}
       {children}

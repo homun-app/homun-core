@@ -4,18 +4,19 @@ import {
   CalendarClock,
   CheckCircle2,
   Database,
+  GalleryVerticalEnd,
   Globe2,
+  History,
   KeyRound,
-  ListTodo,
   MessageSquare,
   Monitor,
   Plug,
-  Settings,
 } from "lucide-react";
 import type {
   ApprovalItem,
   BrainRunDetail,
   ChatMessage,
+  ComputerSession,
   ConnectionItem,
   MemorySummary,
   NavItem,
@@ -25,7 +26,7 @@ import type {
 } from "../types";
 
 export const navItems: NavItem[] = [
-  { id: "chat", label: "Agent", icon: MessageSquare },
+  { id: "chat", label: "Nuovo compito", icon: MessageSquare },
   { id: "connections", label: "Plugin", icon: Plug },
   { id: "automations", label: "Pianificato", icon: CalendarClock },
   { id: "memory", label: "Libreria", icon: Database },
@@ -35,23 +36,107 @@ export const chatMessages: ChatMessage[] = [
   {
     id: "m1",
     role: "user",
-    text: "Organizza la mattina di lavoro Acme: controlla task, messaggi e prepara un riepilogo operativo.",
+    text: "Cerca un treno Napoli-Milano per il 10 giugno e dimmi quali opzioni hanno senso.",
     timestamp: "15:21",
   },
   {
     id: "m2",
     role: "assistant",
-    text: "Posso farlo localmente. Ho preparato un piano con lettura task, memoria progetto e una bozza di riepilogo. Le azioni che inviano messaggi restano in approvazione.",
+    text: "Mi muovo sul browser locale e tengo separati ricerca, verifica fonti e riepilogo. Se una pagina richiede login o pagamento mi fermo prima dell'azione.",
     timestamp: "15:21",
-    metadata: "2 tool caricati, 1 task in attesa approvazione",
+    metadata: "Browser locale, shell disponibile, nessuna API cloud",
   },
   {
     id: "m3",
     role: "system",
-    text: "Runtime Gemma 4 pronto. Browser assistant profile disponibile. Managed cloud disabilitato.",
+    text: "Runtime Gemma 4 pronto. Browser assistant profile attivo. Managed cloud disabilitato.",
     timestamp: "15:22",
   },
 ];
+
+export const computerSession: ComputerSession = {
+  id: "computer_train_search",
+  title: "Computer locale",
+  subtitle: "Ricerca treni con browser e verifica finale in shell",
+  status: "running",
+  activeSurface: "browser",
+  elapsed: "1m 42s",
+  progressCurrent: 2,
+  progressTotal: 4,
+  previewTitle: "trainline.it / trenitalia.com",
+  previewDetail: "Pagina risultati aperta in profilo assistant. Nessun dato personale inserito.",
+  terminalExcerpt: [
+    "local-task % date '+%Y-%m-%d %H:%M %Z'",
+    "2026-05-23 16:31 CEST",
+    "local-task % printf 'validazione fonti completata'",
+  ],
+  surfaces: [
+    {
+      id: "browser",
+      label: "Browser",
+      status: "running",
+      detail: "2 tab controllati, snapshot redatti",
+    },
+    {
+      id: "shell",
+      label: "Terminale",
+      status: "idle",
+      detail: "Pronto per verifiche locali",
+    },
+    {
+      id: "files",
+      label: "File",
+      status: "done",
+      detail: "1 screenshot, 1 nota locale",
+    },
+    {
+      id: "logs",
+      label: "Log",
+      status: "running",
+      detail: "Eventi task redatti",
+    },
+  ],
+  timeline: [
+    {
+      id: "open",
+      surface: "browser",
+      title: "Aprire il browser locale",
+      detail: "Profilo assistant isolato, dominio consentito",
+      status: "done",
+      timestamp: "15:21",
+    },
+    {
+      id: "search",
+      surface: "browser",
+      title: "Cercare tratte Napoli-Milano",
+      detail: "Compilazione form senza login e senza pagamento",
+      status: "running",
+      timestamp: "15:22",
+    },
+    {
+      id: "verify",
+      surface: "shell",
+      title: "Verificare data e fonti",
+      detail: "Controllo locale prima del riepilogo",
+      status: "waiting",
+      timestamp: "in coda",
+    },
+  ],
+  artifacts: [
+    {
+      id: "shot_results",
+      name: "risultati-treni-redatto.png",
+      kind: "screenshot",
+      detail: "Anteprima locale, nessun dato personale",
+    },
+    {
+      id: "terminal_check",
+      name: "terminal-excerpt",
+      kind: "terminal",
+      detail: "Output redatto della verifica locale",
+    },
+  ],
+};
 
 export const brainRun: BrainRunDetail = {
   requestId: "req_acme_morning",
@@ -182,6 +267,41 @@ export const connections: ConnectionItem[] = [
     status: "connected",
     description: "Memoria leggibile e correggibile in Markdown.",
   },
+  {
+    id: "gmail",
+    name: "Gmail",
+    type: "managed",
+    status: "disabled",
+    description: "Lettura e bozze email tramite provider opt-in.",
+  },
+  {
+    id: "drive",
+    name: "Google Drive",
+    type: "managed",
+    status: "disabled",
+    description: "File cloud solo con confini privacy espliciti.",
+  },
+  {
+    id: "calendar-local",
+    name: "Calendario locale",
+    type: "native",
+    status: "available",
+    description: "Eventi e disponibilita' sul dispositivo.",
+  },
+  {
+    id: "browser-skill",
+    name: "browser-booking",
+    type: "skill",
+    status: "available",
+    description: "Workflow riutilizzabile per form e prenotazioni.",
+  },
+  {
+    id: "memory-skill",
+    name: "memory-briefing",
+    type: "skill",
+    status: "connected",
+    description: "Sintesi locale da memoria e wiki.",
+  },
 ];
 
 export const settingsSections: Array<{
@@ -193,5 +313,17 @@ export const settingsSections: Array<{
   { id: "privacy", label: "Privacy e autonomia", icon: KeyRound },
   { id: "runtime", label: "Runtime locale", icon: Bot },
   { id: "connections", label: "Connettori", icon: Plug },
-  { id: "audit", label: "Audit e dati", icon: CheckCircle2 },
+  { id: "audit", label: "Audit e dati", icon: History },
+];
+
+export const drawerTasks = [
+  { id: "task_browser_quote", label: "Treni Napoli-Milano", active: true },
+  { id: "task_acme_summary", label: "Riepilogo operativo Acme", active: false },
+  { id: "task_memory_index", label: "Indice memoria progetto", active: false },
+];
+
+export const drawerProjects = [
+  "local-first-personal-assistant",
+  "Acme workspace",
+  "Ricerca viaggi",
 ];

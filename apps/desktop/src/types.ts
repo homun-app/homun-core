@@ -71,6 +71,48 @@ export interface TaskItem {
   blockedReason?: string;
 }
 
+export type ComputerSurfaceKind = "browser" | "shell" | "files" | "logs";
+
+export interface ComputerSurface {
+  id: ComputerSurfaceKind;
+  label: string;
+  status: "idle" | "running" | "waiting" | "done";
+  detail: string;
+}
+
+export interface ComputerTimelineItem {
+  id: string;
+  surface: ComputerSurfaceKind;
+  title: string;
+  detail: string;
+  status: "done" | "running" | "waiting";
+  timestamp: string;
+}
+
+export interface ComputerArtifact {
+  id: string;
+  name: string;
+  kind: "screenshot" | "terminal" | "file" | "log";
+  detail: string;
+}
+
+export interface ComputerSession {
+  id: string;
+  title: string;
+  subtitle: string;
+  status: "running" | "waiting_user" | "completed";
+  activeSurface: ComputerSurfaceKind;
+  elapsed: string;
+  progressCurrent: number;
+  progressTotal: number;
+  previewTitle: string;
+  previewDetail: string;
+  terminalExcerpt: string[];
+  surfaces: ComputerSurface[];
+  timeline: ComputerTimelineItem[];
+  artifacts: ComputerArtifact[];
+}
+
 export interface ApprovalItem {
   id: string;
   title: string;

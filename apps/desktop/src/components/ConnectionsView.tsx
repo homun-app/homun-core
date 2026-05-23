@@ -25,7 +25,6 @@ export function ConnectionsView({ connections }: ConnectionsViewProps) {
     <section className="connections-view" aria-labelledby="connections-title">
       <header className="page-heading">
         <div>
-          <p className="eyebrow">Plugin</p>
           <h2 id="connections-title">Connettori e skill</h2>
         </div>
         <div className="page-actions">

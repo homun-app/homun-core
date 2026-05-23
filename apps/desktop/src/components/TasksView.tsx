@@ -18,7 +18,6 @@ export function TasksView({
     <section className="tasks-view" aria-labelledby="tasks-title">
       <header className="topbar">
         <div>
-          <p className="eyebrow">Durable Task Runtime</p>
           <h2 id="tasks-title">Task e approvazioni</h2>
         </div>
         <div className="summary-strip">

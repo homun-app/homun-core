@@ -13,7 +13,6 @@ export function SettingsView({ health, connections, section }: SettingsViewProps
     <section className="settings-view" aria-labelledby="settings-title">
       <div className="settings-content">
         <header>
-          <p className="eyebrow">Impostazioni</p>
           <h2 id="settings-title">{titleFor(section)}</h2>
         </header>
 

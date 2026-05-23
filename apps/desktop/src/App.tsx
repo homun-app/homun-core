@@ -1,7 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChatView } from "./components/ChatView";
 import { ConnectionsView } from "./components/ConnectionsView";
-import { Inspector } from "./components/Inspector";
 import { Shell } from "./components/Shell";
 import { ShallowView } from "./components/ShallowView";
 import { SettingsView } from "./components/SettingsView";
@@ -10,6 +9,7 @@ import {
   approvals,
   brainRun,
   chatMessages,
+  computerSession,
   connections,
   memorySummary,
   runtimeHealth,
@@ -23,8 +23,7 @@ export default function App() {
   const [settingsSection, setSettingsSection] =
     useState<SettingsSectionId>("privacy");
   const [selectedTaskId, setSelectedTaskId] = useState(tasks[1].id);
-  const [isNavCollapsed, setIsNavCollapsed] = useState(false);
-  const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(true);
+  const [drawerOpen, setDrawerOpen] = useState(() => window.innerWidth > 860);
   const selectedTask = useMemo(
     () => tasks.find((task) => task.id === selectedTaskId) ?? tasks[0],
     [selectedTaskId],
@@ -38,14 +37,23 @@ export default function App() {
     setActiveView(view);
   }
 
+  useEffect(() => {
+    function syncDrawerWithViewport() {
+      setDrawerOpen(window.innerWidth > 860);
+    }
+
+    syncDrawerWithViewport();
+    window.addEventListener("resize", syncDrawerWithViewport);
+    return () => window.removeEventListener("resize", syncDrawerWithViewport);
+  }, []);
+
   return (
     <Shell
       activeView={activeView}
-      isInspectorCollapsed={isInspectorCollapsed}
-      isNavCollapsed={isNavCollapsed}
+      drawerOpen={drawerOpen}
       onBackFromSettings={() => setActiveView(previousView)}
       onNavigate={handleNavigate}
-      onToggleNav={() => setIsNavCollapsed((value) => !value)}
+      onToggleDrawer={() => setDrawerOpen((value) => !value)}
       onSelectSettingsSection={setSettingsSection}
       settingsSection={settingsSection}
     >
@@ -56,9 +64,9 @@ export default function App() {
         {activeView === "chat" && (
           <ChatView
             approvalsCount={approvals.length}
+            computerSession={computerSession}
             messages={chatMessages}
             health={runtimeHealth}
-            onShowDetails={() => setIsInspectorCollapsed((value) => !value)}
             task={selectedTask}
           />
         )}
@@ -129,17 +137,6 @@ export default function App() {
           />
         )}
       </main>
-      {!isSettings && !isInspectorCollapsed && (
-        <Inspector
-          activeView={activeView}
-          brainRun={brainRun}
-          task={selectedTask}
-          approvals={approvals}
-          health={runtimeHealth}
-          isCollapsed={false}
-          onToggle={() => setIsInspectorCollapsed((value) => !value)}
-        />
-      )}
     </Shell>
   );
 }

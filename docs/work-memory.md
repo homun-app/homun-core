@@ -878,4 +878,24 @@ Perche': l'esperienza utente e' parte centrale del prodotto. Se browser e shell 
 
 ## Prossimo blocco
 
-- Local Computer Session: implementare store/read model/event stream e aggiornare la UI Tauri verso rail/drawer, chat attiva con activity card, computer detail panel e progressive disclosure. Dopo questo, cablare health processi, task queue, approvals, Brain audit, memory summary e capability connections ai read model reali.
+### UI Tauri riallineata alla spec Local Computer
+
+- Scartato il tentativo visuale precedente basato su sidebar densa e inspector.
+- Rifatta la shell con rail primaria sempre presente e drawer espandibile on demand.
+- Rimossa l'integrazione dell'inspector dal layout e cancellato il componente `Inspector`.
+- Rifatta la Chat come active-task thread: topbar minimale, messaggi centrali, timeline inline, Local Computer activity card e composer ancorato al fondo dell'area utile.
+- Aggiunto pannello `Computer locale` on demand con tab Browser, Terminale, File e Log.
+- Aggiunto mock read model `ComputerSession` con superfici, timeline, artifact e transcript redatto.
+- Aggiunto contract test statico `npm run test:ui-contract` per impedire regressioni su rail/drawer, activity card, detail panel, timeline e assenza dell'inspector nella shell.
+- Corretto comportamento responsive: su viewport mobile il drawer parte chiuso, su altezze ridotte il thread torna al fondo e il composer resta utilizzabile.
+- Verifiche eseguite:
+  - `npm run test:ui-contract`
+  - `npm run typecheck`
+  - `npm run build`
+  - screenshot browser in-app su desktop, mobile e altezza corta.
+
+Perche': la UI doveva seguire la nuova specifica Manus-inspired senza mantenere compromessi del primo prototipo. Il prodotto deve comunicare subito "sto lavorando sul tuo computer locale" con progress visibile e dettagli controllati, non "sto mostrando pannelli tecnici".
+
+## Prossimo blocco
+
+- Implementare il crate/read model reale `local-computer-session` e cablare la UI a Tauri commands per sessioni computer, task runtime, approvals e health, mantenendo la struttura rail/drawer + activity card.
