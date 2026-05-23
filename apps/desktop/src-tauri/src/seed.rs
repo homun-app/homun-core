@@ -19,39 +19,35 @@ pub fn seed_tasks(store: &TaskStore) -> TaskRuntimeResult<()> {
     let user_id = TaskUserId::new(DEFAULT_USER_ID);
     let workspace_id = TaskWorkspaceId::new(DEFAULT_WORKSPACE_ID);
 
-    let mut browser_task = TaskRecord::new(
-        "task_browser_quote",
+    let mut prompt_task = TaskRecord::new(
+        "task_prompt_session",
         user_id.clone(),
         workspace_id.clone(),
-        "browser_automation",
-        "Cercare disponibilita' treno Napoli-Milano",
+        "local_prompt",
+        "Gestire prompt locali dalla chat operativa",
         json!({
-            "method": "browser.fill_and_extract",
-            "params": { "target_id": "browser-session-local" }
+            "surface": "chat",
+            "raw_payload": "redacted"
         }),
     )
     .with_priority(TaskPriority::High)
-    .with_resource(ResourceRequirement::new(ResourceClass::BrowserSession, 1));
-    browser_task.status = TaskStatus::Running;
-    browser_task.risk_level = "medium".to_string();
-    store.insert_task(&browser_task)?;
-    store.reserve_resources(&browser_task, "desktop-core")?;
+    .with_resource(ResourceRequirement::new(ResourceClass::ShellProcess, 1));
+    prompt_task.status = TaskStatus::Running;
+    prompt_task.risk_level = "low".to_string();
+    store.insert_task(&prompt_task)?;
+    store.reserve_resources(&prompt_task, "desktop-core")?;
     store.append_checkpoint(
-        &browser_task.task_id,
+        &prompt_task.task_id,
         &user_id,
         &workspace_id,
         json!({
-            "browser": {
-                "method": "browser.fill_and_extract",
-                "target_id": "browser-session-local",
-                "raw_url": "redacted"
+            "prompt": {
+                "raw_payload": "redacted"
             }
         }),
         json!({
-            "browser": {
-                "method": "browser.fill_and_extract",
-                "target_id": "browser-session-local",
-                "snapshot": "redacted"
+            "prompt": {
+                "state": "ready"
             }
         }),
     )?;

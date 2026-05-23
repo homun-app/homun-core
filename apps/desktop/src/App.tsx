@@ -24,7 +24,7 @@ export default function App() {
   const [previousView, setPreviousView] = useState<ViewId>("chat");
   const [settingsSection, setSettingsSection] =
     useState<SettingsSectionId>("privacy");
-  const [selectedTaskId, setSelectedTaskId] = useState("task_browser_quote");
+  const [selectedTaskId, setSelectedTaskId] = useState("task_prompt_session");
   const [drawerOpen, setDrawerOpen] = useState(() => window.innerWidth > 860);
   const selectedTask = useMemo(
     () => tasks.find((task) => task.id === selectedTaskId) ?? tasks[0],
@@ -66,7 +66,7 @@ export default function App() {
         {activeView === "chat" && (
           <ChatView
             approvalsCount={approvals.length}
-            computerSessionId="computer_train_search"
+            computerSessionId="computer_active_prompt"
             messages={chatMessages}
             health={runtimeHealth}
             task={selectedTask}

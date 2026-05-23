@@ -1094,6 +1094,26 @@ Perche': ora l'utente puo' digitare davvero un prompt nella app. Non e' ancora i
 
 ## Prossimo blocco
 
+### Fix sessione attiva non coerente con il prompt
+
+- Rimosso il seed "treni Napoli-Milano" dal percorso chat di default.
+- La sessione attiva e' ora `computer_active_prompt`, collegata al task `task_prompt_session`.
+- Il task attivo seeded e' neutro: `local_prompt`, risorsa `shell_process`, rischio `low`.
+- La chat iniziale ora mostra stato pronto per prompt locali, non una richiesta treni.
+- La drawer mostra `Prompt locale`, non `Treni Napoli-Milano`.
+- Il test `local_computer_snapshot_is_redacted_for_ui` verifica che lo snapshot default non contenga riferimenti treni/Napoli/Milano.
+- Rigenerata e aperta la app Tauri debug.
+- Verifiche eseguite:
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`
+  - `npm run typecheck`
+  - `npm run test:ui-contract`
+  - `npm run build`
+  - `npm run tauri -- build --debug --bundles app --no-sign`
+
+Perche': il composer reale funzionava, ma la UX era contaminata da dati seeded della vecchia demo treni. Questo rendeva la timeline incoerente con prompt come "che ore sono?". Il percorso default deve essere neutro e solo i task effettivamente avviati devono aggiungere contesto specifico.
+
+## Prossimo blocco
+
 - Collegare Tasks/Approvals ai command `task_queue_snapshot` e `task_detail`.
 - Collegare Connections/Settings ai command capability/runtime esistenti.
 - Collegare il Browser Automation Runtime alla `LocalComputerSessionManager`, cosi' le azioni reali producono eventi, artifact e preview nella stessa card.

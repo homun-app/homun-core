@@ -38,47 +38,37 @@ export const navItems: NavItem[] = [
 export const chatMessages: ChatMessage[] = [
   {
     id: "m1",
-    role: "user",
-    text: "Cerca un treno Napoli-Milano per il 10 giugno e dimmi quali opzioni hanno senso.",
-    timestamp: "15:21",
+    role: "assistant",
+    text: "Sono pronto. Scrivi un prompt: per ora posso eseguire controlli locali semplici e registrare tutto nella sessione Computer locale.",
+    timestamp: "ora",
+    metadata: "Tauri core locale, nessuna API cloud",
   },
   {
     id: "m2",
-    role: "assistant",
-    text: "Mi muovo sul browser locale e tengo separati ricerca, verifica fonti e riepilogo. Se una pagina richiede login o pagamento mi fermo prima dell'azione.",
-    timestamp: "15:21",
-    metadata: "Browser locale, shell disponibile, nessuna API cloud",
-  },
-  {
-    id: "m3",
     role: "system",
-    text: "Runtime Gemma 4 pronto. Browser assistant profile attivo. Managed cloud disabilitato.",
-    timestamp: "15:22",
+    text: "Composer cablato al core locale. Il Brain operativo verra' collegato nel prossimo layer.",
+    timestamp: "ora",
   },
 ];
 
 export const computerSession: ComputerSession = {
-  id: "computer_train_search",
+  id: "computer_active_prompt",
   title: "Computer locale",
-  subtitle: "Ricerca treni con browser e verifica finale in shell",
+  subtitle: "Sessione locale pronta per prompt, shell e browser controllato",
   status: "running",
-  activeSurface: "browser",
-  elapsed: "1m 42s",
-  progressCurrent: 2,
-  progressTotal: 4,
-  previewTitle: "trainline.it / trenitalia.com",
-  previewDetail: "Pagina risultati aperta in profilo assistant. Nessun dato personale inserito.",
-  terminalExcerpt: [
-    "local-task % date '+%Y-%m-%d %H:%M %Z'",
-    "2026-05-23 16:31 CEST",
-    "local-task % printf 'validazione fonti completata'",
-  ],
+  activeSurface: "logs",
+  elapsed: "0s",
+  progressCurrent: 0,
+  progressTotal: 3,
+  previewTitle: "Sessione locale",
+  previewDetail: "In attesa di prompt utente.",
+  terminalExcerpt: [],
   surfaces: [
     {
       id: "browser",
       label: "Browser",
-      status: "running",
-      detail: "2 tab controllati, snapshot redatti",
+      status: "idle",
+      detail: "Pronto per task browser controllati",
     },
     {
       id: "shell",
@@ -89,56 +79,27 @@ export const computerSession: ComputerSession = {
     {
       id: "files",
       label: "File",
-      status: "done",
-      detail: "1 screenshot, 1 nota locale",
+      status: "idle",
+      detail: "Nessun artifact ancora",
     },
     {
       id: "logs",
       label: "Log",
       status: "running",
-      detail: "Eventi task redatti",
+      detail: "Eventi prompt redatti",
     },
   ],
   timeline: [
     {
-      id: "open",
-      surface: "browser",
-      title: "Aprire il browser locale",
-      detail: "Profilo assistant isolato, dominio consentito",
+      id: "ready",
+      surface: "logs",
+      title: "Sessione locale pronta",
+      detail: "In attesa di prompt utente",
       status: "done",
-      timestamp: "15:21",
-    },
-    {
-      id: "search",
-      surface: "browser",
-      title: "Cercare tratte Napoli-Milano",
-      detail: "Compilazione form senza login e senza pagamento",
-      status: "running",
-      timestamp: "15:22",
-    },
-    {
-      id: "verify",
-      surface: "shell",
-      title: "Verificare data e fonti",
-      detail: "Controllo locale prima del riepilogo",
-      status: "waiting",
-      timestamp: "in coda",
+      timestamp: "ora",
     },
   ],
-  artifacts: [
-    {
-      id: "shot_results",
-      name: "risultati-treni-redatto.png",
-      kind: "screenshot",
-      detail: "Anteprima locale, nessun dato personale",
-    },
-    {
-      id: "terminal_check",
-      name: "terminal-excerpt",
-      kind: "terminal",
-      detail: "Output redatto della verifica locale",
-    },
-  ],
+  artifacts: [],
 };
 
 export const brainRun: BrainRunDetail = {
@@ -172,13 +133,13 @@ export const brainRun: BrainRunDetail = {
 
 export const tasks: TaskItem[] = [
   {
-    id: "task_browser_quote",
-    title: "Cerca disponibilità treno Napoli-Milano",
-    kind: "browser_automation",
+    id: "task_prompt_session",
+    title: "Prompt locale attivo",
+    kind: "local_prompt",
     status: "running",
     priority: "high",
-    resource: "browser_session",
-    risk: "medium",
+    resource: "shell_process",
+    risk: "low",
     updated: "1 min fa",
   },
   {
@@ -416,7 +377,7 @@ export const settingsSections: Array<{
 ];
 
 export const drawerTasks = [
-  { id: "task_browser_quote", label: "Treni Napoli-Milano", active: true },
+  { id: "task_prompt_session", label: "Prompt locale", active: true },
   { id: "task_acme_summary", label: "Riepilogo operativo Acme", active: false },
   { id: "task_memory_index", label: "Indice memoria progetto", active: false },
 ];
