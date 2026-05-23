@@ -174,11 +174,17 @@ Implementato:
 - `EncryptedFileSecretStore` con XChaCha20Poly1305, nonce casuale, fail-closed su chiave errata e plaintext escluso dal disco.
 - `SystemKeychainSecretStore` come boundary OS keychain, con implementazione macOS via comando `security` e comportamento unsupported-safe sulle altre piattaforme.
 - integrazione `CapabilityRegistryStore` -> `SecretStore`: il registry salva solo `secret_ref`, sanitizza metadata sensibili e scrive il materiale segreto fuori dal DB.
+- contratti skill/plugin nel Capability Layer: `SkillToolManifest`, `PluginManifest`, `SkillInstallRecord`, `PluginInstallRecord` e `SkillTrustLevel`.
+- `SkillPluginRegistryStore` SQLite per manifest globali, installazioni user/workspace, versioni, source path, trust level e manifest hash.
+- registrazione plugin con skill bundled, senza salvare codice eseguibile nel DB.
+- `SkillCapabilityProvider` read-only: espone solo tool di skill installate e abilitate nello scope corrente come normali `CapabilityTool` con provider kind `skill`.
+- esecuzione diretta delle skill disabilitata finche' non esiste un runtime sandbox dedicato; il provider restituisce `skill_execution_unavailable`.
 
 Non ancora incluso:
 
 - policy di restart/backoff eseguita automaticamente in background.
 - UI Tauri per vedere processi, logs e health.
+- runtime sandbox per esecuzione skill/plugin.
 
 API interne previste:
 
@@ -666,6 +672,7 @@ Strategia:
 - MCP client universale.
 - provider managed esterni per copertura ampia, opt-in e policy-gated.
 - skill locali per estendere il sistema senza modificare il core.
+- skill/plugin locali registrati in `SkillPluginRegistryStore`, con manifest tool strutturati, trust level, versioni e install state scoped per user/workspace.
 - fallback browser automation solo quando non esiste API affidabile.
 - i task lunghi, paralleli o sospesi non vivono nei connettori: vengono sempre orchestrati dal Durable Task Runtime.
 - le capability/tool call possono essere montate su `TaskRuntime` tramite bridge dedicato.
@@ -996,14 +1003,14 @@ local-first-personal-assistant/
 
 ## Prossima Azione Consigliata
 
-Chiudere il blocco Skill/Plugin Registry locale:
+Progettare e implementare il blocco Skill Runtime Sandbox:
 
 ```text
-crates/capabilities/src/skills.rs
-crates/capabilities/src/plugins.rs
-crates/capabilities/tests/skill_plugin_registry.rs
-docs/superpowers/specs/2026-05-23-skill-plugin-registry-design.md
-docs/superpowers/plans/2026-05-23-skill-plugin-registry.md
+crates/skill-runtime/
+crates/capabilities/src/skill_plugin.rs
+crates/capabilities/tests/skill_runtime_bridge.rs
+docs/superpowers/specs/2026-05-23-skill-runtime-sandbox-design.md
+docs/superpowers/plans/2026-05-23-skill-runtime-sandbox.md
 ```
 
-Runtime Python/MLX, memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager e Secrets/Keychain hanno una base operativa testata. Il prossimo blocco serve a rendere skill e plugin installabili, versionati, permission-aware e orchestrabili come capability locali.
+Runtime Python/MLX, memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager, Secrets/Keychain e Skill/Plugin Registry hanno una base operativa testata. Il prossimo blocco serve a eseguire skill locali in modo confinato, con permessi filesystem/network applicati, audit, checkpoint e bridge verso Durable Task Runtime.

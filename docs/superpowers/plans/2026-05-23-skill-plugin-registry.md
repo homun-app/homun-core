@@ -41,13 +41,13 @@
 - [x] Run targeted tests and verify failures.
 - [x] Implement `SkillCapabilityProvider` and export it.
 - [x] Run targeted tests until green.
-- [ ] Commit as `Expose skill plugin capabilities`.
+- [x] Commit as `Expose skill plugin capabilities`.
 
 ### Task 4: Verification And Docs
 
-- [ ] Run `cargo test -p local-first-capabilities --test skill_plugin_registry`.
-- [ ] Run `cargo test --workspace`.
-- [ ] Run `make test`.
-- [ ] Update `PROJECT.md`, this plan and `docs/work-memory.md`.
-- [ ] Run `git diff --check`.
-- [ ] Commit as `Document skill plugin registry`.
+- [x] Run `cargo test -p local-first-capabilities --test skill_plugin_registry`.
+- [x] Run `cargo test --workspace`.
+- [x] Run `make test`.
+- [x] Update `PROJECT.md`, this plan and `docs/work-memory.md`.
+- [x] Run `git diff --check`.
+- [x] Commit as `Document skill plugin registry`.

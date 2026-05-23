@@ -687,4 +687,26 @@ Perche': i connettori, MCP e provider managed richiedono credenziali, ma il regi
 
 ## Prossimo blocco
 
-- Chiudere Skill/Plugin Registry locale: manifest, versioni, permessi, install state, provider capability, UI-safe read model e integrazione con Task Runtime.
+### Skill/Plugin Registry locale
+
+- Creato design `docs/superpowers/specs/2026-05-23-skill-plugin-registry-design.md`.
+- Creato piano `docs/superpowers/plans/2026-05-23-skill-plugin-registry.md`.
+- Esteso `SkillManifest`: i tool non sono piu' stringhe, ma `SkillToolManifest` con nome, descrizione, action, privacy domains, sensitivity e input schema.
+- Aggiunti `PluginManifest`, `SkillInstallRecord`, `PluginInstallRecord` e `SkillTrustLevel`.
+- Gli install record sono scoped per `user_id` e `workspace_id`, hanno `enabled`, `source_path`, `trust_level`, versioni e `manifest_hash` opzionale.
+- Aggiunto `SkillPluginRegistryStore` SQLite in `crates/capabilities/src/skill_plugin.rs`.
+- La registry salva manifest globali e installazioni locali, con migrazioni idempotenti.
+- La registrazione di un plugin registra anche le skill bundled.
+- Aggiunto `SkillCapabilityProvider`: converte skill abilitate in normali `CapabilityTool` con `CapabilityProviderKind::Skill`.
+- `SkillCapabilityProvider` e' read-only per ora: `call_tool` restituisce `skill_execution_unavailable:<tool>`, evitando esecuzione di codice non sandboxato.
+- La policy resta unica: `CapabilityFacade` filtra i tool skill tramite provider enabled, privacy domains, action e autonomia come per MCP/browser/managed provider.
+- Verifiche eseguite:
+  - `cargo test -p local-first-capabilities --test skill_plugin_registry`
+  - `cargo test --workspace`
+  - `make test`
+
+Perche': skill e plugin non possono essere solo file o convenzioni esterne. Ora sono oggetti locali versionati, permission-aware, multiutente/workspace e orchestrabili come capability, ma senza introdurre ancora un runtime di esecuzione insicuro.
+
+## Prossimo blocco
+
+- Progettare e implementare Skill Runtime Sandbox: esecuzione locale confinata, permessi filesystem/network applicati, audit, checkpoint e bridge verso Durable Task Runtime.
