@@ -7,6 +7,7 @@ use crate::{
     MemoryMaintenanceReport, MemoryPolicyEngine, MemoryRecord, MemoryRef, MemoryRefKind,
     MemoryRelation, MemorySearchPage, MemorySearchRequest, MemorySearchResult, MemoryStatus,
     MemoryResult, MemoryUpdatePatch, PrivacyDomain, SQLiteMemoryStore, UserId,
+    RoutineInference, RoutineInferenceSummary, RoutineRecord, RoutineStatus,
     WikiCorrectionSyncReport, WikiFileStore, WikiPage, WorkspaceId, current_timestamp,
     ensure_artifacts_inside_root, ensure_transition, parse_wiki_markdown,
 };
@@ -327,6 +328,46 @@ impl MemoryFacade {
         })
     }
 
+    pub fn apply_routine_inference(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        inference: RoutineInference,
+    ) -> MemoryResult<RoutineInferenceSummary> {
+        let mut routine_refs = Vec::new();
+        for extracted in inference.routines {
+            let now = current_timestamp();
+            let reference =
+                MemoryRef::generated(MemoryRefKind::Routine, user_id.clone(), workspace_id.clone());
+            let routine = RoutineRecord {
+                reference: reference.clone(),
+                user_id: user_id.clone(),
+                workspace_id: workspace_id.clone(),
+                name: extracted.name,
+                intent: extracted.intent,
+                confidence: extracted.confidence,
+                status: RoutineStatus::Candidate,
+                schedule_hint: extracted.schedule_hint,
+                privacy_domain: extracted.privacy_domain,
+                sensitivity: extracted.sensitivity,
+                evidence: extracted
+                    .evidence_refs
+                    .iter()
+                    .map(|reference| MemoryRef::from_str(reference))
+                    .collect::<Result<Vec<_>, _>>()?,
+                metadata: extracted.metadata,
+                created_at: now.clone(),
+                updated_at: now,
+            };
+            self.store.upsert_routine(&routine)?;
+            routine_refs.push(reference);
+        }
+        Ok(RoutineInferenceSummary {
+            routines_imported: routine_refs.len(),
+            routine_refs,
+        })
+    }
+
     pub fn context_pack(&self, request: &MemoryAccessRequest) -> MemoryResult<MemoryContextPack> {
         let export_decision = self.policy.decide_export(request);
         if export_decision.kind == AccessDecisionKind::Deny {
@@ -636,6 +677,15 @@ impl MemoryFacade {
         workspace_id: &WorkspaceId,
     ) -> Result<Option<MemoryRecord>, String> {
         self.store.get_memory(reference, user_id, workspace_id)
+    }
+
+    pub fn get_routine_for_test(
+        &self,
+        reference: &MemoryRef,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Option<RoutineRecord>, String> {
+        self.store.get_routine(reference, user_id, workspace_id)
     }
 
     pub fn list_memories_for_ui(

@@ -2,7 +2,8 @@ use crate::{
     DataSensitivity, EncryptedJson, KeyProvider, MemoryAccessDecision, MemoryAccessRequest,
     MemoryBackupReport, MemoryEntity, MemoryEvent, MemoryEvidence, MemoryHealth,
     MemoryMaintenanceReport, MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation,
-    MemoryRestoreMode, PrivacyDomain, UserId, WikiPage, WorkspaceId, decrypt_json, encrypt_json,
+    MemoryRestoreMode, PrivacyDomain, RoutineRecord, UserId, WikiPage, WorkspaceId, decrypt_json,
+    encrypt_json,
 };
 use rusqlite::{Connection, Row, params};
 use std::fs;
@@ -665,6 +666,61 @@ impl SQLiteMemoryStore {
         Ok(pages)
     }
 
+    pub fn upsert_routine(&self, routine: &RoutineRecord) -> Result<(), String> {
+        self.conn
+            .execute(
+                "insert or replace into routines (
+                    ref, user_id, workspace_id, name, intent, confidence, status,
+                    schedule_hint_json, privacy_domain, sensitivity, evidence_json,
+                    metadata_json, created_at, updated_at
+                ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                (
+                    routine.reference.to_string(),
+                    routine.user_id.as_str(),
+                    routine.workspace_id.as_str(),
+                    &routine.name,
+                    &routine.intent,
+                    routine.confidence,
+                    enum_name(&routine.status)?,
+                    serde_json::to_string(&routine.schedule_hint)
+                        .map_err(|error| error.to_string())?,
+                    routine.privacy_domain.as_str(),
+                    enum_name(&routine.sensitivity)?,
+                    serde_json::to_string(&routine.evidence).map_err(|error| error.to_string())?,
+                    serde_json::to_string(&routine.metadata).map_err(|error| error.to_string())?,
+                    &routine.created_at,
+                    &routine.updated_at,
+                ),
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    pub fn get_routine(
+        &self,
+        reference: &MemoryRef,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Option<RoutineRecord>, String> {
+        if self.is_tombstoned(reference, user_id, workspace_id)? {
+            return Ok(None);
+        }
+        query_optional(
+            &self.conn,
+            "select ref, user_id, workspace_id, name, intent, confidence, status,
+                    schedule_hint_json, privacy_domain, sensitivity, evidence_json,
+                    metadata_json, created_at, updated_at
+             from routines
+             where ref = ?1 and user_id = ?2 and workspace_id = ?3",
+            (
+                reference.to_string(),
+                user_id.as_str().to_string(),
+                workspace_id.as_str().to_string(),
+            ),
+            routine_from_row,
+        )
+    }
+
     pub fn tombstone(
         &self,
         reference: &MemoryRef,
@@ -875,6 +931,24 @@ impl SQLiteMemoryStore {
                     privacy_domain text not null,
                     sensitivity text not null
                 );
+
+                create table if not exists routines (
+                    ref text primary key,
+                    user_id text not null,
+                    workspace_id text not null,
+                    name text not null,
+                    intent text not null,
+                    confidence real not null,
+                    status text not null,
+                    schedule_hint_json text not null,
+                    privacy_domain text not null,
+                    sensitivity text not null,
+                    evidence_json text not null,
+                    metadata_json text not null,
+                    created_at text not null,
+                    updated_at text not null
+                );
+                create index if not exists idx_routines_scope on routines(user_id, workspace_id);
 
                 create table if not exists access_audit (
                     ref text primary key,
@@ -1124,6 +1198,38 @@ fn wiki_page_from_row(row: &Row<'_>) -> Result<WikiPage, String> {
             row.get::<_, String>(7).map_err(|error| error.to_string())?,
         ),
         sensitivity: enum_from_name(row.get::<_, String>(8).map_err(|error| error.to_string())?)?,
+    })
+}
+
+fn routine_from_row(row: &Row<'_>) -> Result<RoutineRecord, String> {
+    Ok(RoutineRecord {
+        reference: parse_ref(row.get::<_, String>(0).map_err(|error| error.to_string())?)?,
+        user_id: UserId::new(row.get::<_, String>(1).map_err(|error| error.to_string())?),
+        workspace_id: WorkspaceId::new(row.get::<_, String>(2).map_err(|error| error.to_string())?),
+        name: row.get(3).map_err(|error| error.to_string())?,
+        intent: row.get(4).map_err(|error| error.to_string())?,
+        confidence: row.get(5).map_err(|error| error.to_string())?,
+        status: enum_from_name(row.get::<_, String>(6).map_err(|error| error.to_string())?)?,
+        schedule_hint: serde_json::from_str(
+            &row.get::<_, String>(7).map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?,
+        privacy_domain: PrivacyDomain::new(
+            row.get::<_, String>(8).map_err(|error| error.to_string())?,
+        ),
+        sensitivity: enum_from_name(row.get::<_, String>(9).map_err(|error| error.to_string())?)?,
+        evidence: serde_json::from_str(
+            &row.get::<_, String>(10)
+                .map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?,
+        metadata: serde_json::from_str(
+            &row.get::<_, String>(11)
+                .map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?,
+        created_at: row.get(12).map_err(|error| error.to_string())?,
+        updated_at: row.get(13).map_err(|error| error.to_string())?,
     })
 }
 

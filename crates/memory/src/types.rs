@@ -247,6 +247,61 @@ pub struct MemoryExtractionSummary {
     pub relation_refs: Vec<MemoryRef>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoutineStatus {
+    Candidate,
+    Confirmed,
+    Rejected,
+    Stale,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RoutineRecord {
+    pub reference: MemoryRef,
+    pub user_id: UserId,
+    pub workspace_id: WorkspaceId,
+    pub name: String,
+    pub intent: String,
+    pub confidence: f64,
+    pub status: RoutineStatus,
+    pub schedule_hint: serde_json::Value,
+    pub privacy_domain: PrivacyDomain,
+    pub sensitivity: DataSensitivity,
+    pub evidence: Vec<MemoryRef>,
+    pub metadata: serde_json::Value,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RoutineInference {
+    #[serde(default)]
+    pub routines: Vec<ExtractedRoutine>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExtractedRoutine {
+    pub name: String,
+    pub intent: String,
+    #[serde(default = "default_confidence")]
+    pub confidence: f64,
+    #[serde(default)]
+    pub schedule_hint: serde_json::Value,
+    pub privacy_domain: PrivacyDomain,
+    pub sensitivity: DataSensitivity,
+    #[serde(default)]
+    pub evidence_refs: Vec<String>,
+    #[serde(default)]
+    pub metadata: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoutineInferenceSummary {
+    pub routines_imported: usize,
+    pub routine_refs: Vec<MemoryRef>,
+}
+
 fn default_confidence() -> f64 {
     0.5
 }
