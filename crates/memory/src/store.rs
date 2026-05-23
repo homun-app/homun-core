@@ -1,6 +1,7 @@
 use crate::{
-    MemoryEntity, MemoryEvent, MemoryEvidence, MemoryRecord, MemoryRef, MemoryRelation,
-    PrivacyDomain, UserId, WikiPage, WorkspaceId,
+    DataSensitivity, EncryptedJson, KeyProvider, MemoryAccessDecision, MemoryAccessRequest,
+    MemoryEntity, MemoryEvent, MemoryEvidence, MemoryRecord, MemoryRef, MemoryRefKind,
+    MemoryRelation, PrivacyDomain, UserId, WikiPage, WorkspaceId, decrypt_json, encrypt_json,
 };
 use rusqlite::{Connection, Row};
 use std::path::Path;
@@ -8,19 +9,38 @@ use std::str::FromStr;
 
 pub struct SQLiteMemoryStore {
     conn: Connection,
+    key_provider: Option<Box<dyn KeyProvider>>,
 }
 
 impl SQLiteMemoryStore {
     pub fn open_in_memory() -> Result<Self, String> {
         let conn = Connection::open_in_memory().map_err(|error| error.to_string())?;
-        let store = Self { conn };
+        let store = Self {
+            conn,
+            key_provider: None,
+        };
+        store.init()?;
+        Ok(store)
+    }
+
+    pub fn open_in_memory_with_key_provider(
+        key_provider: Box<dyn KeyProvider>,
+    ) -> Result<Self, String> {
+        let conn = Connection::open_in_memory().map_err(|error| error.to_string())?;
+        let store = Self {
+            conn,
+            key_provider: Some(key_provider),
+        };
         store.init()?;
         Ok(store)
     }
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self, String> {
         let conn = Connection::open(path).map_err(|error| error.to_string())?;
-        let store = Self { conn };
+        let store = Self {
+            conn,
+            key_provider: None,
+        };
         store.init()?;
         Ok(store)
     }
@@ -39,7 +59,12 @@ impl SQLiteMemoryStore {
                     &event.timestamp,
                     &event.source,
                     &event.event_type,
-                    serde_json::to_string(&event.payload).map_err(|error| error.to_string())?,
+                    self.payload_to_storage(
+                        &event.user_id,
+                        &event.workspace_id,
+                        event.sensitivity,
+                        &event.payload,
+                    )?,
                     event.privacy_domain.as_str(),
                     enum_name(&event.sensitivity)?,
                 ),
@@ -68,7 +93,7 @@ impl SQLiteMemoryStore {
                 user_id.as_str().to_string(),
                 workspace_id.as_str().to_string(),
             ),
-            event_from_row,
+            |row| self.event_from_row(row),
         )
     }
 
@@ -328,6 +353,51 @@ impl SQLiteMemoryStore {
         Ok(())
     }
 
+    pub fn record_access_decision(
+        &self,
+        request: &MemoryAccessRequest,
+        decision: &MemoryAccessDecision,
+    ) -> Result<MemoryRef, String> {
+        let reference = MemoryRef::generated(
+            MemoryRefKind::Audit,
+            request.user_id.clone(),
+            request.workspace_id.clone(),
+        );
+        self.conn
+            .execute(
+                "insert into access_audit (
+                    ref, user_id, workspace_id, actor_id, purpose, decision, reasons_json
+                ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                (
+                    reference.to_string(),
+                    request.user_id.as_str(),
+                    request.workspace_id.as_str(),
+                    &request.actor_id,
+                    &request.purpose,
+                    enum_name(&decision.kind)?,
+                    serde_json::to_string(&decision.reasons).map_err(|error| error.to_string())?,
+                ),
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(reference)
+    }
+
+    pub fn raw_event_payload_for_test(&self, reference: &MemoryRef) -> Result<String, String> {
+        self.conn
+            .query_row(
+                "select payload_json from memory_events where ref = ?1",
+                [reference.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn access_audit_count(&self) -> Result<u64, String> {
+        self.conn
+            .query_row("select count(*) from access_audit", [], |row| row.get(0))
+            .map_err(|error| error.to_string())
+    }
+
     pub fn get_wiki_page(
         &self,
         reference: &MemoryRef,
@@ -396,6 +466,71 @@ impl SQLiteMemoryStore {
             )
             .map_err(|error| error.to_string())?;
         Ok(count > 0)
+    }
+
+    fn payload_to_storage(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        sensitivity: DataSensitivity,
+        payload: &serde_json::Value,
+    ) -> Result<String, String> {
+        if sensitivity < DataSensitivity::Confidential {
+            return serde_json::to_string(payload).map_err(|error| error.to_string());
+        }
+
+        let Some(key_provider) = &self.key_provider else {
+            return Err("sensitive payload requires key provider".to_string());
+        };
+        let encrypted = encrypt_json(key_provider.as_ref(), user_id, workspace_id, payload)?;
+        serde_json::to_string(&encrypted).map_err(|error| error.to_string())
+    }
+
+    fn payload_from_storage(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        payload_json: &str,
+    ) -> Result<serde_json::Value, String> {
+        let value: serde_json::Value =
+            serde_json::from_str(payload_json).map_err(|error| error.to_string())?;
+        if value
+            .get("encrypted")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        {
+            let Some(key_provider) = &self.key_provider else {
+                return Err("encrypted payload requires key provider".to_string());
+            };
+            let encrypted: EncryptedJson =
+                serde_json::from_value(value).map_err(|error| error.to_string())?;
+            return decrypt_json(key_provider.as_ref(), user_id, workspace_id, &encrypted);
+        }
+        Ok(value)
+    }
+
+    fn event_from_row(&self, row: &Row<'_>) -> Result<MemoryEvent, String> {
+        let reference = parse_ref(row.get::<_, String>(0).map_err(|error| error.to_string())?)?;
+        let user_id = UserId::new(row.get::<_, String>(1).map_err(|error| error.to_string())?);
+        let workspace_id =
+            WorkspaceId::new(row.get::<_, String>(2).map_err(|error| error.to_string())?);
+        let payload_json: String = row.get(6).map_err(|error| error.to_string())?;
+
+        Ok(MemoryEvent {
+            reference,
+            user_id: user_id.clone(),
+            workspace_id: workspace_id.clone(),
+            timestamp: row.get(3).map_err(|error| error.to_string())?,
+            source: row.get(4).map_err(|error| error.to_string())?,
+            event_type: row.get(5).map_err(|error| error.to_string())?,
+            payload: self.payload_from_storage(&user_id, &workspace_id, &payload_json)?,
+            privacy_domain: PrivacyDomain::new(
+                row.get::<_, String>(7).map_err(|error| error.to_string())?,
+            ),
+            sensitivity: enum_from_name(
+                row.get::<_, String>(8).map_err(|error| error.to_string())?,
+            )?,
+        })
     }
 
     fn init(&self) -> Result<(), String> {
@@ -517,23 +652,6 @@ where
         Some(row) => mapper(row).map(Some),
         None => Ok(None),
     }
-}
-
-fn event_from_row(row: &Row<'_>) -> Result<MemoryEvent, String> {
-    Ok(MemoryEvent {
-        reference: parse_ref(row.get::<_, String>(0).map_err(|error| error.to_string())?)?,
-        user_id: UserId::new(row.get::<_, String>(1).map_err(|error| error.to_string())?),
-        workspace_id: WorkspaceId::new(row.get::<_, String>(2).map_err(|error| error.to_string())?),
-        timestamp: row.get(3).map_err(|error| error.to_string())?,
-        source: row.get(4).map_err(|error| error.to_string())?,
-        event_type: row.get(5).map_err(|error| error.to_string())?,
-        payload: serde_json::from_str(&row.get::<_, String>(6).map_err(|error| error.to_string())?)
-            .map_err(|error| error.to_string())?,
-        privacy_domain: PrivacyDomain::new(
-            row.get::<_, String>(7).map_err(|error| error.to_string())?,
-        ),
-        sensitivity: enum_from_name(row.get::<_, String>(8).map_err(|error| error.to_string())?)?,
-    })
 }
 
 fn memory_from_row(row: &Row<'_>) -> Result<MemoryRecord, String> {
