@@ -167,6 +167,13 @@ Implementato:
 - health check `process_alive` e `http_get` tramite probe iniettabile.
 - `SidecarProcessCatalog` per generare spec concrete di Gemma/MLX, browser automation e MCP stdio server.
 - registry helper per registrare i sidecar default nel `ProcessRegistryStore`.
+- crate `crates/secrets` per secret storage locale, audit-safe e multiutente/workspace.
+- contratti `SecretRef`, `SecretMaterial`, `SecretMetadata`, `SecretStatus` e trait `SecretStore`.
+- `SecretMaterial` redatto in debug e non serializzabile in JSON per ridurre esfiltrazioni accidentali.
+- `InMemorySecretStore` per test deterministici.
+- `EncryptedFileSecretStore` con XChaCha20Poly1305, nonce casuale, fail-closed su chiave errata e plaintext escluso dal disco.
+- `SystemKeychainSecretStore` come boundary OS keychain, con implementazione macOS via comando `security` e comportamento unsupported-safe sulle altre piattaforme.
+- integrazione `CapabilityRegistryStore` -> `SecretStore`: il registry salva solo `secret_ref`, sanitizza metadata sensibili e scrive il materiale segreto fuori dal DB.
 
 Non ancora incluso:
 
@@ -663,7 +670,7 @@ Strategia:
 - i task lunghi, paralleli o sospesi non vivono nei connettori: vengono sempre orchestrati dal Durable Task Runtime.
 - le capability/tool call possono essere montate su `TaskRuntime` tramite bridge dedicato.
 - provider, connessioni, grant e tool cache vengono registrati in SQLite locale tramite `CapabilityRegistryStore`.
-- i segreti dei connettori restano in keychain/secure storage e nel DB viene salvato solo un `secret_ref`.
+- i segreti dei connettori restano in `local-first-secrets`, con storage cifrato/keychain e nel DB viene salvato solo un `secret_ref`.
 
 Permessi per connettore:
 
@@ -699,7 +706,7 @@ Regole:
 - azioni non reversibili richiedono conferma.
 - log auditabile.
 - l'utente puo' cancellare memoria, eventi, wiki e grafo.
-- segreti in keychain/secure storage, mai in chiaro nel DB.
+- segreti in `local-first-secrets`, cifrati o delegati a keychain/secure storage, mai in chiaro nel DB.
 
 Risk levels:
 
@@ -917,8 +924,8 @@ Avvio lavoro Acme
 
 Deliverable:
 
-- process supervision dei sidecar.
-- secrets in keychain/secure storage.
+- process supervision dei sidecar. Stato: first production slice implementato in `crates/process-manager`.
+- secrets in keychain/secure storage. Stato: first production slice implementato in `crates/secrets`.
 - migrations e recovery testate.
 - export/delete globale dei dati utente.
 - osservabilita' locale.
@@ -939,6 +946,7 @@ local-first-personal-assistant/
     memory/
     task-runtime/
     process-manager/
+    secrets/
     connectors/
     capabilities/
     browser-automation/
@@ -988,13 +996,14 @@ local-first-personal-assistant/
 
 ## Prossima Azione Consigliata
 
-Progettare e implementare il modulo Browser Automation come capability separata:
+Chiudere il blocco Skill/Plugin Registry locale:
 
 ```text
-crates/browser-automation/
-crates/capabilities/src/browser.rs
-docs/superpowers/specs/2026-05-23-browser-automation-design.md
-docs/superpowers/plans/2026-05-23-browser-automation.md
+crates/capabilities/src/skills.rs
+crates/capabilities/src/plugins.rs
+crates/capabilities/tests/skill_plugin_registry.rs
+docs/superpowers/specs/2026-05-23-skill-plugin-registry-design.md
+docs/superpowers/plans/2026-05-23-skill-plugin-registry.md
 ```
 
-Il runtime Python/MLX, la memoria, i subagenti, il Durable Task Runtime e il Capability Layer hanno una base operativa. Il prossimo blocco e' il browser locale: navigazione, DOM/screenshot, form, prenotazioni, task lunghi e handoff sensibili, sempre dietro policy, audit, registry provider e Resource Governor.
+Runtime Python/MLX, memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager e Secrets/Keychain hanno una base operativa testata. Il prossimo blocco serve a rendere skill e plugin installabili, versionati, permission-aware e orchestrabili come capability locali.

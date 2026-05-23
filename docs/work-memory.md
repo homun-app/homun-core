@@ -665,4 +665,26 @@ Perche': ora il Process Manager non e' solo un supervisor generico. Ha un catalo
 
 ## Prossimo blocco
 
-- Implementare Secrets/Keychain: secret refs gia' esistono nelle registry, ora serve uno storage sicuro reale e testabile.
+### Secrets/Keychain
+
+- Creato piano `docs/superpowers/plans/2026-05-23-secrets-keychain.md`.
+- Aggiunto crate Rust `crates/secrets` al workspace.
+- Aggiunti contratti `SecretRef`, `SecretMaterial`, `SecretMetadata`, `SecretStatus` e `SecretStore`.
+- `SecretRef` e' stabile, parseabile, multiutente/workspace e rifiuta path traversal o riferimenti legacy non strutturati.
+- `SecretMaterial` redige il debug e rifiuta la serializzazione JSON per ridurre leak accidentali in log, audit, UI o payload task.
+- Aggiunto `InMemorySecretStore` per test deterministici con put/get/delete/list/status e versionamento.
+- Aggiunta crittografia XChaCha20Poly1305 con `EncryptedFileSecretStore`: round trip locale, nonce casuale, plaintext non presente su disco e fallimento con chiave errata.
+- Aggiunto `DevelopmentSecretKeyProvider` per test/dev locale esplicito.
+- Aggiunto `SystemKeychainSecretStore` come boundary OS: su macOS usa il comando `security`, sulle piattaforme non supportate fallisce in modo esplicito e sicuro.
+- Integrato `local-first-secrets` nel `CapabilityRegistryStore` con helper `upsert_connection_config_with_secret`.
+- La capability registry salva nel DB solo `secret_ref`, rimuove metadata sensibili come token/password/api key/secret e scrive il materiale reale nello store segreti.
+- Verifiche eseguite:
+  - `cargo test -p local-first-secrets`
+  - `cargo test --workspace`
+  - `make test`
+
+Perche': i connettori, MCP e provider managed richiedono credenziali, ma il registry locale non deve mai diventare un deposito di token in chiaro. Ora il progetto ha un boundary dedicato per credenziali, testabile in memoria, cifrato su file e agganciabile al keychain di sistema, mantenendo capability e task runtime su `secret_ref` auditabili.
+
+## Prossimo blocco
+
+- Chiudere Skill/Plugin Registry locale: manifest, versioni, permessi, install state, provider capability, UI-safe read model e integrazione con Task Runtime.

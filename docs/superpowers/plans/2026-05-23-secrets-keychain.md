@@ -54,9 +54,9 @@
 
 ### Task 4: Verification And Docs
 
-- [ ] Run `cargo test -p local-first-secrets`.
-- [ ] Run `cargo test --workspace`.
-- [ ] Run `make test`.
-- [ ] Update `PROJECT.md`, this plan and `docs/work-memory.md`.
-- [ ] Run `git diff --check`.
-- [ ] Commit as `Document secrets keychain runtime`.
+- [x] Run `cargo test -p local-first-secrets`.
+- [x] Run `cargo test --workspace`.
+- [x] Run `make test`.
+- [x] Update `PROJECT.md`, this plan and `docs/work-memory.md`.
+- [x] Run `git diff --check`.
+- [x] Commit as `Document secrets keychain runtime`.
