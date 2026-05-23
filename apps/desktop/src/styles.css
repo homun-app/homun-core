@@ -92,7 +92,7 @@ small {
 }
 
 .app-shell.drawer-open {
-  grid-template-columns: 64px 292px minmax(0, 1fr);
+  grid-template-columns: 292px minmax(0, 1fr);
 }
 
 .navigation-rail {
@@ -202,14 +202,14 @@ small {
   border-right: 1px solid var(--line);
   background: #f7f7f8;
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
-  gap: 14px;
+  grid-template-rows: 24px auto auto auto minmax(0, 1fr) auto;
+  gap: 12px;
   padding: 16px 12px;
   overflow: hidden;
 }
 
 .settings-drawer {
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: 24px auto auto minmax(0, 1fr);
 }
 
 .drawer-header,
@@ -1392,7 +1392,7 @@ small {
 
 @media (max-width: 1120px) {
   .app-shell.drawer-open {
-    grid-template-columns: 64px 260px minmax(0, 1fr);
+    grid-template-columns: 260px minmax(0, 1fr);
   }
 
   .active-task-layout {
@@ -1401,9 +1401,12 @@ small {
 }
 
 @media (max-width: 860px) {
-  .app-shell,
-  .app-shell.drawer-open {
+  .app-shell {
     grid-template-columns: 56px minmax(0, 1fr);
+  }
+
+  .app-shell.drawer-open {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .navigation-rail {
@@ -1414,9 +1417,9 @@ small {
     position: fixed;
     top: 0;
     bottom: 0;
-    left: 56px;
+    left: 0;
     z-index: 30;
-    width: min(292px, calc(100vw - 56px));
+    width: min(292px, 100vw);
     box-shadow: var(--shadow-menu);
   }
 

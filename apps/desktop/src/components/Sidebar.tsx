@@ -20,14 +20,12 @@ import type { SettingsSectionId, ViewId } from "../types";
 
 interface NavigationRailProps {
   activeView: ViewId;
-  drawerOpen: boolean;
   onNavigate: (view: ViewId) => void;
   onToggleDrawer: () => void;
 }
 
 export function NavigationRail({
   activeView,
-  drawerOpen,
   onNavigate,
   onToggleDrawer,
 }: NavigationRailProps) {
@@ -42,10 +40,10 @@ export function NavigationRail({
       <button
         className="rail-logo"
         type="button"
-        aria-label={drawerOpen ? "Chiudi menu" : "Apri menu"}
+        aria-label="Apri menu"
         onClick={onToggleDrawer}
       >
-        {drawerOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
+        <PanelLeftOpen size={18} />
       </button>
 
       <nav className="rail-nav">
@@ -99,6 +97,12 @@ export function NavDrawer({
 }: NavDrawerProps) {
   return (
     <aside className="nav-drawer" aria-label="Menu principale">
+      <div className="window-controls" aria-hidden="true">
+        <span className="control red" />
+        <span className="control yellow" />
+        <span className="control green" />
+      </div>
+
       <header className="drawer-header">
         <div>
           <strong>Assistant locale</strong>
@@ -190,6 +194,12 @@ export function SettingsDrawer({
 }: SettingsDrawerProps) {
   return (
     <aside className="nav-drawer settings-drawer" aria-label="Impostazioni">
+      <div className="window-controls" aria-hidden="true">
+        <span className="control red" />
+        <span className="control yellow" />
+        <span className="control green" />
+      </div>
+
       <header className="drawer-header">
         <div>
           <strong>Impostazioni</strong>

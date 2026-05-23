@@ -35,12 +35,13 @@ export function Shell({
         .filter(Boolean)
         .join(" ")}
     >
-      <NavigationRail
-        activeView={activeView}
-        drawerOpen={drawerOpen}
-        onNavigate={onNavigate}
-        onToggleDrawer={onToggleDrawer}
-      />
+      {!drawerOpen && (
+        <NavigationRail
+          activeView={activeView}
+          onNavigate={onNavigate}
+          onToggleDrawer={onToggleDrawer}
+        />
+      )}
       {drawerOpen && !isSettings && (
         <NavDrawer
           activeView={activeView}

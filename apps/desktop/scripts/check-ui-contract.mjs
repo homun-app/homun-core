@@ -24,6 +24,8 @@ function assertNotContains(file, text, description) {
 
 assertContains("src/components/Sidebar.tsx", "navigation-rail", "primary navigation must be rail-first");
 assertContains("src/components/Sidebar.tsx", "nav-drawer", "expanded navigation must be a drawer");
+assertContains("src/components/Shell.tsx", "{!drawerOpen && (", "rail must only render when the drawer is closed");
+assertContains("src/components/Shell.tsx", "{drawerOpen && !isSettings && (", "main drawer must render when open");
 assertContains("src/components/ChatView.tsx", "local-computer-card", "active task must expose a local computer activity card");
 assertContains("src/components/ChatView.tsx", "computer-detail-panel", "computer details must be progressive disclosure");
 assertContains("src/components/ChatView.tsx", "timeline-step", "assistant progress must be inline timeline");

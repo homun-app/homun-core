@@ -888,6 +888,7 @@ Perche': l'esperienza utente e' parte centrale del prodotto. Se browser e shell 
 - Aggiunto mock read model `ComputerSession` con superfici, timeline, artifact e transcript redatto.
 - Aggiunto contract test statico `npm run test:ui-contract` per impedire regressioni su rail/drawer, activity card, detail panel, timeline e assenza dell'inspector nella shell.
 - Corretto comportamento responsive: su viewport mobile il drawer parte chiuso, su altezze ridotte il thread torna al fondo e il composer resta utilizzabile.
+- Rifinito comportamento sidebar: quando il drawer testuale e' aperto la rail di icone sparisce; quando il drawer viene chiuso resta solo la rail compatta.
 - Verifiche eseguite:
   - `npm run test:ui-contract`
   - `npm run typecheck`
