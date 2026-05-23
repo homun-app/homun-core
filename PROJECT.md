@@ -189,12 +189,17 @@ Implementato:
 - `ProcessSkillRunnerConfig` per adapter process trusted/locali: executable e working dir devono stare dentro root consentite.
 - `ProcessSkillRunner` avvia processi senza shell, con env ereditato cancellato, env esplicito, request JSON su stdin, output JSON su stdout, stderr catturato e timeout con kill.
 - il process runner applica limite stdout e delega a `SkillRuntime` la validazione finale di trace/output.
+- `WasmSkillRunnerConfig` per adapter WASM non trusted: il modulo e le root consentite sono canonicalizzati e il modulo deve stare dentro una root esplicita.
+- `WasmSkillRunner` usa Wasmtime con fuel abilitato per limitare esecuzioni infinite o troppo costose.
+- i moduli WASM con import host/WASI vengono rifiutati: nessun accesso a filesystem, rete o host API e' disponibile by construction.
+- protocollo guest minimo: memoria export `memory`, funzione export `run(ptr, len) -> i64`, input JSON scritto a offset 0 e output JSON restituito come pointer/length packed.
+- il runner valida dimensione output, bounds di memoria guest, JSON di risposta e poi delega a `SkillRuntime` la validazione finale di trace/output.
 
 Non ancora incluso:
 
 - policy di restart/backoff eseguita automaticamente in background.
 - UI Tauri per vedere processi, logs e health.
-- adapter WASM/QuickJS con isolamento runtime forte per plugin non trusted.
+- adapter WASI con preopen/capability host controllate e SDK language-friendly per creare skill non trusted senza scrivere WAT/Rust manuale.
 
 API interne previste:
 
@@ -1013,14 +1018,16 @@ local-first-personal-assistant/
 
 ## Prossima Azione Consigliata
 
-Progettare e implementare il blocco Skill Runtime Untrusted Adapter:
+Progettare e implementare il blocco Assistant Orchestrator Brain:
 
 ```text
-crates/skill-runtime/
-crates/skill-runtime/src/wasm_runner.rs
-crates/skill-runtime/tests/adapter_confinement.rs
-docs/superpowers/specs/2026-05-23-skill-runtime-untrusted-adapter-design.md
-docs/superpowers/plans/2026-05-23-skill-runtime-untrusted-adapter.md
+crates/orchestrator/
+crates/orchestrator/src/planner.rs
+crates/orchestrator/src/router.rs
+crates/orchestrator/src/execution_plan.rs
+crates/orchestrator/tests/
+docs/superpowers/specs/2026-05-23-assistant-orchestrator-brain-design.md
+docs/superpowers/plans/2026-05-23-assistant-orchestrator-brain.md
 ```
 
-Runtime Python/MLX, memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager, Secrets/Keychain, Skill/Plugin Registry, Skill Runtime Sandbox e process adapter trusted hanno una base operativa testata. Il prossimo blocco serve a implementare un adapter per skill non trusted con isolamento runtime verificabile, invece del solo hardening process-level.
+Runtime Python/MLX, memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager, Secrets/Keychain, Skill/Plugin Registry, Skill Runtime Sandbox, process adapter trusted e WASM adapter non trusted hanno una base operativa testata. Il prossimo blocco deve creare il cervello deterministico che decide se rispondere direttamente, usare memoria, browser, MCP, connettori, skill o subagenti, producendo piani auditabili e task durevoli invece di lasciare questa scelta al solo prompt del modello.

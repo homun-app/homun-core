@@ -33,13 +33,13 @@
 - [x] Run `cargo test -p local-first-skill-runtime --test wasm_runner`.
 - [x] Implement `WasmSkillRunner`.
 - [x] Run targeted tests until green.
-- [ ] Commit as `Add wasm skill runner`.
+- [x] Commit as `Add wasm skill runner`.
 
 ### Task 3: Verification And Docs
 
-- [ ] Run `cargo test -p local-first-skill-runtime`.
-- [ ] Run `cargo test --workspace`.
-- [ ] Run `make test`.
-- [ ] Update `PROJECT.md`, this plan and `docs/work-memory.md`.
-- [ ] Run `git diff --check`.
-- [ ] Commit as `Document wasm skill runner`.
+- [x] Run `cargo test -p local-first-skill-runtime`.
+- [x] Run `cargo test --workspace`.
+- [x] Run `make test`.
+- [x] Update `PROJECT.md`, this plan and `docs/work-memory.md`.
+- [x] Run `git diff --check`.
+- [x] Commit as `Document wasm skill runner`.

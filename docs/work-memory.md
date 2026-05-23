@@ -761,3 +761,31 @@ Perche': ora possiamo eseguire handler locali fidati o wrapper controllati come 
 ## Prossimo blocco
 
 - Skill Runtime Untrusted Adapter: implementare un adapter WASM/QuickJS per skill non trusted, con test che dimostrano isolamento filesystem/network oltre alla policy contrattuale.
+
+## Prossimo blocco
+
+### Skill Runtime Untrusted Adapter
+
+- Creato design `docs/superpowers/specs/2026-05-23-skill-runtime-untrusted-adapter-design.md`.
+- Creato piano `docs/superpowers/plans/2026-05-23-skill-runtime-untrusted-adapter.md`.
+- Aggiunto Wasmtime 45 a `crates/skill-runtime` e `wat` come dev dependency per test deterministici.
+- Aggiunto `WasmSkillRunnerConfig` in `crates/skill-runtime/src/wasm_runner.rs`.
+- Il config canonicalizza modulo e allowed roots e rifiuta moduli fuori dalle root esplicite.
+- Il config compila il modulo con fuel abilitato e rifiuta qualsiasi import host/WASI.
+- Aggiunto `WasmSkillRunner`.
+- Il runner crea uno store Wasmtime con fuel, istanzia moduli senza import e richiede export `memory` e `run`.
+- Protocollo guest: request JSON scritta nella memoria guest a offset 0, call `run(ptr, len) -> i64`, output restituito come pointer/length packed.
+- Il runner valida dimensione output prima del parse JSON, controlla i bounds della memoria guest e converte trap/fuel exhaustion in errori auditabili.
+- La validazione post-run rimane nel `SkillRuntime`: trace network/filesystem e output passano dallo stesso boundary gia' usato da in-memory e process runner.
+- Aggiunti test per root confinement, import rejection, protocollo memoria/run, output troppo grande, fuel exhaustion e export mancanti.
+- Verifiche eseguite:
+  - `cargo test -p local-first-skill-runtime --test wasm_runner`
+  - `cargo test -p local-first-skill-runtime`
+  - `cargo test --workspace`
+  - `make test`
+
+Perche': ora le skill non trusted possono girare dentro un runtime senza accesso host implicito, invece di essere solo processi hardenizzati. Questo chiude il primo livello production del runtime skill: manifest/policy, task orchestration, process runner trusted e WASM runner non trusted. Restano utili in seguito SDK e host capability WASI controllate, ma non sono piu' prerequisito per avere un confinement forte di base.
+
+## Prossimo blocco
+
+- Assistant Orchestrator Brain: creare il cervello deterministico che decide quando usare memoria, browser, MCP, connettori, skill, subagenti o risposta diretta, generando piani auditabili e task durevoli invece di lasciare il routing solo al prompt del modello.
