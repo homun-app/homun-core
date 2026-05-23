@@ -9,6 +9,10 @@ use local_first_capabilities::{
     CapabilityRegistryStore, ProviderId, UserId as CapabilityUserId,
     WorkspaceId as CapabilityWorkspaceId,
 };
+use local_first_local_computer_session::{
+    ArtifactCreate, ComputerEventCreate, ComputerSessionCreate, ComputerSessionSnapshot,
+    LocalComputerSessionManager, LocalComputerSessionStore, SurfaceKind,
+};
 use local_first_memory::{
     DataSensitivity, MemoryAccessRequest, MemoryDashboard, MemoryFacade, MemoryUiReadModel,
     PrivacyDomain, SQLiteMemoryStore, UserId as MemoryUserId, WorkspaceId as MemoryWorkspaceId,
@@ -34,6 +38,7 @@ pub struct DesktopCoreState {
     memory_facade: Mutex<MemoryFacade>,
     process_manager: Mutex<ProcessManager<LocalProcessSupervisor>>,
     capability_store: Mutex<CapabilityRegistryStore>,
+    local_computer: Mutex<LocalComputerSessionManager>,
 }
 
 impl DesktopCoreState {
@@ -57,6 +62,9 @@ impl DesktopCoreState {
         let capability_store =
             CapabilityRegistryStore::open_in_memory().map_err(to_string_error)?;
         let capability_provider_ids = seed_capabilities(&capability_store)?;
+        let local_computer =
+            LocalComputerSessionManager::new(LocalComputerSessionStore::open_in_memory()?);
+        seed_local_computer_session(&local_computer)?;
 
         Ok(Self {
             user_id: DEFAULT_USER_ID.to_string(),
@@ -70,6 +78,7 @@ impl DesktopCoreState {
             memory_facade: Mutex::new(memory_facade),
             process_manager: Mutex::new(process_manager),
             capability_store: Mutex::new(capability_store),
+            local_computer: Mutex::new(local_computer),
         })
     }
 
@@ -223,6 +232,19 @@ impl DesktopCoreState {
             },
         })
     }
+
+    pub fn local_computer_session_snapshot(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<ComputerSessionSnapshot>, String> {
+        let manager = self
+            .local_computer
+            .lock()
+            .map_err(|_| "local computer lock poisoned".to_string())?;
+        manager
+            .read_model()
+            .snapshot(session_id, &self.user_id, &self.workspace_id)
+    }
 }
 
 fn memory_access_request(user_id: &str, workspace_id: &str) -> MemoryAccessRequest {
@@ -245,6 +267,51 @@ fn memory_access_request(user_id: &str, workspace_id: &str) -> MemoryAccessReque
 
 fn to_string_error(error: impl std::fmt::Display) -> String {
     error.to_string()
+}
+
+fn seed_local_computer_session(manager: &LocalComputerSessionManager) -> Result<(), String> {
+    let session = manager.create_session(ComputerSessionCreate {
+        session_id: "computer_train_search".to_string(),
+        task_id: "task_browser_quote".to_string(),
+        workflow_id: Some("workflow_trip_search".to_string()),
+        user_id: DEFAULT_USER_ID.to_string(),
+        workspace_id: DEFAULT_WORKSPACE_ID.to_string(),
+        title: "Computer locale".to_string(),
+        subtitle: "Ricerca treni con browser e verifica finale in shell".to_string(),
+        risk_level: "medium".to_string(),
+        progress_total: 4,
+    })?;
+    manager.start_surface(&session.session_id, SurfaceKind::Browser, "Browser locale")?;
+    manager.append_event(ComputerEventCreate {
+        session_id: session.session_id.clone(),
+        surface: SurfaceKind::Browser,
+        kind: "computer_action_started".to_string(),
+        status: "running".to_string(),
+        title: "Cercare tratte Napoli-Milano".to_string(),
+        subtitle: "Compilazione form senza login e senza pagamento".to_string(),
+        payload: serde_json::json!({
+            "url": "https://trainline.example/search?token=redacted",
+            "snapshot": "redacted"
+        }),
+        artifact_refs: vec![],
+        approval_required: false,
+    })?;
+    manager.append_terminal_output(
+        &session.session_id,
+        DEFAULT_USER_ID,
+        DEFAULT_WORKSPACE_ID,
+        "local-task % date '+%Y-%m-%d %H:%M %Z'\n2026-05-23 16:31 CEST",
+    )?;
+    manager.create_artifact(ArtifactCreate {
+        session_id: session.session_id,
+        artifact_id: "shot_results".to_string(),
+        title: "risultati-treni-redatto.png".to_string(),
+        kind: "screenshot".to_string(),
+        path_ref: "artifact://shot_results".to_string(),
+        size_bytes: 104_448,
+        preview_ref: Some("preview://shot_results".to_string()),
+    })?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -330,5 +397,22 @@ mod tests {
         }));
         assert!(!serialized.contains("oauth:not-configured"));
         assert!(!serialized.contains("local-profile"));
+    }
+
+    #[test]
+    fn local_computer_snapshot_is_redacted_for_ui() {
+        let snapshot = state()
+            .local_computer_session_snapshot("computer_train_search")
+            .unwrap()
+            .unwrap();
+        let serialized = serde_json::to_string(&snapshot).unwrap();
+
+        assert_eq!(snapshot.task_id, "task_browser_quote");
+        assert_eq!(
+            snapshot.current_url_redacted.as_deref(),
+            Some("https://trainline.example/search")
+        );
+        assert!(snapshot.preview_frame_ref.is_some());
+        assert!(!serialized.contains("token="));
     }
 }

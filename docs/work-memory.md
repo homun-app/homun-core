@@ -968,6 +968,44 @@ Perche': prima di cablare l'auto-apprendimento serve un confine stabile tra UI e
 
 ## Prossimo blocco
 
-- Implementare il crate/read model reale `local-computer-session` e cablarlo al bridge Tauri, mantenendo activity card, timeline, browser/shell/artifact/log e takeover come singolo concetto operativo.
-- Collegare gradualmente Chat, Tasks, Memory, Connections e Settings ai command reali esistenti.
+### Local Computer Session Core
+
+- Aggiunto crate `crates/local-computer-session`.
+- Implementati contratti per:
+  - sessione computer
+  - superfici Browser/Shell/Files/Logs
+  - eventi append-only
+  - artifact
+  - timeline UI
+  - approval state
+  - takeover state
+- Implementato `LocalComputerSessionStore` SQLite con schema version, sessioni, eventi e artifact.
+- Implementato `LocalComputerSessionManager` per creare sessioni, avviare superfici, aggiungere eventi, terminal output, artifact, richieste approval e takeover.
+- Implementato `LocalComputerReadModel` con redazione prima della UI:
+  - URL senza query o frammenti
+  - terminal excerpt redatto
+  - artifact senza path raw
+  - timeline senza payload raw
+  - errori redatti
+- Implementata `ShellCommandPolicy` per classificare comandi read-only, write, network/install e destructive.
+- Esteso `TaskRuntime::ResourceClass` con `computer_session` e `shell_process`, inclusi in Resource Governor e Task UI read model.
+- Collegato il bridge Tauri con `local_computer_session_snapshot`.
+- Aggiornato `apps/desktop/src/lib/coreBridge.ts` con il tipo snapshot Local Computer.
+- Aggiornato `PROJECT.md`.
+- Verifiche eseguite:
+  - RED: `cargo test -p local-first-local-computer-session` falliva per API mancanti.
+  - RED: `cargo test -p local-first-task-runtime --test contracts` falliva per risorse mancanti.
+  - GREEN: `cargo test -p local-first-local-computer-session`
+  - GREEN: `cargo test -p local-first-task-runtime`
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`
+  - GREEN: `npm run typecheck`
+  - GREEN: `npm run build`
+
+Perche': la UI non deve cablare browser, shell e artifact come pannelli separati. Serve un read model unico, persistente e redatto che rappresenti il lavoro reale del computer locale durante task lunghi, con approval e takeover governabili.
+
+## Prossimo blocco
+
+- Collegare Chat/Local Computer activity card al command `local_computer_session_snapshot`.
+- Collegare Tasks/Approvals ai command `task_queue_snapshot` e `task_detail`.
+- Collegare Connections/Settings ai command capability/runtime esistenti.
 - Lasciare `LearningUiReadModel` e azioni di feedback utente per la fine, quando gli eventi PC reali saranno disponibili.

@@ -100,6 +100,29 @@ export interface CoreCapabilitySnapshot {
   };
 }
 
+export interface CoreComputerSessionSnapshot {
+  computer_session_id: string;
+  task_id: string;
+  workflow_id: string | null;
+  user_id: string;
+  workspace_id: string;
+  status: string;
+  active_surface: string;
+  activity_title: string;
+  activity_subtitle: string;
+  progress_current: number;
+  progress_total: number;
+  elapsed_seconds: number;
+  preview_frame_ref: string | null;
+  current_url_redacted: string | null;
+  terminal_excerpt_redacted: string[];
+  approval_state: string;
+  takeover_state: string;
+  risk_level: string;
+  last_error_redacted: string | null;
+  updated_at: string;
+}
+
 export const coreBridge = {
   status: () => invoke<CoreBridgeStatus>("core_bridge_status"),
   runtimeHealth: () =>
@@ -119,4 +142,9 @@ export const coreBridge = {
     invoke<CoreMemoryDashboard>("memory_dashboard_snapshot"),
   capabilities: () =>
     invoke<CoreCapabilitySnapshot>("capability_snapshot"),
+  localComputerSession: (sessionId: string) =>
+    invoke<CoreComputerSessionSnapshot | null>(
+      "local_computer_session_snapshot",
+      { sessionId },
+    ),
 };

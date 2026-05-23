@@ -22,6 +22,7 @@ fn main() {
             commands::task_detail,
             commands::memory_dashboard_snapshot,
             commands::capability_snapshot,
+            commands::local_computer_session_snapshot,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Local First Assistant");

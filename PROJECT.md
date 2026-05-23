@@ -172,6 +172,7 @@ Implementato:
 - Tauri Core Bridge V1 in `apps/desktop/src-tauri`: stato applicativo locale, command Rust e DTO serializzabili/redatti per status core, health processi, task queue/detail, memory dashboard e capability snapshot.
 - Wrapper TypeScript `apps/desktop/src/lib/coreBridge.ts` separato dai componenti, cosi' i mock UI possono essere sostituiti da `invoke(...)` senza riscrivere le schermate.
 - Il bridge espone solo read model UI-safe: task detail usa checkpoint redatti, capability snapshot omette `secret_ref`, memory dashboard passa da `MemoryUiReadModel` e process health non espone env o log raw.
+- Command `local_computer_session_snapshot` collegato al read model reale `crates/local-computer-session`, con sessione seeded redatta per preparare la sostituzione dei mock della activity card.
 
 Direzione UX aggiornata dopo analisi Manus live:
 
@@ -361,6 +362,17 @@ Regole:
 ### 4. Local Computer Session
 
 La Local Computer Session e' il modo in cui l'assistant rende visibile e governabile cio' che sta facendo sul computer durante un task durevole.
+
+Implementato:
+
+- crate `crates/local-computer-session`.
+- contratti `ComputerSessionRecord`, `ComputerEventRecord`, `ArtifactRecord`, superfici Browser/Shell/Files/Logs, stati approval/takeover e snapshot UI-safe.
+- store SQLite locale con schema version, sessioni, eventi append-only e artifact.
+- `LocalComputerSessionManager` per creare sessioni, avviare superfici, appendere eventi, output terminale, artifact, approval e takeover.
+- `LocalComputerReadModel` per materializzare snapshot redatti: URL senza query/frammenti, terminal excerpt redatto, artifact senza path raw, timeline senza payload raw.
+- `ShellCommandPolicy` per classificare comandi read-only, write, network/install e destructive con richiesta approval.
+- `TaskRuntime::ResourceClass` esteso con `computer_session` e `shell_process`, inclusi nei limiti del Resource Governor e nel read model task.
+- Bridge Tauri verso `local_computer_session_snapshot`.
 
 Non e' una feature browser separata. E' una sessione operativa locale, legata a `task_id` e `workflow_id`, che puo' includere piu' superfici:
 
@@ -1212,4 +1224,4 @@ crates/browser-automation/
 crates/task-runtime/
 ```
 
-Runtime Python/MLX, memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager, Secrets/Keychain, Skill/Plugin Registry, Skill Runtime Sandbox, process adapter trusted, WASM adapter non trusted e Assistant Orchestrator Brain hanno una base operativa testata. La UI Tauri esiste con direzione rail/drawer, chat attiva, activity card e progressive disclosure. Il primo Tauri Core Bridge espone read model reali per task, memoria, processi e capability; resta da introdurre il modello Local Computer persistente e poi sostituire i mock React con i command reali senza cablare ancora l'auto-apprendimento.
+Runtime Python/MLX, memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager, Secrets/Keychain, Skill/Plugin Registry, Skill Runtime Sandbox, process adapter trusted, WASM adapter non trusted, Assistant Orchestrator Brain e Local Computer Session hanno una base operativa testata. La UI Tauri esiste con direzione rail/drawer, chat attiva, activity card e progressive disclosure. Il Tauri Core Bridge espone read model reali per task, memoria, processi, capability e Local Computer; resta da sostituire gradualmente i mock React con i command reali e lasciare l'auto-apprendimento per ultimo, quando gli eventi PC reali saranno disponibili.

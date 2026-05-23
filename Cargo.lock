@@ -1151,6 +1151,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "local-first-local-computer-session"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "time",
+ "uuid",
+]
+
+[[package]]
 name = "local-first-memory"
 version = "0.1.0"
 dependencies = [

@@ -49,3 +49,15 @@ fn task_status_and_priority_serialize_as_snake_case() {
         "browser_session"
     );
 }
+
+#[test]
+fn local_computer_resources_serialize_for_governance() {
+    assert_eq!(
+        serde_json::to_value(ResourceClass::ComputerSession).unwrap(),
+        "computer_session"
+    );
+    assert_eq!(
+        serde_json::to_value(ResourceClass::ShellProcess).unwrap(),
+        "shell_process"
+    );
+}

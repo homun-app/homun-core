@@ -6,6 +6,7 @@ members = [
     "crates/task-runtime",
     "crates/browser-automation",
     "crates/process-manager",
+    "crates/local-computer-session",
     "crates/secrets",
     "crates/skill-runtime",
     "crates/orchestrator",

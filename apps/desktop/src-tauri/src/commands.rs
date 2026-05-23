@@ -3,6 +3,7 @@ use crate::models::{
     RuntimeHealthSnapshot, RuntimeProcessItem,
 };
 use crate::state::DesktopCoreState;
+use local_first_local_computer_session::ComputerSessionSnapshot;
 use local_first_memory::MemoryDashboard;
 
 #[tauri::command]
@@ -68,4 +69,12 @@ pub fn capability_snapshot(
     state: tauri::State<'_, DesktopCoreState>,
 ) -> Result<CapabilitySnapshot, String> {
     state.capability_snapshot()
+}
+
+#[tauri::command]
+pub fn local_computer_session_snapshot(
+    state: tauri::State<'_, DesktopCoreState>,
+    session_id: String,
+) -> Result<Option<ComputerSessionSnapshot>, String> {
+    state.local_computer_session_snapshot(&session_id)
 }

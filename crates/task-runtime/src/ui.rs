@@ -137,7 +137,10 @@ impl<'a> TaskUiReadModel<'a> {
     }
 }
 
-fn runtime_metadata_for_task(task: &crate::TaskRecord, checkpoint: Option<&Value>) -> Option<Value> {
+fn runtime_metadata_for_task(
+    task: &crate::TaskRecord,
+    checkpoint: Option<&Value>,
+) -> Option<Value> {
     if task.kind != "browser_automation" {
         return None;
     }
@@ -156,7 +159,11 @@ fn runtime_metadata_for_task(task: &crate::TaskRecord, checkpoint: Option<&Value
             })
         });
     if browser.get("method").is_none() {
-        browser["method"] = task.input_json.get("method").cloned().unwrap_or(Value::Null);
+        browser["method"] = task
+            .input_json
+            .get("method")
+            .cloned()
+            .unwrap_or(Value::Null);
     }
     Some(serde_json::json!({ "browser": browser }))
 }
@@ -174,13 +181,15 @@ impl TaskUiItem {
     }
 }
 
-fn all_resource_classes() -> [ResourceClass; 9] {
+fn all_resource_classes() -> [ResourceClass; 11] {
     [
         ResourceClass::LlmInference,
         ResourceClass::BrowserSession,
         ResourceClass::NetworkIo,
         ResourceClass::FilesystemIo,
         ResourceClass::ConnectorApi,
+        ResourceClass::ComputerSession,
+        ResourceClass::ShellProcess,
         ResourceClass::MemoryIndexing,
         ResourceClass::GraphIndexing,
         ResourceClass::UserWait,

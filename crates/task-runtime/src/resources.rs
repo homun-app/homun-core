@@ -20,6 +20,8 @@ impl ResourceLimits {
             .with_limit(ResourceClass::FilesystemIo, 2)
             .with_limit(ResourceClass::NetworkIo, 4)
             .with_limit(ResourceClass::ConnectorApi, 4)
+            .with_limit(ResourceClass::ComputerSession, 1)
+            .with_limit(ResourceClass::ShellProcess, 2)
             .with_limit(ResourceClass::BackgroundMaintenance, 1)
     }
 
