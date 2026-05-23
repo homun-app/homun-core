@@ -108,6 +108,12 @@ export interface CoreComputerSessionSnapshot {
   workspace_id: string;
   status: string;
   active_surface: string;
+  surfaces: Array<{
+    surface: string;
+    label: string;
+    status: string;
+    detail_redacted: string | null;
+  }>;
   activity_title: string;
   activity_subtitle: string;
   progress_current: number;
@@ -116,6 +122,27 @@ export interface CoreComputerSessionSnapshot {
   preview_frame_ref: string | null;
   current_url_redacted: string | null;
   terminal_excerpt_redacted: string[];
+  artifact_refs: Array<{
+    artifact_id: string;
+    title_redacted: string;
+    kind: string;
+    size_bytes: number;
+    preview_ref: string | null;
+    created_at: string;
+  }>;
+  timeline: Array<{
+    event_id: string;
+    surface: string;
+    kind: string;
+    status: string;
+    title: string;
+    subtitle_redacted: string;
+    artifact_refs: string[];
+    started_at: string;
+    completed_at: string | null;
+    approval_required: boolean;
+    payload_redacted: boolean;
+  }>;
   approval_state: string;
   takeover_state: string;
   risk_level: string;

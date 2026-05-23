@@ -1005,7 +1005,37 @@ Perche': la UI non deve cablare browser, shell e artifact come pannelli separati
 
 ## Prossimo blocco
 
-- Collegare Chat/Local Computer activity card al command `local_computer_session_snapshot`.
+### UI Chat collegata alla Local Computer Session
+
+- La Chat non riceve piu' `computerSession` mock da `App`.
+- Aggiunto mapper `apps/desktop/src/lib/localComputerViewModel.ts` per trasformare `CoreComputerSessionSnapshot` nel view model React `ComputerSession`.
+- Il mapper conserva il contratto privacy:
+  - usa `current_url_redacted`
+  - usa `terminal_excerpt_redacted`
+  - mostra artifact senza path raw
+  - considera la timeline valida solo con `payload_redacted`
+- `ChatView` carica `coreBridge.localComputerSession("computer_train_search")` e aggiorna la card ogni 4 secondi.
+- In anteprima web senza Tauri viene mostrato un fallback esplicito, non un errore tecnico.
+- Il detail panel Computer continua a usare tab Browser, Terminale, File e Log, ma ora legge superfici, timeline, artifact e terminal excerpt dal read model core.
+- Aggiornato il contratto UI statico per impedire regressioni verso mock passati da `App`.
+- Verifiche eseguite:
+  - RED: `npm run test:ui-contract` falliva per cablaggio Tauri mancante.
+  - GREEN: `npm run test:ui-contract`
+  - GREEN: `npm run typecheck`
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`
+  - GREEN: `npm run build`
+- Verifica browser:
+  - viewport desktop 1440x900
+  - activity card visibile
+  - composer resta ancorato
+  - panel Computer apribile senza cambiare route
+  - fallback web chiaro quando il bridge Tauri non e' presente
+
+Perche': questo e' il primo punto in cui la UI legge una sessione operativa reale dal Rust Core invece di affidarsi al mock. In Tauri l'utente puo' vedere il read model seeded e redatto; nel browser resta disponibile solo la preview grafica con messaggio esplicito.
+
+## Prossimo blocco
+
 - Collegare Tasks/Approvals ai command `task_queue_snapshot` e `task_detail`.
 - Collegare Connections/Settings ai command capability/runtime esistenti.
+- Collegare il Browser Automation Runtime alla `LocalComputerSessionManager`, cosi' le azioni reali producono eventi, artifact e preview nella stessa card.
 - Lasciare `LearningUiReadModel` e azioni di feedback utente per la fine, quando gli eventi PC reali saranno disponibili.

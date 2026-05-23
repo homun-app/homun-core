@@ -10,7 +10,6 @@ import {
   approvals,
   brainRun,
   chatMessages,
-  computerSession,
   connections,
   automationProposals,
   learningInsights,
@@ -25,7 +24,7 @@ export default function App() {
   const [previousView, setPreviousView] = useState<ViewId>("chat");
   const [settingsSection, setSettingsSection] =
     useState<SettingsSectionId>("privacy");
-  const [selectedTaskId, setSelectedTaskId] = useState(tasks[1].id);
+  const [selectedTaskId, setSelectedTaskId] = useState("task_browser_quote");
   const [drawerOpen, setDrawerOpen] = useState(() => window.innerWidth > 860);
   const selectedTask = useMemo(
     () => tasks.find((task) => task.id === selectedTaskId) ?? tasks[0],
@@ -67,7 +66,7 @@ export default function App() {
         {activeView === "chat" && (
           <ChatView
             approvalsCount={approvals.length}
-            computerSession={computerSession}
+            computerSessionId="computer_train_search"
             messages={chatMessages}
             health={runtimeHealth}
             task={selectedTask}

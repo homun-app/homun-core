@@ -39,6 +39,10 @@ assertContains("src/components/ChatView.tsx", "local-computer-card", "active tas
 assertContains("src/components/ChatView.tsx", "computer-detail-panel", "computer details must be progressive disclosure");
 assertContains("src/components/ChatView.tsx", "timeline-step", "assistant progress must be inline timeline");
 assertContains("src/components/ChatView.tsx", "composer-surface", "prompt composer must have a stable anchored surface");
+assertContains("src/components/ChatView.tsx", "coreBridge.localComputerSession", "chat local computer card must load the Tauri read model");
+assertContains("src/components/ChatView.tsx", "mapCoreComputerSession", "chat local computer card must map the core snapshot before rendering");
+assertContains("src/lib/localComputerViewModel.ts", "payload_redacted", "local computer UI mapping must preserve redaction contract");
+assertNotContains("src/App.tsx", "computerSession,", "app must not pass mock local computer session into chat");
 assertContains("src/types.ts", "\"learning\"", "auto-learning must be a first-class view");
 assertContains("src/data/mockData.ts", "learningInsights", "auto-learning insights must live in separated mock data");
 assertContains("src/components/LearningView.tsx", "learning-view", "auto-learning must have a dedicated page");

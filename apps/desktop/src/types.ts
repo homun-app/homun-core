@@ -112,6 +112,7 @@ export interface ComputerSession {
   surfaces: ComputerSurface[];
   timeline: ComputerTimelineItem[];
   artifacts: ComputerArtifact[];
+  source?: "mock" | "core" | "loading" | "unavailable";
 }
 
 export interface ApprovalItem {

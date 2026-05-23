@@ -17,6 +17,12 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { coreBridge } from "../lib/coreBridge";
+import {
+  createLoadingComputerSession,
+  createUnavailableComputerSession,
+  mapCoreComputerSession,
+} from "../lib/localComputerViewModel";
 import type {
   ChatMessage,
   ComputerSession,
@@ -27,7 +33,7 @@ import type {
 
 interface ChatViewProps {
   approvalsCount: number;
-  computerSession: ComputerSession;
+  computerSessionId: string;
   messages: ChatMessage[];
   health: RuntimeHealth[];
   task: TaskItem;
@@ -42,11 +48,14 @@ const surfaceIcons: Record<ComputerSurfaceKind, typeof Globe2> = {
 
 export function ChatView({
   approvalsCount,
-  computerSession,
+  computerSessionId,
   messages,
   health,
   task,
 }: ChatViewProps) {
+  const [computerSession, setComputerSession] = useState<ComputerSession>(() =>
+    createLoadingComputerSession(computerSessionId),
+  );
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [activeSurface, setActiveSurface] = useState<ComputerSurfaceKind>(
     computerSession.activeSurface,
@@ -58,6 +67,48 @@ export function ChatView({
     () => health.filter((item) => item.status !== "attention").slice(0, 2),
     [health],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadLocalComputerSession() {
+      try {
+        const snapshot = await coreBridge.localComputerSession(computerSessionId);
+        if (cancelled) return;
+        setComputerSession(
+          snapshot
+            ? mapCoreComputerSession(snapshot)
+            : createUnavailableComputerSession(
+                computerSessionId,
+                "Nessuna sessione computer trovata nel core locale.",
+              ),
+        );
+      } catch (error) {
+        if (cancelled) return;
+        setComputerSession(
+          createUnavailableComputerSession(
+            computerSessionId,
+            describeBridgeError(error),
+          ),
+        );
+      }
+    }
+
+    void loadLocalComputerSession();
+    const interval = window.setInterval(loadLocalComputerSession, 4_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [computerSessionId]);
+
+  useEffect(() => {
+    if (
+      !computerSession.surfaces.some((surface) => surface.id === activeSurface)
+    ) {
+      setActiveSurface(computerSession.activeSurface);
+    }
+  }, [activeSurface, computerSession.activeSurface, computerSession.surfaces]);
 
   useEffect(() => {
     function scrollToBottom(behavior: ScrollBehavior = "smooth") {
@@ -176,6 +227,18 @@ export function ChatView({
       <Composer />
     </section>
   );
+}
+
+function describeBridgeError(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return "Bridge Tauri non raggiungibile in questa visualizzazione.";
+  }
+
+  if (error.message.includes("invoke")) {
+    return "Anteprima web attiva: il read model reale e' disponibile aprendo l'app Tauri.";
+  }
+
+  return error.message;
 }
 
 function InlineTimeline({ session }: { session: ComputerSession }) {
@@ -303,7 +366,7 @@ function ComputerDetailPanel({
         {activeSurface === "browser" && (
           <div className="browser-live-frame">
             <div className="browser-live-bar">
-              <span>https://trenitalia.com/search</span>
+              <span>{session.previewTitle}</span>
             </div>
             <div className="browser-live-body">
               <strong>{session.previewTitle}</strong>
@@ -319,31 +382,41 @@ function ComputerDetailPanel({
 
         {activeSurface === "shell" && (
           <pre className="terminal-live-frame">
-            {session.terminalExcerpt.join("\n")}
+            {session.terminalExcerpt.length
+              ? session.terminalExcerpt.join("\n")
+              : "Nessun output terminale disponibile."}
           </pre>
         )}
 
         {activeSurface === "files" && (
           <div className="artifact-list">
-            {session.artifacts.map((artifact) => (
-              <article key={artifact.id}>
-                <FileText size={17} />
-                <div>
-                  <strong>{artifact.name}</strong>
-                  <small>{artifact.detail}</small>
-                </div>
-              </article>
-            ))}
+            {session.artifacts.length ? (
+              session.artifacts.map((artifact) => (
+                <article key={artifact.id}>
+                  <FileText size={17} />
+                  <div>
+                    <strong>{artifact.name}</strong>
+                    <small>{artifact.detail}</small>
+                  </div>
+                </article>
+              ))
+            ) : (
+              <p className="empty-panel-state">Nessun artifact redatto.</p>
+            )}
           </div>
         )}
 
         {activeSurface === "logs" && (
           <div className="log-list">
-            {session.timeline.map((item) => (
-              <span key={item.id}>
-                {item.timestamp} · {item.title}
-              </span>
-            ))}
+            {session.timeline.length ? (
+              session.timeline.map((item) => (
+                <span key={item.id}>
+                  {item.timestamp} · {item.title}
+                </span>
+              ))
+            ) : (
+              <span>Nessun evento redatto disponibile.</span>
+            )}
           </div>
         )}
       </div>

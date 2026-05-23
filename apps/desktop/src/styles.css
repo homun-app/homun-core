@@ -807,6 +807,10 @@ small {
   animation: panel-in 170ms ease both;
 }
 
+.computer-detail-panel > * {
+  min-width: 0;
+}
+
 .computer-detail-panel header {
   min-height: 62px;
   padding: 14px 16px;
@@ -1678,9 +1682,23 @@ small {
 
   .computer-detail-panel {
     top: 86px;
+    left: 12px;
     right: 12px;
     bottom: 104px;
-    width: calc(100% - 24px);
+    width: auto;
+  }
+
+  .computer-panel-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .computer-panel-footer > div {
+    width: 100%;
+  }
+
+  .computer-panel-footer > div button {
+    flex: 1 1 0;
   }
 
   .composer-toolbar {
