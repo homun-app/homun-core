@@ -1,5 +1,6 @@
 //! Durable local-first task runtime.
 
+pub mod approval;
 pub mod checkpoint;
 pub mod error;
 pub mod lease;
@@ -8,6 +9,7 @@ pub mod scheduler;
 pub mod store;
 pub mod types;
 
+pub use approval::{ApprovalGate, ApprovalRequest, ApprovalStatus};
 pub use checkpoint::{RetryController, TaskCheckpoint};
 pub use error::{TaskRuntimeError, TaskRuntimeResult};
 pub use lease::LeaseManager;

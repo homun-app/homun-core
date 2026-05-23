@@ -1,6 +1,6 @@
 use crate::{
-    ResourceClass, TaskCheckpoint, TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult,
-    TaskStatus, UserId, WorkspaceId,
+    ApprovalRequest, ResourceClass, TaskCheckpoint, TaskId, TaskRecord, TaskRuntimeError,
+    TaskRuntimeResult, TaskStatus, UserId, WorkspaceId,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
@@ -93,6 +93,20 @@ impl TaskStore {
 
             CREATE INDEX IF NOT EXISTS idx_task_checkpoints_task
                 ON task_checkpoints(user_id, workspace_id, task_id, sequence);
+
+            CREATE TABLE IF NOT EXISTS task_approvals (
+                approval_id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                approval_json TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_task_approvals_task
+                ON task_approvals(user_id, workspace_id, task_id, created_at);
 
             INSERT INTO task_runtime_metadata(key, value)
             VALUES ('schema_version', '1')
@@ -470,6 +484,74 @@ impl TaskStore {
             |row| row.get(0),
         )?;
         Ok(sequence.unwrap_or_default() as u32 + 1)
+    }
+
+    pub fn insert_approval(&self, approval: &ApprovalRequest) -> TaskRuntimeResult<()> {
+        self.connection.execute(
+            "
+            INSERT INTO task_approvals (
+                approval_id,
+                task_id,
+                user_id,
+                workspace_id,
+                status,
+                created_at,
+                updated_at,
+                approval_json
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            ON CONFLICT(approval_id) DO UPDATE SET
+                status = excluded.status,
+                updated_at = excluded.updated_at,
+                approval_json = excluded.approval_json
+            ",
+            params![
+                approval.approval_id,
+                approval.task_id.as_str(),
+                approval.user_id.as_str(),
+                approval.workspace_id.as_str(),
+                enum_value(&approval.status)?,
+                approval.created_at.unix_timestamp(),
+                approval.updated_at.unix_timestamp(),
+                serde_json::to_string(approval)?,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn approval_by_id(&self, approval_id: &str) -> TaskRuntimeResult<Option<ApprovalRequest>> {
+        self.connection
+            .query_row(
+                "SELECT approval_json FROM task_approvals WHERE approval_id = ?1",
+                params![approval_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .map(|json| Ok(serde_json::from_str::<ApprovalRequest>(&json)?))
+            .transpose()
+    }
+
+    pub fn latest_approval(
+        &self,
+        task_id: &TaskId,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> TaskRuntimeResult<Option<ApprovalRequest>> {
+        self.connection
+            .query_row(
+                "
+                SELECT approval_json
+                FROM task_approvals
+                WHERE task_id = ?1 AND user_id = ?2 AND workspace_id = ?3
+                ORDER BY created_at DESC, approval_id DESC
+                LIMIT 1
+                ",
+                params![task_id.as_str(), user_id.as_str(), workspace_id.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .map(|json| Ok(serde_json::from_str::<ApprovalRequest>(&json)?))
+            .transpose()
     }
 }
 
