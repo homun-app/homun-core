@@ -44,6 +44,15 @@ Perche': OpenHuman e' utile come repertorio di soluzioni concrete, ma ogni idea 
 
 Perche': OpenHuman mostra che hardcodare agenti e deleghe nel runner rende difficile governare tool, limiti e routing. Noi adattiamo il pattern mantenendo contratti piccoli, testati e coerenti con il nostro Rust Core.
 
+### Prompt guard nel runner subagenti
+
+- Aggiunto `guard_prompt`.
+- Aggiunti `PromptGuardVerdict` e `PromptGuardResult`.
+- Il `SubagentRunner` blocca prompt con pattern di instruction override, prompt exfiltration o secret exfiltration prima di chiamare il runtime.
+- Testato che un prompt ostile non raggiunga il runtime finto.
+
+Perche': OpenHuman applica enforcement server-side prima di inference/tool loop. Nel nostro progetto questo controllo deve vivere nel core/orchestratore, non nella UI, per evitare che un task subagente trasformi input non affidabile in tool call operative.
+
 ### Bootstrap progetto
 
 - Inizializzato il repository Git.
