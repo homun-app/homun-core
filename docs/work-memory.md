@@ -1035,6 +1035,34 @@ Perche': questo e' il primo punto in cui la UI legge una sessione operativa real
 
 ## Prossimo blocco
 
+### Local Computer Smoke Test reale da UI
+
+- Aggiunto command Tauri `local_computer_run_smoke_test`.
+- Il command esegue un percorso locale reale e controllato:
+  - chiama il sidecar Browser Automation via stdio con `browser.health`;
+  - esegue il comando shell read-only `date '+%Y-%m-%d %H:%M:%S %Z'`;
+  - scrive eventi nella `LocalComputerSessionManager`;
+  - aggiunge output terminale redatto;
+  - registra artifact metadata `local-smoke-transcript.txt` senza path raw.
+- Aggiunto bottone `Test reale` nella Local Computer activity card.
+- Il bottone richiama `coreBridge.runLocalComputerSmokeTest(...)` e aggiorna subito la card con lo snapshot reale.
+- Aggiunto test Rust `local_computer_smoke_test_records_real_shell_output`.
+- Aggiornato il contratto UI per imporre che la Chat esponga un'azione reale e non solo il polling dello snapshot.
+- Rigenerata la app Tauri debug apribile da:
+  - `apps/desktop/src-tauri/target/debug/bundle/macos/Local First Assistant.app`
+- Verifiche eseguite:
+  - RED: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml local_computer_smoke_test_records_real_shell_output` falliva per metodo mancante.
+  - RED: `npm run test:ui-contract` falliva per azione UI mancante.
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`
+  - GREEN: `npm run test:ui-contract`
+  - GREEN: `npm run typecheck`
+  - GREEN: `npm run build`
+  - GREEN: `npm run tauri -- build --debug --bundles app --no-sign`
+
+Perche': ora l'utente puo' fare un test reale end-to-end dentro la app Tauri: non e' ancora una prenotazione/browser task complesso, ma attraversa UI -> Tauri command -> runtime browser locale -> shell locale -> Local Computer read model -> UI.
+
+## Prossimo blocco
+
 - Collegare Tasks/Approvals ai command `task_queue_snapshot` e `task_detail`.
 - Collegare Connections/Settings ai command capability/runtime esistenti.
 - Collegare il Browser Automation Runtime alla `LocalComputerSessionManager`, cosi' le azioni reali producono eventi, artifact e preview nella stessa card.

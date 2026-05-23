@@ -1,3 +1,4 @@
+use crate::local_computer_smoke;
 use crate::models::{
     BridgeStatus, CapabilityPolicySummary, CapabilitySnapshot, DesktopTaskDetail,
     DesktopTaskQueueSnapshot, RuntimeHealthSnapshot, RuntimeProcessItem,
@@ -32,6 +33,7 @@ pub(crate) const DEFAULT_WORKSPACE_ID: &str = "local-workspace";
 pub struct DesktopCoreState {
     user_id: String,
     workspace_id: String,
+    workspace_root: PathBuf,
     process_ids: Vec<String>,
     capability_provider_ids: Vec<String>,
     task_store: Mutex<TaskStore>,
@@ -50,7 +52,7 @@ impl DesktopCoreState {
         seed_memories(&memory_facade)?;
 
         let process_store = ProcessRegistryStore::open_in_memory().map_err(to_string_error)?;
-        let sidecar_catalog = SidecarProcessCatalog::new(workspace_root);
+        let sidecar_catalog = SidecarProcessCatalog::new(&workspace_root);
         let process_manager = ProcessManager::new(process_store, LocalProcessSupervisor::new());
         process_manager
             .register(sidecar_catalog.gemma_runtime())
@@ -69,6 +71,7 @@ impl DesktopCoreState {
         Ok(Self {
             user_id: DEFAULT_USER_ID.to_string(),
             workspace_id: DEFAULT_WORKSPACE_ID.to_string(),
+            workspace_root,
             process_ids: vec![
                 "llm-gemma4-mlx".to_string(),
                 "browser-automation".to_string(),
@@ -245,6 +248,23 @@ impl DesktopCoreState {
             .read_model()
             .snapshot(session_id, &self.user_id, &self.workspace_id)
     }
+
+    pub fn run_local_computer_smoke_test(
+        &self,
+        session_id: &str,
+    ) -> Result<ComputerSessionSnapshot, String> {
+        let manager = self
+            .local_computer
+            .lock()
+            .map_err(|_| "local computer lock poisoned".to_string())?;
+        local_computer_smoke::run_local_computer_smoke_test(
+            &manager,
+            &self.workspace_root,
+            &self.user_id,
+            &self.workspace_id,
+            session_id,
+        )
+    }
 }
 
 fn memory_access_request(user_id: &str, workspace_id: &str) -> MemoryAccessRequest {
@@ -414,5 +434,31 @@ mod tests {
         );
         assert!(snapshot.preview_frame_ref.is_some());
         assert!(!serialized.contains("token="));
+    }
+
+    #[test]
+    fn local_computer_smoke_test_records_real_shell_output() {
+        let state = state();
+
+        let snapshot = state
+            .run_local_computer_smoke_test("computer_train_search")
+            .unwrap();
+        let serialized = serde_json::to_string(&snapshot).unwrap();
+
+        assert_eq!(snapshot.computer_session_id, "computer_train_search");
+        assert!(
+            snapshot
+                .timeline
+                .iter()
+                .any(|item| item.kind == "computer_action_completed")
+        );
+        assert!(
+            snapshot
+                .terminal_excerpt_redacted
+                .iter()
+                .any(|line| line.contains("local-smoke % date"))
+        );
+        assert!(snapshot.progress_current >= 2);
+        assert!(!serialized.contains("raw_payload"));
     }
 }

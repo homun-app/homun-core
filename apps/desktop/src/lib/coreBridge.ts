@@ -174,4 +174,8 @@ export const coreBridge = {
       "local_computer_session_snapshot",
       { sessionId },
     ),
+  runLocalComputerSmokeTest: (sessionId: string) =>
+    invoke<CoreComputerSessionSnapshot>("local_computer_run_smoke_test", {
+      sessionId,
+    }),
 };

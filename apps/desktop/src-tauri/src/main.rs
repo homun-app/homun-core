@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod local_computer_smoke;
 mod models;
 mod seed;
 mod state;
@@ -23,6 +24,7 @@ fn main() {
             commands::memory_dashboard_snapshot,
             commands::capability_snapshot,
             commands::local_computer_session_snapshot,
+            commands::local_computer_run_smoke_test,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Local First Assistant");

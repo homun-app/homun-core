@@ -174,6 +174,7 @@ Implementato:
 - Il bridge espone solo read model UI-safe: task detail usa checkpoint redatti, capability snapshot omette `secret_ref`, memory dashboard passa da `MemoryUiReadModel` e process health non espone env o log raw.
 - Command `local_computer_session_snapshot` collegato al read model reale `crates/local-computer-session`, con sessione seeded redatta per preparare la sostituzione dei mock della activity card.
 - La Chat ora carica la Local Computer activity card da `coreBridge.localComputerSession(...)` tramite mapper dedicato `localComputerViewModel.ts`; il mock non viene piu' passato da `App`.
+- Command `local_computer_run_smoke_test` collegato alla card: esegue un health check reale del sidecar browser via stdio, un comando shell read-only `date`, registra eventi/artifact redatti e aggiorna lo snapshot UI.
 
 Direzione UX aggiornata dopo analisi Manus live:
 
@@ -1225,4 +1226,4 @@ crates/browser-automation/
 crates/task-runtime/
 ```
 
-Runtime Python/MLX, memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager, Secrets/Keychain, Skill/Plugin Registry, Skill Runtime Sandbox, process adapter trusted, WASM adapter non trusted, Assistant Orchestrator Brain e Local Computer Session hanno una base operativa testata. La UI Tauri esiste con direzione rail/drawer, chat attiva, activity card e progressive disclosure. Il Tauri Core Bridge espone read model reali per task, memoria, processi, capability e Local Computer; la Chat legge gia' la sessione computer reale via Tauri command. Restano da sostituire progressivamente Tasks/Approvals, Connections e Settings con i command reali, collegare Browser/Shell runtime alla sessione computer, e lasciare l'auto-apprendimento per ultimo quando gli eventi PC reali saranno disponibili.
+Runtime Python/MLX, memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager, Secrets/Keychain, Skill/Plugin Registry, Skill Runtime Sandbox, process adapter trusted, WASM adapter non trusted, Assistant Orchestrator Brain e Local Computer Session hanno una base operativa testata. La UI Tauri esiste con direzione rail/drawer, chat attiva, activity card e progressive disclosure. Il Tauri Core Bridge espone read model reali per task, memoria, processi, capability e Local Computer; la Chat legge gia' la sessione computer reale via Tauri command e puo' avviare un smoke test reale browser-sidecar + shell dalla card. Restano da sostituire progressivamente Tasks/Approvals, Connections e Settings con i command reali, collegare Browser/Shell runtime alla sessione computer per task operativi completi, e lasciare l'auto-apprendimento per ultimo quando gli eventi PC reali saranno disponibili.

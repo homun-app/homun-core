@@ -78,3 +78,11 @@ pub fn local_computer_session_snapshot(
 ) -> Result<Option<ComputerSessionSnapshot>, String> {
     state.local_computer_session_snapshot(&session_id)
 }
+
+#[tauri::command]
+pub fn local_computer_run_smoke_test(
+    state: tauri::State<'_, DesktopCoreState>,
+    session_id: String,
+) -> Result<ComputerSessionSnapshot, String> {
+    state.run_local_computer_smoke_test(&session_id)
+}

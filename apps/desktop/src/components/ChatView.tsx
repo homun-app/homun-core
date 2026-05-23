@@ -60,6 +60,8 @@ export function ChatView({
   const [activeSurface, setActiveSurface] = useState<ComputerSurfaceKind>(
     computerSession.activeSurface,
   );
+  const [smokeTestRunning, setSmokeTestRunning] = useState(false);
+  const [smokeTestError, setSmokeTestError] = useState<string | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const conversationRef = useRef<HTMLDivElement>(null);
@@ -67,6 +69,20 @@ export function ChatView({
     () => health.filter((item) => item.status !== "attention").slice(0, 2),
     [health],
   );
+
+  async function runLocalSmokeTest() {
+    setSmokeTestRunning(true);
+    setSmokeTestError(null);
+    try {
+      const snapshot =
+        await coreBridge.runLocalComputerSmokeTest(computerSessionId);
+      setComputerSession(mapCoreComputerSession(snapshot));
+    } catch (error) {
+      setSmokeTestError(describeBridgeError(error));
+    } finally {
+      setSmokeTestRunning(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -208,9 +224,12 @@ export function ChatView({
 
           <LocalComputerCard
             approvalsCount={approvalsCount}
+            smokeTestError={smokeTestError}
+            smokeTestRunning={smokeTestRunning}
             session={computerSession}
             task={task}
             onOpen={() => setDetailsOpen(true)}
+            onRunSmokeTest={runLocalSmokeTest}
           />
         </div>
       </div>
@@ -268,12 +287,18 @@ function InlineTimeline({ session }: { session: ComputerSession }) {
 function LocalComputerCard({
   approvalsCount,
   onOpen,
+  onRunSmokeTest,
   session,
+  smokeTestError,
+  smokeTestRunning,
   task,
 }: {
   approvalsCount: number;
   onOpen: () => void;
+  onRunSmokeTest: () => void;
   session: ComputerSession;
+  smokeTestError: string | null;
+  smokeTestRunning: boolean;
   task: TaskItem;
 }) {
   return (
@@ -314,7 +339,18 @@ function LocalComputerCard({
           <Play size={14} />
           {task.title}
         </span>
-        <span>{approvalsCount} approval</span>
+        <div className="computer-card-actions">
+          {smokeTestError && <span>{smokeTestError}</span>}
+          <button
+            className="smoke-test-button"
+            disabled={smokeTestRunning}
+            type="button"
+            onClick={onRunSmokeTest}
+          >
+            {smokeTestRunning ? "In esecuzione" : "Test reale"}
+          </button>
+          <span>{approvalsCount} approval</span>
+        </div>
       </div>
     </article>
   );
