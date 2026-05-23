@@ -18,6 +18,14 @@ Principi:
 
 ## Decisioni Gia' Validate
 
+### Riferimento di ispirazione
+
+- OpenHuman (`tinyhumansai/openhuman`) e' uno spunto di riferimento per capire come altri hanno affrontato assistant personali, agenti, memoria, tool e UX operativa.
+- Non e' un progetto da copiare o forkare.
+- Lo usiamo per leggere soluzioni concrete, confrontare tradeoff e decidere consapevolmente cosa adattare al nostro progetto.
+- Le nostre decisioni restano autonome: local-first per default, Rust Core, Tauri, runtime Python/MLX con Gemma 4, subagenti auditabili e permessi deny-by-default.
+- Ogni idea presa da OpenHuman deve passare da una decisione esplicita: cosa risolve, come viene adattata, quali parti non importiamo.
+
 ### Stack applicazione
 
 - Desktop shell: Tauri.
@@ -694,7 +702,7 @@ local-first-personal-assistant/
 
 ## Riferimenti
 
-- OpenHuman: https://github.com/tinyhumansai/openhuman
+- OpenHuman, spunto di riferimento da studiare e adattare, non da copiare: https://github.com/tinyhumansai/openhuman
 - Graphify repo: https://github.com/safishamsi/graphify
 - GraphifyLabs: https://graphifylabs.ai/
 - Obsidian Wiki: https://github.com/Ar9av/obsidian-wiki

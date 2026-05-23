@@ -4,6 +4,15 @@ Questo file e' la memoria operativa del lavoro svolto nel repository. Va aggiorn
 
 ## 2026-05-22
 
+### OpenHuman come spunto, non copia
+
+- Chiarito in `PROJECT.md` che OpenHuman e' un riferimento di ispirazione gia' considerato.
+- Lo useremo per studiare come hanno risolto agenti, memoria, tool, permission flow e UX operativa.
+- Non lo useremo come base da copiare, forkare o replicare nello stack.
+- Ogni idea presa da OpenHuman dovra' essere adattata alle decisioni gia' validate: local-first, Rust Core, Tauri, runtime Python/MLX con Gemma 4, subagenti auditabili e permessi deny-by-default.
+
+Perche': il progetto deve imparare da implementazioni esistenti senza perdere identita' architetturale e vincoli locali.
+
 ### Bootstrap progetto
 
 - Inizializzato il repository Git.
