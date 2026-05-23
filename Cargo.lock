@@ -642,6 +642,7 @@ version = "0.1.0"
 dependencies = [
  "local-first-capabilities",
  "local-first-memory",
+ "local-first-task-runtime",
  "reqwest",
  "rusqlite",
  "serde",

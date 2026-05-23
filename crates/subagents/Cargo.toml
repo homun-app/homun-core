@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 local-first-capabilities = { path = "../capabilities" }
 local-first-memory = { path = "../memory" }
+local-first-task-runtime = { path = "../task-runtime" }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
