@@ -1,9 +1,11 @@
 use crate::{
-    CapabilityCall, CapabilityProviderKind, CapabilityTool, PolicyContext, UserId, WorkspaceId,
+    CapabilityCall, CapabilityFacade, CapabilityProviderKind, CapabilityTool, PolicyContext,
+    UserId, WorkspaceId,
 };
 use local_first_task_runtime::{
-    ResourceClass, ResourceRequirement, RetryPolicy, TaskRecord, TaskRuntimeResult, TaskStore,
-    UserId as TaskUserId, WorkspaceId as TaskWorkspaceId,
+    ExecutorResult, ResourceClass, ResourceRequirement, RetryPolicy, TaskCheckpoint, TaskExecutor,
+    TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStore, UserId as TaskUserId,
+    WorkspaceId as TaskWorkspaceId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -96,4 +98,37 @@ fn task_user_id(user_id: &UserId) -> TaskUserId {
 
 fn task_workspace_id(workspace_id: &WorkspaceId) -> TaskWorkspaceId {
     TaskWorkspaceId::new(workspace_id.as_str())
+}
+
+pub struct CapabilityTaskExecutor {
+    facade: CapabilityFacade,
+}
+
+impl CapabilityTaskExecutor {
+    pub fn new(facade: CapabilityFacade) -> Self {
+        Self { facade }
+    }
+}
+
+impl TaskExecutor for CapabilityTaskExecutor {
+    fn executor_id(&self) -> &str {
+        "capability-task-executor"
+    }
+
+    fn execute_step(
+        &mut self,
+        task: &TaskRecord,
+        _checkpoint: Option<TaskCheckpoint>,
+    ) -> TaskRuntimeResult<ExecutorResult> {
+        let payload: CapabilityTaskPayload = serde_json::from_value(task.input_json.clone())
+            .map_err(|error| TaskRuntimeError::Store(error.to_string()))?;
+        match self.facade.call_tool(&payload.context, payload.call) {
+            Ok(result) => Ok(ExecutorResult::Completed {
+                output: serde_json::to_value(result)?,
+            }),
+            Err(error) => Ok(ExecutorResult::RetryableFailure {
+                reason: error.as_str().to_string(),
+            }),
+        }
+    }
 }
