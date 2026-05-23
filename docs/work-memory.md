@@ -53,6 +53,16 @@ Perche': OpenHuman mostra che hardcodare agenti e deleghe nel runner rende diffi
 
 Perche': OpenHuman applica enforcement server-side prima di inference/tool loop. Nel nostro progetto questo controllo deve vivere nel core/orchestratore, non nella UI, per evitare che un task subagente trasformi input non affidabile in tool call operative.
 
+### Tool visibility vs execution
+
+- Aggiunto `ToolDefinition`.
+- Aggiunto `ToolAccessPlan`.
+- Aggiunto `plan_tool_access`.
+- Separata la lista di tool visibili al modello dalla lista di tool realmente eseguibili dal runtime.
+- Testato che `ToolAgent` possa vedere un tool di scrittura per preparare un piano, ma possa eseguire solo i tool consentiti da scope, connector, azione e autonomia del task.
+
+Perche': OpenHuman distingue i tool mostrati al modello dai tool che il runtime puo' invocare davvero. Nel nostro progetto questo evita che la capacita' di ragionare su un'azione diventi automaticamente permesso operativo.
+
 ### Bootstrap progetto
 
 - Inizializzato il repository Git.
