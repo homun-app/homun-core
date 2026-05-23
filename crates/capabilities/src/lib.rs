@@ -14,7 +14,10 @@ pub use channel::{
 };
 pub use error::{CapabilityError, CapabilityResult};
 pub use facade::{CapabilityFacade, ToolAccessPlan};
-pub use mcp::{InMemoryMcpTransport, McpCapabilityProvider, McpToolPolicy, McpTransport};
+pub use mcp::{
+    InMemoryMcpTransport, McpCapabilityProvider, McpStdioConfig, McpStdioTransport, McpToolPolicy,
+    McpTransport,
+};
 pub use policy::{CapabilityPolicy, PolicyContext, ToolAccessDecision};
 pub use provider::{CapabilityProvider, FakeCapabilityProvider};
 pub use types::*;

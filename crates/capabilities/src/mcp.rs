@@ -6,6 +6,10 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::io::{BufRead, BufReader, Write};
+use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub trait McpTransport {
     fn request(
@@ -78,6 +82,132 @@ impl McpTransport for InMemoryMcpTransport {
     fn notify(&self, method: &str, _params: Option<serde_json::Value>) -> CapabilityResult<()> {
         self.notifications.borrow_mut().push(method.to_string());
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpStdioConfig {
+    pub command: String,
+    pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
+}
+
+pub struct McpStdioTransport {
+    child: Mutex<Child>,
+    stdin: Mutex<ChildStdin>,
+    stdout: Mutex<BufReader<ChildStdout>>,
+    next_id: AtomicU64,
+}
+
+impl McpStdioTransport {
+    pub fn spawn(config: McpStdioConfig) -> CapabilityResult<Self> {
+        let mut command = Command::new(&config.command);
+        command.args(&config.args);
+        for (key, value) in &config.env {
+            command.env(key, value);
+        }
+        let mut child = command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|error| {
+                CapabilityError::ProviderUnavailable(format!("mcp_stdio_spawn_failed:{error}"))
+            })?;
+        let stdin = child.stdin.take().ok_or_else(|| {
+            CapabilityError::ProviderUnavailable("mcp_stdio_missing_stdin".to_string())
+        })?;
+        let stdout = child.stdout.take().ok_or_else(|| {
+            CapabilityError::ProviderUnavailable("mcp_stdio_missing_stdout".to_string())
+        })?;
+        Ok(Self {
+            child: Mutex::new(child),
+            stdin: Mutex::new(stdin),
+            stdout: Mutex::new(BufReader::new(stdout)),
+            next_id: AtomicU64::new(1),
+        })
+    }
+
+    fn write_message(&self, message: &serde_json::Value) -> CapabilityResult<()> {
+        let mut stdin = self.stdin.lock().map_err(|_| {
+            CapabilityError::ProviderUnavailable("mcp_stdio_stdin_lock_poisoned".to_string())
+        })?;
+        serde_json::to_writer(&mut *stdin, message).map_err(|error| {
+            CapabilityError::ProviderUnavailable(format!("mcp_stdio_write_failed:{error}"))
+        })?;
+        stdin.write_all(b"\n").map_err(|error| {
+            CapabilityError::ProviderUnavailable(format!("mcp_stdio_write_failed:{error}"))
+        })?;
+        stdin.flush().map_err(|error| {
+            CapabilityError::ProviderUnavailable(format!("mcp_stdio_flush_failed:{error}"))
+        })?;
+        Ok(())
+    }
+}
+
+impl McpTransport for McpStdioTransport {
+    fn request(
+        &self,
+        method: &str,
+        params: Option<serde_json::Value>,
+    ) -> CapabilityResult<serde_json::Value> {
+        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let mut message = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": method,
+        });
+        if let Some(params) = params {
+            message["params"] = params;
+        }
+        self.write_message(&message)?;
+
+        let mut stdout = self.stdout.lock().map_err(|_| {
+            CapabilityError::ProviderUnavailable("mcp_stdio_stdout_lock_poisoned".to_string())
+        })?;
+        loop {
+            let mut line = String::new();
+            let bytes = stdout.read_line(&mut line).map_err(|error| {
+                CapabilityError::ProviderUnavailable(format!("mcp_stdio_read_failed:{error}"))
+            })?;
+            if bytes == 0 {
+                return Err(CapabilityError::ProviderUnavailable(
+                    "mcp_stdio_closed".to_string(),
+                ));
+            }
+            let response: serde_json::Value = serde_json::from_str(&line).map_err(|error| {
+                CapabilityError::ProviderUnavailable(format!("mcp_stdio_invalid_json:{error}"))
+            })?;
+            if response.get("id").and_then(|value| value.as_u64()) != Some(id) {
+                continue;
+            }
+            if let Some(error) = response.get("error") {
+                return Err(CapabilityError::ProviderUnavailable(format!(
+                    "mcp_stdio_error:{error}"
+                )));
+            }
+            return Ok(response.get("result").cloned().unwrap_or(serde_json::Value::Null));
+        }
+    }
+
+    fn notify(&self, method: &str, params: Option<serde_json::Value>) -> CapabilityResult<()> {
+        let mut message = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": method,
+        });
+        if let Some(params) = params {
+            message["params"] = params;
+        }
+        self.write_message(&message)
+    }
+}
+
+impl Drop for McpStdioTransport {
+    fn drop(&mut self) {
+        if let Ok(mut child) = self.child.lock() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
     }
 }
 
