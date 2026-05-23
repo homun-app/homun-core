@@ -1,6 +1,7 @@
 use local_first_capabilities::{
     ActionClass, PluginInstallRecord, PluginManifest, ProviderId, SkillInstallRecord,
-    SkillManifest, SkillPermissions, SkillToolManifest, SkillTrustLevel, UserId, WorkspaceId,
+    SkillManifest, SkillPermissions, SkillPluginRegistryStore, SkillToolManifest, SkillTrustLevel,
+    UserId, WorkspaceId,
 };
 
 #[test]
@@ -39,11 +40,99 @@ fn contracts_serialize_skill_plugin_manifests() {
     assert_eq!(decoded.skills[0].tools[0].name, "calendar.search");
     assert_eq!(decoded.skills[0].tools[0].action, ActionClass::Read);
     assert_eq!(decoded.skills[0].permissions.privacy_domains, vec!["work"]);
-    assert_eq!(skill_install.provider_id(), ProviderId::new("skill:calendar-local"));
+    assert_eq!(
+        skill_install.provider_id(),
+        ProviderId::new("skill:calendar-local")
+    );
     assert!(skill_install.enabled);
     assert_eq!(encoded_install["trust_level"], "trusted_local");
     assert_eq!(encoded_install["manifest_hash"], "sha256:calendar");
     assert_eq!(plugin_install.trust_level, SkillTrustLevel::TrustedLocal);
+}
+
+#[test]
+fn registry_round_trips_skill_manifests_and_installs_by_scope() {
+    let store = SkillPluginRegistryStore::open_in_memory().unwrap();
+    assert_eq!(store.schema_version().unwrap(), 1);
+    store.run_migrations().unwrap();
+
+    let manifest = sample_skill_manifest("calendar-local", "0.1.0");
+    let user_1 = UserId::new("user_1");
+    let user_2 = UserId::new("user_2");
+    let workspace = WorkspaceId::new("workspace_1");
+    let install = SkillInstallRecord::new(
+        user_1.clone(),
+        workspace.clone(),
+        manifest.id.clone(),
+        manifest.version.clone(),
+        "/plugins/productivity/calendar",
+        SkillTrustLevel::Reviewed,
+    )
+    .with_manifest_hash("sha256:calendar");
+    let other_user_install = SkillInstallRecord::new(
+        user_2.clone(),
+        workspace.clone(),
+        manifest.id.clone(),
+        manifest.version.clone(),
+        "/plugins/productivity/calendar",
+        SkillTrustLevel::Untrusted,
+    )
+    .disabled();
+
+    store.upsert_skill_manifest(&manifest).unwrap();
+    store.upsert_skill_install(&install).unwrap();
+    store.upsert_skill_install(&other_user_install).unwrap();
+
+    let loaded_manifest = store
+        .skill_manifest("calendar-local", "0.1.0")
+        .unwrap()
+        .unwrap();
+    let user_1_installs = store.skill_installs(&user_1, &workspace).unwrap();
+    let user_2_installs = store.skill_installs(&user_2, &workspace).unwrap();
+
+    assert_eq!(loaded_manifest.tools[0].name, "calendar.search");
+    assert_eq!(user_1_installs, vec![install]);
+    assert_eq!(user_2_installs, vec![other_user_install]);
+}
+
+#[test]
+fn registry_registers_plugin_manifest_and_bundled_skills() {
+    let store = SkillPluginRegistryStore::open_in_memory().unwrap();
+    let calendar = sample_skill_manifest("calendar-local", "0.1.0");
+    let files = sample_skill_manifest("files-local", "0.2.0");
+    let plugin = PluginManifest::new(
+        "productivity-suite",
+        "0.1.0",
+        "Productivity Suite",
+        vec![calendar.clone(), files.clone()],
+    );
+    let install = PluginInstallRecord::new(
+        UserId::new("user_1"),
+        WorkspaceId::new("workspace_1"),
+        plugin.id.clone(),
+        plugin.version.clone(),
+        "/plugins/productivity",
+        SkillTrustLevel::TrustedLocal,
+    );
+
+    store.upsert_plugin_manifest(&plugin).unwrap();
+    store.upsert_plugin_install(&install).unwrap();
+
+    let loaded_plugin = store
+        .plugin_manifest("productivity-suite", "0.1.0")
+        .unwrap()
+        .unwrap();
+    let loaded_calendar = store
+        .skill_manifest("calendar-local", "0.1.0")
+        .unwrap()
+        .unwrap();
+    let plugin_installs = store
+        .plugin_installs(&UserId::new("user_1"), &WorkspaceId::new("workspace_1"))
+        .unwrap();
+
+    assert_eq!(loaded_plugin.skills.len(), 2);
+    assert_eq!(loaded_calendar.id, calendar.id);
+    assert_eq!(plugin_installs, vec![install]);
 }
 
 fn sample_skill_manifest(id: &str, version: &str) -> SkillManifest {

@@ -25,14 +25,14 @@
 - [x] Run `cargo test -p local-first-capabilities --test skill_plugin_registry contracts_serialize_skill_plugin_manifests`.
 - [x] Implement the contract types in `types.rs`.
 - [x] Run targeted test until green.
-- [ ] Commit as `Add skill plugin contracts`.
+- [x] Commit as `Add skill plugin contracts`.
 
 ### Task 2: SQLite Registry
 
-- [ ] Write failing tests for schema migrations, skill install round trip, user/workspace isolation and plugin bundled skill registration.
-- [ ] Run targeted tests and verify failures.
-- [ ] Implement `SkillPluginRegistryStore` in `skill_plugin.rs`.
-- [ ] Run targeted tests until green.
+- [x] Write failing tests for schema migrations, skill install round trip, user/workspace isolation and plugin bundled skill registration.
+- [x] Run targeted tests and verify failures.
+- [x] Implement `SkillPluginRegistryStore` in `skill_plugin.rs`.
+- [x] Run targeted tests until green.
 - [ ] Commit as `Add skill plugin registry`.
 
 ### Task 3: Capability Provider Integration
