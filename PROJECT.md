@@ -691,6 +691,15 @@ routines(id, name, intent, confidence, status, schedule_hint_json, created_at, u
 automation_candidates(id, routine_id, proposal_json, risk_level, status, created_at)
 ```
 
+Stato implementato:
+
+- Le estrazioni del `MemoryAgent` entrano come memorie `candidate`, non come verita' confermate.
+- Il context pack operativo espone solo memorie `confirmed`; le candidate restano visibili nel read model di apprendimento/review.
+- Le routine inferite restano `RoutineRecord` candidate con evidence refs e privacy domain.
+- Aggiunto supporto persistente a `automation_candidates` nel Memory Core con risk level, autonomy level, stato, trigger, azioni, evidence refs e `proposal_json`.
+- Aggiunto `LearningUiReadModel` per esporre alla UI cosa e' stato appreso e quali automatismi sono proponibili senza raw event payload.
+- Il read model applica policy di privacy domain e sensitivity prima di esporre insight, routine o proposte.
+
 ### Graphify / GraphifyLabs
 
 Graphify (`safishamsi/graphify`) non va perso. E' il motore scelto per la memoria tecnica e documentale.

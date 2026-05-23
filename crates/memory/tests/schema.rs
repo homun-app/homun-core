@@ -8,12 +8,12 @@ use std::path::PathBuf;
 fn store_records_schema_version_and_migrations_are_idempotent() {
     let store = SQLiteMemoryStore::open_in_memory().unwrap();
 
-    assert_eq!(store.schema_version().unwrap(), 2);
+    assert_eq!(store.schema_version().unwrap(), 3);
 
     store.run_migrations().unwrap();
     store.run_migrations().unwrap();
 
-    assert_eq!(store.schema_version().unwrap(), 2);
+    assert_eq!(store.schema_version().unwrap(), 3);
 }
 
 #[test]
@@ -78,12 +78,12 @@ fn file_backed_store_keeps_schema_version_after_reopen() {
     let path = unique_db_path();
     {
         let store = SQLiteMemoryStore::open(&path).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 2);
+        assert_eq!(store.schema_version().unwrap(), 3);
     }
 
     let reopened = SQLiteMemoryStore::open(&path).unwrap();
 
-    assert_eq!(reopened.schema_version().unwrap(), 2);
+    assert_eq!(reopened.schema_version().unwrap(), 3);
     let _ = std::fs::remove_file(path);
 }
 

@@ -1,6 +1,6 @@
 use local_first_memory::{
-    DataSensitivity, MemoryAccessRequest, MemoryExtraction, MemoryFacade, MemoryRef, MemoryRefKind,
-    PrivacyDomain, SQLiteMemoryStore, UserId, WorkspaceId,
+    DataSensitivity, MemoryAccessRequest, MemoryExtraction, MemoryFacade, MemoryLifecycleRequest,
+    MemoryRef, MemoryRefKind, MemoryStatus, PrivacyDomain, SQLiteMemoryStore, UserId, WorkspaceId,
 };
 
 #[test]
@@ -42,15 +42,40 @@ fn facade_applies_memory_agent_extraction_to_memory_core() {
     let summary = facade
         .apply_extraction(&user, &workspace, extraction)
         .unwrap();
-    let pack = facade.context_pack(&request()).unwrap();
+    let candidate_pack = facade.context_pack(&request()).unwrap();
 
     assert_eq!(summary.memories_imported, 1);
     assert_eq!(summary.entities_imported, 1);
     assert_eq!(summary.relations_imported, 0);
     assert_eq!(summary.evidence_links_imported, 1);
+    let extracted_memory = facade
+        .get_memory_for_ui(&summary.memory_refs[0], &user, &workspace)
+        .unwrap()
+        .unwrap();
+    assert_eq!(extracted_memory.status, MemoryStatus::Candidate);
+    assert_eq!(candidate_pack.items.len(), 0);
+
+    facade
+        .confirm_memory(
+            &lifecycle_request(),
+            &summary.memory_refs[0],
+            "user confirmed extracted memory",
+        )
+        .unwrap();
+
+    let pack = facade.context_pack(&request()).unwrap();
     assert_eq!(pack.items.len(), 1);
     assert_eq!(pack.items[0].summary, "Fabio prefers Zed for Acme work");
     assert_eq!(pack.items[0].evidence, vec![event_ref]);
+}
+
+fn lifecycle_request() -> MemoryLifecycleRequest {
+    MemoryLifecycleRequest {
+        actor_id: "memory_test".to_string(),
+        user_id: UserId::new("user_1"),
+        workspace_id: WorkspaceId::new("workspace_1"),
+        purpose: "confirm memory".to_string(),
+    }
 }
 
 fn request() -> MemoryAccessRequest {

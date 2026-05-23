@@ -1,7 +1,7 @@
 use crate::{
-    DataSensitivity, EncryptedJson, KeyProvider, MemoryAccessDecision, MemoryAccessRequest,
-    MemoryBackupReport, MemoryEntity, MemoryEvent, MemoryEvidence, MemoryHealth,
-    MemoryMaintenanceReport, MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation,
+    AutomationCandidateRecord, DataSensitivity, EncryptedJson, KeyProvider, MemoryAccessDecision,
+    MemoryAccessRequest, MemoryBackupReport, MemoryEntity, MemoryEvent, MemoryEvidence,
+    MemoryHealth, MemoryMaintenanceReport, MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation,
     MemoryRestoreMode, PrivacyDomain, RoutineRecord, UserId, WikiPage, WorkspaceId, decrypt_json,
     encrypt_json,
 };
@@ -10,7 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-const SCHEMA_VERSION: u32 = 2;
+const SCHEMA_VERSION: u32 = 3;
 
 pub struct SQLiteMemoryStore {
     conn: Connection,
@@ -721,6 +721,99 @@ impl SQLiteMemoryStore {
         )
     }
 
+    pub fn list_routines(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Vec<RoutineRecord>, String> {
+        let mut statement = self
+            .conn
+            .prepare(
+                "select ref, user_id, workspace_id, name, intent, confidence, status,
+                        schedule_hint_json, privacy_domain, sensitivity, evidence_json,
+                        metadata_json, created_at, updated_at
+                 from routines
+                 where user_id = ?1 and workspace_id = ?2
+                 order by updated_at desc, ref",
+            )
+            .map_err(|error| error.to_string())?;
+        let mut rows = statement
+            .query((user_id.as_str(), workspace_id.as_str()))
+            .map_err(|error| error.to_string())?;
+        let mut routines = Vec::new();
+        while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+            let routine = routine_from_row(row)?;
+            if !self.is_tombstoned(&routine.reference, user_id, workspace_id)? {
+                routines.push(routine);
+            }
+        }
+        Ok(routines)
+    }
+
+    pub fn upsert_automation_candidate(
+        &self,
+        candidate: &AutomationCandidateRecord,
+    ) -> Result<(), String> {
+        self.conn
+            .execute(
+                "insert or replace into automation_candidates (
+                    ref, user_id, workspace_id, routine_ref, title, summary, trigger,
+                    actions_json, risk_level, autonomy_level, status, privacy_domain,
+                    sensitivity, evidence_json, proposal_json, created_at, updated_at
+                ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+                params![
+                    candidate.reference.to_string(),
+                    candidate.user_id.as_str(),
+                    candidate.workspace_id.as_str(),
+                    candidate.routine_ref.as_ref().map(ToString::to_string),
+                    &candidate.title,
+                    &candidate.summary,
+                    &candidate.trigger,
+                    serde_json::to_string(&candidate.actions).map_err(|error| error.to_string())?,
+                    enum_name(&candidate.risk_level)?,
+                    candidate.autonomy_level,
+                    enum_name(&candidate.status)?,
+                    candidate.privacy_domain.as_str(),
+                    enum_name(&candidate.sensitivity)?,
+                    serde_json::to_string(&candidate.evidence).map_err(|error| error.to_string())?,
+                    serde_json::to_string(&candidate.proposal_json).map_err(|error| error.to_string())?,
+                    &candidate.created_at,
+                    &candidate.updated_at,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    pub fn list_automation_candidates(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Vec<AutomationCandidateRecord>, String> {
+        let mut statement = self
+            .conn
+            .prepare(
+                "select ref, user_id, workspace_id, routine_ref, title, summary, trigger,
+                        actions_json, risk_level, autonomy_level, status, privacy_domain,
+                        sensitivity, evidence_json, proposal_json, created_at, updated_at
+                 from automation_candidates
+                 where user_id = ?1 and workspace_id = ?2
+                 order by updated_at desc, ref",
+            )
+            .map_err(|error| error.to_string())?;
+        let mut rows = statement
+            .query((user_id.as_str(), workspace_id.as_str()))
+            .map_err(|error| error.to_string())?;
+        let mut candidates = Vec::new();
+        while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+            let candidate = automation_candidate_from_row(row)?;
+            if !self.is_tombstoned(&candidate.reference, user_id, workspace_id)? {
+                candidates.push(candidate);
+            }
+        }
+        Ok(candidates)
+    }
+
     pub fn tombstone(
         &self,
         reference: &MemoryRef,
@@ -949,6 +1042,28 @@ impl SQLiteMemoryStore {
                     updated_at text not null
                 );
                 create index if not exists idx_routines_scope on routines(user_id, workspace_id);
+
+                create table if not exists automation_candidates (
+                    ref text primary key,
+                    user_id text not null,
+                    workspace_id text not null,
+                    routine_ref text,
+                    title text not null,
+                    summary text not null,
+                    trigger text not null,
+                    actions_json text not null,
+                    risk_level text not null,
+                    autonomy_level integer not null,
+                    status text not null,
+                    privacy_domain text not null,
+                    sensitivity text not null,
+                    evidence_json text not null,
+                    proposal_json text not null,
+                    created_at text not null,
+                    updated_at text not null
+                );
+                create index if not exists idx_automation_candidates_scope
+                    on automation_candidates(user_id, workspace_id);
 
                 create table if not exists access_audit (
                     ref text primary key,
@@ -1230,6 +1345,46 @@ fn routine_from_row(row: &Row<'_>) -> Result<RoutineRecord, String> {
         .map_err(|error| error.to_string())?,
         created_at: row.get(12).map_err(|error| error.to_string())?,
         updated_at: row.get(13).map_err(|error| error.to_string())?,
+    })
+}
+
+fn automation_candidate_from_row(row: &Row<'_>) -> Result<AutomationCandidateRecord, String> {
+    Ok(AutomationCandidateRecord {
+        reference: parse_ref(row.get::<_, String>(0).map_err(|error| error.to_string())?)?,
+        user_id: UserId::new(row.get::<_, String>(1).map_err(|error| error.to_string())?),
+        workspace_id: WorkspaceId::new(row.get::<_, String>(2).map_err(|error| error.to_string())?),
+        routine_ref: parse_optional_ref(row.get(3).map_err(|error| error.to_string())?)?,
+        title: row.get(4).map_err(|error| error.to_string())?,
+        summary: row.get(5).map_err(|error| error.to_string())?,
+        trigger: row.get(6).map_err(|error| error.to_string())?,
+        actions: serde_json::from_str(&row.get::<_, String>(7).map_err(|error| error.to_string())?)
+            .map_err(|error| error.to_string())?,
+        risk_level: enum_from_name(row.get::<_, String>(8).map_err(|error| error.to_string())?)?,
+        autonomy_level: row.get(9).map_err(|error| error.to_string())?,
+        status: enum_from_name(
+            row.get::<_, String>(10)
+                .map_err(|error| error.to_string())?,
+        )?,
+        privacy_domain: PrivacyDomain::new(
+            row.get::<_, String>(11)
+                .map_err(|error| error.to_string())?,
+        ),
+        sensitivity: enum_from_name(
+            row.get::<_, String>(12)
+                .map_err(|error| error.to_string())?,
+        )?,
+        evidence: serde_json::from_str(
+            &row.get::<_, String>(13)
+                .map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?,
+        proposal_json: serde_json::from_str(
+            &row.get::<_, String>(14)
+                .map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?,
+        created_at: row.get(15).map_err(|error| error.to_string())?,
+        updated_at: row.get(16).map_err(|error| error.to_string())?,
     })
 }
 

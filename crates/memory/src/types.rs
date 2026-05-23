@@ -302,6 +302,45 @@ pub struct RoutineInferenceSummary {
     pub routine_refs: Vec<MemoryRef>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutomationRiskLevel {
+    Low,
+    Medium,
+    High,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutomationCandidateStatus {
+    Candidate,
+    Approved,
+    Rejected,
+    Stale,
+    Executed,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AutomationCandidateRecord {
+    pub reference: MemoryRef,
+    pub user_id: UserId,
+    pub workspace_id: WorkspaceId,
+    pub routine_ref: Option<MemoryRef>,
+    pub title: String,
+    pub summary: String,
+    pub trigger: String,
+    pub actions: Vec<String>,
+    pub risk_level: AutomationRiskLevel,
+    pub autonomy_level: u8,
+    pub status: AutomationCandidateStatus,
+    pub privacy_domain: PrivacyDomain,
+    pub sensitivity: DataSensitivity,
+    pub evidence: Vec<MemoryRef>,
+    pub proposal_json: serde_json::Value,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 fn default_confidence() -> f64 {
     0.5
 }

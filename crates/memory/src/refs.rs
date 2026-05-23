@@ -14,6 +14,7 @@ pub enum MemoryRefKind {
     Wiki,
     Graph,
     Routine,
+    Automation,
     Audit,
 }
 
@@ -57,6 +58,7 @@ impl Display for MemoryRefKind {
             MemoryRefKind::Wiki => "wiki",
             MemoryRefKind::Graph => "graph",
             MemoryRefKind::Routine => "routine",
+            MemoryRefKind::Automation => "automation",
             MemoryRefKind::Audit => "audit",
         };
         formatter.write_str(value)
@@ -93,6 +95,7 @@ impl FromStr for MemoryRef {
             "wiki" => MemoryRefKind::Wiki,
             "graph" => MemoryRefKind::Graph,
             "routine" => MemoryRefKind::Routine,
+            "automation" => MemoryRefKind::Automation,
             "audit" => MemoryRefKind::Audit,
             _ => return Err(format!("unknown memory ref kind {}", parts[0])),
         };

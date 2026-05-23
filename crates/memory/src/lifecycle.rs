@@ -1,4 +1,7 @@
-use crate::{DataSensitivity, MemoryRef, MemoryStatus, PrivacyDomain, UserId, WorkspaceId};
+use crate::{
+    AutomationCandidateStatus, AutomationRiskLevel, DataSensitivity, MemoryRef, MemoryStatus,
+    PrivacyDomain, UserId, WorkspaceId,
+};
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -34,6 +37,23 @@ pub struct MemoryUpdatePatch {
     pub sensitivity: Option<DataSensitivity>,
     pub metadata: Option<serde_json::Value>,
     pub last_seen_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AutomationCandidateCreateRequest {
+    pub request: MemoryLifecycleRequest,
+    pub routine_ref: Option<MemoryRef>,
+    pub title: String,
+    pub summary: String,
+    pub trigger: String,
+    pub actions: Vec<String>,
+    pub risk_level: AutomationRiskLevel,
+    pub autonomy_level: u8,
+    pub status: AutomationCandidateStatus,
+    pub privacy_domain: PrivacyDomain,
+    pub sensitivity: DataSensitivity,
+    pub evidence_refs: Vec<MemoryRef>,
+    pub proposal_json: serde_json::Value,
 }
 
 pub(crate) fn current_timestamp() -> String {

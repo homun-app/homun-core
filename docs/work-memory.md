@@ -913,5 +913,26 @@ Perche': l'auto-apprendimento e' una differenza centrale del prodotto, ma deve e
 
 ## Prossimo blocco
 
+### Allineamento Auto-apprendimento al Memory Core
+
+- Riallineato il comportamento al piano originale del progetto: l'auto-apprendimento non introduce un core separato, ma passa da `Event Log`, `MemoryAgent`, `RoutineRecord`, `automation_candidates` e `MemoryFacade`.
+- Cambiato `MemoryFacade::apply_extraction`: le memorie estratte dal `MemoryAgent` ora entrano come `candidate`, non `confirmed`.
+- Aggiornato `MemoryFacade::context_pack`: il contesto operativo carica solo memorie `confirmed`; le candidate restano disponibili alla UI di apprendimento/review.
+- Aggiunto `MemoryRefKind::Automation`.
+- Aggiunti `AutomationCandidateRecord`, `AutomationCandidateCreateRequest`, `AutomationRiskLevel` e `AutomationCandidateStatus`.
+- Aggiunta tabella SQLite `automation_candidates` e portata la schema version memoria a `3`.
+- Aggiunta API `MemoryFacade::propose_automation`.
+- Aggiunto `LearningUiReadModel`, che aggrega memorie candidate/confermate, routine candidate e proposte di automazione applicando privacy domain e sensitivity prima di esporre dati alla UI.
+- Aggiunti test TDD:
+  - `crates/memory/tests/extraction.rs`: MemoryAgent extraction resta candidate.
+  - `crates/memory/tests/learning_ui.rs`: snapshot apprendimento, evidence refs, automation proposals e filtri privacy.
+- Verifiche eseguite:
+  - `cargo test -p local-first-memory`
+  - `cargo test -p local-first-subagents`
+
+Perche': il progetto aveva gia' definito il percorso corretto: osservare eventi, dedurre candidate, mostrare evidenze redatte, lasciare all'utente il controllo e solo poi trasformare pattern ricorrenti in automazioni approvate. Questo evita che la pagina Apprendimento sia un mock scollegato o che l'assistant trasformi inferenze in verita' operative senza review.
+
+## Prossimo blocco
+
 - Implementare il crate/read model reale `local-computer-session` e cablare la UI a Tauri commands per sessioni computer, task runtime, approvals e health, mantenendo la struttura rail/drawer + activity card.
-- Definire il read model reale per auto-apprendimento: insight, prove redatte, feedback utente, domini privacy e proposte di automazione.
+- Cablare `LearningUiReadModel` alla UI Tauri con commands reali e azioni di feedback utente: conferma, correzione, rifiuto e preparazione automazione.

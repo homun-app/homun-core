@@ -1,15 +1,15 @@
 use crate::{
-    AccessDecisionKind, DataSensitivity, GraphifyArtifacts, GraphifyCli, GraphifyImport,
-    GraphifyImportSummary, GraphifyOperation, GraphifyQueryRequest, GraphifyQueryResult,
-    MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryContextItem,
-    MemoryContextPack, MemoryCreateRequest, MemoryEntity, MemoryError, MemoryEvent, MemoryEvidence,
-    MemoryExtraction, MemoryExtractionSummary, MemoryHealth, MemoryLifecycleRequest,
-    MemoryMaintenanceReport, MemoryPolicyEngine, MemoryRecord, MemoryRef, MemoryRefKind,
-    MemoryRelation, MemoryResult, MemorySearchPage, MemorySearchRequest, MemorySearchResult,
-    MemoryStatus, MemoryUpdatePatch, PrivacyDomain, RoutineInference, RoutineInferenceSummary,
-    RoutineRecord, RoutineStatus, SQLiteMemoryStore, UserId, WikiCorrectionSyncReport,
-    WikiFileStore, WikiPage, WorkspaceId, current_timestamp, ensure_artifacts_inside_root,
-    ensure_transition, parse_wiki_markdown,
+    AccessDecisionKind, AutomationCandidateCreateRequest, AutomationCandidateRecord,
+    DataSensitivity, GraphifyArtifacts, GraphifyCli, GraphifyImport, GraphifyImportSummary,
+    GraphifyOperation, GraphifyQueryRequest, GraphifyQueryResult, MemoryAccessDecision,
+    MemoryAccessRequest, MemoryBackupReport, MemoryContextItem, MemoryContextPack,
+    MemoryCreateRequest, MemoryEntity, MemoryError, MemoryEvent, MemoryEvidence, MemoryExtraction,
+    MemoryExtractionSummary, MemoryHealth, MemoryLifecycleRequest, MemoryMaintenanceReport,
+    MemoryPolicyEngine, MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation, MemoryResult,
+    MemorySearchPage, MemorySearchRequest, MemorySearchResult, MemoryStatus, MemoryUpdatePatch,
+    PrivacyDomain, RoutineInference, RoutineInferenceSummary, RoutineRecord, RoutineStatus,
+    SQLiteMemoryStore, UserId, WikiCorrectionSyncReport, WikiFileStore, WikiPage, WorkspaceId,
+    current_timestamp, ensure_artifacts_inside_root, ensure_transition, parse_wiki_markdown,
 };
 use std::path::Path;
 use std::str::FromStr;
@@ -244,7 +244,7 @@ impl MemoryFacade {
                 aliases: extracted.aliases,
                 language_hints: extracted.language_hints,
                 confidence: extracted.confidence,
-                status: MemoryStatus::Confirmed,
+                status: MemoryStatus::Candidate,
                 privacy_domain: extracted.privacy_domain,
                 sensitivity: extracted.sensitivity,
                 metadata: extracted.metadata,
@@ -371,6 +371,47 @@ impl MemoryFacade {
         })
     }
 
+    pub fn propose_automation(
+        &self,
+        create: AutomationCandidateCreateRequest,
+    ) -> MemoryResult<AutomationCandidateRecord> {
+        if let Some(routine_ref) = &create.routine_ref
+            && (routine_ref.user_id != create.request.user_id
+                || routine_ref.workspace_id != create.request.workspace_id)
+        {
+            return Err(MemoryError::validation(
+                "cannot propose automation for routine outside user/workspace",
+            ));
+        }
+        let now = current_timestamp();
+        let reference = MemoryRef::generated(
+            MemoryRefKind::Automation,
+            create.request.user_id.clone(),
+            create.request.workspace_id.clone(),
+        );
+        let candidate = AutomationCandidateRecord {
+            reference,
+            user_id: create.request.user_id,
+            workspace_id: create.request.workspace_id,
+            routine_ref: create.routine_ref,
+            title: create.title,
+            summary: create.summary,
+            trigger: create.trigger,
+            actions: create.actions,
+            risk_level: create.risk_level,
+            autonomy_level: create.autonomy_level,
+            status: create.status,
+            privacy_domain: create.privacy_domain,
+            sensitivity: create.sensitivity,
+            evidence: create.evidence_refs,
+            proposal_json: create.proposal_json,
+            created_at: now.clone(),
+            updated_at: now,
+        };
+        self.store.upsert_automation_candidate(&candidate)?;
+        Ok(candidate)
+    }
+
     pub fn context_pack(&self, request: &MemoryAccessRequest) -> MemoryResult<MemoryContextPack> {
         let export_decision = self.policy.decide_export(request);
         if export_decision.kind == AccessDecisionKind::Deny {
@@ -391,6 +432,9 @@ impl MemoryFacade {
             .store
             .list_memories(&request.user_id, &request.workspace_id)?
         {
+            if memory.status != MemoryStatus::Confirmed {
+                continue;
+            }
             let decision = self.policy.decide_memory(request, &memory);
             self.store.record_access_decision(request, &decision)?;
             match decision.kind {
@@ -718,6 +762,22 @@ impl MemoryFacade {
         workspace_id: &WorkspaceId,
     ) -> Result<Vec<WikiPage>, String> {
         self.store.list_wiki_pages(user_id, workspace_id)
+    }
+
+    pub fn list_routines_for_ui(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Vec<RoutineRecord>, String> {
+        self.store.list_routines(user_id, workspace_id)
+    }
+
+    pub fn list_automation_candidates_for_ui(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Vec<AutomationCandidateRecord>, String> {
+        self.store.list_automation_candidates(user_id, workspace_id)
     }
 
     pub fn evidence_for_ui(
