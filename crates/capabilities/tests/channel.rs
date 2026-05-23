@@ -24,9 +24,8 @@ fn channel_message_normalizes_sender_target_thread_and_content() {
 
 #[test]
 fn outbound_message_can_target_existing_thread() {
-    let outbound =
-        OutboundChannelMessage::new(ProviderId::new("discord"), "channel_1", "hello")
-            .in_thread(Some("thread_9".to_string()));
+    let outbound = OutboundChannelMessage::new(ProviderId::new("discord"), "channel_1", "hello")
+        .in_thread(Some("thread_9".to_string()));
 
     assert_eq!(outbound.provider_id.as_str(), "discord");
     assert_eq!(outbound.recipient, "channel_1");
@@ -59,5 +58,8 @@ fn fake_channel_provider_records_sent_messages() {
     assert_eq!(provider.sent_messages().len(), 1);
     assert_eq!(provider.sent_messages()[0].content, "working on it");
     assert_eq!(provider.typing_targets(), vec!["chat_1"]);
-    assert_eq!(provider.reactions(), vec![("msg_1".to_string(), "ok".to_string())]);
+    assert_eq!(
+        provider.reactions(),
+        vec![("msg_1".to_string(), "ok".to_string())]
+    );
 }

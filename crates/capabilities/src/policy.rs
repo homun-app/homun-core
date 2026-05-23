@@ -38,7 +38,10 @@ impl CapabilityPolicy {
             .iter()
             .any(|provider| provider == &tool.provider_id);
         if !provider_enabled {
-            reasons.push(format!("provider_not_enabled:{}", tool.provider_id.as_str()));
+            reasons.push(format!(
+                "provider_not_enabled:{}",
+                tool.provider_id.as_str()
+            ));
         }
 
         if tool.provider_kind == CapabilityProviderKind::Managed && !context.allow_managed_cloud {
@@ -49,7 +52,11 @@ impl CapabilityPolicy {
         }
 
         for domain in &tool.privacy_domains {
-            if !context.privacy_domains.iter().any(|allowed| allowed == domain) {
+            if !context
+                .privacy_domains
+                .iter()
+                .any(|allowed| allowed == domain)
+            {
                 reasons.push(format!("privacy_domain_denied:{domain}"));
             }
         }

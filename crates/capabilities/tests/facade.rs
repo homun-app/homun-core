@@ -21,7 +21,10 @@ fn facade_lists_policy_filtered_visible_and_executable_tools() {
 
     let access = facade.list_tools(&policy_context(false)).unwrap();
 
-    assert_eq!(access.visible_tool_names(), vec!["github.create_issue", "github.search"]);
+    assert_eq!(
+        access.visible_tool_names(),
+        vec!["github.create_issue", "github.search"]
+    );
     assert_eq!(access.executable_tool_names(), vec!["github.search"]);
 }
 
@@ -87,9 +90,7 @@ fn facade_denies_managed_tool_without_cloud_permission() {
 
     assert_eq!(
         error,
-        CapabilityError::ManagedProviderBoundary(
-            "managed_cloud_not_allowed:composio".to_string()
-        )
+        CapabilityError::ManagedProviderBoundary("managed_cloud_not_allowed:composio".to_string())
     );
     assert_eq!(facade.audit().events()[0].decision, "denied");
 }

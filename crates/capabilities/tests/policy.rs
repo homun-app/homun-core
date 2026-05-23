@@ -42,7 +42,11 @@ fn policy_keeps_write_tool_visible_but_not_executable_without_autonomy() {
         max_autonomy_level: 2,
         allow_managed_cloud: false,
     };
-    let mut tool = read_tool("github.create_issue", "github", CapabilityProviderKind::Native);
+    let mut tool = read_tool(
+        "github.create_issue",
+        "github",
+        CapabilityProviderKind::Native,
+    );
     tool.action = ActionClass::WriteWithConfirmation;
 
     let decision = policy.tool_access(&context, &tool);

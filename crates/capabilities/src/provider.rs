@@ -1,7 +1,7 @@
 use crate::{
-    CapabilityCall, CapabilityCallResult, CapabilityConnection, CapabilityError, CapabilityTrigger,
-    CapabilityProviderKind, CapabilityResult, CapabilityTool, ManagedProviderMetadata, ProviderId,
-    TriggerStatus,
+    CapabilityCall, CapabilityCallResult, CapabilityConnection, CapabilityError,
+    CapabilityProviderKind, CapabilityResult, CapabilityTool, CapabilityTrigger,
+    ManagedProviderMetadata, ProviderId, TriggerStatus,
 };
 use std::collections::HashMap;
 

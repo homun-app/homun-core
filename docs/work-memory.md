@@ -404,8 +404,23 @@ Perche': il `MemoryAgent` non deve scrivere nello store direttamente. Anche nel 
 
 Perche': costruire manualmente decine o centinaia di integrazioni richiederebbe troppo tempo. Il progetto deve scalare usando MCP e provider managed quando l'utente li abilita, mantenendo pero' policy, audit, memoria e subagenti sotto controllo locale.
 
+### Capability Layer first slice
+
+- Creato crate Rust `crates/capabilities`.
+- Aggiunti contratti provider-neutral per provider, tool, call, connection, trigger, skill manifest e managed metadata.
+- Aggiunto `CapabilityPolicy` con separazione tra tool visibili al modello e tool eseguibili.
+- I provider managed/cloud richiedono `allow_managed_cloud`.
+- Aggiunto `FakeCapabilityProvider` per test locali senza Composio live.
+- Aggiunto `CapabilityFacade` per listare tool policy-gated, chiamare tool, filtrare connessioni per user/workspace e auditare le operazioni.
+- Aggiunto audit in-memory con redazione di `access_token`, `refresh_token`, `api_key`, `password`, `secret`.
+- Aggiunta validazione minima degli argomenti tool su `type`, `properties` e `required`.
+- Aggiunti contratti trigger con enable/disable nel provider fake.
+- Aggiunti contratti channel separati: `ChannelProvider`, `ChannelMessage`, `OutboundChannelMessage`, `ChannelCapabilities`, `FakeChannelProvider`.
+
+Perche': questo crea il confine interno prima di integrare MCP o Composio. Subagenti e UI potranno parlare con un layer stabile, mentre provider nativi, MCP, managed, browser e skill restano intercambiabili e policy-gated.
+
 ## Prossimo blocco
 
-- Rivedere e approvare la spec Capability Layer.
-- Scrivere il piano di implementazione per `crates/capabilities`.
-- Implementare prima contratti, fake provider, policy e audit senza chiamate live a Composio.
+- Collegare `crates/capabilities` a `crates/subagents` sostituendo/affiancando l'attuale tool access interno.
+- Implementare `McpCapabilityProvider` come primo provider reale locale.
+- Solo dopo, aggiungere adapter Composio managed opt-in.
