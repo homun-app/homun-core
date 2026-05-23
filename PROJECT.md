@@ -759,6 +759,8 @@ Deliverable:
 
 ### Fase 5 - Durable Task Runtime
 
+Stato: first production slice implementato in `crates/task-runtime`.
+
 Deliverable:
 
 - crate Rust `crates/task-runtime`.
@@ -775,6 +777,18 @@ Deliverable:
 - adapter iniziali per subagenti e capability fake.
 
 Regola: questo componente va chiuso prima di browser automation, per evitare che scheduling, retry, code e resume vengano duplicati nei singoli executor.
+
+Implementato:
+
+- contratti task, stati, priorita', risorse e retry policy.
+- store SQLite con task, dipendenze, reservation risorse, checkpoint e approval records.
+- scheduler deterministico per priorita', `not_before` e dipendenze.
+- resource governor con `waiting_resource`.
+- lease/heartbeat/recovery con rilascio reservation.
+- checkpoint append-only e retry/backoff.
+- approval gates.
+- `TaskExecutor` e `TaskRuntime` facade con executor finto testabile.
+- read model UI-safe per coda, task attivi, blocchi, approvazioni, risorse e checkpoint redatti.
 
 ### Fase 6 - Browser Automation
 

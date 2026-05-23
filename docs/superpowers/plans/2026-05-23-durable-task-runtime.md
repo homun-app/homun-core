@@ -1,6 +1,6 @@
 # Durable Task Runtime Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Build the central Rust crate for durable local-first tasks, queues, priorities, resource governance, checkpoints, approvals and crash recovery.
 
@@ -39,11 +39,11 @@
 - Modify: `Cargo.toml`
 - Test: `crates/task-runtime/tests/contracts.rs`
 
-- [ ] Write tests that construct a task with `user_id`, `workspace_id`, status, priority, resource requirements and retry policy.
-- [ ] Implement public contract types.
-- [ ] Export the crate from `lib.rs`.
-- [ ] Run `cargo test -p local-first-task-runtime --test contracts`.
-- [ ] Commit as `Add durable task runtime contracts`.
+- [x] Write tests that construct a task with `user_id`, `workspace_id`, status, priority, resource requirements and retry policy.
+- [x] Implement public contract types.
+- [x] Export the crate from `lib.rs`.
+- [x] Run `cargo test -p local-first-task-runtime --test contracts`.
+- [x] Commit as `Add durable task runtime contracts`.
 
 ## Task 2: SQLite Store
 
@@ -51,10 +51,10 @@
 - Create: `crates/task-runtime/src/store.rs`
 - Test: `crates/task-runtime/tests/store.rs`
 
-- [ ] Write tests for schema creation, task insert, task load, status update, user/workspace isolation and idempotent migrations.
-- [ ] Implement `TaskStore::open`, `TaskStore::open_in_memory`, `insert_task`, `get_task`, `update_task_status` and `list_tasks`.
-- [ ] Run `cargo test -p local-first-task-runtime --test store`.
-- [ ] Commit as `Add durable task SQLite store`.
+- [x] Write tests for schema creation, task insert, task load, status update, user/workspace isolation and idempotent migrations.
+- [x] Implement `TaskStore::open`, `TaskStore::open_in_memory`, `insert_task`, `get_task`, `update_task_status` and `list_tasks`.
+- [x] Run `cargo test -p local-first-task-runtime --test store`.
+- [x] Commit as `Add durable task SQLite store`.
 
 ## Task 3: Queue And Scheduler
 
@@ -63,11 +63,11 @@
 - Modify: `crates/task-runtime/src/store.rs`
 - Test: `crates/task-runtime/tests/scheduler.rs`
 
-- [ ] Write tests for priority order, deterministic tie-breaks, `not_before`, dependency blocking and waiting-resource transitions.
-- [ ] Implement runnable task selection.
-- [ ] Implement workflow dependency checks.
-- [ ] Run `cargo test -p local-first-task-runtime --test scheduler`.
-- [ ] Commit as `Add durable task scheduler`.
+- [x] Write tests for priority order, deterministic tie-breaks, `not_before`, dependency blocking and waiting-resource transitions.
+- [x] Implement runnable task selection.
+- [x] Implement workflow dependency checks.
+- [x] Run `cargo test -p local-first-task-runtime --test scheduler`.
+- [x] Commit as `Add durable task scheduler`.
 
 ## Task 4: Resource Governor
 
@@ -76,11 +76,11 @@
 - Modify: `crates/task-runtime/src/scheduler.rs`
 - Test: `crates/task-runtime/tests/resources.rs`
 
-- [ ] Write tests for limits on `llm_inference`, `browser_session`, `graph_indexing` and connector API resources.
-- [ ] Implement resource limit config and reservation checks.
-- [ ] Ensure blocked tasks expose `waiting_resource` and a clear `blocked_reason`.
-- [ ] Run `cargo test -p local-first-task-runtime --test resources`.
-- [ ] Commit as `Add task resource governor`.
+- [x] Write tests for limits on `llm_inference`, `browser_session`, `graph_indexing` and connector API resources.
+- [x] Implement resource limit config and reservation checks.
+- [x] Ensure blocked tasks expose `waiting_resource` and a clear `blocked_reason`.
+- [x] Run `cargo test -p local-first-task-runtime --test resources`.
+- [x] Commit as `Add task resource governor`.
 
 ## Task 5: Lease, Heartbeat And Recovery
 
@@ -89,11 +89,11 @@
 - Modify: `crates/task-runtime/src/store.rs`
 - Test: `crates/task-runtime/tests/lease.rs`
 
-- [ ] Write tests for acquire lease, heartbeat refresh, stale lease recovery and duplicate execution prevention.
-- [ ] Implement lease owner and lease expiry updates.
-- [ ] Implement recovery that releases resources and returns retryable tasks to queue.
-- [ ] Run `cargo test -p local-first-task-runtime --test lease`.
-- [ ] Commit as `Add task leases and recovery`.
+- [x] Write tests for acquire lease, heartbeat refresh, stale lease recovery and duplicate execution prevention.
+- [x] Implement lease owner and lease expiry updates.
+- [x] Implement recovery that releases resources and returns retryable tasks to queue.
+- [x] Run `cargo test -p local-first-task-runtime --test lease`.
+- [x] Commit as `Add task leases and recovery`.
 
 ## Task 6: Checkpoints And Retry
 
@@ -102,11 +102,11 @@
 - Modify: `crates/task-runtime/src/store.rs`
 - Test: `crates/task-runtime/tests/checkpoint.rs`
 
-- [ ] Write tests for checkpoint append, latest checkpoint, retryable failure, backoff and terminal failure.
-- [ ] Implement checkpoint persistence with redacted UI payloads.
-- [ ] Implement retry policy transitions.
-- [ ] Run `cargo test -p local-first-task-runtime --test checkpoint`.
-- [ ] Commit as `Add task checkpoints and retry`.
+- [x] Write tests for checkpoint append, latest checkpoint, retryable failure, backoff and terminal failure.
+- [x] Implement checkpoint persistence with redacted UI payloads.
+- [x] Implement retry policy transitions.
+- [x] Run `cargo test -p local-first-task-runtime --test checkpoint`.
+- [x] Commit as `Add task checkpoints and retry`.
 
 ## Task 7: Approval Gates
 
@@ -115,11 +115,11 @@
 - Modify: `crates/task-runtime/src/store.rs`
 - Test: `crates/task-runtime/tests/approval.rs`
 
-- [ ] Write tests for approval request, approve, reject, high-risk waiting state and audit fields.
-- [ ] Implement approval records and transitions.
-- [ ] Ensure rejected approvals do not execute the task.
-- [ ] Run `cargo test -p local-first-task-runtime --test approval`.
-- [ ] Commit as `Add durable task approval gates`.
+- [x] Write tests for approval request, approve, reject, high-risk waiting state and audit fields.
+- [x] Implement approval records and transitions.
+- [x] Ensure rejected approvals do not execute the task.
+- [x] Run `cargo test -p local-first-task-runtime --test approval`.
+- [x] Commit as `Add durable task approval gates`.
 
 ## Task 8: Executor Boundary And Facade
 
@@ -128,11 +128,11 @@
 - Create: `crates/task-runtime/src/facade.rs`
 - Test: `crates/task-runtime/tests/facade.rs`
 
-- [ ] Write tests with a fake executor for completed task, checkpoint-and-continue, wait-for-time, wait-for-approval and retryable failure.
-- [ ] Implement `TaskExecutor` and `TaskRuntime`.
-- [ ] Ensure `TaskRuntime` performs scheduling, resource reservation, lease acquisition, executor call and state transition.
-- [ ] Run `cargo test -p local-first-task-runtime --test facade`.
-- [ ] Commit as `Add durable task runtime facade`.
+- [x] Write tests with a fake executor for completed task, checkpoint-and-continue, wait-for-time, wait-for-approval and retryable failure.
+- [x] Implement `TaskExecutor` and `TaskRuntime`.
+- [x] Ensure `TaskRuntime` performs scheduling, resource reservation, lease acquisition, executor call and state transition.
+- [x] Run `cargo test -p local-first-task-runtime --test facade`.
+- [x] Commit as `Add durable task runtime facade`.
 
 ## Task 9: UI Read Model
 
@@ -140,10 +140,10 @@
 - Create: `crates/task-runtime/src/ui.rs`
 - Test: `crates/task-runtime/tests/ui.rs`
 
-- [ ] Write tests for queue snapshot, active tasks, blocked tasks, waiting approvals, resource saturation and recent failures.
-- [ ] Implement UI-safe read structs that omit raw secrets and sensitive payloads.
-- [ ] Run `cargo test -p local-first-task-runtime --test ui`.
-- [ ] Commit as `Add durable task UI read model`.
+- [x] Write tests for queue snapshot, active tasks, blocked tasks, waiting approvals, resource saturation and recent failures.
+- [x] Implement UI-safe read structs that omit raw secrets and sensitive payloads.
+- [x] Run `cargo test -p local-first-task-runtime --test ui`.
+- [x] Commit as `Add durable task UI read model`.
 
 ## Task 10: Documentation And Verification
 
@@ -152,8 +152,8 @@
 - Modify: `docs/work-memory.md`
 - Modify: `docs/superpowers/plans/2026-05-23-durable-task-runtime.md`
 
-- [ ] Mark completed plan steps.
-- [ ] Update work memory with what was implemented and why.
-- [ ] Run `make test`.
-- [ ] Commit as `Document durable task runtime`.
+- [x] Mark completed plan steps.
+- [x] Update work memory with what was implemented and why.
+- [x] Run `make test`.
+- [x] Commit as `Document durable task runtime`.
 

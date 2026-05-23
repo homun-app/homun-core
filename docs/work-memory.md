@@ -492,6 +492,34 @@ Perche': Composio serve a scalare rapidamente la copertura integrazioni, ma deve
 
 Perche': senza un task runtime centrale, browser automation, subagenti, connettori e manutenzioni finirebbero per duplicare code, retry, limiti risorse, approvazioni e recovery. Questo blocco va chiuso prima del browser reale.
 
+### Durable Task Runtime first production slice
+
+- Creato crate `crates/task-runtime`.
+- Aggiunti contratti core: `TaskRecord`, `TaskStatus`, `TaskPriority`, `ResourceClass`, `ResourceRequirement`, `RetryPolicy`, `TaskId`, `WorkflowId`, `UserId`, `WorkspaceId`.
+- Aggiunto `TaskStore` SQLite con migrazioni idempotenti.
+- Lo store persiste task, dipendenze workflow, reservation risorse, checkpoint e approval records.
+- Aggiunto scheduler deterministico:
+  - priorita' `critical > high > normal > low > background`.
+  - rispetto di `not_before`.
+  - dipendenze completate prima dei task figli.
+  - dipendenze terminali marcano i figli come `waiting_external_event`.
+- Aggiunto `ResourceGovernor` con limiti per classe risorsa e transizione `waiting_resource` con motivo esplicito.
+- Aggiunto `LeaseManager` con acquire, heartbeat e recovery dei lease scaduti.
+- La recovery libera le reservation e rimette in coda task running con lease stale.
+- Aggiunti checkpoint append-only con payload raw e payload redatto separati.
+- Aggiunto `RetryController` con backoff e failure terminale dopo `max_attempts`.
+- Aggiunto `ApprovalGate` per request/approve/reject:
+  - request porta il task in `waiting_user_approval`.
+  - approve rimette il task in coda.
+  - reject cancella il task senza esecuzione.
+- Aggiunti `TaskExecutor`, `FakeTaskExecutor` e `TaskRuntime` facade.
+- `TaskRuntime::run_ready_once` collega scheduler, resource governor, lease, executor, checkpoint, approval e retry.
+- Aggiunto `TaskUiReadModel` per snapshot UI-safe: queued, active, blocked, waiting approvals, recent failures, resource usage e detail con checkpoint redatto.
+- Aggiornato e marcato completo il piano `docs/superpowers/plans/2026-05-23-durable-task-runtime.md`.
+- Ogni slice e' stato sviluppato test-first e committato separatamente.
+
+Perche': ora il progetto ha un fondamento durevole riusabile da subagenti, capability, browser automation, Graphify e manutenzioni. I task lunghi e paralleli non richiedono logica duplicata negli executor.
+
 ## Prossimo blocco
 
-- Implementare `crates/task-runtime` seguendo `docs/superpowers/plans/2026-05-23-durable-task-runtime.md`.
+- Integrare i workflow subagenti con `crates/task-runtime`, cosi' gli step del Subagent Manager possono diventare task persistenti, accodati, riprendibili e bloccabili su approvazione.
