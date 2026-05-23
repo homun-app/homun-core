@@ -151,6 +151,7 @@ impl SQLiteMemoryStore {
                 ],
             )
             .map_err(|error| error.to_string())?;
+        self.index_memory(memory)?;
         Ok(())
     }
 
@@ -208,6 +209,43 @@ impl SQLiteMemoryStore {
             }
         }
         Ok(memories)
+    }
+
+    pub fn search_memory_refs(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        query: &str,
+    ) -> Result<Vec<MemoryRef>, String> {
+        let mut statement = self
+            .conn
+            .prepare(
+                "select ref
+                 from memory_search_fts
+                 where memory_search_fts match ?1
+                   and user_id = ?2
+                   and workspace_id = ?3
+                 order by bm25(memory_search_fts), text, ref",
+            )
+            .map_err(|error| error.to_string())?;
+        let mut rows = statement
+            .query((query, user_id.as_str(), workspace_id.as_str()))
+            .map_err(|error| error.to_string())?;
+        let mut refs = Vec::new();
+        while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+            refs.push(parse_ref(row.get::<_, String>(0).map_err(|error| error.to_string())?)?);
+        }
+        Ok(refs)
+    }
+
+    pub fn rebuild_memory_search_index(&self) -> Result<(), String> {
+        self.conn
+            .execute("delete from memory_search_fts", [])
+            .map_err(|error| error.to_string())?;
+        for memory in self.all_memories_for_index()? {
+            self.index_memory(&memory)?;
+        }
+        Ok(())
     }
 
     pub fn list_entities(
@@ -692,6 +730,14 @@ impl SQLiteMemoryStore {
                 );
                 create index if not exists idx_memories_scope on memories(user_id, workspace_id);
 
+                create virtual table if not exists memory_search_fts using fts5(
+                    ref unindexed,
+                    user_id unindexed,
+                    workspace_id unindexed,
+                    text,
+                    aliases
+                );
+
                 create table if not exists entities (
                     ref text primary key,
                     user_id text not null,
@@ -797,6 +843,7 @@ impl SQLiteMemoryStore {
                 [SCHEMA_VERSION.to_string()],
             )
             .map_err(|error| error.to_string())?;
+        self.rebuild_memory_search_index()?;
         Ok(())
     }
 
@@ -816,6 +863,49 @@ impl SQLiteMemoryStore {
             .execute(alter_sql, [])
             .map_err(|error| error.to_string())?;
         Ok(())
+    }
+
+    fn index_memory(&self, memory: &MemoryRecord) -> Result<(), String> {
+        self.conn
+            .execute(
+                "delete from memory_search_fts where ref = ?1",
+                [memory.reference.to_string()],
+            )
+            .map_err(|error| error.to_string())?;
+        self.conn
+            .execute(
+                "insert into memory_search_fts (ref, user_id, workspace_id, text, aliases)
+                 values (?1, ?2, ?3, ?4, ?5)",
+                (
+                    memory.reference.to_string(),
+                    memory.user_id.as_str(),
+                    memory.workspace_id.as_str(),
+                    &memory.text,
+                    memory.aliases.join(" "),
+                ),
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    fn all_memories_for_index(&self) -> Result<Vec<MemoryRecord>, String> {
+        let mut statement = self
+            .conn
+            .prepare(
+                "select ref, user_id, workspace_id, memory_type, text, aliases_json,
+                        language_hints_json, confidence, status, privacy_domain, sensitivity,
+                        metadata_json, created_at, updated_at, last_seen_at, supersedes_json,
+                        superseded_by, correction_of
+                 from memories
+                 order by ref",
+            )
+            .map_err(|error| error.to_string())?;
+        let mut rows = statement.query([]).map_err(|error| error.to_string())?;
+        let mut memories = Vec::new();
+        while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+            memories.push(memory_from_row(row)?);
+        }
+        Ok(memories)
     }
 }
 

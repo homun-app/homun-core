@@ -3,7 +3,8 @@ use crate::{
     MemoryAccessDecision, MemoryAccessRequest, MemoryContextItem, MemoryContextPack,
     MemoryCreateRequest, MemoryEntity, MemoryEvent, MemoryEvidence, MemoryExtraction,
     MemoryExtractionSummary, MemoryLifecycleRequest, MemoryPolicyEngine, MemoryRecord, MemoryRef,
-    MemoryRefKind, MemoryRelation, MemoryStatus, MemoryUpdatePatch, PrivacyDomain,
+    MemoryRefKind, MemoryRelation, MemorySearchPage, MemorySearchRequest, MemorySearchResult,
+    MemoryStatus, MemoryUpdatePatch, PrivacyDomain,
     SQLiteMemoryStore, UserId, WikiFileStore, WikiPage, WorkspaceId, current_timestamp,
     ensure_transition,
 };
@@ -361,6 +362,70 @@ impl MemoryFacade {
             purpose: request.purpose.clone(),
             items,
             redacted,
+        })
+    }
+
+    pub fn search_memories(
+        &self,
+        request: MemorySearchRequest,
+    ) -> Result<MemorySearchPage, String> {
+        let refs = self.store.search_memory_refs(
+            &request.access.user_id,
+            &request.access.workspace_id,
+            &request.query,
+        )?;
+        let mut allowed = Vec::new();
+        for reference in refs {
+            let Some(memory) = self.store.get_memory(
+                &reference,
+                &request.access.user_id,
+                &request.access.workspace_id,
+            )?
+            else {
+                continue;
+            };
+            let decision = self.policy.decide_memory(&request.access, &memory);
+            self.store
+                .record_access_decision(&request.access, &decision)?;
+            if decision.kind == AccessDecisionKind::Deny {
+                continue;
+            }
+            if !request.statuses.is_empty() && !request.statuses.contains(&memory.status) {
+                continue;
+            }
+            if !request.memory_types.is_empty()
+                && !request
+                    .memory_types
+                    .iter()
+                    .any(|memory_type| memory_type == &memory.memory_type)
+            {
+                continue;
+            }
+            allowed.push(memory);
+        }
+
+        let total = allowed.len();
+        let items = allowed
+            .into_iter()
+            .skip(request.offset)
+            .take(request.limit)
+            .enumerate()
+            .map(|(index, memory)| MemorySearchResult {
+                reference: memory.reference,
+                memory_type: memory.memory_type,
+                summary: memory.text,
+                status: memory.status,
+                privacy_domain: memory.privacy_domain,
+                sensitivity: memory.sensitivity,
+                rank: request.offset + index + 1,
+            })
+            .collect();
+
+        Ok(MemorySearchPage {
+            items,
+            total,
+            limit: request.limit,
+            offset: request.offset,
         })
     }
 
