@@ -165,10 +165,11 @@ Implementato:
 - `FakeProcessSupervisor` per test deterministici.
 - `LocalProcessSupervisor` con spawn reale, idempotent start, stop/kill, snapshot exit e capture stdout/stderr in log ring bounded.
 - health check `process_alive` e `http_get` tramite probe iniettabile.
+- `SidecarProcessCatalog` per generare spec concrete di Gemma/MLX, browser automation e MCP stdio server.
+- registry helper per registrare i sidecar default nel `ProcessRegistryStore`.
 
 Non ancora incluso:
 
-- wiring automatico dei sidecar esistenti al Process Manager nel binario desktop.
 - policy di restart/backoff eseguita automaticamente in background.
 - UI Tauri per vedere processi, logs e health.
 

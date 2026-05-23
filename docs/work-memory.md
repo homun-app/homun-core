@@ -650,4 +650,19 @@ Perche': LLM runtime, browser sidecar e MCP server non devono essere avviati ad 
 
 ## Prossimo blocco
 
-- Collegare Process Manager alle config concrete dei sidecar LLM, browser e MCP, poi passare a Secrets/Keychain.
+### Process sidecar catalog
+
+- Creato piano `docs/superpowers/plans/2026-05-23-process-sidecar-catalog.md`.
+- Aggiunto `SidecarProcessCatalog` nel crate `crates/process-manager`.
+- Il catalogo genera `ProcessSpec` concrete per:
+  - `llm-gemma4-mlx`: `.venv-mlx/bin/python runtimes/mlx-gemma4/server.py`, cwd workspace, health HTTP `127.0.0.1:8765/health`.
+  - `browser-automation`: `node node_modules/tsx/dist/cli.mjs src/server.ts`, cwd `runtimes/browser-automation`, health `process_alive`.
+  - MCP stdio configurati dall'utente tramite `McpProcessConfig`.
+- Aggiunto helper `register_default_sidecars` per registrare Gemma e browser nel `ProcessRegistryStore`.
+- Testato che le spec siano stabili, serializzabili e registrabili.
+
+Perche': ora il Process Manager non e' solo un supervisor generico. Ha un catalogo esplicito per i sidecar reali del progetto, ma resta separato dall'esecuzione: registra configurazioni, mentre start/stop/health restano azioni intenzionali del `ProcessManager`.
+
+## Prossimo blocco
+
+- Implementare Secrets/Keychain: secret refs gia' esistono nelle registry, ora serve uno storage sicuro reale e testabile.
