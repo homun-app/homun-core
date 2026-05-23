@@ -14,14 +14,19 @@ fn audit_store_records_subagent_results() {
     store.record_result(&result).unwrap();
 
     assert_eq!(store.result_count().unwrap(), 1);
-    assert_eq!(store.result_status("task_1").unwrap(), Some("succeeded".to_string()));
+    assert_eq!(
+        store.result_status("task_1").unwrap(),
+        Some("succeeded".to_string())
+    );
 }
 
 #[test]
 fn audit_store_returns_latest_result_for_task() {
     let store = AuditStore::open_in_memory().unwrap();
     store.record_result(&result("task_1")).unwrap();
-    store.record_result(&failed_result("task_1", "schema mismatch")).unwrap();
+    store
+        .record_result(&failed_result("task_1", "schema mismatch"))
+        .unwrap();
 
     let latest = store.latest_result("task_1").unwrap().unwrap();
 
@@ -33,9 +38,13 @@ fn audit_store_returns_latest_result_for_task() {
 #[test]
 fn audit_store_filters_recent_results_by_status() {
     let store = AuditStore::open_in_memory().unwrap();
-    store.record_result(&failed_result("task_1", "first failure")).unwrap();
+    store
+        .record_result(&failed_result("task_1", "first failure"))
+        .unwrap();
     store.record_result(&result("task_2")).unwrap();
-    store.record_result(&failed_result("task_3", "second failure")).unwrap();
+    store
+        .record_result(&failed_result("task_3", "second failure"))
+        .unwrap();
 
     let failed = store
         .recent_results_by_status(SubagentStatus::Failed, 10)
@@ -77,7 +86,10 @@ fn orchestrator_records_results_while_running_until_blocked() {
 
     assert_eq!(results.len(), 1);
     assert_eq!(store.result_count().unwrap(), 1);
-    assert_eq!(store.result_status("task_1").unwrap(), Some("succeeded".to_string()));
+    assert_eq!(
+        store.result_status("task_1").unwrap(),
+        Some("succeeded".to_string())
+    );
 }
 
 struct FakeRuntime {
@@ -132,9 +144,7 @@ fn result(task_id: &str) -> SubagentResult {
         status: SubagentStatus::Succeeded,
         output: serde_json::json!({"ok": true}),
         errors: vec![],
-        metrics: TokenMetrics {
-            ..metrics()
-        },
+        metrics: TokenMetrics { ..metrics() },
         audit: AgentAudit {
             model: "local-model".to_string(),
             contract: "RoutineInference".to_string(),
@@ -151,9 +161,7 @@ fn failed_result(task_id: &str, error: &str) -> SubagentResult {
         status: SubagentStatus::Failed,
         output: serde_json::Value::Null,
         errors: vec![error.to_string()],
-        metrics: TokenMetrics {
-            ..metrics()
-        },
+        metrics: TokenMetrics { ..metrics() },
         audit: AgentAudit {
             model: "local-model".to_string(),
             contract: "RoutineInference".to_string(),

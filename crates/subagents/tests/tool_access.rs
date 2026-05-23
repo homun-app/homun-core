@@ -1,6 +1,6 @@
 use local_first_subagents::{
-    plan_tool_access, AgentDefinition, AgentId, AgentTier, AllowedAction, PermissionEnvelope,
-    SubagentTask, TaskBudgets, ToolDefinition, ToolScope,
+    AgentDefinition, AgentId, AgentTier, AllowedAction, PermissionEnvelope, SubagentTask,
+    TaskBudgets, ToolDefinition, ToolScope, plan_tool_access,
 };
 
 #[test]

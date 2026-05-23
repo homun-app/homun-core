@@ -1,5 +1,5 @@
 use local_first_subagents::{
-    default_agent_definitions, validate_agent_definitions, AgentDefinition, AgentTier, ToolScope,
+    AgentDefinition, AgentTier, ToolScope, default_agent_definitions, validate_agent_definitions,
 };
 
 #[test]

@@ -15,6 +15,34 @@ Perche': il progetto deve imparare da implementazioni esistenti senza perdere id
 
 ## 2026-05-23
 
+### Principi architetturali confermati
+
+- Il progetto e' language-agnostic e multilingua di default.
+- Nessun contratto, agente, memoria o workflow deve assumere una lingua unica.
+- L'italiano resta un caso d'uso primario, ma non deve diventare accoppiamento nel core.
+- Va mantenuta una buona separazione dei file per dominio, evitando file lunghi da dividere tardi.
+
+Perche': l'assistant deve lavorare su input reali e misti, spesso multilingua, e il core deve rimanere stabile anche se cambiano lingua, UI o runtime modello. Separare presto i file riduce il costo dei refactor man mano che i subagenti crescono.
+
+### Split crate subagenti
+
+- Diviso `crates/subagents/src/lib.rs` in moduli per dominio:
+  - `types.rs`
+  - `runtime.rs`
+  - `runner.rs`
+  - `prompt_guard.rs`
+  - `agents.rs`
+  - `tool_access.rs`
+  - `workflow.rs`
+  - `permissions.rs`
+  - `graph.rs`
+  - `orchestrator.rs`
+  - `audit.rs`
+- `lib.rs` ora resta solo il punto di export pubblico.
+- Verificata la suite Rust dopo il refactor.
+
+Perche': il file unico era arrivato a circa 1500 righe. Spezzarlo ora riduce accoppiamento e rende piu' semplice evolvere subagenti, audit, workflow e policy senza creare un monolite difficile da mantenere.
+
 ### Analisi mirata OpenHuman
 
 - Clonato OpenHuman in `/tmp/openhuman-reference` solo per lettura.

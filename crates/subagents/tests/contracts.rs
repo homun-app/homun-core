@@ -1,7 +1,7 @@
 use local_first_subagents::{
-    default_registry, validate_task_permissions, AgentAudit, AllowedAction, AgentId, Finding,
-    FindingSeverity, PermissionEnvelope, RiskLevel, SubagentResult, SubagentReview, SubagentStatus,
-    SubagentTask, TaskBudgets, TokenMetrics,
+    AgentAudit, AgentId, AllowedAction, Finding, FindingSeverity, PermissionEnvelope, RiskLevel,
+    SubagentResult, SubagentReview, SubagentStatus, SubagentTask, TaskBudgets, TokenMetrics,
+    default_registry, validate_task_permissions,
 };
 
 #[test]

@@ -1,4 +1,4 @@
-use local_first_subagents::{routine_startup_workflow, AgentId};
+use local_first_subagents::{AgentId, routine_startup_workflow};
 
 #[test]
 fn routine_startup_workflow_matches_project_mvp_shape() {
@@ -34,7 +34,10 @@ fn routine_startup_workflow_matches_project_mvp_shape() {
     assert_eq!(workflow[1].depends_on, vec!["routine.plan"]);
     assert_eq!(workflow[2].depends_on, vec!["routine.risk"]);
     assert_eq!(workflow[3].depends_on, vec!["routine.risk"]);
-    assert_eq!(workflow[4].depends_on, vec!["routine.memory", "routine.tool"]);
+    assert_eq!(
+        workflow[4].depends_on,
+        vec!["routine.memory", "routine.tool"]
+    );
 
     let review_schema = &workflow[4].task.input["schema"];
     assert_eq!(review_schema["properties"]["findings"]["type"], "array");

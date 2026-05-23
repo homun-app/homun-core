@@ -11,10 +11,12 @@ Il modello mentale e': un apprendista che osserva, capisce, propone, esegue con 
 Principi:
 
 - local-first: i dati e la memoria restano sul dispositivo per default.
+- language-agnostic e multilingua di default: pipeline, contratti, memoria e subagenti non devono assumere una lingua specifica; l'italiano e' un caso d'uso primario, non un vincolo architetturale.
 - trasparente: l'utente vede e corregge cio' che l'assistant sa.
 - operativo: ogni azione passa da contratti, permessi e audit trail.
 - proattivo: l'assistant rileva pattern e propone aiuto prima che venga chiesto.
 - estendibile: connettori, MCP, skill e runtime LLM devono essere modulari.
+- modulare nei file: i componenti vanno separati presto per dominio, evitando file troppo lunghi che costringano a refactor tardivi.
 
 ## Decisioni Gia' Validate
 

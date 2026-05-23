@@ -1,5 +1,5 @@
 use local_first_subagents::{
-    routine_startup_workflow, RuntimeClient, SubagentOrchestrator, SubagentRunner, SubagentStatus,
+    RuntimeClient, SubagentOrchestrator, SubagentRunner, SubagentStatus, routine_startup_workflow,
 };
 
 fn main() {

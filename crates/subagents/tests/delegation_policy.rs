@@ -1,5 +1,5 @@
 use local_first_subagents::{
-    decide_delegation, DelegationDecision, DelegationInput, TaskComplexity,
+    DelegationDecision, DelegationInput, TaskComplexity, decide_delegation,
 };
 
 #[test]

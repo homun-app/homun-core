@@ -30,7 +30,9 @@ fn orchestrator_runs_ready_tasks_and_unblocks_dependents() {
     );
     let mut orchestrator = SubagentOrchestrator::new(runner);
 
-    orchestrator.add_task(task("plan", AgentId::Planner), vec![]).unwrap();
+    orchestrator
+        .add_task(task("plan", AgentId::Planner), vec![])
+        .unwrap();
     orchestrator
         .add_task(task("risk", AgentId::Risk), vec!["plan".to_string()])
         .unwrap();
@@ -57,7 +59,9 @@ fn orchestrator_marks_failed_tasks_and_leaves_dependents_blocked() {
     );
     let mut orchestrator = SubagentOrchestrator::new(runner);
 
-    orchestrator.add_task(task("plan", AgentId::Planner), vec![]).unwrap();
+    orchestrator
+        .add_task(task("plan", AgentId::Planner), vec![])
+        .unwrap();
     orchestrator
         .add_task(task("risk", AgentId::Risk), vec!["plan".to_string()])
         .unwrap();
@@ -83,8 +87,14 @@ fn orchestrator_adds_workflow_specs_to_graph() {
         .add_workflow(routine_startup_workflow(serde_json::json!({"events": []})))
         .unwrap();
 
-    assert_eq!(orchestrator.state("routine.plan"), Some(&TaskState::Pending));
-    assert_eq!(orchestrator.state("routine.review"), Some(&TaskState::Pending));
+    assert_eq!(
+        orchestrator.state("routine.plan"),
+        Some(&TaskState::Pending)
+    );
+    assert_eq!(
+        orchestrator.state("routine.review"),
+        Some(&TaskState::Pending)
+    );
     assert_eq!(orchestrator.ready_task_ids(), vec!["routine.plan"]);
 }
 
@@ -110,10 +120,15 @@ fn orchestrator_runs_workflow_until_no_more_tasks_are_ready() {
     let results = orchestrator.run_until_blocked();
 
     assert_eq!(results.len(), 5);
-    assert!(results
-        .iter()
-        .all(|result| result.status == SubagentStatus::Succeeded));
-    assert_eq!(orchestrator.state("routine.review"), Some(&TaskState::Succeeded));
+    assert!(
+        results
+            .iter()
+            .all(|result| result.status == SubagentStatus::Succeeded)
+    );
+    assert_eq!(
+        orchestrator.state("routine.review"),
+        Some(&TaskState::Succeeded)
+    );
     assert!(orchestrator.ready_task_ids().is_empty());
     assert!(orchestrator.blocked_task_ids().is_empty());
 }
