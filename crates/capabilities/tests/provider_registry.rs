@@ -5,6 +5,7 @@ use local_first_capabilities::{
     FakeCapabilityProvider, InMemoryCapabilityAudit, ManagedProviderMetadata, ProviderId, UserId,
     WorkspaceId,
 };
+use local_first_secrets::{InMemorySecretStore, SecretMaterial, SecretRef, SecretStore};
 use local_first_task_runtime::ResourceClass;
 
 #[test]
@@ -142,6 +143,42 @@ fn registry_round_trips_connection_metadata_with_secret_ref_only() {
     assert_eq!(loaded[0].secret_ref, "keychain://github/conn_1");
     assert_eq!(loaded[0].metadata["account"], "fabio");
     assert!(loaded[0].metadata.get("api_key").is_none());
+}
+
+#[test]
+fn registry_stores_connection_secret_material_outside_database() {
+    let store = CapabilityRegistryStore::open_in_memory().unwrap();
+    let secrets = InMemorySecretStore::default();
+    let reference = SecretRef::new("user_1", "workspace_1", "github", "conn_1").unwrap();
+    let connection = CapabilityConnectionConfig::new(
+        "conn_1",
+        ProviderId::new("github"),
+        UserId::new("user_1"),
+        WorkspaceId::new("workspace_1"),
+        "GitHub Work",
+        reference.as_str(),
+    )
+    .with_metadata(serde_json::json!({"token": "must-not-persist"}));
+
+    store
+        .upsert_connection_config_with_secret(
+            &connection,
+            &secrets,
+            reference.clone(),
+            SecretMaterial::from_string("ghp_secret_value"),
+        )
+        .unwrap();
+
+    let loaded = store
+        .connection_configs(&UserId::new("user_1"), &WorkspaceId::new("workspace_1"))
+        .unwrap();
+
+    assert_eq!(loaded[0].secret_ref, reference.as_str());
+    assert_eq!(loaded[0].metadata, serde_json::json!({}));
+    assert_eq!(
+        secrets.get(&reference).unwrap().unwrap().expose_utf8().unwrap(),
+        "ghp_secret_value"
+    );
 }
 
 #[test]

@@ -46,11 +46,11 @@
 
 ### Task 3: Capability Registry Integration
 
-- [ ] Write failing test that stores a connection secret via registry helper and proves DB only contains `secret_ref`, not raw credentials.
-- [ ] Run targeted capability registry test and verify failure.
-- [ ] Add `local-first-secrets` dependency and registry helper.
-- [ ] Run targeted tests until green.
-- [ ] Commit as `Integrate secrets with capability registry`.
+- [x] Write failing test that stores a connection secret via registry helper and proves DB only contains `secret_ref`, not raw credentials.
+- [x] Run targeted capability registry test and verify failure.
+- [x] Add `local-first-secrets` dependency and registry helper.
+- [x] Run targeted tests until green.
+- [x] Commit as `Integrate secrets with capability registry`.
 
 ### Task 4: Verification And Docs
 

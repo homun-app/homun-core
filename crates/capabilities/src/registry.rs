@@ -2,6 +2,7 @@ use crate::{
     ActionClass, CapabilityError, CapabilityProviderKind, CapabilityResult, CapabilityTool,
     ConnectionStatus, ManagedProviderMetadata, PolicyContext, ProviderId, UserId, WorkspaceId,
 };
+use local_first_secrets::{SecretMaterial, SecretRef, SecretStore};
 use local_first_task_runtime::ResourceClass;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -495,6 +496,21 @@ impl CapabilityRegistryStore {
         Ok(())
     }
 
+    pub fn upsert_connection_config_with_secret(
+        &self,
+        config: &CapabilityConnectionConfig,
+        secrets: &impl SecretStore,
+        reference: SecretRef,
+        material: SecretMaterial,
+    ) -> CapabilityResult<()> {
+        secrets
+            .put(reference.clone(), material)
+            .map_err(|error| CapabilityError::SecretUnavailable(error.to_string()))?;
+        let mut config = config.clone();
+        config.secret_ref = reference.as_str().to_string();
+        self.upsert_connection_config(&config)
+    }
+
     pub fn connection_configs(
         &self,
         user_id: &UserId,
@@ -672,7 +688,7 @@ fn is_secret_metadata_key(key: &str) -> bool {
     let normalized = key.to_ascii_lowercase();
     matches!(
         normalized.as_str(),
-        "access_token" | "refresh_token" | "api_key" | "password" | "secret"
+        "access_token" | "refresh_token" | "api_key" | "password" | "secret" | "token"
     )
 }
 
