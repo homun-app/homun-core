@@ -1,5 +1,6 @@
 mod audit;
 mod channel;
+mod composio;
 mod error;
 mod facade;
 mod mcp;
@@ -11,6 +12,10 @@ pub use audit::{CapabilityAuditEvent, InMemoryCapabilityAudit};
 pub use channel::{
     ChannelCapabilities, ChannelMessage, ChannelProvider, FakeChannelProvider,
     OutboundChannelMessage,
+};
+pub use composio::{
+    ComposioCapabilityProvider, ComposioProviderConfig, ComposioRequest, ComposioToolPolicy,
+    ComposioTransport, InMemoryComposioTransport,
 };
 pub use error::{CapabilityError, CapabilityResult};
 pub use facade::{CapabilityFacade, ToolAccessPlan};
