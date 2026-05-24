@@ -1944,3 +1944,31 @@ persistenti restano operative anche dopo riapertura dell'app.
   piano -> batch -> preview browser -> approval visibile.
 - Valutare se spostare chat thread storage da JSON a SQLite per allinearlo agli
   altri store persistenti prima dei task di giorni.
+
+### Fase 11 - Computer locale collassabile nella chat
+
+- Reso il card `Computer locale` collassabile nella chat operativa.
+- Stato UX:
+  - di default resta compatto, come barra da 44px circa;
+  - quando parte un test reale o l'esecuzione del piano si espande per mostrare
+    preview, step e azioni;
+  - quando arriva una risposta finale dal core si richiude, cosi' la risposta
+    torna a essere il contenuto primario.
+- La barra compatta conserva solo le informazioni utili:
+  - titolo della sessione;
+  - superficie attiva (`Browser`, `Terminale`, `Computer`);
+  - avanzamento e numero approval;
+  - bottone di disclosure accessibile con `aria-expanded`.
+- Aggiornato il contract test UI per impedire regressioni su collapse del
+  Computer locale e styling compatto.
+- Verifica visiva su `http://127.0.0.1:1420/`:
+  - collassato: card `local-computer-card collapsed`, altezza 44px, nessun
+    overflow pagina;
+  - espanso: altezza 169px, nessun overlap con il composer;
+  - la preview browser resta disponibile solo nel dettaglio/expanded state, non
+    compete con la risposta.
+
+Perche': il Computer locale deve dare contezza di cosa sta succedendo, ma non
+deve diventare il protagonista quando il sistema ha gia' prodotto la risposta.
+Questo allinea la UI alla regola di prodotto: risposta al centro, esecuzione
+locale come contesto progressivo e richiudibile.

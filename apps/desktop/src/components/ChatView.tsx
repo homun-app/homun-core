@@ -78,6 +78,7 @@ export function ChatView({
   const [shareOpen, setShareOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [timelineCollapsed, setTimelineCollapsed] = useState(true);
+  const [computerCardCollapsed, setComputerCardCollapsed] = useState(true);
   const conversationRef = useRef<HTMLDivElement>(null);
   const activeHealth = useMemo(
     () => health.filter((item) => item.status !== "attention").slice(0, 2),
@@ -88,6 +89,7 @@ export function ChatView({
   async function runLocalSmokeTest() {
     setSmokeTestRunning(true);
     setSmokeTestError(null);
+    setComputerCardCollapsed(false);
     try {
       const snapshot =
         await coreBridge.runLocalComputerSmokeTest(computerSessionId);
@@ -102,6 +104,7 @@ export function ChatView({
   async function runPromptPlanNextStep() {
     setPlanStepRunning(true);
     setPlanStepError(null);
+    setComputerCardCollapsed(false);
     try {
       const result = await coreBridge.runPromptPlanReadySteps(
         computerSessionId,
@@ -166,6 +169,7 @@ export function ChatView({
     try {
       const result = await coreBridge.submitUserPrompt(computerSessionId, text);
       setComputerSession(mapCoreComputerSession(result.computer_session));
+      setComputerCardCollapsed(true);
       onMessagesChange([
         ...promptMessages,
         {
@@ -349,10 +353,16 @@ export function ChatView({
           {threadMessages.map((message) => (
             <article className={`message ${message.role}`} key={message.id}>
               {message.role !== "user" && (
-                <header className="assistant-label">
-                  <Sparkles size={17} />
-                  <strong>assistant</strong>
-                  <span>Local</span>
+                <header
+                  className={`assistant-label ${message.role === "system" ? "system-label" : ""}`}
+                >
+                  {message.role === "system" ? (
+                    <Clock3 size={15} />
+                  ) : (
+                    <Sparkles size={17} />
+                  )}
+                  <strong>{message.role === "system" ? "stato" : "assistant"}</strong>
+                  <span>{message.role === "system" ? "Sistema" : "Local"}</span>
                 </header>
               )}
               <p>{message.text}</p>
@@ -371,6 +381,7 @@ export function ChatView({
 
           <LocalComputerCard
             approvalsCount={approvalsCount}
+            collapsed={computerCardCollapsed}
             smokeTestError={smokeTestError}
             smokeTestRunning={smokeTestRunning}
             planStepError={planStepError}
@@ -381,6 +392,9 @@ export function ChatView({
             onOpen={() => setDetailsOpen(true)}
             onRunPlanStep={runPromptPlanNextStep}
             onRunSmokeTest={runLocalSmokeTest}
+            onToggleCollapsed={() =>
+              setComputerCardCollapsed((current) => !current)
+            }
           />
         </div>
       </div>
@@ -484,9 +498,11 @@ function InlineTimeline({
 
 function LocalComputerCard({
   approvalsCount,
+  collapsed,
   onOpen,
   onRunPlanStep,
   onRunSmokeTest,
+  onToggleCollapsed,
   planStepError,
   planStepRunning,
   previewDataUrl,
@@ -496,9 +512,11 @@ function LocalComputerCard({
   task,
 }: {
   approvalsCount: number;
+  collapsed: boolean;
   onOpen: () => void;
   onRunPlanStep: () => void;
   onRunSmokeTest: () => void;
+  onToggleCollapsed: () => void;
   planStepError: string | null;
   planStepRunning: boolean;
   previewDataUrl: string | null;
@@ -507,77 +525,119 @@ function LocalComputerCard({
   smokeTestRunning: boolean;
   task: TaskItem;
 }) {
-  return (
-    <article className="local-computer-card">
-      <button className="computer-card-main" type="button" onClick={onOpen}>
-        <div className="computer-preview" aria-hidden="true">
-          {previewDataUrl ? (
-            <img
-              className="computer-preview-image"
-              alt=""
-              src={previewDataUrl}
-            />
-          ) : (
-            <>
-              <div className="browser-chrome">
-                <span />
-                <span />
-                <span />
-              </div>
-              <div className="browser-lines">
-                <i />
-                <i />
-                <i />
-              </div>
-              <div className="terminal-preview">
-                <span>$ date</span>
-                <span>CEST · local</span>
-              </div>
-            </>
-          )}
-        </div>
-        <div className="computer-card-copy">
-          <div className="computer-card-title">
-            <strong>{session.title}</strong>
-            <span>{session.elapsed}</span>
-          </div>
-          <p>{session.subtitle}</p>
-          <small>{session.previewDetail}</small>
-        </div>
-        <div className="computer-card-progress">
-          <span>{session.progressCurrent} / {session.progressTotal}</span>
-          <ChevronDown size={16} />
-        </div>
-      </button>
+  const surfaceLabel =
+    session.activeSurface === "browser"
+      ? "Browser"
+      : session.activeSurface === "shell"
+        ? "Terminale"
+        : "Computer";
+  const activityLabel =
+    planStepRunning || smokeTestRunning ? "in esecuzione" : "pronto";
 
-      <div className="computer-card-footer">
-        <span className="status-line">
+  return (
+    <article className={`local-computer-card ${collapsed ? "collapsed" : ""}`}>
+      <div className="computer-card-toolbar">
+        <button
+          className="computer-toolbar-main"
+          type="button"
+          onClick={onOpen}
+        >
           <Play size={14} />
-          {task.title}
-        </span>
-        <div className="computer-card-actions">
-          {(smokeTestError || planStepError) && (
-            <span>{smokeTestError ?? planStepError}</span>
-          )}
-          <button
-            className="smoke-test-button"
-            disabled={planStepRunning}
-            type="button"
-            onClick={onRunPlanStep}
-          >
-            {planStepRunning ? "Esecuzione" : "Esegui piano"}
-          </button>
-          <button
-            className="smoke-test-button"
-            disabled={smokeTestRunning}
-            type="button"
-            onClick={onRunSmokeTest}
-          >
-            {smokeTestRunning ? "In esecuzione" : "Test reale"}
-          </button>
+          <strong>{session.title}</strong>
+          <span>{surfaceLabel} {activityLabel}</span>
+        </button>
+        <div className="computer-toolbar-meta">
+          <span>
+            {session.progressCurrent} / {session.progressTotal}
+          </span>
           <span>{approvalsCount} approval</span>
+          <button
+            className="computer-collapse-button"
+            type="button"
+            aria-expanded={!collapsed}
+            aria-label={collapsed ? "Mostra computer locale" : "Nascondi computer locale"}
+            onClick={onToggleCollapsed}
+          >
+            <ChevronDown
+              className={collapsed ? "" : "computer-collapse-icon-open"}
+              size={15}
+            />
+          </button>
         </div>
       </div>
+
+      {!collapsed && (
+        <>
+          <button className="computer-card-main" type="button" onClick={onOpen}>
+            <div className="computer-preview" aria-hidden="true">
+              {previewDataUrl ? (
+                <img
+                  className="computer-preview-image"
+                  alt=""
+                  src={previewDataUrl}
+                />
+              ) : (
+                <>
+                  <div className="browser-chrome">
+                    <span />
+                    <span />
+                    <span />
+                  </div>
+                  <div className="browser-lines">
+                    <i />
+                    <i />
+                    <i />
+                  </div>
+                  <div className="terminal-preview">
+                    <span>$ date</span>
+                    <span>CEST · local</span>
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="computer-card-copy">
+              <div className="computer-card-title">
+                <strong>{session.previewTitle}</strong>
+                <span>{session.elapsed}</span>
+              </div>
+              <p>{session.subtitle}</p>
+              <small>{session.previewDetail}</small>
+            </div>
+            <div className="computer-card-progress">
+              <span>Apri dettaglio</span>
+              <ChevronDown size={16} />
+            </div>
+          </button>
+
+          <div className="computer-card-footer">
+            <span className="status-line">
+              <Play size={14} />
+              {task.title}
+            </span>
+            <div className="computer-card-actions">
+              {(smokeTestError || planStepError) && (
+                <span>{smokeTestError ?? planStepError}</span>
+              )}
+              <button
+                className="smoke-test-button"
+                disabled={planStepRunning}
+                type="button"
+                onClick={onRunPlanStep}
+              >
+                {planStepRunning ? "Esecuzione" : "Esegui piano"}
+              </button>
+              <button
+                className="smoke-test-button"
+                disabled={smokeTestRunning}
+                type="button"
+                onClick={onRunSmokeTest}
+              >
+                {smokeTestRunning ? "In esecuzione" : "Test reale"}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </article>
   );
 }

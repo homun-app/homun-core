@@ -558,10 +558,31 @@ small {
   line-height: 1.62;
 }
 
+.message.assistant p {
+  color: var(--text);
+  font-size: 16.5px;
+  line-height: 1.68;
+}
+
+.message.system p {
+  max-width: 640px;
+  color: var(--muted);
+  font-size: 14.5px;
+  line-height: 1.55;
+}
+
 .assistant-label {
   gap: 7px;
   margin-bottom: 8px;
   color: var(--text);
+}
+
+.assistant-label.system-label {
+  color: var(--muted);
+}
+
+.assistant-label.system-label strong {
+  font-weight: 600;
 }
 
 .assistant-label span {
@@ -702,17 +723,95 @@ small {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow-soft);
+  background: #fcfcfd;
   overflow: hidden;
+}
+
+.local-computer-card.collapsed {
+  background: #ffffff;
+}
+
+.computer-card-toolbar {
+  min-height: 42px;
+  padding: 0 10px 0 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  background: #ffffff;
+}
+
+.local-computer-card.collapsed .computer-card-toolbar {
+  border-bottom: 0;
+}
+
+.computer-toolbar-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  text-align: left;
+}
+
+.computer-toolbar-main svg {
+  flex: 0 0 auto;
+  color: var(--green);
+}
+
+.computer-toolbar-main strong,
+.computer-toolbar-main span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.computer-toolbar-main strong {
+  max-width: min(240px, 42vw);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.computer-toolbar-main span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.computer-toolbar-meta {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.computer-collapse-button {
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--muted);
+}
+
+.computer-collapse-button:hover {
+  color: var(--text);
+  background: var(--surface-muted);
+}
+
+.computer-collapse-icon-open {
+  transform: rotate(180deg);
 }
 
 .computer-card-main {
   width: 100%;
-  padding: 14px 16px;
+  padding: 12px 16px;
   display: grid;
-  grid-template-columns: 112px minmax(0, 1fr) auto;
-  gap: 16px;
+  grid-template-columns: 96px minmax(0, 1fr) auto;
+  gap: 14px;
   align-items: center;
   background: transparent;
   color: var(--text);
@@ -720,7 +819,7 @@ small {
 }
 
 .computer-preview {
-  height: 70px;
+  height: 56px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   overflow: hidden;
@@ -737,7 +836,7 @@ small {
 }
 
 .browser-chrome {
-  height: 18px;
+  height: 15px;
   display: flex;
   gap: 4px;
   align-items: center;
@@ -753,14 +852,14 @@ small {
 }
 
 .browser-lines {
-  padding: 10px 8px;
+  padding: 8px 8px;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
 .browser-lines i {
-  height: 6px;
+  height: 5px;
   border-radius: 999px;
   background: #dfe8f4;
 }
@@ -779,14 +878,14 @@ small {
   bottom: 7px;
   left: 28px;
   border-radius: 6px;
-  padding: 5px 7px;
+  padding: 4px 6px;
   display: flex;
   justify-content: space-between;
   gap: 8px;
   color: #1f7a3d;
   background: #f4fff7;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
+  font-size: 9px;
 }
 
 .computer-card-copy {
@@ -800,7 +899,7 @@ small {
 }
 
 .computer-card-title strong {
-  font-size: 17px;
+  font-size: 15.5px;
 }
 
 .computer-card-title span,
@@ -812,11 +911,15 @@ small {
 
 .computer-card-copy p {
   margin: 0 0 4px;
+  color: #34363b;
+  font-size: 14px;
   line-height: 1.4;
 }
 
 .computer-card-copy small {
   display: block;
+  color: var(--muted);
+  font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -831,10 +934,10 @@ small {
 .computer-card-footer {
   justify-content: space-between;
   gap: 12px;
-  min-height: 40px;
+  min-height: 38px;
   padding: 0 16px;
   border-top: 1px solid var(--line);
-  background: #fbfbfc;
+  background: #ffffff;
 }
 
 .computer-card-actions {
@@ -1914,8 +2017,35 @@ small {
     padding-top: 18px;
   }
 
+  .computer-card-toolbar {
+    padding-left: 12px;
+  }
+
+  .computer-toolbar-main {
+    gap: 7px;
+  }
+
+  .computer-toolbar-main strong {
+    max-width: 42vw;
+  }
+
+  .computer-toolbar-main span,
+  .computer-toolbar-meta span:nth-child(2) {
+    display: none;
+  }
+
+  .computer-toolbar-meta {
+    gap: 6px;
+  }
+
   .computer-card-main {
-    grid-template-columns: 72px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 12px 14px;
+  }
+
+  .computer-card-main .computer-preview {
+    display: none;
   }
 
   .computer-card-footer {

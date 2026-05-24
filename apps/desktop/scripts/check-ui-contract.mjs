@@ -50,6 +50,10 @@ assertOccurrenceCount("src/components/ChatView.tsx", "<InlineTimeline", 1, "time
 assertContains("src/components/ChatView.tsx", "timelineCollapsed", "computer timeline must keep collapsed state");
 assertContains("src/components/ChatView.tsx", "aria-expanded={!collapsed}", "computer timeline toggle must expose expansion state");
 assertContains("src/components/ChatView.tsx", "timeline-collapsed", "computer timeline must expose collapsed styling hook");
+assertContains("src/components/ChatView.tsx", "system-label", "system status messages must be visually distinct from assistant answers");
+assertContains("src/components/ChatView.tsx", "computerCardCollapsed", "local computer card must be collapsible after answers");
+assertContains("src/components/ChatView.tsx", "setComputerCardCollapsed(true)", "local computer card must collapse when a final answer arrives");
+assertContains("src/styles.css", ".local-computer-card.collapsed", "local computer card must expose compact collapsed styling");
 assertContains("src/components/ChatView.tsx", "composer-surface", "prompt composer must have a stable anchored surface");
 assertContains("src/components/ChatView.tsx", "coreBridge.localComputerSession", "chat local computer card must load the Tauri read model");
 assertContains("src/components/ChatView.tsx", "coreBridge.submitUserPrompt", "composer must submit prompts to the Tauri core");
