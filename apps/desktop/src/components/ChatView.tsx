@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { coreBridge } from "../lib/coreBridge";
+import { coreBridge, type CoreComputerSessionSnapshot } from "../lib/coreBridge";
 import {
   createLoadingComputerSession,
   createUnavailableComputerSession,
@@ -70,6 +70,8 @@ export function ChatView({
   const [smokeTestError, setSmokeTestError] = useState<string | null>(null);
   const [planStepRunning, setPlanStepRunning] = useState(false);
   const [planStepError, setPlanStepError] = useState<string | null>(null);
+  const [computerControlBusy, setComputerControlBusy] = useState(false);
+  const [computerControlError, setComputerControlError] = useState<string | null>(null);
   const [promptSubmitting, setPromptSubmitting] = useState(false);
   const [promptError, setPromptError] = useState<string | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
@@ -119,6 +121,21 @@ export function ChatView({
       setPlanStepError(describeBridgeError(error));
     } finally {
       setPlanStepRunning(false);
+    }
+  }
+
+  async function runComputerControl(
+    action: (sessionId: string) => Promise<CoreComputerSessionSnapshot>,
+  ) {
+    setComputerControlBusy(true);
+    setComputerControlError(null);
+    try {
+      const snapshot = await action(computerSessionId);
+      setComputerSession(mapCoreComputerSession(snapshot));
+    } catch (error) {
+      setComputerControlError(describeBridgeError(error));
+    } finally {
+      setComputerControlBusy(false);
     }
   }
 
@@ -328,8 +345,13 @@ export function ChatView({
       {detailsOpen && (
         <ComputerDetailPanel
           activeSurface={activeSurface}
+          controlBusy={computerControlBusy}
+          controlError={computerControlError}
           onClose={() => setDetailsOpen(false)}
+          onPause={() => runComputerControl(coreBridge.pauseLocalComputerSession)}
+          onResume={() => runComputerControl(coreBridge.resumeLocalComputerSession)}
           onSelectSurface={setActiveSurface}
+          onTakeover={() => runComputerControl(coreBridge.requestLocalComputerTakeover)}
           session={computerSession}
         />
       )}
@@ -506,16 +528,27 @@ function LocalComputerCard({
 
 function ComputerDetailPanel({
   activeSurface,
+  controlBusy,
+  controlError,
   onClose,
+  onPause,
+  onResume,
   onSelectSurface,
+  onTakeover,
   session,
 }: {
   activeSurface: ComputerSurfaceKind;
+  controlBusy: boolean;
+  controlError: string | null;
   onClose: () => void;
+  onPause: () => void;
+  onResume: () => void;
   onSelectSurface: (surface: ComputerSurfaceKind) => void;
+  onTakeover: () => void;
   session: ComputerSession;
 }) {
   const currentSurface = session.surfaces.find((surface) => surface.id === activeSurface);
+  const paused = session.status === "paused";
 
   return (
     <aside className="computer-detail-panel" aria-label="Dettaglio computer locale">
@@ -606,13 +639,23 @@ function ComputerDetailPanel({
       </div>
 
       <footer className="computer-panel-footer">
-        <span>{currentSurface?.detail}</span>
+        <span>{controlError ?? currentSurface?.detail}</span>
         <div>
-          <button className="secondary-button" type="button">
-            <Pause size={14} />
-            Pausa
+          <button
+            className="secondary-button"
+            disabled={controlBusy}
+            type="button"
+            onClick={paused ? onResume : onPause}
+          >
+            {paused ? <Play size={14} /> : <Pause size={14} />}
+            {paused ? "Riprendi" : "Pausa"}
           </button>
-          <button className="primary-button" type="button">
+          <button
+            className="primary-button"
+            disabled={controlBusy}
+            type="button"
+            onClick={onTakeover}
+          >
             Prendi controllo
           </button>
         </div>

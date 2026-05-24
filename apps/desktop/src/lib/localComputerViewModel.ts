@@ -123,6 +123,9 @@ function toSessionStatus(
   if (approvalState === "waiting_user" || status === "waiting_user") {
     return "waiting_user";
   }
+  if (status === "paused") {
+    return "paused";
+  }
   if (status === "completed") {
     return "completed";
   }

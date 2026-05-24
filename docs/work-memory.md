@@ -1365,6 +1365,38 @@ Perche': il Local Computer deve diventare la superficie di fiducia: non basta di
 
 ## Prossimo blocco
 
+### Fase 3 - Controlli Local Computer cablati
+
+- Aggiunti a `LocalComputerSessionManager`:
+  - `pause_session`;
+  - `resume_session`.
+- Collegato `request_takeover` gia' presente nel manager alla UI desktop.
+- Aggiunti command Tauri:
+  - `local_computer_request_takeover`;
+  - `local_computer_pause_session`;
+  - `local_computer_resume_session`.
+- `coreBridge` espone i tre command e `ChatView` li usa nel pannello Computer.
+- Il bottone `Pausa` cambia in `Riprendi` quando la sessione e' paused.
+- Gli stati vengono persistiti nel read model Local Computer e registrano eventi
+  redatti:
+  - `computer_session_paused`;
+  - `computer_session_resumed`;
+  - `computer_takeover_requested`.
+- Aggiornato `check-ui-contract.mjs` per impedire regressioni verso pulsanti
+  solo visuali.
+- Test aggiunto: `local_computer_controls_are_persisted_in_read_model`.
+- Verifiche eseguite:
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml local_computer_controls -- --nocapture`;
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`;
+  - GREEN: `npm run typecheck`;
+  - GREEN: `npm run test:ui-contract`;
+  - GREEN: `npm run build`;
+  - Playwright su `http://127.0.0.1:1420/`: pannello Computer aperto, bottoni `Pausa` e `Prendi controllo` visibili senza overlap.
+
+Perche': il Local Computer non deve essere solo una preview. L'utente deve poter fermare il runtime o chiedere controllo manuale da una UI che passa dal Core, cosi' l'audit e gli stati restano affidabili.
+
+## Prossimo blocco
+
 ### Roadmap finale dettagliata
 
 - Creato `docs/architecture/final-roadmap.md`.

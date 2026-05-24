@@ -129,7 +129,7 @@ export interface ComputerSession {
   id: string;
   title: string;
   subtitle: string;
-  status: "running" | "waiting_user" | "completed";
+  status: "running" | "waiting_user" | "paused" | "completed";
   activeSurface: ComputerSurfaceKind;
   elapsed: string;
   progressCurrent: number;

@@ -121,6 +121,30 @@ pub fn local_computer_run_smoke_test(
 }
 
 #[tauri::command]
+pub fn local_computer_request_takeover(
+    state: tauri::State<'_, DesktopCoreState>,
+    session_id: String,
+) -> Result<ComputerSessionSnapshot, String> {
+    state.request_local_computer_takeover(&session_id)
+}
+
+#[tauri::command]
+pub fn local_computer_pause_session(
+    state: tauri::State<'_, DesktopCoreState>,
+    session_id: String,
+) -> Result<ComputerSessionSnapshot, String> {
+    state.pause_local_computer_session(&session_id)
+}
+
+#[tauri::command]
+pub fn local_computer_resume_session(
+    state: tauri::State<'_, DesktopCoreState>,
+    session_id: String,
+) -> Result<ComputerSessionSnapshot, String> {
+    state.resume_local_computer_session(&session_id)
+}
+
+#[tauri::command]
 pub fn submit_user_prompt(
     state: tauri::State<'_, DesktopCoreState>,
     session_id: String,

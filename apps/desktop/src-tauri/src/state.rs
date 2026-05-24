@@ -477,6 +477,61 @@ impl DesktopCoreState {
         )
     }
 
+    pub fn request_local_computer_takeover(
+        &self,
+        session_id: &str,
+    ) -> Result<ComputerSessionSnapshot, String> {
+        let manager = self
+            .local_computer
+            .lock()
+            .map_err(|_| "local computer lock poisoned".to_string())?;
+        manager.request_takeover(
+            session_id,
+            &self.user_id,
+            &self.workspace_id,
+            "Richiesta controllo manuale dalla UI desktop",
+        )?;
+        manager
+            .read_model()
+            .snapshot(session_id, &self.user_id, &self.workspace_id)?
+            .ok_or_else(|| format!("session not found: {session_id}"))
+    }
+
+    pub fn pause_local_computer_session(
+        &self,
+        session_id: &str,
+    ) -> Result<ComputerSessionSnapshot, String> {
+        let manager = self
+            .local_computer
+            .lock()
+            .map_err(|_| "local computer lock poisoned".to_string())?;
+        manager.pause_session(
+            session_id,
+            &self.user_id,
+            &self.workspace_id,
+            "Pausa richiesta dalla UI desktop",
+        )?;
+        manager
+            .read_model()
+            .snapshot(session_id, &self.user_id, &self.workspace_id)?
+            .ok_or_else(|| format!("session not found: {session_id}"))
+    }
+
+    pub fn resume_local_computer_session(
+        &self,
+        session_id: &str,
+    ) -> Result<ComputerSessionSnapshot, String> {
+        let manager = self
+            .local_computer
+            .lock()
+            .map_err(|_| "local computer lock poisoned".to_string())?;
+        manager.resume_session(session_id, &self.user_id, &self.workspace_id)?;
+        manager
+            .read_model()
+            .snapshot(session_id, &self.user_id, &self.workspace_id)?
+            .ok_or_else(|| format!("session not found: {session_id}"))
+    }
+
     pub fn submit_user_prompt(
         &self,
         session_id: &str,
@@ -1015,6 +1070,52 @@ mod tests {
         );
         assert!(snapshot.progress_current >= 2);
         assert!(!serialized.contains("raw_payload"));
+    }
+
+    #[test]
+    fn local_computer_controls_are_persisted_in_read_model() {
+        let state = state();
+
+        let paused = state
+            .pause_local_computer_session("computer_active_prompt")
+            .unwrap();
+        let resumed = state
+            .resume_local_computer_session("computer_active_prompt")
+            .unwrap();
+        let takeover = state
+            .request_local_computer_takeover("computer_active_prompt")
+            .unwrap();
+
+        assert_eq!(
+            paused.status,
+            local_first_local_computer_session::SessionStatus::Paused
+        );
+        assert_eq!(
+            resumed.status,
+            local_first_local_computer_session::SessionStatus::Running
+        );
+        assert_eq!(
+            takeover.takeover_state,
+            local_first_local_computer_session::TakeoverState::Requested
+        );
+        assert!(
+            takeover
+                .timeline
+                .iter()
+                .any(|item| item.kind == "computer_takeover_requested")
+        );
+        assert!(
+            takeover
+                .timeline
+                .iter()
+                .any(|item| item.kind == "computer_session_paused")
+        );
+        assert!(
+            takeover
+                .timeline
+                .iter()
+                .any(|item| item.kind == "computer_session_resumed")
+        );
     }
 
     #[test]

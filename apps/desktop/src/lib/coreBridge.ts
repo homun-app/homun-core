@@ -237,6 +237,18 @@ export const coreBridge = {
     invoke<CoreComputerSessionSnapshot>("local_computer_run_smoke_test", {
       sessionId,
     }),
+  requestLocalComputerTakeover: (sessionId: string) =>
+    invoke<CoreComputerSessionSnapshot>("local_computer_request_takeover", {
+      sessionId,
+    }),
+  pauseLocalComputerSession: (sessionId: string) =>
+    invoke<CoreComputerSessionSnapshot>("local_computer_pause_session", {
+      sessionId,
+    }),
+  resumeLocalComputerSession: (sessionId: string) =>
+    invoke<CoreComputerSessionSnapshot>("local_computer_resume_session", {
+      sessionId,
+    }),
   submitUserPrompt: (sessionId: string, prompt: string) =>
     invoke<CorePromptSubmissionResult>("submit_user_prompt", {
       sessionId,

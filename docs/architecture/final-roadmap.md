@@ -151,9 +151,10 @@ Gate di chiusura:
 
 ## Fase 3 - Local Computer Live
 
-Stato: avviata. Il smoke locale ora registra shell output reale e produce anche
-un artifact screenshot browser dal sidecar Playwright, esposto come preview
-redatta nella sessione Local Computer.
+Stato: avviata. Il smoke locale registra shell output reale e produce anche un
+artifact screenshot browser dal sidecar Playwright, esposto come preview
+redatta nella sessione Local Computer. I controlli base pausa/riprendi/takeover
+sono cablati al Core e persistiti nel read model.
 
 Obiettivo:
 

@@ -31,6 +31,9 @@ fn main() {
             commands::capability_snapshot,
             commands::local_computer_session_snapshot,
             commands::local_computer_run_smoke_test,
+            commands::local_computer_request_takeover,
+            commands::local_computer_pause_session,
+            commands::local_computer_resume_session,
             commands::submit_user_prompt,
             commands::prompt_plan_run_next_step,
         ])

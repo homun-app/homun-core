@@ -55,6 +55,8 @@ assertContains("src/components/ChatView.tsx", "coreBridge.localComputerSession",
 assertContains("src/components/ChatView.tsx", "coreBridge.submitUserPrompt", "composer must submit prompts to the Tauri core");
 assertContains("src/components/ChatView.tsx", "coreBridge.runLocalComputerSmokeTest", "chat must expose a real local computer smoke test action");
 assertContains("src/components/ChatView.tsx", "coreBridge.runPromptPlanNextStep", "chat must expose prompt plan step execution through Tauri core");
+assertContains("src/components/ChatView.tsx", "coreBridge.pauseLocalComputerSession", "computer panel pause must be wired to the Tauri core");
+assertContains("src/components/ChatView.tsx", "coreBridge.requestLocalComputerTakeover", "computer panel takeover must be wired to the Tauri core");
 assertContains("src/components/ChatView.tsx", "mapCoreComputerSession", "chat local computer card must map the core snapshot before rendering");
 assertContains("src/App.tsx", "coreBridge.taskQueue", "tasks view must load the real Tauri task queue read model");
 assertContains("src/App.tsx", "coreBridge.taskDetail", "tasks view must load selected task detail through the Tauri read model");

@@ -208,6 +208,51 @@ impl LocalComputerSessionManager {
         Ok(())
     }
 
+    pub fn pause_session(
+        &self,
+        session_id: &str,
+        user_id: &str,
+        workspace_id: &str,
+        reason: &str,
+    ) -> Result<(), String> {
+        self.store
+            .update_session_status(session_id, user_id, workspace_id, SessionStatus::Paused)?;
+        self.append_event(ComputerEventCreate {
+            session_id: session_id.to_string(),
+            surface: SurfaceKind::Logs,
+            kind: "computer_session_paused".to_string(),
+            status: "waiting".to_string(),
+            title: "Sessione in pausa".to_string(),
+            subtitle: reason.to_string(),
+            payload: json!({ "reason": reason }),
+            artifact_refs: vec![],
+            approval_required: false,
+        })?;
+        Ok(())
+    }
+
+    pub fn resume_session(
+        &self,
+        session_id: &str,
+        user_id: &str,
+        workspace_id: &str,
+    ) -> Result<(), String> {
+        self.store
+            .update_session_status(session_id, user_id, workspace_id, SessionStatus::Running)?;
+        self.append_event(ComputerEventCreate {
+            session_id: session_id.to_string(),
+            surface: SurfaceKind::Logs,
+            kind: "computer_session_resumed".to_string(),
+            status: "running".to_string(),
+            title: "Sessione ripresa".to_string(),
+            subtitle: "Controllo restituito al runtime locale".to_string(),
+            payload: json!({}),
+            artifact_refs: vec![],
+            approval_required: false,
+        })?;
+        Ok(())
+    }
+
     pub fn request_approval(
         &self,
         session_id: &str,
