@@ -620,6 +620,7 @@ impl DesktopCoreState {
                     "step_id": step.step_id,
                     "surface": step.surface,
                     "action_kind": step.action_kind,
+                    "target_url": step.target_url,
                     "payload_redacted": true
                 }),
             )
@@ -645,6 +646,7 @@ impl DesktopCoreState {
                             "detail": step.detail,
                             "surface": step.surface,
                             "action_kind": step.action_kind,
+                            "target_url_origin": step.target_url.as_deref().map(redacted_url_origin),
                             "requires_user_approval": step.requires_user_approval
                         },
                         "payload_redacted": true
@@ -684,6 +686,21 @@ fn resource_for_plan_surface(surface: &str) -> ResourceClass {
         "files" => ResourceClass::FilesystemIo,
         _ => ResourceClass::BackgroundMaintenance,
     }
+}
+
+fn redacted_url_origin(target_url: &str) -> String {
+    if target_url == "about:blank" {
+        return target_url.to_string();
+    }
+    let Some((scheme, rest)) = target_url.split_once("://") else {
+        return "redacted".to_string();
+    };
+    let host = rest
+        .split(['/', '?', '#'])
+        .next()
+        .filter(|value| !value.is_empty())
+        .unwrap_or("redacted");
+    format!("{scheme}://{host}")
 }
 
 fn memory_access_request(user_id: &str, workspace_id: &str) -> MemoryAccessRequest {
@@ -797,6 +814,7 @@ mod tests {
                     surface: "logs".to_string(),
                     action_kind: "final_response".to_string(),
                     requires_user_approval: false,
+                    target_url: None,
                 }],
             },
         }
@@ -815,6 +833,7 @@ mod tests {
                     surface: "browser".to_string(),
                     action_kind: "research".to_string(),
                     requires_user_approval: false,
+                    target_url: Some("about:blank".to_string()),
                 },
                 PromptPlanStep {
                     step_id: "compare_options".to_string(),
@@ -823,6 +842,7 @@ mod tests {
                     surface: "browser".to_string(),
                     action_kind: "compare_options".to_string(),
                     requires_user_approval: false,
+                    target_url: None,
                 },
                 PromptPlanStep {
                     step_id: "approval_before_payment".to_string(),
@@ -832,6 +852,7 @@ mod tests {
                     surface: "logs".to_string(),
                     action_kind: "approval_gate".to_string(),
                     requires_user_approval: true,
+                    target_url: None,
                 },
             ],
         }
@@ -849,6 +870,7 @@ mod tests {
                 surface: "logs".to_string(),
                 action_kind: "approval_gate".to_string(),
                 requires_user_approval: true,
+                target_url: None,
             }],
         }
     }
@@ -1236,6 +1258,14 @@ mod tests {
                 .queued
                 .iter()
                 .any(|task| task.kind == "prompt_plan.research")
+        );
+        let detail = state
+            .task_detail("prompt_computer_active_prompt_search_trains")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            detail.latest_checkpoint.unwrap()["step"]["target_url_origin"],
+            "about:blank"
         );
         assert!(
             snapshot

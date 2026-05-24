@@ -201,7 +201,9 @@ per `browser.manual_action`, l'executor puo' riprendere l'azione. Esiste una
 demo/test locale con fixture form, sidecar Playwright, blocco click, approval e
 resume reale. La UI Tasks/Approval Center mostra i blocker browser in forma
 leggibile e redatta. Restano da chiudere recovery su errori browser e
-orchestrazione Brain -> task browser reale.
+orchestrazione Brain -> task browser reale. Il planner puo' gia' produrre una
+`target_url` sicura per step browser: solo start page/homepage senza query o
+fragment, cosi' il prompt raw non viene trasformato in URL esterne.
 
 Obiettivo:
 
@@ -225,6 +227,7 @@ Deliverable:
 - resume dopo approval browser manuale;
 - test locale form mutativo simulato con Playwright sidecar;
 - blocker browser leggibili nella UI;
+- `target_url` sicura per step browser del Brain planner;
 - screenshot e transcript redatti;
 - policy per domini e azioni sensibili;
 - fallback e recovery su errore browser.

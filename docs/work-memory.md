@@ -1637,3 +1637,39 @@ interazioni piu' frequenti durante task web reali.
 - Collegare il planner Brain ai task browser reali.
 - Fare in modo che una richiesta naturale complessa generi ed esegua step
   browser/task usando il runtime invece di restare solo nel piano visualizzato.
+
+### Fase 5 - Target URL sicura per step browser del Brain planner
+
+- Esteso `PromptPlanStep` con `target_url` opzionale.
+- Aggiornato il prompt JSON del planner:
+  - per step browser puo' indicare una pagina di partenza;
+  - deve usare homepage/start URL;
+  - non deve usare search URL con query o raw user text.
+- Aggiornata la validazione del piano:
+  - `about:blank` consentito;
+  - `http://` e `https://` consentiti;
+  - query string e fragment bloccati;
+  - URL troppo lunghe bloccate.
+- `DesktopCoreState::enqueue_prompt_plan` salva `target_url` nell'input task,
+  ma nel checkpoint redatto espone solo l'origine redatta
+  (`target_url_origin`).
+- `PromptPlanExecutor` usa `target_url` quando apre lo step browser; se assente
+  resta su `about:blank`.
+- Test aggiunti/aggiornati:
+  - il piano treno espone una start URL sicura;
+  - le query URL vengono rifiutate;
+  - il task enqueue conserva solo origine redatta nel checkpoint UI.
+- Verifica eseguita:
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`.
+
+Perche': per passare da piano visualizzato a browser task reale serve una
+destinazione di partenza. Allo stesso tempo, una URL di ricerca con tutto il
+prompt dentro sarebbe esfiltrazione verso un sito esterno. La regola start URL
+consente esecuzione browser controllata senza leak del testo utente.
+
+## Prossimo blocco
+
+- Integrare Capability/Tool Registry nel planner operativo della UI, cosi' il
+  Brain sceglie tool reali invece di soli `action_kind`.
+- Mappare step browser pianificati a task `browser_automation` quando sono
+  atomici, mantenendo `prompt_plan.*` per workflow multi-step.

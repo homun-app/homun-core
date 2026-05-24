@@ -48,6 +48,7 @@ pub fn run_next_prompt_plan_step(
     let surface = prompt_plan_surface(&task);
     let surface_kind = surface_kind_for_prompt_plan(surface);
     let action_kind = prompt_plan_action_kind(&task);
+    let target_url = prompt_plan_target_url(&task);
 
     if resources
         .mark_waiting_if_unavailable(store, &task)
@@ -151,6 +152,7 @@ pub fn run_next_prompt_plan_step(
                 session_id,
                 &task_id,
                 &task.goal,
+                target_url,
             )?)
         } else {
             None
@@ -243,6 +245,7 @@ fn execute_browser_read_only_step(
     session_id: &str,
     task_id: &str,
     title: &str,
+    target_url: Option<&str>,
 ) -> Result<BrowserReadOnlyResult, String> {
     let runtime_dir = workspace_root.join("runtimes/browser-automation");
     let artifact_root = workspace_root.join("target/browser-task-artifacts");
@@ -263,11 +266,12 @@ fn execute_browser_read_only_step(
         .call(BrowserMethod::Health, serde_json::json!({}))
         .map_err(to_string_error)?;
     let target_id = format!("task-{}", sanitize_task_id(task_id));
+    let start_url = target_url.unwrap_or("about:blank");
     let opened = client
         .call(
             BrowserMethod::Open,
             serde_json::json!({
-                "url": "about:blank",
+                "url": start_url,
                 "label": target_id
             }),
         )
@@ -383,6 +387,13 @@ fn prompt_plan_action_kind(task: &TaskRecord) -> &str {
         .get("action_kind")
         .and_then(|value| value.as_str())
         .unwrap_or("unknown")
+}
+
+fn prompt_plan_target_url(task: &TaskRecord) -> Option<&str> {
+    task.input_json
+        .get("target_url")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty())
 }
 
 fn surface_kind_for_prompt_plan(surface: &str) -> SurfaceKind {

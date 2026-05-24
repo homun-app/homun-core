@@ -40,6 +40,8 @@ pub struct PromptPlanStep {
     pub surface: String,
     pub action_kind: String,
     pub requires_user_approval: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_url: Option<String>,
 }
 
 pub trait PromptBrain {
@@ -502,6 +504,7 @@ fn planner_prompt(prompt: &str, summary: &str) -> String {
          Use short UI-safe titles and details. Do not include secrets, payment data, credentials, raw forms, or raw prompt text.\n\
          For booking, purchasing, sending, posting, deleting, or changing external state, add a step with requires_user_approval=true before the risky action.\n\
          For browser research or form filling, use surface=browser. For shell checks, use surface=shell. For files/artifacts, use surface=files. Otherwise use surface=logs.\n\
+         For browser steps, target_url may be an HTTPS start page or about:blank. Use a homepage/start URL only, never a search URL with query parameters or raw user text.\n\
          action_kind must be one of research, compare_options, draft, approval_gate, browser_action, shell_check, artifact, final_response.\n\
          User request summary: {summary}\n\
          User request: {prompt}"
@@ -527,7 +530,8 @@ fn planner_schema() -> serde_json::Value {
                         "detail": {"type": "string"},
                         "surface": {"type": "string", "enum": ["browser", "shell", "files", "logs"]},
                         "action_kind": {"type": "string", "enum": ["research", "compare_options", "draft", "approval_gate", "browser_action", "shell_check", "artifact", "final_response"]},
-                        "requires_user_approval": {"type": "boolean"}
+                        "requires_user_approval": {"type": "boolean"},
+                        "target_url": {"type": ["string", "null"]}
                     }
                 }
             }
@@ -549,6 +553,26 @@ fn validate_prompt_plan(plan: &PromptExecutionPlan) -> Result<(), String> {
         if step.step_id.trim().is_empty() || step.title.trim().is_empty() {
             return Err("planner_plan_invalid_step".to_string());
         }
+        if let Some(target_url) = &step.target_url {
+            validate_browser_target_url(target_url)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_browser_target_url(target_url: &str) -> Result<(), String> {
+    let target_url = target_url.trim();
+    if target_url == "about:blank" {
+        return Ok(());
+    }
+    if target_url.len() > 300 {
+        return Err("planner_plan_target_url_too_long".to_string());
+    }
+    if target_url.contains('?') || target_url.contains('#') {
+        return Err("planner_plan_target_url_must_not_include_query".to_string());
+    }
+    if !(target_url.starts_with("https://") || target_url.starts_with("http://")) {
+        return Err("planner_plan_target_url_unsupported_scheme".to_string());
     }
     Ok(())
 }
@@ -678,6 +702,7 @@ mod tests {
                     surface: "logs".to_string(),
                     action_kind: "final_response".to_string(),
                     requires_user_approval: false,
+                    target_url: None,
                 }],
             },
         }
@@ -696,6 +721,7 @@ mod tests {
                     surface: "browser".to_string(),
                     action_kind: "research".to_string(),
                     requires_user_approval: false,
+                    target_url: Some("https://www.trenitalia.com/".to_string()),
                 },
                 PromptPlanStep {
                     step_id: "compare_options".to_string(),
@@ -704,6 +730,7 @@ mod tests {
                     surface: "browser".to_string(),
                     action_kind: "compare_options".to_string(),
                     requires_user_approval: false,
+                    target_url: None,
                 },
                 PromptPlanStep {
                     step_id: "approval_before_payment".to_string(),
@@ -713,6 +740,7 @@ mod tests {
                     surface: "logs".to_string(),
                     action_kind: "approval_gate".to_string(),
                     requires_user_approval: true,
+                    target_url: None,
                 },
             ],
         }
@@ -832,6 +860,10 @@ mod tests {
 
         let plan = result.plan.unwrap();
         assert_eq!(plan.steps.len(), 3);
+        assert_eq!(
+            plan.steps[0].target_url.as_deref(),
+            Some("https://www.trenitalia.com/")
+        );
         assert!(plan.steps.iter().any(|step| step.requires_user_approval));
         assert!(
             result
@@ -848,5 +880,16 @@ mod tests {
                 .any(|item| item.kind == "operational_plan_step_ready" && item.approval_required)
         );
         assert!(!serialized.contains("prompt_pending_brain"));
+    }
+
+    #[test]
+    fn planner_target_url_rejects_query_parameters_to_avoid_raw_prompt_leakage() {
+        let mut plan = train_plan();
+        plan.steps[0].target_url =
+            Some("https://www.google.com/search?q=prenota+un+treno".to_string());
+
+        let error = validate_prompt_plan(&plan).unwrap_err();
+
+        assert_eq!(error, "planner_plan_target_url_must_not_include_query");
     }
 }
