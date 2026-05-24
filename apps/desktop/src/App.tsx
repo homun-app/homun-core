@@ -17,8 +17,23 @@ import {
   runtimeHealth,
   tasks,
 } from "./data/mockData";
-import { coreBridge, type CoreChatThread } from "./lib/coreBridge";
-import type { ChatMessage, ChatThread, SettingsSectionId, ViewId } from "./types";
+import {
+  coreBridge,
+  type CoreApprovalItem,
+  type CoreChatThread,
+  type CoreTaskItem,
+} from "./lib/coreBridge";
+import type {
+  ApprovalItem,
+  ChatMessage,
+  ChatThread,
+  Priority,
+  SettingsSectionId,
+  TaskItem,
+  TaskResourceUsage,
+  TaskStatus,
+  ViewId,
+} from "./types";
 
 const defaultChatThread: ChatThread = {
   threadId: "thread_active_prompt",
@@ -73,6 +88,57 @@ function updateThreadPreview(
   };
 }
 
+function mapCoreTaskStatus(status: string): TaskStatus {
+  if (
+    status === "queued" ||
+    status === "running" ||
+    status === "waiting_user_approval" ||
+    status === "waiting_resource" ||
+    status === "completed" ||
+    status === "failed"
+  ) {
+    return status;
+  }
+  return "queued";
+}
+
+function mapCoreTaskPriority(priority: string): Priority {
+  if (
+    priority === "critical" ||
+    priority === "high" ||
+    priority === "normal" ||
+    priority === "low" ||
+    priority === "background"
+  ) {
+    return priority;
+  }
+  return "normal";
+}
+
+function mapCoreTask(task: CoreTaskItem): TaskItem {
+  return {
+    id: task.task_id,
+    title: task.goal,
+    kind: task.kind,
+    status: mapCoreTaskStatus(task.status),
+    priority: mapCoreTaskPriority(task.priority),
+    resource: "task_runtime",
+    risk: "low",
+    updated: "ora",
+    blockedReason: task.blocked_reason ?? undefined,
+  };
+}
+
+function mapCoreApproval(approval: CoreApprovalItem): ApprovalItem {
+  return {
+    id: approval.approval_id,
+    title: approval.action,
+    reason: approval.explanation,
+    risk: approval.risk_level === "high" ? "high" : "medium",
+    requestedBy: approval.task_id,
+  };
+}
+
 export default function App() {
   const [activeView, setActiveView] = useState<ViewId>("chat");
   const [previousView, setPreviousView] = useState<ViewId>("chat");
@@ -89,6 +155,9 @@ export default function App() {
   >({
     [defaultChatThread.threadId]: chatMessages,
   });
+  const [taskItems, setTaskItems] = useState<TaskItem[]>(tasks);
+  const [approvalItems, setApprovalItems] = useState<ApprovalItem[]>(approvals);
+  const [resourceUsage, setResourceUsage] = useState<TaskResourceUsage[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState("task_prompt_session");
   const [drawerOpen, setDrawerOpen] = useState(() => window.innerWidth > 860);
   const activeThread = useMemo(
@@ -100,14 +169,14 @@ export default function App() {
   );
   const selectedTask = useMemo(
     () =>
-      tasks.find((task) => task.id === selectedTaskId) ?? {
+      taskItems.find((task) => task.id === selectedTaskId) ?? {
         ...tasks[0],
         id: activeThread.taskId,
         title: activeThread.title,
         kind: "prompt_session",
         status: "queued" as const,
       },
-    [activeThread.taskId, activeThread.title, selectedTaskId],
+    [activeThread.taskId, activeThread.title, selectedTaskId, taskItems],
   );
   const activeMessages =
     threadMessages[activeThread.threadId] ?? starterMessages(activeThread);
@@ -178,6 +247,34 @@ export default function App() {
     );
   }
 
+  async function loadTaskQueue() {
+    try {
+      const snapshot = await coreBridge.taskQueue();
+      const nextTasks = [
+        ...snapshot.active,
+        ...snapshot.queued,
+        ...snapshot.blocked,
+        ...snapshot.recent_failures,
+      ].map(mapCoreTask);
+      setTaskItems(nextTasks.length ? nextTasks : tasks);
+      setApprovalItems(
+        snapshot.waiting_approvals.length
+          ? snapshot.waiting_approvals.map(mapCoreApproval)
+          : [],
+      );
+      setResourceUsage(
+        snapshot.resource_usage
+          .filter((usage) => usage.units > 0)
+          .map((usage) => ({
+            resourceClass: usage.resource_class,
+            units: usage.units,
+          })),
+      );
+    } catch (error) {
+      console.warn("task_queue_snapshot unavailable", error);
+    }
+  }
+
   useEffect(() => {
     function syncDrawerWithViewport() {
       setDrawerOpen(window.innerWidth > 860);
@@ -186,6 +283,12 @@ export default function App() {
     syncDrawerWithViewport();
     window.addEventListener("resize", syncDrawerWithViewport);
     return () => window.removeEventListener("resize", syncDrawerWithViewport);
+  }, []);
+
+  useEffect(() => {
+    void loadTaskQueue();
+    const interval = window.setInterval(loadTaskQueue, 4_000);
+    return () => window.clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -241,7 +344,7 @@ export default function App() {
       >
         {activeView === "chat" && (
           <ChatView
-            approvalsCount={approvals.length}
+            approvalsCount={approvalItems.length}
             computerSessionId={activeThread.computerSessionId}
             messages={activeMessages}
             health={runtimeHealth}
@@ -254,8 +357,9 @@ export default function App() {
         )}
         {activeView === "tasks" && (
           <TasksView
-            tasks={tasks}
-            approvals={approvals}
+            tasks={taskItems}
+            approvals={approvalItems}
+            resourceUsage={resourceUsage}
             selectedTaskId={selectedTask.id}
             onSelectTask={setSelectedTaskId}
           />

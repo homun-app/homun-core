@@ -110,6 +110,9 @@ Gate di chiusura:
 
 ## Fase 2 - UI Tasks, Queue, Risorse E Approval Reali
 
+Stato: primo slice implementato. La UI legge `task_queue_snapshot`, mostra task,
+approval e resource usage reali; resta da completare task detail/azioni approval.
+
 Obiettivo:
 
 - rendere visibile il runtime operativo, non solo la chat;

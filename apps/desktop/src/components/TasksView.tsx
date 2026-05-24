@@ -1,9 +1,10 @@
 import { AlertCircle, Check, Clock3, Loader2, PauseCircle } from "lucide-react";
-import type { ApprovalItem, TaskItem } from "../types";
+import type { ApprovalItem, TaskItem, TaskResourceUsage } from "../types";
 
 interface TasksViewProps {
   tasks: TaskItem[];
   approvals: ApprovalItem[];
+  resourceUsage: TaskResourceUsage[];
   selectedTaskId: string;
   onSelectTask: (taskId: string) => void;
 }
@@ -11,6 +12,7 @@ interface TasksViewProps {
 export function TasksView({
   tasks,
   approvals,
+  resourceUsage,
   selectedTaskId,
   onSelectTask,
 }: TasksViewProps) {
@@ -67,6 +69,20 @@ export function TasksView({
               </div>
             </article>
           ))}
+
+          <div className="resource-usage-panel" aria-label="Uso risorse runtime">
+            <h3>Risorse</h3>
+            {resourceUsage.length ? (
+              resourceUsage.map((usage) => (
+                <span className="resource-usage-row" key={usage.resourceClass}>
+                  <strong>{usage.resourceClass}</strong>
+                  <em>{usage.units}</em>
+                </span>
+              ))
+            ) : (
+              <p>Nessuna risorsa prenotata.</p>
+            )}
+          </div>
         </section>
       </div>
     </section>

@@ -54,7 +54,11 @@ assertContains("src/components/ChatView.tsx", "composer-surface", "prompt compos
 assertContains("src/components/ChatView.tsx", "coreBridge.localComputerSession", "chat local computer card must load the Tauri read model");
 assertContains("src/components/ChatView.tsx", "coreBridge.submitUserPrompt", "composer must submit prompts to the Tauri core");
 assertContains("src/components/ChatView.tsx", "coreBridge.runLocalComputerSmokeTest", "chat must expose a real local computer smoke test action");
+assertContains("src/components/ChatView.tsx", "coreBridge.runPromptPlanNextStep", "chat must expose prompt plan step execution through Tauri core");
 assertContains("src/components/ChatView.tsx", "mapCoreComputerSession", "chat local computer card must map the core snapshot before rendering");
+assertContains("src/App.tsx", "coreBridge.taskQueue", "tasks view must load the real Tauri task queue read model");
+assertContains("src/components/TasksView.tsx", "resourceUsage", "tasks view must expose resource usage from the task runtime");
+assertContains("src/data/mockData.ts", "{ id: \"tasks\", label: \"Pianificato\"", "planned navigation must open the real task queue view");
 assertContains("src/lib/localComputerViewModel.ts", "payload_redacted", "local computer UI mapping must preserve redaction contract");
 assertNotContains("src/App.tsx", "computerSession,", "app must not pass mock local computer session into chat");
 assertContains("src/types.ts", "\"learning\"", "auto-learning must be a first-class view");

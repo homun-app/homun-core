@@ -1276,6 +1276,36 @@ Perche': prima di collegare browser/shell reali serve provare il percorso govern
 
 ## Prossimo blocco
 
+### Fase 2 - Tasks/Approvals reali, primo slice
+
+- Collegata `App.tsx` a `coreBridge.taskQueue`.
+- La UI ora mappa dal read model reale:
+  - `active`;
+  - `queued`;
+  - `blocked`;
+  - `recent_failures`;
+  - `waiting_approvals`;
+  - `resource_usage`.
+- `TasksView` riceve `resourceUsage` e mostra un pannello risorse runtime.
+- `ChatView` usa il numero approval reale per la Local Computer card.
+- La voce di navigazione `Pianificato` apre la vista task/approval reale invece
+  della vecchia vista shallow automazioni.
+- Aggiornato `check-ui-contract.mjs` per rendere obbligatorio:
+  - `coreBridge.runPromptPlanNextStep` nella chat;
+  - `coreBridge.taskQueue` in App;
+  - `resourceUsage` in TasksView.
+  - navigazione `Pianificato` verso `tasks`.
+- Verifiche eseguite:
+  - RED: `npm run test:ui-contract` falliva per `coreBridge.taskQueue` mancante;
+  - GREEN: `npm run test:ui-contract`;
+  - GREEN: `npm run typecheck`;
+  - GREEN: `npm run build`;
+  - Playwright su `http://127.0.0.1:1420/`: `Pianificato` apre `Task e approvazioni` su desktop e mobile, senza overlap.
+
+Perche': dopo aver creato l'executor, l'utente deve vedere lo stato reale del runtime: task attivi, in coda, approval e risorse. Questo e' necessario prima di aumentare autonomia e tool reali.
+
+## Prossimo blocco
+
 ### Roadmap finale dettagliata
 
 - Creato `docs/architecture/final-roadmap.md`.

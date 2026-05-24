@@ -83,6 +83,11 @@ export interface TaskItem {
   blockedReason?: string;
 }
 
+export interface TaskResourceUsage {
+  resourceClass: string;
+  units: number;
+}
+
 export type ComputerSurfaceKind = "browser" | "shell" | "files" | "logs";
 
 export interface ComputerSurface {
