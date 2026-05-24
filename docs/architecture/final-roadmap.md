@@ -197,9 +197,10 @@ e aggiornano Task Runtime + Local Computer. Il smoke browser copre anche form
 fill draft su fixture locale senza submit. Il `BrowserTaskExecutor` applica una
 policy preventiva: fill/draft resta consentito, click/close/type con submit
 richiedono approval prima di arrivare al sidecar. Dopo un checkpoint approvato
-per `browser.manual_action`, l'executor puo' riprendere l'azione. Restano da
-chiudere blocker manuali completi nella UI e demo end-to-end su form mutativo
-simulato.
+per `browser.manual_action`, l'executor puo' riprendere l'azione. Esiste una
+demo/test locale con fixture form, sidecar Playwright, blocco click, approval e
+resume reale. Restano da chiudere blocker manuali completi nella UI e recovery
+su errori browser.
 
 Obiettivo:
 
@@ -221,6 +222,7 @@ Deliverable:
 - manual blockers tipizzati;
 - policy mutative preventiva nel task executor;
 - resume dopo approval browser manuale;
+- test locale form mutativo simulato con Playwright sidecar;
 - screenshot e transcript redatti;
 - policy per domini e azioni sensibili;
 - fallback e recovery su errore browser.

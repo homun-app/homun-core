@@ -425,3 +425,160 @@ fn run_date_command() -> Result<String, String> {
         "local-smoke % date '+%Y-%m-%d %H:%M:%S %Z'\n{stdout}"
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use local_first_browser_automation::{
+        BrowserMethod, BrowserSidecarSession, BrowserSidecarSpawnOptions, BrowserTaskExecutor,
+        BrowserTaskRuntimeBridge,
+    };
+    use local_first_task_runtime::{
+        ExecutorResult, TaskCheckpoint, TaskExecutor, UserId, WorkspaceId,
+    };
+
+    #[test]
+    fn browser_form_submit_waits_for_approval_then_resumes() {
+        let workspace_root = repo_root();
+        let runtime_dir = workspace_root.join("runtimes/browser-automation");
+        let artifact_root = workspace_root.join("target/browser-approval-resume-artifacts");
+        let fixture_url = start_form_fixture_server().unwrap();
+        let transport = BrowserSidecarSession::spawn_with_options(
+            "node",
+            &["node_modules/tsx/dist/cli.mjs", "src/server.ts"],
+            BrowserSidecarSpawnOptions {
+                current_dir: Some(runtime_dir),
+                env: vec![
+                    (
+                        "BROWSER_AUTOMATION_ARTIFACT_ROOT".to_string(),
+                        artifact_root.display().to_string(),
+                    ),
+                    (
+                        "BROWSER_AUTOMATION_ALLOW_PRIVATE_NETWORK".to_string(),
+                        "1".to_string(),
+                    ),
+                ],
+            },
+        )
+        .unwrap();
+        let mut executor = BrowserTaskExecutor::new(transport);
+        let bridge = BrowserTaskRuntimeBridge::new();
+        let user = UserId::new("user_approval_resume");
+        let workspace = WorkspaceId::new("workspace_approval_resume");
+
+        let open_task = bridge.enqueue_browser_call(
+            "browser_open",
+            user.clone(),
+            workspace.clone(),
+            BrowserMethod::Open,
+            serde_json::json!({"url": fixture_url, "label": "approval-resume"}),
+        );
+        assert!(matches!(
+            executor.execute_step(&open_task, None).unwrap(),
+            ExecutorResult::Completed { .. }
+        ));
+
+        let snapshot_task = bridge.enqueue_browser_call(
+            "browser_snapshot",
+            user.clone(),
+            workspace.clone(),
+            BrowserMethod::Snapshot,
+            serde_json::json!({"target_id": "approval-resume"}),
+        );
+        let snapshot = executor.execute_step(&snapshot_task, None).unwrap();
+        let submit_ref = match snapshot {
+            ExecutorResult::Checkpoint { payload, .. } => find_ref_in_snapshot(&payload, "Submit"),
+            other => panic!("expected snapshot checkpoint, got {other:?}"),
+        };
+        let click_task = bridge.enqueue_browser_call(
+            "browser_click_submit",
+            user.clone(),
+            workspace.clone(),
+            BrowserMethod::Act,
+            serde_json::json!({
+                "target_id": "approval-resume",
+                "kind": "click",
+                "ref": submit_ref
+            }),
+        );
+
+        assert!(matches!(
+            executor.execute_step(&click_task, None).unwrap(),
+            ExecutorResult::NeedsApproval {
+                action,
+                data_boundary,
+                ..
+            } if action == "browser.manual_action" && data_boundary == "local_browser"
+        ));
+
+        let approval_checkpoint = TaskCheckpoint::new(
+            "approval_checkpoint",
+            click_task.task_id.clone(),
+            user.clone(),
+            workspace.clone(),
+            1,
+            serde_json::json!({
+                "decision": "approved",
+                "action": "browser.manual_action"
+            }),
+            serde_json::json!({
+                "approval": {
+                    "decision": "approved",
+                    "action": "browser.manual_action"
+                }
+            }),
+        );
+        assert!(matches!(
+            executor
+                .execute_step(&click_task, Some(approval_checkpoint))
+                .unwrap(),
+            ExecutorResult::Completed { .. }
+        ));
+
+        let after_click = bridge.enqueue_browser_call(
+            "browser_snapshot_after_click",
+            user,
+            workspace,
+            BrowserMethod::Snapshot,
+            serde_json::json!({"target_id": "approval-resume"}),
+        );
+        let snapshot = executor.execute_step(&after_click, None).unwrap();
+        let ExecutorResult::Checkpoint {
+            payload,
+            redacted_payload,
+        } = snapshot
+        else {
+            panic!("expected snapshot checkpoint after click");
+        };
+        assert!(
+            payload["snapshot"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("Submitted")
+        );
+        assert_eq!(redacted_payload["browser"]["target_id"], "approval-resume");
+    }
+
+    fn find_ref_in_snapshot(snapshot: &serde_json::Value, name: &str) -> String {
+        snapshot["refs"]
+            .as_array()
+            .and_then(|refs| {
+                refs.iter().find_map(|entry| {
+                    (entry.get("name").and_then(serde_json::Value::as_str) == Some(name))
+                        .then(|| entry.get("ref").and_then(serde_json::Value::as_str))
+                        .flatten()
+                        .map(str::to_string)
+                })
+            })
+            .unwrap_or_else(|| panic!("missing ref: {name}"))
+    }
+
+    fn repo_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::parent)
+            .map(Path::to_path_buf)
+            .expect("repo root")
+    }
+}

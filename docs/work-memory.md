@@ -1571,3 +1571,36 @@ Runtime, quindi e' auditabile.
 - Portare il blocker browser nella UI come stato leggibile e azionabile.
 - Creare una demo locale end-to-end: form draft -> richiesta approval -> resume
   click simulato -> completion redatta.
+
+### Fase 4 - Browser approval resume end-to-end locale
+
+- Aggiunto test `browser_form_submit_waits_for_approval_then_resumes` nel
+  Tauri Core.
+- Il test usa componenti reali, non mock:
+  - server HTTP locale effimero su `127.0.0.1`;
+  - sidecar Playwright `runtimes/browser-automation`;
+  - `BrowserTaskExecutor`;
+  - `BrowserTaskRuntimeBridge`;
+  - checkpoint di approval del Task Runtime.
+- Flusso verificato:
+  - `browser.open` apre la fixture locale;
+  - `browser.snapshot` ricava il ref del bottone `Submit`;
+  - `browser.act` con `kind=click` viene bloccato da policy e restituisce
+    `NeedsApproval`;
+  - dopo checkpoint `approved` per `browser.manual_action`, lo stesso task viene
+    eseguito dal sidecar;
+  - uno snapshot finale verifica che la pagina contiene `Submitted`.
+- Il test usa artifact sotto `target/browser-approval-resume-artifacts`, quindi
+  resta locale e fuori da git.
+- Verifica mirata eseguita:
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml browser_form_submit_waits_for_approval_then_resumes -- --nocapture`.
+
+Perche': questo e' il primo loop reale completo della browser automation
+mutativa controllata: il sistema puo' preparare una bozza, fermarsi, ricevere
+approval e riprendere l'azione senza bypassare policy o sidecar.
+
+## Prossimo blocco
+
+- Rendere il blocker browser piu' chiaro nella UI Tasks/Approval Center.
+- Collegare il planner Brain ai task browser reali invece di fermarsi al piano
+  visualizzato.
