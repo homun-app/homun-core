@@ -102,19 +102,26 @@ export function ChatView({
     setPlanStepRunning(true);
     setPlanStepError(null);
     try {
-      const result = await coreBridge.runPromptPlanNextStep(computerSessionId);
+      const result = await coreBridge.runPromptPlanReadySteps(
+        computerSessionId,
+        4,
+      );
       const snapshot = await coreBridge.localComputerSession(computerSessionId);
       if (snapshot) {
         setComputerSession(mapCoreComputerSession(snapshot));
       }
+      const lastResult = result.results.at(-1);
       onMessagesChange([
         ...threadMessages,
         {
-          id: `local_plan_step_${Date.now()}`,
+          id: `local_plan_batch_${Date.now()}`,
           role: "system",
-          text: result.message,
+          text:
+            result.completed > 0
+              ? `Eseguiti ${result.completed} step locali. ${lastResult?.message ?? ""}`.trim()
+              : (lastResult?.message ?? "Nessuno step pronto."),
           timestamp: "ora",
-          metadata: result.task_id ?? result.status,
+          metadata: result.stopped_reason ?? result.status,
         },
       ]);
     } catch (error) {
@@ -509,7 +516,7 @@ function LocalComputerCard({
             type="button"
             onClick={onRunPlanStep}
           >
-            {planStepRunning ? "Esecuzione" : "Esegui step"}
+            {planStepRunning ? "Esecuzione" : "Esegui piano"}
           </button>
           <button
             className="smoke-test-button"

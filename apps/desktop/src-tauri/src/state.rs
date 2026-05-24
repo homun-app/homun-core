@@ -2,9 +2,9 @@ use crate::local_computer_smoke;
 use crate::models::{
     BridgeStatus, CapabilityPolicySummary, CapabilitySnapshot, DesktopChatThread,
     DesktopChatThreadSnapshot, DesktopTaskDetail, DesktopTaskQueueSnapshot,
-    PromptPlanStepRunResult, RuntimeHealthSnapshot, RuntimeProcessItem, capability_connection_item,
-    capability_tool_item, component, desktop_task_detail, desktop_task_queue, runtime_process_item,
-    runtime_process_item_with_snapshot,
+    PromptPlanBatchRunResult, PromptPlanStepRunResult, RuntimeHealthSnapshot, RuntimeProcessItem,
+    capability_connection_item, capability_tool_item, component, desktop_task_detail,
+    desktop_task_queue, runtime_process_item, runtime_process_item_with_snapshot,
 };
 use crate::prompt_plan_executor;
 use crate::prompt_submission::{
@@ -372,6 +372,41 @@ impl DesktopCoreState {
             &self.workspace_id,
             session_id,
         )
+    }
+
+    pub fn run_prompt_plan_ready_steps(
+        &self,
+        session_id: &str,
+        max_steps: usize,
+    ) -> Result<PromptPlanBatchRunResult, String> {
+        let max_steps = max_steps.clamp(1, 8);
+        let mut results = Vec::new();
+        let mut completed = 0;
+        let mut stopped_reason = None;
+        for _ in 0..max_steps {
+            let result = self.run_prompt_plan_next_step(session_id)?;
+            if result.status == "completed" {
+                completed += 1;
+                results.push(result);
+                continue;
+            }
+            stopped_reason = Some(result.status.clone());
+            results.push(result);
+            break;
+        }
+        let status = if stopped_reason.is_some() {
+            "stopped"
+        } else if completed == max_steps {
+            "limit_reached"
+        } else {
+            "completed"
+        };
+        Ok(PromptPlanBatchRunResult {
+            status: status.to_string(),
+            completed,
+            stopped_reason,
+            results,
+        })
     }
 
     fn ensure_approval_scope(
@@ -1520,6 +1555,55 @@ mod tests {
         assert!(computer.timeline.iter().any(|item| {
             item.kind == "browser_automation_waiting_resource" && item.payload_redacted
         }));
+    }
+
+    #[test]
+    fn prompt_plan_batch_runner_executes_ready_steps_until_idle() {
+        let state = state();
+        let mut brain = StaticBrain {
+            understanding: BrainUnderstanding::NeedsPlanning {
+                summary: "Prenotare un treno con conferma prima del pagamento".to_string(),
+                reason: Some("Richiede browser e approval".to_string()),
+            },
+        };
+        let mut planner = StaticPlanner { plan: train_plan() };
+        state
+            .submit_user_prompt_with_brain_and_planner(
+                "computer_active_prompt",
+                "prenota un treno",
+                &mut brain,
+                &mut planner,
+            )
+            .unwrap();
+
+        let run = state
+            .run_prompt_plan_ready_steps("computer_active_prompt", 4)
+            .unwrap();
+        let queue = state.task_queue_snapshot().unwrap();
+        let computer = state
+            .local_computer_session_snapshot("computer_active_prompt")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(run.status, "stopped");
+        assert_eq!(run.completed, 2);
+        assert_eq!(run.stopped_reason.as_deref(), Some("idle"));
+        assert_eq!(run.results.len(), 3);
+        assert!(run.results.iter().any(|result| {
+            result.task_id.as_deref() == Some("browser_computer_active_prompt_search_trains")
+        }));
+        assert!(run.results.iter().any(|result| {
+            result.task_id.as_deref() == Some("prompt_computer_active_prompt_compare_options")
+        }));
+        assert!(queue.waiting_approvals.iter().any(|approval| {
+            approval.task_id == "prompt_computer_active_prompt_approval_before_payment"
+        }));
+        assert!(
+            computer
+                .timeline
+                .iter()
+                .any(|item| item.kind == "browser_automation_preview_ready")
+        );
     }
 
     #[test]

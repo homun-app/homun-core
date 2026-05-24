@@ -36,6 +36,7 @@ fn main() {
             commands::local_computer_resume_session,
             commands::submit_user_prompt,
             commands::prompt_plan_run_next_step,
+            commands::prompt_plan_run_ready_steps,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Local First Assistant");

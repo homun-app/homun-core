@@ -208,7 +208,9 @@ browser atomici con `target_url` vengono ora enqueueati come task
 `browser_automation` reali, usando il tool registry browser e il browser task
 executor. Il primo task browser atomico esegue ora `browser.open` e, nella
 stessa sessione sidecar, produce anche `browser.snapshot` e
-`browser.screenshot` redatti per alimentare la Local Computer card.
+`browser.screenshot` redatti per alimentare la Local Computer card. Esiste
+anche un batch runner controllato che puo' avanzare piu' step pronti del piano
+senza bypassare approval o risorse.
 
 Obiettivo:
 
@@ -254,6 +256,11 @@ Gate di chiusura:
 
 ## Fase 5 - Orchestrator Brain Completo
 
+Stato: in corso. Il Brain produce gia' piani strutturati, il Capability
+Registry espone tool sintetici e la UI puo' eseguire un batch limitato di step
+pronti tramite Task Runtime. Restano da chiudere DAG completo, selezione
+capability multi-provider, MCP/connettori e subagenti.
+
 Obiettivo:
 
 - superare il planner prompt-level e avere un Brain che sceglie tool,
@@ -273,6 +280,8 @@ Deliverable:
 - lazy loading del dettaglio tool;
 - piano validato con step, dipendenze, risorse, risk e approval;
 - immediate execution solo per azioni read/draft brevi e sicure;
+- batch runner controllato per step pronti, con stop su idle, risorsa,
+  approval o errore;
 - tutto il resto accodato;
 - audit Brain persistente e UI-safe.
 
@@ -280,6 +289,8 @@ Test minimi:
 
 - prompt in italiano e inglese selezionano tool coerenti;
 - richiesta multi-step genera DAG;
+- batch su richiesta treno completa step read-only e si ferma prima
+  dell'approval;
 - tool rischioso richiede approval;
 - tool non abilitato genera richiesta configurazione;
 - token budget: il Brain non riceve l'intero registry completo.

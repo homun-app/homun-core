@@ -204,6 +204,13 @@ export interface CorePromptPlanStepRunResult {
   message: string;
 }
 
+export interface CorePromptPlanBatchRunResult {
+  status: string;
+  completed: number;
+  stopped_reason: string | null;
+  results: CorePromptPlanStepRunResult[];
+}
+
 export const coreBridge = {
   status: () => invoke<CoreBridgeStatus>("core_bridge_status"),
   chatThreads: () => invoke<CoreChatThreadSnapshot>("chat_thread_snapshot"),
@@ -258,5 +265,10 @@ export const coreBridge = {
   runPromptPlanNextStep: (sessionId: string) =>
     invoke<CorePromptPlanStepRunResult>("prompt_plan_run_next_step", {
       sessionId,
+    }),
+  runPromptPlanReadySteps: (sessionId: string, maxSteps = 4) =>
+    invoke<CorePromptPlanBatchRunResult>("prompt_plan_run_ready_steps", {
+      sessionId,
+      maxSteps,
     }),
 };

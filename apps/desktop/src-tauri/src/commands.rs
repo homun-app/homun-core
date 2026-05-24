@@ -1,7 +1,7 @@
 use crate::models::{
     BridgeStatus, CapabilitySnapshot, DesktopChatThread, DesktopChatThreadSnapshot,
-    DesktopTaskDetail, DesktopTaskQueueSnapshot, PromptPlanStepRunResult, RuntimeHealthSnapshot,
-    RuntimeProcessItem,
+    DesktopTaskDetail, DesktopTaskQueueSnapshot, PromptPlanBatchRunResult, PromptPlanStepRunResult,
+    RuntimeHealthSnapshot, RuntimeProcessItem,
 };
 use crate::prompt_submission::PromptSubmissionResult;
 use crate::state::DesktopCoreState;
@@ -159,4 +159,13 @@ pub fn prompt_plan_run_next_step(
     session_id: String,
 ) -> Result<PromptPlanStepRunResult, String> {
     state.run_prompt_plan_next_step(&session_id)
+}
+
+#[tauri::command]
+pub fn prompt_plan_run_ready_steps(
+    state: tauri::State<'_, DesktopCoreState>,
+    session_id: String,
+    max_steps: usize,
+) -> Result<PromptPlanBatchRunResult, String> {
+    state.run_prompt_plan_ready_steps(&session_id, max_steps)
 }

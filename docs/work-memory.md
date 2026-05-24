@@ -1749,3 +1749,46 @@ farlo nello stesso sidecar evita di perdere lo stato della pagina tra processi.
 - Aggiungere run sequenziale controllato di piu' step del piano.
 - Portare nel read model UI il fatto che un task browser ha prodotto snapshot e
   preview, senza leggere il payload raw.
+
+### Fase 5 - Batch runner controllato per step pronti
+
+- Aggiunto `PromptPlanBatchRunResult` come DTO Core/UI per esporre:
+  - stato batch;
+  - numero di step completati;
+  - motivo di stop;
+  - risultati redatti dei singoli step.
+- Aggiunto `DesktopCoreState::run_prompt_plan_ready_steps`:
+  - esegue fino a `max_steps` step pronti;
+  - limita il batch a 8 step massimo per non saturare il runtime;
+  - si ferma su `idle`, `waiting_resource`, `waiting_user_approval` o `error`;
+  - non bypassa Approval Gate e Resource Governor.
+- Aggiunto comando Tauri `prompt_plan_run_ready_steps`.
+- Aggiornato il bridge React con `coreBridge.runPromptPlanReadySteps`.
+- La Chat ora espone il comando `Esegui piano`, che lancia fino a 4 step pronti
+  e mostra un riepilogo leggibile invece di richiedere un click per ogni step.
+- Test aggiunto:
+  - richiesta treno -> esecuzione batch;
+  - completa il task browser readback;
+  - completa lo step read-only successivo;
+  - si ferma in idle lasciando l'approval pagamento in attesa;
+  - verifica evento `browser_automation_preview_ready`.
+- Verifica eseguita:
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`;
+  - GREEN: `npm run test:ui-contract` in `apps/desktop`;
+  - GREEN: `npm run build` in `apps/desktop`;
+  - GREEN: `cargo test --manifest-path crates/browser-automation/Cargo.toml`.
+
+Perche': un assistente operativo non puo' richiedere un click manuale per ogni
+micro-step, ma non puo' neanche procedere senza limiti. Questo batch runner e'
+il primo loop controllato: avanza sugli step locali pronti, registra risultati
+redatti e si ferma appena incontra risorse occupate, approval o assenza di
+lavoro.
+
+## Prossimo blocco
+
+- Portare nel read model UI un riepilogo batch/task piu' chiaro, includendo
+  preview browser e stato di stop senza payload raw.
+- Rafforzare le dipendenze tra step quando il Brain produce piani multi-step
+  piu' lunghi.
+- Preparare il passaggio dal runner batch locale al loop orchestrato con task
+  durevoli persistenti.

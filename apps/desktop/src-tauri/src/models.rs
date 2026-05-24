@@ -45,6 +45,14 @@ pub struct PromptPlanStepRunResult {
     pub message: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptPlanBatchRunResult {
+    pub status: String,
+    pub completed: usize,
+    pub stopped_reason: Option<String>,
+    pub results: Vec<PromptPlanStepRunResult>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeHealthSnapshot {
     pub processes: Vec<RuntimeProcessItem>,
