@@ -3,8 +3,15 @@ use local_first_local_computer_session::{
     SurfaceKind,
 };
 use std::io::{BufRead, BufReader, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+
+#[derive(Debug, Clone)]
+struct BrowserPreviewSmoke {
+    url: String,
+    path: String,
+    bytes: u64,
+}
 
 pub fn run_local_computer_smoke_test(
     manager: &LocalComputerSessionManager,
@@ -25,17 +32,31 @@ pub fn run_local_computer_smoke_test(
         false,
     )?;
 
-    match browser_sidecar_health(workspace_root) {
-        Ok(status) => {
+    match browser_sidecar_preview(workspace_root) {
+        Ok(preview) => {
+            let artifact_id = "local_smoke_browser_preview";
+            manager.create_artifact(ArtifactCreate {
+                session_id: session_id.to_string(),
+                artifact_id: artifact_id.to_string(),
+                title: "local-browser-preview.png".to_string(),
+                kind: "screenshot".to_string(),
+                path_ref: preview.path.clone(),
+                size_bytes: preview.bytes,
+                preview_ref: Some(preview.path.clone()),
+            })?;
             append_computer_event(
                 manager,
                 session_id,
                 SurfaceKind::Browser,
                 "computer_action_completed",
                 "done",
-                "Sidecar browser pronto",
-                &status,
-                serde_json::json!({ "status": status }),
+                "Preview browser disponibile",
+                "Screenshot redatto prodotto dal sidecar locale",
+                serde_json::json!({
+                    "url": preview.url,
+                    "artifact_id": artifact_id,
+                    "preview": "redacted"
+                }),
                 false,
             )?;
         }
@@ -132,26 +153,54 @@ fn append_computer_event(
     Ok(())
 }
 
-fn browser_sidecar_health(workspace_root: &Path) -> Result<String, String> {
+fn browser_sidecar_preview(workspace_root: &Path) -> Result<BrowserPreviewSmoke, String> {
     let runtime_dir = workspace_root.join("runtimes/browser-automation");
+    let artifact_root = workspace_root.join("target/local-computer-artifacts");
     let mut child = Command::new("node")
         .arg("node_modules/tsx/dist/cli.mjs")
         .arg("src/server.ts")
         .current_dir(runtime_dir)
+        .env("BROWSER_AUTOMATION_ARTIFACT_ROOT", &artifact_root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| format!("browser sidecar spawn failed: {error}"))?;
 
-    let request = serde_json::json!({
-        "id": "local_computer_smoke",
-        "method": "browser.health",
-        "params": {}
-    });
+    let requests = [
+        serde_json::json!({
+            "id": "local_computer_health",
+            "method": "browser.health",
+            "params": {}
+        }),
+        serde_json::json!({
+            "id": "local_computer_open",
+            "method": "browser.open",
+            "params": {
+                "url": "about:blank",
+                "label": "local-preview"
+            }
+        }),
+        serde_json::json!({
+            "id": "local_computer_screenshot",
+            "method": "browser.screenshot",
+            "params": {
+                "target_id": "local-preview",
+                "file_name": "local-browser-preview.png",
+                "full_page": false
+            }
+        }),
+        serde_json::json!({
+            "id": "local_computer_stop",
+            "method": "browser.stop",
+            "params": {}
+        }),
+    ];
     if let Some(stdin) = child.stdin.as_mut() {
-        writeln!(stdin, "{request}")
-            .map_err(|error| format!("browser sidecar write failed: {error}"))?;
+        for request in requests {
+            writeln!(stdin, "{request}")
+                .map_err(|error| format!("browser sidecar write failed: {error}"))?;
+        }
     }
     drop(child.stdin.take());
 
@@ -159,22 +208,59 @@ fn browser_sidecar_health(workspace_root: &Path) -> Result<String, String> {
         .stdout
         .take()
         .ok_or_else(|| "browser sidecar stdout unavailable".to_string())?;
-    let mut reader = BufReader::new(stdout);
-    let mut line = String::new();
-    reader
-        .read_line(&mut line)
-        .map_err(|error| format!("browser sidecar read failed: {error}"))?;
+    let mut responses = Vec::new();
+    for line in BufReader::new(stdout).lines() {
+        responses.push(line.map_err(|error| format!("browser sidecar read failed: {error}"))?);
+        if responses.len() == 4 {
+            break;
+        }
+    }
     let _ = child.kill();
     let _ = child.wait();
 
-    let response: serde_json::Value = serde_json::from_str(line.trim())
-        .map_err(|error| format!("browser sidecar invalid response: {error}"))?;
-    if response.get("ok").and_then(serde_json::Value::as_bool) == Some(true) {
-        let transport = response["result"]["transport"].as_str().unwrap_or("stdio");
-        Ok(format!("browser.health ok via {transport}"))
-    } else {
-        Err(response.to_string())
+    let health = response_by_id(&responses, "local_computer_health")?;
+    ensure_ok(&health)?;
+    let open = response_by_id(&responses, "local_computer_open")?;
+    ensure_ok(&open)?;
+    let screenshot = response_by_id(&responses, "local_computer_screenshot")?;
+    ensure_ok(&screenshot)?;
+    let path = screenshot["result"]["path"]
+        .as_str()
+        .ok_or_else(|| "browser screenshot path missing".to_string())?;
+    let bytes = screenshot["result"]["bytes"]
+        .as_u64()
+        .ok_or_else(|| "browser screenshot bytes missing".to_string())?;
+    let url = open["result"]["url"]
+        .as_str()
+        .unwrap_or("about:blank")
+        .to_string();
+    Ok(BrowserPreviewSmoke {
+        url,
+        path: normalize_path(path),
+        bytes,
+    })
+}
+
+fn response_by_id(lines: &[String], id: &str) -> Result<serde_json::Value, String> {
+    for line in lines {
+        let value: serde_json::Value = serde_json::from_str(line.trim())
+            .map_err(|error| format!("browser sidecar invalid response: {error}"))?;
+        if value.get("id").and_then(serde_json::Value::as_str) == Some(id) {
+            return Ok(value);
+        }
     }
+    Err(format!("browser sidecar response missing: {id}"))
+}
+
+fn ensure_ok(response: &serde_json::Value) -> Result<(), String> {
+    if response.get("ok").and_then(serde_json::Value::as_bool) == Some(true) {
+        return Ok(());
+    }
+    Err(response.to_string())
+}
+
+fn normalize_path(path: &str) -> String {
+    PathBuf::from(path).display().to_string()
 }
 
 fn run_date_command() -> Result<String, String> {

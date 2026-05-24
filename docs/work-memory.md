@@ -1340,6 +1340,31 @@ Perche': la coda e' utile solo se l'utente puo' capire e governare cosa sta acca
 
 ## Prossimo blocco
 
+### Fase 3 - Local Computer browser preview smoke
+
+- Esteso `local_computer_smoke.rs`.
+- Il smoke Local Computer ora:
+  - avvia il sidecar browser locale via stdio;
+  - verifica `browser.health`;
+  - apre una tab `about:blank` governata dal sidecar;
+  - produce uno screenshot reale con `browser.screenshot`;
+  - registra lo screenshot come artifact `local_smoke_browser_preview`;
+  - espone `preview_ref` e `current_url_redacted` nel read model Local Computer;
+  - mantiene il comando shell read-only `date` e il transcript redatto.
+- Gli artifact browser sono scritti sotto `target/local-computer-artifacts`,
+  quindi restano locali e ignorati da git.
+- Se il browser sidecar non riesce a partire, il smoke registra un evento
+  redatto di failure e continua comunque il test shell.
+- Verifiche eseguite:
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml local_computer_smoke_test_records_real_shell_output -- --nocapture`;
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`;
+  - GREEN: `npm run test:ui-contract`;
+  - GREEN: `npm run build`.
+
+Perche': il Local Computer deve diventare la superficie di fiducia: non basta dire che il browser ha lavorato, serve un artifact/preview verificabile e legato alla stessa sessione, senza esporre payload raw.
+
+## Prossimo blocco
+
 ### Roadmap finale dettagliata
 
 - Creato `docs/architecture/final-roadmap.md`.
