@@ -1,11 +1,12 @@
 use crate::local_computer_smoke;
 use crate::models::{
     BridgeStatus, CapabilityPolicySummary, CapabilitySnapshot, DesktopChatThread,
-    DesktopChatThreadSnapshot, DesktopTaskDetail, DesktopTaskQueueSnapshot, RuntimeHealthSnapshot,
-    RuntimeProcessItem, capability_connection_item, capability_tool_item, component,
-    desktop_task_detail, desktop_task_queue, runtime_process_item,
+    DesktopChatThreadSnapshot, DesktopTaskDetail, DesktopTaskQueueSnapshot,
+    PromptPlanStepRunResult, RuntimeHealthSnapshot, RuntimeProcessItem, capability_connection_item,
+    capability_tool_item, component, desktop_task_detail, desktop_task_queue, runtime_process_item,
     runtime_process_item_with_snapshot,
 };
+use crate::prompt_plan_executor;
 use crate::prompt_submission::{
     self, PromptBrain, PromptExecutionPlan, PromptSubmissionResult, PromptTaskPlanner,
     RuntimePromptBrain, RuntimePromptTaskPlanner,
@@ -266,6 +267,27 @@ impl DesktopCoreState {
             .task_detail(&task_id, &user_id, &workspace_id)
             .map_err(to_string_error)
             .map(|detail| detail.map(desktop_task_detail))
+    }
+
+    pub fn run_prompt_plan_next_step(
+        &self,
+        session_id: &str,
+    ) -> Result<PromptPlanStepRunResult, String> {
+        let store = self
+            .task_store
+            .lock()
+            .map_err(|_| "task store lock poisoned".to_string())?;
+        let manager = self
+            .local_computer
+            .lock()
+            .map_err(|_| "local computer lock poisoned".to_string())?;
+        prompt_plan_executor::run_next_prompt_plan_step(
+            &store,
+            &manager,
+            &self.user_id,
+            &self.workspace_id,
+            session_id,
+        )
     }
 
     pub fn memory_dashboard_snapshot(&self) -> Result<MemoryDashboard, String> {
@@ -653,6 +675,22 @@ mod tests {
         }
     }
 
+    fn approval_only_plan() -> PromptExecutionPlan {
+        PromptExecutionPlan {
+            title: "Operazione rischiosa".to_string(),
+            summary: "Attendere conferma prima di procedere.".to_string(),
+            risk_level: "high".to_string(),
+            steps: vec![PromptPlanStep {
+                step_id: "confirm_send".to_string(),
+                title: "Conferma invio".to_string(),
+                detail: "Non inviare nulla senza approvazione esplicita.".to_string(),
+                surface: "logs".to_string(),
+                action_kind: "approval_gate".to_string(),
+                requires_user_approval: true,
+            }],
+        }
+    }
+
     fn state() -> DesktopCoreState {
         DesktopCoreState::seeded(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.."))
             .unwrap()
@@ -945,5 +983,163 @@ mod tests {
         );
         assert!(!serialized.contains("prenota un treno"));
         assert!(!serialized.contains("prompt_pending_brain"));
+    }
+
+    #[test]
+    fn prompt_plan_executor_runs_first_research_step_and_records_checkpoint() {
+        let state = state();
+        let mut brain = StaticBrain {
+            understanding: BrainUnderstanding::NeedsPlanning {
+                summary: "Prenotare un treno con conferma prima del pagamento".to_string(),
+                reason: Some("Richiede browser e approval".to_string()),
+            },
+        };
+        let mut planner = StaticPlanner { plan: train_plan() };
+        state
+            .submit_user_prompt_with_brain_and_planner(
+                "computer_active_prompt",
+                "prenota un treno",
+                &mut brain,
+                &mut planner,
+            )
+            .unwrap();
+
+        let run = state
+            .run_prompt_plan_next_step("computer_active_prompt")
+            .unwrap();
+        let task_id = "prompt_computer_active_prompt_search_trains";
+        let detail = state.task_detail(task_id).unwrap().unwrap();
+        let computer = state
+            .local_computer_session_snapshot("computer_active_prompt")
+            .unwrap()
+            .unwrap();
+        let queue = state.task_queue_snapshot().unwrap();
+        let browser_usage = queue
+            .resource_usage
+            .iter()
+            .find(|usage| usage.resource_class == "browser_session")
+            .map(|usage| usage.units)
+            .unwrap_or_default();
+        let serialized = serde_json::to_string(&detail).unwrap();
+
+        assert_eq!(run.status, "completed");
+        assert_eq!(run.task_id.as_deref(), Some(task_id));
+        assert_eq!(detail.status, "completed");
+        assert_eq!(
+            detail.latest_checkpoint.unwrap()["prompt_plan_executor"]["state"],
+            "completed"
+        );
+        assert_eq!(browser_usage, 0);
+        assert!(
+            computer
+                .timeline
+                .iter()
+                .any(|item| { item.kind == "prompt_plan_step_completed" && item.payload_redacted })
+        );
+        assert!(!serialized.contains("prenota un treno"));
+    }
+
+    #[test]
+    fn prompt_plan_executor_marks_step_waiting_resource_when_browser_is_busy() {
+        let state = state();
+        let mut brain = StaticBrain {
+            understanding: BrainUnderstanding::NeedsPlanning {
+                summary: "Prenotare un treno con conferma prima del pagamento".to_string(),
+                reason: Some("Richiede browser e approval".to_string()),
+            },
+        };
+        let mut planner = StaticPlanner { plan: train_plan() };
+        state
+            .submit_user_prompt_with_brain_and_planner(
+                "computer_active_prompt",
+                "prenota un treno",
+                &mut brain,
+                &mut planner,
+            )
+            .unwrap();
+        {
+            let store = state.task_store.lock().unwrap();
+            let user_id = TaskUserId::new(DEFAULT_USER_ID);
+            let workspace_id = TaskWorkspaceId::new(DEFAULT_WORKSPACE_ID);
+            let blocker = TaskRecord::new(
+                "browser_resource_blocker",
+                user_id,
+                workspace_id,
+                "test.browser_blocker",
+                "Occupare browser session",
+                serde_json::json!({"payload_redacted": true}),
+            )
+            .with_resource(ResourceRequirement::new(ResourceClass::BrowserSession, 1));
+            store.insert_task(&blocker).unwrap();
+            store.reserve_resources(&blocker, "test").unwrap();
+        }
+
+        let run = state
+            .run_prompt_plan_next_step("computer_active_prompt")
+            .unwrap();
+        let detail = state
+            .task_detail("prompt_computer_active_prompt_search_trains")
+            .unwrap()
+            .unwrap();
+        let computer = state
+            .local_computer_session_snapshot("computer_active_prompt")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(run.status, "waiting_resource");
+        assert_eq!(detail.status, "waiting_resource");
+        assert!(
+            detail
+                .blocked_reason
+                .unwrap()
+                .contains("resource browser_session")
+        );
+        assert!(computer.timeline.iter().any(|item| {
+            item.kind == "prompt_plan_step_waiting_resource" && item.payload_redacted
+        }));
+    }
+
+    #[test]
+    fn prompt_plan_executor_does_not_execute_approval_only_step() {
+        let state = state();
+        let mut brain = StaticBrain {
+            understanding: BrainUnderstanding::NeedsPlanning {
+                summary: "Inviare un messaggio solo dopo conferma".to_string(),
+                reason: Some("Richiede approval".to_string()),
+            },
+        };
+        let mut planner = StaticPlanner {
+            plan: approval_only_plan(),
+        };
+        state
+            .submit_user_prompt_with_brain_and_planner(
+                "computer_active_prompt",
+                "invia il messaggio",
+                &mut brain,
+                &mut planner,
+            )
+            .unwrap();
+
+        let run = state
+            .run_prompt_plan_next_step("computer_active_prompt")
+            .unwrap();
+        let queue = state.task_queue_snapshot().unwrap();
+        let computer = state
+            .local_computer_session_snapshot("computer_active_prompt")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(run.status, "idle");
+        assert!(
+            queue.waiting_approvals.iter().any(|approval| {
+                approval.task_id == "prompt_computer_active_prompt_confirm_send"
+            })
+        );
+        assert!(
+            !computer
+                .timeline
+                .iter()
+                .any(|item| item.kind == "prompt_plan_step_started")
+        );
     }
 }

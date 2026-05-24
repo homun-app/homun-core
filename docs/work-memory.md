@@ -1242,6 +1242,40 @@ Perche': prima di eseguire task reali serve separare bene le conversazioni. Senz
 
 ## Prossimo blocco
 
+### Fase 1 - Prompt Plan Executor V1, primo slice
+
+- Implementato `DesktopCoreState::run_prompt_plan_next_step`.
+- Esposto command Tauri `prompt_plan_run_next_step`.
+- Aggiunto bridge TypeScript `coreBridge.runPromptPlanNextStep`.
+- Aggiunto bottone UI `Esegui step` nella Local Computer card.
+- L'executor:
+  - usa `TaskScheduler::ready_tasks` per selezionare task pronti;
+  - filtra task `prompt_plan.*` della chat/sessione attiva;
+  - usa `ResourceGovernor::conservative_defaults`;
+  - mette il task in `waiting_resource` se la risorsa e' occupata;
+  - non seleziona step in `waiting_user_approval`;
+  - riserva risorse prima dell'esecuzione;
+  - registra checkpoint `started`, `completed` o `waiting_resource`;
+  - rilascia risorse dopo completion;
+  - aggiorna Local Computer Session con eventi `prompt_plan_step_started`, `prompt_plan_step_completed` e `prompt_plan_step_waiting_resource`.
+- Questo primo slice esegue gli step in modalita read-only controllata (`read_only_step_recorded`), senza ancora guidare il browser reale o fare azioni mutative.
+- Test aggiunti:
+  - esecuzione del primo step `prompt_plan.research`;
+  - blocco `waiting_resource` quando `browser_session` e' occupata;
+  - garanzia che uno step solo-approval non venga eseguito.
+- Verifiche eseguite:
+  - RED: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml prompt_plan_executor -- --nocapture` falliva per metodo mancante;
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml prompt_plan_executor -- --nocapture`;
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`;
+  - GREEN: `npm run typecheck`;
+  - GREEN: `npm run test:ui-contract`;
+  - GREEN: `npm run build`;
+  - Playwright su `http://127.0.0.1:1420/`: bottone `Esegui step` visibile nella Local Computer card, senza overlap.
+
+Perche': prima di collegare browser/shell reali serve provare il percorso governato end-to-end: task pronto -> risorse -> checkpoint -> Local Computer -> UI. Questo evita di far partire tool direttamente dal frontend o dal Brain bypassando Resource Governor e Approval Gate.
+
+## Prossimo blocco
+
 ### Roadmap finale dettagliata
 
 - Creato `docs/architecture/final-roadmap.md`.

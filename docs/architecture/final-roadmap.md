@@ -66,6 +66,9 @@ Gate di chiusura:
 
 ## Fase 1 - Prompt Plan Executor V1
 
+Stato: primo slice read-only governato implementato. Restano da collegare
+browser/shell live come executor reali nelle fasi 3-4.
+
 Obiettivo:
 
 - trasformare i task `prompt_plan.*` creati dal Brain in esecuzione governata;

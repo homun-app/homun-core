@@ -68,6 +68,8 @@ export function ChatView({
   );
   const [smokeTestRunning, setSmokeTestRunning] = useState(false);
   const [smokeTestError, setSmokeTestError] = useState<string | null>(null);
+  const [planStepRunning, setPlanStepRunning] = useState(false);
+  const [planStepError, setPlanStepError] = useState<string | null>(null);
   const [promptSubmitting, setPromptSubmitting] = useState(false);
   const [promptError, setPromptError] = useState<string | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
@@ -91,6 +93,32 @@ export function ChatView({
       setSmokeTestError(describeBridgeError(error));
     } finally {
       setSmokeTestRunning(false);
+    }
+  }
+
+  async function runPromptPlanNextStep() {
+    setPlanStepRunning(true);
+    setPlanStepError(null);
+    try {
+      const result = await coreBridge.runPromptPlanNextStep(computerSessionId);
+      const snapshot = await coreBridge.localComputerSession(computerSessionId);
+      if (snapshot) {
+        setComputerSession(mapCoreComputerSession(snapshot));
+      }
+      onMessagesChange([
+        ...threadMessages,
+        {
+          id: `local_plan_step_${Date.now()}`,
+          role: "system",
+          text: result.message,
+          timestamp: "ora",
+          metadata: result.task_id ?? result.status,
+        },
+      ]);
+    } catch (error) {
+      setPlanStepError(describeBridgeError(error));
+    } finally {
+      setPlanStepRunning(false);
     }
   }
 
@@ -286,9 +314,12 @@ export function ChatView({
             approvalsCount={approvalsCount}
             smokeTestError={smokeTestError}
             smokeTestRunning={smokeTestRunning}
+            planStepError={planStepError}
+            planStepRunning={planStepRunning}
             session={computerSession}
             task={task}
             onOpen={() => setDetailsOpen(true)}
+            onRunPlanStep={runPromptPlanNextStep}
             onRunSmokeTest={runLocalSmokeTest}
           />
         </div>
@@ -388,7 +419,10 @@ function InlineTimeline({
 function LocalComputerCard({
   approvalsCount,
   onOpen,
+  onRunPlanStep,
   onRunSmokeTest,
+  planStepError,
+  planStepRunning,
   session,
   smokeTestError,
   smokeTestRunning,
@@ -396,7 +430,10 @@ function LocalComputerCard({
 }: {
   approvalsCount: number;
   onOpen: () => void;
+  onRunPlanStep: () => void;
   onRunSmokeTest: () => void;
+  planStepError: string | null;
+  planStepRunning: boolean;
   session: ComputerSession;
   smokeTestError: string | null;
   smokeTestRunning: boolean;
@@ -441,7 +478,17 @@ function LocalComputerCard({
           {task.title}
         </span>
         <div className="computer-card-actions">
-          {smokeTestError && <span>{smokeTestError}</span>}
+          {(smokeTestError || planStepError) && (
+            <span>{smokeTestError ?? planStepError}</span>
+          )}
+          <button
+            className="smoke-test-button"
+            disabled={planStepRunning}
+            type="button"
+            onClick={onRunPlanStep}
+          >
+            {planStepRunning ? "Esecuzione" : "Esegui step"}
+          </button>
           <button
             className="smoke-test-button"
             disabled={smokeTestRunning}

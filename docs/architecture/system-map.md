@@ -158,7 +158,8 @@ Stato attuale:
 - supporta priorita', stati, resource reservations, approval, checkpoint,
   scheduler, lease recovery e UI read model;
 - i piani da prompt vengono gia' materializzati come task durevoli;
-- manca collegare l'executor reale degli step pianificati.
+- primo executor read-only per task `prompt_plan.*` collegato al Tauri Core;
+- manca collegare browser/shell live come executor reali degli step pianificati.
 
 ### Resource Governor
 

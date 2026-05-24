@@ -38,6 +38,13 @@ pub struct DesktopChatThreadSnapshot {
     pub threads: Vec<DesktopChatThread>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptPlanStepRunResult {
+    pub status: String,
+    pub task_id: Option<String>,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeHealthSnapshot {
     pub processes: Vec<RuntimeProcessItem>,

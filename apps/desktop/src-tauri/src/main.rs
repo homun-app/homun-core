@@ -3,6 +3,7 @@
 mod commands;
 mod local_computer_smoke;
 mod models;
+mod prompt_plan_executor;
 mod prompt_submission;
 mod seed;
 mod state;
@@ -29,6 +30,7 @@ fn main() {
             commands::local_computer_session_snapshot,
             commands::local_computer_run_smoke_test,
             commands::submit_user_prompt,
+            commands::prompt_plan_run_next_step,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Local First Assistant");

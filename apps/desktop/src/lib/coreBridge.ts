@@ -197,6 +197,12 @@ export interface CorePromptPlanStep {
   requires_user_approval: boolean;
 }
 
+export interface CorePromptPlanStepRunResult {
+  status: string;
+  task_id: string | null;
+  message: string;
+}
+
 export const coreBridge = {
   status: () => invoke<CoreBridgeStatus>("core_bridge_status"),
   chatThreads: () => invoke<CoreChatThreadSnapshot>("chat_thread_snapshot"),
@@ -231,5 +237,9 @@ export const coreBridge = {
     invoke<CorePromptSubmissionResult>("submit_user_prompt", {
       sessionId,
       prompt,
+    }),
+  runPromptPlanNextStep: (sessionId: string) =>
+    invoke<CorePromptPlanStepRunResult>("prompt_plan_run_next_step", {
+      sessionId,
     }),
 };
