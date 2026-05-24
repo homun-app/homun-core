@@ -1069,6 +1069,14 @@ mod tests {
                 .iter()
                 .any(|line| line.contains("local-smoke % date"))
         );
+        assert!(
+            snapshot
+                .timeline
+                .iter()
+                .any(|item| item.kind == "browser_form_draft_completed")
+        );
+        assert!(!serialized.contains("Submitted"));
+        assert!(!serialized.contains("Draft redatto"));
         assert!(snapshot.progress_current >= 2);
         assert!(!serialized.contains("raw_payload"));
     }

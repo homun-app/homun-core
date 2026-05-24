@@ -2,15 +2,19 @@ use local_first_local_computer_session::{
     ArtifactCreate, ComputerEventCreate, ComputerSessionSnapshot, LocalComputerSessionManager,
     SurfaceKind,
 };
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]
 struct BrowserPreviewSmoke {
     url: String,
     path: String,
     bytes: u64,
+    form_draft_completed: bool,
 }
 
 pub fn run_local_computer_smoke_test(
@@ -55,7 +59,23 @@ pub fn run_local_computer_smoke_test(
                 serde_json::json!({
                     "url": preview.url,
                     "artifact_id": artifact_id,
-                    "preview": "redacted"
+                    "preview": "redacted",
+                    "form_draft_completed": preview.form_draft_completed
+                }),
+                false,
+            )?;
+            append_computer_event(
+                manager,
+                session_id,
+                SurfaceKind::Browser,
+                "browser_form_draft_completed",
+                "done",
+                "Form compilato in bozza",
+                "Nessun submit eseguito",
+                serde_json::json!({
+                    "url": preview.url,
+                    "submitted": false,
+                    "payload_redacted": true
                 }),
                 false,
             )?;
@@ -156,31 +176,87 @@ fn append_computer_event(
 fn browser_sidecar_preview(workspace_root: &Path) -> Result<BrowserPreviewSmoke, String> {
     let runtime_dir = workspace_root.join("runtimes/browser-automation");
     let artifact_root = workspace_root.join("target/local-computer-artifacts");
+    let fixture_url = start_form_fixture_server()?;
     let mut child = Command::new("node")
         .arg("node_modules/tsx/dist/cli.mjs")
         .arg("src/server.ts")
         .current_dir(runtime_dir)
         .env("BROWSER_AUTOMATION_ARTIFACT_ROOT", &artifact_root)
+        .env("BROWSER_AUTOMATION_ALLOW_PRIVATE_NETWORK", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| format!("browser sidecar spawn failed: {error}"))?;
 
-    let requests = [
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| "browser sidecar stdin unavailable".to_string())?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "browser sidecar stdout unavailable".to_string())?;
+    let mut reader = BufReader::new(stdout);
+
+    let health = send_sidecar_request(
+        &mut stdin,
+        &mut reader,
         serde_json::json!({
             "id": "local_computer_health",
             "method": "browser.health",
             "params": {}
         }),
+    )?;
+    ensure_ok(&health)?;
+    let open = send_sidecar_request(
+        &mut stdin,
+        &mut reader,
         serde_json::json!({
             "id": "local_computer_open",
             "method": "browser.open",
             "params": {
-                "url": "about:blank",
+                "url": fixture_url,
                 "label": "local-preview"
             }
         }),
+    )?;
+    ensure_ok(&open)?;
+    let snapshot = send_sidecar_request(
+        &mut stdin,
+        &mut reader,
+        serde_json::json!({
+            "id": "local_computer_snapshot_before_fill",
+            "method": "browser.snapshot",
+            "params": {
+                "target_id": "local-preview"
+            }
+        }),
+    )?;
+    ensure_ok(&snapshot)?;
+    let input_ref = find_ref_by_name(&snapshot, "Name")?;
+    let fill = send_sidecar_request(
+        &mut stdin,
+        &mut reader,
+        serde_json::json!({
+            "id": "local_computer_fill_draft",
+            "method": "browser.act",
+            "params": {
+                "target_id": "local-preview",
+                "kind": "fill",
+                "fields": [
+                    {
+                        "ref": input_ref,
+                        "value": "Draft redatto"
+                    }
+                ]
+            }
+        }),
+    )?;
+    ensure_ok(&fill)?;
+    let screenshot = send_sidecar_request(
+        &mut stdin,
+        &mut reader,
         serde_json::json!({
             "id": "local_computer_screenshot",
             "method": "browser.screenshot",
@@ -190,40 +266,20 @@ fn browser_sidecar_preview(workspace_root: &Path) -> Result<BrowserPreviewSmoke,
                 "full_page": false
             }
         }),
+    )?;
+    ensure_ok(&screenshot)?;
+    let _ = send_sidecar_request(
+        &mut stdin,
+        &mut reader,
         serde_json::json!({
             "id": "local_computer_stop",
             "method": "browser.stop",
             "params": {}
         }),
-    ];
-    if let Some(stdin) = child.stdin.as_mut() {
-        for request in requests {
-            writeln!(stdin, "{request}")
-                .map_err(|error| format!("browser sidecar write failed: {error}"))?;
-        }
-    }
-    drop(child.stdin.take());
-
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "browser sidecar stdout unavailable".to_string())?;
-    let mut responses = Vec::new();
-    for line in BufReader::new(stdout).lines() {
-        responses.push(line.map_err(|error| format!("browser sidecar read failed: {error}"))?);
-        if responses.len() == 4 {
-            break;
-        }
-    }
+    );
+    drop(stdin);
     let _ = child.kill();
     let _ = child.wait();
-
-    let health = response_by_id(&responses, "local_computer_health")?;
-    ensure_ok(&health)?;
-    let open = response_by_id(&responses, "local_computer_open")?;
-    ensure_ok(&open)?;
-    let screenshot = response_by_id(&responses, "local_computer_screenshot")?;
-    ensure_ok(&screenshot)?;
     let path = screenshot["result"]["path"]
         .as_str()
         .ok_or_else(|| "browser screenshot path missing".to_string())?;
@@ -238,18 +294,107 @@ fn browser_sidecar_preview(workspace_root: &Path) -> Result<BrowserPreviewSmoke,
         url,
         path: normalize_path(path),
         bytes,
+        form_draft_completed: true,
     })
 }
 
-fn response_by_id(lines: &[String], id: &str) -> Result<serde_json::Value, String> {
-    for line in lines {
-        let value: serde_json::Value = serde_json::from_str(line.trim())
-            .map_err(|error| format!("browser sidecar invalid response: {error}"))?;
-        if value.get("id").and_then(serde_json::Value::as_str) == Some(id) {
-            return Ok(value);
-        }
+fn send_sidecar_request(
+    stdin: &mut std::process::ChildStdin,
+    reader: &mut BufReader<std::process::ChildStdout>,
+    request: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let expected_id = request
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+    writeln!(stdin, "{request}")
+        .map_err(|error| format!("browser sidecar write failed: {error}"))?;
+    stdin
+        .flush()
+        .map_err(|error| format!("browser sidecar flush failed: {error}"))?;
+    let mut line = String::new();
+    reader
+        .read_line(&mut line)
+        .map_err(|error| format!("browser sidecar read failed: {error}"))?;
+    let value: serde_json::Value = serde_json::from_str(line.trim())
+        .map_err(|error| format!("browser sidecar invalid response: {error}"))?;
+    if value.get("id").and_then(serde_json::Value::as_str) != Some(expected_id.as_str()) {
+        return Err(format!("browser sidecar response mismatch: {expected_id}"));
     }
-    Err(format!("browser sidecar response missing: {id}"))
+    Ok(value)
+}
+
+fn start_form_fixture_server() -> Result<String, String> {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|error| format!("fixture server bind failed: {error}"))?;
+    let address = listener
+        .local_addr()
+        .map_err(|error| format!("fixture server address failed: {error}"))?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|error| format!("fixture server nonblocking failed: {error}"))?;
+    thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(8);
+        let mut handled = 0;
+        while Instant::now() < deadline && handled < 8 {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    handled += 1;
+                    let _ = respond_form_fixture(stream);
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(20));
+                }
+                Err(_) => break,
+            }
+        }
+    });
+    Ok(format!("http://{address}/"))
+}
+
+fn respond_form_fixture(mut stream: TcpStream) -> Result<(), String> {
+    let mut buffer = [0_u8; 1024];
+    let _ = stream.read(&mut buffer);
+    let body = r##"<!doctype html>
+<html>
+  <head><meta charset="utf-8"><title>Local Draft Fixture</title></head>
+  <body>
+    <main>
+      <h1>Booking Draft</h1>
+      <label>Name<input aria-label="Name" name="name"></label>
+      <button id="submit" type="button">Submit</button>
+      <p id="result" aria-live="polite"></p>
+    </main>
+    <script>
+      document.querySelector("#submit").addEventListener("click", () => {
+        document.querySelector("#result").textContent = "Submitted";
+      });
+    </script>
+  </body>
+</html>"##;
+    let response = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: text/html; charset=utf-8\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    stream
+        .write_all(response.as_bytes())
+        .map_err(|error| format!("fixture server write failed: {error}"))
+}
+
+fn find_ref_by_name(response: &serde_json::Value, name: &str) -> Result<String, String> {
+    response["result"]["refs"]
+        .as_array()
+        .and_then(|refs| {
+            refs.iter().find_map(|entry| {
+                (entry.get("name").and_then(serde_json::Value::as_str) == Some(name))
+                    .then(|| entry.get("ref").and_then(serde_json::Value::as_str))
+                    .flatten()
+                    .map(str::to_string)
+            })
+        })
+        .ok_or_else(|| format!("browser ref missing: {name}"))
 }
 
 fn ensure_ok(response: &serde_json::Value) -> Result<(), String> {

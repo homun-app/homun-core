@@ -191,10 +191,11 @@ Gate di chiusura:
 
 ## Fase 4 - Browser Automation End-To-End
 
-Stato: primo slice read-only implementato. Gli step `prompt_plan.*` con
-`surface=browser` usano il sidecar browser locale, aprono una pagina sicura,
-producono screenshot artifact e aggiornano Task Runtime + Local Computer.
-Restano form fill controllato, manual blockers e policy mutative complete.
+Stato: in corso. Gli step `prompt_plan.*` con `surface=browser` usano il
+sidecar browser locale, aprono una pagina sicura, producono screenshot artifact
+e aggiornano Task Runtime + Local Computer. Il smoke browser copre anche form
+fill draft su fixture locale senza submit. Restano manual blockers e policy
+mutative complete.
 
 Obiettivo:
 

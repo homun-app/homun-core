@@ -1431,6 +1431,34 @@ Perche': questo chiude il primo passaggio da "piano visualizzato" a "azione brow
 
 ## Prossimo blocco
 
+### Fase 4 - Browser form draft senza submit
+
+- Esteso il smoke Local Computer browser.
+- Il smoke ora avvia un server HTTP locale effimero su `127.0.0.1` con una
+  fixture di form.
+- Il sidecar browser viene avviato con private-network opt-in solo per questo
+  test locale controllato.
+- Flusso eseguito:
+  - `browser.health`;
+  - `browser.open` sulla fixture locale;
+  - `browser.snapshot` per ottenere ref accessibili;
+  - `browser.act` con `kind=fill` sul campo `Name`;
+  - `browser.screenshot`;
+  - `browser.stop`.
+- Non viene eseguito click su submit o azioni mutative.
+- La timeline registra `browser_form_draft_completed` con `submitted=false`.
+- Il test verifica che il read model non contenga il valore compilato ne' il
+  risultato `Submitted`.
+- Verifiche eseguite:
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml local_computer_smoke_test_records_real_shell_output -- --nocapture`;
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`;
+  - GREEN: `npm run test:ui-contract`;
+  - GREEN: `npm run build`.
+
+Perche': dopo navigazione e screenshot, il prossimo comportamento fondamentale del browser e' compilare bozze senza inviare. Questo abilita casi come prenotazioni e form web mantenendo il blocco prima di submit/login/pagamento.
+
+## Prossimo blocco
+
 ### Roadmap finale dettagliata
 
 - Creato `docs/architecture/final-roadmap.md`.
