@@ -415,6 +415,12 @@ Gate di chiusura:
 
 ## Fase 9 - Persistenza, Resume E Task Di Giorni
 
+Stato: avviata. Il desktop ora apre store persistenti locali sotto
+`.local-first/desktop-state/` per task runtime, memoria, process registry,
+capability registry, Local Computer e chat thread. I test restano su store
+in-memory isolati. Restano da chiudere recovery lease, resume task running e
+policy di compattazione/retention.
+
 Obiettivo:
 
 - rendere affidabili task lunghi, multipli e riprendibili dopo riavvio.
@@ -432,6 +438,7 @@ Deliverable:
 - thread persistenti;
 - task e checkpoint persistenti;
 - sessioni computer persistenti o ricostruibili;
+- seed locale idempotente, senza reset a ogni avvio;
 - resume di task pending/running;
 - lease recovery all'avvio;
 - limiti globali/per workspace/per utente applicati dopo restart.
@@ -439,6 +446,7 @@ Deliverable:
 Test minimi:
 
 - creare task, riavviare app, ritrovare coda;
+- creare chat, riavviare app, ritrovare thread e sessione computer;
 - running stale rilascia risorse e torna retryable;
 - approval pending sopravvive al riavvio;
 - thread nuovo non eredita eventi vecchi.

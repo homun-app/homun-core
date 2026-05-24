@@ -1832,3 +1832,44 @@ solo un data URL generato dal Core per un artifact gia' registrato e redatto.
   stop, step completati, approval pendenti e task bloccanti.
 - Iniziare a rendere persistenti thread/task/sessioni, cosi' il test reale non
   dipende piu' solo da store in-memory.
+
+### Fase 9 - Persistenza desktop locale V1
+
+- Il bootstrap desktop ora usa storage locale persistente in
+  `.local-first/desktop-state/`:
+  - `task-runtime.sqlite`;
+  - `memory.sqlite`;
+  - `process-registry.sqlite`;
+  - `capability-registry.sqlite`;
+  - `local-computer.sqlite`;
+  - `chat-threads.json`.
+- Aggiunta modalità `seeded_in_memory` per i test, così la suite resta isolata.
+- Il seed di task e memoria ora viene eseguito solo se lo scope locale è vuoto,
+  per non resettare stato, approval, checkpoint o dati utente a ogni avvio.
+- La sessione `computer_active_prompt` viene creata solo se manca già.
+- `ChatThreadStore` ora può caricare/salvare su JSON locale:
+  - `create_chat_thread` persiste subito il nuovo thread;
+  - `touch_thread_for_session` aggiorna `active_thread_id`, timestamp e
+    contatore messaggi su disco.
+- `.local-first/` è stato aggiunto a `.gitignore`.
+- Test aggiunto:
+  - crea stato persistente su directory temporanea;
+  - crea una nuova chat;
+  - riapre `DesktopCoreState` dalla stessa directory;
+  - verifica thread attivo, sessione computer e task runtime seed persistiti.
+- Verifica eseguita:
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`;
+  - GREEN: `npm run test:ui-contract` in `apps/desktop`;
+  - GREEN: `npm run build` in `apps/desktop`.
+
+Perche': per test reali e task lunghi non possiamo dipendere da store
+in-memory. Questo primo blocco rende persistenti le fondamenta desktop senza
+ancora promettere resume completo dei task running: thread, coda, checkpoint,
+memoria, capability, process registry e Local Computer sono ora su file locali.
+
+## Prossimo blocco
+
+- Implementare recovery/lease all'avvio: task `running` o risorse prenotate da
+  una sessione morta devono tornare in stato retryable o waiting_resource
+  coerente.
+- Rendere approval pending e batch summary più visibili nella UI dopo restart.

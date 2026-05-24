@@ -1,5 +1,6 @@
 .venv/
 .venv-mlx/
+.local-first/
 __pycache__/
 *.py[cod]
 .DS_Store

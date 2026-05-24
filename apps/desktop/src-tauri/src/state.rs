@@ -33,6 +33,7 @@ use local_first_task_runtime::{
     ApprovalGate, ResourceClass, ResourceRequirement, TaskRecord, TaskStore, TaskUiReadModel,
     UserId as TaskUserId, WorkspaceId as TaskWorkspaceId,
 };
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -56,37 +57,42 @@ pub struct DesktopCoreState {
     brain_runtime_url: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct ChatThreadStore {
     active_thread_id: String,
     threads: Vec<DesktopChatThread>,
+    #[serde(skip)]
+    path: Option<PathBuf>,
 }
 
-impl DesktopCoreState {
-    pub fn seeded(workspace_root: PathBuf) -> Result<Self, String> {
-        let task_store = TaskStore::open_in_memory().map_err(to_string_error)?;
-        seed_tasks(&task_store).map_err(to_string_error)?;
+enum DesktopStorageMode {
+    InMemory,
+    Persistent,
+}
 
-        let memory_facade = MemoryFacade::new(SQLiteMemoryStore::open_in_memory()?);
-        seed_memories(&memory_facade)?;
+impl ChatThreadStore {
+    fn load_or_default(path: Option<PathBuf>) -> Result<Self, String> {
+        let Some(path_ref) = path.as_ref() else {
+            return Ok(Self::default_with_path(None));
+        };
+        if path_ref.exists() {
+            let json = std::fs::read_to_string(path_ref).map_err(to_string_error)?;
+            let mut store: Self = serde_json::from_str(&json).map_err(to_string_error)?;
+            store.path = path;
+            if store.threads.is_empty() {
+                store = Self::default_with_path(store.path.clone());
+                store.persist()?;
+            }
+            return Ok(store);
+        }
 
-        let process_store = ProcessRegistryStore::open_in_memory().map_err(to_string_error)?;
-        let sidecar_catalog = SidecarProcessCatalog::new(&workspace_root);
-        let process_manager = ProcessManager::new(process_store, LocalProcessSupervisor::new());
-        process_manager
-            .register(sidecar_catalog.gemma_runtime())
-            .map_err(to_string_error)?;
-        process_manager
-            .register(sidecar_catalog.browser_sidecar())
-            .map_err(to_string_error)?;
+        let store = Self::default_with_path(path);
+        store.persist()?;
+        Ok(store)
+    }
 
-        let capability_store =
-            CapabilityRegistryStore::open_in_memory().map_err(to_string_error)?;
-        let capability_provider_ids = seed_capabilities(&capability_store)?;
-        let local_computer =
-            LocalComputerSessionManager::new(LocalComputerSessionStore::open_in_memory()?);
-        seed_local_computer_session(&local_computer)?;
-        let chat_threads = ChatThreadStore {
+    fn default_with_path(path: Option<PathBuf>) -> Self {
+        Self {
             active_thread_id: "thread_active_prompt".to_string(),
             threads: vec![DesktopChatThread {
                 thread_id: "thread_active_prompt".to_string(),
@@ -98,6 +104,87 @@ impl DesktopCoreState {
                 updated_at: now_timestamp(),
                 message_count: 1,
             }],
+            path,
+        }
+    }
+
+    fn persist(&self) -> Result<(), String> {
+        let Some(path) = &self.path else {
+            return Ok(());
+        };
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(to_string_error)?;
+        }
+        let json = serde_json::to_string_pretty(self).map_err(to_string_error)?;
+        std::fs::write(path, json).map_err(to_string_error)
+    }
+}
+
+impl DesktopCoreState {
+    pub fn seeded(workspace_root: PathBuf) -> Result<Self, String> {
+        Self::seeded_with_storage(workspace_root, DesktopStorageMode::Persistent)
+    }
+
+    #[cfg(test)]
+    pub fn seeded_in_memory(workspace_root: PathBuf) -> Result<Self, String> {
+        Self::seeded_with_storage(workspace_root, DesktopStorageMode::InMemory)
+    }
+
+    fn seeded_with_storage(
+        workspace_root: PathBuf,
+        storage_mode: DesktopStorageMode,
+    ) -> Result<Self, String> {
+        let persistent_dir = match storage_mode {
+            DesktopStorageMode::InMemory => None,
+            DesktopStorageMode::Persistent => {
+                let dir = workspace_root.join(".local-first").join("desktop-state");
+                std::fs::create_dir_all(&dir).map_err(to_string_error)?;
+                Some(dir)
+            }
+        };
+
+        let task_store = match &persistent_dir {
+            Some(dir) => {
+                TaskStore::open(dir.join("task-runtime.sqlite")).map_err(to_string_error)?
+            }
+            None => TaskStore::open_in_memory().map_err(to_string_error)?,
+        };
+        seed_tasks_if_empty(&task_store).map_err(to_string_error)?;
+
+        let memory_facade = MemoryFacade::new(match &persistent_dir {
+            Some(dir) => SQLiteMemoryStore::open(dir.join("memory.sqlite"))?,
+            None => SQLiteMemoryStore::open_in_memory()?,
+        });
+        seed_memories_if_empty(&memory_facade)?;
+
+        let process_store = match &persistent_dir {
+            Some(dir) => ProcessRegistryStore::open(dir.join("process-registry.sqlite"))
+                .map_err(to_string_error)?,
+            None => ProcessRegistryStore::open_in_memory().map_err(to_string_error)?,
+        };
+        let sidecar_catalog = SidecarProcessCatalog::new(&workspace_root);
+        let process_manager = ProcessManager::new(process_store, LocalProcessSupervisor::new());
+        process_manager
+            .register(sidecar_catalog.gemma_runtime())
+            .map_err(to_string_error)?;
+        process_manager
+            .register(sidecar_catalog.browser_sidecar())
+            .map_err(to_string_error)?;
+
+        let capability_store = match &persistent_dir {
+            Some(dir) => CapabilityRegistryStore::open(dir.join("capability-registry.sqlite"))
+                .map_err(to_string_error)?,
+            None => CapabilityRegistryStore::open_in_memory().map_err(to_string_error)?,
+        };
+        let capability_provider_ids = seed_capabilities(&capability_store)?;
+        let local_computer = LocalComputerSessionManager::new(match &persistent_dir {
+            Some(dir) => LocalComputerSessionStore::open(dir.join("local-computer.sqlite"))?,
+            None => LocalComputerSessionStore::open_in_memory()?,
+        });
+        ensure_seed_local_computer_session(&local_computer)?;
+        let chat_threads = match &persistent_dir {
+            Some(dir) => ChatThreadStore::load_or_default(Some(dir.join("chat-threads.json")))?,
+            None => ChatThreadStore::load_or_default(None)?,
         };
 
         Ok(Self {
@@ -187,6 +274,7 @@ impl DesktopCoreState {
             .map_err(|_| "chat thread lock poisoned".to_string())?;
         store.active_thread_id = thread.thread_id.clone();
         store.threads.insert(0, thread.clone());
+        store.persist()?;
         Ok(thread)
     }
 
@@ -667,6 +755,7 @@ impl DesktopCoreState {
             thread.updated_at = now_timestamp();
             thread.message_count = thread.message_count.saturating_add(2);
             store.active_thread_id = thread.thread_id.clone();
+            store.persist()?;
         }
         Ok(())
     }
@@ -926,6 +1015,47 @@ fn to_string_error(error: impl std::fmt::Display) -> String {
     error.to_string()
 }
 
+fn seed_tasks_if_empty(store: &TaskStore) -> Result<(), String> {
+    let tasks = store
+        .list_tasks(
+            &TaskUserId::new(DEFAULT_USER_ID),
+            &TaskWorkspaceId::new(DEFAULT_WORKSPACE_ID),
+        )
+        .map_err(to_string_error)?;
+    if tasks.is_empty() {
+        seed_tasks(store).map_err(to_string_error)?;
+    }
+    Ok(())
+}
+
+fn seed_memories_if_empty(facade: &MemoryFacade) -> Result<(), String> {
+    let memories = facade
+        .list_memories_for_ui(
+            &MemoryUserId::new(DEFAULT_USER_ID),
+            &MemoryWorkspaceId::new(DEFAULT_WORKSPACE_ID),
+        )
+        .map_err(to_string_error)?;
+    if memories.is_empty() {
+        seed_memories(facade)?;
+    }
+    Ok(())
+}
+
+fn ensure_seed_local_computer_session(manager: &LocalComputerSessionManager) -> Result<(), String> {
+    if manager
+        .read_model()
+        .snapshot(
+            "computer_active_prompt",
+            DEFAULT_USER_ID,
+            DEFAULT_WORKSPACE_ID,
+        )?
+        .is_some()
+    {
+        return Ok(());
+    }
+    seed_local_computer_session(manager)
+}
+
 fn seed_local_computer_session(manager: &LocalComputerSessionManager) -> Result<(), String> {
     create_local_computer_session(
         manager,
@@ -1077,8 +1207,10 @@ mod tests {
     }
 
     fn state() -> DesktopCoreState {
-        DesktopCoreState::seeded(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.."))
-            .unwrap()
+        DesktopCoreState::seeded_in_memory(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.."),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -1705,6 +1837,39 @@ mod tests {
         );
 
         std::fs::remove_file(preview_path).unwrap();
+    }
+
+    #[test]
+    fn persistent_desktop_state_restores_threads_tasks_and_computer_sessions() {
+        let workspace_root = std::env::temp_dir().join(format!("lfpa-state-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&workspace_root).unwrap();
+
+        let created_thread = {
+            let state = DesktopCoreState::seeded(workspace_root.clone()).unwrap();
+            state.create_chat_thread().unwrap()
+        };
+
+        let restored = DesktopCoreState::seeded(workspace_root.clone()).unwrap();
+        let threads = restored.chat_thread_snapshot().unwrap();
+        let queue = restored.task_queue_snapshot().unwrap();
+        let computer = restored
+            .local_computer_session_snapshot(&created_thread.computer_session_id)
+            .unwrap();
+
+        assert_eq!(threads.active_thread_id, created_thread.thread_id);
+        assert!(threads.threads.iter().any(|thread| {
+            thread.thread_id == created_thread.thread_id
+                && thread.computer_session_id == created_thread.computer_session_id
+        }));
+        assert!(computer.is_some());
+        assert!(
+            queue
+                .active
+                .iter()
+                .any(|task| task.task_id == "task_prompt_session")
+        );
+
+        std::fs::remove_dir_all(workspace_root).unwrap();
     }
 
     #[test]
