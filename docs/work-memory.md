@@ -1512,3 +1512,36 @@ Perche': il progetto ha molti componenti separati ma interdipendenti. Senza una 
 - Collegare il Browser Automation Runtime alla `LocalComputerSessionManager`, cosi' le azioni reali producono eventi, artifact e preview nella stessa card.
 - Collegare `needs_planning` del composer al planner OrchestratorBrain completo per trasformare prompt generici in piani/tool/task invece dell'attuale stato di attesa `prompt_pending_brain`.
 - Lasciare `LearningUiReadModel` e azioni di feedback utente per la fine, quando gli eventi PC reali saranno disponibili.
+
+### Fase 4 - Browser action policy mutative
+
+- Aggiunta `BrowserActionDecision` nel crate `browser-automation`.
+- `BrowserPolicy::classify_tool_call` distingue gli atti browser prima
+  dell'invio al sidecar:
+  - `fill` e bozze non submit restano consentite;
+  - `click`, `close` e `type` con `submit=true` richiedono approval;
+  - gli altri metodi browser non mutativi restano consentiti.
+- `BrowserTaskExecutor` applica la policy prima di chiamare Playwright:
+  quando serve approval restituisce `ExecutorResult::NeedsApproval` e non
+  invia alcun request al sidecar.
+- Il mapping dei manual blocker emessi dal sidecar resta attivo per i casi in
+  cui il blocker viene rilevato durante un'azione consentita.
+- Test aggiunti/aggiornati:
+  - policy su fill draft, click e submit;
+  - executor che blocca click prima del sidecar;
+  - executor che continua a mappare manual blockers del sidecar.
+- Verifica mirata eseguita:
+  - GREEN: `cargo test --manifest-path crates/browser-automation/Cargo.toml`.
+
+Perche': la browser automation deve poter compilare bozze, ma non deve mai
+cliccare, chiudere o inviare form senza un passaggio esplicito di approval. Il
+blocco deve stare nel runtime, non solo nella UI, cosi' Brain, MCP e subagenti
+non possono bypassarlo.
+
+## Prossimo blocco
+
+- Collegare il flusso approval -> resume per azioni browser mutative.
+- Rendere visibile nella UI il motivo del blocco browser senza mostrare payload
+  raw.
+- Integrare il Brain planner reale sopra capability registry e task runtime,
+  cosi' i prompt non dipendono da euristiche o regex.

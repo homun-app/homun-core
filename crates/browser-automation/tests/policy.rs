@@ -1,4 +1,6 @@
-use local_first_browser_automation::{BrowserAutomationError, BrowserPolicy};
+use local_first_browser_automation::{
+    BrowserActionDecision, BrowserAutomationError, BrowserMethod, BrowserPolicy,
+};
 
 #[test]
 fn policy_blocks_unsupported_protocols() {
@@ -35,4 +37,32 @@ fn policy_allows_private_network_with_explicit_opt_in() {
     policy
         .assert_navigation_allowed("http://127.0.0.1:3000")
         .unwrap();
+}
+
+#[test]
+fn policy_allows_form_fill_drafts_without_submit() {
+    let decision = BrowserPolicy::default().classify_tool_call(
+        BrowserMethod::Act,
+        &serde_json::json!({
+            "kind": "fill",
+            "fields": [{"ref": "e1", "value": "redacted"}]
+        }),
+    );
+
+    assert_eq!(decision, BrowserActionDecision::Allow);
+}
+
+#[test]
+fn policy_requires_approval_for_clicks_and_submit_typing() {
+    let click = BrowserPolicy::default().classify_tool_call(
+        BrowserMethod::Act,
+        &serde_json::json!({"kind": "click", "ref": "e1"}),
+    );
+    let submit = BrowserPolicy::default().classify_tool_call(
+        BrowserMethod::Act,
+        &serde_json::json!({"kind": "type", "ref": "e1", "text": "hello", "submit": true}),
+    );
+
+    assert!(matches!(click, BrowserActionDecision::NeedsApproval { .. }));
+    assert!(matches!(submit, BrowserActionDecision::NeedsApproval { .. }));
 }

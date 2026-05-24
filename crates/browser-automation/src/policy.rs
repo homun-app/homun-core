@@ -1,9 +1,21 @@
-use crate::{BrowserAutomationError, BrowserResult};
+use crate::{BrowserAutomationError, BrowserMethod, BrowserResult};
+use serde_json::Value;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BrowserPolicy {
     allow_private_network: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BrowserActionDecision {
+    Allow,
+    NeedsApproval {
+        action: String,
+        risk_level: String,
+        data_boundary: String,
+        explanation: String,
+    },
 }
 
 impl Default for BrowserPolicy {
@@ -38,6 +50,34 @@ impl BrowserPolicy {
             ));
         }
         Ok(())
+    }
+
+    pub fn classify_tool_call(
+        &self,
+        method: BrowserMethod,
+        params: &Value,
+    ) -> BrowserActionDecision {
+        if method != BrowserMethod::Act {
+            return BrowserActionDecision::Allow;
+        }
+        let kind = params.get("kind").and_then(Value::as_str).unwrap_or("");
+        let requires_approval = match kind {
+            "click" | "close" => true,
+            "type" => params
+                .get("submit")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            _ => false,
+        };
+        if !requires_approval {
+            return BrowserActionDecision::Allow;
+        }
+        BrowserActionDecision::NeedsApproval {
+            action: "browser.manual_action".to_string(),
+            risk_level: "medium".to_string(),
+            data_boundary: "local_browser".to_string(),
+            explanation: format!("browser action requires approval before execution: {kind}"),
+        }
     }
 }
 

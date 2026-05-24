@@ -3,10 +3,11 @@ use local_first_browser_automation::{
 };
 use local_first_task_runtime::{ExecutorResult, ResourceClass, TaskExecutor, UserId, WorkspaceId};
 use std::cell::RefCell;
+use std::rc::Rc;
 
 struct FakeTransport {
     response: String,
-    sent: RefCell<Vec<BrowserRequest>>,
+    sent: Rc<RefCell<Vec<BrowserRequest>>>,
 }
 
 impl BrowserTransport for FakeTransport {
@@ -49,7 +50,7 @@ fn executor_checkpoints_snapshot_results() {
             "result": {"snapshot": "page", "refs": []}
         })
         .to_string(),
-        sent: Default::default(),
+        sent: Rc::default(),
     };
     let mut executor = BrowserTaskExecutor::new(transport);
     let task = BrowserTaskRuntimeBridge::new().enqueue_browser_call(
@@ -91,8 +92,42 @@ fn executor_maps_manual_blockers_to_user_approval() {
             }
         })
         .to_string(),
-        sent: Default::default(),
+        sent: Rc::default(),
     };
+    let mut executor = BrowserTaskExecutor::new(transport);
+    let task = BrowserTaskRuntimeBridge::new().enqueue_browser_call(
+        "browser_task_1",
+        UserId::new("user_1"),
+        WorkspaceId::new("workspace_1"),
+        BrowserMethod::Act,
+        serde_json::json!({"target_id": "booking", "kind": "wait", "text": "2FA"}),
+    );
+
+    let result = executor.execute_step(&task, None).unwrap();
+
+    assert_eq!(
+        result,
+        ExecutorResult::NeedsApproval {
+            action: "browser.manual_action".to_string(),
+            risk_level: "medium".to_string(),
+            data_boundary: "local_browser".to_string(),
+            explanation: "2FA required".to_string(),
+        }
+    );
+}
+
+#[test]
+fn executor_blocks_click_actions_before_sidecar() {
+    let transport = FakeTransport {
+        response: serde_json::json!({
+            "id": "browser_req_1",
+            "ok": true,
+            "result": {"ok": true}
+        })
+        .to_string(),
+        sent: Rc::default(),
+    };
+    let sent = Rc::clone(&transport.sent);
     let mut executor = BrowserTaskExecutor::new(transport);
     let task = BrowserTaskRuntimeBridge::new().enqueue_browser_call(
         "browser_task_1",
@@ -110,9 +145,10 @@ fn executor_maps_manual_blockers_to_user_approval() {
             action: "browser.manual_action".to_string(),
             risk_level: "medium".to_string(),
             data_boundary: "local_browser".to_string(),
-            explanation: "2FA required".to_string(),
+            explanation: "browser action requires approval before execution: click".to_string(),
         }
     );
+    assert!(sent.borrow().is_empty());
 }
 
 #[test]
@@ -124,7 +160,7 @@ fn executor_completes_non_snapshot_calls() {
             "result": {"status": "ready"}
         })
         .to_string(),
-        sent: Default::default(),
+        sent: Rc::default(),
     };
     let mut executor = BrowserTaskExecutor::new(transport);
     let task = BrowserTaskRuntimeBridge::new().enqueue_browser_call(

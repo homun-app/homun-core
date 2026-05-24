@@ -1,4 +1,7 @@
-use crate::{BrowserAutomationClient, BrowserMethod, BrowserResponse, BrowserTransport};
+use crate::{
+    BrowserActionDecision, BrowserAutomationClient, BrowserMethod, BrowserPolicy, BrowserResponse,
+    BrowserTransport,
+};
 use local_first_task_runtime::{
     ExecutorResult, ResourceClass, ResourceRequirement, TaskCheckpoint, TaskExecutor, TaskRecord,
     TaskRuntimeError, TaskRuntimeResult, UserId, WorkspaceId,
@@ -69,6 +72,20 @@ impl<T: BrowserTransport> TaskExecutor for BrowserTaskExecutor<T> {
             .get("params")
             .cloned()
             .unwrap_or_else(|| Value::Object(Default::default()));
+        if let BrowserActionDecision::NeedsApproval {
+            action,
+            risk_level,
+            data_boundary,
+            explanation,
+        } = BrowserPolicy::default().classify_tool_call(method, &params)
+        {
+            return Ok(ExecutorResult::NeedsApproval {
+                action,
+                risk_level,
+                data_boundary,
+                explanation,
+            });
+        }
         let response = self
             .client
             .call_response(method, params.clone())

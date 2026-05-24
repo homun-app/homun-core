@@ -194,8 +194,10 @@ Gate di chiusura:
 Stato: in corso. Gli step `prompt_plan.*` con `surface=browser` usano il
 sidecar browser locale, aprono una pagina sicura, producono screenshot artifact
 e aggiornano Task Runtime + Local Computer. Il smoke browser copre anche form
-fill draft su fixture locale senza submit. Restano manual blockers e policy
-mutative complete.
+fill draft su fixture locale senza submit. Il `BrowserTaskExecutor` applica una
+policy preventiva: fill/draft resta consentito, click/close/type con submit
+richiedono approval prima di arrivare al sidecar. Restano da chiudere il flusso
+end-to-end approval -> resume dell'azione mutativa e i blocker manuali nella UI.
 
 Obiettivo:
 
@@ -215,6 +217,7 @@ Deliverable:
 - task browser read-only reali;
 - form fill draft senza submit rischioso;
 - manual blockers tipizzati;
+- policy mutative preventiva nel task executor;
 - screenshot e transcript redatti;
 - policy per domini e azioni sensibili;
 - fallback e recovery su errore browser.
