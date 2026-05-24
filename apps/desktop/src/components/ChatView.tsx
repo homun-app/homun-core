@@ -72,6 +72,7 @@ export function ChatView({
   const [planStepError, setPlanStepError] = useState<string | null>(null);
   const [computerControlBusy, setComputerControlBusy] = useState(false);
   const [computerControlError, setComputerControlError] = useState<string | null>(null);
+  const [previewDataUrl, setPreviewDataUrl] = useState<string | null>(null);
   const [promptSubmitting, setPromptSubmitting] = useState(false);
   const [promptError, setPromptError] = useState<string | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
@@ -195,6 +196,7 @@ export function ChatView({
   useEffect(() => {
     let cancelled = false;
     setComputerSession(createLoadingComputerSession(computerSessionId));
+    setPreviewDataUrl(null);
 
     async function loadLocalComputerSession() {
       try {
@@ -226,6 +228,39 @@ export function ChatView({
       window.clearInterval(interval);
     };
   }, [computerSessionId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const artifactId = computerSession.previewArtifactId;
+    if (!artifactId || computerSession.source !== "core") {
+      setPreviewDataUrl(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+    const previewArtifactId = artifactId;
+
+    async function loadPreview() {
+      try {
+        const preview = await coreBridge.localComputerArtifactPreview(
+          computerSession.id,
+          previewArtifactId,
+        );
+        if (!cancelled) {
+          setPreviewDataUrl(preview?.data_url ?? null);
+        }
+      } catch {
+        if (!cancelled) {
+          setPreviewDataUrl(null);
+        }
+      }
+    }
+
+    void loadPreview();
+    return () => {
+      cancelled = true;
+    };
+  }, [computerSession.id, computerSession.previewArtifactId, computerSession.source]);
 
   useEffect(() => {
     if (
@@ -340,6 +375,7 @@ export function ChatView({
             smokeTestRunning={smokeTestRunning}
             planStepError={planStepError}
             planStepRunning={planStepRunning}
+            previewDataUrl={previewDataUrl}
             session={computerSession}
             task={task}
             onOpen={() => setDetailsOpen(true)}
@@ -359,6 +395,7 @@ export function ChatView({
           onResume={() => runComputerControl(coreBridge.resumeLocalComputerSession)}
           onSelectSurface={setActiveSurface}
           onTakeover={() => runComputerControl(coreBridge.requestLocalComputerTakeover)}
+          previewDataUrl={previewDataUrl}
           session={computerSession}
         />
       )}
@@ -452,6 +489,7 @@ function LocalComputerCard({
   onRunSmokeTest,
   planStepError,
   planStepRunning,
+  previewDataUrl,
   session,
   smokeTestError,
   smokeTestRunning,
@@ -463,6 +501,7 @@ function LocalComputerCard({
   onRunSmokeTest: () => void;
   planStepError: string | null;
   planStepRunning: boolean;
+  previewDataUrl: string | null;
   session: ComputerSession;
   smokeTestError: string | null;
   smokeTestRunning: boolean;
@@ -472,20 +511,30 @@ function LocalComputerCard({
     <article className="local-computer-card">
       <button className="computer-card-main" type="button" onClick={onOpen}>
         <div className="computer-preview" aria-hidden="true">
-          <div className="browser-chrome">
-            <span />
-            <span />
-            <span />
-          </div>
-          <div className="browser-lines">
-            <i />
-            <i />
-            <i />
-          </div>
-          <div className="terminal-preview">
-            <span>$ date</span>
-            <span>CEST · local</span>
-          </div>
+          {previewDataUrl ? (
+            <img
+              className="computer-preview-image"
+              alt=""
+              src={previewDataUrl}
+            />
+          ) : (
+            <>
+              <div className="browser-chrome">
+                <span />
+                <span />
+                <span />
+              </div>
+              <div className="browser-lines">
+                <i />
+                <i />
+                <i />
+              </div>
+              <div className="terminal-preview">
+                <span>$ date</span>
+                <span>CEST · local</span>
+              </div>
+            </>
+          )}
         </div>
         <div className="computer-card-copy">
           <div className="computer-card-title">
@@ -542,6 +591,7 @@ function ComputerDetailPanel({
   onResume,
   onSelectSurface,
   onTakeover,
+  previewDataUrl,
   session,
 }: {
   activeSurface: ComputerSurfaceKind;
@@ -552,6 +602,7 @@ function ComputerDetailPanel({
   onResume: () => void;
   onSelectSurface: (surface: ComputerSurfaceKind) => void;
   onTakeover: () => void;
+  previewDataUrl: string | null;
   session: ComputerSession;
 }) {
   const currentSurface = session.surfaces.find((surface) => surface.id === activeSurface);
@@ -593,13 +644,23 @@ function ComputerDetailPanel({
               <span>{session.previewTitle}</span>
             </div>
             <div className="browser-live-body">
-              <strong>{session.previewTitle}</strong>
-              <p>{session.previewDetail}</p>
-              <div className="result-skeleton">
-                <span />
-                <span />
-                <span />
-              </div>
+              {previewDataUrl ? (
+                <img
+                  className="browser-live-image"
+                  alt="Preview browser redatta"
+                  src={previewDataUrl}
+                />
+              ) : (
+                <>
+                  <strong>{session.previewTitle}</strong>
+                  <p>{session.previewDetail}</p>
+                  <div className="result-skeleton">
+                    <span />
+                    <span />
+                    <span />
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}

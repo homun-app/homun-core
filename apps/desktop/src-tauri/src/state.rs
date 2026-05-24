@@ -1,7 +1,7 @@
 use crate::local_computer_smoke;
 use crate::models::{
-    BridgeStatus, CapabilityPolicySummary, CapabilitySnapshot, DesktopChatThread,
-    DesktopChatThreadSnapshot, DesktopTaskDetail, DesktopTaskQueueSnapshot,
+    BridgeStatus, CapabilityPolicySummary, CapabilitySnapshot, ComputerArtifactPreview,
+    DesktopChatThread, DesktopChatThreadSnapshot, DesktopTaskDetail, DesktopTaskQueueSnapshot,
     PromptPlanBatchRunResult, PromptPlanStepRunResult, RuntimeHealthSnapshot, RuntimeProcessItem,
     capability_connection_item, capability_tool_item, component, desktop_task_detail,
     desktop_task_queue, runtime_process_item, runtime_process_item_with_snapshot,
@@ -19,7 +19,7 @@ use local_first_capabilities::{
 };
 use local_first_local_computer_session::{
     ComputerEventCreate, ComputerSessionCreate, ComputerSessionSnapshot,
-    LocalComputerSessionManager, LocalComputerSessionStore, SurfaceKind,
+    LocalComputerSessionManager, LocalComputerSessionStore, SurfaceKind, redact_text,
 };
 use local_first_memory::{
     DataSensitivity, MemoryAccessRequest, MemoryDashboard, MemoryFacade, MemoryUiReadModel,
@@ -497,6 +497,52 @@ impl DesktopCoreState {
             .snapshot(session_id, &self.user_id, &self.workspace_id)
     }
 
+    pub fn local_computer_artifact_preview(
+        &self,
+        session_id: &str,
+        artifact_id: &str,
+    ) -> Result<Option<ComputerArtifactPreview>, String> {
+        const MAX_PREVIEW_BYTES: u64 = 5 * 1024 * 1024;
+
+        let manager = self
+            .local_computer
+            .lock()
+            .map_err(|_| "local computer lock poisoned".to_string())?;
+        let artifacts =
+            manager
+                .store()
+                .artifacts_for_session(session_id, &self.user_id, &self.workspace_id)?;
+        let Some(artifact) = artifacts
+            .into_iter()
+            .find(|artifact| artifact.artifact_id == artifact_id)
+        else {
+            return Ok(None);
+        };
+        let Some(preview_ref) = artifact.preview_ref.clone() else {
+            return Ok(None);
+        };
+        if artifact.size_bytes > MAX_PREVIEW_BYTES {
+            return Err("artifact preview exceeds local UI size limit".to_string());
+        }
+
+        let preview_path = PathBuf::from(&preview_ref);
+        let mime_type = preview_mime_type(&preview_path)?;
+        let bytes = std::fs::read(&preview_path).map_err(|error| error.to_string())?;
+        if bytes.len() as u64 > MAX_PREVIEW_BYTES {
+            return Err("artifact preview exceeds local UI size limit".to_string());
+        }
+
+        use base64::Engine;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+        Ok(Some(ComputerArtifactPreview {
+            artifact_id: artifact.artifact_id,
+            title_redacted: redact_text(&artifact.title),
+            kind: artifact.kind,
+            size_bytes: artifact.size_bytes,
+            data_url: format!("data:{mime_type};base64,{encoded}"),
+        }))
+    }
+
     pub fn run_local_computer_smoke_test(
         &self,
         session_id: &str,
@@ -842,6 +888,20 @@ fn redacted_url_origin(target_url: &str) -> String {
         .filter(|value| !value.is_empty())
         .unwrap_or("redacted");
     format!("{scheme}://{host}")
+}
+
+fn preview_mime_type(path: &std::path::Path) -> Result<&'static str, String> {
+    match path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("png") => Ok("image/png"),
+        Some("jpg") | Some("jpeg") => Ok("image/jpeg"),
+        Some("webp") => Ok("image/webp"),
+        _ => Err("unsupported artifact preview type".to_string()),
+    }
 }
 
 fn memory_access_request(user_id: &str, workspace_id: &str) -> MemoryAccessRequest {
@@ -1604,6 +1664,47 @@ mod tests {
                 .iter()
                 .any(|item| item.kind == "browser_automation_preview_ready")
         );
+    }
+
+    #[test]
+    fn local_computer_artifact_preview_returns_redacted_data_url_for_session_artifact() {
+        let state = state();
+        let preview_path =
+            std::env::temp_dir().join(format!("lfpa-preview-{}.png", Uuid::new_v4()));
+        std::fs::write(&preview_path, b"\x89PNG\r\n\x1a\n").unwrap();
+
+        {
+            let manager = state.local_computer.lock().unwrap();
+            manager
+                .create_artifact(local_first_local_computer_session::ArtifactCreate {
+                    session_id: "computer_active_prompt".to_string(),
+                    artifact_id: "preview_test".to_string(),
+                    title: "risultati-treni-redatto.png".to_string(),
+                    kind: "screenshot".to_string(),
+                    path_ref: preview_path.to_string_lossy().to_string(),
+                    size_bytes: 8,
+                    preview_ref: Some(preview_path.to_string_lossy().to_string()),
+                })
+                .unwrap();
+        }
+
+        let preview = state
+            .local_computer_artifact_preview("computer_active_prompt", "preview_test")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(preview.artifact_id, "preview_test");
+        assert_eq!(preview.kind, "screenshot");
+        assert_eq!(preview.size_bytes, 8);
+        assert_eq!(preview.title_redacted, "risultati-treni-redatto.png");
+        assert!(preview.data_url.starts_with("data:image/png;base64,"));
+        assert!(
+            !preview
+                .data_url
+                .contains(preview_path.to_string_lossy().as_ref())
+        );
+
+        std::fs::remove_file(preview_path).unwrap();
     }
 
     #[test]

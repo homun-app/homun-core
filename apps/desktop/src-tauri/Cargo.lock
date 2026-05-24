@@ -1913,6 +1913,7 @@ dependencies = [
 name = "local-first-desktop"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "local-first-browser-automation",
  "local-first-capabilities",
  "local-first-local-computer-session",

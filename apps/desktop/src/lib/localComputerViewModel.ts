@@ -7,6 +7,9 @@ export function mapCoreComputerSession(
   snapshot: CoreComputerSessionSnapshot,
 ): ComputerSession {
   const activeSurface = toSurfaceKind(snapshot.active_surface);
+  const previewArtifact = [...snapshot.artifact_refs]
+    .reverse()
+    .find((artifact) => artifact.preview_ref);
   const timeline = snapshot.timeline.map((item) => ({
     id: item.event_id,
     surface: toSurfaceKind(item.surface),
@@ -31,6 +34,7 @@ export function mapCoreComputerSession(
     previewDetail: snapshot.preview_frame_ref
       ? `Preview redatta disponibile: ${snapshot.preview_frame_ref}`
       : "Preview non ancora disponibile",
+    previewArtifactId: previewArtifact?.artifact_id,
     terminalExcerpt: snapshot.terminal_excerpt_redacted,
     surfaces: snapshot.surfaces.map((surface) => ({
       id: toSurfaceKind(surface.surface),
@@ -44,6 +48,7 @@ export function mapCoreComputerSession(
       name: artifact.title_redacted,
       kind: toArtifactKind(artifact.kind),
       detail: `${formatBytes(artifact.size_bytes)} · ${artifact.preview_ref ? "preview redatta" : "solo metadati"}`,
+      previewRef: artifact.preview_ref ?? undefined,
     })),
     source: "core",
   };

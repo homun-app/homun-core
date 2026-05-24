@@ -1,7 +1,7 @@
 use crate::models::{
-    BridgeStatus, CapabilitySnapshot, DesktopChatThread, DesktopChatThreadSnapshot,
-    DesktopTaskDetail, DesktopTaskQueueSnapshot, PromptPlanBatchRunResult, PromptPlanStepRunResult,
-    RuntimeHealthSnapshot, RuntimeProcessItem,
+    BridgeStatus, CapabilitySnapshot, ComputerArtifactPreview, DesktopChatThread,
+    DesktopChatThreadSnapshot, DesktopTaskDetail, DesktopTaskQueueSnapshot,
+    PromptPlanBatchRunResult, PromptPlanStepRunResult, RuntimeHealthSnapshot, RuntimeProcessItem,
 };
 use crate::prompt_submission::PromptSubmissionResult;
 use crate::state::DesktopCoreState;
@@ -110,6 +110,15 @@ pub fn local_computer_session_snapshot(
     session_id: String,
 ) -> Result<Option<ComputerSessionSnapshot>, String> {
     state.local_computer_session_snapshot(&session_id)
+}
+
+#[tauri::command]
+pub fn local_computer_artifact_preview(
+    state: tauri::State<'_, DesktopCoreState>,
+    session_id: String,
+    artifact_id: String,
+) -> Result<Option<ComputerArtifactPreview>, String> {
+    state.local_computer_artifact_preview(&session_id, &artifact_id)
 }
 
 #[tauri::command]

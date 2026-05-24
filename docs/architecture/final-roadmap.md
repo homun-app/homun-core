@@ -153,8 +153,10 @@ Gate di chiusura:
 
 Stato: avviata. Il smoke locale registra shell output reale e produce anche un
 artifact screenshot browser dal sidecar Playwright, esposto come preview
-redatta nella sessione Local Computer. I controlli base pausa/riprendi/takeover
-sono cablati al Core e persistiti nel read model.
+redatta nella sessione Local Computer. La UI puo' caricare la preview artifact
+tramite comando Tauri locale e mostrarla come thumbnail/pannello Browser senza
+esporre path raw. I controlli base pausa/riprendi/takeover sono cablati al Core
+e persistiti nel read model.
 
 Obiettivo:
 
@@ -171,6 +173,7 @@ Componenti:
 Deliverable:
 
 - preview browser reale o screenshot aggiornabile;
+- comando locale per leggere preview artifact redatti come data URL UI-safe;
 - output shell redatto;
 - artifact list reale;
 - timeline compatta nella chat e detail completo on demand;
@@ -210,7 +213,9 @@ executor. Il primo task browser atomico esegue ora `browser.open` e, nella
 stessa sessione sidecar, produce anche `browser.snapshot` e
 `browser.screenshot` redatti per alimentare la Local Computer card. Esiste
 anche un batch runner controllato che puo' avanzare piu' step pronti del piano
-senza bypassare approval o risorse.
+senza bypassare approval o risorse. Le preview prodotte dai task browser sono
+ora renderizzabili nella UI attraverso un comando locale che restituisce solo
+data URL per artifact di sessione.
 
 Obiettivo:
 
@@ -237,6 +242,7 @@ Deliverable:
 - `target_url` sicura per step browser del Brain planner;
 - mapping Brain planner -> task `browser_automation`;
 - readback browser atomico con snapshot e screenshot;
+- preview browser visibile nel Local Computer UI;
 - screenshot e transcript redatti;
 - policy per domini e azioni sensibili;
 - fallback e recovery su errore browser.

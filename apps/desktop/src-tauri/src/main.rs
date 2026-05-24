@@ -30,6 +30,7 @@ fn main() {
             commands::memory_dashboard_snapshot,
             commands::capability_snapshot,
             commands::local_computer_session_snapshot,
+            commands::local_computer_artifact_preview,
             commands::local_computer_run_smoke_test,
             commands::local_computer_request_takeover,
             commands::local_computer_pause_session,

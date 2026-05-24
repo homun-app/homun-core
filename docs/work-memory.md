@@ -1792,3 +1792,43 @@ lavoro.
   piu' lunghi.
 - Preparare il passaggio dal runner batch locale al loop orchestrato con task
   durevoli persistenti.
+
+### Fase 5 - Preview artifact locale nel Computer UI
+
+- Aggiunto DTO `ComputerArtifactPreview` nel Tauri Core.
+- Aggiunto metodo `DesktopCoreState::local_computer_artifact_preview`:
+  - cerca l'artifact solo dentro la sessione, utente e workspace correnti;
+  - accetta solo artifact con `preview_ref`;
+  - limita la preview a 5 MB;
+  - accetta solo immagini `png`, `jpg/jpeg`, `webp`;
+  - restituisce un `data_url` locale e non espone path raw nel payload UI.
+- Aggiunto comando Tauri `local_computer_artifact_preview`.
+- Aggiornato `coreBridge.localComputerArtifactPreview`.
+- Aggiornato `mapCoreComputerSession` per individuare l'ultimo artifact con
+  preview redatta.
+- La Chat ora carica la preview artifact quando disponibile e la mostra:
+  - come thumbnail nella card `Computer locale`;
+  - come immagine grande nel pannello Browser del Computer.
+- Aggiunto test TDD:
+  - prima RED: metodo non presente;
+  - poi GREEN: artifact screenshot di sessione -> `data:image/png;base64,...`;
+  - verifica che il data URL non contenga il path locale.
+- Verifica eseguita:
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`;
+  - GREEN: `npm run test:ui-contract` in `apps/desktop`;
+  - GREEN: `npm run build` in `apps/desktop`;
+  - GREEN: `cargo test --manifest-path crates/browser-automation/Cargo.toml`;
+  - GREEN: browser locale `http://127.0.0.1:1420/` desktop 1440x900 senza
+    errori console e senza overlap evidente.
+
+Perche': Manus rende forte l'esperienza perche' mostra cosa sta facendo il
+computer, non solo log. Questo blocco rende visibile la preview browser reale
+prodotta dal runtime, mantenendo il confine local-first: il browser web vede
+solo un data URL generato dal Core per un artifact gia' registrato e redatto.
+
+## Prossimo blocco
+
+- Rendere il riepilogo batch piu' operativo nella UI Tasks/Computer: ultimo
+  stop, step completati, approval pendenti e task bloccanti.
+- Iniziare a rendere persistenti thread/task/sessioni, cosi' il test reale non
+  dipende piu' solo da store in-memory.

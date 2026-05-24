@@ -53,6 +53,15 @@ pub struct PromptPlanBatchRunResult {
     pub results: Vec<PromptPlanStepRunResult>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ComputerArtifactPreview {
+    pub artifact_id: String,
+    pub title_redacted: String,
+    pub kind: String,
+    pub size_bytes: u64,
+    pub data_url: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeHealthSnapshot {
     pub processes: Vec<RuntimeProcessItem>,

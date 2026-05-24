@@ -166,6 +166,14 @@ export interface CoreComputerSessionSnapshot {
   updated_at: string;
 }
 
+export interface CoreComputerArtifactPreview {
+  artifact_id: string;
+  title_redacted: string;
+  kind: string;
+  size_bytes: number;
+  data_url: string;
+}
+
 export interface CorePromptMessage {
   id: string;
   role: "user" | "assistant" | "system";
@@ -240,6 +248,11 @@ export const coreBridge = {
     invoke<CoreComputerSessionSnapshot | null>(
       "local_computer_session_snapshot",
       { sessionId },
+    ),
+  localComputerArtifactPreview: (sessionId: string, artifactId: string) =>
+    invoke<CoreComputerArtifactPreview | null>(
+      "local_computer_artifact_preview",
+      { sessionId, artifactId },
     ),
   runLocalComputerSmokeTest: (sessionId: string) =>
     invoke<CoreComputerSessionSnapshot>("local_computer_run_smoke_test", {

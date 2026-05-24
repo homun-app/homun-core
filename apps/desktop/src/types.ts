@@ -123,6 +123,7 @@ export interface ComputerArtifact {
   name: string;
   kind: "screenshot" | "terminal" | "file" | "log";
   detail: string;
+  previewRef?: string;
 }
 
 export interface ComputerSession {
@@ -136,6 +137,7 @@ export interface ComputerSession {
   progressTotal: number;
   previewTitle: string;
   previewDetail: string;
+  previewArtifactId?: string;
   terminalExcerpt: string[];
   surfaces: ComputerSurface[];
   timeline: ComputerTimelineItem[];
