@@ -9,6 +9,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 local-first-capabilities = { path = "../../../crates/capabilities" }
+local-first-browser-automation = { path = "../../../crates/browser-automation" }
 local-first-local-computer-session = { path = "../../../crates/local-computer-session" }
 local-first-memory = { path = "../../../crates/memory" }
 local-first-process-manager = { path = "../../../crates/process-manager" }

@@ -1913,6 +1913,7 @@ dependencies = [
 name = "local-first-desktop"
 version = "0.1.0"
 dependencies = [
+ "local-first-browser-automation",
  "local-first-capabilities",
  "local-first-local-computer-session",
  "local-first-memory",

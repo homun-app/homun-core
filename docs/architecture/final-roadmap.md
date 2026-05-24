@@ -191,6 +191,11 @@ Gate di chiusura:
 
 ## Fase 4 - Browser Automation End-To-End
 
+Stato: primo slice read-only implementato. Gli step `prompt_plan.*` con
+`surface=browser` usano il sidecar browser locale, aprono una pagina sicura,
+producono screenshot artifact e aggiornano Task Runtime + Local Computer.
+Restano form fill controllato, manual blockers e policy mutative complete.
+
 Obiettivo:
 
 - usare il browser per ricerche, compilazione form e operazioni web controllate;

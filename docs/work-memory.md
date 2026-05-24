@@ -1397,6 +1397,40 @@ Perche': il Local Computer non deve essere solo una preview. L'utente deve poter
 
 ## Prossimo blocco
 
+### Fase 4 - Browser automation read-only dal Prompt Plan Executor
+
+- Aggiunto `local-first-browser-automation` come dipendenza del Tauri Core.
+- Esteso `BrowserSidecarSession`:
+  - supporta `current_dir`;
+  - supporta env dedicate;
+  - implementa `BrowserTransport`;
+  - mantiene stdin/stdout persistenti per chiamate JSON-line multiple.
+- `PromptPlanExecutor` ora, per step `surface=browser`:
+  - riserva `browser_session` tramite Resource Governor;
+  - avvia il sidecar Playwright locale;
+  - chiama `browser.health`;
+  - apre una tab sicura `about:blank`;
+  - produce screenshot con `browser.screenshot`;
+  - registra artifact `browser_preview_*` nella Local Computer Session;
+  - salva checkpoint redatto `browser_read_only_completed`;
+  - aggiorna timeline con `browser_read_only_artifact_ready`;
+  - rilascia la risorsa browser anche dopo l'esecuzione.
+- Gli artifact browser del task vengono scritti sotto
+  `target/browser-task-artifacts`, quindi restano locali e ignorati da git.
+- Test rafforzato:
+  - `prompt_plan_executor_runs_first_research_step_and_records_checkpoint`
+    verifica ora checkpoint browser, artifact screenshot e preview ref.
+- Verifiche eseguite:
+  - GREEN: `cargo test --manifest-path crates/browser-automation/Cargo.toml`;
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml prompt_plan_executor_runs_first_research_step_and_records_checkpoint -- --nocapture`;
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`;
+  - GREEN: `npm run test:ui-contract`;
+  - GREEN: `npm run build`.
+
+Perche': questo chiude il primo passaggio da "piano visualizzato" a "azione browser locale reale". Resta read-only per non introdurre mutazioni web prima di policy form/submit/manual blocker complete.
+
+## Prossimo blocco
+
 ### Roadmap finale dettagliata
 
 - Creato `docs/architecture/final-roadmap.md`.

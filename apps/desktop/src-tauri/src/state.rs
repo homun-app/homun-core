@@ -366,6 +366,7 @@ impl DesktopCoreState {
         prompt_plan_executor::run_next_prompt_plan_step(
             &store,
             &manager,
+            &self.workspace_root,
             &self.user_id,
             &self.workspace_id,
             session_id,
@@ -1278,9 +1279,11 @@ mod tests {
         assert_eq!(run.status, "completed");
         assert_eq!(run.task_id.as_deref(), Some(task_id));
         assert_eq!(detail.status, "completed");
+        let checkpoint = detail.latest_checkpoint.unwrap();
+        assert_eq!(checkpoint["prompt_plan_executor"]["state"], "completed");
         assert_eq!(
-            detail.latest_checkpoint.unwrap()["prompt_plan_executor"]["state"],
-            "completed"
+            checkpoint["prompt_plan_executor"]["result"],
+            "browser_read_only_completed"
         );
         assert_eq!(browser_usage, 0);
         assert!(
@@ -1288,6 +1291,18 @@ mod tests {
                 .timeline
                 .iter()
                 .any(|item| { item.kind == "prompt_plan_step_completed" && item.payload_redacted })
+        );
+        assert!(
+            computer
+                .timeline
+                .iter()
+                .any(|item| item.kind == "browser_read_only_artifact_ready")
+        );
+        assert!(
+            computer
+                .artifact_refs
+                .iter()
+                .any(|artifact| artifact.kind == "screenshot" && artifact.preview_ref.is_some())
         );
         assert!(!serialized.contains("prenota un treno"));
     }
