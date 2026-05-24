@@ -206,7 +206,9 @@ orchestrazione Brain -> task browser reale. Il planner puo' produrre una
 fragment, cosi' il prompt raw non viene trasformato in URL esterne. Gli step
 browser atomici con `target_url` vengono ora enqueueati come task
 `browser_automation` reali, usando il tool registry browser e il browser task
-executor.
+executor. Il primo task browser atomico esegue ora `browser.open` e, nella
+stessa sessione sidecar, produce anche `browser.snapshot` e
+`browser.screenshot` redatti per alimentare la Local Computer card.
 
 Obiettivo:
 
@@ -232,6 +234,7 @@ Deliverable:
 - blocker browser leggibili nella UI;
 - `target_url` sicura per step browser del Brain planner;
 - mapping Brain planner -> task `browser_automation`;
+- readback browser atomico con snapshot e screenshot;
 - screenshot e transcript redatti;
 - policy per domini e azioni sensibili;
 - fallback e recovery su errore browser.

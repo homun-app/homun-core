@@ -1712,3 +1712,40 @@ typed, resource governor, BrowserTaskExecutor e Local Computer audit.
   `browser.snapshot` e `browser.screenshot`.
 - Aggiungere un run sequenziale di piu' task del piano, non solo il prossimo
   step.
+
+### Fase 5 - Browser task readback con snapshot e screenshot
+
+- Aggiunto `browser.screenshot` al tool cache seed del Capability Registry.
+- Gli step browser atomici creati dal Brain planner ora marcano il task con
+  `read_after_open=true`.
+- `prompt_plan_run_next_step`, quando esegue un task `browser_automation` con
+  `read_after_open`, mantiene una singola sessione sidecar Playwright e chiama:
+  - `browser.health`;
+  - `browser.open`;
+  - `browser.snapshot`;
+  - `browser.screenshot`;
+  - `browser.stop`.
+- Il checkpoint del task resta redatto:
+  - stato `completed`;
+  - metodo `browser.open`;
+  - origine URL redatta;
+  - sole chiavi di output (`opened`, `snapshot`, `screenshot`), non payload raw.
+- La Local Computer Session riceve:
+  - evento `browser_automation_preview_ready`;
+  - artifact screenshot con `preview_ref`;
+  - evento `browser_automation_task_completed`.
+- Test aggiornato:
+  - `prompt_plan_executor_runs_first_research_step_and_records_checkpoint`
+    verifica output keys `snapshot` e `screenshot`, evento preview e artifact.
+- Verifica mirata eseguita:
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`.
+
+Perche': aprire una pagina non basta per un assistente operativo. Il sistema
+deve anche leggere una snapshot strutturata e produrre una preview visiva, ma
+farlo nello stesso sidecar evita di perdere lo stato della pagina tra processi.
+
+## Prossimo blocco
+
+- Aggiungere run sequenziale controllato di piu' step del piano.
+- Portare nel read model UI il fatto che un task browser ha prodotto snapshot e
+  preview, senza leggere il payload raw.

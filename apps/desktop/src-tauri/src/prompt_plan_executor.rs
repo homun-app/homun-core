@@ -319,6 +319,49 @@ fn run_browser_automation_plan_task(
             approval_required: false,
         })?;
 
+        if browser_task_should_read_after_open(&task) {
+            let output = execute_browser_open_readback_task(
+                manager,
+                workspace_root,
+                session_id,
+                &task,
+                &task_id,
+            )?;
+            append_browser_task_checkpoint(
+                store,
+                &task,
+                user_id,
+                workspace_id,
+                "completed",
+                Some(output),
+            )?;
+            store
+                .update_task_status(
+                    &task.task_id,
+                    user_id,
+                    workspace_id,
+                    TaskStatus::Completed,
+                    None,
+                )
+                .map_err(to_string_error)?;
+            append_prompt_plan_computer_event(
+                manager,
+                session_id,
+                SurfaceKind::Browser,
+                "browser_automation_task_completed",
+                "done",
+                &task.goal,
+                "Task browser completato con snapshot e preview redatti",
+                false,
+            )?;
+            return Ok(PromptPlanStepRunResult {
+                status: "completed".to_string(),
+                task_id: Some(task_id),
+                message: "Task browser ha aperto la pagina e prodotto snapshot/preview."
+                    .to_string(),
+            });
+        }
+
         let runtime_dir = workspace_root.join("runtimes/browser-automation");
         let artifact_root = workspace_root.join("target/browser-task-artifacts");
         let transport = BrowserSidecarSession::spawn_with_options(
@@ -457,6 +500,123 @@ fn run_browser_automation_plan_task(
     execution_result
 }
 
+fn execute_browser_open_readback_task(
+    manager: &LocalComputerSessionManager,
+    workspace_root: &Path,
+    session_id: &str,
+    task: &TaskRecord,
+    task_id: &str,
+) -> Result<serde_json::Value, String> {
+    let runtime_dir = workspace_root.join("runtimes/browser-automation");
+    let artifact_root = workspace_root.join("target/browser-task-artifacts");
+    let transport = BrowserSidecarSession::spawn_with_options(
+        "node",
+        &["node_modules/tsx/dist/cli.mjs", "src/server.ts"],
+        BrowserSidecarSpawnOptions {
+            current_dir: Some(runtime_dir),
+            env: vec![(
+                "BROWSER_AUTOMATION_ARTIFACT_ROOT".to_string(),
+                artifact_root.display().to_string(),
+            )],
+        },
+    )
+    .map_err(to_string_error)?;
+    let client = BrowserAutomationClient::new(transport);
+    client
+        .call(BrowserMethod::Health, serde_json::json!({}))
+        .map_err(to_string_error)?;
+    let params = task
+        .input_json
+        .get("params")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let opened = client
+        .call(BrowserMethod::Open, params)
+        .map_err(to_string_error)?;
+    let target_id = opened
+        .get("targetId")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| opened.get("target_id").and_then(serde_json::Value::as_str))
+        .or_else(|| {
+            task.input_json
+                .get("params")
+                .and_then(|params| params.get("label"))
+                .and_then(serde_json::Value::as_str)
+        })
+        .ok_or_else(|| "browser open target_id missing".to_string())?;
+    let snapshot = client
+        .call(
+            BrowserMethod::Snapshot,
+            serde_json::json!({ "target_id": target_id }),
+        )
+        .map_err(to_string_error)?;
+    let screenshot_name = format!("{}.png", sanitize_task_id(task_id));
+    let screenshot = client
+        .call(
+            BrowserMethod::Screenshot,
+            serde_json::json!({
+                "target_id": target_id,
+                "file_name": screenshot_name,
+                "full_page": false
+            }),
+        )
+        .map_err(to_string_error)?;
+    let _ = client.call(BrowserMethod::Stop, serde_json::json!({}));
+    let screenshot_path = screenshot
+        .get("path")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "browser screenshot path missing".to_string())?
+        .to_string();
+    let bytes = screenshot
+        .get("bytes")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| "browser screenshot bytes missing".to_string())?;
+    let artifact_id = format!("browser_preview_{}", sanitize_task_id(task_id));
+    manager.create_artifact(ArtifactCreate {
+        session_id: session_id.to_string(),
+        artifact_id: artifact_id.clone(),
+        title: format!("{}.png", sanitize_task_id(&task.goal)),
+        kind: "screenshot".to_string(),
+        path_ref: screenshot_path.clone(),
+        size_bytes: bytes,
+        preview_ref: Some(screenshot_path),
+    })?;
+    manager.append_event(ComputerEventCreate {
+        session_id: session_id.to_string(),
+        surface: SurfaceKind::Browser,
+        kind: "browser_automation_preview_ready".to_string(),
+        status: "done".to_string(),
+        title: "Preview browser disponibile".to_string(),
+        subtitle: "Snapshot e screenshot redatti disponibili".to_string(),
+        payload: serde_json::json!({
+            "artifact_id": artifact_id,
+            "target_id": target_id,
+            "payload_redacted": true
+        }),
+        artifact_refs: vec![artifact_id.clone()],
+        approval_required: false,
+    })?;
+    Ok(serde_json::json!({
+        "opened": {
+            "target_id": target_id,
+            "url": opened.get("url").cloned().unwrap_or(serde_json::Value::Null)
+        },
+        "snapshot": {
+            "target_id": target_id,
+            "url": snapshot.get("url").cloned().unwrap_or(serde_json::Value::Null),
+            "ref_count": snapshot
+                .get("refs")
+                .and_then(serde_json::Value::as_array)
+                .map(Vec::len)
+                .unwrap_or_default()
+        },
+        "screenshot": {
+            "artifact_id": artifact_id,
+            "bytes": bytes
+        }
+    }))
+}
+
 fn append_browser_task_checkpoint(
     store: &TaskStore,
     task: &TaskRecord,
@@ -502,6 +662,18 @@ fn append_browser_task_checkpoint(
         )
         .map_err(to_string_error)?;
     Ok(())
+}
+
+fn browser_task_should_read_after_open(task: &TaskRecord) -> bool {
+    task.input_json
+        .get("read_after_open")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+        && task
+            .input_json
+            .get("method")
+            .and_then(serde_json::Value::as_str)
+            == Some("browser.open")
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

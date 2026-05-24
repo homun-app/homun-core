@@ -723,6 +723,7 @@ impl DesktopCoreState {
         task.input_json["surface"] = serde_json::json!(step.surface);
         task.input_json["action_kind"] = serde_json::json!(step.action_kind);
         task.input_json["target_url_origin"] = serde_json::json!(redacted_url_origin(target_url));
+        task.input_json["read_after_open"] = serde_json::json!(true);
         store.insert_task(&task).map_err(to_string_error)?;
         store
             .append_checkpoint(
@@ -750,6 +751,7 @@ impl DesktopCoreState {
                     },
                     "browser": {
                         "method": "browser.open",
+                        "read_after_open": true,
                         "target_id": target_id,
                         "target_url_origin": redacted_url_origin(target_url)
                     },
@@ -1427,10 +1429,36 @@ mod tests {
             checkpoint["browser_task_executor"]["method"],
             "browser.open"
         );
+        assert!(
+            checkpoint["browser_task_executor"]["output_keys"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|key| key.as_str() == Some("snapshot"))
+        );
+        assert!(
+            checkpoint["browser_task_executor"]["output_keys"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|key| key.as_str() == Some("screenshot"))
+        );
         assert_eq!(browser_usage, 0);
         assert!(computer.timeline.iter().any(|item| {
             item.kind == "browser_automation_task_completed" && item.payload_redacted
         }));
+        assert!(
+            computer
+                .timeline
+                .iter()
+                .any(|item| item.kind == "browser_automation_preview_ready")
+        );
+        assert!(
+            computer
+                .artifact_refs
+                .iter()
+                .any(|artifact| artifact.kind == "screenshot" && artifact.preview_ref.is_some())
+        );
         assert!(!serialized.contains("prenota un treno"));
     }
 
