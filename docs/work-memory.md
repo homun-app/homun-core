@@ -1673,3 +1673,42 @@ consente esecuzione browser controllata senza leak del testo utente.
   Brain sceglie tool reali invece di soli `action_kind`.
 - Mappare step browser pianificati a task `browser_automation` quando sono
   atomici, mantenendo `prompt_plan.*` per workflow multi-step.
+
+### Fase 5 - Mapping Brain planner verso task browser reali
+
+- Aggiunto `browser.open` al tool cache seed del Capability Registry.
+- `DesktopCoreState::enqueue_prompt_plan` ora distingue gli step:
+  - step browser atomici con `target_url` -> task `browser_automation`;
+  - step senza destinazione eseguibile o non browser -> task `prompt_plan.*`;
+  - step di approval restano governati da `ApprovalGate`.
+- I task browser creati dal planner:
+  - usano `BrowserTaskRuntimeBridge`;
+  - hanno `method=browser.open`;
+  - mantengono `session_id`, `step_id`, `action_kind` e origine URL redatta;
+  - non espongono prompt raw nei checkpoint UI.
+- `prompt_plan_run_next_step` ora esegue prima task `browser_automation`
+  associati alla sessione corrente:
+  - riserva `browser_session`;
+  - usa `BrowserTaskExecutor`;
+  - registra checkpoint redatti;
+  - aggiorna Local Computer con eventi `browser_automation_task_started`,
+    `browser_automation_task_completed`, `browser_automation_waiting_resource`
+    o `browser_automation_waiting_approval`.
+- Aggiornati i test:
+  - il prompt di prenotazione treno enqueuea un task `browser_automation`;
+  - il primo run completa quel task tramite executor browser;
+  - il blocco risorse ora si applica al task browser reale;
+  - i checkpoint continuano a non contenere raw prompt.
+- Verifica eseguita:
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`.
+
+Perche': questo e' il passaggio da piano visualizzato a esecuzione tool reale.
+Il Brain resta responsabile di pianificare, ma l'esecuzione avviene tramite task
+typed, resource governor, BrowserTaskExecutor e Local Computer audit.
+
+## Prossimo blocco
+
+- Estendere il mapping ad altri tool del Capability Registry, partendo da
+  `browser.snapshot` e `browser.screenshot`.
+- Aggiungere un run sequenziale di piu' task del piano, non solo il prossimo
+  step.

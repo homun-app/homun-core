@@ -1,13 +1,14 @@
 use crate::models::PromptPlanStepRunResult;
 use local_first_browser_automation::{
     BrowserAutomationClient, BrowserMethod, BrowserSidecarSession, BrowserSidecarSpawnOptions,
+    BrowserTaskExecutor,
 };
 use local_first_local_computer_session::{
     ArtifactCreate, ComputerEventCreate, LocalComputerSessionManager, SurfaceKind,
 };
 use local_first_task_runtime::{
-    ResourceGovernor, ResourceLimits, TaskRecord, TaskScheduler, TaskStatus, TaskStore,
-    UserId as TaskUserId, WorkspaceId as TaskWorkspaceId,
+    ApprovalGate, ExecutorResult, ResourceGovernor, ResourceLimits, TaskExecutor, TaskRecord,
+    TaskScheduler, TaskStatus, TaskStore, UserId as TaskUserId, WorkspaceId as TaskWorkspaceId,
 };
 use std::path::Path;
 use time::OffsetDateTime;
@@ -33,6 +34,21 @@ pub fn run_next_prompt_plan_step(
             usize::MAX,
         )
         .map_err(to_string_error)?;
+    if let Some(task) = ready_tasks
+        .iter()
+        .find(|task| is_browser_automation_task_for_session(task, session_id))
+    {
+        return run_browser_automation_plan_task(
+            store,
+            manager,
+            workspace_root,
+            &resources,
+            &user_id,
+            &workspace_id,
+            session_id,
+            task.clone(),
+        );
+    }
     let Some(task) = ready_tasks
         .into_iter()
         .find(|task| is_prompt_plan_task_for_session(task, session_id))
@@ -231,6 +247,263 @@ pub fn run_next_prompt_plan_step(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
+fn run_browser_automation_plan_task(
+    store: &TaskStore,
+    manager: &LocalComputerSessionManager,
+    workspace_root: &Path,
+    resources: &ResourceGovernor,
+    user_id: &TaskUserId,
+    workspace_id: &TaskWorkspaceId,
+    session_id: &str,
+    task: TaskRecord,
+) -> Result<PromptPlanStepRunResult, String> {
+    let task_id = task.task_id.as_str().to_string();
+    if resources
+        .mark_waiting_if_unavailable(store, &task)
+        .map_err(to_string_error)?
+    {
+        append_browser_task_checkpoint(
+            store,
+            &task,
+            user_id,
+            workspace_id,
+            "waiting_resource",
+            None,
+        )?;
+        append_prompt_plan_computer_event(
+            manager,
+            session_id,
+            SurfaceKind::Browser,
+            "browser_automation_waiting_resource",
+            "waiting",
+            &task.goal,
+            "In attesa di sessione browser disponibile",
+            false,
+        )?;
+        return Ok(PromptPlanStepRunResult {
+            status: "waiting_resource".to_string(),
+            task_id: Some(task_id),
+            message: "Task browser pronto ma sessione locale non disponibile.".to_string(),
+        });
+    }
+
+    store
+        .update_task_status(
+            &task.task_id,
+            user_id,
+            workspace_id,
+            TaskStatus::Running,
+            None,
+        )
+        .map_err(to_string_error)?;
+    resources
+        .reserve(store, &task, "desktop-browser-automation-executor")
+        .map_err(to_string_error)?;
+    append_browser_task_checkpoint(store, &task, user_id, workspace_id, "started", None)?;
+
+    let execution_result = (|| -> Result<PromptPlanStepRunResult, String> {
+        manager.start_surface(session_id, SurfaceKind::Browser, "Browser locale")?;
+        manager.append_event(ComputerEventCreate {
+            session_id: session_id.to_string(),
+            surface: SurfaceKind::Browser,
+            kind: "browser_automation_task_started".to_string(),
+            status: "running".to_string(),
+            title: task.goal.clone(),
+            subtitle: "Esecuzione browser da Task Runtime".to_string(),
+            payload: serde_json::json!({
+                "task_id": task_id,
+                "payload_redacted": true
+            }),
+            artifact_refs: vec![],
+            approval_required: false,
+        })?;
+
+        let runtime_dir = workspace_root.join("runtimes/browser-automation");
+        let artifact_root = workspace_root.join("target/browser-task-artifacts");
+        let transport = BrowserSidecarSession::spawn_with_options(
+            "node",
+            &["node_modules/tsx/dist/cli.mjs", "src/server.ts"],
+            BrowserSidecarSpawnOptions {
+                current_dir: Some(runtime_dir),
+                env: vec![(
+                    "BROWSER_AUTOMATION_ARTIFACT_ROOT".to_string(),
+                    artifact_root.display().to_string(),
+                )],
+            },
+        )
+        .map_err(to_string_error)?;
+        let mut executor = BrowserTaskExecutor::new(transport);
+        let checkpoint = store
+            .latest_checkpoint(&task.task_id, user_id, workspace_id)
+            .map_err(to_string_error)?;
+        match executor
+            .execute_step(&task, checkpoint)
+            .map_err(to_string_error)?
+        {
+            ExecutorResult::Completed { output } => {
+                append_browser_task_checkpoint(
+                    store,
+                    &task,
+                    user_id,
+                    workspace_id,
+                    "completed",
+                    Some(output),
+                )?;
+                store
+                    .update_task_status(
+                        &task.task_id,
+                        user_id,
+                        workspace_id,
+                        TaskStatus::Completed,
+                        None,
+                    )
+                    .map_err(to_string_error)?;
+                append_prompt_plan_computer_event(
+                    manager,
+                    session_id,
+                    SurfaceKind::Browser,
+                    "browser_automation_task_completed",
+                    "done",
+                    &task.goal,
+                    "Task browser completato con checkpoint redatto",
+                    false,
+                )?;
+                Ok(PromptPlanStepRunResult {
+                    status: "completed".to_string(),
+                    task_id: Some(task_id),
+                    message: "Task browser eseguito dal runtime locale.".to_string(),
+                })
+            }
+            ExecutorResult::Checkpoint {
+                payload,
+                redacted_payload,
+            } => {
+                store
+                    .append_checkpoint(
+                        &task.task_id,
+                        user_id,
+                        workspace_id,
+                        payload,
+                        redacted_payload,
+                    )
+                    .map_err(to_string_error)?;
+                store
+                    .update_task_status(
+                        &task.task_id,
+                        user_id,
+                        workspace_id,
+                        TaskStatus::Queued,
+                        None,
+                    )
+                    .map_err(to_string_error)?;
+                Ok(PromptPlanStepRunResult {
+                    status: "checkpointed".to_string(),
+                    task_id: Some(task_id),
+                    message: "Task browser ha prodotto un checkpoint.".to_string(),
+                })
+            }
+            ExecutorResult::NeedsApproval {
+                action,
+                risk_level,
+                data_boundary,
+                explanation,
+            } => {
+                ApprovalGate::new()
+                    .request_approval(
+                        store,
+                        &task.task_id,
+                        user_id,
+                        workspace_id,
+                        &action,
+                        &risk_level,
+                        &data_boundary,
+                        &explanation,
+                    )
+                    .map_err(to_string_error)?;
+                append_prompt_plan_computer_event(
+                    manager,
+                    session_id,
+                    SurfaceKind::Browser,
+                    "browser_automation_waiting_approval",
+                    "waiting",
+                    &task.goal,
+                    "Serve approval prima di proseguire",
+                    true,
+                )?;
+                Ok(PromptPlanStepRunResult {
+                    status: "waiting_user_approval".to_string(),
+                    task_id: Some(task_id),
+                    message: "Task browser in attesa di approval.".to_string(),
+                })
+            }
+            ExecutorResult::WaitUntil { reason, .. }
+            | ExecutorResult::RetryableFailure { reason } => {
+                store
+                    .update_task_status(
+                        &task.task_id,
+                        user_id,
+                        workspace_id,
+                        TaskStatus::Failed,
+                        Some(&reason),
+                    )
+                    .map_err(to_string_error)?;
+                Err(reason)
+            }
+        }
+    })();
+    let release_result = resources.release(store, &task).map_err(to_string_error);
+    release_result?;
+    execution_result
+}
+
+fn append_browser_task_checkpoint(
+    store: &TaskStore,
+    task: &TaskRecord,
+    user_id: &TaskUserId,
+    workspace_id: &TaskWorkspaceId,
+    state: &str,
+    output: Option<serde_json::Value>,
+) -> Result<(), String> {
+    let method = task
+        .input_json
+        .get("method")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let target_url_origin = task
+        .input_json
+        .get("target_url_origin")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    store
+        .append_checkpoint(
+            &task.task_id,
+            user_id,
+            workspace_id,
+            serde_json::json!({
+                "browser_task_executor": {
+                    "state": state,
+                    "raw_payload_stored": false
+                }
+            }),
+            serde_json::json!({
+                "browser_task_executor": {
+                    "state": state,
+                    "method": method,
+                    "target_url_origin": target_url_origin,
+                    "output_keys": output
+                        .as_ref()
+                        .and_then(|value| value.as_object())
+                        .map(|object| object.keys().cloned().collect::<Vec<_>>())
+                        .unwrap_or_default(),
+                    "payload_redacted": true
+                }
+            }),
+        )
+        .map_err(to_string_error)?;
+    Ok(())
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 struct BrowserReadOnlyResult {
     url: String,
@@ -363,6 +636,20 @@ fn append_prompt_plan_computer_event(
 
 fn is_prompt_plan_task_for_session(task: &TaskRecord, session_id: &str) -> bool {
     task.kind.starts_with("prompt_plan.")
+        && task
+            .input_json
+            .get("source")
+            .and_then(|value| value.as_str())
+            == Some("prompt_plan")
+        && task
+            .input_json
+            .get("session_id")
+            .and_then(|value| value.as_str())
+            == Some(session_id)
+}
+
+fn is_browser_automation_task_for_session(task: &TaskRecord, session_id: &str) -> bool {
+    task.kind == "browser_automation"
         && task
             .input_json
             .get("source")

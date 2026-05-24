@@ -195,6 +195,7 @@ export interface CorePromptPlanStep {
   surface: string;
   action_kind: string;
   requires_user_approval: boolean;
+  target_url?: string | null;
 }
 
 export interface CorePromptPlanStepRunResult {

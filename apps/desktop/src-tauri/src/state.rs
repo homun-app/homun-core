@@ -12,6 +12,7 @@ use crate::prompt_submission::{
     RuntimePromptBrain, RuntimePromptTaskPlanner,
 };
 use crate::seed::{seed_capabilities, seed_memories, seed_tasks};
+use local_first_browser_automation::{BrowserMethod, BrowserTaskRuntimeBridge};
 use local_first_capabilities::{
     CapabilityRegistryStore, ProviderId, UserId as CapabilityUserId,
     WorkspaceId as CapabilityWorkspaceId,
@@ -602,6 +603,17 @@ impl DesktopCoreState {
         let workspace_id = TaskWorkspaceId::new(&self.workspace_id);
         let approval_gate = ApprovalGate::new();
         for step in &plan.steps {
+            if step.surface == "browser" && step.target_url.is_some() {
+                self.enqueue_browser_plan_step(
+                    &store,
+                    &user_id,
+                    &workspace_id,
+                    session_id,
+                    plan,
+                    step,
+                )?;
+                continue;
+            }
             let task_id = format!(
                 "prompt_{}_{}",
                 sanitize_task_id(session_id),
@@ -669,6 +681,98 @@ impl DesktopCoreState {
             }
         }
         Ok(())
+    }
+
+    fn enqueue_browser_plan_step(
+        &self,
+        store: &TaskStore,
+        user_id: &TaskUserId,
+        workspace_id: &TaskWorkspaceId,
+        session_id: &str,
+        plan: &PromptExecutionPlan,
+        step: &crate::prompt_submission::PromptPlanStep,
+    ) -> Result<(), String> {
+        self.ensure_cached_browser_tool("browser.open")?;
+        let target_url = step
+            .target_url
+            .as_deref()
+            .ok_or_else(|| "browser step missing target_url".to_string())?;
+        let task_id = format!(
+            "browser_{}_{}",
+            sanitize_task_id(session_id),
+            sanitize_task_id(&step.step_id)
+        );
+        let target_id = format!("task-{}", sanitize_task_id(&task_id));
+        let mut task = BrowserTaskRuntimeBridge::new().enqueue_browser_call(
+            task_id,
+            user_id.clone(),
+            workspace_id.clone(),
+            BrowserMethod::Open,
+            serde_json::json!({
+                "url": target_url,
+                "label": target_id,
+                "source": "prompt_plan"
+            }),
+        );
+        task.goal = step.title.clone();
+        task.risk_level = plan.risk_level.clone();
+        task.input_json["source"] = serde_json::json!("prompt_plan");
+        task.input_json["session_id"] = serde_json::json!(session_id);
+        task.input_json["plan_title"] = serde_json::json!(plan.title);
+        task.input_json["step_id"] = serde_json::json!(step.step_id);
+        task.input_json["surface"] = serde_json::json!(step.surface);
+        task.input_json["action_kind"] = serde_json::json!(step.action_kind);
+        task.input_json["target_url_origin"] = serde_json::json!(redacted_url_origin(target_url));
+        store.insert_task(&task).map_err(to_string_error)?;
+        store
+            .append_checkpoint(
+                &task.task_id,
+                user_id,
+                workspace_id,
+                serde_json::json!({
+                    "raw_prompt_stored": false,
+                    "plan_step": step,
+                    "browser_method": "browser.open"
+                }),
+                serde_json::json!({
+                    "plan": {
+                        "title": plan.title,
+                        "risk_level": plan.risk_level
+                    },
+                    "step": {
+                        "step_id": step.step_id,
+                        "title": step.title,
+                        "detail": step.detail,
+                        "surface": step.surface,
+                        "action_kind": step.action_kind,
+                        "target_url_origin": redacted_url_origin(target_url),
+                        "requires_user_approval": step.requires_user_approval
+                    },
+                    "browser": {
+                        "method": "browser.open",
+                        "target_id": target_id,
+                        "target_url_origin": redacted_url_origin(target_url)
+                    },
+                    "payload_redacted": true
+                }),
+            )
+            .map_err(to_string_error)?;
+        Ok(())
+    }
+
+    fn ensure_cached_browser_tool(&self, tool_name: &str) -> Result<(), String> {
+        let store = self
+            .capability_store
+            .lock()
+            .map_err(|_| "capability store lock poisoned".to_string())?;
+        let tools = store
+            .cached_tools(&ProviderId::new("browser"))
+            .map_err(to_string_error)?;
+        tools
+            .iter()
+            .any(|tool| tool.tool.name == tool_name)
+            .then_some(())
+            .ok_or_else(|| format!("capability tool not cached: browser:{tool_name}"))
     }
 }
 
@@ -1257,10 +1361,10 @@ mod tests {
             snapshot
                 .queued
                 .iter()
-                .any(|task| task.kind == "prompt_plan.research")
+                .any(|task| task.kind == "browser_automation")
         );
         let detail = state
-            .task_detail("prompt_computer_active_prompt_search_trains")
+            .task_detail("browser_computer_active_prompt_search_trains")
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -1299,7 +1403,7 @@ mod tests {
         let run = state
             .run_prompt_plan_next_step("computer_active_prompt")
             .unwrap();
-        let task_id = "prompt_computer_active_prompt_search_trains";
+        let task_id = "browser_computer_active_prompt_search_trains";
         let detail = state.task_detail(task_id).unwrap().unwrap();
         let computer = state
             .local_computer_session_snapshot("computer_active_prompt")
@@ -1318,30 +1422,15 @@ mod tests {
         assert_eq!(run.task_id.as_deref(), Some(task_id));
         assert_eq!(detail.status, "completed");
         let checkpoint = detail.latest_checkpoint.unwrap();
-        assert_eq!(checkpoint["prompt_plan_executor"]["state"], "completed");
+        assert_eq!(checkpoint["browser_task_executor"]["state"], "completed");
         assert_eq!(
-            checkpoint["prompt_plan_executor"]["result"],
-            "browser_read_only_completed"
+            checkpoint["browser_task_executor"]["method"],
+            "browser.open"
         );
         assert_eq!(browser_usage, 0);
-        assert!(
-            computer
-                .timeline
-                .iter()
-                .any(|item| { item.kind == "prompt_plan_step_completed" && item.payload_redacted })
-        );
-        assert!(
-            computer
-                .timeline
-                .iter()
-                .any(|item| item.kind == "browser_read_only_artifact_ready")
-        );
-        assert!(
-            computer
-                .artifact_refs
-                .iter()
-                .any(|artifact| artifact.kind == "screenshot" && artifact.preview_ref.is_some())
-        );
+        assert!(computer.timeline.iter().any(|item| {
+            item.kind == "browser_automation_task_completed" && item.payload_redacted
+        }));
         assert!(!serialized.contains("prenota un treno"));
     }
 
@@ -1384,7 +1473,7 @@ mod tests {
             .run_prompt_plan_next_step("computer_active_prompt")
             .unwrap();
         let detail = state
-            .task_detail("prompt_computer_active_prompt_search_trains")
+            .task_detail("browser_computer_active_prompt_search_trains")
             .unwrap()
             .unwrap();
         let computer = state
@@ -1401,7 +1490,7 @@ mod tests {
                 .contains("resource browser_session")
         );
         assert!(computer.timeline.iter().any(|item| {
-            item.kind == "prompt_plan_step_waiting_resource" && item.payload_redacted
+            item.kind == "browser_automation_waiting_resource" && item.payload_redacted
         }));
     }
 
