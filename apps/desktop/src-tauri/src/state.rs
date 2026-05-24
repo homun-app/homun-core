@@ -1,9 +1,10 @@
 use crate::local_computer_smoke;
 use crate::models::{
-    BridgeStatus, CapabilityPolicySummary, CapabilitySnapshot, DesktopTaskDetail,
-    DesktopTaskQueueSnapshot, RuntimeHealthSnapshot, RuntimeProcessItem,
-    capability_connection_item, capability_tool_item, component, desktop_task_detail,
-    desktop_task_queue, runtime_process_item, runtime_process_item_with_snapshot,
+    BridgeStatus, CapabilityPolicySummary, CapabilitySnapshot, DesktopChatThread,
+    DesktopChatThreadSnapshot, DesktopTaskDetail, DesktopTaskQueueSnapshot, RuntimeHealthSnapshot,
+    RuntimeProcessItem, capability_connection_item, capability_tool_item, component,
+    desktop_task_detail, desktop_task_queue, runtime_process_item,
+    runtime_process_item_with_snapshot,
 };
 use crate::prompt_submission::{
     self, PromptBrain, PromptExecutionPlan, PromptSubmissionResult, PromptTaskPlanner,
@@ -32,6 +33,8 @@ use local_first_task_runtime::{
 };
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
 
 pub(crate) const DEFAULT_USER_ID: &str = "local-user";
 pub(crate) const DEFAULT_WORKSPACE_ID: &str = "local-workspace";
@@ -47,7 +50,14 @@ pub struct DesktopCoreState {
     process_manager: Mutex<ProcessManager<LocalProcessSupervisor>>,
     capability_store: Mutex<CapabilityRegistryStore>,
     local_computer: Mutex<LocalComputerSessionManager>,
+    chat_threads: Mutex<ChatThreadStore>,
     brain_runtime_url: String,
+}
+
+#[derive(Debug, Clone)]
+struct ChatThreadStore {
+    active_thread_id: String,
+    threads: Vec<DesktopChatThread>,
 }
 
 impl DesktopCoreState {
@@ -74,6 +84,19 @@ impl DesktopCoreState {
         let local_computer =
             LocalComputerSessionManager::new(LocalComputerSessionStore::open_in_memory()?);
         seed_local_computer_session(&local_computer)?;
+        let chat_threads = ChatThreadStore {
+            active_thread_id: "thread_active_prompt".to_string(),
+            threads: vec![DesktopChatThread {
+                thread_id: "thread_active_prompt".to_string(),
+                title: "Nuovo compito".to_string(),
+                subtitle: "Sessione locale pronta".to_string(),
+                status: "active".to_string(),
+                computer_session_id: "computer_active_prompt".to_string(),
+                task_id: "task_prompt_session".to_string(),
+                updated_at: now_timestamp(),
+                message_count: 1,
+            }],
+        };
 
         Ok(Self {
             user_id: DEFAULT_USER_ID.to_string(),
@@ -89,6 +112,7 @@ impl DesktopCoreState {
             process_manager: Mutex::new(process_manager),
             capability_store: Mutex::new(capability_store),
             local_computer: Mutex::new(local_computer),
+            chat_threads: Mutex::new(chat_threads),
             brain_runtime_url: "http://127.0.0.1:8765".to_string(),
         })
     }
@@ -111,6 +135,57 @@ impl DesktopCoreState {
                 ),
             ],
         }
+    }
+
+    pub fn chat_thread_snapshot(&self) -> Result<DesktopChatThreadSnapshot, String> {
+        let store = self
+            .chat_threads
+            .lock()
+            .map_err(|_| "chat thread lock poisoned".to_string())?;
+        Ok(DesktopChatThreadSnapshot {
+            active_thread_id: store.active_thread_id.clone(),
+            threads: store.threads.clone(),
+        })
+    }
+
+    pub fn create_chat_thread(&self) -> Result<DesktopChatThread, String> {
+        let suffix = Uuid::new_v4().simple().to_string();
+        let short_suffix = &suffix[..12];
+        let thread_id = format!("thread_{short_suffix}");
+        let task_id = format!("task_prompt_{short_suffix}");
+        let computer_session_id = format!("computer_{short_suffix}");
+
+        {
+            let manager = self
+                .local_computer
+                .lock()
+                .map_err(|_| "local computer lock poisoned".to_string())?;
+            create_local_computer_session(
+                &manager,
+                &computer_session_id,
+                &task_id,
+                &self.user_id,
+                &self.workspace_id,
+            )?;
+        }
+
+        let thread = DesktopChatThread {
+            thread_id,
+            title: "Nuovo compito".to_string(),
+            subtitle: "Chat pulita, pronta per un nuovo task".to_string(),
+            status: "active".to_string(),
+            computer_session_id,
+            task_id,
+            updated_at: now_timestamp(),
+            message_count: 1,
+        };
+        let mut store = self
+            .chat_threads
+            .lock()
+            .map_err(|_| "chat thread lock poisoned".to_string())?;
+        store.active_thread_id = thread.thread_id.clone();
+        store.threads.insert(0, thread.clone());
+        Ok(thread)
     }
 
     pub fn runtime_health_snapshot(&self) -> Result<RuntimeHealthSnapshot, String> {
@@ -309,7 +384,25 @@ impl DesktopCoreState {
         if let Some(plan) = &result.plan {
             self.enqueue_prompt_plan(session_id, plan)?;
         }
+        self.touch_thread_for_session(session_id)?;
         Ok(result)
+    }
+
+    fn touch_thread_for_session(&self, session_id: &str) -> Result<(), String> {
+        let mut store = self
+            .chat_threads
+            .lock()
+            .map_err(|_| "chat thread lock poisoned".to_string())?;
+        if let Some(thread) = store
+            .threads
+            .iter_mut()
+            .find(|thread| thread.computer_session_id == session_id)
+        {
+            thread.updated_at = now_timestamp();
+            thread.message_count = thread.message_count.saturating_add(2);
+            store.active_thread_id = thread.thread_id.clone();
+        }
+        Ok(())
     }
 
     fn enqueue_prompt_plan(
@@ -432,12 +525,28 @@ fn to_string_error(error: impl std::fmt::Display) -> String {
 }
 
 fn seed_local_computer_session(manager: &LocalComputerSessionManager) -> Result<(), String> {
+    create_local_computer_session(
+        manager,
+        "computer_active_prompt",
+        "task_prompt_session",
+        DEFAULT_USER_ID,
+        DEFAULT_WORKSPACE_ID,
+    )
+}
+
+fn create_local_computer_session(
+    manager: &LocalComputerSessionManager,
+    session_id: &str,
+    task_id: &str,
+    user_id: &str,
+    workspace_id: &str,
+) -> Result<(), String> {
     let session = manager.create_session(ComputerSessionCreate {
-        session_id: "computer_active_prompt".to_string(),
-        task_id: "task_prompt_session".to_string(),
+        session_id: session_id.to_string(),
+        task_id: task_id.to_string(),
         workflow_id: None,
-        user_id: DEFAULT_USER_ID.to_string(),
-        workspace_id: DEFAULT_WORKSPACE_ID.to_string(),
+        user_id: user_id.to_string(),
+        workspace_id: workspace_id.to_string(),
         title: "Computer locale".to_string(),
         subtitle: "Sessione locale pronta per prompt, shell e browser controllato".to_string(),
         risk_level: "low".to_string(),
@@ -457,6 +566,13 @@ fn seed_local_computer_session(manager: &LocalComputerSessionManager) -> Result<
         approval_required: false,
     })?;
     Ok(())
+}
+
+fn now_timestamp() -> String {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs().to_string())
+        .unwrap_or_else(|_| "0".to_string())
 }
 
 #[cfg(test)]
@@ -540,6 +656,57 @@ mod tests {
     fn state() -> DesktopCoreState {
         DesktopCoreState::seeded(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.."))
             .unwrap()
+    }
+
+    #[test]
+    fn chat_threads_start_with_default_thread_bound_to_computer_session() {
+        let state = state();
+
+        let snapshot = state.chat_thread_snapshot().unwrap();
+        let default_thread = snapshot
+            .threads
+            .iter()
+            .find(|thread| thread.thread_id == snapshot.active_thread_id)
+            .unwrap();
+        let computer = state
+            .local_computer_session_snapshot(&default_thread.computer_session_id)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(default_thread.thread_id, "thread_active_prompt");
+        assert_eq!(default_thread.computer_session_id, "computer_active_prompt");
+        assert_eq!(computer.task_id, default_thread.task_id);
+        assert_eq!(default_thread.message_count, 1);
+    }
+
+    #[test]
+    fn create_chat_thread_creates_isolated_computer_session() {
+        let state = state();
+
+        let new_thread = state.create_chat_thread().unwrap();
+        let snapshot = state.chat_thread_snapshot().unwrap();
+        let computer = state
+            .local_computer_session_snapshot(&new_thread.computer_session_id)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(snapshot.active_thread_id, new_thread.thread_id);
+        assert!(snapshot.threads.iter().any(|thread| {
+            thread.thread_id == new_thread.thread_id
+                && thread.computer_session_id == new_thread.computer_session_id
+        }));
+        assert_ne!(new_thread.computer_session_id, "computer_active_prompt");
+        assert_eq!(computer.computer_session_id, new_thread.computer_session_id);
+        assert!(computer.terminal_excerpt_redacted.is_empty());
+        assert!(
+            computer
+                .timeline
+                .iter()
+                .any(|item| { item.kind == "computer_session_ready" && item.payload_redacted })
+        );
+        assert!(!computer.timeline.iter().any(|item| {
+            item.kind == "user_prompt_received" || item.kind == "local_calculation_completed"
+        }));
     }
 
     #[test]

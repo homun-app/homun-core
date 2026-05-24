@@ -43,6 +43,17 @@ export interface ChatMessage {
   metadata?: string;
 }
 
+export interface ChatThread {
+  threadId: string;
+  title: string;
+  subtitle: string;
+  status: "active" | "archived";
+  computerSessionId: string;
+  taskId: string;
+  updatedAt: string;
+  messageCount: number;
+}
+
 export interface BrainStep {
   id: string;
   label: string;

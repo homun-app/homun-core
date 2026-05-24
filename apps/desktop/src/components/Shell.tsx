@@ -1,12 +1,16 @@
 import type { ReactNode } from "react";
 import { NavDrawer, NavigationRail, SettingsDrawer } from "./Sidebar";
-import type { SettingsSectionId, ViewId } from "../types";
+import type { ChatThread, SettingsSectionId, ViewId } from "../types";
 
 interface ShellProps {
   activeView: ViewId;
+  activeThreadId: string;
+  chatThreads: ChatThread[];
   drawerOpen: boolean;
   onBackFromSettings: () => void;
+  onCreateChatThread: () => void;
   onNavigate: (view: ViewId) => void;
+  onSelectThread: (threadId: string) => void;
   onSelectSettingsSection: (section: SettingsSectionId) => void;
   onToggleDrawer: () => void;
   settingsSection: SettingsSectionId;
@@ -15,10 +19,14 @@ interface ShellProps {
 
 export function Shell({
   activeView,
+  activeThreadId,
+  chatThreads,
   children,
   drawerOpen,
   onBackFromSettings,
+  onCreateChatThread,
   onNavigate,
+  onSelectThread,
   onSelectSettingsSection,
   onToggleDrawer,
   settingsSection,
@@ -45,7 +53,11 @@ export function Shell({
       {drawerOpen && !isSettings && (
         <NavDrawer
           activeView={activeView}
+          activeThreadId={activeThreadId}
+          chatThreads={chatThreads}
+          onCreateChatThread={onCreateChatThread}
           onNavigate={onNavigate}
+          onSelectThread={onSelectThread}
           onToggleDrawer={onToggleDrawer}
         />
       )}

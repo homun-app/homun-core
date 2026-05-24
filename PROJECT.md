@@ -1239,3 +1239,7 @@ Nota Brain understanding: i campi per calcoli devono essere espliciti (`calculat
 Nota task da prompt: `needs_planning` deve sempre produrre un piano persistente e redatto. Gli step rischiosi come login, invio, acquisto o pagamento devono avere `requires_user_approval=true` e passare da `ApprovalGate` prima dell'esecuzione.
 
 Nota UI timeline: la timeline Computer e' progress disclosure, non un log sempre aperto. Deve partire collassata, mostrare solo gli ultimi eventi e offrire espansione con stato accessibile (`aria-expanded`).
+
+Nota chat/thread: la chat operativa deve supportare thread separati. `Nuovo compito` crea una nuova chat pulita e una nuova Local Computer Session isolata; prompt, timeline, terminal output e artifact non devono contaminare altri thread. La sidebar mostra i thread come compiti attivi, ma non decide strumenti.
+
+Nota tool orchestration: la scelta di tool, MCP, browser, shell, skill e subagenti appartiene al Brain + Capability Layer + Durable Task Runtime. Il composer invia richiesta e contesto thread; il Brain restituisce intenzione/piano validati; il runtime materializza task, risorse, approval e policy. Evitare logica di routing nei componenti React o riconoscimenti testuali locali.

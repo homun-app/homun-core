@@ -1221,6 +1221,27 @@ Perche': la timeline e' utile per fiducia e audit, ma non deve diventare rumore 
 
 ## Prossimo blocco
 
+### Gestione chat e thread operativi
+
+- Aggiunto il concetto di chat thread nel Tauri Core.
+- Ogni thread ha:
+  - `thread_id`
+  - titolo/sottotitolo UI-safe
+  - `computer_session_id`
+  - `task_id`
+  - contatore messaggi
+  - timestamp aggiornamento
+- Il thread default resta `thread_active_prompt` collegato a `computer_active_prompt`.
+- `create_chat_thread` crea una nuova chat pulita e una nuova Local Computer Session isolata, senza ereditare terminal output o eventi prompt precedenti.
+- La UI React tiene i messaggi separati per thread e il bottone `Nuovo compito` crea/seleziona il nuovo thread.
+- La sidebar mostra i thread reali invece della lista mock dei task.
+- Il titolo del thread viene aggiornato localmente dal primo messaggio utente, cosi' la lista resta leggibile senza esporre payload raw nel core.
+- Decisione architetturale: la chat non decide tool, MCP o browser. Passa prompt + thread/session context al Core; il Brain produce intenzione e piano, poi il Capability Layer/Task Runtime scegliera' uno o piu' strumenti.
+
+Perche': prima di eseguire task reali serve separare bene le conversazioni. Senza thread isolati, test su ora, calcoli, treni e browser si contaminano nella stessa timeline e rendono difficile capire se il sistema sta agendo sul contesto giusto.
+
+## Prossimo blocco
+
 - Collegare Tasks/Approvals ai command `task_queue_snapshot` e `task_detail`.
 - Collegare Connections/Settings ai command capability/runtime esistenti.
 - Collegare il Browser Automation Runtime alla `LocalComputerSessionManager`, cosi' le azioni reali producono eventi, artifact e preview nella stessa card.

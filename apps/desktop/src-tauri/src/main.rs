@@ -16,6 +16,8 @@ fn main() {
         .manage(core_state)
         .invoke_handler(tauri::generate_handler![
             commands::core_bridge_status,
+            commands::chat_thread_snapshot,
+            commands::create_chat_thread,
             commands::runtime_health_snapshot,
             commands::process_check_health,
             commands::process_start,

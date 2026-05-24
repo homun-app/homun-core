@@ -11,11 +11,10 @@ import {
 } from "lucide-react";
 import {
   drawerProjects,
-  drawerTasks,
   navItems,
   settingsSections,
 } from "../data/mockData";
-import type { SettingsSectionId, ViewId } from "../types";
+import type { ChatThread, SettingsSectionId, ViewId } from "../types";
 
 interface NavigationRailProps {
   activeView: ViewId;
@@ -85,13 +84,21 @@ export function NavigationRail({
 
 interface NavDrawerProps {
   activeView: ViewId;
+  activeThreadId: string;
+  chatThreads: ChatThread[];
+  onCreateChatThread: () => void;
   onNavigate: (view: ViewId) => void;
+  onSelectThread: (threadId: string) => void;
   onToggleDrawer: () => void;
 }
 
 export function NavDrawer({
   activeView,
+  activeThreadId,
+  chatThreads,
+  onCreateChatThread,
   onNavigate,
+  onSelectThread,
   onToggleDrawer,
 }: NavDrawerProps) {
   return (
@@ -112,7 +119,11 @@ export function NavDrawer({
         </button>
       </header>
 
-      <button className="drawer-primary-action" type="button">
+      <button
+        className="drawer-primary-action"
+        type="button"
+        onClick={onCreateChatThread}
+      >
         <SquarePen size={17} />
         <span>Nuovo compito</span>
       </button>
@@ -155,13 +166,18 @@ export function NavDrawer({
             <span>Tutti i compiti</span>
             <SlidersHorizontal size={15} />
           </div>
-          {drawerTasks.map((task) => (
+          {chatThreads.map((thread) => (
             <button
-              className={`drawer-link ${task.active ? "active" : ""}`}
+              className={`drawer-link ${
+                thread.threadId === activeThreadId && activeView === "chat"
+                  ? "active"
+                  : ""
+              }`}
               type="button"
-              key={task.id}
+              key={thread.threadId}
+              onClick={() => onSelectThread(thread.threadId)}
             >
-              {task.label}
+              {thread.title}
             </button>
           ))}
         </section>

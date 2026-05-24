@@ -12,6 +12,22 @@ export interface CoreBridgeStatus {
   }>;
 }
 
+export interface CoreChatThread {
+  thread_id: string;
+  title: string;
+  subtitle: string;
+  status: string;
+  computer_session_id: string;
+  task_id: string;
+  updated_at: string;
+  message_count: number;
+}
+
+export interface CoreChatThreadSnapshot {
+  active_thread_id: string;
+  threads: CoreChatThread[];
+}
+
 export interface RuntimeProcessItem {
   id: string;
   kind: string;
@@ -183,6 +199,8 @@ export interface CorePromptPlanStep {
 
 export const coreBridge = {
   status: () => invoke<CoreBridgeStatus>("core_bridge_status"),
+  chatThreads: () => invoke<CoreChatThreadSnapshot>("chat_thread_snapshot"),
+  createChatThread: () => invoke<CoreChatThread>("create_chat_thread"),
   runtimeHealth: () =>
     invoke<RuntimeHealthSnapshot>("runtime_health_snapshot"),
   checkProcessHealth: (processId: string) =>

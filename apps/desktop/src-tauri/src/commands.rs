@@ -1,6 +1,6 @@
 use crate::models::{
-    BridgeStatus, CapabilitySnapshot, DesktopTaskDetail, DesktopTaskQueueSnapshot,
-    RuntimeHealthSnapshot, RuntimeProcessItem,
+    BridgeStatus, CapabilitySnapshot, DesktopChatThread, DesktopChatThreadSnapshot,
+    DesktopTaskDetail, DesktopTaskQueueSnapshot, RuntimeHealthSnapshot, RuntimeProcessItem,
 };
 use crate::prompt_submission::PromptSubmissionResult;
 use crate::state::DesktopCoreState;
@@ -10,6 +10,20 @@ use local_first_memory::MemoryDashboard;
 #[tauri::command]
 pub fn core_bridge_status(state: tauri::State<'_, DesktopCoreState>) -> BridgeStatus {
     state.bridge_status()
+}
+
+#[tauri::command]
+pub fn chat_thread_snapshot(
+    state: tauri::State<'_, DesktopCoreState>,
+) -> Result<DesktopChatThreadSnapshot, String> {
+    state.chat_thread_snapshot()
+}
+
+#[tauri::command]
+pub fn create_chat_thread(
+    state: tauri::State<'_, DesktopCoreState>,
+) -> Result<DesktopChatThread, String> {
+    state.create_chat_thread()
 }
 
 #[tauri::command]

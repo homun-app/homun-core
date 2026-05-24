@@ -26,6 +26,7 @@ import {
 } from "../lib/localComputerViewModel";
 import type {
   ChatMessage,
+  ChatThread,
   ComputerSession,
   ComputerSurfaceKind,
   RuntimeHealth,
@@ -38,6 +39,8 @@ interface ChatViewProps {
   messages: ChatMessage[];
   health: RuntimeHealth[];
   task: TaskItem;
+  thread: ChatThread;
+  onMessagesChange: (messages: ChatMessage[]) => void;
 }
 
 const surfaceIcons: Record<ComputerSurfaceKind, typeof Globe2> = {
@@ -53,8 +56,9 @@ export function ChatView({
   messages,
   health,
   task,
+  thread,
+  onMessagesChange,
 }: ChatViewProps) {
-  const [threadMessages, setThreadMessages] = useState<ChatMessage[]>(() => messages);
   const [computerSession, setComputerSession] = useState<ComputerSession>(() =>
     createLoadingComputerSession(computerSessionId),
   );
@@ -74,6 +78,7 @@ export function ChatView({
     () => health.filter((item) => item.status !== "attention").slice(0, 2),
     [health],
   );
+  const threadMessages = messages;
 
   async function runLocalSmokeTest() {
     setSmokeTestRunning(true);
@@ -95,22 +100,21 @@ export function ChatView({
 
     setPromptSubmitting(true);
     setPromptError(null);
-    setThreadMessages((current) => [
-      ...current,
-      {
-        id: `local_user_${Date.now()}`,
-        role: "user",
-        text,
-        timestamp: "ora",
-        metadata: "Inviato al core locale",
-      },
-    ]);
+    const userMessage: ChatMessage = {
+      id: `local_user_${Date.now()}`,
+      role: "user",
+      text,
+      timestamp: "ora",
+      metadata: "Inviato al core locale",
+    };
+    const promptMessages = [...threadMessages, userMessage];
+    onMessagesChange(promptMessages);
 
     try {
       const result = await coreBridge.submitUserPrompt(computerSessionId, text);
       setComputerSession(mapCoreComputerSession(result.computer_session));
-      setThreadMessages((current) => [
-        ...current,
+      onMessagesChange([
+        ...promptMessages,
         {
           id: result.assistant_message.id,
           role: result.assistant_message.role,
@@ -122,8 +126,8 @@ export function ChatView({
     } catch (error) {
       const message = describeBridgeError(error);
       setPromptError(message);
-      setThreadMessages((current) => [
-        ...current,
+      onMessagesChange([
+        ...promptMessages,
         {
           id: `local_error_${Date.now()}`,
           role: "system",
@@ -138,6 +142,7 @@ export function ChatView({
 
   useEffect(() => {
     let cancelled = false;
+    setComputerSession(createLoadingComputerSession(computerSessionId));
 
     async function loadLocalComputerSession() {
       try {
@@ -205,7 +210,7 @@ export function ChatView({
             type="button"
             onClick={() => setModelOpen((value) => !value)}
           >
-            <span id="chat-title">Assistant locale 1.0</span>
+            <span id="chat-title">{thread.title}</span>
             <ChevronDown size={15} />
           </button>
           {modelOpen && (

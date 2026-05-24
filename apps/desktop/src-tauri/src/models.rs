@@ -20,6 +20,24 @@ pub struct BridgeComponentStatus {
     pub status: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DesktopChatThread {
+    pub thread_id: String,
+    pub title: String,
+    pub subtitle: String,
+    pub status: String,
+    pub computer_session_id: String,
+    pub task_id: String,
+    pub updated_at: String,
+    pub message_count: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DesktopChatThreadSnapshot {
+    pub active_thread_id: String,
+    pub threads: Vec<DesktopChatThread>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeHealthSnapshot {
     pub processes: Vec<RuntimeProcessItem>,
