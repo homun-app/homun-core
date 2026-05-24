@@ -2067,3 +2067,28 @@ Perche': il percorso precedente richiedeva di sapere che bisognava espandere il
 Computer o andare nella vista task. Ora il flusso e' leggibile: risposta al
 centro, Computer come barra di stato, azione esplicita per continuare o sbloccare
 approval.
+
+### Fase 11 - Prova reale del flusso approval/resume
+
+- Aggiunta prova automatica `approved_prompt_plan_gate_resumes_and_persists_progress_message`.
+- Scenario coperto:
+  - prompt complesso produce piano con step che richiede approval;
+  - prima dell'approvazione `run_prompt_plan_next_step` non esegue lo step;
+  - `approve_task_approval` rimuove l'approval del task del piano;
+  - `run_prompt_plan_ready_steps` consuma lo step approvato;
+  - la chat riceve un system message persistente `Eseguiti 1 step locali...`.
+- Durante la prova e' emerso che lo stato seed contiene un'approval dimostrativa
+  separata: il test ora verifica l'approval specifica del prompt plan invece di
+  pretendere coda approval globale vuota.
+- Verifica eseguita:
+  - `approved_prompt_plan_gate_resumes_and_persists_progress_message`;
+  - `browser_form_submit_waits_for_approval_then_resumes`;
+  - `prompt_plan_batch_runner_executes_ready_steps_until_idle`;
+  - `npm run test:ui-contract`;
+  - `npm run build`;
+  - suite completa `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`
+    con 31 test verdi.
+
+Perche': questo conferma che `Approva e continua` non e' solo un'etichetta UI:
+il Core sa riprendere il piano dopo un gate utente e persiste l'avanzamento
+nella cronologia chat locale.

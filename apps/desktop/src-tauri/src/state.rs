@@ -2375,4 +2375,58 @@ mod tests {
                 .any(|item| item.kind == "prompt_plan_step_started")
         );
     }
+
+    #[test]
+    fn approved_prompt_plan_gate_resumes_and_persists_progress_message() {
+        let state = state();
+        let mut brain = StaticBrain {
+            understanding: BrainUnderstanding::NeedsPlanning {
+                summary: "Inviare un messaggio solo dopo conferma".to_string(),
+                reason: Some("Richiede approval".to_string()),
+            },
+        };
+        let mut planner = StaticPlanner {
+            plan: approval_only_plan(),
+        };
+        state
+            .submit_user_prompt_with_brain_and_planner(
+                "computer_active_prompt",
+                "invia il messaggio",
+                &mut brain,
+                &mut planner,
+            )
+            .unwrap();
+        let approval_id = state.task_queue_snapshot().unwrap().waiting_approvals[0]
+            .approval_id
+            .clone();
+
+        state.approve_task_approval(&approval_id).unwrap();
+        let run = state
+            .run_prompt_plan_ready_steps("computer_active_prompt", 4)
+            .unwrap();
+        let queue = state.task_queue_snapshot().unwrap();
+        let messages = state
+            .chat_messages_snapshot("thread_active_prompt")
+            .unwrap();
+
+        assert_eq!(run.completed, 1);
+        assert!(
+            !queue.waiting_approvals.iter().any(|approval| {
+                approval.task_id == "prompt_computer_active_prompt_confirm_send"
+            })
+        );
+        assert!(
+            queue
+                .active
+                .iter()
+                .chain(queue.queued.iter())
+                .chain(queue.blocked.iter())
+                .chain(queue.recent_failures.iter())
+                .all(|task| task.task_id != "prompt_computer_active_prompt_confirm_send")
+        );
+        assert!(queue.recent_failures.is_empty());
+        assert!(messages.messages.iter().any(|message| {
+            message.role == "system" && message.text.contains("Eseguiti 1 step locali")
+        }));
+    }
 }
