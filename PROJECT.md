@@ -1200,6 +1200,7 @@ local-first-personal-assistant/
 ## Riferimenti
 
 - System Map operativa del progetto: `docs/architecture/system-map.md`
+- Roadmap finale dettagliata: `docs/architecture/final-roadmap.md`
 - OpenHuman, spunto di riferimento da studiare e adattare, non da copiare: https://github.com/tinyhumansai/openhuman
 - OpenClaw, riferimento principale per browser automation, da adattare con attribution MIT: https://github.com/openclaw/openclaw
 - Manus, riferimento UX da studiare per chat operativa, task visibili, Local Computer, popover e progressive disclosure; non base tecnica da copiare: https://manus.im/app

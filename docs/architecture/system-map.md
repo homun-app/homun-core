@@ -1,8 +1,8 @@
 # System Map
 
 Questo documento e' la mappa operativa del progetto. Va tenuto aggiornato insieme a
-`docs/work-memory.md` quando cambiano scopo, componenti, responsabilita' o ordine di
-implementazione.
+`docs/architecture/final-roadmap.md` e `docs/work-memory.md` quando cambiano
+scopo, componenti, responsabilita' o ordine di implementazione.
 
 ## Scopo Prodotto
 
@@ -376,3 +376,5 @@ Implementare il Prompt Plan Executor V1:
 - registra checkpoint redatti;
 - aggiorna Local Computer Session;
 - espone tutto alla UI Tasks/Chat.
+
+La sequenza completa e' dettagliata in `docs/architecture/final-roadmap.md`.

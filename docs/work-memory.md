@@ -1242,6 +1242,36 @@ Perche': prima di eseguire task reali serve separare bene le conversazioni. Senz
 
 ## Prossimo blocco
 
+### Roadmap finale dettagliata
+
+- Creato `docs/architecture/final-roadmap.md`.
+- La roadmap trasforma la system map in 13 fasi operative:
+  - Fase 0: mappa e contratti;
+  - Fase 1: Prompt Plan Executor V1;
+  - Fase 2: UI Tasks/Queue/Risorse/Approval reali;
+  - Fase 3: Local Computer live;
+  - Fase 4: Browser automation end-to-end;
+  - Fase 5: Orchestrator Brain completo;
+  - Fase 6: Capability, MCP, connettori e skill;
+  - Fase 7: subagenti operativi;
+  - Fase 8: memoria nel ciclo operativo;
+  - Fase 9: persistenza, resume e task di giorni;
+  - Fase 10: auto-apprendimento;
+  - Fase 11: UI finale e qualita' esperienza;
+  - Fase 12: production hardening e packaging.
+- Ogni fase contiene obiettivo, componenti, deliverable, test minimi e gate di chiusura.
+- Milestone prodotto:
+  - A: test reale locale governato;
+  - B: browser reale utile;
+  - C: tool orchestration reale;
+  - D: assistente personale contestuale;
+  - E: prodotto installabile.
+- Decisione: la prossima azione resta Fase 1, Prompt Plan Executor V1, con primo slice read-only e governato da Task Runtime + Resource Governor + Approval Gate.
+
+Perche': ora abbiamo una sequenza verificabile fino all'obiettivo finale. Questo evita di anticipare auto-apprendimento, connettori o UI finale prima che esecuzione task, risorse e Local Computer siano realmente funzionanti.
+
+## Prossimo blocco
+
 ### Mappa di sistema e focus progetto
 
 - Creato `docs/architecture/system-map.md` come documento guida operativo.
