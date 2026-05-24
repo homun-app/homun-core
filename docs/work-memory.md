@@ -1242,6 +1242,24 @@ Perche': prima di eseguire task reali serve separare bene le conversazioni. Senz
 
 ## Prossimo blocco
 
+### Mappa di sistema e focus progetto
+
+- Creato `docs/architecture/system-map.md` come documento guida operativo.
+- Il documento esplicita:
+  - scopo prodotto;
+  - flusso principale utente -> UI -> Core -> Brain -> Task Runtime -> tool -> Local Computer;
+  - responsabilita' e non-responsabilita' di ogni componente;
+  - stato attuale per UI, thread, Brain, task runtime, resource governor, capability, browser, Local Computer, memoria, subagenti, process manager e learning;
+  - sequenza aggiornata di implementazione;
+  - regole architetturali da non violare;
+  - cosa e' base production-ready e cosa non e' ancora end-to-end production-ready.
+- Decisione: `docs/architecture/system-map.md` e `docs/work-memory.md` devono restare allineati. Ogni blocco futuro deve aggiornare la memoria lavoro e, se cambia architettura o ordine, anche la system map.
+- Decisione: i prossimi lavori devono dichiarare quale parte della mappa stanno chiudendo. Questo evita di saltare tra UI, Brain, browser e learning senza completare i pezzi base.
+
+Perche': il progetto ha molti componenti separati ma interdipendenti. Senza una mappa stabile rischiamo di implementare feature isolate senza arrivare al comportamento finale: assistente locale che capisce, pianifica, usa strumenti, governa risorse, mostra il Local Computer e impara in modo controllato.
+
+## Prossimo blocco
+
 - Collegare Tasks/Approvals ai command `task_queue_snapshot` e `task_detail`.
 - Collegare Connections/Settings ai command capability/runtime esistenti.
 - Collegare il Browser Automation Runtime alla `LocalComputerSessionManager`, cosi' le azioni reali producono eventi, artifact e preview nella stessa card.
