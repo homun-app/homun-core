@@ -28,6 +28,19 @@ export interface CoreChatThreadSnapshot {
   threads: CoreChatThread[];
 }
 
+export interface CoreChatMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  text: string;
+  timestamp: string;
+  metadata: string | null;
+}
+
+export interface CoreChatMessagesSnapshot {
+  thread_id: string;
+  messages: CoreChatMessage[];
+}
+
 export interface RuntimeProcessItem {
   id: string;
   kind: string;
@@ -222,6 +235,10 @@ export interface CorePromptPlanBatchRunResult {
 export const coreBridge = {
   status: () => invoke<CoreBridgeStatus>("core_bridge_status"),
   chatThreads: () => invoke<CoreChatThreadSnapshot>("chat_thread_snapshot"),
+  chatMessages: (threadId: string) =>
+    invoke<CoreChatMessagesSnapshot>("chat_messages_snapshot", { threadId }),
+  selectChatThread: (threadId: string) =>
+    invoke<CoreChatThreadSnapshot>("select_chat_thread", { threadId }),
   createChatThread: () => invoke<CoreChatThread>("create_chat_thread"),
   runtimeHealth: () =>
     invoke<RuntimeHealthSnapshot>("runtime_health_snapshot"),

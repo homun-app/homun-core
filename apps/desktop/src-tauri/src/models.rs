@@ -39,6 +39,21 @@ pub struct DesktopChatThreadSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DesktopChatMessage {
+    pub id: String,
+    pub role: String,
+    pub text: String,
+    pub timestamp: String,
+    pub metadata: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DesktopChatMessagesSnapshot {
+    pub thread_id: String,
+    pub messages: Vec<DesktopChatMessage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PromptPlanStepRunResult {
     pub status: String,
     pub task_id: Option<String>,

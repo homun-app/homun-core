@@ -93,8 +93,12 @@ Responsabilita':
 Stato attuale:
 
 - `create_chat_thread` crea un thread e una sessione computer isolata;
-- la UI conserva messaggi separati per thread;
-- il core espone snapshot thread.
+- il Core conserva messaggi separati per thread nel read model locale
+  persistente;
+- la UI idrata i messaggi da `chat_messages_snapshot` e seleziona il thread
+  attivo con `select_chat_thread`;
+- il primo prompt aggiorna titolo, subtitle, conteggio messaggi e thread attivo
+  senza contaminare altri thread.
 
 ### Tauri Rust Core
 
@@ -108,15 +112,20 @@ Responsabilita':
 Non deve:
 
 - delegare decisioni di sicurezza al frontend;
-- salvare raw prompt nei read model;
+- salvare raw prompt nei read model operativi di task, tool, Local Computer,
+  audit o checkpoint; la cronologia chat locale e' l'unico read model che
+  conserva il testo conversazionale per mostrarlo all'utente;
 - usare API cloud per default.
 
 Stato attuale:
 
 - bridge Tauri con command per status, health, task, memory, capability, Local
-  Computer, prompt e chat thread;
-- stato ancora in-memory per varie parti desktop, da rendere persistente in
-  seguito.
+  Computer, prompt, chat thread e messaggi chat;
+- thread chat, messaggi chat, task, approval, checkpoint, process registry,
+  capability, memoria e Local Computer hanno persistenza locale nei blocchi gia'
+  implementati;
+- restano da consolidare alcuni read model UI e orchestrazione end-to-end dei
+  tool prima di considerare chiuso il prodotto.
 
 ### Orchestrator Brain
 
@@ -335,7 +344,9 @@ Stato attuale:
 - Ogni task dichiara risorse e passa dal Resource Governor.
 - Browser, shell, connettori, MCP, skill e subagenti usano lo stesso task
   runtime.
-- Raw prompt, segreti e payload sensibili non entrano nei read model UI.
+- Raw prompt, segreti e payload sensibili non entrano in task, audit,
+  checkpoint, Local Computer o tool payload; la chat locale conserva il testo
+  conversazionale solo come cronologia utente.
 - Azioni mutative, login, invio, acquisto e pagamento richiedono approval.
 - Auto-apprendimento viene dopo la raccolta affidabile di eventi reali.
 - File e moduli devono restare separati e non troppo lunghi.

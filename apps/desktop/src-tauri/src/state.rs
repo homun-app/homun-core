@@ -1,15 +1,16 @@
 use crate::local_computer_smoke;
 use crate::models::{
     BridgeStatus, CapabilityPolicySummary, CapabilitySnapshot, ComputerArtifactPreview,
-    DesktopChatThread, DesktopChatThreadSnapshot, DesktopTaskDetail, DesktopTaskQueueSnapshot,
-    PromptPlanBatchRunResult, PromptPlanStepRunResult, RuntimeHealthSnapshot, RuntimeProcessItem,
-    capability_connection_item, capability_tool_item, component, desktop_task_detail,
-    desktop_task_queue, runtime_process_item, runtime_process_item_with_snapshot,
+    DesktopChatMessage, DesktopChatMessagesSnapshot, DesktopChatThread, DesktopChatThreadSnapshot,
+    DesktopTaskDetail, DesktopTaskQueueSnapshot, PromptPlanBatchRunResult, PromptPlanStepRunResult,
+    RuntimeHealthSnapshot, RuntimeProcessItem, capability_connection_item, capability_tool_item,
+    component, desktop_task_detail, desktop_task_queue, runtime_process_item,
+    runtime_process_item_with_snapshot,
 };
 use crate::prompt_plan_executor;
 use crate::prompt_submission::{
-    self, PromptBrain, PromptExecutionPlan, PromptSubmissionResult, PromptTaskPlanner,
-    RuntimePromptBrain, RuntimePromptTaskPlanner,
+    self, PromptBrain, PromptExecutionPlan, PromptMessage, PromptSubmissionResult,
+    PromptTaskPlanner, RuntimePromptBrain, RuntimePromptTaskPlanner,
 };
 use crate::seed::{seed_capabilities, seed_memories, seed_tasks};
 use local_first_browser_automation::{BrowserMethod, BrowserTaskRuntimeBridge};
@@ -34,6 +35,7 @@ use local_first_task_runtime::{
     TaskUiReadModel, UserId as TaskUserId, WorkspaceId as TaskWorkspaceId,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -62,6 +64,8 @@ pub struct DesktopCoreState {
 struct ChatThreadStore {
     active_thread_id: String,
     threads: Vec<DesktopChatThread>,
+    #[serde(default)]
+    messages: BTreeMap<String, Vec<DesktopChatMessage>>,
     #[serde(skip)]
     path: Option<PathBuf>,
 }
@@ -84,6 +88,7 @@ impl ChatThreadStore {
                 store = Self::default_with_path(store.path.clone());
                 store.persist()?;
             }
+            store.ensure_thread_messages();
             return Ok(store);
         }
 
@@ -93,19 +98,36 @@ impl ChatThreadStore {
     }
 
     fn default_with_path(path: Option<PathBuf>) -> Self {
+        let default_thread = DesktopChatThread {
+            thread_id: "thread_active_prompt".to_string(),
+            title: "Nuovo compito".to_string(),
+            subtitle: "Sessione locale pronta".to_string(),
+            status: "active".to_string(),
+            computer_session_id: "computer_active_prompt".to_string(),
+            task_id: "task_prompt_session".to_string(),
+            updated_at: now_timestamp(),
+            message_count: 1,
+        };
+        let mut messages = BTreeMap::new();
+        messages.insert(
+            default_thread.thread_id.clone(),
+            starter_chat_messages(&default_thread),
+        );
         Self {
             active_thread_id: "thread_active_prompt".to_string(),
-            threads: vec![DesktopChatThread {
-                thread_id: "thread_active_prompt".to_string(),
-                title: "Nuovo compito".to_string(),
-                subtitle: "Sessione locale pronta".to_string(),
-                status: "active".to_string(),
-                computer_session_id: "computer_active_prompt".to_string(),
-                task_id: "task_prompt_session".to_string(),
-                updated_at: now_timestamp(),
-                message_count: 1,
-            }],
+            threads: vec![default_thread],
+            messages,
             path,
+        }
+    }
+
+    fn ensure_thread_messages(&mut self) {
+        for thread in self.threads.iter_mut() {
+            let messages = self
+                .messages
+                .entry(thread.thread_id.clone())
+                .or_insert_with(|| starter_chat_messages(thread));
+            thread.message_count = messages.len() as u32;
         }
     }
 
@@ -239,6 +261,47 @@ impl DesktopCoreState {
         })
     }
 
+    pub fn chat_messages_snapshot(
+        &self,
+        thread_id: &str,
+    ) -> Result<DesktopChatMessagesSnapshot, String> {
+        let store = self
+            .chat_threads
+            .lock()
+            .map_err(|_| "chat thread lock poisoned".to_string())?;
+        if !store
+            .threads
+            .iter()
+            .any(|thread| thread.thread_id == thread_id)
+        {
+            return Err(format!("chat thread not found: {thread_id}"));
+        }
+        Ok(DesktopChatMessagesSnapshot {
+            thread_id: thread_id.to_string(),
+            messages: store.messages.get(thread_id).cloned().unwrap_or_default(),
+        })
+    }
+
+    pub fn select_chat_thread(&self, thread_id: &str) -> Result<DesktopChatThreadSnapshot, String> {
+        let mut store = self
+            .chat_threads
+            .lock()
+            .map_err(|_| "chat thread lock poisoned".to_string())?;
+        if !store
+            .threads
+            .iter()
+            .any(|thread| thread.thread_id == thread_id)
+        {
+            return Err(format!("chat thread not found: {thread_id}"));
+        }
+        store.active_thread_id = thread_id.to_string();
+        store.persist()?;
+        Ok(DesktopChatThreadSnapshot {
+            active_thread_id: store.active_thread_id.clone(),
+            threads: store.threads.clone(),
+        })
+    }
+
     pub fn create_chat_thread(&self) -> Result<DesktopChatThread, String> {
         let suffix = Uuid::new_v4().simple().to_string();
         let short_suffix = &suffix[..12];
@@ -276,6 +339,9 @@ impl DesktopCoreState {
             .map_err(|_| "chat thread lock poisoned".to_string())?;
         store.active_thread_id = thread.thread_id.clone();
         store.threads.insert(0, thread.clone());
+        store
+            .messages
+            .insert(thread.thread_id.clone(), starter_chat_messages(&thread));
         store.persist()?;
         Ok(thread)
     }
@@ -740,25 +806,66 @@ impl DesktopCoreState {
         if let Some(plan) = &result.plan {
             self.enqueue_prompt_plan(session_id, plan)?;
         }
-        self.touch_thread_for_session(session_id)?;
+        self.record_prompt_messages_for_session(session_id, prompt, &result.assistant_message)?;
         Ok(result)
     }
 
-    fn touch_thread_for_session(&self, session_id: &str) -> Result<(), String> {
+    fn record_prompt_messages_for_session(
+        &self,
+        session_id: &str,
+        prompt: &str,
+        assistant_message: &PromptMessage,
+    ) -> Result<(), String> {
         let mut store = self
             .chat_threads
             .lock()
             .map_err(|_| "chat thread lock poisoned".to_string())?;
-        if let Some(thread) = store
+        let Some(index) = store
             .threads
-            .iter_mut()
-            .find(|thread| thread.computer_session_id == session_id)
-        {
-            thread.updated_at = now_timestamp();
-            thread.message_count = thread.message_count.saturating_add(2);
-            store.active_thread_id = thread.thread_id.clone();
-            store.persist()?;
+            .iter()
+            .position(|thread| thread.computer_session_id == session_id)
+        else {
+            return Ok(());
+        };
+        let thread_id = store.threads[index].thread_id.clone();
+        if !store.messages.contains_key(&thread_id) {
+            let starter = starter_chat_messages(&store.threads[index]);
+            store.messages.insert(thread_id.clone(), starter);
         }
+        let messages = store
+            .messages
+            .get_mut(&thread_id)
+            .ok_or_else(|| format!("chat messages not found: {thread_id}"))?;
+        messages.push(DesktopChatMessage {
+            id: format!("user_{}", Uuid::new_v4().simple()),
+            role: "user".to_string(),
+            text: prompt.trim().to_string(),
+            timestamp: "ora".to_string(),
+            metadata: Some("Inviato al core locale".to_string()),
+        });
+        messages.push(DesktopChatMessage {
+            id: assistant_message.id.clone(),
+            role: assistant_message.role.clone(),
+            text: assistant_message.text.clone(),
+            timestamp: assistant_message.timestamp.clone(),
+            metadata: assistant_message.metadata.clone(),
+        });
+        let message_count = messages.len() as u32;
+        let prompt_title = truncate_chars(prompt.trim(), 44);
+        let assistant_subtitle = truncate_chars(&assistant_message.text, 72);
+        let thread = &mut store.threads[index];
+        thread.updated_at = now_timestamp();
+        thread.message_count = message_count;
+        if thread.title == "Nuovo compito" && !prompt_title.is_empty() {
+            thread.title = prompt_title;
+        }
+        thread.subtitle = if assistant_subtitle.is_empty() {
+            "Risposta locale disponibile".to_string()
+        } else {
+            assistant_subtitle
+        };
+        store.active_thread_id = thread.thread_id.clone();
+        store.persist()?;
         Ok(())
     }
 
@@ -1169,6 +1276,24 @@ fn create_local_computer_session(
     Ok(())
 }
 
+fn starter_chat_messages(thread: &DesktopChatThread) -> Vec<DesktopChatMessage> {
+    vec![DesktopChatMessage {
+        id: format!("{}_ready", thread.thread_id),
+        role: "assistant".to_string(),
+        text: "Sono pronto. Questa chat ha una sessione Computer locale separata: puoi scrivere una richiesta senza sporcare i thread precedenti.".to_string(),
+        timestamp: "ora".to_string(),
+        metadata: Some("Thread locale isolato".to_string()),
+    }]
+}
+
+fn truncate_chars(text: &str, limit: usize) -> String {
+    let mut truncated = text.chars().take(limit).collect::<String>();
+    if text.chars().count() > limit {
+        truncated.push_str("...");
+    }
+    truncated
+}
+
 fn now_timestamp() -> String {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1331,6 +1456,74 @@ mod tests {
         assert!(!computer.timeline.iter().any(|item| {
             item.kind == "user_prompt_received" || item.kind == "local_calculation_completed"
         }));
+    }
+
+    #[test]
+    fn select_chat_thread_switches_active_thread_without_merging_messages() {
+        let state = state();
+
+        let created_thread = state.create_chat_thread().unwrap();
+        let selected = state.select_chat_thread("thread_active_prompt").unwrap();
+        let default_messages = state
+            .chat_messages_snapshot("thread_active_prompt")
+            .unwrap();
+        let created_messages = state
+            .chat_messages_snapshot(&created_thread.thread_id)
+            .unwrap();
+
+        assert_eq!(selected.active_thread_id, "thread_active_prompt");
+        assert_eq!(default_messages.thread_id, "thread_active_prompt");
+        assert_eq!(created_messages.thread_id, created_thread.thread_id);
+        assert_eq!(default_messages.messages.len(), 1);
+        assert_eq!(created_messages.messages.len(), 1);
+        assert_ne!(
+            default_messages.messages[0].id,
+            created_messages.messages[0].id
+        );
+    }
+
+    #[test]
+    fn submit_user_prompt_persists_chat_messages_and_updates_thread_preview() {
+        let state = state();
+        let thread = state.create_chat_thread().unwrap();
+        let mut brain = StaticBrain {
+            understanding: BrainUnderstanding::LocalCalculation {
+                calculation_left: 6,
+                calculation_operator: "*".to_string(),
+                calculation_right: 3,
+                reason: Some("calcolo locale".to_string()),
+            },
+        };
+        let mut planner = inert_planner();
+
+        let result = state
+            .submit_user_prompt_with_brain_and_planner(
+                &thread.computer_session_id,
+                "quanto fa 6*3",
+                &mut brain,
+                &mut planner,
+            )
+            .unwrap();
+        let result_serialized = serde_json::to_string(&result).unwrap();
+        let messages = state.chat_messages_snapshot(&thread.thread_id).unwrap();
+        let threads = state.chat_thread_snapshot().unwrap();
+        let updated_thread = threads
+            .threads
+            .iter()
+            .find(|item| item.thread_id == thread.thread_id)
+            .unwrap();
+
+        assert_eq!(result.assistant_message.text, "6 * 3 fa 18.");
+        assert!(!result_serialized.contains("quanto fa 6*3"));
+        assert_eq!(threads.active_thread_id, thread.thread_id);
+        assert_eq!(messages.messages.len(), 3);
+        assert_eq!(messages.messages[1].role, "user");
+        assert_eq!(messages.messages[1].text, "quanto fa 6*3");
+        assert_eq!(messages.messages[2].role, "assistant");
+        assert_eq!(messages.messages[2].text, "6 * 3 fa 18.");
+        assert_eq!(updated_thread.title, "quanto fa 6*3");
+        assert_eq!(updated_thread.subtitle, "6 * 3 fa 18.");
+        assert_eq!(updated_thread.message_count, messages.messages.len() as u32);
     }
 
     #[test]
@@ -1915,11 +2108,32 @@ mod tests {
 
         let created_thread = {
             let state = DesktopCoreState::seeded(workspace_root.clone()).unwrap();
-            state.create_chat_thread().unwrap()
+            let thread = state.create_chat_thread().unwrap();
+            let mut brain = StaticBrain {
+                understanding: BrainUnderstanding::LocalCalculation {
+                    calculation_left: 6,
+                    calculation_operator: "*".to_string(),
+                    calculation_right: 3,
+                    reason: Some("calcolo locale".to_string()),
+                },
+            };
+            let mut planner = inert_planner();
+            state
+                .submit_user_prompt_with_brain_and_planner(
+                    &thread.computer_session_id,
+                    "quanto fa 6*3",
+                    &mut brain,
+                    &mut planner,
+                )
+                .unwrap();
+            thread
         };
 
         let restored = DesktopCoreState::seeded(workspace_root.clone()).unwrap();
         let threads = restored.chat_thread_snapshot().unwrap();
+        let messages = restored
+            .chat_messages_snapshot(&created_thread.thread_id)
+            .unwrap();
         let queue = restored.task_queue_snapshot().unwrap();
         let computer = restored
             .local_computer_session_snapshot(&created_thread.computer_session_id)
@@ -1930,6 +2144,18 @@ mod tests {
             thread.thread_id == created_thread.thread_id
                 && thread.computer_session_id == created_thread.computer_session_id
         }));
+        assert!(
+            messages
+                .messages
+                .iter()
+                .any(|message| message.role == "user" && message.text == "quanto fa 6*3")
+        );
+        assert!(
+            messages
+                .messages
+                .iter()
+                .any(|message| message.role == "assistant" && message.text == "6 * 3 fa 18.")
+        );
         assert!(computer.is_some());
         assert!(
             queue
@@ -2021,10 +2247,12 @@ mod tests {
 
         let restored = DesktopCoreState::seeded(workspace_root.clone()).unwrap();
         let snapshot = restored.task_queue_snapshot().unwrap();
-        assert!(snapshot
-            .waiting_approvals
-            .iter()
-            .any(|approval| approval.approval_id == approval_id));
+        assert!(
+            snapshot
+                .waiting_approvals
+                .iter()
+                .any(|approval| approval.approval_id == approval_id)
+        );
 
         let approved = restored.approve_task_approval(&approval_id).unwrap();
         assert!(approved.waiting_approvals.is_empty());

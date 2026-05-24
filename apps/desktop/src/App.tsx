@@ -20,6 +20,7 @@ import {
 import {
   coreBridge,
   type CoreApprovalItem,
+  type CoreChatMessage,
   type CoreChatThread,
   type CoreTaskDetail,
   type CoreTaskItem,
@@ -59,6 +60,16 @@ function mapCoreChatThread(thread: CoreChatThread): ChatThread {
     taskId: thread.task_id,
     updatedAt: thread.updated_at,
     messageCount: thread.message_count,
+  };
+}
+
+function mapCoreChatMessage(message: CoreChatMessage): ChatMessage {
+  return {
+    id: message.id,
+    role: message.role,
+    text: message.text,
+    timestamp: message.timestamp,
+    metadata: message.metadata ?? undefined,
   };
 }
 
@@ -303,24 +314,42 @@ export default function App() {
     setActiveView(view);
   }
 
-  function handleSelectThread(threadId: string) {
+  async function handleSelectThread(threadId: string) {
     const thread = chatThreads.find((item) => item.threadId === threadId);
     if (!thread) return;
-    setActiveThreadId(threadId);
-    setSelectedTaskId(thread.taskId);
-    setActiveView("chat");
+    try {
+      const snapshot = await coreBridge.selectChatThread(threadId);
+      const mappedThreads = snapshot.threads.map(mapCoreChatThread);
+      const selectedThread =
+        mappedThreads.find((item) => item.threadId === threadId) ?? thread;
+      const messages = await coreBridge.chatMessages(threadId);
+      setChatThreads(mappedThreads.length ? mappedThreads : chatThreads);
+      setThreadMessages((current) => ({
+        ...current,
+        [threadId]: messages.messages.map(mapCoreChatMessage),
+      }));
+      setActiveThreadId(threadId);
+      setSelectedTaskId(selectedThread.taskId);
+      setActiveView("chat");
+    } catch (error) {
+      setActiveThreadId(threadId);
+      setSelectedTaskId(thread.taskId);
+      setActiveView("chat");
+      console.warn("select_chat_thread unavailable", error);
+    }
   }
 
   async function handleCreateChatThread() {
     try {
       const created = mapCoreChatThread(await coreBridge.createChatThread());
+      const messages = await coreBridge.chatMessages(created.threadId);
       setChatThreads((current) => [
         created,
         ...current.filter((thread) => thread.threadId !== created.threadId),
       ]);
       setThreadMessages((current) => ({
         ...current,
-        [created.threadId]: starterMessages(created),
+        [created.threadId]: messages.messages.map(mapCoreChatMessage),
       }));
       setActiveThreadId(created.threadId);
       setSelectedTaskId(created.taskId);
@@ -481,17 +510,31 @@ export default function App() {
         const snapshot = await coreBridge.chatThreads();
         if (cancelled) return;
         const mapped = snapshot.threads.map(mapCoreChatThread);
+        const messageEntries = await Promise.all(
+          mapped.map(async (thread) => {
+            try {
+              const messages = await coreBridge.chatMessages(thread.threadId);
+              return [
+                thread.threadId,
+                messages.messages.map(mapCoreChatMessage),
+              ] as const;
+            } catch {
+              return [thread.threadId, starterMessages(thread)] as const;
+            }
+          }),
+        );
+        if (cancelled) return;
+        const selectedThread =
+          mapped.find((thread) => thread.threadId === snapshot.active_thread_id) ??
+          mapped[0] ??
+          defaultChatThread;
         setChatThreads(mapped.length ? mapped : [defaultChatThread]);
-        setActiveThreadId(snapshot.active_thread_id || defaultChatThread.threadId);
+        setActiveThreadId(selectedThread.threadId);
+        setSelectedTaskId(selectedThread.taskId);
         setThreadMessages((current) => {
           const next = { ...current };
-          for (const thread of mapped) {
-            if (!next[thread.threadId]) {
-              next[thread.threadId] =
-                thread.threadId === defaultChatThread.threadId
-                  ? chatMessages
-                  : starterMessages(thread);
-            }
+          for (const [threadId, messages] of messageEntries) {
+            next[threadId] = messages;
           }
           return next;
         });

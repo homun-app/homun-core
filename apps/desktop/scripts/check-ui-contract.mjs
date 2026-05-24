@@ -57,6 +57,10 @@ assertContains("src/styles.css", ".local-computer-card.collapsed", "local comput
 assertContains("src/components/ChatView.tsx", "composer-surface", "prompt composer must have a stable anchored surface");
 assertContains("src/components/ChatView.tsx", "coreBridge.localComputerSession", "chat local computer card must load the Tauri read model");
 assertContains("src/components/ChatView.tsx", "coreBridge.submitUserPrompt", "composer must submit prompts to the Tauri core");
+assertContains("src/lib/coreBridge.ts", "chat_messages_snapshot", "frontend bridge must load persisted chat messages from the Tauri core");
+assertContains("src/lib/coreBridge.ts", "select_chat_thread", "frontend bridge must select active chat threads in the Tauri core");
+assertContains("src/App.tsx", "coreBridge.chatMessages", "app must hydrate thread messages from the Tauri read model");
+assertContains("src/App.tsx", "coreBridge.selectChatThread", "thread selection must update the Tauri active thread");
 assertContains("src/components/ChatView.tsx", "coreBridge.runLocalComputerSmokeTest", "chat must expose a real local computer smoke test action");
 assertContains("src/components/ChatView.tsx", "coreBridge.runPromptPlanReadySteps", "chat must expose prompt plan batch execution through Tauri core");
 assertContains("src/components/ChatView.tsx", "coreBridge.localComputerArtifactPreview", "chat must load local computer artifact previews through Tauri core");

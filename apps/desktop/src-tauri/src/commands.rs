@@ -1,6 +1,6 @@
 use crate::models::{
-    BridgeStatus, CapabilitySnapshot, ComputerArtifactPreview, DesktopChatThread,
-    DesktopChatThreadSnapshot, DesktopTaskDetail, DesktopTaskQueueSnapshot,
+    BridgeStatus, CapabilitySnapshot, ComputerArtifactPreview, DesktopChatMessagesSnapshot,
+    DesktopChatThread, DesktopChatThreadSnapshot, DesktopTaskDetail, DesktopTaskQueueSnapshot,
     PromptPlanBatchRunResult, PromptPlanStepRunResult, RuntimeHealthSnapshot, RuntimeProcessItem,
 };
 use crate::prompt_submission::PromptSubmissionResult;
@@ -18,6 +18,22 @@ pub fn chat_thread_snapshot(
     state: tauri::State<'_, DesktopCoreState>,
 ) -> Result<DesktopChatThreadSnapshot, String> {
     state.chat_thread_snapshot()
+}
+
+#[tauri::command]
+pub fn chat_messages_snapshot(
+    state: tauri::State<'_, DesktopCoreState>,
+    thread_id: String,
+) -> Result<DesktopChatMessagesSnapshot, String> {
+    state.chat_messages_snapshot(&thread_id)
+}
+
+#[tauri::command]
+pub fn select_chat_thread(
+    state: tauri::State<'_, DesktopCoreState>,
+    thread_id: String,
+) -> Result<DesktopChatThreadSnapshot, String> {
+    state.select_chat_thread(&thread_id)
 }
 
 #[tauri::command]

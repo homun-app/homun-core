@@ -1972,3 +1972,42 @@ Perche': il Computer locale deve dare contezza di cosa sta succedendo, ma non
 deve diventare il protagonista quando il sistema ha gia' prodotto la risposta.
 Questo allinea la UI alla regola di prodotto: risposta al centro, esecuzione
 locale come contesto progressivo e richiudibile.
+
+### Fase 11 - Chat lifecycle persistente
+
+- Spostata la cronologia chat dal solo stato React al Core locale.
+- Aggiunti read model/command Tauri:
+  - `chat_messages_snapshot(thread_id)` per caricare i messaggi persistenti di
+    un thread;
+  - `select_chat_thread(thread_id)` per aggiornare il thread attivo nel Core.
+- Esteso `ChatThreadStore`:
+  - ora contiene messaggi per thread in una mappa separata;
+  - crea uno starter message isolato per ogni nuova chat;
+  - persiste thread, active thread e messaggi in `chat-threads.json`;
+  - migra store vecchi senza messaggi aggiungendo starter message.
+- `submit_user_prompt` continua a non includere il raw prompt nel
+  `PromptSubmissionResult` e nei payload del Local Computer, ma registra il
+  testo utente nella cronologia chat locale: e' contenuto di conversazione, non
+  payload operativo o dato esfiltrabile verso tool.
+- Dopo il primo prompt:
+  - il titolo del thread diventa il primo prompt troncato;
+  - il subtitle diventa la risposta assistant troncata;
+  - il conteggio messaggi viene calcolato dalla cronologia reale;
+  - il thread diventa attivo nel Core.
+- La UI desktop ora:
+  - idrata i messaggi da `coreBridge.chatMessages`;
+  - seleziona thread tramite `coreBridge.selectChatThread`;
+  - crea nuove chat caricando subito i messaggi dal Core;
+  - conserva fallback web per anteprima senza bridge Tauri.
+- Aggiornati `docs/architecture/system-map.md` e contract UI per fissare il
+  confine: thread e messaggi sono read model del Core, non solo stato frontend.
+- Verifica TDD:
+  - RED: i test fallivano per assenza di `select_chat_thread` e
+    `chat_messages_snapshot`;
+  - GREEN: test su selezione thread, isolamento messaggi, preview thread dopo
+    prompt e persistenza post-restart.
+
+Perche': prima potevamo creare thread separati, ma la cronologia visibile era
+ancora fragile per reload/switch e dipendeva dai mock. Ora nuova chat, switch e
+riapertura hanno una fonte di verita' locale unica, necessaria prima di testare
+orchestrazione tool piu' complessa.
