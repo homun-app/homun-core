@@ -30,13 +30,14 @@ use local_first_process_manager::{
 };
 use local_first_subagents::RuntimeClient;
 use local_first_task_runtime::{
-    ApprovalGate, ResourceClass, ResourceRequirement, TaskRecord, TaskStore, TaskUiReadModel,
-    UserId as TaskUserId, WorkspaceId as TaskWorkspaceId,
+    ApprovalGate, ResourceClass, ResourceRequirement, TaskId, TaskRecord, TaskStatus, TaskStore,
+    TaskUiReadModel, UserId as TaskUserId, WorkspaceId as TaskWorkspaceId,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 pub(crate) const DEFAULT_USER_ID: &str = "local-user";
@@ -150,6 +151,7 @@ impl DesktopCoreState {
             None => TaskStore::open_in_memory().map_err(to_string_error)?,
         };
         seed_tasks_if_empty(&task_store).map_err(to_string_error)?;
+        recover_desktop_runtime_state(&task_store).map_err(to_string_error)?;
 
         let memory_facade = MemoryFacade::new(match &persistent_dir {
             Some(dir) => SQLiteMemoryStore::open(dir.join("memory.sqlite"))?,
@@ -1041,6 +1043,73 @@ fn seed_memories_if_empty(facade: &MemoryFacade) -> Result<(), String> {
     Ok(())
 }
 
+fn recover_desktop_runtime_state(store: &TaskStore) -> Result<Vec<TaskId>, String> {
+    let user_id = TaskUserId::new(DEFAULT_USER_ID);
+    let workspace_id = TaskWorkspaceId::new(DEFAULT_WORKSPACE_ID);
+    let now = OffsetDateTime::now_utc();
+    let mut recovered = Vec::new();
+
+    for mut task in store
+        .list_tasks(&user_id, &workspace_id)
+        .map_err(to_string_error)?
+    {
+        if task.kind == "local_prompt" {
+            continue;
+        }
+
+        if matches!(
+            task.status,
+            TaskStatus::Completed
+                | TaskStatus::Failed
+                | TaskStatus::Cancelled
+                | TaskStatus::Expired
+        ) {
+            store.release_resources(&task).map_err(to_string_error)?;
+            continue;
+        }
+
+        if !matches!(
+            task.status,
+            TaskStatus::Running | TaskStatus::WaitingResource
+        ) {
+            continue;
+        }
+
+        store.release_resources(&task).map_err(to_string_error)?;
+        task.status = TaskStatus::Queued;
+        task.lease_owner = None;
+        task.lease_expires_at = None;
+        task.last_heartbeat_at = None;
+        task.blocked_reason = Some("recovered after desktop restart".to_string());
+        task.updated_at = now;
+        let task_id = task.task_id.clone();
+        store.insert_task(&task).map_err(to_string_error)?;
+        store
+            .append_checkpoint(
+                &task_id,
+                &user_id,
+                &workspace_id,
+                serde_json::json!({
+                    "desktop_recovery": {
+                        "state": "requeued_after_restart",
+                        "raw_payload_stored": false
+                    }
+                }),
+                serde_json::json!({
+                    "desktop_recovery": {
+                        "state": "requeued_after_restart",
+                        "resource_reservations_released": true,
+                        "payload_redacted": true
+                    }
+                }),
+            )
+            .map_err(to_string_error)?;
+        recovered.push(task_id);
+    }
+
+    Ok(recovered)
+}
+
 fn ensure_seed_local_computer_session(manager: &LocalComputerSessionManager) -> Result<(), String> {
     if manager
         .read_model()
@@ -1868,6 +1937,72 @@ mod tests {
                 .iter()
                 .any(|task| task.task_id == "task_prompt_session")
         );
+
+        std::fs::remove_dir_all(workspace_root).unwrap();
+    }
+
+    #[test]
+    fn persistent_desktop_state_recovers_running_tasks_and_releases_stale_resources() {
+        let workspace_root = std::env::temp_dir().join(format!("lfpa-recovery-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&workspace_root).unwrap();
+        let task_id = TaskId::new("task_stale_browser");
+        let user = TaskUserId::new(DEFAULT_USER_ID);
+        let workspace = TaskWorkspaceId::new(DEFAULT_WORKSPACE_ID);
+
+        {
+            let state = DesktopCoreState::seeded(workspace_root.clone()).unwrap();
+            let store = state.task_store.lock().unwrap();
+            let mut task = TaskRecord::new(
+                task_id.as_str(),
+                user.clone(),
+                workspace.clone(),
+                "browser_automation",
+                "Riprendere task browser dopo riavvio",
+                serde_json::json!({ "raw_payload": "redacted" }),
+            )
+            .with_resource(ResourceRequirement::new(ResourceClass::BrowserSession, 1));
+            task.status = TaskStatus::Running;
+            task.lease_owner = Some("dead-desktop".to_string());
+            store.insert_task(&task).unwrap();
+            store.reserve_resources(&task, "dead-desktop").unwrap();
+            assert_eq!(
+                store
+                    .resource_usage(&user, &workspace, ResourceClass::BrowserSession)
+                    .unwrap(),
+                1
+            );
+        }
+
+        let restored = DesktopCoreState::seeded(workspace_root.clone()).unwrap();
+        let store = restored.task_store.lock().unwrap();
+        let recovered = store
+            .get_task(&task_id, &user, &workspace)
+            .unwrap()
+            .unwrap();
+        let checkpoint = store
+            .latest_checkpoint(&task_id, &user, &workspace)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(recovered.status, TaskStatus::Queued);
+        assert_eq!(recovered.lease_owner, None);
+        assert_eq!(recovered.lease_expires_at, None);
+        assert_eq!(recovered.last_heartbeat_at, None);
+        assert_eq!(
+            recovered.blocked_reason.as_deref(),
+            Some("recovered after desktop restart")
+        );
+        assert_eq!(
+            store
+                .resource_usage(&user, &workspace, ResourceClass::BrowserSession)
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            checkpoint.redacted_payload["desktop_recovery"]["state"],
+            "requeued_after_restart"
+        );
+        assert!(checkpoint.payload["raw_payload"].is_null());
 
         std::fs::remove_dir_all(workspace_root).unwrap();
     }

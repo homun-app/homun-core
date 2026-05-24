@@ -1873,3 +1873,40 @@ memoria, capability, process registry e Local Computer sono ora su file locali.
   una sessione morta devono tornare in stato retryable o waiting_resource
   coerente.
 - Rendere approval pending e batch summary più visibili nella UI dopo restart.
+
+### Fase 9 - Recovery runtime all'avvio
+
+- Aggiunto `recover_desktop_runtime_state` nel bootstrap desktop.
+- A ogni avvio il Core ispeziona i task persistenti dello scope locale:
+  - lascia invariato `local_prompt`, che rappresenta la sessione chat attiva;
+  - rilascia risorse rimaste associate a task terminali
+    (`completed`, `failed`, `cancelled`, `expired`);
+  - per task `running` o `waiting_resource` non di sessione chat:
+    - rilascia le risorse prenotate;
+    - resetta `lease_owner`, `lease_expires_at`, `last_heartbeat_at`;
+    - riporta il task a `queued`;
+    - imposta `blocked_reason=recovered after desktop restart`;
+    - aggiunge checkpoint redatto `desktop_recovery`.
+- Test TDD aggiunto:
+  - crea store persistente;
+  - inserisce task browser `running` con risorsa `browser_session` prenotata;
+  - riapre lo stato desktop;
+  - verifica task `queued`, lease azzerato, risorsa rilasciata e checkpoint
+    redatto senza raw payload.
+- Verifica eseguita:
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`;
+  - GREEN: `npm run test:ui-contract` in `apps/desktop`;
+  - GREEN: `npm run build` in `apps/desktop`;
+  - GREEN: `cargo test --manifest-path crates/browser-automation/Cargo.toml`.
+
+Perche': dopo un crash o riavvio non vogliamo risorse fantasma che bloccano il
+browser o task marcati running senza worker vivo. Questo recovery rende il
+runtime riavviabile: il lavoro non viene perso, ma torna in coda con audit
+esplicito e redatto.
+
+## Prossimo blocco
+
+- Esporre nella UI Tasks/Computer il fatto che un task e' stato recuperato dopo
+  restart, con messaggio comprensibile e senza payload raw.
+- Verificare che approval pending sopravviva a restart e resti azionabile dalla
+  UI.

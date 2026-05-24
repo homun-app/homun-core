@@ -418,7 +418,9 @@ Gate di chiusura:
 Stato: avviata. Il desktop ora apre store persistenti locali sotto
 `.local-first/desktop-state/` per task runtime, memoria, process registry,
 capability registry, Local Computer e chat thread. I test restano su store
-in-memory isolati. Restano da chiudere recovery lease, resume task running e
+in-memory isolati. Il bootstrap rilascia risorse stale e riporta in coda task
+`running`/`waiting_resource` non-chat dopo restart, con checkpoint redatto.
+Restano da chiudere resume task running più avanzato, approval UI post-restart e
 policy di compattazione/retention.
 
 Obiettivo:
@@ -440,14 +442,14 @@ Deliverable:
 - sessioni computer persistenti o ricostruibili;
 - seed locale idempotente, senza reset a ogni avvio;
 - resume di task pending/running;
-- lease recovery all'avvio;
+- lease/recovery all'avvio con rilascio risorse stale;
 - limiti globali/per workspace/per utente applicati dopo restart.
 
 Test minimi:
 
 - creare task, riavviare app, ritrovare coda;
 - creare chat, riavviare app, ritrovare thread e sessione computer;
-- running stale rilascia risorse e torna retryable;
+- running stale rilascia risorse, registra checkpoint redatto e torna queued;
 - approval pending sopravvive al riavvio;
 - thread nuovo non eredita eventi vecchi.
 
