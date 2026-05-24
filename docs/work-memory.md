@@ -1604,3 +1604,36 @@ approval e riprendere l'azione senza bypassare policy o sidecar.
 - Rendere il blocker browser piu' chiaro nella UI Tasks/Approval Center.
 - Collegare il planner Brain ai task browser reali invece di fermarsi al piano
   visualizzato.
+
+### Fase 4 - UI approval blocker leggibile
+
+- Aggiornata la vista Tasks/Approval Center.
+- Le approval ora portano nel view-model anche:
+  - action tecnica;
+  - data boundary;
+  - task richiedente.
+- Le approval `browser.manual_action` vengono tradotte in testo leggibile:
+  - click browser;
+  - close browser;
+  - type/submit.
+- La card mostra un'etichetta `Browser`, il confine dati e il task collegato,
+  senza mostrare raw payload.
+- Aggiunto stato vuoto per il centro approval.
+- Aggiornato il contratto UI per verificare che i browser blockers abbiano
+  label dedicata e mapping user-readable.
+- Verifica visiva eseguita su `http://127.0.0.1:1420/` viewport `1440x960`,
+  pagina `Pianificato`: nessun overlap rilevato nella card approval.
+- Verifiche eseguite:
+  - GREEN: `npm run test:ui-contract`;
+  - GREEN: `npm run build`.
+
+Perche': quando il browser si ferma prima di un click/submit, l'utente deve
+capire rapidamente che non e' un errore ma una richiesta di controllo. Il
+messaggio deve essere leggibile e redatto, perche' questa sara' una delle
+interazioni piu' frequenti durante task web reali.
+
+## Prossimo blocco
+
+- Collegare il planner Brain ai task browser reali.
+- Fare in modo che una richiesta naturale complessa generi ed esegua step
+  browser/task usando il runtime invece di restare solo nel piano visualizzato.

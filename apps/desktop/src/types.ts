@@ -147,6 +147,8 @@ export interface ApprovalItem {
   id: string;
   title: string;
   reason: string;
+  action: string;
+  boundary: string;
   risk: "medium" | "high";
   requestedBy: string;
 }

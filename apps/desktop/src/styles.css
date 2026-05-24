@@ -1354,9 +1354,65 @@ small {
   padding: 16px;
 }
 
-.approval-card p {
+.approval-header,
+.approval-meta,
+.approval-surface,
+.approval-empty {
+  display: flex;
+  align-items: center;
+}
+
+.approval-header {
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.approval-header .risk-badge {
+  margin-bottom: 0;
+}
+
+.approval-surface {
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.approval-reason {
   color: var(--muted);
   line-height: 1.45;
+}
+
+.approval-meta {
+  margin: 12px 0 14px;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.approval-meta span {
+  min-height: 24px;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.approval-empty {
+  min-height: 58px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  justify-content: center;
+  gap: 8px;
+  color: var(--muted);
+  background: var(--surface);
 }
 
 .resource-usage-panel {

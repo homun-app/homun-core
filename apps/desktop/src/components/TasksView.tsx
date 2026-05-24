@@ -1,4 +1,12 @@
-import { AlertCircle, Check, Clock3, Loader2, PauseCircle } from "lucide-react";
+import {
+  AlertCircle,
+  Check,
+  Clock3,
+  Globe2,
+  Loader2,
+  PauseCircle,
+  ShieldCheck,
+} from "lucide-react";
 import type {
   ApprovalItem,
   TaskDetailItem,
@@ -75,9 +83,26 @@ export function TasksView({
           <h3>Approval center</h3>
           {approvals.map((approval) => (
             <article className="approval-card" key={approval.id}>
-              <span className={`risk-badge ${approval.risk}`}>{approval.risk}</span>
+              <div className="approval-header">
+                <span className={`risk-badge ${approval.risk}`}>
+                  {approval.risk}
+                </span>
+                {approval.action === "browser.manual_action" && (
+                  <span className="approval-surface">
+                    <Globe2 size={14} />
+                    Browser
+                  </span>
+                )}
+              </div>
               <h4>{approval.title}</h4>
-              <p>{approval.reason}</p>
+              <p className="approval-reason">{approval.reason}</p>
+              <div className="approval-meta">
+                <span>
+                  <ShieldCheck size={14} />
+                  {approval.boundary}
+                </span>
+                <span>{approval.requestedBy}</span>
+              </div>
               <div className="approval-actions">
                 <button
                   className="secondary-button"
@@ -98,6 +123,12 @@ export function TasksView({
               </div>
             </article>
           ))}
+          {!approvals.length && (
+            <div className="approval-empty">
+              <Check size={17} />
+              <span>Nessuna approval in attesa.</span>
+            </div>
+          )}
 
           <div className="resource-usage-panel" aria-label="Uso risorse runtime">
             <h3>Risorse</h3>

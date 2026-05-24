@@ -199,8 +199,9 @@ policy preventiva: fill/draft resta consentito, click/close/type con submit
 richiedono approval prima di arrivare al sidecar. Dopo un checkpoint approvato
 per `browser.manual_action`, l'executor puo' riprendere l'azione. Esiste una
 demo/test locale con fixture form, sidecar Playwright, blocco click, approval e
-resume reale. Restano da chiudere blocker manuali completi nella UI e recovery
-su errori browser.
+resume reale. La UI Tasks/Approval Center mostra i blocker browser in forma
+leggibile e redatta. Restano da chiudere recovery su errori browser e
+orchestrazione Brain -> task browser reale.
 
 Obiettivo:
 
@@ -223,6 +224,7 @@ Deliverable:
 - policy mutative preventiva nel task executor;
 - resume dopo approval browser manuale;
 - test locale form mutativo simulato con Playwright sidecar;
+- blocker browser leggibili nella UI;
 - screenshot e transcript redatti;
 - policy per domini e azioni sensibili;
 - fallback e recovery su errore browser.

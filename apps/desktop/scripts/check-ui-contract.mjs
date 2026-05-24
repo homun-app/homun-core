@@ -64,6 +64,8 @@ assertContains("src/App.tsx", "coreBridge.approveApproval", "tasks view must app
 assertContains("src/App.tsx", "coreBridge.rejectApproval", "tasks view must reject through the Tauri approval gate command");
 assertContains("src/components/TasksView.tsx", "resourceUsage", "tasks view must expose resource usage from the task runtime");
 assertContains("src/components/TasksView.tsx", "selectedTaskDetail", "tasks view must render a selected task detail panel");
+assertContains("src/components/TasksView.tsx", "approval-surface", "tasks view must label browser approval blockers clearly");
+assertContains("src/App.tsx", "humanizeBrowserApprovalReason", "browser approval blockers must be mapped to user-readable text");
 assertContains("src/data/mockData.ts", "{ id: \"tasks\", label: \"Pianificato\"", "planned navigation must open the real task queue view");
 assertContains("src/lib/localComputerViewModel.ts", "payload_redacted", "local computer UI mapping must preserve redaction contract");
 assertNotContains("src/App.tsx", "computerSession,", "app must not pass mock local computer session into chat");

@@ -180,6 +180,8 @@ export const approvals: ApprovalItem[] = [
     id: "approval_acme",
     title: "Inviare riepilogo ad Acme",
     reason: "Azione write_with_confirmation verso connettore di messaggistica.",
+    action: "connector.write_with_confirmation",
+    boundary: "team_messaging",
     risk: "medium",
     requestedBy: "ReviewAgent",
   },

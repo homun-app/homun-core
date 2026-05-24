@@ -133,13 +133,33 @@ function mapCoreTask(task: CoreTaskItem): TaskItem {
 }
 
 function mapCoreApproval(approval: CoreApprovalItem): ApprovalItem {
+  const isBrowserAction = approval.action === "browser.manual_action";
   return {
     id: approval.approval_id,
-    title: approval.action,
-    reason: approval.explanation,
+    title: isBrowserAction ? "Azione browser in attesa" : approval.action,
+    reason: isBrowserAction
+      ? humanizeBrowserApprovalReason(approval.explanation)
+      : approval.explanation,
+    action: approval.action,
+    boundary: approval.data_boundary,
     risk: approval.risk_level === "high" ? "high" : "medium",
     requestedBy: approval.task_id,
   };
+}
+
+function humanizeBrowserApprovalReason(reason: string): string {
+  const match = reason.match(/before execution: ([a-z_]+)/i);
+  const action = match?.[1] ?? "azione";
+  if (action === "click") {
+    return "Il browser vuole fare click su un elemento della pagina. Conferma solo se vuoi proseguire.";
+  }
+  if (action === "close") {
+    return "Il browser vuole chiudere una pagina o una finestra. Conferma solo se non serve piu'.";
+  }
+  if (action === "type") {
+    return "Il browser vuole inviare testo come submit. Conferma solo se il contenuto e' corretto.";
+  }
+  return "Il browser richiede una conferma prima di procedere.";
 }
 
 function summarizeSafeValue(value: unknown): string {
