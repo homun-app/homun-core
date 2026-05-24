@@ -420,8 +420,9 @@ Stato: avviata. Il desktop ora apre store persistenti locali sotto
 capability registry, Local Computer e chat thread. I test restano su store
 in-memory isolati. Il bootstrap rilascia risorse stale e riporta in coda task
 `running`/`waiting_resource` non-chat dopo restart, con checkpoint redatto.
-Restano da chiudere resume task running più avanzato, approval UI post-restart e
-policy di compattazione/retention.
+La UI traduce i task recuperati in messaggi leggibili e le approval pending
+sono verificate come persistenti e ancora azionabili dopo restart. Restano da
+chiudere resume task running più avanzato e policy di compattazione/retention.
 
 Obiettivo:
 
@@ -443,6 +444,7 @@ Deliverable:
 - seed locale idempotente, senza reset a ogni avvio;
 - resume di task pending/running;
 - lease/recovery all'avvio con rilascio risorse stale;
+- recovery e approval post-restart visibili nei read model/UI;
 - limiti globali/per workspace/per utente applicati dopo restart.
 
 Test minimi:

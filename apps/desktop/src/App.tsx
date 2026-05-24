@@ -128,7 +128,7 @@ function mapCoreTask(task: CoreTaskItem): TaskItem {
     resource: "task_runtime",
     risk: "low",
     updated: "ora",
-    blockedReason: task.blocked_reason ?? undefined,
+    blockedReason: humanizeTaskBlockedReason(task.blocked_reason),
   };
 }
 
@@ -162,6 +162,20 @@ function humanizeBrowserApprovalReason(reason: string): string {
   return "Il browser richiede una conferma prima di procedere.";
 }
 
+function humanizeTaskBlockedReason(reason: string | null): string | undefined {
+  if (!reason) return undefined;
+  if (reason === "recovered after desktop restart") {
+    return "Recuperato dopo riavvio: risorse locali rilasciate, task rimesso in coda.";
+  }
+  if (reason.startsWith("resource ")) {
+    return "In attesa di risorse locali disponibili.";
+  }
+  if (reason.startsWith("approval required:")) {
+    return "In attesa di conferma utente.";
+  }
+  return reason;
+}
+
 function summarizeSafeValue(value: unknown): string {
   if (value === null || value === undefined) {
     return "Nessun dato redatto disponibile";
@@ -179,6 +193,10 @@ function summarizeSafeValue(value: unknown): string {
   }
   if (typeof value === "object") {
     const record = value as Record<string, unknown>;
+    const recovery = record.desktop_recovery as Record<string, unknown> | undefined;
+    if (recovery?.state === "requeued_after_restart") {
+      return "Recuperato dopo riavvio · risorse rilasciate";
+    }
     const approval = record.approval as Record<string, unknown> | undefined;
     if (approval?.decision) {
       return `Approval ${String(approval.decision)} · ${String(
@@ -210,7 +228,7 @@ function mapCoreTaskDetail(detail: CoreTaskDetail): TaskDetailItem {
     goal: detail.goal,
     status: mapCoreTaskStatus(detail.status),
     priority: mapCoreTaskPriority(detail.priority),
-    blockedReason: detail.blocked_reason ?? undefined,
+    blockedReason: humanizeTaskBlockedReason(detail.blocked_reason),
     checkpointSummary: summarizeSafeValue(detail.latest_checkpoint),
     metadataSummary: summarizeSafeValue(detail.runtime_metadata),
     exposesRawInput: detail.exposes_raw_input,

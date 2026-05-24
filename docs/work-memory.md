@@ -1910,3 +1910,37 @@ esplicito e redatto.
   restart, con messaggio comprensibile e senza payload raw.
 - Verificare che approval pending sopravviva a restart e resti azionabile dalla
   UI.
+
+### Fase 9 - UI recovery e approval post-restart
+
+- Aggiunto `humanizeTaskBlockedReason` nel frontend:
+  - `recovered after desktop restart` diventa
+    `Recuperato dopo riavvio: risorse locali rilasciate, task rimesso in coda.`;
+  - blocchi risorsa diventano testo utente;
+  - approval required diventa conferma utente.
+- `summarizeSafeValue` riconosce checkpoint `desktop_recovery` e mostra
+  `Recuperato dopo riavvio · risorse rilasciate` invece di un JSON generico.
+- Aggiornato il contratto UI per impedire regressioni sul testo recovery.
+- Aggiunto test persistente per approval:
+  - crea stato persistente;
+  - legge approval pending seed;
+  - riapre lo stato;
+  - verifica che l'approval sia ancora presente;
+  - approva dopo restart;
+  - verifica task `queued` e checkpoint approval redatto.
+- Verifica eseguita:
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`;
+  - GREEN: `npm run test:ui-contract` in `apps/desktop`;
+  - GREEN: `npm run build` in `apps/desktop`;
+  - GREEN: `cargo test --manifest-path crates/browser-automation/Cargo.toml`.
+
+Perche': la recovery tecnica serve solo se l'utente la capisce. La UI ora
+spiega quando un task e' stato rimesso in coda dopo restart e le approval
+persistenti restano operative anche dopo riapertura dell'app.
+
+## Prossimo blocco
+
+- Chiudere un test reale end-to-end da UI: nuova chat -> prompt complesso ->
+  piano -> batch -> preview browser -> approval visibile.
+- Valutare se spostare chat thread storage da JSON a SQLite per allinearlo agli
+  altri store persistenti prima dei task di giorni.

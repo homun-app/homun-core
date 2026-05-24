@@ -2008,6 +2008,37 @@ mod tests {
     }
 
     #[test]
+    fn persistent_desktop_state_restores_pending_approval_and_allows_approval() {
+        let workspace_root = std::env::temp_dir().join(format!("lfpa-approval-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&workspace_root).unwrap();
+
+        let approval_id = {
+            let state = DesktopCoreState::seeded(workspace_root.clone()).unwrap();
+            state.task_queue_snapshot().unwrap().waiting_approvals[0]
+                .approval_id
+                .clone()
+        };
+
+        let restored = DesktopCoreState::seeded(workspace_root.clone()).unwrap();
+        let snapshot = restored.task_queue_snapshot().unwrap();
+        assert!(snapshot
+            .waiting_approvals
+            .iter()
+            .any(|approval| approval.approval_id == approval_id));
+
+        let approved = restored.approve_task_approval(&approval_id).unwrap();
+        assert!(approved.waiting_approvals.is_empty());
+        let detail = restored.task_detail("task_acme_summary").unwrap().unwrap();
+        assert_eq!(detail.status, "queued");
+        assert_eq!(
+            detail.latest_checkpoint.unwrap()["approval"]["decision"],
+            "approved"
+        );
+
+        std::fs::remove_dir_all(workspace_root).unwrap();
+    }
+
+    #[test]
     fn prompt_plan_executor_does_not_execute_approval_only_step() {
         let state = state();
         let mut brain = StaticBrain {
