@@ -788,6 +788,32 @@ small {
   font-size: 12px;
 }
 
+.computer-inline-action {
+  min-height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 10px;
+  color: var(--text);
+  background: var(--surface);
+  font-size: 12px;
+}
+
+.computer-inline-action:hover,
+.smoke-test-button:hover {
+  background: var(--surface-muted);
+}
+
+.computer-inline-action.attention,
+.smoke-test-button.attention {
+  border-color: #ffd79b;
+  color: #8a4a00;
+  background: #fff7e8;
+}
+
+.computer-inline-action:disabled {
+  color: var(--muted);
+}
+
 .computer-collapse-button {
   width: 28px;
   height: 28px;

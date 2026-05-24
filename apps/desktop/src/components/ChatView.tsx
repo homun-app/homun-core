@@ -41,6 +41,7 @@ interface ChatViewProps {
   task: TaskItem;
   thread: ChatThread;
   onMessagesChange: (messages: ChatMessage[]) => void;
+  onOpenTasks: () => void;
   onRuntimeChanged: () => void | Promise<void>;
   onThreadChanged: () => void | Promise<void>;
 }
@@ -60,6 +61,7 @@ export function ChatView({
   task,
   thread,
   onMessagesChange,
+  onOpenTasks,
   onRuntimeChanged,
   onThreadChanged,
 }: ChatViewProps) {
@@ -385,6 +387,7 @@ export function ChatView({
             session={computerSession}
             task={task}
             onOpen={() => setDetailsOpen(true)}
+            onOpenTasks={onOpenTasks}
             onRunPlanStep={runPromptPlanNextStep}
             onRunSmokeTest={runLocalSmokeTest}
             onToggleCollapsed={() =>
@@ -495,6 +498,7 @@ function LocalComputerCard({
   approvalsCount,
   collapsed,
   onOpen,
+  onOpenTasks,
   onRunPlanStep,
   onRunSmokeTest,
   onToggleCollapsed,
@@ -509,6 +513,7 @@ function LocalComputerCard({
   approvalsCount: number;
   collapsed: boolean;
   onOpen: () => void;
+  onOpenTasks: () => void;
   onRunPlanStep: () => void;
   onRunSmokeTest: () => void;
   onToggleCollapsed: () => void;
@@ -528,6 +533,7 @@ function LocalComputerCard({
         : "Computer";
   const activityLabel =
     planStepRunning || smokeTestRunning ? "in esecuzione" : "pronto";
+  const hasApproval = approvalsCount > 0;
 
   return (
     <article className={`local-computer-card ${collapsed ? "collapsed" : ""}`}>
@@ -545,7 +551,24 @@ function LocalComputerCard({
           <span>
             {session.progressCurrent} / {session.progressTotal}
           </span>
-          <span>{approvalsCount} approval</span>
+          {hasApproval ? (
+            <button
+              className="computer-inline-action attention"
+              type="button"
+              onClick={onOpenTasks}
+            >
+              Approval
+            </button>
+          ) : (
+            <button
+              className="computer-inline-action"
+              disabled={planStepRunning}
+              type="button"
+              onClick={onRunPlanStep}
+            >
+              {planStepRunning ? "Esecuzione" : "Continua"}
+            </button>
+          )}
           <button
             className="computer-collapse-button"
             type="button"
@@ -621,6 +644,15 @@ function LocalComputerCard({
               >
                 {planStepRunning ? "Esecuzione" : "Esegui piano"}
               </button>
+              {hasApproval && (
+                <button
+                  className="smoke-test-button attention"
+                  type="button"
+                  onClick={onOpenTasks}
+                >
+                  Apri approval
+                </button>
+              )}
               <button
                 className="smoke-test-button"
                 disabled={smokeTestRunning}

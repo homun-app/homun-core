@@ -2038,3 +2038,32 @@ orchestrazione tool piu' complessa.
 Perche': per test reali l'utente deve vedere subito task, approval e stato
 chat coerenti. Il polling resta utile come safety net, ma la chat non deve
 aspettare secondi ne' perdere messaggi di avanzamento dopo reload.
+
+### Fase 11 - Flusso piano/approval piu' testabile dalla UI
+
+- Reso il `Computer locale` collassato piu' operativo:
+  - se non ci sono approval pendenti mostra `Continua`, che esegue il batch
+    degli step pronti senza dover espandere il pannello;
+  - se ci sono approval pendenti mostra `Approval`, che porta direttamente alla
+    vista Task/Approval;
+  - nello stato espanso resta disponibile anche `Apri approval`.
+- Cambiata l'azione primaria dell'Approval Center in `Approva e continua`.
+- Dopo approval, `App`:
+  - approva tramite `approval_approve`;
+  - se l'approval appartiene al thread attivo, lancia
+    `prompt_plan_run_ready_steps` sulla sessione Computer del thread;
+  - ricarica task queue, approval, task detail, thread e messaggi.
+- Aggiornato il contract UI:
+  - la chat deve esporre un'azione diretta `Continua`/`Approval`;
+  - l'approval deve dichiarare esplicitamente che continua il flusso;
+  - il resume post-approval deve chiamare il batch runner del prompt plan.
+- Verifica visuale su `http://127.0.0.1:1420/`:
+  - card Computer resta collassato a 44px;
+  - azione compatta larga 72px, senza overflow;
+  - composer stabile;
+  - nessun overflow pagina.
+
+Perche': il percorso precedente richiedeva di sapere che bisognava espandere il
+Computer o andare nella vista task. Ora il flusso e' leggibile: risposta al
+centro, Computer come barra di stato, azione esplicita per continuare o sbloccare
+approval.

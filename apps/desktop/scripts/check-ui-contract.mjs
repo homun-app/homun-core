@@ -63,8 +63,12 @@ assertContains("src/App.tsx", "coreBridge.chatMessages", "app must hydrate threa
 assertContains("src/App.tsx", "coreBridge.selectChatThread", "thread selection must update the Tauri active thread");
 assertContains("src/components/ChatView.tsx", "onRuntimeChanged", "chat mutations must notify the app to refresh runtime read models");
 assertContains("src/components/ChatView.tsx", "onThreadChanged", "chat mutations must reload persisted chat messages after core writes");
+assertContains("src/components/ChatView.tsx", "computer-inline-action", "collapsed local computer must expose a direct continue or approval action");
+assertContains("src/components/ChatView.tsx", "Apri approval", "chat must expose pending approvals without requiring users to hunt through navigation");
 assertContains("src/App.tsx", "refreshRuntimeReadModels", "app must refresh tasks and approvals immediately after chat runtime changes");
 assertContains("src/App.tsx", "refreshChatReadModels", "app must refresh chat threads and messages from the core after mutations");
+assertContains("src/App.tsx", "coreBridge.runPromptPlanReadySteps(activeThread.computerSessionId", "approval flow must resume the active prompt plan after user approval");
+assertContains("src/components/TasksView.tsx", "Approva e continua", "approval primary action must make resume behavior explicit");
 assertContains("src/components/ChatView.tsx", "coreBridge.runLocalComputerSmokeTest", "chat must expose a real local computer smoke test action");
 assertContains("src/components/ChatView.tsx", "coreBridge.runPromptPlanReadySteps", "chat must expose prompt plan batch execution through Tauri core");
 assertContains("src/components/ChatView.tsx", "coreBridge.localComputerArtifactPreview", "chat must load local computer artifact previews through Tauri core");

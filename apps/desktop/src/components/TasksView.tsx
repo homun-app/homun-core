@@ -118,7 +118,7 @@ export function TasksView({
                   disabled={approvalBusyId === approval.id}
                   onClick={() => onApproveApproval(approval.id)}
                 >
-                  Approva
+                  Approva e continua
                 </button>
               </div>
             </article>

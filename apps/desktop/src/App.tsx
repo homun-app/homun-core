@@ -457,9 +457,15 @@ export default function App() {
 
   async function handleApproveApproval(approvalId: string) {
     setApprovalBusyId(approvalId);
+    const approval = approvalItems.find((item) => item.id === approvalId);
     try {
       applyTaskQueueSnapshot(await coreBridge.approveApproval(approvalId));
+      if (approval?.requestedBy.includes(activeThread.computerSessionId)) {
+        await coreBridge.runPromptPlanReadySteps(activeThread.computerSessionId, 4);
+      }
       await refreshSelectedTaskDetail(selectedTaskId);
+      await refreshRuntimeReadModels(activeThread.taskId);
+      await refreshChatReadModels(activeThread.threadId);
     } catch (error) {
       console.warn("approval_approve unavailable", error);
     } finally {
@@ -607,6 +613,7 @@ export default function App() {
             onMessagesChange={(messages) =>
               handleMessagesChange(activeThread.threadId, messages)
             }
+            onOpenTasks={() => setActiveView("tasks")}
             onRuntimeChanged={() => refreshRuntimeReadModels(activeThread.taskId)}
             onThreadChanged={() => refreshChatReadModels(activeThread.threadId)}
           />
