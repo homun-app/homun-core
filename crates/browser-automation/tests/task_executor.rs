@@ -1,7 +1,9 @@
 use local_first_browser_automation::{
     BrowserMethod, BrowserRequest, BrowserTaskExecutor, BrowserTaskRuntimeBridge, BrowserTransport,
 };
-use local_first_task_runtime::{ExecutorResult, ResourceClass, TaskExecutor, UserId, WorkspaceId};
+use local_first_task_runtime::{
+    ExecutorResult, ResourceClass, TaskCheckpoint, TaskExecutor, UserId, WorkspaceId,
+};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -149,6 +151,57 @@ fn executor_blocks_click_actions_before_sidecar() {
         }
     );
     assert!(sent.borrow().is_empty());
+}
+
+#[test]
+fn executor_runs_click_after_browser_action_approval_checkpoint() {
+    let transport = FakeTransport {
+        response: serde_json::json!({
+            "id": "browser_req_1",
+            "ok": true,
+            "result": {"clicked": true}
+        })
+        .to_string(),
+        sent: Rc::default(),
+    };
+    let sent = Rc::clone(&transport.sent);
+    let mut executor = BrowserTaskExecutor::new(transport);
+    let user = UserId::new("user_1");
+    let workspace = WorkspaceId::new("workspace_1");
+    let task = BrowserTaskRuntimeBridge::new().enqueue_browser_call(
+        "browser_task_1",
+        user.clone(),
+        workspace.clone(),
+        BrowserMethod::Act,
+        serde_json::json!({"target_id": "booking", "kind": "click", "ref": "e1"}),
+    );
+    let checkpoint = TaskCheckpoint::new(
+        "checkpoint_1",
+        task.task_id.clone(),
+        user,
+        workspace,
+        1,
+        serde_json::json!({
+            "decision": "approved",
+            "action": "browser.manual_action"
+        }),
+        serde_json::json!({
+            "approval": {
+                "decision": "approved",
+                "action": "browser.manual_action"
+            }
+        }),
+    );
+
+    let result = executor.execute_step(&task, Some(checkpoint)).unwrap();
+
+    assert_eq!(
+        result,
+        ExecutorResult::Completed {
+            output: serde_json::json!({"clicked": true}),
+        }
+    );
+    assert_eq!(sent.borrow().len(), 1);
 }
 
 #[test]

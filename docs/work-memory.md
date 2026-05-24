@@ -1545,3 +1545,29 @@ non possono bypassarlo.
   raw.
 - Integrare il Brain planner reale sopra capability registry e task runtime,
   cosi' i prompt non dipendono da euristiche o regex.
+
+### Fase 4 - Browser approval resume
+
+- `BrowserTaskExecutor` ora legge il checkpoint precedente ricevuto dal Task
+  Runtime.
+- Se il checkpoint contiene una decisione `approved` per
+  `browser.manual_action`, la policy mutativa non riblocca la stessa esecuzione
+  e la chiamata viene inoltrata al sidecar.
+- Il bypass e' ristretto all'action browser manuale approvata: un checkpoint di
+  altra approval non basta.
+- Aggiunto test `executor_runs_click_after_browser_action_approval_checkpoint`:
+  una `browser.act` di tipo `click` viene prima bloccata normalmente, ma con
+  checkpoint approvato viene eseguita e invia una sola request al transport.
+- Verifica mirata eseguita:
+  - GREEN: `cargo test --manifest-path crates/browser-automation/Cargo.toml`.
+
+Perche': il sistema deve fermarsi davanti ad azioni web rischiose, ma dopo la
+decisione esplicita dell'utente deve poter riprendere il task senza entrare in
+un loop infinito di approval. Il resume resta governato dai checkpoint del Task
+Runtime, quindi e' auditabile.
+
+## Prossimo blocco
+
+- Portare il blocker browser nella UI come stato leggibile e azionabile.
+- Creare una demo locale end-to-end: form draft -> richiesta approval -> resume
+  click simulato -> completion redatta.

@@ -196,8 +196,10 @@ sidecar browser locale, aprono una pagina sicura, producono screenshot artifact
 e aggiornano Task Runtime + Local Computer. Il smoke browser copre anche form
 fill draft su fixture locale senza submit. Il `BrowserTaskExecutor` applica una
 policy preventiva: fill/draft resta consentito, click/close/type con submit
-richiedono approval prima di arrivare al sidecar. Restano da chiudere il flusso
-end-to-end approval -> resume dell'azione mutativa e i blocker manuali nella UI.
+richiedono approval prima di arrivare al sidecar. Dopo un checkpoint approvato
+per `browser.manual_action`, l'executor puo' riprendere l'azione. Restano da
+chiudere blocker manuali completi nella UI e demo end-to-end su form mutativo
+simulato.
 
 Obiettivo:
 
@@ -218,6 +220,7 @@ Deliverable:
 - form fill draft senza submit rischioso;
 - manual blockers tipizzati;
 - policy mutative preventiva nel task executor;
+- resume dopo approval browser manuale;
 - screenshot e transcript redatti;
 - policy per domini e azioni sensibili;
 - fallback e recovery su errore browser.

@@ -64,7 +64,7 @@ impl<T: BrowserTransport> TaskExecutor for BrowserTaskExecutor<T> {
     fn execute_step(
         &mut self,
         task: &TaskRecord,
-        _checkpoint: Option<TaskCheckpoint>,
+        checkpoint: Option<TaskCheckpoint>,
     ) -> TaskRuntimeResult<ExecutorResult> {
         let method: BrowserMethod = serde_json::from_value(task.input_json["method"].clone())?;
         let params = task
@@ -78,6 +78,7 @@ impl<T: BrowserTransport> TaskExecutor for BrowserTaskExecutor<T> {
             data_boundary,
             explanation,
         } = BrowserPolicy::default().classify_tool_call(method, &params)
+            && !has_browser_action_approval(checkpoint.as_ref())
         {
             return Ok(ExecutorResult::NeedsApproval {
                 action,
@@ -116,6 +117,24 @@ impl<T: BrowserTransport> TaskExecutor for BrowserTaskExecutor<T> {
             }),
         }
     }
+}
+
+fn has_browser_action_approval(checkpoint: Option<&TaskCheckpoint>) -> bool {
+    let Some(checkpoint) = checkpoint else {
+        return false;
+    };
+    let decision = checkpoint
+        .payload
+        .get("decision")
+        .or_else(|| checkpoint.redacted_payload.pointer("/approval/decision"))
+        .and_then(Value::as_str);
+    let action = checkpoint
+        .payload
+        .get("action")
+        .or_else(|| checkpoint.redacted_payload.pointer("/approval/action"))
+        .and_then(Value::as_str);
+
+    decision == Some("approved") && action == Some("browser.manual_action")
 }
 
 fn browser_redacted_checkpoint(method: BrowserMethod, params: &Value, result: Value) -> Value {
