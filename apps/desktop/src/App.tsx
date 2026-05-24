@@ -421,6 +421,35 @@ export default function App() {
     }
   }
 
+  async function refreshRuntimeReadModels(taskId = selectedTaskId) {
+    await loadTaskQueue();
+    if (taskId) {
+      try {
+        await refreshSelectedTaskDetail(taskId);
+      } catch (error) {
+        console.warn("task_detail unavailable after runtime change", error);
+      }
+    }
+  }
+
+  async function refreshChatReadModels(preferredThreadId = activeThreadId) {
+    const snapshot = await coreBridge.chatThreads();
+    const mappedThreads = snapshot.threads.map(mapCoreChatThread);
+    const selectedThread =
+      mappedThreads.find((thread) => thread.threadId === preferredThreadId) ??
+      mappedThreads.find((thread) => thread.threadId === snapshot.active_thread_id) ??
+      mappedThreads[0] ??
+      defaultChatThread;
+    const messages = await coreBridge.chatMessages(selectedThread.threadId);
+    setChatThreads(mappedThreads.length ? mappedThreads : [defaultChatThread]);
+    setActiveThreadId(selectedThread.threadId);
+    setSelectedTaskId(selectedThread.taskId);
+    setThreadMessages((current) => ({
+      ...current,
+      [selectedThread.threadId]: messages.messages.map(mapCoreChatMessage),
+    }));
+  }
+
   async function refreshSelectedTaskDetail(taskId: string) {
     const detail = await coreBridge.taskDetail(taskId);
     setSelectedTaskDetail(detail ? mapCoreTaskDetail(detail) : null);
@@ -578,6 +607,8 @@ export default function App() {
             onMessagesChange={(messages) =>
               handleMessagesChange(activeThread.threadId, messages)
             }
+            onRuntimeChanged={() => refreshRuntimeReadModels(activeThread.taskId)}
+            onThreadChanged={() => refreshChatReadModels(activeThread.threadId)}
           />
         )}
         {activeView === "tasks" && (

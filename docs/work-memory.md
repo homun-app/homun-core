@@ -2011,3 +2011,30 @@ Perche': prima potevamo creare thread separati, ma la cronologia visibile era
 ancora fragile per reload/switch e dipendeva dai mock. Ora nuova chat, switch e
 riapertura hanno una fonte di verita' locale unica, necessaria prima di testare
 orchestrazione tool piu' complessa.
+
+### Fase 11 - Refresh operativo immediato da chat
+
+- Aggiunto callback `onRuntimeChanged` da `ChatView` verso `App`:
+  - dopo submit prompt;
+  - dopo `Esegui piano`;
+  - dopo smoke test reale.
+- `App` ora chiama `refreshRuntimeReadModels` per ricaricare subito task queue,
+  approval e task detail dopo mutazioni operative, senza aspettare il polling.
+- Aggiunto callback `onThreadChanged`:
+  - dopo submit prompt la UI rilegge thread e messaggi dal Core;
+  - dopo batch del piano la UI rilegge il system message persistito dal Core;
+  - React mantiene solo lo stato ottimistico durante l'invio, poi torna al read
+    model locale reale.
+- `run_prompt_plan_ready_steps` ora aggiunge alla cronologia chat un messaggio
+  system persistente, ad esempio `Eseguiti 2 step locali...`, invece di lasciare
+  l'avanzamento solo in memoria frontend.
+- Aggiornato il contract UI per imporre refresh immediato di runtime e chat
+  dopo mutazioni.
+- Verifica TDD:
+  - RED: `prompt_plan_batch_runner_executes_ready_steps_until_idle` falliva
+    per assenza del messaggio system persistito;
+  - GREEN: batch plan persiste il messaggio, refresh UI compila e contract passa.
+
+Perche': per test reali l'utente deve vedere subito task, approval e stato
+chat coerenti. Il polling resta utile come safety net, ma la chat non deve
+aspettare secondi ne' perdere messaggi di avanzamento dopo reload.

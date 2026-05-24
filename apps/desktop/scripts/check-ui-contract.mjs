@@ -61,6 +61,10 @@ assertContains("src/lib/coreBridge.ts", "chat_messages_snapshot", "frontend brid
 assertContains("src/lib/coreBridge.ts", "select_chat_thread", "frontend bridge must select active chat threads in the Tauri core");
 assertContains("src/App.tsx", "coreBridge.chatMessages", "app must hydrate thread messages from the Tauri read model");
 assertContains("src/App.tsx", "coreBridge.selectChatThread", "thread selection must update the Tauri active thread");
+assertContains("src/components/ChatView.tsx", "onRuntimeChanged", "chat mutations must notify the app to refresh runtime read models");
+assertContains("src/components/ChatView.tsx", "onThreadChanged", "chat mutations must reload persisted chat messages after core writes");
+assertContains("src/App.tsx", "refreshRuntimeReadModels", "app must refresh tasks and approvals immediately after chat runtime changes");
+assertContains("src/App.tsx", "refreshChatReadModels", "app must refresh chat threads and messages from the core after mutations");
 assertContains("src/components/ChatView.tsx", "coreBridge.runLocalComputerSmokeTest", "chat must expose a real local computer smoke test action");
 assertContains("src/components/ChatView.tsx", "coreBridge.runPromptPlanReadySteps", "chat must expose prompt plan batch execution through Tauri core");
 assertContains("src/components/ChatView.tsx", "coreBridge.localComputerArtifactPreview", "chat must load local computer artifact previews through Tauri core");

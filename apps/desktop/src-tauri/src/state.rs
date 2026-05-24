@@ -557,12 +557,28 @@ impl DesktopCoreState {
         } else {
             "completed"
         };
-        Ok(PromptPlanBatchRunResult {
+        let batch = PromptPlanBatchRunResult {
             status: status.to_string(),
             completed,
             stopped_reason,
             results,
-        })
+        };
+        let last_message = batch
+            .results
+            .last()
+            .map(|result| result.message.as_str())
+            .unwrap_or("Nessuno step pronto.");
+        let system_text = if batch.completed > 0 {
+            format!("Eseguiti {} step locali. {last_message}", batch.completed)
+        } else {
+            last_message.to_string()
+        };
+        self.append_chat_system_message_for_session(
+            session_id,
+            &system_text,
+            Some(batch.stopped_reason.as_deref().unwrap_or(&batch.status)),
+        )?;
+        Ok(batch)
     }
 
     fn ensure_approval_scope(
@@ -864,6 +880,50 @@ impl DesktopCoreState {
         } else {
             assistant_subtitle
         };
+        store.active_thread_id = thread.thread_id.clone();
+        store.persist()?;
+        Ok(())
+    }
+
+    fn append_chat_system_message_for_session(
+        &self,
+        session_id: &str,
+        text: &str,
+        metadata: Option<&str>,
+    ) -> Result<(), String> {
+        let mut store = self
+            .chat_threads
+            .lock()
+            .map_err(|_| "chat thread lock poisoned".to_string())?;
+        let Some(index) = store
+            .threads
+            .iter()
+            .position(|thread| thread.computer_session_id == session_id)
+        else {
+            return Ok(());
+        };
+        let thread_id = store.threads[index].thread_id.clone();
+        if !store.messages.contains_key(&thread_id) {
+            let starter = starter_chat_messages(&store.threads[index]);
+            store.messages.insert(thread_id.clone(), starter);
+        }
+        let messages = store
+            .messages
+            .get_mut(&thread_id)
+            .ok_or_else(|| format!("chat messages not found: {thread_id}"))?;
+        messages.push(DesktopChatMessage {
+            id: format!("system_{}", Uuid::new_v4().simple()),
+            role: "system".to_string(),
+            text: text.to_string(),
+            timestamp: "ora".to_string(),
+            metadata: metadata.map(ToString::to_string),
+        });
+        let message_count = messages.len() as u32;
+        let subtitle = truncate_chars(text, 72);
+        let thread = &mut store.threads[index];
+        thread.updated_at = now_timestamp();
+        thread.message_count = message_count;
+        thread.subtitle = subtitle;
         store.active_thread_id = thread.thread_id.clone();
         store.persist()?;
         Ok(())
@@ -2038,6 +2098,9 @@ mod tests {
             .local_computer_session_snapshot("computer_active_prompt")
             .unwrap()
             .unwrap();
+        let messages = state
+            .chat_messages_snapshot("thread_active_prompt")
+            .unwrap();
 
         assert_eq!(run.status, "stopped");
         assert_eq!(run.completed, 2);
@@ -2058,6 +2121,9 @@ mod tests {
                 .iter()
                 .any(|item| item.kind == "browser_automation_preview_ready")
         );
+        assert!(messages.messages.iter().any(|message| {
+            message.role == "system" && message.text.contains("Eseguiti 2 step locali")
+        }));
     }
 
     #[test]

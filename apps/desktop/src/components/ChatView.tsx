@@ -41,6 +41,8 @@ interface ChatViewProps {
   task: TaskItem;
   thread: ChatThread;
   onMessagesChange: (messages: ChatMessage[]) => void;
+  onRuntimeChanged: () => void | Promise<void>;
+  onThreadChanged: () => void | Promise<void>;
 }
 
 const surfaceIcons: Record<ComputerSurfaceKind, typeof Globe2> = {
@@ -58,6 +60,8 @@ export function ChatView({
   task,
   thread,
   onMessagesChange,
+  onRuntimeChanged,
+  onThreadChanged,
 }: ChatViewProps) {
   const [computerSession, setComputerSession] = useState<ComputerSession>(() =>
     createLoadingComputerSession(computerSessionId),
@@ -94,6 +98,7 @@ export function ChatView({
       const snapshot =
         await coreBridge.runLocalComputerSmokeTest(computerSessionId);
       setComputerSession(mapCoreComputerSession(snapshot));
+      await onRuntimeChanged();
     } catch (error) {
       setSmokeTestError(describeBridgeError(error));
     } finally {
@@ -114,20 +119,8 @@ export function ChatView({
       if (snapshot) {
         setComputerSession(mapCoreComputerSession(snapshot));
       }
-      const lastResult = result.results.at(-1);
-      onMessagesChange([
-        ...threadMessages,
-        {
-          id: `local_plan_batch_${Date.now()}`,
-          role: "system",
-          text:
-            result.completed > 0
-              ? `Eseguiti ${result.completed} step locali. ${lastResult?.message ?? ""}`.trim()
-              : (lastResult?.message ?? "Nessuno step pronto."),
-          timestamp: "ora",
-          metadata: result.stopped_reason ?? result.status,
-        },
-      ]);
+      await onRuntimeChanged();
+      await onThreadChanged();
     } catch (error) {
       setPlanStepError(describeBridgeError(error));
     } finally {
@@ -180,6 +173,8 @@ export function ChatView({
           metadata: result.assistant_message.metadata ?? undefined,
         },
       ]);
+      await onRuntimeChanged();
+      await onThreadChanged();
     } catch (error) {
       const message = describeBridgeError(error);
       setPromptError(message);
