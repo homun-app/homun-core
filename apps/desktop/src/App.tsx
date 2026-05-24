@@ -21,7 +21,9 @@ import {
   coreBridge,
   type CoreApprovalItem,
   type CoreChatThread,
+  type CoreTaskDetail,
   type CoreTaskItem,
+  type CoreTaskQueueSnapshot,
 } from "./lib/coreBridge";
 import type {
   ApprovalItem,
@@ -29,6 +31,7 @@ import type {
   ChatThread,
   Priority,
   SettingsSectionId,
+  TaskDetailItem,
   TaskItem,
   TaskResourceUsage,
   TaskStatus,
@@ -139,6 +142,75 @@ function mapCoreApproval(approval: CoreApprovalItem): ApprovalItem {
   };
 }
 
+function summarizeSafeValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "Nessun dato redatto disponibile";
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (typeof value === "string") {
+    return value.toLowerCase().includes("redacted")
+      ? "Payload redatto"
+      : "Dato redatto disponibile";
+  }
+  if (Array.isArray(value)) {
+    return `Lista redatta (${value.length})`;
+  }
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const approval = record.approval as Record<string, unknown> | undefined;
+    if (approval?.decision) {
+      return `Approval ${String(approval.decision)} · ${String(
+        approval.action ?? "azione redatta",
+      )}`;
+    }
+    const prompt = record.prompt as Record<string, unknown> | undefined;
+    if (prompt?.state) {
+      return `Prompt · ${String(prompt.state)}`;
+    }
+    const step = record.step as Record<string, unknown> | undefined;
+    if (step?.title) {
+      return `Step · ${String(step.title)}`;
+    }
+    const visibleKeys = Object.keys(record)
+      .filter((key) => !/raw|payload|input|content|secret/i.test(key))
+      .slice(0, 4);
+    return visibleKeys.length
+      ? `JSON redatto · ${visibleKeys.join(", ")}`
+      : "JSON redatto disponibile";
+  }
+  return "Dato redatto disponibile";
+}
+
+function mapCoreTaskDetail(detail: CoreTaskDetail): TaskDetailItem {
+  return {
+    taskId: detail.task_id,
+    kind: detail.kind,
+    goal: detail.goal,
+    status: mapCoreTaskStatus(detail.status),
+    priority: mapCoreTaskPriority(detail.priority),
+    blockedReason: detail.blocked_reason ?? undefined,
+    checkpointSummary: summarizeSafeValue(detail.latest_checkpoint),
+    metadataSummary: summarizeSafeValue(detail.runtime_metadata),
+    exposesRawInput: detail.exposes_raw_input,
+  };
+}
+
+function fallbackTaskDetail(task: TaskItem): TaskDetailItem {
+  return {
+    taskId: task.id,
+    kind: task.kind,
+    goal: task.title,
+    status: task.status,
+    priority: task.priority,
+    blockedReason: task.blockedReason,
+    checkpointSummary: "Anteprima web: read model Tauri non disponibile",
+    metadataSummary: "Apri l'app desktop per il dettaglio core reale",
+    exposesRawInput: false,
+  };
+}
+
 export default function App() {
   const [activeView, setActiveView] = useState<ViewId>("chat");
   const [previousView, setPreviousView] = useState<ViewId>("chat");
@@ -158,6 +230,10 @@ export default function App() {
   const [taskItems, setTaskItems] = useState<TaskItem[]>(tasks);
   const [approvalItems, setApprovalItems] = useState<ApprovalItem[]>(approvals);
   const [resourceUsage, setResourceUsage] = useState<TaskResourceUsage[]>([]);
+  const [selectedTaskDetail, setSelectedTaskDetail] =
+    useState<TaskDetailItem | null>(null);
+  const [taskDetailLoading, setTaskDetailLoading] = useState(false);
+  const [approvalBusyId, setApprovalBusyId] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState("task_prompt_session");
   const [drawerOpen, setDrawerOpen] = useState(() => window.innerWidth > 860);
   const activeThread = useMemo(
@@ -247,31 +323,68 @@ export default function App() {
     );
   }
 
+  function applyTaskQueueSnapshot(snapshot: CoreTaskQueueSnapshot) {
+    const nextTasks = [
+      ...snapshot.active,
+      ...snapshot.queued,
+      ...snapshot.blocked,
+      ...snapshot.recent_failures,
+    ].map(mapCoreTask);
+    setTaskItems(nextTasks.length ? nextTasks : tasks);
+    setApprovalItems(
+      snapshot.waiting_approvals.length
+        ? snapshot.waiting_approvals.map(mapCoreApproval)
+        : [],
+    );
+    setResourceUsage(
+      snapshot.resource_usage
+        .filter((usage) => usage.units > 0)
+        .map((usage) => ({
+          resourceClass: usage.resource_class,
+          units: usage.units,
+        })),
+    );
+  }
+
   async function loadTaskQueue() {
     try {
-      const snapshot = await coreBridge.taskQueue();
-      const nextTasks = [
-        ...snapshot.active,
-        ...snapshot.queued,
-        ...snapshot.blocked,
-        ...snapshot.recent_failures,
-      ].map(mapCoreTask);
-      setTaskItems(nextTasks.length ? nextTasks : tasks);
-      setApprovalItems(
-        snapshot.waiting_approvals.length
-          ? snapshot.waiting_approvals.map(mapCoreApproval)
-          : [],
-      );
-      setResourceUsage(
-        snapshot.resource_usage
-          .filter((usage) => usage.units > 0)
-          .map((usage) => ({
-            resourceClass: usage.resource_class,
-            units: usage.units,
-          })),
-      );
+      applyTaskQueueSnapshot(await coreBridge.taskQueue());
     } catch (error) {
       console.warn("task_queue_snapshot unavailable", error);
+    }
+  }
+
+  async function refreshSelectedTaskDetail(taskId: string) {
+    const detail = await coreBridge.taskDetail(taskId);
+    setSelectedTaskDetail(detail ? mapCoreTaskDetail(detail) : null);
+  }
+
+  async function handleApproveApproval(approvalId: string) {
+    setApprovalBusyId(approvalId);
+    try {
+      applyTaskQueueSnapshot(await coreBridge.approveApproval(approvalId));
+      await refreshSelectedTaskDetail(selectedTaskId);
+    } catch (error) {
+      console.warn("approval_approve unavailable", error);
+    } finally {
+      setApprovalBusyId(null);
+    }
+  }
+
+  async function handleRejectApproval(approvalId: string) {
+    setApprovalBusyId(approvalId);
+    try {
+      applyTaskQueueSnapshot(
+        await coreBridge.rejectApproval(
+          approvalId,
+          "Rifiutato dall'utente dalla UI desktop.",
+        ),
+      );
+      await refreshSelectedTaskDetail(selectedTaskId);
+    } catch (error) {
+      console.warn("approval_reject unavailable", error);
+    } finally {
+      setApprovalBusyId(null);
     }
   }
 
@@ -290,6 +403,37 @@ export default function App() {
     const interval = window.setInterval(loadTaskQueue, 4_000);
     return () => window.clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSelectedTaskDetail() {
+      if (!selectedTaskId) {
+        setSelectedTaskDetail(null);
+        return;
+      }
+      setTaskDetailLoading(true);
+      try {
+        if (!cancelled) {
+          await refreshSelectedTaskDetail(selectedTaskId);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setSelectedTaskDetail(fallbackTaskDetail(selectedTask));
+        }
+        console.warn("task_detail unavailable", error);
+      } finally {
+        if (!cancelled) {
+          setTaskDetailLoading(false);
+        }
+      }
+    }
+
+    void loadSelectedTaskDetail();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedTask, selectedTaskId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -360,7 +504,12 @@ export default function App() {
             tasks={taskItems}
             approvals={approvalItems}
             resourceUsage={resourceUsage}
+            selectedTaskDetail={selectedTaskDetail}
+            taskDetailLoading={taskDetailLoading}
+            approvalBusyId={approvalBusyId}
             selectedTaskId={selectedTask.id}
+            onApproveApproval={handleApproveApproval}
+            onRejectApproval={handleRejectApproval}
             onSelectTask={setSelectedTaskId}
           />
         )}

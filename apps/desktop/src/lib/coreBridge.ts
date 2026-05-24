@@ -220,6 +220,10 @@ export const coreBridge = {
   taskQueue: () => invoke<CoreTaskQueueSnapshot>("task_queue_snapshot"),
   taskDetail: (taskId: string) =>
     invoke<CoreTaskDetail | null>("task_detail", { taskId }),
+  approveApproval: (approvalId: string) =>
+    invoke<CoreTaskQueueSnapshot>("approval_approve", { approvalId }),
+  rejectApproval: (approvalId: string, reason: string) =>
+    invoke<CoreTaskQueueSnapshot>("approval_reject", { approvalId, reason }),
   memoryDashboard: () =>
     invoke<CoreMemoryDashboard>("memory_dashboard_snapshot"),
   capabilities: () =>

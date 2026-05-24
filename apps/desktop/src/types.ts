@@ -88,6 +88,18 @@ export interface TaskResourceUsage {
   units: number;
 }
 
+export interface TaskDetailItem {
+  taskId: string;
+  kind: string;
+  goal: string;
+  status: TaskStatus;
+  priority: Priority;
+  blockedReason?: string;
+  checkpointSummary: string;
+  metadataSummary: string;
+  exposesRawInput: boolean;
+}
+
 export type ComputerSurfaceKind = "browser" | "shell" | "files" | "logs";
 
 export interface ComputerSurface {

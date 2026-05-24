@@ -57,7 +57,11 @@ assertContains("src/components/ChatView.tsx", "coreBridge.runLocalComputerSmokeT
 assertContains("src/components/ChatView.tsx", "coreBridge.runPromptPlanNextStep", "chat must expose prompt plan step execution through Tauri core");
 assertContains("src/components/ChatView.tsx", "mapCoreComputerSession", "chat local computer card must map the core snapshot before rendering");
 assertContains("src/App.tsx", "coreBridge.taskQueue", "tasks view must load the real Tauri task queue read model");
+assertContains("src/App.tsx", "coreBridge.taskDetail", "tasks view must load selected task detail through the Tauri read model");
+assertContains("src/App.tsx", "coreBridge.approveApproval", "tasks view must approve through the Tauri approval gate command");
+assertContains("src/App.tsx", "coreBridge.rejectApproval", "tasks view must reject through the Tauri approval gate command");
 assertContains("src/components/TasksView.tsx", "resourceUsage", "tasks view must expose resource usage from the task runtime");
+assertContains("src/components/TasksView.tsx", "selectedTaskDetail", "tasks view must render a selected task detail panel");
 assertContains("src/data/mockData.ts", "{ id: \"tasks\", label: \"Pianificato\"", "planned navigation must open the real task queue view");
 assertContains("src/lib/localComputerViewModel.ts", "payload_redacted", "local computer UI mapping must preserve redaction contract");
 assertNotContains("src/App.tsx", "computerSession,", "app must not pass mock local computer session into chat");

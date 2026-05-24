@@ -25,6 +25,8 @@ fn main() {
             commands::process_stop,
             commands::task_queue_snapshot,
             commands::task_detail,
+            commands::approval_approve,
+            commands::approval_reject,
             commands::memory_dashboard_snapshot,
             commands::capability_snapshot,
             commands::local_computer_session_snapshot,

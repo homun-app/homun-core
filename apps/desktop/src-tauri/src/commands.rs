@@ -74,6 +74,23 @@ pub fn task_detail(
 }
 
 #[tauri::command]
+pub fn approval_approve(
+    state: tauri::State<'_, DesktopCoreState>,
+    approval_id: String,
+) -> Result<DesktopTaskQueueSnapshot, String> {
+    state.approve_task_approval(&approval_id)
+}
+
+#[tauri::command]
+pub fn approval_reject(
+    state: tauri::State<'_, DesktopCoreState>,
+    approval_id: String,
+    reason: String,
+) -> Result<DesktopTaskQueueSnapshot, String> {
+    state.reject_task_approval(&approval_id, &reason)
+}
+
+#[tauri::command]
 pub fn memory_dashboard_snapshot(
     state: tauri::State<'_, DesktopCoreState>,
 ) -> Result<MemoryDashboard, String> {

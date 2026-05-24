@@ -1306,6 +1306,40 @@ Perche': dopo aver creato l'executor, l'utente deve vedere lo stato reale del ru
 
 ## Prossimo blocco
 
+### Fase 2 - Dettaglio task e Approval Gate cablati
+
+- Aggiunti command Tauri:
+  - `approval_approve`;
+  - `approval_reject`.
+- `DesktopCoreState` ora approva/rifiuta tramite `ApprovalGate`, valida
+  user/workspace dell'approval e ritorna lo snapshot coda aggiornato.
+- Ogni decisione approval registra un checkpoint redatto sul task interessato.
+- `coreBridge` espone `approveApproval`, `rejectApproval` e usa `taskDetail`.
+- `TasksView` mostra:
+  - dettaglio task selezionato;
+  - stato e priorita';
+  - sintesi checkpoint/metadata redatta;
+  - conferma esplicita che il payload raw non e' esposto;
+  - bottoni approval collegati ai command reali.
+- L'anteprima web senza bridge Tauri mostra un fallback redatto, mentre l'app
+  desktop usa `task_detail` reale.
+- Aggiornato `check-ui-contract.mjs` per rendere obbligatori detail e azioni
+  approval nel percorso UI.
+- Test aggiunti:
+  - approve approval -> task torna `queued`, approval rimossa, checkpoint redatto;
+  - reject approval -> task `cancelled`, reason redatta, approval rimossa.
+- Verifiche eseguite:
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml approval_`;
+  - GREEN: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`;
+  - GREEN: `npm run typecheck`;
+  - GREEN: `npm run test:ui-contract`;
+  - GREEN: `npm run build`;
+  - Playwright su `http://127.0.0.1:1420/`: detail redatto, approval actions e risorse visibili su desktop/mobile senza overlap.
+
+Perche': la coda e' utile solo se l'utente puo' capire e governare cosa sta accadendo. Approval e detail devono restare nel Core, non nella UI, cosi' policy, audit e multiutente non vengono bypassati.
+
+## Prossimo blocco
+
 ### Roadmap finale dettagliata
 
 - Creato `docs/architecture/final-roadmap.md`.

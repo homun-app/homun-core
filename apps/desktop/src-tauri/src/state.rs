@@ -269,6 +269,88 @@ impl DesktopCoreState {
             .map(|detail| detail.map(desktop_task_detail))
     }
 
+    pub fn approve_task_approval(
+        &self,
+        approval_id: &str,
+    ) -> Result<DesktopTaskQueueSnapshot, String> {
+        let store = self
+            .task_store
+            .lock()
+            .map_err(|_| "task store lock poisoned".to_string())?;
+        let approval = store
+            .approval_by_id(approval_id)
+            .map_err(to_string_error)?
+            .ok_or_else(|| format!("approval not found: {approval_id}"))?;
+        self.ensure_approval_scope(&approval)?;
+        ApprovalGate::new()
+            .approve(&store, approval_id, &self.user_id)
+            .map_err(to_string_error)?;
+        store
+            .append_checkpoint(
+                &approval.task_id,
+                &approval.user_id,
+                &approval.workspace_id,
+                serde_json::json!({
+                    "approval_id": approval.approval_id,
+                    "decision": "approved",
+                    "payload": "redacted"
+                }),
+                serde_json::json!({
+                    "approval": {
+                        "decision": "approved",
+                        "action": approval.action,
+                        "data_boundary": approval.data_boundary
+                    }
+                }),
+            )
+            .map_err(to_string_error)?;
+        self.task_queue_snapshot_from_store(&store)
+    }
+
+    pub fn reject_task_approval(
+        &self,
+        approval_id: &str,
+        reason: &str,
+    ) -> Result<DesktopTaskQueueSnapshot, String> {
+        let store = self
+            .task_store
+            .lock()
+            .map_err(|_| "task store lock poisoned".to_string())?;
+        let approval = store
+            .approval_by_id(approval_id)
+            .map_err(to_string_error)?
+            .ok_or_else(|| format!("approval not found: {approval_id}"))?;
+        self.ensure_approval_scope(&approval)?;
+        let reason = if reason.trim().is_empty() {
+            "Rifiutato dall'utente"
+        } else {
+            reason.trim()
+        };
+        ApprovalGate::new()
+            .reject(&store, approval_id, &self.user_id, reason)
+            .map_err(to_string_error)?;
+        store
+            .append_checkpoint(
+                &approval.task_id,
+                &approval.user_id,
+                &approval.workspace_id,
+                serde_json::json!({
+                    "approval_id": approval.approval_id,
+                    "decision": "rejected",
+                    "payload": "redacted"
+                }),
+                serde_json::json!({
+                    "approval": {
+                        "decision": "rejected",
+                        "action": approval.action,
+                        "reason": reason
+                    }
+                }),
+            )
+            .map_err(to_string_error)?;
+        self.task_queue_snapshot_from_store(&store)
+    }
+
     pub fn run_prompt_plan_next_step(
         &self,
         session_id: &str,
@@ -288,6 +370,30 @@ impl DesktopCoreState {
             &self.workspace_id,
             session_id,
         )
+    }
+
+    fn ensure_approval_scope(
+        &self,
+        approval: &local_first_task_runtime::ApprovalRequest,
+    ) -> Result<(), String> {
+        if approval.user_id.as_str() != self.user_id
+            || approval.workspace_id.as_str() != self.workspace_id
+        {
+            return Err("approval outside current user/workspace".to_string());
+        }
+        Ok(())
+    }
+
+    fn task_queue_snapshot_from_store(
+        &self,
+        store: &TaskStore,
+    ) -> Result<DesktopTaskQueueSnapshot, String> {
+        let user_id = TaskUserId::new(&self.user_id);
+        let workspace_id = TaskWorkspaceId::new(&self.workspace_id);
+        let snapshot = TaskUiReadModel::new(store)
+            .queue_snapshot(&user_id, &workspace_id)
+            .map_err(to_string_error)?;
+        desktop_task_queue(snapshot)
     }
 
     pub fn memory_dashboard_snapshot(&self) -> Result<MemoryDashboard, String> {
@@ -774,6 +880,52 @@ mod tests {
             detail.latest_checkpoint.unwrap()["prompt"]["state"],
             "ready"
         );
+    }
+
+    #[test]
+    fn approval_approve_requeues_task_and_removes_waiting_approval() {
+        let state = state();
+        let approval_id = state.task_queue_snapshot().unwrap().waiting_approvals[0]
+            .approval_id
+            .clone();
+
+        let snapshot = state.approve_task_approval(&approval_id).unwrap();
+        let detail = state.task_detail("task_acme_summary").unwrap().unwrap();
+
+        assert!(snapshot.waiting_approvals.is_empty());
+        assert!(
+            snapshot
+                .queued
+                .iter()
+                .any(|task| task.task_id == "task_acme_summary")
+        );
+        assert_eq!(detail.status, "queued");
+        assert!(!detail.exposes_raw_input);
+        assert_eq!(
+            detail.latest_checkpoint.unwrap()["approval"]["decision"],
+            "approved"
+        );
+    }
+
+    #[test]
+    fn approval_reject_cancels_task_with_redacted_checkpoint() {
+        let state = state();
+        let approval_id = state.task_queue_snapshot().unwrap().waiting_approvals[0]
+            .approval_id
+            .clone();
+
+        let snapshot = state
+            .reject_task_approval(&approval_id, "Non inviare questo riepilogo")
+            .unwrap();
+        let detail = state.task_detail("task_acme_summary").unwrap().unwrap();
+
+        assert!(snapshot.waiting_approvals.is_empty());
+        assert_eq!(detail.status, "cancelled");
+        assert_eq!(
+            detail.latest_checkpoint.unwrap()["approval"]["decision"],
+            "rejected"
+        );
+        assert!(detail.blocked_reason.unwrap().contains("approval rejected"));
     }
 
     #[test]

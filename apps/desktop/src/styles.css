@@ -1314,6 +1314,42 @@ small {
   animation: spin 1.2s linear infinite;
 }
 
+.task-detail-panel {
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+  background: var(--surface);
+}
+
+.task-detail-panel h3 {
+  margin-bottom: 10px;
+}
+
+.task-detail-panel p {
+  color: var(--muted);
+}
+
+.task-detail-panel dl {
+  display: grid;
+  gap: 10px;
+}
+
+.task-detail-panel dl div {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.task-detail-panel dt {
+  color: var(--muted);
+}
+
+.task-detail-panel dd {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
 .approval-card {
   padding: 16px;
 }

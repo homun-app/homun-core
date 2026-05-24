@@ -110,8 +110,9 @@ Gate di chiusura:
 
 ## Fase 2 - UI Tasks, Queue, Risorse E Approval Reali
 
-Stato: primo slice implementato. La UI legge `task_queue_snapshot`, mostra task,
-approval e resource usage reali; resta da completare task detail/azioni approval.
+Stato: completata come base operativa. La UI legge `task_queue_snapshot`, mostra
+task, approval e resource usage reali, carica `task_detail` redatto e invia
+approve/reject all'Approval Gate del Core.
 
 Obiettivo:
 

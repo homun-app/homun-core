@@ -1,11 +1,21 @@
 import { AlertCircle, Check, Clock3, Loader2, PauseCircle } from "lucide-react";
-import type { ApprovalItem, TaskItem, TaskResourceUsage } from "../types";
+import type {
+  ApprovalItem,
+  TaskDetailItem,
+  TaskItem,
+  TaskResourceUsage,
+} from "../types";
 
 interface TasksViewProps {
   tasks: TaskItem[];
   approvals: ApprovalItem[];
   resourceUsage: TaskResourceUsage[];
+  selectedTaskDetail: TaskDetailItem | null;
+  taskDetailLoading: boolean;
+  approvalBusyId: string | null;
   selectedTaskId: string;
+  onApproveApproval: (approvalId: string) => void;
+  onRejectApproval: (approvalId: string) => void;
   onSelectTask: (taskId: string) => void;
 }
 
@@ -13,7 +23,12 @@ export function TasksView({
   tasks,
   approvals,
   resourceUsage,
+  selectedTaskDetail,
+  taskDetailLoading,
+  approvalBusyId,
   selectedTaskId,
+  onApproveApproval,
+  onRejectApproval,
   onSelectTask,
 }: TasksViewProps) {
   return (
@@ -50,6 +65,10 @@ export function TasksView({
               </button>
             ))}
           </div>
+          <TaskDetailPanel
+            detail={selectedTaskDetail}
+            loading={taskDetailLoading}
+          />
         </section>
 
         <section className="task-column" aria-label="Centro approvazioni">
@@ -60,10 +79,20 @@ export function TasksView({
               <h4>{approval.title}</h4>
               <p>{approval.reason}</p>
               <div className="approval-actions">
-                <button className="secondary-button" type="button">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={approvalBusyId === approval.id}
+                  onClick={() => onRejectApproval(approval.id)}
+                >
                   Rifiuta
                 </button>
-                <button className="primary-button" type="button">
+                <button
+                  className="primary-button"
+                  type="button"
+                  disabled={approvalBusyId === approval.id}
+                  onClick={() => onApproveApproval(approval.id)}
+                >
                   Approva
                 </button>
               </div>
@@ -86,6 +115,52 @@ export function TasksView({
         </section>
       </div>
     </section>
+  );
+}
+
+function TaskDetailPanel({
+  detail,
+  loading,
+}: {
+  detail: TaskDetailItem | null;
+  loading: boolean;
+}) {
+  return (
+    <aside className="task-detail-panel" aria-label="Dettaglio task redatto">
+      <h3>Dettaglio redatto</h3>
+      {loading && <p>Caricamento dettaglio...</p>}
+      {!loading && !detail && <p>Seleziona un task per vedere lo stato.</p>}
+      {!loading && detail && (
+        <dl>
+          <div>
+            <dt>Stato</dt>
+            <dd>{detail.status}</dd>
+          </div>
+          <div>
+            <dt>Priorita'</dt>
+            <dd>{detail.priority}</dd>
+          </div>
+          <div>
+            <dt>Checkpoint</dt>
+            <dd>{detail.checkpointSummary}</dd>
+          </div>
+          <div>
+            <dt>Metadata</dt>
+            <dd>{detail.metadataSummary}</dd>
+          </div>
+          <div>
+            <dt>Payload raw</dt>
+            <dd>{detail.exposesRawInput ? "bloccato" : "non esposto"}</dd>
+          </div>
+          {detail.blockedReason && (
+            <div>
+              <dt>Blocco</dt>
+              <dd>{detail.blockedReason}</dd>
+            </div>
+          )}
+        </dl>
+      )}
+    </aside>
   );
 }
 
