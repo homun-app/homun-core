@@ -871,8 +871,11 @@ async fn submit_operational_prompt(
     let brain_task_ids = if brain_materialize_enabled() {
         let state_for_brain = state.clone();
         let goal = request.user_message.text.clone();
-        tokio::task::spawn_blocking(move || brain_materialize_tasks(&state_for_brain, &goal))
-            .await
+        let thread_for_brain = thread_id.clone();
+        tokio::task::spawn_blocking(move || {
+            brain_materialize_tasks(&state_for_brain, &thread_for_brain, &goal)
+        })
+        .await
             .ok()
             .and_then(|result| result.ok())
             .filter(|ids| !ids.is_empty())
@@ -4261,7 +4264,11 @@ fn brain_materialize_enabled() -> bool {
 /// planning-only CachedToolProvider is safe) and enqueues every step as a
 /// durable task, executed by the worker's real executors (browser/subagent).
 /// Returns the materialized task ids, or an error so the caller can fall back.
-fn brain_materialize_tasks(state: &AppState, goal: &str) -> Result<Vec<String>, LocalTaskExecutionError> {
+fn brain_materialize_tasks(
+    state: &AppState,
+    thread_id: &str,
+    goal: &str,
+) -> Result<Vec<String>, LocalTaskExecutionError> {
     ensure_runtime_available_for_task(state)?;
     let user = gateway_capability_user_id();
     let workspace = gateway_capability_workspace_id();
@@ -4337,7 +4344,98 @@ fn brain_materialize_tasks(state: &AppState, goal: &str) -> Result<Vec<String>, 
     for summary in &outcome.enqueued_subagent_tasks {
         task_ids.push(summary.task_id.as_str().to_string());
     }
+
+    // A1.2: bind the N materialized tasks to the originating chat thread so the
+    // worker's existing session/chat surfacing (sync_session_for_task_run,
+    // append_task_result_to_chat — both keyed on thread_by_task_id) resolves
+    // them into the thread's single Local Computer session. Best-effort: a
+    // linkage hiccup must not lose the materialized tasks (they just run
+    // "headless" as before), so failures are logged, not propagated.
+    if !task_ids.is_empty() {
+        if let Err(error) = link_brain_tasks_to_thread(state, thread_id, goal, &task_ids) {
+            eprintln!(
+                "brain_materialize_tasks: thread linkage failed for {thread_id}: {}",
+                error.message
+            );
+        }
+    }
+
     Ok(task_ids)
+}
+
+/// Links Brain-materialized tasks to their chat thread and seeds the thread's
+/// aggregating Local Computer session (progress_total = number of tasks), so a
+/// single prompt that fans out into N durable tasks surfaces as ONE session
+/// with per-task progress and results in chat.
+fn link_brain_tasks_to_thread(
+    state: &AppState,
+    thread_id: &str,
+    goal: &str,
+    task_ids: &[String],
+) -> Result<(), LocalTaskExecutionError> {
+    let thread = {
+        let chat_store = lock_store(state).map_err(local_task_gateway_error)?;
+        chat_store
+            .thread(thread_id)
+            .map_err(GatewayError::store)
+            .map_err(local_task_gateway_error)?
+    };
+    let Some(thread) = thread else {
+        return Ok(());
+    };
+
+    // Seed (or reuse) the aggregating session, then size its progress bar to the
+    // number of tasks the Brain planned.
+    let goal_redacted = task_goal_summary(goal);
+    ensure_computer_session_for_task(
+        state,
+        &thread.computer_session_id,
+        &thread.task_id,
+        thread_id,
+        &goal_redacted,
+        false,
+    )
+    .map_err(local_task_gateway_error)?;
+    set_session_progress_total(
+        state,
+        &thread.computer_session_id,
+        task_ids.len() as u32,
+    )
+    .map_err(local_task_gateway_error)?;
+
+    // Resolve every member task back to this thread.
+    let chat_store = lock_store(state).map_err(local_task_gateway_error)?;
+    for task_id in task_ids {
+        chat_store
+            .link_task_to_thread(task_id, thread_id)
+            .map_err(GatewayError::store)
+            .map_err(local_task_gateway_error)?;
+    }
+    Ok(())
+}
+
+/// Overrides the aggregating session's `progress_total` to the planned task
+/// count (the seeding helper uses the legacy single-task default of 2/3).
+fn set_session_progress_total(
+    state: &AppState,
+    session_id: &str,
+    total: u32,
+) -> Result<(), GatewayError> {
+    let user = gateway_user_id();
+    let workspace = gateway_workspace_id();
+    let store = lock_computer_store(state)?;
+    if let Some(mut session) = store
+        .session(session_id, user.as_str(), workspace.as_str())
+        .map_err(GatewayError::local_computer)?
+    {
+        session.progress_total = total.max(1);
+        session.progress_current = session.progress_current.min(session.progress_total);
+        session.updated_at = OffsetDateTime::now_utc();
+        store
+            .upsert_session(&session)
+            .map_err(GatewayError::local_computer)?;
+    }
+    Ok(())
 }
 
 /// Resolves the cloud inference API key, preferring a 0600 key file over the
