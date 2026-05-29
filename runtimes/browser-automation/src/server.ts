@@ -255,10 +255,24 @@ function optionalSnapshotMode(
 }
 
 async function main() {
+  // Tear the browser down on any exit path so Chromium is never orphaned:
+  // a clean stdin EOF (parent closed the pipe) or a termination signal.
+  let shuttingDown = false;
+  const shutdown = async (code: number) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    await manager.stop().catch(() => undefined);
+    process.exit(code);
+  };
+  process.on("SIGTERM", () => void shutdown(0));
+  process.on("SIGINT", () => void shutdown(0));
+
   const rl = createInterface({ input });
   for await (const line of rl) {
     output.write(await handleRequestLine(line));
   }
+  // stdin closed (parent gone): stop the browser and exit cleanly.
+  await shutdown(0);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

@@ -6,7 +6,10 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
 pub struct BrowserSidecarSession {
     child: RefCell<Child>,
-    stdin: RefCell<ChildStdin>,
+    // `Option` so `Drop` can close the pipe (take + drop) before killing: the
+    // sidecar treats stdin EOF as "parent gone" and shuts the browser down
+    // gracefully, which avoids orphaning Chromium.
+    stdin: RefCell<Option<ChildStdin>>,
     stdout: RefCell<ChildStdout>,
 }
 
@@ -50,23 +53,25 @@ impl BrowserSidecarSession {
             .ok_or_else(|| BrowserAutomationError::Sidecar("missing sidecar stdout".to_string()))?;
         Ok(Self {
             child: RefCell::new(child),
-            stdin: RefCell::new(stdin),
+            stdin: RefCell::new(Some(stdin)),
             stdout: RefCell::new(stdout),
         })
     }
 
     pub fn send(&self, request: &BrowserRequest) -> BrowserResult<String> {
-        writeln!(
-            self.stdin.borrow_mut(),
-            "{}",
-            serde_json::to_string(request)
-                .map_err(|error| BrowserAutomationError::InvalidRequest(error.to_string()))?
-        )
-        .map_err(|error| BrowserAutomationError::Sidecar(error.to_string()))?;
-        self.stdin
-            .borrow_mut()
-            .flush()
-            .map_err(|error| BrowserAutomationError::Sidecar(error.to_string()))?;
+        let payload = serde_json::to_string(request)
+            .map_err(|error| BrowserAutomationError::InvalidRequest(error.to_string()))?;
+        {
+            let mut guard = self.stdin.borrow_mut();
+            let stdin = guard.as_mut().ok_or_else(|| {
+                BrowserAutomationError::Sidecar("sidecar stdin closed".to_string())
+            })?;
+            writeln!(stdin, "{payload}")
+                .map_err(|error| BrowserAutomationError::Sidecar(error.to_string()))?;
+            stdin
+                .flush()
+                .map_err(|error| BrowserAutomationError::Sidecar(error.to_string()))?;
+        }
         let mut stdout = self.stdout.borrow_mut();
         let mut reader = BufReader::new(&mut *stdout);
         let mut line = String::new();
@@ -85,7 +90,18 @@ impl crate::BrowserTransport for BrowserSidecarSession {
 
 impl Drop for BrowserSidecarSession {
     fn drop(&mut self) {
+        // Close stdin first: the sidecar sees EOF, shuts the browser down
+        // gracefully (closing Chromium so it is not orphaned), and exits. Give
+        // it a brief grace period, then force-kill only if it is still alive.
+        self.stdin.borrow_mut().take();
         let mut child = self.child.borrow_mut();
+        for _ in 0..30 {
+            match child.try_wait() {
+                Ok(Some(_)) => return,
+                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(100)),
+                Err(_) => break,
+            }
+        }
         let _ = child.kill();
         let _ = child.wait();
     }
