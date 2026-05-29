@@ -104,3 +104,14 @@ P1 fixes a regression and lands the validated capability in the app. P2 is the
 highest leverage (one executor change unlocks MCP/skills/connectors). P3 makes it
 personal. P4 makes it whole. P1–P3 are mostly wiring existing crates; P4 is the
 real build-out.
+
+---
+
+## Progress
+
+- **P1 — DONE** (commit 488f685): `brain_materialize_tasks` plan_only()s first; a
+  browser-targeting plan materializes ONE `browser_task` (observe-act loop) via
+  `materialize_browser_loop_task` instead of static `capability.browser.*` steps.
+  Live-validated: A1.6 default-on Brain (no flag) + Trenitalia prompt → queued
+  `orchestrator_browser_*` of kind `browser_task`. Closes the example↔app gap and
+  the A1.6 regression. Next: P2 (wire non-browser capability execution).
