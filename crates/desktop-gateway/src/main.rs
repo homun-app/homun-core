@@ -1944,41 +1944,57 @@ fn aggregate_member_session_state(
         return Ok(None);
     }
 
-    let mut completed = 0u32;
-    let mut terminal = 0u32;
-    let mut any_failed = false;
-    let mut any_waiting_user = false;
-    {
+    let counts = {
         let store = lock_task_store(state)?;
-        for task_id in &member_ids {
-            let Some(member) = store
-                .get_task(&TaskId::new(task_id.clone()), user, workspace)
-                .map_err(GatewayError::task)?
-            else {
-                continue;
-            };
-            match member.status {
-                TaskStatus::Completed => {
-                    completed += 1;
-                    terminal += 1;
-                }
-                TaskStatus::Failed | TaskStatus::Cancelled | TaskStatus::Expired => {
-                    any_failed = true;
-                    terminal += 1;
-                }
-                TaskStatus::WaitingUserApproval => any_waiting_user = true,
-                _ => {}
-            }
-        }
-    }
-
+        collect_member_counts(&store, &member_ids, user, workspace).map_err(GatewayError::task)?
+    };
     Ok(Some(aggregate_session_state_from_counts(
         member_ids.len(),
-        completed,
-        terminal,
-        any_failed,
-        any_waiting_user,
+        counts.completed,
+        counts.terminal,
+        counts.any_failed,
+        counts.any_waiting_user,
     )))
+}
+
+/// Terminal-state tally of a thread's member tasks, read from the durable store.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct MemberCounts {
+    completed: u32,
+    terminal: u32,
+    any_failed: bool,
+    any_waiting_user: bool,
+}
+
+/// Reads each member task's status from the durable store and tallies it.
+/// Separated from [`aggregate_member_session_state`] so the store-reading loop
+/// is testable against an in-memory `TaskStore` without a full `AppState`.
+/// Missing tasks are skipped (treated as not-yet-terminal).
+fn collect_member_counts(
+    store: &TaskStore,
+    member_ids: &[String],
+    user: &UserId,
+    workspace: &WorkspaceId,
+) -> Result<MemberCounts, TaskRuntimeError> {
+    let mut counts = MemberCounts::default();
+    for task_id in member_ids {
+        let Some(member) = store.get_task(&TaskId::new(task_id.clone()), user, workspace)? else {
+            continue;
+        };
+        match member.status {
+            TaskStatus::Completed => {
+                counts.completed += 1;
+                counts.terminal += 1;
+            }
+            TaskStatus::Failed | TaskStatus::Cancelled | TaskStatus::Expired => {
+                counts.any_failed = true;
+                counts.terminal += 1;
+            }
+            TaskStatus::WaitingUserApproval => counts.any_waiting_user = true,
+            _ => {}
+        }
+    }
+    Ok(counts)
 }
 
 /// Pure decision for the aggregate session status given member-task counts.
@@ -7975,15 +7991,16 @@ mod tests {
         privacy_accept_button_for_snapshot, redact_sensitive_text, resources_for_prompt,
         runtime_logs_unavailable_message, should_create_operational_task, task_effective_goal,
         task_execution_outcome_from_executor_result, task_goal_summary, task_kind_for_prompt,
-        aggregate_session_state_from_counts, task_queue_response, train_option_lines,
-        train_search_draft_for_goal, train_station_suggestion_for_snapshot,
+        aggregate_session_state_from_counts, collect_member_counts, task_queue_response,
+        train_option_lines, train_search_draft_for_goal, train_station_suggestion_for_snapshot,
         train_success_criteria_met, trovatreno_search_url,
     };
+    use crate::chat_store::ChatStore;
     use local_first_local_computer_session::SessionStatus;
     use local_first_browser_automation::BrowserMethod;
     use local_first_task_runtime::{
         ApprovalRequest, ExecutorResult, ResourceClass, TaskId, TaskPriority, TaskQueueSnapshot,
-        TaskRecord, TaskStatus, TaskUiItem, UserId, WorkspaceId,
+        TaskRecord, TaskStatus, TaskStore, TaskUiItem, UserId, WorkspaceId,
     };
     use std::collections::HashMap;
 
@@ -8013,6 +8030,92 @@ mod tests {
         assert_eq!(
             aggregate_session_state_from_counts(5, 1, 1, false, true),
             (SessionStatus::WaitingUser, 1)
+        );
+    }
+
+    #[test]
+    fn member_counts_read_real_task_statuses_and_drive_aggregate_state() {
+        // A1.2 integration: exercise the actual store-reading path the worker
+        // uses — link N member tasks to a thread, persist them with mixed
+        // statuses in a real (in-memory) TaskStore, and confirm the aggregate
+        // session state matches.
+        let user = UserId::new("local-user");
+        let workspace = WorkspaceId::new("local-workspace");
+        let chat = ChatStore::in_memory().unwrap();
+        let thread = chat.create_thread().unwrap();
+        let tasks = TaskStore::open_in_memory().unwrap();
+
+        // Three Brain-materialized member tasks for this thread.
+        let members = ["orch_s1", "orch_s2", "orch_s3"];
+        for id in members {
+            chat.link_task_to_thread(id, &thread.thread_id).unwrap();
+            tasks
+                .insert_task(&TaskRecord::new(
+                    id,
+                    user.clone(),
+                    workspace.clone(),
+                    "capability.browser.navigate",
+                    "step",
+                    serde_json::json!({}),
+                ))
+                .unwrap();
+        }
+
+        let member_ids = chat.member_task_ids_for_thread(&thread.thread_id).unwrap();
+        assert_eq!(member_ids.len(), 3);
+
+        // All queued -> no terminal members -> session still Running at 0.
+        let counts = collect_member_counts(&tasks, &member_ids, &user, &workspace).unwrap();
+        assert_eq!(
+            aggregate_session_state_from_counts(
+                member_ids.len(),
+                counts.completed,
+                counts.terminal,
+                counts.any_failed,
+                counts.any_waiting_user,
+            ),
+            (SessionStatus::Running, 0)
+        );
+
+        // One completes -> Running, progress 1.
+        tasks
+            .update_task_status(&TaskId::new("orch_s1"), &user, &workspace, TaskStatus::Completed, None)
+            .unwrap();
+        let counts = collect_member_counts(&tasks, &member_ids, &user, &workspace).unwrap();
+        assert_eq!(
+            aggregate_session_state_from_counts(
+                member_ids.len(),
+                counts.completed,
+                counts.terminal,
+                counts.any_failed,
+                counts.any_waiting_user,
+            ),
+            (SessionStatus::Running, 1)
+        );
+
+        // Remaining complete + one fails -> all terminal with a failure -> Failed.
+        tasks
+            .update_task_status(&TaskId::new("orch_s2"), &user, &workspace, TaskStatus::Completed, None)
+            .unwrap();
+        tasks
+            .update_task_status(
+                &TaskId::new("orch_s3"),
+                &user,
+                &workspace,
+                TaskStatus::Failed,
+                Some("boom"),
+            )
+            .unwrap();
+        let counts = collect_member_counts(&tasks, &member_ids, &user, &workspace).unwrap();
+        assert_eq!(
+            aggregate_session_state_from_counts(
+                member_ids.len(),
+                counts.completed,
+                counts.terminal,
+                counts.any_failed,
+                counts.any_waiting_user,
+            ),
+            (SessionStatus::Failed, 2)
         );
     }
 
