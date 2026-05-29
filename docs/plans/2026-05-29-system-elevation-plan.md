@@ -166,18 +166,55 @@ Prerequisito utile: keychain cross-platform (vedi anche memory/secrets gap G8).
 
 ---
 
-## Sequenza consigliata (milestone)
+## Stato (2026-05-29)
 
-1. **M0 — Sicurezza (1 settimana):** S1, S2, S3, S4. Piccoli, chiudono buchi reali.
-2. **M1 — Un solo cervello, un solo loop (core):** A2 → A3 → A1 (incrementale) +
-   M5 test e2e workflow durevole. È il refactor che allinea architettura ed
-   esecuzione.
-3. **M2 — La chat e la memoria diventano "il sistema":** A4 (chat dal router) +
-   A5 (memoria nel loop). Da qui l'assistant impara e il routing è unico.
-4. **M3 — L'agente completa i task:** B1, B2, B4 (B3 confluisce in A1).
+- ✅ FATTO: fix browser (tab hygiene, piano nel prompt, parser robusto,
+  context-profile auto), inference router (ADR 0007: provider OpenAI-compat/
+  Ollama/Anthropic/MLX/mistral.rs, streaming primitive, mistral.rs validato),
+  M0 sicurezza (S1-S3 + S4-slice), M1 dispatcher+worker (A2/A3 gia' esistenti),
+  A1 groundwork (plan_only, adattatore, CachedToolProvider, Brain-nel-piano
+  opt-in, subagent de-stub, ADR 0008), M3 B1 (conferma combobox).
+- DECISIONE STRATEGICA: modello piccolo locale = OPZIONALE (router + delega
+  cloud). "Modello capace via router" e' il percorso. B2/B4 deprioritizzati;
+  test live small-model rimandato alla fine.
+
+## Sequenza A1-full (chiusura, ADR 0008) — da validare col sistema acceso
+
+- **A1.1 — Brain materializza task durevoli** nel TaskStore CONDIVISO (handle
+  sullo stesso DB del worker). Durable-only via `PolicyContext.allowed_actions`
+  vuoto (tool visibili-ma-non-executable → `call_tool` mai chiamato → niente
+  doppio sidecar). Path prompt ALTERNATIVO dietro flag, accanto all'esistente.
+- **A1.2 — Linkage sessione/chat/read-model per N task** (il ripple #3): un
+  prompt → piano Brain → N task → UNA Local Computer session aggregante →
+  progress/risultati in chat.
+- **A1.3 — Provider VIVI** dove serve `call_tool` reale; risolvere la proprieta'
+  UNICA del sidecar (browser provider vs `execute_capability_browser_task`) →
+  una sola superficie d'esecuzione.
+- **A1.4 — Convergere il run loop** del gateway su `TaskRuntime::run_ready_once`
+  + trait `TaskExecutor` (ritiro del modello parallelo `TaskExecutionOutcome`,
+  A2-residual).
+- **A1.5 — Ritiro keyword/train** (`should_create_operational_task`,
+  `browser_targets_for_goal`, `train_search_draft_for_goal`,
+  `operational_plan_for_goal`); `OperationalPlan` diventa read-model derivato
+  dall'`ExecutionPlan` + stato task.
+- **A1.6 — Flag Brain default ON + rimozione fallback** quando stabile.
+- Trasversale: test e2e workflow durevole (M5 della vecchia numerazione) +
+  validazione live (Gemma/Ollama + browser) a ogni step.
+
+## Sequenza milestone (aggiornata)
+
+1. ✅ **M0 — Sicurezza** (S1-S3 + S4-slice). S4-full differito (vedi Tema 0).
+2. **A4 — Chat dal router** (ALTA priorita' dopo la decisione strategica): la
+   chat e' la superficie principale ed e' ancora hard-coupled a MLX; portarla sul
+   router le da' subito i modelli capaci. Streaming primitive gia' pronto.
+3. **A1-full** — sequenza A1.1→A1.6 sopra. Orchestrazione browser/task tramite
+   Brain+router. Grande, multi-superficie, validazione live.
+4. **A5 — Memoria nel loop** (completa M2): record-event + iniezione contesto →
+   l'assistant impara. Dipende da Desktop Observation (I4) per eventi reali.
 5. **M4 — Fiducia UI:** U1, U2, U3, U5, U4.
-6. **M5 — Dati & resilienza:** D1, D2, D3, D4, D5.
-7. **M6 — Profondità:** I1, I2, I3, I4.
+6. **M5 — Dati & resilienza:** D1, D2, D3, D4, D5 + S4-full (secret store).
+7. **M6 — Profondità:** I1, I2, I3, I4. (B2/B4 di M3 qui se mai servissero per i
+   modelli piccoli.)
 
 Regola trasversale: ogni milestone si chiude con test e con un check che il
 **path in esecuzione** (non solo i test unitari) usi il componente nuovo.
