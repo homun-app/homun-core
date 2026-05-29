@@ -7,7 +7,11 @@ use serde_json::Value;
 use std::collections::BTreeSet;
 
 const MAX_ACTION_FRAME_CHARS_FOR_DECISION: usize = 6_500;
-const MAX_FULL_SNAPSHOT_CHARS_FOR_DECISION: usize = 12_000;
+// The Full profile is only chosen for capable, big-context models (see
+// `BrowserContextProfile::for_context_window`), so give them most of the page's
+// aria tree rather than the gemma4-era 12K (~3K-token) clip. Dense result pages
+// (e.g. 1900+ refs) then surface their option rows instead of being cut off.
+const MAX_FULL_SNAPSHOT_CHARS_FOR_DECISION: usize = 40_000;
 const MAX_SNAPSHOT_LINES_FOR_DECISION: usize = 90;
 const MAX_SNAPSHOT_CHARS_FOR_DECISION: usize = 4_500;
 const MAX_ITERATIONS_IN_PROMPT: usize = 5;
