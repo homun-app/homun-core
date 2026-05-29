@@ -69,6 +69,15 @@ async function dispatch(request: BrowserRequest): Promise<unknown> {
     case "browser.snapshot":
       return await manager.snapshot({
         targetId: requireString(request.params, "target_id"),
+        snapshotFormat: optionalSnapshotFormat(request.params, "snapshot_format"),
+        refsMode: optionalRefsMode(request.params, "refs_mode"),
+        mode: optionalSnapshotMode(request.params, "mode"),
+        interactive: optionalBoolean(request.params, "interactive"),
+        compact: optionalBoolean(request.params, "compact"),
+        depth: optionalNumber(request.params, "depth"),
+        timeoutMs: optionalNumber(request.params, "timeout_ms"),
+        maxChars: optionalNumber(request.params, "max_chars"),
+        urls: optionalBoolean(request.params, "urls"),
       });
     case "browser.act":
       return await manager.act({
@@ -187,6 +196,60 @@ function optionalProfile(
   throw new BrowserAutomationError({
     code: "BROWSER_INVALID_REQUEST",
     message: `${key} must be assistant or user`,
+    retryable: false,
+  });
+}
+
+function optionalSnapshotFormat(
+  params: Record<string, unknown> | undefined,
+  key: string,
+): "ai" | "legacy" | undefined {
+  const value = params?.[key];
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === "ai" || value === "legacy") {
+    return value;
+  }
+  throw new BrowserAutomationError({
+    code: "BROWSER_INVALID_REQUEST",
+    message: `${key} must be ai or legacy`,
+    retryable: false,
+  });
+}
+
+function optionalRefsMode(
+  params: Record<string, unknown> | undefined,
+  key: string,
+): "aria" | "locator" | undefined {
+  const value = params?.[key];
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === "aria" || value === "locator") {
+    return value;
+  }
+  throw new BrowserAutomationError({
+    code: "BROWSER_INVALID_REQUEST",
+    message: `${key} must be aria or locator`,
+    retryable: false,
+  });
+}
+
+function optionalSnapshotMode(
+  params: Record<string, unknown> | undefined,
+  key: string,
+): "efficient" | undefined {
+  const value = params?.[key];
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === "efficient") {
+    return value;
+  }
+  throw new BrowserAutomationError({
+    code: "BROWSER_INVALID_REQUEST",
+    message: `${key} must be efficient`,
     retryable: false,
   });
 }

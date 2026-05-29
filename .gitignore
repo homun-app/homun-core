@@ -12,3 +12,9 @@ target/
 node_modules/
 dist/
 apps/desktop/src-tauri/gen/
+# editor/tooling scratch and run artifacts
+.commandcode/
+.cursor/
+output/
+last_prompt_*.txt
+last_response_*.txt

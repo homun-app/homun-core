@@ -28,9 +28,10 @@ osservabilita', memoria e apprendimento.
 
 ```mermaid
 flowchart TD
-  U["Utente"] --> UI["Desktop UI Tauri"]
-  UI --> Thread["Chat Thread"]
-  Thread --> Core["Tauri Rust Core"]
+  U["Utente"] --> UI["Desktop UI Electron"]
+  UI --> Gateway["Desktop HTTP Gateway Rust"]
+  Gateway --> Thread["Chat Thread"]
+  Thread --> Core["Rust Core / Crates"]
   Core --> Brain["Orchestrator Brain"]
 
   Brain --> Memory["Memory Layer"]
@@ -65,7 +66,11 @@ Responsabilita':
 - offrire la chat operativa, la lista thread, task, approval, settings,
   connettori, memoria, browser e apprendimento;
 - mostrare read model UI-safe e progress disclosure;
-- inviare prompt e comandi al Tauri Core.
+- inviare prompt e comandi al gateway desktop locale.
+- rendere contenuti chat complessi: Markdown, codice, tabelle, diagrammi,
+  allegati, artifact, azioni messaggio e suggestion contestuali.
+- usare il Desktop Chat HTTP Gateway per thread, messaggi, streaming,
+  cancellazione e artifact ad alto volume.
 
 Non deve:
 
@@ -73,14 +78,55 @@ Non deve:
 - interpretare richieste naturali con regex o keyword;
 - eseguire direttamente browser, shell, MCP o connettori;
 - esporre raw payload, segreti o dati sensibili.
+- usare IPC desktop per stream chat lunghi o payload grandi.
 
 Stato attuale:
 
-- shell Tauri/React creata;
+- shell Electron/React creata;
 - chat operativa creata;
+- renderer messaggi ricco creato con Markdown/GFM, codice, tabelle e Mermaid;
 - thread separati e nuova chat funzionanti;
 - Local Computer card e dettaglio UI esistenti;
 - alcune viste sono ancora mock o parzialmente cablate.
+- decisione aggiornata: rimuovere Tauri dalla shell desktop e usare Electron
+  con un gateway HTTP Rust locale.
+
+### Desktop Chat HTTP Gateway
+
+Responsabilita':
+
+- esporre API locali per thread, messaggi, streaming chat, cancel, feedback e
+  azioni messaggio;
+- streammare risposte via browser networking, non via IPC desktop;
+- tenere il Gemma Python/MLX runtime dietro al Rust Core, non esposto come API
+  prodotto;
+- preservare metriche runtime: `prompt_tokens`, `generation_tokens`,
+  `prompt_tps`, `generation_tps`, `peak_memory_gb`, `elapsed_seconds`;
+- applicare token locale, CORS stretto, bind loopback e read model redatti;
+- diventare il canale futuro per artifact Local Computer, preview browser/shell
+  e payload grandi.
+
+Non deve:
+
+- ascoltare su LAN;
+- bypassare Brain, policy, Task Runtime o Resource Governor;
+- esporre raw prompt nei task/audit o segreti nei read model;
+- sostituire i moduli desktop dedicati per funzioni native di sistema come file
+  picker, lifecycle, notifiche o window controls.
+
+Stato attuale:
+
+- decisione architetturale fissata in
+  `docs/decisions/0004-desktop-chat-http-gateway.md`;
+- primo slice Electron creato in `apps/desktop/electron`;
+- Tauri e `apps/desktop/src-tauri` sono stati rimossi dal desktop app;
+- `crates/desktop-gateway` e' il processo Rust autonomo per la chat;
+- `apps/desktop/src/lib/chatApi.ts` usa il gateway per thread, messaggi, pin,
+  archivio, delete e commit delle risposte, con cache locale solo come fallback;
+- `apps/desktop/src/lib/coreBridge.ts` usa il gateway per stream/cancel e per
+  runtime health/warmup/shutdown; il renderer non chiama piu' Gemma direttamente;
+- prossimo step: estendere il gateway a task, memoria, capability, Local
+  Computer e packaging/log diagnostici del runtime Python/MLX.
 
 ### Chat Thread
 
@@ -92,15 +138,26 @@ Responsabilita':
 
 Stato attuale:
 
-- `create_chat_thread` crea un thread e una sessione computer isolata;
-- il Core conserva messaggi separati per thread nel read model locale
-  persistente;
-- la UI idrata i messaggi da `chat_messages_snapshot` e seleziona il thread
-  attivo con `select_chat_thread`;
+- il gateway conserva thread e messaggi separati in SQLite locale;
+- la UI idrata thread e messaggi dal gateway e mantiene una cache locale solo
+  come fallback Electron-safe;
+- il commit delle risposte streaming e delle continuazioni e' atteso prima del
+  refresh del read model, cosi' il contesto non viene perso tra turni;
 - il primo prompt aggiorna titolo, subtitle, conteggio messaggi e thread attivo
   senza contaminare altri thread.
+- il rendering chat segue un external-store pattern: React renderizza messaggi,
+  stato streaming e comandi; il gateway/Rust Core deve tornare owner di thread,
+  messaggi, task, approval, artifact e policy.
+- da completare nella Chat Experience Foundation:
+  - composer avanzato con cancel streaming, allegati, drag and drop, quote e
+    focus management;
+  - message actions per copia, rigenera, continua, salva in memoria, crea task
+    o automazione e feedback;
+  - suggestions contestuali;
+  - Mermaid e code block streaming-aware;
+  - attachment preview in composer e messaggi.
 
-### Tauri Rust Core
+### Rust Desktop Gateway / Core
 
 Responsabilita':
 
@@ -108,6 +165,7 @@ Responsabilita':
 - possedere policy, read model, command e validazione;
 - coordinare Brain, task runtime, memoria, capability, processi e sessione
   computer.
+- esporre il Desktop HTTP Gateway locale.
 
 Non deve:
 
@@ -119,13 +177,13 @@ Non deve:
 
 Stato attuale:
 
-- bridge Tauri con command per status, health, task, memory, capability, Local
-  Computer, prompt, chat thread e messaggi chat;
-- thread chat, messaggi chat, task, approval, checkpoint, process registry,
-  capability, memoria e Local Computer hanno persistenza locale nei blocchi gia'
-  implementati;
-- restano da consolidare alcuni read model UI e orchestrazione end-to-end dei
-  tool prima di considerare chiuso il prodotto.
+- i crate Rust per task, processi, capability, memoria, Local Computer,
+  orchestrator, subagenti, skill runtime e secrets restano la base operativa;
+- il vecchio core desktop legato alla shell e' stato rimosso con Tauri;
+- `crates/desktop-gateway` espone gia' prompt, stream/cancel, runtime
+  health/warmup/shutdown, thread e messaggi chat persistenti;
+- restano da esporre nel gateway task, memory, capability, Local Computer,
+  artifact preview, audit, log runtime e packaging produzione.
 
 ### Orchestrator Brain
 
@@ -167,7 +225,8 @@ Stato attuale:
 - supporta priorita', stati, resource reservations, approval, checkpoint,
   scheduler, lease recovery e UI read model;
 - i piani da prompt vengono gia' materializzati come task durevoli;
-- primo executor read-only per task `prompt_plan.*` collegato al Tauri Core;
+- primo executor read-only per task `prompt_plan.*` da ricollegare al gateway
+  autonomo;
 - manca collegare browser/shell live come executor reali degli step pianificati.
 
 ### Resource Governor
@@ -310,8 +369,12 @@ Stato attuale:
 
 ## Sequenza Di Implementazione Aggiornata
 
-1. Chiudere gestione chat/thread.
-   Stato: base completata.
+1. Completare il Desktop HTTP Gateway Rust autonomo collegato a Electron.
+   Slice fatti: prompt builder/context compression Rust, proxy NDJSON
+   stream/cancel, runtime health/warmup/shutdown, read model persistente
+   thread/messaggi su SQLite locale, token bearer locale e CORS allowlist.
+   Restano packaging gateway/runtime, log diagnostici e read model locali più
+   ampi senza ripristinare IPC desktop per stream.
 
 2. Collegare executor dei task pianificati dal Brain.
    Deve usare Task Runtime, Resource Governor, Approval Gate e checkpoint.

@@ -1,0 +1,8192 @@
+mod browser_loop_controller;
+// Brain -> OperationalPlan adapter (A1), wired via `try_brain_operational_plan`.
+mod brain_adapter;
+mod chat_store;
+mod task_registry;
+
+use axum::{
+    Json, Router,
+    body::Body,
+    extract::{Path, Request, State},
+    http::{
+        HeaderMap, HeaderValue, Method, StatusCode,
+        header::{AUTHORIZATION, CONTENT_TYPE},
+    },
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
+    routing::delete,
+    routing::get,
+    routing::post,
+};
+use base64::Engine as _;
+use browser_loop_controller::{BrowserContextProfile, RuntimeBrowserLoopPlanner};
+use chat_store::ChatStore;
+use local_first_browser_automation::{
+    BrowserAutomationClient, BrowserAutomationError, BrowserLoopRequest, BrowserLoopRunner,
+    BrowserMethod, BrowserResponse, BrowserSidecarSession, BrowserSidecarSpawnOptions,
+    BrowserUrlApprovalGrant, BrowserUrlApprovalScope, BrowserUrlPolicyStore, BrowserVisibilityMode,
+    browser_loop_event_payload,
+};
+use local_first_inference::{
+    AnthropicProvider, CapabilityDescriptor, JsonRuntimeProvider, Locality, ModelRouter,
+    OpenAiCompatProvider, PrivacyPolicy, Requirements,
+};
+use local_first_capabilities::{
+    ActionClass, CachedCapabilityTool, CachedToolProvider, CapabilityConnectionConfig,
+    CapabilityFacade, CapabilityPolicy, CapabilityProviderConfig, CapabilityProviderGrant,
+    CapabilityProviderKind, CapabilityRegistryStore, CapabilityTaskPayload, InMemoryCapabilityAudit,
+    PolicyContext, ProviderId as CapabilityProviderId, UserId as CapabilityUserId,
+    WorkspaceId as CapabilityWorkspaceId,
+};
+use local_first_orchestrator::{
+    NoopMemoryContextProvider, OrchestratorBrain, OrchestratorBudgets, OrchestratorRequest,
+    ToolSearchIndexStore,
+};
+use local_first_desktop_gateway::{
+    BuildPromptRequest, BuildPromptResponse, CancelGenerationRequest, ChatGenerateStreamRequest,
+    ChatMessage, ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot,
+    CommitContinuationResultRequest, CommitPromptResultRequest, SetThreadPinnedRequest,
+    build_chat_runtime_prompt, build_gemma_generate_stream_request, compact_thread_title,
+};
+use local_first_local_computer_session::{
+    ApprovalState, ArtifactRecord, ComputerEventRecord, ComputerSessionRecord,
+    ComputerSurfaceRecord, SessionStatus, SurfaceKind, SurfaceStatus, TakeoverState,
+};
+use local_first_local_computer_session::{LocalComputerReadModel, LocalComputerSessionStore};
+use local_first_memory::{
+    DataSensitivity as MemoryDataSensitivity, MemoryAccessRequest, MemoryDashboard, MemoryFacade,
+    MemoryUiReadModel, PrivacyDomain, SQLiteMemoryStore, UserId as MemoryUserId,
+    WorkspaceId as MemoryWorkspaceId,
+};
+use local_first_process_manager::{
+    LocalProcessSupervisor, LocalRuntimeDiscovery, LogEntry, ProcessManager, ProcessRegistryStore,
+    RuntimeControlSnapshot, RuntimeControlStatus, SidecarProcessCatalog,
+};
+use local_first_subagents::{RuntimeClient, SubagentTaskExecutor};
+use local_first_task_runtime::{
+    ApprovalGate, ApprovalRequest, ApprovalStatus, ExecutorResult, LeaseManager, ResourceClass,
+    ResourceGovernor, ResourceLimits, ResourceRequirement, TaskExecutor, TaskId, TaskPriority,
+    TaskQueueSnapshot, TaskRecord, TaskRuntimeError, TaskScheduler, TaskStatus, TaskStore,
+    TaskUiDetail, TaskUiItem, TaskUiReadModel, UserId, WorkspaceId,
+};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::{
+    collections::{HashMap, HashSet},
+    env, fs,
+    io::{Read, Write},
+    net::{SocketAddr, TcpStream},
+    path::{Path as FsPath, PathBuf},
+    process::Command,
+    sync::{Arc, Mutex, MutexGuard},
+    time::Duration as StdDuration,
+};
+use task_registry::{GatewayTaskExecutorKind, TaskExecutorRegistry};
+use time::{Duration, OffsetDateTime};
+use tokio::net::TcpListener;
+use tower_http::cors::{AllowOrigin, CorsLayer};
+
+const TASK_EXECUTOR_WORKER_ID: &str = "desktop-gateway-background-worker";
+const TASK_EXECUTOR_MANUAL_WORKER_ID: &str = "desktop-gateway-manual-run";
+const TASK_EXECUTOR_POLL_INTERVAL_MS: u64 = 1_000;
+const RUNTIME_START_TIMEOUT_SECS: u64 = 120;
+
+#[derive(Clone)]
+struct AppState {
+    http: reqwest::Client,
+    gemma_runtime_url: Arc<str>,
+    chat_store: Arc<Mutex<ChatStore>>,
+    task_store: Arc<Mutex<TaskStore>>,
+    computer_store: Arc<Mutex<LocalComputerSessionStore>>,
+    browser_url_policies: Arc<Mutex<BrowserUrlPolicyStore>>,
+    memory_facade: Arc<Mutex<MemoryFacade>>,
+    capability_registry: Arc<Mutex<CapabilityRegistryStore>>,
+    process_manager: Arc<Mutex<ProcessManager<LocalProcessSupervisor>>>,
+    task_executor_status: Arc<Mutex<TaskExecutorStatus>>,
+    task_executor_registry: TaskExecutorRegistry,
+    browser_capability_client: Arc<Mutex<Option<BrowserAutomationClient<BrowserSidecarSession>>>>,
+    auth_token: Arc<str>,
+}
+
+#[derive(Debug, Clone)]
+struct TaskExecutorStatus {
+    enabled: bool,
+    worker_id: String,
+    poll_interval_ms: u64,
+    status: String,
+    last_tick_at: Option<String>,
+    last_task_id: Option<String>,
+    last_message: String,
+    completed_count: u64,
+    failure_count: u64,
+}
+
+impl TaskExecutorStatus {
+    fn new(enabled: bool) -> Self {
+        Self {
+            enabled,
+            worker_id: TASK_EXECUTOR_WORKER_ID.to_string(),
+            poll_interval_ms: TASK_EXECUTOR_POLL_INTERVAL_MS,
+            status: if enabled { "starting" } else { "disabled" }.to_string(),
+            last_tick_at: None,
+            last_task_id: None,
+            last_message: if enabled {
+                "Worker executor locale in avvio.".to_string()
+            } else {
+                "Worker executor locale disabilitato da ambiente.".to_string()
+            },
+            completed_count: 0,
+            failure_count: 0,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct HealthResponse {
+    ok: bool,
+    service: &'static str,
+    local_first: bool,
+    gemma_runtime_url: String,
+    auth_required: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct RuntimeProcessResponse {
+    id: &'static str,
+    kind: &'static str,
+    status: &'static str,
+    pid: Option<u32>,
+    message: String,
+    health_check: serde_json::Value,
+    command_label: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct RuntimeControlResponse {
+    process_id: &'static str,
+    status: &'static str,
+    port: u16,
+    port_owner_pid: Option<u32>,
+    duplicate_count: u32,
+    total_memory_mb: Option<u64>,
+    available_memory_mb: Option<u64>,
+    process_memory_mb: Option<u64>,
+    process_cpu_percent: Option<f64>,
+    message: String,
+}
+
+#[derive(Debug, Serialize)]
+struct RuntimeHealthResponse {
+    processes: Vec<RuntimeProcessResponse>,
+    controls: Vec<RuntimeControlResponse>,
+}
+
+#[derive(Debug, Serialize)]
+struct RuntimeLogsResponse {
+    process_id: &'static str,
+    source: &'static str,
+    entries: Vec<RuntimeLogEntryResponse>,
+    message: String,
+}
+
+#[derive(Debug, Serialize)]
+struct RuntimeLogEntryResponse {
+    stream: String,
+    line_redacted: String,
+}
+
+#[derive(Debug, Serialize)]
+struct TaskItemResponse {
+    task_id: String,
+    kind: String,
+    goal: String,
+    status: String,
+    priority: String,
+    blocked_reason: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ApprovalItemResponse {
+    approval_id: String,
+    task_id: String,
+    action: String,
+    risk_level: String,
+    data_boundary: String,
+    explanation: String,
+    status: String,
+    scope_options: Vec<String>,
+    browser_visibility_options: Vec<String>,
+    default_browser_visibility: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ResourceUsageResponse {
+    resource_class: String,
+    units: u32,
+}
+
+#[derive(Debug, Serialize)]
+struct TaskQueueResponse {
+    queued: Vec<TaskItemResponse>,
+    active: Vec<TaskItemResponse>,
+    blocked: Vec<TaskItemResponse>,
+    waiting_approvals: Vec<ApprovalItemResponse>,
+    recent_failures: Vec<TaskItemResponse>,
+    resource_usage: Vec<ResourceUsageResponse>,
+}
+
+#[derive(Debug, Serialize)]
+struct TaskDetailResponse {
+    #[serde(flatten)]
+    item: TaskItemResponse,
+    latest_checkpoint: Option<Value>,
+    runtime_metadata: Option<Value>,
+    exposes_raw_input: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct TaskRunStepResponse {
+    status: String,
+    task_id: Option<String>,
+    message: String,
+}
+
+#[derive(Debug, Serialize)]
+struct TaskRunBatchResponse {
+    status: String,
+    completed: u32,
+    stopped_reason: Option<String>,
+    results: Vec<TaskRunStepResponse>,
+}
+
+#[derive(Debug, Serialize)]
+struct TaskExecutorStatusResponse {
+    enabled: bool,
+    worker_id: String,
+    poll_interval_ms: u64,
+    status: String,
+    last_tick_at: Option<String>,
+    last_task_id: Option<String>,
+    last_message: String,
+    completed_count: u64,
+    failure_count: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct SubmitOperationalPromptRequest {
+    user_message: ChatMessage,
+}
+
+struct TaskExecutionOutcome {
+    completed: bool,
+    blocked_reason: Option<String>,
+    pending_approval: Option<PendingExecutorApproval>,
+    summary: String,
+    checkpoint_payload: Value,
+    checkpoint_redacted: Value,
+    chat_message: String,
+    surface: SurfaceKind,
+    event_kind: String,
+    event_title: String,
+    event_subtitle: String,
+    event_payload: Value,
+    artifacts: Vec<TaskArtifactOutput>,
+}
+
+struct PendingExecutorApproval {
+    action: String,
+    risk_level: String,
+    data_boundary: String,
+    explanation: String,
+}
+
+struct TaskArtifactOutput {
+    artifact_id: String,
+    title: String,
+    kind: String,
+    path_ref: String,
+    size_bytes: u64,
+    preview_ref: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct BrowserSourceSummary {
+    label: String,
+    url: String,
+    status: String,
+    excerpt: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct BrowserFormDraftSummary {
+    label: String,
+    url: String,
+    status: String,
+    filled_fields: Vec<String>,
+    reason: Option<String>,
+    search_status: Option<String>,
+    search_excerpt: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct BrowserSearchResult {
+    status: String,
+    excerpt: Option<String>,
+    snapshot: Option<Value>,
+}
+
+#[derive(Debug, Clone)]
+struct TrainStationSelectionResult {
+    filled_fields: Vec<String>,
+    failed_fields: Vec<String>,
+    latest_snapshot: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum OperationalIntentType {
+    Informational,
+    Transactional,
+    Navigational,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum OperationalAutonomy {
+    AutomaticUntilGate,
+    AskBeforeEachExternalAction,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum OperationalStepStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Blocked,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct OperationalPlanStep {
+    id: String,
+    title: String,
+    detail: String,
+    tool: Option<String>,
+    status: OperationalStepStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct OperationalPlan {
+    objective: String,
+    intent_type: OperationalIntentType,
+    autonomy: OperationalAutonomy,
+    tools: Vec<String>,
+    steps: Vec<OperationalPlanStep>,
+    constraints: Vec<String>,
+    success_criteria: Vec<String>,
+    stop_conditions: Vec<String>,
+    approval_gates: Vec<String>,
+    data_schema: Vec<String>,
+}
+
+impl OperationalPlan {
+    fn start_step(&mut self, id: &str) {
+        for step in &mut self.steps {
+            if step.id == id {
+                step.status = OperationalStepStatus::InProgress;
+            }
+        }
+    }
+
+    fn complete_step(&mut self, id: &str) {
+        for step in &mut self.steps {
+            if step.id == id {
+                step.status = OperationalStepStatus::Completed;
+            }
+        }
+    }
+
+    fn block_step(&mut self, id: &str) {
+        for step in &mut self.steps {
+            if step.id == id {
+                step.status = OperationalStepStatus::Blocked;
+            }
+        }
+    }
+}
+
+fn operational_step(
+    id: impl Into<String>,
+    title: impl Into<String>,
+    detail: impl Into<String>,
+    tool: Option<&str>,
+) -> OperationalPlanStep {
+    OperationalPlanStep {
+        id: id.into(),
+        title: title.into(),
+        detail: detail.into(),
+        tool: tool.map(str::to_string),
+        status: OperationalStepStatus::Pending,
+    }
+}
+
+#[derive(Debug, Clone)]
+struct TrainSearchDraft {
+    origin: String,
+    destination: String,
+    date: Option<String>,
+    time: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct TaskFinalAnswer {
+    title: String,
+    summary: String,
+    findings: Vec<String>,
+    sources: Vec<String>,
+    limitations: Vec<String>,
+    next_steps: Vec<String>,
+}
+
+impl TaskFinalAnswer {
+    fn to_markdown(&self) -> String {
+        let mut sections = Vec::new();
+        sections.push(format!("**{}**\n\n{}", self.title, self.summary));
+        if !self.findings.is_empty() {
+            sections.push(format!(
+                "**Risultato**\n{}",
+                self.findings
+                    .iter()
+                    .map(|item| format!("- {item}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ));
+        }
+        if !self.sources.is_empty() {
+            sections.push(format!(
+                "**Fonti controllate**\n{}",
+                self.sources
+                    .iter()
+                    .map(|item| format!("- {item}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ));
+        }
+        if !self.limitations.is_empty() {
+            sections.push(format!(
+                "**Limiti**\n{}",
+                self.limitations
+                    .iter()
+                    .map(|item| format!("- {item}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ));
+        }
+        if !self.next_steps.is_empty() {
+            sections.push(format!(
+                "**Prossimo passo**\n{}",
+                self.next_steps
+                    .iter()
+                    .map(|item| format!("- {item}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ));
+        }
+        sections.join("\n\n")
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct ComputerArtifactPreviewResponse {
+    artifact_id: String,
+    title_redacted: String,
+    kind: String,
+    size_bytes: u64,
+    data_url: String,
+}
+
+#[derive(Debug, Serialize)]
+struct CapabilityConnectionResponse {
+    id: String,
+    provider_id: String,
+    display_name: String,
+    status: String,
+    privacy_domains: Vec<String>,
+    metadata: Value,
+}
+
+#[derive(Debug, Serialize)]
+struct CapabilityToolResponse {
+    provider_id: String,
+    name: String,
+    provider_kind: String,
+    action: String,
+    description: String,
+    privacy_domains: Vec<String>,
+    sensitivity: String,
+}
+
+#[derive(Debug, Serialize)]
+struct CapabilityPolicyResponse {
+    enabled_providers: Vec<String>,
+    allow_managed_cloud: bool,
+    privacy_domains: Vec<String>,
+    max_autonomy_level: u8,
+}
+
+#[derive(Debug, Serialize)]
+struct CapabilitySnapshotResponse {
+    connections: Vec<CapabilityConnectionResponse>,
+    tools: Vec<CapabilityToolResponse>,
+    policy: CapabilityPolicyResponse,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct RejectApprovalRequest {
+    reason: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ApproveApprovalRequest {
+    scope: Option<String>,
+    browser_visibility: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TaskCreationMode {
+    AutoFromPrompt,
+    ExplicitMessageAction,
+}
+
+#[derive(Debug, Serialize)]
+struct ErrorResponse {
+    error: ErrorBody,
+}
+
+#[derive(Debug, Serialize)]
+struct ErrorBody {
+    code: &'static str,
+    message: String,
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let port = env::var("LOCAL_FIRST_DESKTOP_GATEWAY_PORT")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(18_765);
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let gemma_runtime_url = env::var("LOCAL_FIRST_GEMMA_RUNTIME_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:8765".to_string())
+        .trim_end_matches('/')
+        .to_string();
+    let workspace_root = gateway_workspace_root()?;
+    let process_store = ProcessRegistryStore::open(gateway_process_database_path()?)?;
+    let process_catalog = SidecarProcessCatalog::new(&workspace_root)
+        .with_python_venv(gateway_python_venv(&workspace_root))
+        .with_gemma_port(gemma_runtime_port(&gemma_runtime_url));
+    process_catalog.register_default_sidecars(&process_store)?;
+    let state = AppState {
+        http: reqwest::Client::new(),
+        gemma_runtime_url: gemma_runtime_url.into(),
+        chat_store: Arc::new(Mutex::new(ChatStore::open(gateway_database_path()?)?)),
+        task_store: Arc::new(Mutex::new(TaskStore::open(gateway_task_database_path()?)?)),
+        computer_store: Arc::new(Mutex::new(LocalComputerSessionStore::open(
+            gateway_local_computer_database_path()?,
+        )?)),
+        browser_url_policies: Arc::new(Mutex::new(BrowserUrlPolicyStore::open(
+            gateway_browser_policy_database_path()?,
+        )?)),
+        memory_facade: Arc::new(Mutex::new(MemoryFacade::new(
+            SQLiteMemoryStore::open(gateway_memory_database_path()?)
+                .map_err(std::io::Error::other)?,
+        ))),
+        capability_registry: Arc::new(Mutex::new(open_seeded_capability_registry()?)),
+        process_manager: Arc::new(Mutex::new(ProcessManager::new(
+            process_store,
+            LocalProcessSupervisor::new().with_log_dir(gateway_process_log_dir()?, 2_000),
+        ))),
+        task_executor_status: Arc::new(Mutex::new(TaskExecutorStatus::new(
+            task_executor_worker_enabled(),
+        ))),
+        task_executor_registry: TaskExecutorRegistry::with_defaults(),
+        browser_capability_client: Arc::new(Mutex::new(None)),
+        auth_token: resolve_gateway_auth_token()?.into(),
+    };
+    start_task_executor_worker(state.clone());
+    let chat_routes = Router::new()
+        .route(
+            "/api/chat/threads",
+            get(chat_threads).post(create_chat_thread),
+        )
+        .route(
+            "/api/chat/threads/{thread_id}/select",
+            post(select_chat_thread),
+        )
+        .route(
+            "/api/chat/threads/{thread_id}/pin",
+            post(set_chat_thread_pinned),
+        )
+        .route(
+            "/api/chat/threads/{thread_id}/archive",
+            post(archive_chat_thread),
+        )
+        .route(
+            "/api/chat/threads/{thread_id}/unarchive",
+            post(unarchive_chat_thread),
+        )
+        .route("/api/chat/threads/{thread_id}", delete(delete_chat_thread))
+        .route("/api/chat/threads/{thread_id}/messages", get(chat_messages))
+        .route(
+            "/api/chat/threads/{thread_id}/messages/commit_prompt_result",
+            post(commit_prompt_result),
+        )
+        .route(
+            "/api/chat/threads/{thread_id}/messages/submit_operational_prompt",
+            post(submit_operational_prompt),
+        )
+        .route(
+            "/api/chat/threads/{thread_id}/messages/{message_id}/commit_continuation_result",
+            post(commit_continuation_result),
+        )
+        .route(
+            "/api/chat/threads/{thread_id}/messages/{message_id}/create_task",
+            post(create_task_from_chat_message),
+        )
+        .route("/api/chat/build_prompt", post(build_prompt))
+        .route("/api/chat/generate_stream", post(generate_stream))
+        .route("/api/chat/cancel_generation", post(cancel_generation))
+        .route("/api/runtime/health", get(runtime_health))
+        .route("/api/runtime/logs", get(runtime_logs))
+        .route("/api/runtime/warmup", post(runtime_warmup))
+        .route("/api/runtime/shutdown", post(runtime_shutdown))
+        .route("/api/tasks/queue", get(task_queue))
+        .route("/api/tasks/executor", get(task_executor_status))
+        .route("/api/tasks/run_next", post(run_next_task))
+        .route("/api/tasks/{task_id}", get(task_detail))
+        .route(
+            "/api/approvals/{approval_id}/approve",
+            post(approve_approval),
+        )
+        .route("/api/approvals/{approval_id}/reject", post(reject_approval))
+        .route(
+            "/api/local-computer/sessions/{session_id}",
+            get(local_computer_session),
+        )
+        .route(
+            "/api/local-computer/sessions/{session_id}/artifacts/{artifact_id}/preview",
+            get(local_computer_artifact_preview),
+        )
+        .route("/api/memory/dashboard", get(memory_dashboard))
+        .route("/api/capabilities/snapshot", get(capability_snapshot))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_gateway_token,
+        ));
+    let app = Router::new()
+        .route("/api/health", get(health))
+        .merge(chat_routes)
+        .with_state(state)
+        .layer(cors_layer());
+    let listener = TcpListener::bind(addr).await?;
+    println!("local-first-desktop-gateway listening on http://{addr}");
+    axum::serve(listener, app).await?;
+    Ok(())
+}
+
+async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
+    Json(HealthResponse {
+        ok: true,
+        service: "local-first-desktop-gateway",
+        local_first: true,
+        gemma_runtime_url: state.gemma_runtime_url.to_string(),
+        auth_required: !state.auth_token.is_empty(),
+    })
+}
+
+async fn require_gateway_token(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    request: Request,
+    next: Next,
+) -> Result<Response, GatewayError> {
+    // The token is resolved deny-by-default at startup and is never empty; if it
+    // somehow were, fail closed (reject) rather than open.
+    let expected = format!("Bearer {}", state.auth_token);
+    let authorized = headers
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value == expected);
+    if authorized {
+        Ok(next.run(request).await)
+    } else {
+        Err(GatewayError {
+            status: StatusCode::UNAUTHORIZED,
+            code: "gateway_unauthorized",
+            message: "Missing or invalid Desktop Gateway token".to_string(),
+        })
+    }
+}
+
+async fn build_prompt(Json(request): Json<BuildPromptRequest>) -> Json<BuildPromptResponse> {
+    Json(build_chat_runtime_prompt(&request))
+}
+
+async fn chat_threads(
+    State(state): State<AppState>,
+) -> Result<Json<ChatThreadSnapshot>, GatewayError> {
+    Ok(Json(
+        lock_store(&state)?.threads().map_err(GatewayError::store)?,
+    ))
+}
+
+async fn create_chat_thread(
+    State(state): State<AppState>,
+) -> Result<Json<ChatThread>, GatewayError> {
+    Ok(Json(
+        lock_store(&state)?
+            .create_thread()
+            .map_err(GatewayError::store)?,
+    ))
+}
+
+async fn select_chat_thread(
+    State(state): State<AppState>,
+    Path(thread_id): Path<String>,
+) -> Result<Json<ChatThreadSnapshot>, GatewayError> {
+    Ok(Json(
+        lock_store(&state)?
+            .select_thread(&thread_id)
+            .map_err(GatewayError::store)?,
+    ))
+}
+
+async fn set_chat_thread_pinned(
+    State(state): State<AppState>,
+    Path(thread_id): Path<String>,
+    Json(request): Json<SetThreadPinnedRequest>,
+) -> Result<Json<ChatThreadSnapshot>, GatewayError> {
+    Ok(Json(
+        lock_store(&state)?
+            .set_pinned(&thread_id, request.pinned)
+            .map_err(GatewayError::store)?,
+    ))
+}
+
+async fn archive_chat_thread(
+    State(state): State<AppState>,
+    Path(thread_id): Path<String>,
+) -> Result<Json<ChatThreadSnapshot>, GatewayError> {
+    Ok(Json(
+        lock_store(&state)?
+            .set_status(&thread_id, "archived")
+            .map_err(GatewayError::store)?,
+    ))
+}
+
+async fn unarchive_chat_thread(
+    State(state): State<AppState>,
+    Path(thread_id): Path<String>,
+) -> Result<Json<ChatThreadSnapshot>, GatewayError> {
+    Ok(Json(
+        lock_store(&state)?
+            .set_status(&thread_id, "active")
+            .map_err(GatewayError::store)?,
+    ))
+}
+
+async fn delete_chat_thread(
+    State(state): State<AppState>,
+    Path(thread_id): Path<String>,
+) -> Result<Json<ChatThreadSnapshot>, GatewayError> {
+    Ok(Json(
+        lock_store(&state)?
+            .delete_thread(&thread_id)
+            .map_err(GatewayError::store)?,
+    ))
+}
+
+async fn chat_messages(
+    State(state): State<AppState>,
+    Path(thread_id): Path<String>,
+) -> Result<Json<ChatMessagesSnapshot>, GatewayError> {
+    Ok(Json(
+        lock_store(&state)?
+            .messages(&thread_id)
+            .map_err(GatewayError::store)?,
+    ))
+}
+
+async fn commit_prompt_result(
+    State(state): State<AppState>,
+    Path(thread_id): Path<String>,
+    Json(request): Json<CommitPromptResultRequest>,
+) -> Result<Json<ChatMessagesSnapshot>, GatewayError> {
+    let snapshot = lock_store(&state)?
+        .commit_prompt_result(
+            &thread_id,
+            &request.user_message,
+            &request.assistant_message,
+        )
+        .map_err(GatewayError::store)?;
+    if should_create_operational_task(&request.user_message.text) {
+        ensure_operational_task_for_thread(
+            &state,
+            &thread_id,
+            &request.assistant_message.id,
+            &request.user_message.text,
+            TaskCreationMode::AutoFromPrompt,
+        )?;
+        return Ok(Json(
+            lock_store(&state)?
+                .messages(&thread_id)
+                .map_err(GatewayError::store)?,
+        ));
+    }
+    Ok(Json(snapshot))
+}
+
+async fn submit_operational_prompt(
+    State(state): State<AppState>,
+    Path(thread_id): Path<String>,
+    Json(request): Json<SubmitOperationalPromptRequest>,
+) -> Result<Json<ChatMessagesSnapshot>, GatewayError> {
+    if !should_create_operational_task(&request.user_message.text) {
+        return Err(GatewayError {
+            status: StatusCode::CONFLICT,
+            code: "not_operational_prompt",
+            message: "prompt does not require an operational local task".to_string(),
+        });
+    }
+
+    let now = OffsetDateTime::now_utc();
+    let assistant_message = ChatMessage {
+        id: format!(
+            "assistant_operational_{}_{}",
+            thread_id,
+            now.unix_timestamp_nanos()
+        ),
+        role: "assistant".to_string(),
+        text: operational_task_acknowledgement(&request.user_message.text),
+        timestamp: now.unix_timestamp().to_string(),
+        metadata: Some("Executor locale".to_string()),
+        metrics: None,
+        feedback: None,
+        saved_memory_ref: None,
+        linked_task_id: None,
+        linked_automation_ref: None,
+        attachments: Vec::new(),
+    };
+    let snapshot = lock_store(&state)?
+        .commit_prompt_result(&thread_id, &request.user_message, &assistant_message)
+        .map_err(GatewayError::store)?;
+    ensure_operational_task_for_thread(
+        &state,
+        &thread_id,
+        &assistant_message.id,
+        &request.user_message.text,
+        TaskCreationMode::AutoFromPrompt,
+    )?;
+    Ok(Json(snapshot))
+}
+
+async fn commit_continuation_result(
+    State(state): State<AppState>,
+    Path((thread_id, message_id)): Path<(String, String)>,
+    Json(request): Json<CommitContinuationResultRequest>,
+) -> Result<Json<ChatMessagesSnapshot>, GatewayError> {
+    Ok(Json(
+        lock_store(&state)?
+            .commit_continuation_result(&thread_id, &message_id, &request.assistant_message)
+            .map_err(GatewayError::store)?,
+    ))
+}
+
+async fn create_task_from_chat_message(
+    State(state): State<AppState>,
+    Path((thread_id, message_id)): Path<(String, String)>,
+) -> Result<Json<ChatMessagesSnapshot>, GatewayError> {
+    let message = lock_store(&state)?
+        .message(&thread_id, &message_id)
+        .map_err(GatewayError::store)?
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "chat_message_not_found",
+            message: format!("chat message not found: {message_id}"),
+        })?;
+    ensure_operational_task_for_thread(
+        &state,
+        &thread_id,
+        &message_id,
+        &message.text,
+        TaskCreationMode::ExplicitMessageAction,
+    )?;
+    Ok(Json(
+        lock_store(&state)?
+            .messages(&thread_id)
+            .map_err(GatewayError::store)?,
+    ))
+}
+
+async fn generate_stream(
+    State(state): State<AppState>,
+    Json(request): Json<ChatGenerateStreamRequest>,
+) -> Result<Response, GatewayError> {
+    ensure_runtime_available(&state).await?;
+
+    let runtime_request = build_gemma_generate_stream_request(&request);
+    let response = state
+        .http
+        .post(format!("{}/generate_stream", state.gemma_runtime_url))
+        .json(&runtime_request)
+        .send()
+        .await
+        .map_err(|error| GatewayError::bad_gateway("runtime_request_failed", error))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let message = response.text().await.unwrap_or_else(|_| status.to_string());
+        return Err(GatewayError::from_status(
+            status,
+            "runtime_stream_failed",
+            message,
+        ));
+    }
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/x-ndjson")
+        .body(Body::from_stream(response.bytes_stream()))
+        .expect("valid streaming response"))
+}
+
+async fn cancel_generation(
+    State(state): State<AppState>,
+    Json(request): Json<CancelGenerationRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let response = state
+        .http
+        .post(format!("{}/cancel_generation", state.gemma_runtime_url))
+        .json(&request)
+        .send()
+        .await
+        .map_err(|error| GatewayError::bad_gateway("runtime_cancel_failed", error))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let message = response.text().await.unwrap_or_else(|_| status.to_string());
+        return Err(GatewayError::from_status(
+            status,
+            "runtime_cancel_failed",
+            message,
+        ));
+    }
+
+    response
+        .json::<serde_json::Value>()
+        .await
+        .map(Json)
+        .map_err(|error| GatewayError::bad_gateway("runtime_cancel_decode_failed", error))
+}
+
+async fn runtime_health(State(state): State<AppState>) -> Json<RuntimeHealthResponse> {
+    let control = runtime_control_snapshot(&state).ok();
+    let health_url = format!("{}/health", state.gemma_runtime_url);
+    match state.http.get(&health_url).send().await {
+        Ok(response) if response.status().is_success() => {
+            let health = response
+                .json::<serde_json::Value>()
+                .await
+                .unwrap_or_else(|_| serde_json::json!({ "ok": true }));
+            Json(runtime_health_response(
+                "ready",
+                "Runtime Gemma locale pronto",
+                health,
+                control,
+            ))
+        }
+        Ok(response) => Json(runtime_health_response(
+            "attention",
+            format!("Runtime Gemma HTTP {}", response.status().as_u16()),
+            serde_json::json!({ "status": response.status().as_u16() }),
+            control,
+        )),
+        Err(error) => Json(runtime_health_response(
+            "attention",
+            format!("Runtime Gemma locale non raggiungibile: {error}"),
+            serde_json::json!({ "error": error.to_string() }),
+            control,
+        )),
+    }
+}
+
+async fn runtime_logs(State(state): State<AppState>) -> Json<RuntimeLogsResponse> {
+    match lock_process_manager(&state).and_then(|manager| {
+        manager
+            .logs("llm-gemma4-mlx", 80)
+            .map_err(GatewayError::process)
+    }) {
+        Ok(entries) if !entries.is_empty() => Json(RuntimeLogsResponse {
+            process_id: "llm-gemma4-mlx",
+            source: "managed_process",
+            message: format!("{} righe log runtime gestito", entries.len()),
+            entries: entries
+                .into_iter()
+                .map(redacted_runtime_log_entry)
+                .collect(),
+        }),
+        Ok(_) => Json(RuntimeLogsResponse {
+            process_id: "llm-gemma4-mlx",
+            source: "managed_process",
+            entries: Vec::new(),
+            message: "Nessun log disponibile per il processo gestito.".to_string(),
+        }),
+        Err(error) => Json(RuntimeLogsResponse {
+            process_id: "llm-gemma4-mlx",
+            source: "external_or_unavailable",
+            entries: Vec::new(),
+            message: runtime_logs_unavailable_message(&error.message),
+        }),
+    }
+}
+
+async fn runtime_warmup(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    ensure_runtime_available(&state).await?;
+    proxy_runtime_json(&state, "/warmup").await.map(Json)
+}
+
+async fn runtime_shutdown(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let shutdown_result = proxy_runtime_json(&state, "/shutdown").await;
+    if shutdown_result.is_ok() {
+        return shutdown_result.map(Json);
+    }
+
+    let stopped = lock_process_manager(&state)?.stop("llm-gemma4-mlx");
+    match stopped {
+        Ok(snapshot) => Ok(Json(serde_json::json!({
+            "ok": true,
+            "local_first": true,
+            "status": "stopped",
+            "process_id": snapshot.process_id,
+            "pid": snapshot.pid
+        }))),
+        Err(error) => Err(GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "runtime_shutdown_failed",
+            message: error.to_string(),
+        }),
+    }
+}
+
+async fn task_queue(
+    State(state): State<AppState>,
+) -> Result<Json<TaskQueueResponse>, GatewayError> {
+    Ok(Json(task_queue_response_for_state(&state)?))
+}
+
+async fn task_detail(
+    State(state): State<AppState>,
+    Path(task_id): Path<String>,
+) -> Result<Json<Option<TaskDetailResponse>>, GatewayError> {
+    let user = gateway_user_id();
+    let workspace = gateway_workspace_id();
+    let store = lock_task_store(&state)?;
+    let detail = TaskUiReadModel::new(&store)
+        .task_detail(&TaskId::new(task_id), &user, &workspace)
+        .map_err(GatewayError::task)?
+        .map(task_detail_response)
+        .transpose()?;
+    Ok(Json(detail))
+}
+
+async fn run_next_task(
+    State(state): State<AppState>,
+) -> Result<Json<TaskRunBatchResponse>, GatewayError> {
+    let state_for_task = state.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        run_next_task_once(&state_for_task, TASK_EXECUTOR_MANUAL_WORKER_ID)
+    })
+    .await
+    .map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "task_executor_join_error",
+        message: error.to_string(),
+    })??;
+    Ok(Json(result))
+}
+
+async fn task_executor_status(
+    State(state): State<AppState>,
+) -> Result<Json<TaskExecutorStatusResponse>, GatewayError> {
+    Ok(Json(task_executor_status_response(&state)?))
+}
+
+async fn approve_approval(
+    State(state): State<AppState>,
+    Path(approval_id): Path<String>,
+    request: Option<Json<ApproveApprovalRequest>>,
+) -> Result<Json<TaskQueueResponse>, GatewayError> {
+    let store = lock_task_store(&state)?;
+    let approval = store
+        .approval_by_id(&approval_id)
+        .map_err(GatewayError::task)?
+        .ok_or_else(|| GatewayError::task(TaskRuntimeError::NotFound(approval_id.clone())))?;
+    let task = store
+        .get_task(&approval.task_id, &approval.user_id, &approval.workspace_id)
+        .map_err(GatewayError::task)?;
+    let approval_options = request.map(|Json(request)| request);
+    if let (Some(task), Some(options)) = (task.as_ref(), approval_options.as_ref()) {
+        persist_browser_approval_options(&state, &approval, task, options)?;
+        append_browser_approval_checkpoint(&store, &approval, task, options)
+            .map_err(GatewayError::task)?;
+    }
+    ApprovalGate::new()
+        .approve(&store, &approval_id, gateway_user_id().as_str())
+        .map_err(GatewayError::task)?;
+    drop(store);
+    sync_computer_session_after_approval(&state, &approval, ApprovalState::Approved)?;
+    Ok(Json(task_queue_response_for_state(&state)?))
+}
+
+async fn reject_approval(
+    State(state): State<AppState>,
+    Path(approval_id): Path<String>,
+    Json(request): Json<RejectApprovalRequest>,
+) -> Result<Json<TaskQueueResponse>, GatewayError> {
+    let store = lock_task_store(&state)?;
+    let approval = store
+        .approval_by_id(&approval_id)
+        .map_err(GatewayError::task)?
+        .ok_or_else(|| GatewayError::task(TaskRuntimeError::NotFound(approval_id.clone())))?;
+    ApprovalGate::new()
+        .reject(
+            &store,
+            &approval_id,
+            gateway_user_id().as_str(),
+            &request.reason,
+        )
+        .map_err(GatewayError::task)?;
+    drop(store);
+    sync_computer_session_after_approval(&state, &approval, ApprovalState::Rejected)?;
+    Ok(Json(task_queue_response_for_state(&state)?))
+}
+
+fn sync_computer_session_after_approval(
+    state: &AppState,
+    approval: &ApprovalRequest,
+    approval_state: ApprovalState,
+) -> Result<(), GatewayError> {
+    let task_id = approval.task_id.as_str();
+    let thread = {
+        let chat_store = lock_store(state)?;
+        chat_store
+            .thread_by_task_id(task_id)
+            .map_err(GatewayError::store)?
+    };
+    let Some(thread) = thread else {
+        return Ok(());
+    };
+
+    let mut computer_store = lock_computer_store(state)?;
+    let user = gateway_user_id();
+    let workspace = gateway_workspace_id();
+    let Some(mut session) = computer_store
+        .session(
+            &thread.computer_session_id,
+            user.as_str(),
+            workspace.as_str(),
+        )
+        .map_err(GatewayError::local_computer)?
+    else {
+        return Ok(());
+    };
+
+    let now = OffsetDateTime::now_utc();
+    session.status = match approval_state {
+        ApprovalState::Approved => SessionStatus::Running,
+        ApprovalState::Rejected => SessionStatus::Cancelled,
+        ApprovalState::None | ApprovalState::WaitingUser => SessionStatus::WaitingUser,
+    };
+    session.approval_state = approval_state;
+    session.progress_current = session.progress_current.max(1);
+    session.updated_at = now;
+    if approval_state == ApprovalState::Rejected {
+        session.last_error = Some("Approval rifiutata dall'utente.".to_string());
+    }
+    computer_store
+        .upsert_session(&session)
+        .map_err(GatewayError::local_computer)?;
+
+    match approval_state {
+        ApprovalState::Approved => append_computer_event(
+            &mut computer_store,
+            &thread.computer_session_id,
+            &user,
+            &workspace,
+            SurfaceKind::Logs,
+            "computer_approval_approved",
+            "done",
+            "Approval confermata",
+            "Il task locale e' stato messo in coda.",
+            false,
+        )?,
+        ApprovalState::Rejected => append_computer_event(
+            &mut computer_store,
+            &thread.computer_session_id,
+            &user,
+            &workspace,
+            SurfaceKind::Logs,
+            "computer_approval_rejected",
+            "done",
+            "Approval rifiutata",
+            "Il task locale e' stato annullato prima dell'esecuzione.",
+            false,
+        )?,
+        ApprovalState::None | ApprovalState::WaitingUser => {}
+    }
+    Ok(())
+}
+
+fn persist_browser_approval_options(
+    state: &AppState,
+    approval: &ApprovalRequest,
+    task: &TaskRecord,
+    options: &ApproveApprovalRequest,
+) -> Result<(), GatewayError> {
+    if parse_approval_scope(options.scope.as_deref()) != BrowserUrlApprovalScope::Always {
+        return Ok(());
+    }
+    if !task_uses_browser(task) || !approval_allows_browser_policy(approval) {
+        return Ok(());
+    }
+    let visibility = parse_browser_visibility(options.browser_visibility.as_deref());
+    let policy_store = lock_browser_url_policies(state)?;
+    for target in browser_targets_for_goal(&task_effective_goal(task)) {
+        policy_store
+            .grant(&BrowserUrlApprovalGrant {
+                user_id: approval.user_id.as_str().to_string(),
+                workspace_id: approval.workspace_id.as_str().to_string(),
+                url: target.url,
+                action: "navigate".to_string(),
+                scope: BrowserUrlApprovalScope::Always,
+                visibility,
+            })
+            .map_err(|error| GatewayError {
+                status: StatusCode::BAD_GATEWAY,
+                code: "browser_url_policy_error",
+                message: error.to_string(),
+            })?;
+    }
+    Ok(())
+}
+
+fn append_browser_approval_checkpoint(
+    store: &TaskStore,
+    approval: &ApprovalRequest,
+    task: &TaskRecord,
+    options: &ApproveApprovalRequest,
+) -> Result<(), TaskRuntimeError> {
+    if !task_uses_browser(task) || !approval_allows_browser_policy(approval) {
+        return Ok(());
+    }
+    let scope = parse_approval_scope(options.scope.as_deref());
+    let visibility = parse_browser_visibility(options.browser_visibility.as_deref());
+    store.append_checkpoint(
+        &approval.task_id,
+        &approval.user_id,
+        &approval.workspace_id,
+        serde_json::json!({
+            "kind": "browser_approval_options",
+            "approval": {
+                "decision": "approved",
+                "action": approval.action,
+            },
+            "scope": approval_scope_label(scope),
+            "browser_visibility": browser_visibility_label(visibility),
+        }),
+        serde_json::json!({
+            "kind": "browser_approval_options",
+            "approval": {
+                "decision": "approved",
+                "action": approval.action,
+            },
+            "scope": approval_scope_label(scope),
+            "browser_visibility": browser_visibility_label(visibility),
+        }),
+    )?;
+    Ok(())
+}
+
+fn approval_allows_browser_policy(approval: &ApprovalRequest) -> bool {
+    approval.action == "browser.manual_action"
+        || approval.action == "prompt_plan.approve_step"
+        || approval.data_boundary.contains("browser")
+        || approval.explanation.to_lowercase().contains("browser")
+}
+
+fn run_next_task_once(
+    state: &AppState,
+    worker_id: &str,
+) -> Result<TaskRunBatchResponse, GatewayError> {
+    let user = gateway_user_id();
+    let workspace = gateway_workspace_id();
+    let now = OffsetDateTime::now_utc();
+    let governor = ResourceGovernor::new(ResourceLimits::conservative_defaults());
+    let lease_manager = LeaseManager::new(Duration::minutes(5));
+    let task = {
+        let store = lock_task_store(state)?;
+        let scheduler = TaskScheduler::new();
+        lease_manager
+            .recover_stale_leases(&store, &user, &workspace, now)
+            .map_err(GatewayError::task)?;
+        scheduler
+            .mark_blocked_by_terminal_dependencies(&store, &user, &workspace)
+            .map_err(GatewayError::task)?;
+        scheduler
+            .ready_tasks(&store, &user, &workspace, now, 1)
+            .map_err(GatewayError::task)?
+            .into_iter()
+            .next()
+    };
+    let Some(task) = task else {
+        return Ok(TaskRunBatchResponse {
+            status: "idle".to_string(),
+            completed: 0,
+            stopped_reason: Some("Nessun task approvato in coda.".to_string()),
+            results: vec![],
+        });
+    };
+
+    let task_id = task.task_id.as_str().to_string();
+    let mut task = match acquire_task_for_execution(
+        state,
+        task,
+        &user,
+        &workspace,
+        &governor,
+        &lease_manager,
+        worker_id,
+        now,
+    )? {
+        TaskAcquireResult::Acquired(task) => task,
+        TaskAcquireResult::WaitingResource(reason) => {
+            return Ok(TaskRunBatchResponse {
+                status: "waiting_resource".to_string(),
+                completed: 0,
+                stopped_reason: Some(reason),
+                results: vec![TaskRunStepResponse {
+                    status: "waiting_resource".to_string(),
+                    task_id: Some(task_id),
+                    message: "Risorse locali non ancora disponibili.".to_string(),
+                }],
+            });
+        }
+        TaskAcquireResult::LeaseBusy => {
+            return Ok(TaskRunBatchResponse {
+                status: "skipped".to_string(),
+                completed: 0,
+                stopped_reason: Some("Task gia' in esecuzione da un altro worker.".to_string()),
+                results: vec![TaskRunStepResponse {
+                    status: "skipped".to_string(),
+                    task_id: Some(task_id),
+                    message: "Lease gia' attivo.".to_string(),
+                }],
+            });
+        }
+    };
+    sync_session_for_task_run(state, &task, SessionStatus::Running, 1, None)?;
+    append_task_progress_checkpoint(
+        state,
+        &task,
+        "execution_started",
+        SurfaceKind::Logs,
+        "Task avviato",
+        "Esecuzione locale approvata e presa in carico dal worker.",
+        serde_json::json!({
+            "kind": "execution_started",
+            "worker_id": worker_id,
+            "task_id": task.task_id.as_str(),
+        }),
+    )?;
+
+    let execution_task = match task_with_dependency_outputs(state, &task) {
+        Ok(task) => task,
+        Err(error) => {
+            mark_task_failed(state, &mut task, &error.message)?;
+            sync_session_for_task_run(
+                state,
+                &task,
+                SessionStatus::Failed,
+                1,
+                Some(error.message.clone()),
+            )?;
+            return Ok(TaskRunBatchResponse {
+                status: "failed".to_string(),
+                completed: 0,
+                stopped_reason: Some(error.message.clone()),
+                results: vec![TaskRunStepResponse {
+                    status: "failed".to_string(),
+                    task_id: Some(task_id),
+                    message: error.message,
+                }],
+            });
+        }
+    };
+
+    let outcome = match execute_read_only_task(state, &execution_task) {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            mark_task_failed(state, &mut task, &error.message)?;
+            sync_session_for_task_run(
+                state,
+                &task,
+                SessionStatus::Failed,
+                1,
+                Some(error.message.clone()),
+            )?;
+            return Ok(TaskRunBatchResponse {
+                status: "failed".to_string(),
+                completed: 0,
+                stopped_reason: Some(error.message.clone()),
+                results: vec![TaskRunStepResponse {
+                    status: "failed".to_string(),
+                    task_id: Some(task_id),
+                    message: error.message,
+                }],
+            });
+        }
+    };
+
+    {
+        let store = lock_task_store(state)?;
+        store
+            .append_checkpoint(
+                &task.task_id,
+                &user,
+                &workspace,
+                outcome.checkpoint_payload.clone(),
+                outcome.checkpoint_redacted.clone(),
+            )
+            .map_err(GatewayError::task)?;
+    }
+    append_task_observation_to_session(state, &task, &outcome)?;
+    if outcome.completed {
+        mark_task_completed(state, &mut task)?;
+        sync_session_for_task_run(state, &task, SessionStatus::Completed, 3, None)?;
+    } else if let Some(approval) = outcome.pending_approval.as_ref() {
+        request_task_executor_approval(state, &mut task, approval)?;
+        sync_session_for_task_run(
+            state,
+            &task,
+            SessionStatus::WaitingUser,
+            2,
+            Some(approval.explanation.clone()),
+        )?;
+    } else {
+        let reason = outcome
+            .blocked_reason
+            .as_deref()
+            .unwrap_or("Il piano operativo non ha soddisfatto i criteri di successo.");
+        mark_task_waiting_external(state, &mut task, reason)?;
+        sync_session_for_task_run(
+            state,
+            &task,
+            SessionStatus::Paused,
+            2,
+            Some(reason.to_string()),
+        )?;
+    }
+    append_task_result_to_chat(state, &task_id, &outcome.chat_message)?;
+
+    Ok(TaskRunBatchResponse {
+        status: if outcome.completed {
+            "completed".to_string()
+        } else if outcome.pending_approval.is_some() {
+            "waiting_user_approval".to_string()
+        } else {
+            "blocked".to_string()
+        },
+        completed: u32::from(outcome.completed),
+        stopped_reason: outcome.blocked_reason.clone(),
+        results: vec![TaskRunStepResponse {
+            status: if outcome.completed {
+                "completed".to_string()
+            } else if outcome.pending_approval.is_some() {
+                "waiting_user_approval".to_string()
+            } else {
+                "blocked".to_string()
+            },
+            task_id: Some(task_id),
+            message: outcome.summary,
+        }],
+    })
+}
+
+fn start_task_executor_worker(state: AppState) {
+    if !task_executor_worker_enabled() {
+        return;
+    }
+    tokio::spawn(async move {
+        let mut interval =
+            tokio::time::interval(StdDuration::from_millis(TASK_EXECUTOR_POLL_INTERVAL_MS));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            update_task_executor_status(&state, |status| {
+                status.status = "polling".to_string();
+                status.last_tick_at = Some(OffsetDateTime::now_utc().to_string());
+                status.last_message = "Controllo coda task locale.".to_string();
+            });
+
+            let state_for_worker = state.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                run_next_task_once(&state_for_worker, TASK_EXECUTOR_WORKER_ID)
+            })
+            .await;
+
+            match result {
+                Ok(Ok(batch)) => record_task_executor_batch(&state, batch),
+                Ok(Err(error)) => {
+                    let message = error.message.clone();
+                    update_task_executor_status(&state, |status| {
+                        status.status = "failed".to_string();
+                        status.failure_count += 1;
+                        status.last_message = message.clone();
+                    });
+                    eprintln!("task executor worker error: {message}");
+                }
+                Err(error) => {
+                    let message = error.to_string();
+                    update_task_executor_status(&state, |status| {
+                        status.status = "failed".to_string();
+                        status.failure_count += 1;
+                        status.last_message = message.clone();
+                    });
+                    eprintln!("task executor worker join error: {message}");
+                }
+            }
+        }
+    });
+}
+
+fn record_task_executor_batch(state: &AppState, batch: TaskRunBatchResponse) {
+    update_task_executor_status(state, |status| {
+        status.last_task_id = batch
+            .results
+            .iter()
+            .find_map(|result| result.task_id.clone())
+            .or_else(|| status.last_task_id.clone());
+        status.last_message = batch
+            .stopped_reason
+            .clone()
+            .or_else(|| batch.results.first().map(|result| result.message.clone()))
+            .unwrap_or_else(|| "Coda task controllata.".to_string());
+        status.status = batch.status.clone();
+        status.completed_count += u64::from(batch.completed);
+        if batch.status == "failed" {
+            status.failure_count += 1;
+        }
+    });
+}
+
+fn task_executor_worker_enabled() -> bool {
+    env::var("LOCAL_FIRST_TASK_EXECUTOR_WORKER")
+        .map(|value| {
+            let normalized = value.trim().to_lowercase();
+            !matches!(normalized.as_str(), "0" | "false" | "off" | "disabled")
+        })
+        .unwrap_or(true)
+}
+
+fn update_task_executor_status(state: &AppState, update: impl FnOnce(&mut TaskExecutorStatus)) {
+    if let Ok(mut status) = state.task_executor_status.lock() {
+        update(&mut status);
+    }
+}
+
+fn task_executor_status_response(
+    state: &AppState,
+) -> Result<TaskExecutorStatusResponse, GatewayError> {
+    let status = lock_task_executor_status(state)?;
+    Ok(TaskExecutorStatusResponse {
+        enabled: status.enabled,
+        worker_id: status.worker_id.clone(),
+        poll_interval_ms: status.poll_interval_ms,
+        status: status.status.clone(),
+        last_tick_at: status.last_tick_at.clone(),
+        last_task_id: status.last_task_id.clone(),
+        last_message: status.last_message.clone(),
+        completed_count: status.completed_count,
+        failure_count: status.failure_count,
+    })
+}
+
+enum TaskAcquireResult {
+    Acquired(TaskRecord),
+    WaitingResource(String),
+    LeaseBusy,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn acquire_task_for_execution(
+    state: &AppState,
+    task: TaskRecord,
+    user: &UserId,
+    workspace: &WorkspaceId,
+    governor: &ResourceGovernor,
+    lease_manager: &LeaseManager,
+    worker_id: &str,
+    now: OffsetDateTime,
+) -> Result<TaskAcquireResult, GatewayError> {
+    let store = lock_task_store(state)?;
+    if governor
+        .mark_waiting_if_unavailable(&store, &task)
+        .map_err(GatewayError::task)?
+    {
+        let blocked_reason = store
+            .get_task(&task.task_id, user, workspace)
+            .map_err(GatewayError::task)?
+            .and_then(|task| task.blocked_reason)
+            .unwrap_or_else(|| "Risorse locali non disponibili.".to_string());
+        return Ok(TaskAcquireResult::WaitingResource(blocked_reason));
+    }
+    if !lease_manager
+        .acquire(&store, &task.task_id, user, workspace, worker_id, now)
+        .map_err(GatewayError::task)?
+    {
+        return Ok(TaskAcquireResult::LeaseBusy);
+    }
+    let leased = store
+        .get_task(&task.task_id, user, workspace)
+        .map_err(GatewayError::task)?
+        .ok_or_else(|| {
+            GatewayError::task(TaskRuntimeError::NotFound(
+                task.task_id.as_str().to_string(),
+            ))
+        })?;
+    governor
+        .reserve(&store, &leased, worker_id)
+        .map_err(GatewayError::task)?;
+    Ok(TaskAcquireResult::Acquired(leased))
+}
+
+fn mark_task_completed(state: &AppState, task: &mut TaskRecord) -> Result<(), GatewayError> {
+    task.status = TaskStatus::Completed;
+    task.blocked_reason = None;
+    task.lease_owner = None;
+    task.lease_expires_at = None;
+    task.last_heartbeat_at = None;
+    task.updated_at = OffsetDateTime::now_utc();
+    let store = lock_task_store(state)?;
+    store.release_resources(task).map_err(GatewayError::task)?;
+    store.insert_task(task).map_err(GatewayError::task)
+}
+
+fn mark_task_failed(
+    state: &AppState,
+    task: &mut TaskRecord,
+    reason: &str,
+) -> Result<(), GatewayError> {
+    task.status = TaskStatus::Failed;
+    task.blocked_reason = Some(reason.to_string());
+    task.lease_owner = None;
+    task.lease_expires_at = None;
+    task.last_heartbeat_at = None;
+    task.updated_at = OffsetDateTime::now_utc();
+    let store = lock_task_store(state)?;
+    store.release_resources(task).map_err(GatewayError::task)?;
+    store.insert_task(task).map_err(GatewayError::task)
+}
+
+fn mark_task_waiting_external(
+    state: &AppState,
+    task: &mut TaskRecord,
+    reason: &str,
+) -> Result<(), GatewayError> {
+    task.status = TaskStatus::WaitingExternalEvent;
+    task.blocked_reason = Some(reason.to_string());
+    task.lease_owner = None;
+    task.lease_expires_at = None;
+    task.last_heartbeat_at = None;
+    task.updated_at = OffsetDateTime::now_utc();
+    let store = lock_task_store(state)?;
+    store.release_resources(task).map_err(GatewayError::task)?;
+    store.insert_task(task).map_err(GatewayError::task)
+}
+
+fn request_task_executor_approval(
+    state: &AppState,
+    task: &mut TaskRecord,
+    approval: &PendingExecutorApproval,
+) -> Result<ApprovalRequest, GatewayError> {
+    let store = lock_task_store(state)?;
+    let approval_request = ApprovalGate::new()
+        .request_approval(
+            &store,
+            &task.task_id,
+            &task.user_id,
+            &task.workspace_id,
+            &approval.action,
+            &approval.risk_level,
+            &approval.data_boundary,
+            &approval.explanation,
+        )
+        .map_err(GatewayError::task)?;
+    task.status = TaskStatus::WaitingUserApproval;
+    task.blocked_reason = Some(format!("approval required: {}", approval.action));
+    task.lease_owner = None;
+    task.lease_expires_at = None;
+    task.last_heartbeat_at = None;
+    task.updated_at = OffsetDateTime::now_utc();
+    store.release_resources(task).map_err(GatewayError::task)?;
+    store.insert_task(task).map_err(GatewayError::task)?;
+    Ok(approval_request)
+}
+
+fn sync_session_for_task_run(
+    state: &AppState,
+    task: &TaskRecord,
+    status: SessionStatus,
+    progress_current: u32,
+    last_error: Option<String>,
+) -> Result<(), GatewayError> {
+    let thread = {
+        let chat_store = lock_store(state)?;
+        chat_store
+            .thread_by_task_id(task.task_id.as_str())
+            .map_err(GatewayError::store)?
+    };
+    let Some(thread) = thread else {
+        return Ok(());
+    };
+    let user = gateway_user_id();
+    let workspace = gateway_workspace_id();
+    let mut store = lock_computer_store(state)?;
+    let Some(mut session) = store
+        .session(
+            &thread.computer_session_id,
+            user.as_str(),
+            workspace.as_str(),
+        )
+        .map_err(GatewayError::local_computer)?
+    else {
+        return Ok(());
+    };
+
+    session.status = status;
+    session.progress_current = progress_current.min(session.progress_total);
+    session.approval_state = match status {
+        SessionStatus::Running | SessionStatus::Completed => ApprovalState::Approved,
+        SessionStatus::WaitingUser => ApprovalState::WaitingUser,
+        _ => session.approval_state,
+    };
+    session.last_error = last_error.clone();
+    session.updated_at = OffsetDateTime::now_utc();
+    store
+        .upsert_session(&session)
+        .map_err(GatewayError::local_computer)?;
+
+    match status {
+        SessionStatus::Running => append_computer_event(
+            &mut store,
+            &thread.computer_session_id,
+            &user,
+            &workspace,
+            surface_for_task(task),
+            "computer_task_running",
+            "running",
+            "Esecuzione locale avviata",
+            "Il task approvato e' in esecuzione read-only.",
+            false,
+        )?,
+        SessionStatus::Completed => append_computer_event(
+            &mut store,
+            &thread.computer_session_id,
+            &user,
+            &workspace,
+            surface_for_task(task),
+            "computer_task_completed",
+            "done",
+            "Task completato",
+            "Risultato sintetico disponibile in chat.",
+            false,
+        )?,
+        SessionStatus::Failed => append_computer_event_with_payload(
+            &mut store,
+            &thread.computer_session_id,
+            &user,
+            &workspace,
+            surface_for_task(task),
+            "computer_task_failed",
+            "failed",
+            "Task non completato",
+            last_error.as_deref().unwrap_or("Errore locale redatto."),
+            serde_json::json!({ "error": last_error.clone().unwrap_or_else(|| "Errore locale redatto.".to_string()) }),
+            false,
+            vec![],
+        )?,
+        SessionStatus::WaitingUser => append_computer_event_with_payload(
+            &mut store,
+            &thread.computer_session_id,
+            &user,
+            &workspace,
+            surface_for_task(task),
+            "computer_task_waiting_approval",
+            "waiting_user",
+            "Approval richiesta",
+            last_error
+                .as_deref()
+                .unwrap_or("Serve una conferma per continuare."),
+            serde_json::json!({
+                "approval_required": true,
+                "reason": last_error.clone().unwrap_or_else(|| "Serve una conferma per continuare.".to_string()),
+            }),
+            true,
+            vec![],
+        )?,
+        _ => {}
+    }
+    Ok(())
+}
+
+fn append_task_result_to_chat(
+    state: &AppState,
+    task_id: &str,
+    message_text: &str,
+) -> Result<(), GatewayError> {
+    let thread = {
+        let chat_store = lock_store(state)?;
+        chat_store
+            .thread_by_task_id(task_id)
+            .map_err(GatewayError::store)?
+    };
+    let Some(thread) = thread else {
+        return Ok(());
+    };
+    let now = OffsetDateTime::now_utc();
+    let message = local_first_desktop_gateway::ChatMessage {
+        id: format!("assistant_task_{}_{}", task_id, now.unix_timestamp_nanos()),
+        role: "assistant".to_string(),
+        text: message_text.to_string(),
+        timestamp: now.unix_timestamp().to_string(),
+        metadata: Some("Executor locale".to_string()),
+        metrics: None,
+        feedback: None,
+        saved_memory_ref: None,
+        linked_task_id: Some(task_id.to_string()),
+        linked_automation_ref: None,
+        attachments: Vec::new(),
+    };
+    lock_store(state)?
+        .append_assistant_message(&thread.thread_id, &message)
+        .map_err(GatewayError::store)?;
+    Ok(())
+}
+
+fn append_task_observation_to_session(
+    state: &AppState,
+    task: &TaskRecord,
+    outcome: &TaskExecutionOutcome,
+) -> Result<(), GatewayError> {
+    let thread = {
+        let chat_store = lock_store(state)?;
+        chat_store
+            .thread_by_task_id(task.task_id.as_str())
+            .map_err(GatewayError::store)?
+    };
+    let Some(thread) = thread else {
+        return Ok(());
+    };
+    let user = gateway_user_id();
+    let workspace = gateway_workspace_id();
+    let mut store = lock_computer_store(state)?;
+    for artifact in &outcome.artifacts {
+        store
+            .upsert_artifact(&ArtifactRecord {
+                artifact_id: artifact.artifact_id.clone(),
+                session_id: thread.computer_session_id.clone(),
+                user_id: user.as_str().to_string(),
+                workspace_id: workspace.as_str().to_string(),
+                title: artifact.title.clone(),
+                kind: artifact.kind.clone(),
+                path_ref: artifact.path_ref.clone(),
+                size_bytes: artifact.size_bytes,
+                preview_ref: artifact.preview_ref.clone(),
+                created_at: OffsetDateTime::now_utc(),
+            })
+            .map_err(GatewayError::local_computer)?;
+    }
+    let artifact_refs = outcome
+        .artifacts
+        .iter()
+        .map(|artifact| artifact.artifact_id.clone())
+        .collect::<Vec<_>>();
+    append_computer_event_with_payload(
+        &mut store,
+        &thread.computer_session_id,
+        &user,
+        &workspace,
+        outcome.surface,
+        &outcome.event_kind,
+        "done",
+        &outcome.event_title,
+        &outcome.event_subtitle,
+        outcome.event_payload.clone(),
+        false,
+        artifact_refs,
+    )
+}
+
+fn append_task_progress_checkpoint(
+    state: &AppState,
+    task: &TaskRecord,
+    phase: &str,
+    surface: SurfaceKind,
+    title: &str,
+    subtitle: &str,
+    payload: Value,
+) -> Result<(), GatewayError> {
+    {
+        let store = lock_task_store(state)?;
+        store
+            .append_checkpoint(
+                &task.task_id,
+                &task.user_id,
+                &task.workspace_id,
+                payload.clone(),
+                payload.clone(),
+            )
+            .map_err(GatewayError::task)?;
+    }
+    append_task_progress_event(state, task, phase, surface, title, subtitle, payload)
+}
+
+fn append_operational_plan_progress(
+    state: &AppState,
+    task: &TaskRecord,
+    plan: &OperationalPlan,
+    phase: &str,
+    title: &str,
+    subtitle: &str,
+) -> Result<(), GatewayError> {
+    append_task_progress_checkpoint(
+        state,
+        task,
+        phase,
+        SurfaceKind::Logs,
+        title,
+        subtitle,
+        serde_json::json!({
+            "kind": phase,
+            "operational_plan": operational_plan_payload(plan),
+            "operational_plan_markdown": operational_plan_markdown(plan),
+        }),
+    )
+}
+
+fn append_task_progress_event(
+    state: &AppState,
+    task: &TaskRecord,
+    phase: &str,
+    surface: SurfaceKind,
+    title: &str,
+    subtitle: &str,
+    payload: Value,
+) -> Result<(), GatewayError> {
+    let thread = {
+        let chat_store = lock_store(state)?;
+        chat_store
+            .thread_by_task_id(task.task_id.as_str())
+            .map_err(GatewayError::store)?
+    };
+    let Some(thread) = thread else {
+        return Ok(());
+    };
+    let mut store = lock_computer_store(state)?;
+    append_computer_event_with_payload(
+        &mut store,
+        &thread.computer_session_id,
+        &task.user_id,
+        &task.workspace_id,
+        surface,
+        phase,
+        "running",
+        title,
+        subtitle,
+        payload,
+        false,
+        vec![],
+    )
+}
+
+#[derive(Debug)]
+struct LocalTaskExecutionError {
+    message: String,
+}
+
+fn local_task_gateway_error(error: GatewayError) -> LocalTaskExecutionError {
+    LocalTaskExecutionError {
+        message: error.message,
+    }
+}
+
+fn task_with_dependency_outputs(
+    state: &AppState,
+    task: &TaskRecord,
+) -> Result<TaskRecord, LocalTaskExecutionError> {
+    let store = lock_task_store(state).map_err(local_task_gateway_error)?;
+    let dependency_outputs = store
+        .dependency_outputs_for(&task.task_id, &task.user_id, &task.workspace_id)
+        .map_err(GatewayError::task)
+        .map_err(local_task_gateway_error)?;
+    if dependency_outputs.is_empty() {
+        return Ok(task.clone());
+    }
+
+    let outputs = dependency_outputs
+        .into_iter()
+        .map(|dependency| {
+            serde_json::json!({
+                "task_id": dependency.task_id.as_str(),
+                "output": dependency.output,
+                "redacted_output": dependency.redacted_output,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let mut enriched = task.clone();
+    let mut input = enriched.input_json.as_object().cloned().unwrap_or_default();
+    input.insert("previous_step_outputs".to_string(), Value::Array(outputs));
+    enriched.input_json = Value::Object(input);
+    Ok(enriched)
+}
+
+fn execute_read_only_task(
+    state: &AppState,
+    task: &TaskRecord,
+) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
+    match state
+        .task_executor_registry
+        .resolve(task.kind.as_str())
+        .unwrap_or(GatewayTaskExecutorKind::LegacyLocal)
+    {
+        GatewayTaskExecutorKind::CapabilityBrowser => execute_capability_browser_task(state, task),
+        GatewayTaskExecutorKind::CapabilityGeneric => execute_unwired_registered_task(
+            task,
+            "capability-task-executor",
+            "Executor capability generico non ancora collegato al gateway.",
+        ),
+        GatewayTaskExecutorKind::Subagent => execute_subagent_task(state, task),
+        GatewayTaskExecutorKind::LegacyShell => execute_shell_read_only_task(task),
+        GatewayTaskExecutorKind::LegacyBrowser => execute_browser_read_only_task(state, task),
+        GatewayTaskExecutorKind::LegacyLocal => execute_local_read_only_task(task),
+    }
+}
+
+fn execute_capability_browser_task(
+    state: &AppState,
+    task: &TaskRecord,
+) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
+    let payload: CapabilityTaskPayload =
+        serde_json::from_value(task.input_json.clone()).map_err(|error| {
+            LocalTaskExecutionError {
+                message: format!("Payload capability browser non valido: {error}"),
+            }
+        })?;
+    let method = browser_method_for_capability_tool(&payload.call.tool_name).ok_or_else(|| {
+        LocalTaskExecutionError {
+            message: format!("Tool browser non supportato: {}", payload.call.tool_name),
+        }
+    })?;
+
+    append_task_progress_checkpoint(
+        state,
+        task,
+        "capability_browser_executor_started",
+        SurfaceKind::Browser,
+        "Executor browser",
+        &format!(
+            "Eseguo capability `{}` tramite BrowserTaskExecutor.",
+            payload.call.tool_name
+        ),
+        serde_json::json!({
+            "kind": "capability_browser_executor_started",
+            "tool": payload.call.tool_name,
+            "provider": payload.call.provider_id.as_str(),
+        }),
+    )
+    .map_err(local_task_gateway_error)?;
+
+    let result =
+        execute_persistent_browser_capability(state, task, method, payload.call.arguments)?;
+
+    task_execution_outcome_from_executor_result(
+        task,
+        "browser-capability-executor",
+        &payload.call.tool_name,
+        result,
+    )
+}
+
+fn execute_persistent_browser_capability(
+    state: &AppState,
+    task: &TaskRecord,
+    method: BrowserMethod,
+    params: Value,
+) -> Result<ExecutorResult, LocalTaskExecutionError> {
+    let mut client_guard =
+        state
+            .browser_capability_client
+            .lock()
+            .map_err(|error| LocalTaskExecutionError {
+                message: format!("Browser capability lock fallita: {error}"),
+            })?;
+    if client_guard.is_none() {
+        *client_guard = Some(BrowserAutomationClient::new(
+            spawn_browser_sidecar_for_task(state, task)?,
+        ));
+    }
+    let client = client_guard
+        .as_ref()
+        .ok_or_else(|| LocalTaskExecutionError {
+            message: "Browser capability non inizializzato.".to_string(),
+        })?;
+    let response = client
+        .call_response(method, params.clone())
+        .map_err(|error| LocalTaskExecutionError {
+            message: format!("Browser capability fallita: {error}"),
+        })?;
+    match response {
+        BrowserResponse::Success {
+            ok: true, result, ..
+        } if method == BrowserMethod::Snapshot => Ok(ExecutorResult::Checkpoint {
+            payload: result.clone(),
+            redacted_payload: browser_capability_redacted_checkpoint(method, &params, result),
+        }),
+        BrowserResponse::Success {
+            ok: true, result, ..
+        } => Ok(ExecutorResult::Completed { output: result }),
+        BrowserResponse::Success { .. } => Ok(ExecutorResult::RetryableFailure {
+            reason: "browser returned invalid success envelope".to_string(),
+        }),
+        BrowserResponse::Error { error, .. } if error.manual_action_required => {
+            Ok(ExecutorResult::NeedsApproval {
+                action: "browser.manual_action".to_string(),
+                risk_level: "medium".to_string(),
+                data_boundary: "local_browser".to_string(),
+                explanation: error.message,
+            })
+        }
+        BrowserResponse::Error { error, .. } => Ok(ExecutorResult::RetryableFailure {
+            reason: format!("{}:{}", error.code, error.message),
+        }),
+    }
+}
+
+fn browser_capability_redacted_checkpoint(
+    method: BrowserMethod,
+    params: &Value,
+    result: Value,
+) -> Value {
+    let method_name = serde_json::to_value(method).unwrap_or(Value::Null);
+    let target_id = params.get("target_id").cloned().unwrap_or(Value::Null);
+    let mut browser = serde_json::json!({
+        "method": method_name,
+        "target_id": target_id,
+    });
+    if let Some(url) = result.get("url") {
+        browser["url"] = url.clone();
+    }
+    if let Some(snapshot) = result.get("snapshot").and_then(Value::as_str) {
+        browser["snapshot_excerpt"] =
+            Value::String(redact_sensitive_text(&truncate_chars(snapshot, 2_000)));
+    }
+    browser
+}
+
+/// Runs a `subagent.*` task through the real `SubagentTaskExecutor` (trait-based)
+/// and bridges its `ExecutorResult` into the gateway's `TaskExecutionOutcome`
+/// (ADR 0008 pillar #3 / GAP 4: de-stub the registered executors). The runner
+/// only needs the local LLM runtime.
+fn execute_subagent_task(
+    state: &AppState,
+    task: &TaskRecord,
+) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
+    ensure_runtime_available_for_task(state)?;
+    let mut executor =
+        SubagentTaskExecutor::new(RuntimeClient::new(state.gemma_runtime_url.to_string()));
+    let executor_id = executor.executor_id().to_string();
+    let result = executor.execute_step(task, None).map_err(|error| LocalTaskExecutionError {
+        message: format!("subagent executor failed: {error}"),
+    })?;
+    // Reuse the existing ExecutorResult -> TaskExecutionOutcome bridge (the same
+    // one the browser capability path uses).
+    task_execution_outcome_from_executor_result(task, &executor_id, "subagent", result)
+}
+
+fn execute_unwired_registered_task(
+    task: &TaskRecord,
+    executor_id: &str,
+    reason: &str,
+) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
+    Ok(TaskExecutionOutcome {
+        completed: false,
+        blocked_reason: Some(reason.to_string()),
+        pending_approval: None,
+        summary: reason.to_string(),
+        checkpoint_payload: serde_json::json!({
+            "kind": "executor_unwired",
+            "executor_id": executor_id,
+            "task_kind": task.kind,
+            "output": {
+                "blocked_reason": reason,
+            },
+        }),
+        checkpoint_redacted: serde_json::json!({
+            "kind": "executor_unwired",
+            "executor_id": executor_id,
+            "task_kind": task.kind,
+            "output": {
+                "blocked_reason": reason,
+            },
+        }),
+        chat_message: format!(
+            "Il piano operativo ha creato un task `{}`, ma {reason}",
+            task.kind
+        ),
+        surface: SurfaceKind::Logs,
+        event_kind: "computer_executor_unwired".to_string(),
+        event_title: "Executor non collegato".to_string(),
+        event_subtitle: reason.to_string(),
+        event_payload: serde_json::json!({
+            "executor_id": executor_id,
+            "task_kind": task.kind,
+        }),
+        artifacts: vec![],
+    })
+}
+
+fn task_execution_outcome_from_executor_result(
+    task: &TaskRecord,
+    executor_id: &str,
+    tool_name: &str,
+    result: ExecutorResult,
+) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
+    match result {
+        ExecutorResult::Completed { output } => Ok(completed_executor_outcome(
+            task,
+            executor_id,
+            tool_name,
+            output,
+        )),
+        ExecutorResult::Checkpoint {
+            payload,
+            redacted_payload,
+        } => {
+            let output = payload.clone();
+            let mut outcome = completed_executor_outcome(task, executor_id, tool_name, output);
+            outcome.checkpoint_payload = serde_json::json!({
+                "kind": "executor_completed",
+                "executor_id": executor_id,
+                "tool": tool_name,
+                "output": payload,
+            });
+            outcome.checkpoint_redacted = serde_json::json!({
+                "kind": "executor_completed",
+                "executor_id": executor_id,
+                "tool": tool_name,
+                "output": redacted_payload,
+            });
+            Ok(outcome)
+        }
+        ExecutorResult::NeedsApproval {
+            action,
+            risk_level,
+            data_boundary,
+            explanation,
+        } => Ok(TaskExecutionOutcome {
+            completed: false,
+            blocked_reason: Some(explanation.clone()),
+            pending_approval: Some(PendingExecutorApproval {
+                action: action.clone(),
+                risk_level: risk_level.clone(),
+                data_boundary: data_boundary.clone(),
+                explanation: explanation.clone(),
+            }),
+            summary: "Task in attesa di approval.".to_string(),
+            checkpoint_payload: serde_json::json!({
+                "kind": "executor_needs_approval",
+                "executor_id": executor_id,
+                "tool": tool_name,
+                "approval": {
+                    "action": action,
+                    "risk_level": risk_level,
+                    "data_boundary": data_boundary,
+                    "explanation": explanation,
+                },
+            }),
+            checkpoint_redacted: serde_json::json!({
+                "kind": "executor_needs_approval",
+                "executor_id": executor_id,
+                "tool": tool_name,
+                "approval": {
+                    "action": action,
+                    "risk_level": risk_level,
+                    "data_boundary": data_boundary,
+                    "explanation": explanation,
+                },
+            }),
+            chat_message: format!(
+                "Il task `{}` richiede una nuova approval prima di continuare: {}",
+                task.kind, explanation
+            ),
+            surface: SurfaceKind::Logs,
+            event_kind: "computer_executor_waiting_approval".to_string(),
+            event_title: "Approval richiesta".to_string(),
+            event_subtitle: explanation,
+            event_payload: serde_json::json!({
+                "executor_id": executor_id,
+                "tool": tool_name,
+            }),
+            artifacts: vec![],
+        }),
+        ExecutorResult::WaitUntil { reason, .. } | ExecutorResult::RetryableFailure { reason } => {
+            Ok(TaskExecutionOutcome {
+                completed: false,
+                blocked_reason: Some(reason.clone()),
+                pending_approval: None,
+                summary: reason.clone(),
+                checkpoint_payload: serde_json::json!({
+                    "kind": "executor_blocked",
+                    "executor_id": executor_id,
+                    "tool": tool_name,
+                    "output": {
+                        "blocked_reason": reason,
+                    },
+                }),
+                checkpoint_redacted: serde_json::json!({
+                    "kind": "executor_blocked",
+                    "executor_id": executor_id,
+                    "tool": tool_name,
+                    "output": {
+                        "blocked_reason": reason,
+                    },
+                }),
+                chat_message: format!("Il task `{}` e' bloccato: {}", task.kind, reason),
+                surface: SurfaceKind::Logs,
+                event_kind: "computer_executor_blocked".to_string(),
+                event_title: "Task bloccato".to_string(),
+                event_subtitle: reason,
+                event_payload: serde_json::json!({
+                    "executor_id": executor_id,
+                    "tool": tool_name,
+                }),
+                artifacts: vec![],
+            })
+        }
+    }
+}
+
+fn completed_executor_outcome(
+    task: &TaskRecord,
+    executor_id: &str,
+    tool_name: &str,
+    output: Value,
+) -> TaskExecutionOutcome {
+    TaskExecutionOutcome {
+        completed: true,
+        blocked_reason: None,
+        pending_approval: None,
+        summary: format!("Executor `{executor_id}` completato."),
+        checkpoint_payload: serde_json::json!({
+            "kind": "executor_completed",
+            "executor_id": executor_id,
+            "tool": tool_name,
+            "output": output,
+        }),
+        checkpoint_redacted: serde_json::json!({
+            "kind": "executor_completed",
+            "executor_id": executor_id,
+            "tool": tool_name,
+            "output": redact_json_for_task_output(&output),
+        }),
+        chat_message: format!("Task `{}` completato tramite `{tool_name}`.", task.kind),
+        surface: SurfaceKind::Browser,
+        event_kind: "computer_executor_completed".to_string(),
+        event_title: "Executor completato".to_string(),
+        event_subtitle: format!("{} ha prodotto output strutturato.", tool_name),
+        event_payload: serde_json::json!({
+            "executor_id": executor_id,
+            "tool": tool_name,
+        }),
+        artifacts: vec![],
+    }
+}
+
+fn spawn_browser_sidecar_for_task(
+    state: &AppState,
+    task: &TaskRecord,
+) -> Result<BrowserSidecarSession, LocalTaskExecutionError> {
+    let browser_dir = browser_automation_dir();
+    if !browser_dir.exists() {
+        return Err(LocalTaskExecutionError {
+            message: format!("Runtime browser non trovato: {}", browser_dir.display()),
+        });
+    }
+    let artifact_root = env::temp_dir().join("local-first-browser-artifacts");
+    BrowserSidecarSession::spawn_with_options(
+        "npm",
+        &["run", "start", "--silent"],
+        BrowserSidecarSpawnOptions {
+            current_dir: Some(browser_dir),
+            env: vec![
+                (
+                    "BROWSER_AUTOMATION_HEADLESS".to_string(),
+                    browser_headless_env_value_for_task(state, task),
+                ),
+                (
+                    "BROWSER_AUTOMATION_ARTIFACT_ROOT".to_string(),
+                    artifact_root.display().to_string(),
+                ),
+            ],
+        },
+    )
+    .map_err(|error| LocalTaskExecutionError {
+        message: format!("Browser sidecar non avviato: {error}"),
+    })
+}
+
+fn browser_method_for_capability_tool(tool_name: &str) -> Option<BrowserMethod> {
+    match tool_name {
+        "browser.health" => Some(BrowserMethod::Health),
+        "browser.profiles" => Some(BrowserMethod::Profiles),
+        "browser.tabs" => Some(BrowserMethod::Tabs),
+        "browser.snapshot" => Some(BrowserMethod::Snapshot),
+        "browser.console" => Some(BrowserMethod::Console),
+        "browser.open" => Some(BrowserMethod::Open),
+        "browser.focus" => Some(BrowserMethod::Focus),
+        "browser.close_tab" => Some(BrowserMethod::CloseTab),
+        "browser.navigate" => Some(BrowserMethod::Navigate),
+        "browser.screenshot" => Some(BrowserMethod::Screenshot),
+        "browser.pdf" => Some(BrowserMethod::Pdf),
+        "browser.act" => Some(BrowserMethod::Act),
+        "browser.arm_file_chooser" => Some(BrowserMethod::ArmFileChooser),
+        "browser.respond_dialog" => Some(BrowserMethod::RespondDialog),
+        "browser.wait_download" => Some(BrowserMethod::WaitDownload),
+        _ => None,
+    }
+}
+
+fn redact_json_for_task_output(output: &Value) -> Value {
+    match output {
+        Value::String(text) => Value::String(redact_sensitive_text(&truncate_chars(text, 2_000))),
+        Value::Array(values) => Value::Array(
+            values
+                .iter()
+                .take(100)
+                .map(redact_json_for_task_output)
+                .collect(),
+        ),
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(key, value)| (key.clone(), redact_json_for_task_output(value)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+fn execute_local_read_only_task(
+    task: &TaskRecord,
+) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
+    if let Some(answer) = evaluate_simple_arithmetic(&task.goal) {
+        return Ok(TaskExecutionOutcome {
+            completed: true,
+            blocked_reason: None,
+            pending_approval: None,
+            summary: format!("Calcolo completato: {answer}"),
+            checkpoint_payload: serde_json::json!({ "kind": "calculation", "answer": answer }),
+            checkpoint_redacted: serde_json::json!({ "kind": "calculation", "answer": answer }),
+            chat_message: format!("Il risultato e' **{answer}**."),
+            surface: SurfaceKind::Logs,
+            event_kind: "computer_calculation_completed".to_string(),
+            event_title: "Calcolo locale completato".to_string(),
+            event_subtitle: "Risultato calcolato senza strumenti esterni.".to_string(),
+            event_payload: serde_json::json!({ "answer": answer }),
+            artifacts: vec![],
+        });
+    }
+    Ok(TaskExecutionOutcome {
+        completed: true,
+        blocked_reason: None,
+        pending_approval: None,
+        summary: "Task locale letto e completato senza azioni esterne.".to_string(),
+        checkpoint_payload: serde_json::json!({ "kind": "local_read_only", "goal": task.goal }),
+        checkpoint_redacted: serde_json::json!({ "kind": "local_read_only", "goal": task.goal }),
+        chat_message: "Ho registrato il task locale. Non servivano azioni esterne per questo primo passaggio read-only.".to_string(),
+        surface: SurfaceKind::Logs,
+        event_kind: "computer_local_task_completed".to_string(),
+        event_title: "Task locale completato".to_string(),
+        event_subtitle: "Nessuna azione esterna necessaria.".to_string(),
+        event_payload: serde_json::json!({ "goal": task.goal }),
+        artifacts: vec![],
+    })
+}
+
+fn execute_shell_read_only_task(
+    task: &TaskRecord,
+) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
+    let normalized = task.goal.to_lowercase();
+    let output = if normalized.contains("ora")
+        || normalized.contains("orario")
+        || normalized.contains("date")
+        || normalized.contains("tempo")
+    {
+        run_read_only_command("date", &["+%Y-%m-%d %H:%M:%S %Z"])
+    } else {
+        Err(LocalTaskExecutionError {
+            message: "Il task shell non contiene un comando read-only consentito.".to_string(),
+        })
+    }?;
+    Ok(TaskExecutionOutcome {
+        completed: true,
+        blocked_reason: None,
+        pending_approval: None,
+        summary: "Comando shell read-only completato.".to_string(),
+        checkpoint_payload: serde_json::json!({ "kind": "shell_read_only", "command": "date", "output": output }),
+        checkpoint_redacted: serde_json::json!({ "kind": "shell_read_only", "command": "date", "output": output }),
+        chat_message: format!(
+            "Ho eseguito un controllo locale read-only:\n\n```text\n{}\n```",
+            output.trim()
+        ),
+        surface: SurfaceKind::Shell,
+        event_kind: "computer_terminal_output".to_string(),
+        event_title: "Output terminale".to_string(),
+        event_subtitle: "Comando read-only completato.".to_string(),
+        event_payload: serde_json::json!({ "command": "date", "output": output }),
+        artifacts: vec![],
+    })
+}
+
+fn run_read_only_command(command: &str, args: &[&str]) -> Result<String, LocalTaskExecutionError> {
+    let output =
+        Command::new(command)
+            .args(args)
+            .output()
+            .map_err(|error| LocalTaskExecutionError {
+                message: format!("Comando read-only non avviato: {error}"),
+            })?;
+    if !output.status.success() {
+        return Err(LocalTaskExecutionError {
+            message: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn execute_browser_read_only_task(
+    state: &AppState,
+    task: &TaskRecord,
+) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
+    if browser_loop_controller_enabled() {
+        return execute_browser_loop_read_only_task(state, task);
+    }
+
+    let mut operational_plan = task
+        .input_json
+        .get("operational_plan")
+        .and_then(|value| serde_json::from_value::<OperationalPlan>(value.clone()).ok())
+        .unwrap_or_else(|| operational_plan_for_goal(&task_effective_goal(task), &task.kind));
+    operational_plan.start_step("understand_request");
+    operational_plan.complete_step("understand_request");
+    append_operational_plan_progress(
+        state,
+        task,
+        &operational_plan,
+        "operational_plan_started",
+        "Piano operativo",
+        "Eseguo il task seguendo step e criteri di successo.",
+    )
+    .map_err(local_task_gateway_error)?;
+    let browser_dir = browser_automation_dir();
+    if !browser_dir.exists() {
+        return Err(LocalTaskExecutionError {
+            message: format!("Runtime browser non trovato: {}", browser_dir.display()),
+        });
+    }
+    append_task_progress_checkpoint(
+        state,
+        task,
+        "browser_runtime_starting",
+        SurfaceKind::Browser,
+        "Browser locale",
+        "Avvio browser controllato locale.",
+        serde_json::json!({ "kind": "browser_runtime_starting" }),
+    )
+    .map_err(local_task_gateway_error)?;
+    let artifact_root = env::temp_dir().join("local-first-browser-artifacts");
+    let session = BrowserSidecarSession::spawn_with_options(
+        "npm",
+        &["run", "start", "--silent"],
+        BrowserSidecarSpawnOptions {
+            current_dir: Some(browser_dir),
+            env: vec![
+                (
+                    "BROWSER_AUTOMATION_HEADLESS".to_string(),
+                    browser_headless_env_value_for_task(state, task),
+                ),
+                (
+                    "BROWSER_AUTOMATION_ARTIFACT_ROOT".to_string(),
+                    artifact_root.display().to_string(),
+                ),
+            ],
+        },
+    )
+    .map_err(|error| LocalTaskExecutionError {
+        message: format!("Browser sidecar non avviato: {error}"),
+    })?;
+    append_task_progress_checkpoint(
+        state,
+        task,
+        "browser_runtime_ready",
+        SurfaceKind::Browser,
+        "Browser pronto",
+        "Runtime browser locale avviato.",
+        serde_json::json!({ "kind": "browser_runtime_ready" }),
+    )
+    .map_err(local_task_gateway_error)?;
+    let client = BrowserAutomationClient::new(session);
+    let effective_goal = task_effective_goal(task);
+    let targets = browser_targets_for_goal(&effective_goal);
+    let train_draft = train_search_draft_for_goal(&effective_goal);
+    operational_plan.start_step("open_sources");
+    let mut source_snapshots = Vec::new();
+    let mut source_summaries = Vec::new();
+    let mut form_drafts = Vec::new();
+    let mut first_opened_label = None;
+    let mut preferred_screenshot_label = None;
+    for (index, target) in targets.iter().enumerate() {
+        let label = format!("task_{index}");
+        let open_step_id = source_step_id(&target.label, "open");
+        let fill_step_id = source_step_id(&target.label, "fill");
+        let search_step_id = source_step_id(&target.label, "search");
+        let extract_step_id = source_step_id(&target.label, "extract");
+        operational_plan.start_step(&open_step_id);
+        append_operational_plan_progress(
+            state,
+            task,
+            &operational_plan,
+            "operational_plan_source_open_started",
+            &format!("Piano: apro {}", target.label),
+            "Avanzamento piano operativo salvato in markdown.",
+        )
+        .map_err(local_task_gateway_error)?;
+        append_task_progress_checkpoint(
+            state,
+            task,
+            "browser_source_started",
+            SurfaceKind::Browser,
+            &format!("Controllo {}", target.label),
+            "Apro la fonte in modalita' read-only.",
+            serde_json::json!({
+                "kind": "browser_source_started",
+                "label": target.label,
+                "url": target.url,
+            }),
+        )
+        .map_err(local_task_gateway_error)?;
+        let opened = match client.call(
+            BrowserMethod::Open,
+            serde_json::json!({ "url": target.url, "label": label }),
+        ) {
+            Ok(opened) => opened,
+            Err(error) => {
+                operational_plan.block_step(&open_step_id);
+                append_operational_plan_progress(
+                    state,
+                    task,
+                    &operational_plan,
+                    "operational_plan_source_open_blocked",
+                    &format!("Piano: {} non raggiungibile", target.label),
+                    "La fonte e' bloccata; continuo con le altre fonti previste.",
+                )
+                .map_err(local_task_gateway_error)?;
+                let redacted_error =
+                    redact_sensitive_text(&truncate_chars(&error.to_string(), 500));
+                source_snapshots.push(serde_json::json!({
+                    "label": target.label,
+                    "url": target.url,
+                    "status": "failed",
+                    "error": redacted_error,
+                }));
+                source_summaries.push(BrowserSourceSummary {
+                    label: target.label.clone(),
+                    url: target.url.clone(),
+                    status: "failed".to_string(),
+                    excerpt: None,
+                });
+                append_task_progress_checkpoint(
+                    state,
+                    task,
+                    "browser_source_failed",
+                    SurfaceKind::Browser,
+                    &format!("{} non raggiungibile", target.label),
+                    "La fonte e' stata saltata; continuo con le altre fonti disponibili.",
+                    serde_json::json!({
+                        "kind": "browser_source_failed",
+                        "label": target.label,
+                        "url": target.url,
+                        "error": redacted_error,
+                    }),
+                )
+                .map_err(local_task_gateway_error)?;
+                continue;
+            }
+        };
+        first_opened_label.get_or_insert_with(|| label.clone());
+        let mut snapshot = match client.call(
+            BrowserMethod::Snapshot,
+            serde_json::json!({ "target_id": label }),
+        ) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                operational_plan.block_step(&open_step_id);
+                append_operational_plan_progress(
+                    state,
+                    task,
+                    &operational_plan,
+                    "operational_plan_source_snapshot_blocked",
+                    &format!("Piano: snapshot {} non leggibile", target.label),
+                    "La fonte e' aperta ma non ha prodotto uno snapshot affidabile.",
+                )
+                .map_err(local_task_gateway_error)?;
+                let final_url = opened
+                    .get("url")
+                    .and_then(Value::as_str)
+                    .unwrap_or(target.url.as_str())
+                    .to_string();
+                let redacted_error =
+                    redact_sensitive_text(&truncate_chars(&error.to_string(), 500));
+                source_snapshots.push(serde_json::json!({
+                    "label": target.label,
+                    "url": final_url,
+                    "status": "failed",
+                    "error": redacted_error,
+                }));
+                source_summaries.push(BrowserSourceSummary {
+                    label: target.label.clone(),
+                    url: final_url.clone(),
+                    status: "failed".to_string(),
+                    excerpt: None,
+                });
+                append_task_progress_checkpoint(
+                    state,
+                    task,
+                    "browser_source_failed",
+                    SurfaceKind::Browser,
+                    &format!("Snapshot {} non disponibile", target.label),
+                    "La pagina e' stata aperta, ma lo snapshot non e' leggibile.",
+                    serde_json::json!({
+                        "kind": "browser_source_failed",
+                        "label": target.label,
+                        "url": final_url,
+                        "error": redacted_error,
+                    }),
+                )
+                .map_err(local_task_gateway_error)?;
+                continue;
+            }
+        };
+        if let Some((accept_ref, accept_name)) = privacy_accept_button_for_snapshot(&snapshot) {
+            append_task_progress_checkpoint(
+                state,
+                task,
+                "browser_privacy_banner_detected",
+                SurfaceKind::Browser,
+                &format!("{} banner privacy rilevato", target.label),
+                "Accetto solo il banner tecnico/consenso per rendere leggibile il form, senza login o acquisti.",
+                serde_json::json!({
+                    "kind": "browser_privacy_banner_detected",
+                    "label": target.label,
+                    "target_id": label,
+                    "button": accept_name,
+                }),
+            )
+            .map_err(local_task_gateway_error)?;
+            if let Ok(updated_snapshot) = client.call(
+                BrowserMethod::Act,
+                serde_json::json!({
+                    "target_id": label,
+                    "kind": "click",
+                    "ref": accept_ref,
+                    "snapshot_after": true,
+                }),
+            ) {
+                snapshot = updated_snapshot;
+            }
+        }
+        let mut final_url = snapshot
+            .get("url")
+            .and_then(Value::as_str)
+            .or_else(|| opened.get("url").and_then(Value::as_str))
+            .unwrap_or(target.url.as_str())
+            .to_string();
+        let mut snapshot_excerpt = snapshot
+            .get("snapshot")
+            .and_then(Value::as_str)
+            .map(|text| truncate_chars(text, 900))
+            .unwrap_or_else(|| "Snapshot non disponibile.".to_string());
+        operational_plan.complete_step(&open_step_id);
+        append_operational_plan_progress(
+            state,
+            task,
+            &operational_plan,
+            "operational_plan_source_open_completed",
+            &format!("Piano: {} aperto", target.label),
+            "URL e snapshot redatto disponibili.",
+        )
+        .map_err(local_task_gateway_error)?;
+        if let Some(draft) = train_draft
+            .as_ref()
+            .filter(|_| is_train_operator(&target.label))
+        {
+            operational_plan.start_step("fill_forms");
+            operational_plan.start_step(&fill_step_id);
+            append_operational_plan_progress(
+                state,
+                task,
+                &operational_plan,
+                "operational_plan_source_fill_started",
+                &format!("Piano: compilo {}", target.label),
+                "Cerco campi affidabili e salvo quali vengono compilati.",
+            )
+            .map_err(local_task_gateway_error)?;
+            append_task_progress_checkpoint(
+                state,
+                task,
+                "browser_form_draft_started",
+                SurfaceKind::Browser,
+                &format!("Compilo bozza {}", target.label),
+                "Inserisco partenza, arrivo, data e ora dove i campi sono riconoscibili. Non invio il form.",
+                serde_json::json!({
+                    "kind": "browser_form_draft_started",
+                    "label": target.label,
+                    "target_id": label,
+                    "draft": train_draft_redacted_payload(draft),
+                    "field_detection": browser_form_detection_summary(&snapshot, draft),
+                }),
+            )
+            .map_err(local_task_gateway_error)?;
+            let (draft_fields, draft_field_labels) =
+                browser_form_fields_for_snapshot(&snapshot, draft);
+            if draft_fields.is_empty() {
+                operational_plan.block_step(&fill_step_id);
+                operational_plan.block_step(&search_step_id);
+                operational_plan.block_step(&extract_step_id);
+                append_operational_plan_progress(
+                    state,
+                    task,
+                    &operational_plan,
+                    "operational_plan_source_fill_blocked",
+                    &format!("Piano: {} senza campi riconoscibili", target.label),
+                    "Non posso proseguire su questa fonte senza campi form affidabili.",
+                )
+                .map_err(local_task_gateway_error)?;
+                form_drafts.push(BrowserFormDraftSummary {
+                    label: target.label.clone(),
+                    url: final_url.clone(),
+                    status: "blocked".to_string(),
+                    filled_fields: Vec::new(),
+                    reason: Some(
+                        "Non ho trovato campi form riconoscibili nello snapshot corrente."
+                            .to_string(),
+                    ),
+                    search_status: None,
+                    search_excerpt: None,
+                });
+                append_task_progress_checkpoint(
+                    state,
+                    task,
+                    "browser_form_draft_blocked",
+                    SurfaceKind::Browser,
+                    &format!("{} non compilabile", target.label),
+                    "La pagina e' aperta, ma i campi non sono esposti in modo affidabile.",
+                    serde_json::json!({
+                        "kind": "browser_form_draft_blocked",
+                        "label": target.label,
+                        "target_id": label,
+                        "reason": "no_recognized_fields",
+                    }),
+                )
+                .map_err(local_task_gateway_error)?;
+            } else {
+                let station_selection = select_train_station_autocompletes(
+                    &client,
+                    &label,
+                    draft,
+                    &snapshot,
+                    &target.label,
+                );
+                let mut station_filled = Vec::new();
+                let mut station_failed = Vec::new();
+                let mut latest_form_snapshot = snapshot.clone();
+                match station_selection {
+                    Ok(selection) => {
+                        station_filled = selection.filled_fields;
+                        station_failed = selection.failed_fields;
+                        if let Some(snapshot) = selection.latest_snapshot {
+                            latest_form_snapshot = snapshot;
+                        }
+                    }
+                    Err(error) => {
+                        station_failed
+                            .push(redact_sensitive_text(&truncate_chars(&error.message, 180)));
+                    }
+                }
+                let route_fields_handled = !station_filled.is_empty();
+                let (latest_draft_fields, latest_draft_field_labels) =
+                    browser_form_fields_for_snapshot(&latest_form_snapshot, draft);
+                append_task_progress_checkpoint(
+                    state,
+                    task,
+                    "browser_form_fields_refreshed",
+                    SurfaceKind::Browser,
+                    &format!("{} campi rivalutati", target.label),
+                    "Dopo l'autocomplete delle stazioni ho acquisito uno snapshot fresco e rivalutato data, ora e controlli rimasti.",
+                    serde_json::json!({
+                        "kind": "browser_form_fields_refreshed",
+                        "label": target.label,
+                        "target_id": label,
+                        "route_fields_handled": route_fields_handled,
+                        "field_detection": browser_form_detection_summary(&latest_form_snapshot, draft),
+                    }),
+                )
+                .map_err(local_task_gateway_error)?;
+                let source_fields = if latest_draft_fields.is_empty() {
+                    &draft_fields
+                } else {
+                    &latest_draft_fields
+                };
+                let source_labels = if latest_draft_field_labels.is_empty() {
+                    &draft_field_labels
+                } else {
+                    &latest_draft_field_labels
+                };
+                let label_by_ref = source_fields
+                    .iter()
+                    .zip(source_labels.iter())
+                    .filter(|(_, field_label)| {
+                        !route_fields_handled
+                            || (!field_label.starts_with("partenza ")
+                                && !field_label.starts_with("arrivo "))
+                    })
+                    .filter_map(|(field, field_label)| {
+                        field
+                            .get("ref")
+                            .and_then(Value::as_str)
+                            .map(|ref_id| (ref_id.to_string(), field_label.clone()))
+                    })
+                    .collect::<HashMap<_, _>>();
+                let remaining_fields = source_fields
+                    .iter()
+                    .zip(source_labels.iter())
+                    .filter(|(_, field_label)| {
+                        !route_fields_handled
+                            || (!field_label.starts_with("partenza ")
+                                && !field_label.starts_with("arrivo "))
+                    })
+                    .map(|(field, _)| field.clone())
+                    .collect::<Vec<_>>();
+                let (mut filled_fields, mut failed_fields) = if remaining_fields.is_empty() {
+                    (Vec::new(), Vec::new())
+                } else {
+                    let batch_result = client.call(
+                        BrowserMethod::Act,
+                        serde_json::json!({
+                            "target_id": label,
+                            "kind": "fill_form",
+                            "fields": remaining_fields,
+                            "snapshot_after": true,
+                        }),
+                    );
+                    match batch_result {
+                        Ok(result) => browser_form_draft_result_labels(&result, &label_by_ref),
+                        Err(error) => (
+                            Vec::new(),
+                            vec![redact_sensitive_text(&truncate_chars(
+                                &error.to_string(),
+                                180,
+                            ))],
+                        ),
+                    }
+                };
+                filled_fields.splice(0..0, station_filled);
+                failed_fields.extend(station_failed);
+                if let Some(url) = latest_form_snapshot.get("url").and_then(Value::as_str) {
+                    final_url = url.to_string();
+                }
+                if let Some(excerpt) = latest_form_snapshot.get("snapshot").and_then(Value::as_str)
+                {
+                    snapshot_excerpt = truncate_chars(excerpt, 1_400);
+                }
+                if filled_fields.is_empty() {
+                    operational_plan.block_step(&fill_step_id);
+                    operational_plan.block_step(&search_step_id);
+                    operational_plan.block_step(&extract_step_id);
+                    append_operational_plan_progress(
+                        state,
+                        task,
+                        &operational_plan,
+                        "operational_plan_source_fill_failed",
+                        &format!("Piano: compilazione {} fallita", target.label),
+                        "I campi erano candidati ma l'azione browser non e' riuscita.",
+                    )
+                    .map_err(local_task_gateway_error)?;
+                    form_drafts.push(BrowserFormDraftSummary {
+                        label: target.label.clone(),
+                        url: final_url.clone(),
+                        status: "blocked".to_string(),
+                        filled_fields,
+                        reason: Some(format!(
+                            "I campi sono stati riconosciuti ma la compilazione e' fallita: {}",
+                            failed_fields.join("; ")
+                        )),
+                        search_status: None,
+                        search_excerpt: None,
+                    });
+                    append_task_progress_checkpoint(
+                        state,
+                        task,
+                        "browser_form_draft_blocked",
+                        SurfaceKind::Browser,
+                        &format!("{} non compilabile", target.label),
+                        "Ho trovato campi candidati, ma Playwright non e' riuscito a compilarli.",
+                        serde_json::json!({
+                            "kind": "browser_form_draft_blocked",
+                            "label": target.label,
+                            "target_id": label,
+                            "failed_fields": failed_fields,
+                        }),
+                    )
+                    .map_err(local_task_gateway_error)?;
+                } else {
+                    operational_plan.complete_step(&fill_step_id);
+                    operational_plan.complete_step("fill_forms");
+                    operational_plan.start_step("search_options");
+                    operational_plan.start_step(&search_step_id);
+                    append_operational_plan_progress(
+                        state,
+                        task,
+                        &operational_plan,
+                        "operational_plan_source_search_started",
+                        &format!("Piano: cerco risultati su {}", target.label),
+                        "Avvio solo ricerca risultati, senza selezione/acquisto.",
+                    )
+                    .map_err(local_task_gateway_error)?;
+                    preferred_screenshot_label.get_or_insert_with(|| label.clone());
+                    let status = if failed_fields.is_empty() {
+                        "completed"
+                    } else {
+                        "partial"
+                    };
+                    let search_result = attempt_train_options_search(
+                        state,
+                        task,
+                        &client,
+                        &label,
+                        &target.label,
+                        Some(draft),
+                    )?;
+                    if search_result.status == "completed" {
+                        operational_plan.complete_step(&search_step_id);
+                        operational_plan.complete_step("search_options");
+                        operational_plan.start_step(&extract_step_id);
+                        operational_plan.start_step("extract_options");
+                        if search_result
+                            .excerpt
+                            .as_deref()
+                            .map(train_option_lines)
+                            .unwrap_or_default()
+                            .is_empty()
+                        {
+                            operational_plan.block_step(&extract_step_id);
+                        } else {
+                            operational_plan.complete_step(&extract_step_id);
+                        }
+                    } else {
+                        operational_plan.block_step(&search_step_id);
+                        operational_plan.block_step(&extract_step_id);
+                        operational_plan.block_step("search_options");
+                    }
+                    append_operational_plan_progress(
+                        state,
+                        task,
+                        &operational_plan,
+                        "operational_plan_source_search_completed",
+                        &format!("Piano: risultati {} valutati", target.label),
+                        "Lo step fonte contiene ora esito ricerca ed estrazione.",
+                    )
+                    .map_err(local_task_gateway_error)?;
+                    if let Some(result_snapshot) = search_result.snapshot.as_ref() {
+                        if let Some(url) = result_snapshot.get("url").and_then(Value::as_str) {
+                            final_url = url.to_string();
+                        }
+                        if let Some(excerpt) =
+                            result_snapshot.get("snapshot").and_then(Value::as_str)
+                        {
+                            snapshot_excerpt = truncate_chars(excerpt, 1_400);
+                        }
+                    }
+                    form_drafts.push(BrowserFormDraftSummary {
+                        label: target.label.clone(),
+                        url: final_url.clone(),
+                        status: status.to_string(),
+                        filled_fields: filled_fields.clone(),
+                        reason: if failed_fields.is_empty() {
+                            None
+                        } else {
+                            Some(format!(
+                                "Alcuni campi non sono stati compilati: {}",
+                                failed_fields.join("; ")
+                            ))
+                        },
+                        search_status: Some(search_result.status),
+                        search_excerpt: search_result.excerpt,
+                    });
+                    append_task_progress_checkpoint(
+                        state,
+                        task,
+                        "browser_form_draft_completed",
+                        SurfaceKind::Browser,
+                        &format!("{} compilato in bozza", target.label),
+                        "Ho riempito i campi riconoscibili senza inviare il form.",
+                        serde_json::json!({
+                            "kind": "browser_form_draft_completed",
+                            "label": target.label,
+                            "target_id": label,
+                            "status": status,
+                            "filled_fields": filled_fields,
+                            "failed_fields": failed_fields,
+                        }),
+                    )
+                    .map_err(local_task_gateway_error)?;
+                }
+            }
+        }
+        source_snapshots.push(serde_json::json!({
+            "label": target.label,
+            "url": final_url,
+            "status": "completed",
+            "snapshot_excerpt": snapshot_excerpt,
+        }));
+        source_summaries.push(BrowserSourceSummary {
+            label: target.label.clone(),
+            url: final_url.clone(),
+            status: "completed".to_string(),
+            excerpt: Some(snapshot_excerpt.clone()),
+        });
+        append_task_progress_checkpoint(
+            state,
+            task,
+            "browser_source_completed",
+            SurfaceKind::Browser,
+            &format!("{} letto", target.label),
+            "Snapshot read-only salvato nel checkpoint del task.",
+            serde_json::json!({
+                "kind": "browser_source_completed",
+                "label": target.label,
+                "url": final_url,
+            }),
+        )
+        .map_err(local_task_gateway_error)?;
+    }
+    operational_plan.complete_step("open_sources");
+    if first_opened_label.is_none() {
+        return Err(LocalTaskExecutionError {
+            message: "Nessuna fonte browser read-only raggiungibile.".to_string(),
+        });
+    }
+    let first_source = source_snapshots
+        .iter()
+        .find(|source| {
+            source
+                .get("status")
+                .and_then(Value::as_str)
+                .is_some_and(|status| status == "completed")
+        })
+        .or_else(|| source_snapshots.first())
+        .ok_or_else(|| LocalTaskExecutionError {
+            message: "Nessuna fonte browser disponibile.".to_string(),
+        })?;
+    let final_url = first_source
+        .get("url")
+        .and_then(Value::as_str)
+        .unwrap_or("about:blank")
+        .to_string();
+    let artifact_id = format!("artifact_{}_browser_snapshot", task.task_id.as_str());
+    let file_name = format!("{artifact_id}.png");
+    let screenshot = client
+        .call(
+            BrowserMethod::Screenshot,
+            serde_json::json!({
+                "target_id": preferred_screenshot_label
+                    .as_deref()
+                    .or(first_opened_label.as_deref())
+                    .unwrap_or("task_0"),
+                "file_name": file_name,
+                "full_page": false
+            }),
+        )
+        .map_err(|error| LocalTaskExecutionError {
+            message: format!("Browser screenshot fallito: {error}"),
+        })?;
+    let screenshot_path = screenshot
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or_else(|| LocalTaskExecutionError {
+            message: "Browser screenshot senza path artifact.".to_string(),
+        })?
+        .to_string();
+    let screenshot_bytes = screenshot
+        .get("bytes")
+        .and_then(Value::as_u64)
+        .unwrap_or_else(|| {
+            fs::metadata(&screenshot_path)
+                .map(|metadata| metadata.len())
+                .unwrap_or(0)
+        });
+    append_task_progress_checkpoint(
+        state,
+        task,
+        "browser_synthesis_started",
+        SurfaceKind::Browser,
+        "Sintesi risultato",
+        "Fonti raccolte; preparo risposta e miniatura consultabile.",
+        serde_json::json!({
+            "kind": "browser_synthesis_started",
+            "sources": source_snapshots.clone(),
+            "form_drafts": form_drafts
+                .iter()
+                .map(browser_form_draft_payload)
+                .collect::<Vec<_>>(),
+            "screenshot_artifact_id": artifact_id.clone(),
+        }),
+    )
+    .map_err(local_task_gateway_error)?;
+    let train_plan = train_draft.is_some();
+    let train_success = !train_plan || train_success_criteria_met(&source_summaries, &form_drafts);
+    operational_plan.start_step("consolidate_options");
+    if train_success {
+        operational_plan.complete_step("consolidate_options");
+        operational_plan.complete_step("extract_options");
+        operational_plan.complete_step("answer_and_next_gate");
+    } else {
+        operational_plan.block_step("consolidate_options");
+        operational_plan.block_step("extract_options");
+        operational_plan.block_step("answer_and_next_gate");
+    }
+    append_operational_plan_progress(
+        state,
+        task,
+        &operational_plan,
+        "operational_plan_completed",
+        "Piano operativo valutato",
+        "La tasklist markdown contiene lo stato finale di ogni step.",
+    )
+    .map_err(local_task_gateway_error)?;
+    let final_answer = browser_final_answer_for_task(task, &source_summaries, &form_drafts);
+    let blocked_reason = if train_success {
+        None
+    } else {
+        Some(
+        "Il browser ha compilato/consultato le fonti, ma non ha estratto opzioni treno affidabili."
+                .to_string(),
+        )
+    };
+    let plan_artifact = write_operational_plan_artifact(task, &operational_plan)?;
+
+    Ok(TaskExecutionOutcome {
+        completed: train_success,
+        blocked_reason: blocked_reason.clone(),
+        pending_approval: None,
+        summary: if form_drafts
+            .iter()
+            .any(|draft| draft.status == "completed" || draft.status == "partial")
+        {
+            if train_success {
+                "Navigazione browser, ricerca e estrazione risultati completate.".to_string()
+            } else {
+                "Piano browser bloccato: risultati non estratti.".to_string()
+            }
+        } else {
+            "Navigazione browser completata.".to_string()
+        },
+        checkpoint_payload: serde_json::json!({
+            "kind": "browser_guided",
+            "operational_plan": operational_plan_payload(&operational_plan),
+            "operational_plan_markdown": operational_plan_markdown(&operational_plan),
+            "operational_plan_artifact_id": plan_artifact.artifact_id.clone(),
+            "success_criteria_met": train_success,
+            "blocked_reason": blocked_reason.clone(),
+            "url": final_url,
+            "sources": source_snapshots.clone(),
+            "form_drafts": form_drafts
+                .iter()
+                .map(browser_form_draft_payload)
+                .collect::<Vec<_>>(),
+            "screenshot_artifact_id": artifact_id.clone(),
+        }),
+        checkpoint_redacted: serde_json::json!({
+            "kind": "browser_guided",
+            "operational_plan": operational_plan_payload(&operational_plan),
+            "operational_plan_markdown": operational_plan_markdown(&operational_plan),
+            "operational_plan_artifact_id": plan_artifact.artifact_id.clone(),
+            "success_criteria_met": train_success,
+            "blocked_reason": blocked_reason.clone(),
+            "url": final_url,
+            "sources": source_snapshots.clone(),
+            "form_drafts": form_drafts
+                .iter()
+                .map(browser_form_draft_payload)
+                .collect::<Vec<_>>(),
+            "screenshot_artifact_id": artifact_id.clone(),
+        }),
+        chat_message: final_answer.to_markdown(),
+        surface: SurfaceKind::Browser,
+        event_kind: "computer_browser_snapshot".to_string(),
+        event_title: "Snapshot browser".to_string(),
+        event_subtitle: if form_drafts
+            .iter()
+            .any(|draft| draft.status == "completed" || draft.status == "partial")
+        {
+            "Browser aperto e form compilato in bozza.".to_string()
+        } else {
+            "Navigazione browser completata.".to_string()
+        },
+        event_payload: serde_json::json!({
+            "url": final_url,
+            "operational_plan": operational_plan_payload(&operational_plan),
+            "operational_plan_markdown": operational_plan_markdown(&operational_plan),
+            "sources": source_snapshots,
+            "form_drafts": form_drafts
+                .iter()
+                .map(browser_form_draft_payload)
+                .collect::<Vec<_>>(),
+        }),
+        artifacts: vec![
+            TaskArtifactOutput {
+                artifact_id: artifact_id.clone(),
+                title: "Browser snapshot redatto".to_string(),
+                kind: "screenshot".to_string(),
+                path_ref: screenshot_path,
+                size_bytes: screenshot_bytes,
+                preview_ref: Some(format!("preview:{artifact_id}")),
+            },
+            plan_artifact,
+        ],
+    })
+}
+
+fn execute_browser_loop_read_only_task(
+    state: &AppState,
+    task: &TaskRecord,
+) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
+    let effective_goal = task_effective_goal(task);
+    let mut operational_plan = task
+        .input_json
+        .get("operational_plan")
+        .and_then(|value| serde_json::from_value::<OperationalPlan>(value.clone()).ok())
+        .or_else(|| {
+            // A1: prefer the OrchestratorBrain's plan when enabled; fall back to
+            // the legacy keyword/train planner on any failure.
+            brain_planner_enabled()
+                .then(|| try_brain_operational_plan(state, &effective_goal))
+                .flatten()
+        })
+        .unwrap_or_else(|| operational_plan_for_goal(&effective_goal, &task.kind));
+    operational_plan.start_step("understand_request");
+    operational_plan.complete_step("understand_request");
+    append_operational_plan_progress(
+        state,
+        task,
+        &operational_plan,
+        "operational_plan_started",
+        "Piano operativo",
+        "Eseguo il task con loop browser osserva-agisci-verifica.",
+    )
+    .map_err(local_task_gateway_error)?;
+
+    append_task_progress_checkpoint(
+        state,
+        task,
+        "planner_runtime_starting",
+        SurfaceKind::Logs,
+        "Gemma planner",
+        "Verifico e avvio il runtime Gemma locale prima del loop browser.",
+        serde_json::json!({ "kind": "planner_runtime_starting" }),
+    )
+    .map_err(local_task_gateway_error)?;
+    ensure_runtime_available_for_task(state)?;
+    append_task_progress_checkpoint(
+        state,
+        task,
+        "planner_runtime_ready",
+        SurfaceKind::Logs,
+        "Gemma planner pronto",
+        "Il controller locale puo' decidere le azioni browser.",
+        serde_json::json!({ "kind": "planner_runtime_ready" }),
+    )
+    .map_err(local_task_gateway_error)?;
+
+    append_task_progress_checkpoint(
+        state,
+        task,
+        "browser_runtime_starting",
+        SurfaceKind::Browser,
+        "Browser locale",
+        "Avvio browser controllato locale.",
+        serde_json::json!({ "kind": "browser_runtime_starting" }),
+    )
+    .map_err(local_task_gateway_error)?;
+
+    let session = spawn_browser_sidecar_for_task(state, task)?;
+    append_task_progress_checkpoint(
+        state,
+        task,
+        "browser_runtime_ready",
+        SurfaceKind::Browser,
+        "Browser pronto",
+        "Runtime browser locale avviato.",
+        serde_json::json!({ "kind": "browser_runtime_ready" }),
+    )
+    .map_err(local_task_gateway_error)?;
+
+    let mut client = BrowserAutomationClient::new(session);
+    let targets = browser_targets_for_goal(&effective_goal);
+    let draft = train_search_draft_for_goal(&effective_goal);
+    let is_train_task = draft.is_some();
+    let mut source_snapshots = Vec::new();
+    let mut source_summaries = Vec::new();
+    let mut form_drafts = Vec::new();
+    let mut first_target_id: Option<String> = None;
+    let mut completed_output: Option<Value> = None;
+
+    // Load the local inference backend once per task and share it across every
+    // source via Arc (a single mistral.rs model load, not one per target).
+    let inference_router =
+        std::sync::Arc::new(build_browser_inference_router(&state.gemma_runtime_url));
+    let context_profile = BrowserContextProfile::for_context_window(
+        inference_router.active_context_window(&Requirements::default()),
+    );
+
+    operational_plan.start_step("open_sources");
+    for (index, target) in targets.iter().enumerate() {
+        let target_id = format!("loop_{index}");
+        first_target_id.get_or_insert_with(|| target_id.clone());
+        append_task_progress_checkpoint(
+            state,
+            task,
+            "browser_loop_source_started",
+            SurfaceKind::Browser,
+            &format!("Loop browser {}", target.label),
+            "Apro la fonte e procedo una micro-azione alla volta usando snapshot freschi.",
+            serde_json::json!({
+                "kind": "browser_loop_source_started",
+                "label": target.label,
+                "target_id": target_id,
+                "url": target.url,
+            }),
+        )
+        .map_err(local_task_gateway_error)?;
+
+        let planner = RuntimeBrowserLoopPlanner::with_context_profile(
+            std::sync::Arc::clone(&inference_router),
+            context_profile,
+        );
+        let mut runner = BrowserLoopRunner::from_client(client, planner);
+        let request = BrowserLoopRequest::new(
+            browser_loop_goal_for_source(&effective_goal, &target.label, draft.as_ref()),
+            &target_id,
+        )
+        .with_initial_url(target.url.clone())
+        .with_max_iterations(browser_loop_max_iterations())
+        .with_plan(browser_loop_plan_for_source(draft.as_ref()));
+        let loop_result = runner.run_with_iteration_observer(&request, |iteration| {
+            append_task_progress_checkpoint(
+                state,
+                task,
+                "browser_loop_iteration",
+                SurfaceKind::Browser,
+                &format!("{} azione {}", target.label, iteration.iteration),
+                if iteration.status == "no_progress" {
+                    "Azione eseguita, ma lo snapshot non e' cambiato: il controller dovra' cambiare strategia."
+                } else {
+                    "Azione eseguita e nuovo snapshot acquisito."
+                },
+                serde_json::json!({
+                    "kind": "browser_loop_iteration",
+                    "label": target.label,
+                    "target_id": target_id,
+                    "iteration": browser_loop_event_payload(iteration),
+                }),
+            )
+            .map_err(|error| {
+                BrowserAutomationError::InvalidResponse(format!(
+                    "browser loop progress checkpoint failed: {}",
+                    error.message
+                ))
+            })?;
+            Ok(())
+        });
+        client = runner.into_client();
+
+        match loop_result {
+            Ok(output) => {
+                let excerpt = truncate_chars(&output.final_observation.snapshot, 1_800);
+                let has_verified_train_options = browser_loop_output_has_train_options(
+                    &output.output,
+                    &output.final_observation.snapshot,
+                );
+                let verified_output = if is_train_task {
+                    if output.completed && has_verified_train_options {
+                        Some(output.output.clone())
+                    } else if has_verified_train_options {
+                        Some(browser_loop_output_from_snapshot_options(
+                            &output.final_observation.snapshot,
+                            &target.label,
+                            &output.final_observation.url,
+                        ))
+                    } else {
+                        None
+                    }
+                } else if output.completed {
+                    Some(output.output.clone())
+                } else {
+                    None
+                };
+                let output_for_payload = verified_output.as_ref().unwrap_or(&output.output);
+                let status = if let Some(verified_output) = verified_output.as_ref() {
+                    completed_output.get_or_insert_with(|| verified_output.clone());
+                    "completed"
+                } else if output.completed {
+                    "blocked"
+                } else {
+                    "blocked"
+                };
+                source_snapshots.push(serde_json::json!({
+                    "label": target.label,
+                    "url": output.final_observation.url,
+                    "status": status,
+                    "snapshot_excerpt": excerpt,
+                    "loop_completed": output.completed,
+                    "loop_output": redact_json_for_task_output(output_for_payload),
+                    "iterations": output.iterations.len(),
+                }));
+                source_summaries.push(BrowserSourceSummary {
+                    label: target.label.clone(),
+                    url: output.final_observation.url.clone(),
+                    status: status.to_string(),
+                    excerpt: Some(excerpt.clone()),
+                });
+                form_drafts.push(BrowserFormDraftSummary {
+                    label: target.label.clone(),
+                    url: output.final_observation.url,
+                    status: if verified_output.is_some() {
+                        "completed".to_string()
+                    } else {
+                        "blocked".to_string()
+                    },
+                    filled_fields: Vec::new(),
+                    reason: if is_train_task && output.completed && !has_verified_train_options {
+                        Some(
+                            "Il loop ha terminato la fonte senza opzioni treno verificate."
+                                .to_string(),
+                        )
+                    } else if is_train_task && !output.completed && has_verified_train_options {
+                        None
+                    } else if output.completed {
+                        None
+                    } else {
+                        output
+                            .output
+                            .get("blocked_reason")
+                            .and_then(Value::as_str)
+                            .map(ToString::to_string)
+                    },
+                    search_status: Some(status.to_string()),
+                    search_excerpt: Some(loop_output_excerpt(output_for_payload, &excerpt)),
+                });
+                append_task_progress_checkpoint(
+                    state,
+                    task,
+                    "browser_loop_source_completed",
+                    SurfaceKind::Browser,
+                    &format!("{} loop valutato", target.label),
+                    if verified_output.is_some() {
+                        "Il controller ha dichiarato completati i criteri sullo snapshot corrente."
+                    } else if output.completed {
+                        "Il controller ha terminato senza opzioni verificate; continuo con le altre fonti."
+                    } else {
+                        "Il controller ha bloccato questa fonte senza inventare risultati."
+                    },
+                    serde_json::json!({
+                        "kind": "browser_loop_source_completed",
+                        "label": target.label,
+                        "target_id": target_id,
+                        "completed": output.completed,
+                        "verified_train_options": if is_train_task { Some(has_verified_train_options) } else { None },
+                        "output": redact_json_for_task_output(output_for_payload),
+                    }),
+                )
+                .map_err(local_task_gateway_error)?;
+                if verified_output.is_some() {
+                    break;
+                }
+            }
+            Err(error) => {
+                let redacted_error =
+                    redact_sensitive_text(&truncate_chars(&error.to_string(), 500));
+                source_snapshots.push(serde_json::json!({
+                    "label": target.label,
+                    "url": target.url,
+                    "status": "failed",
+                    "error": redacted_error,
+                }));
+                source_summaries.push(BrowserSourceSummary {
+                    label: target.label.clone(),
+                    url: target.url.clone(),
+                    status: "failed".to_string(),
+                    excerpt: None,
+                });
+                append_task_progress_checkpoint(
+                    state,
+                    task,
+                    "browser_loop_source_failed",
+                    SurfaceKind::Browser,
+                    &format!("{} loop fallito", target.label),
+                    "La fonte e' stata saltata; continuo con le altre fonti disponibili.",
+                    serde_json::json!({
+                        "kind": "browser_loop_source_failed",
+                        "label": target.label,
+                        "target_id": target_id,
+                        "error": redacted_error,
+                    }),
+                )
+                .map_err(local_task_gateway_error)?;
+            }
+        }
+    }
+    operational_plan.complete_step("open_sources");
+
+    if source_summaries.is_empty() {
+        return Err(LocalTaskExecutionError {
+            message: "Nessuna fonte browser raggiungibile dal loop.".to_string(),
+        });
+    }
+
+    let final_url = source_summaries
+        .iter()
+        .find(|source| source.status == "completed")
+        .or_else(|| source_summaries.first())
+        .map(|source| source.url.clone())
+        .unwrap_or_else(|| "about:blank".to_string());
+    let artifact_id = format!("artifact_{}_browser_snapshot", task.task_id.as_str());
+    let file_name = format!("{artifact_id}.png");
+    let screenshot = client
+        .call(
+            BrowserMethod::Screenshot,
+            serde_json::json!({
+                "target_id": first_target_id.as_deref().unwrap_or("loop_0"),
+                "file_name": file_name,
+                "full_page": false
+            }),
+        )
+        .map_err(|error| LocalTaskExecutionError {
+            message: format!("Browser screenshot fallito: {error}"),
+        })?;
+    let screenshot_path = screenshot
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or_else(|| LocalTaskExecutionError {
+            message: "Browser screenshot senza path artifact.".to_string(),
+        })?
+        .to_string();
+    let screenshot_bytes = screenshot
+        .get("bytes")
+        .and_then(Value::as_u64)
+        .unwrap_or_else(|| fs::metadata(&screenshot_path).map(|m| m.len()).unwrap_or(0));
+
+    let browser_success = completed_output.is_some()
+        || (is_train_task && train_success_criteria_met(&source_summaries, &form_drafts));
+    operational_plan.start_step("consolidate_options");
+    if browser_success {
+        operational_plan.complete_step("consolidate_options");
+        operational_plan.complete_step("extract_options");
+        operational_plan.complete_step("answer_and_next_gate");
+    } else {
+        operational_plan.block_step("consolidate_options");
+        operational_plan.block_step("extract_options");
+        operational_plan.block_step("answer_and_next_gate");
+    }
+    append_operational_plan_progress(
+        state,
+        task,
+        &operational_plan,
+        "operational_plan_completed",
+        "Piano operativo valutato",
+        "La tasklist markdown contiene lo stato finale del loop browser.",
+    )
+    .map_err(local_task_gateway_error)?;
+
+    let plan_artifact = write_operational_plan_artifact(task, &operational_plan)?;
+    let final_answer = completed_output
+        .as_ref()
+        .map(browser_loop_final_answer_markdown)
+        .unwrap_or_else(|| {
+            browser_final_answer_for_task(task, &source_summaries, &form_drafts).to_markdown()
+        });
+    let blocked_reason = if browser_success {
+        None
+    } else if is_train_task {
+        Some("Il loop browser non ha ancora estratto opzioni treno affidabili.".to_string())
+    } else {
+        Some("Il loop browser non ha completato il goal con dati verificabili.".to_string())
+    };
+
+    Ok(TaskExecutionOutcome {
+        completed: browser_success,
+        blocked_reason: blocked_reason.clone(),
+        pending_approval: None,
+        summary: if browser_success {
+            "Loop browser completato con output strutturato.".to_string()
+        } else {
+            "Loop browser bloccato: risultati non estratti.".to_string()
+        },
+        checkpoint_payload: serde_json::json!({
+            "kind": "browser_loop_guided",
+            "operational_plan": operational_plan_payload(&operational_plan),
+            "operational_plan_markdown": operational_plan_markdown(&operational_plan),
+            "operational_plan_artifact_id": plan_artifact.artifact_id.clone(),
+            "success_criteria_met": browser_success,
+            "blocked_reason": blocked_reason.clone(),
+            "url": final_url,
+            "sources": source_snapshots.clone(),
+            "form_drafts": form_drafts.iter().map(browser_form_draft_payload).collect::<Vec<_>>(),
+            "loop_output": completed_output.as_ref().map(redact_json_for_task_output),
+            "screenshot_artifact_id": artifact_id.clone(),
+        }),
+        checkpoint_redacted: serde_json::json!({
+            "kind": "browser_loop_guided",
+            "operational_plan": operational_plan_payload(&operational_plan),
+            "operational_plan_markdown": operational_plan_markdown(&operational_plan),
+            "operational_plan_artifact_id": plan_artifact.artifact_id.clone(),
+            "success_criteria_met": browser_success,
+            "blocked_reason": blocked_reason.clone(),
+            "url": final_url,
+            "sources": source_snapshots,
+            "form_drafts": form_drafts.iter().map(browser_form_draft_payload).collect::<Vec<_>>(),
+            "loop_output": completed_output.as_ref().map(redact_json_for_task_output),
+            "screenshot_artifact_id": artifact_id.clone(),
+        }),
+        chat_message: final_answer,
+        surface: SurfaceKind::Browser,
+        event_kind: "computer_browser_loop_completed".to_string(),
+        event_title: "Loop browser".to_string(),
+        event_subtitle: if browser_success {
+            "Risultato browser consolidato.".to_string()
+        } else {
+            "Loop browser bloccato prima di inventare dati.".to_string()
+        },
+        event_payload: serde_json::json!({
+            "url": final_url,
+            "operational_plan": operational_plan_payload(&operational_plan),
+            "operational_plan_markdown": operational_plan_markdown(&operational_plan),
+        }),
+        artifacts: vec![
+            TaskArtifactOutput {
+                artifact_id: artifact_id.clone(),
+                title: "Browser snapshot redatto".to_string(),
+                kind: "screenshot".to_string(),
+                path_ref: screenshot_path,
+                size_bytes: screenshot_bytes,
+                preview_ref: Some(format!("preview:{artifact_id}")),
+            },
+            plan_artifact,
+        ],
+    })
+}
+
+fn browser_final_answer_for_task(
+    task: &TaskRecord,
+    sources: &[BrowserSourceSummary],
+    form_drafts: &[BrowserFormDraftSummary],
+) -> TaskFinalAnswer {
+    let normalized_goal = task_effective_goal(task).to_lowercase();
+    let completed = sources
+        .iter()
+        .filter(|source| source.status == "completed")
+        .collect::<Vec<_>>();
+    let failed = sources
+        .iter()
+        .filter(|source| source.status != "completed")
+        .collect::<Vec<_>>();
+    let is_train_task = normalized_goal.contains("treno")
+        || normalized_goal.contains("trenitalia")
+        || normalized_goal.contains("italo")
+        || normalized_goal.contains("milano")
+        || normalized_goal.contains("napoli");
+
+    let verified_train_options = verified_train_option_lines(sources, form_drafts);
+    let title = if is_train_task && verified_train_options.is_empty() {
+        "Ricerca treni non conclusa".to_string()
+    } else if is_train_task {
+        "Ricerca treni completata".to_string()
+    } else {
+        "Ricerca browser completata".to_string()
+    };
+    let form_draft_completed = form_drafts
+        .iter()
+        .filter(|draft| draft.status == "completed" || draft.status == "partial")
+        .collect::<Vec<_>>();
+    let form_draft_blocked = form_drafts
+        .iter()
+        .filter(|draft| draft.status == "blocked")
+        .collect::<Vec<_>>();
+
+    let search_completed = is_train_task && !verified_train_options.is_empty();
+
+    let summary = if completed.is_empty() {
+        "Non sono riuscito a leggere fonti browser utili in modalita' read-only.".to_string()
+    } else if is_train_task && search_completed {
+        "Ho aperto le fonti disponibili, compilato i form riconoscibili, avviato la ricerca e ho estratto opzioni leggibili senza selezionare treni, fare login, acquistare o pagare. La miniatura e il dettaglio tecnico restano nel Computer locale.".to_string()
+    } else if is_train_task && !form_draft_completed.is_empty() {
+        "Ho aperto le fonti disponibili e compilato i form riconoscibili, ma non ho ancora estratto un elenco affidabile di opzioni. Non considero il task completato. La miniatura e il dettaglio tecnico restano nel Computer locale.".to_string()
+    } else if is_train_task {
+        "Ho controllato le fonti disponibili, ma non ho raggiunto i criteri di successo del piano operativo. La miniatura e il dettaglio tecnico restano nel Computer locale.".to_string()
+    } else {
+        "Ho raccolto le fonti disponibili in modalita' read-only. Il dettaglio tecnico resta nel Computer locale.".to_string()
+    };
+
+    let mut findings = Vec::new();
+    if is_train_task {
+        findings.push(
+            "Ho consultato una ricerca web generale e i siti degli operatori disponibili."
+                .to_string(),
+        );
+        findings
+            .push("Non ho effettuato prenotazioni, login, pagamenti o invii di form.".to_string());
+        if completed.iter().any(|source| source.label == "Trenitalia") {
+            findings
+                .push("Trenitalia e' stata raggiunta e letta in modalita' read-only.".to_string());
+        }
+        if completed.iter().any(|source| source.label == "Italo") {
+            findings.push("Italo e' stata raggiunta e letta in modalita' read-only.".to_string());
+        }
+        for draft in &form_draft_completed {
+            findings.push(format!(
+                "{} compilato in bozza: {}.",
+                draft.label,
+                draft.filled_fields.join(", ")
+            ));
+            if draft.search_status.as_deref() == Some("completed") {
+                let draft_options = draft
+                    .search_excerpt
+                    .as_deref()
+                    .map(train_option_lines)
+                    .unwrap_or_default();
+                if draft_options.is_empty() {
+                    findings.push(format!(
+                        "{}: ricerca avviata, ma nessuna opzione affidabile e' stata estratta.",
+                        draft.label
+                    ));
+                } else {
+                    findings.push(format!(
+                        "{}: ricerca opzioni avviata e risultati letti senza selezionare o acquistare.",
+                        draft.label
+                    ));
+                }
+                for option in draft_options.into_iter().take(5) {
+                    findings.push(format!("Opzione rilevata: {option}"));
+                }
+            } else if draft.search_status.as_deref() == Some("blocked") {
+                findings.push(format!(
+                    "{}: non ho trovato un controllo Cerca sicuro da premere automaticamente.",
+                    draft.label
+                ));
+            }
+        }
+        for draft in &form_draft_blocked {
+            let reason = draft.reason.as_deref().unwrap_or("campi non riconoscibili");
+            findings.push(format!(
+                "{} aperto ma non compilato: {}.",
+                draft.label, reason
+            ));
+        }
+        if !verified_train_options.is_empty() {
+            findings.push("Opzioni verificate estratte:".to_string());
+            for option in verified_train_options.iter().take(8) {
+                findings.push(option.clone());
+            }
+        }
+    } else {
+        findings.push(format!("Fonti lette correttamente: {}.", completed.len()));
+    }
+
+    let sources_markdown = sources
+        .iter()
+        .map(|source| {
+            if source.status == "completed" {
+                format!("{}: {}", source.label, source.url)
+            } else {
+                format!("{}: non raggiungibile in questa sessione", source.label)
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let mut limitations = Vec::new();
+    if failed.is_empty() && form_draft_completed.is_empty() {
+        limitations.push("La ricerca e' read-only: non ho compilato form ne' verificato disponibilita' dopo eventuali step interattivi.".to_string());
+    } else if form_draft_completed
+        .iter()
+        .any(|draft| draft.search_status.as_deref() == Some("completed"))
+    {
+        limitations.push("Ho cercato le opzioni disponibili, ma non ho selezionato corse, non ho fatto login, non ho inserito dati passeggero e non ho acquistato nulla.".to_string());
+    } else if !form_draft_completed.is_empty() {
+        limitations.push("La compilazione e' solo una bozza locale: non ho trovato un click Cerca sicuro o non ho ottenuto risultati leggibili; non ho inviato dati sensibili, non ho fatto login e non ho acquistato nulla.".to_string());
+    } else {
+        limitations.push(format!(
+            "{} fonte/i non erano leggibili o raggiungibili in questa sessione.",
+            failed.len()
+        ));
+    }
+    if is_train_task {
+        limitations.push("Gli orari e i prezzi reali possono richiedere ricerca live su form interattivi degli operatori.".to_string());
+    }
+    if verified_train_options.is_empty() && is_train_task {
+        limitations.push(
+            "Dagli snapshot browser non ho estratto un elenco affidabile di partenze specifiche; il piano resta bloccato sullo step di estrazione risultati."
+                .to_string(),
+        );
+    }
+
+    let next_steps = if is_train_task && !verified_train_options.is_empty() {
+        vec![
+            "Dimmi quale opzione vuoi prenotare e procedo fino al prossimo gate sicuro. Prima di login, dati passeggero, pagamento o acquisto ti chiedero' una conferma esplicita.".to_string(),
+        ]
+    } else if is_train_task && !form_draft_completed.is_empty() {
+        vec![
+            "Posso continuare cercando un percorso alternativo o usando un sito operatore diverso; non procedero' comunque a login, dati passeggero o pagamento senza conferma.".to_string(),
+        ]
+    } else if is_train_task {
+        vec![
+            "Posso proseguire con una ricerca browser interattiva guidata, chiedendo approvazione prima di qualunque click o compilazione form.".to_string(),
+        ]
+    } else {
+        Vec::new()
+    };
+
+    TaskFinalAnswer {
+        title,
+        summary,
+        findings,
+        sources: sources_markdown,
+        limitations,
+        next_steps,
+    }
+}
+
+fn browser_loop_controller_enabled() -> bool {
+    env::var("LOCAL_FIRST_BROWSER_LOOP_CONTROLLER")
+        .map(|value| value != "0" && value.to_lowercase() != "false")
+        .unwrap_or(true)
+}
+
+fn browser_loop_max_iterations() -> u32 {
+    env::var("LOCAL_FIRST_BROWSER_LOOP_MAX_ITERATIONS")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .map(|value| value.clamp(1, 24))
+        .unwrap_or(10)
+}
+
+/// Builds the inference router that drives the browser loop planner.
+///
+/// Default backend is the local MLX runtime (current behavior, preserved). Set
+/// `LOCAL_FIRST_INFERENCE_BACKEND=openai` plus `LOCAL_FIRST_INFERENCE_BASE_URL`
+/// to route through an OpenAI-compatible endpoint (Ollama local/cloud, OpenAI,
+/// OpenRouter, ...). Cloud delegation is opt-in via `LOCAL_FIRST_INFERENCE_CLOUD`
+/// and gated by the router's privacy policy.
+fn brain_planner_enabled() -> bool {
+    env::var("LOCAL_FIRST_USE_BRAIN_PLANNER")
+        .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "on"))
+        .unwrap_or(false)
+}
+
+/// Produces an `OperationalPlan` via the OrchestratorBrain (plan-only, no side
+/// effects), or `None` on any failure so the caller falls back to the legacy
+/// planner. Transitional A1 wiring (ADR 0008 pillars #1/#2): the Brain becomes
+/// the live planner, seeing the registry's cached tools for planning visibility
+/// via `CachedToolProvider`. Gated by `LOCAL_FIRST_USE_BRAIN_PLANNER`.
+fn try_brain_operational_plan(state: &AppState, goal: &str) -> Option<OperationalPlan> {
+    let user = gateway_capability_user_id();
+    let workspace = gateway_capability_workspace_id();
+
+    let (policy_context, provider_tools) = {
+        let registry = state.capability_registry.lock().ok()?;
+        let policy = registry.policy_context(&user, &workspace).ok()?;
+        let mut provider_tools = Vec::new();
+        for provider in &policy.enabled_providers {
+            let tools = registry
+                .cached_tools(provider)
+                .ok()?
+                .into_iter()
+                .map(|cached| cached.tool)
+                .collect::<Vec<_>>();
+            provider_tools.push((provider.clone(), tools));
+        }
+        (policy, provider_tools)
+    };
+
+    let mut facade =
+        CapabilityFacade::new(CapabilityPolicy::default(), InMemoryCapabilityAudit::default());
+    for (provider_id, tools) in provider_tools {
+        let kind = tools
+            .first()
+            .map(|tool| tool.provider_kind)
+            .unwrap_or(CapabilityProviderKind::Native);
+        facade.register_provider(CachedToolProvider::new(provider_id, kind, tools));
+    }
+
+    let mut brain = OrchestratorBrain::new(
+        RuntimeClient::new(state.gemma_runtime_url.to_string()),
+        NoopMemoryContextProvider,
+        facade,
+        ToolSearchIndexStore::open_in_memory().ok()?,
+        TaskStore::open_in_memory().ok()?,
+    );
+    let request = OrchestratorRequest {
+        request_id: format!("brain_{}", uuid::Uuid::new_v4().simple()),
+        policy_context,
+        user_message: goal.to_string(),
+        conversation_summary: None,
+        attachments: Vec::new(),
+        budgets: OrchestratorBudgets::default(),
+    };
+    let plan = brain.plan_only(&request).ok()?;
+    Some(brain_adapter::execution_plan_to_operational_plan(&plan, goal))
+}
+
+/// Resolves the cloud inference API key, preferring a 0600 key file over the
+/// environment. A key file is not inherited by child processes (browser sidecar,
+/// MLX) and is not visible in `ps`/`/proc/<pid>/environ`, so it is the safer
+/// source. Env remains supported for convenience but warns once.
+///
+/// TODO(security): migrate to `local-first-secrets` (`secret_ref`) per ADR 0007
+/// for at-rest encryption / keychain — tracked as workstream S4-full in the
+/// system elevation plan.
+fn resolve_inference_api_key() -> Option<String> {
+    if let Ok(path) = env::var("LOCAL_FIRST_INFERENCE_API_KEY_FILE")
+        && !path.trim().is_empty()
+    {
+        match fs::read_to_string(path.trim()) {
+            Ok(contents) => {
+                let key = contents.trim().to_string();
+                if !key.is_empty() {
+                    return Some(key);
+                }
+            }
+            Err(error) => {
+                eprintln!("[inference] could not read LOCAL_FIRST_INFERENCE_API_KEY_FILE: {error}");
+            }
+        }
+    }
+
+    let from_env = env::var("LOCAL_FIRST_INFERENCE_API_KEY")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())?;
+    eprintln!(
+        "[inference] using API key from LOCAL_FIRST_INFERENCE_API_KEY (env); prefer \
+         LOCAL_FIRST_INFERENCE_API_KEY_FILE (0600) — env is inherited by child processes"
+    );
+    Some(from_env)
+}
+
+fn build_browser_inference_router(gemma_runtime_url: &str) -> ModelRouter {
+    let backend = env::var("LOCAL_FIRST_INFERENCE_BACKEND")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    if backend == "anthropic"
+        && let Some(api_key) = resolve_inference_api_key()
+    {
+        let model = env::var("LOCAL_FIRST_INFERENCE_MODEL")
+            .unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
+        let context_window = env::var("LOCAL_FIRST_INFERENCE_CONTEXT_WINDOW")
+            .ok()
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(200_000);
+        let descriptor = CapabilityDescriptor {
+            id: format!("anthropic:{model}"),
+            locality: Locality::Cloud,
+            supports_vision: true,
+            supports_tools: true,
+            context_window,
+            approx_tokens_per_second: None,
+        };
+        let provider = AnthropicProvider::new(descriptor, model, api_key);
+        return ModelRouter::new(PrivacyPolicy::allowing_cloud()).with_provider(Box::new(provider));
+    }
+
+    if backend == "openai"
+        && let Some(base_url) = env::var("LOCAL_FIRST_INFERENCE_BASE_URL")
+            .ok()
+            .filter(|value| !value.is_empty())
+    {
+        let model =
+            env::var("LOCAL_FIRST_INFERENCE_MODEL").unwrap_or_else(|_| "gpt-4o-mini".to_string());
+        let api_key = resolve_inference_api_key();
+        let context_window = env::var("LOCAL_FIRST_INFERENCE_CONTEXT_WINDOW")
+            .ok()
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(32_768);
+        let is_cloud = env::var("LOCAL_FIRST_INFERENCE_CLOUD")
+            .map(|value| value == "1" || value.to_ascii_lowercase() == "true")
+            .unwrap_or(false);
+        let descriptor = CapabilityDescriptor {
+            id: format!("openai-compat:{model}"),
+            locality: if is_cloud {
+                Locality::Cloud
+            } else {
+                Locality::Local
+            },
+            supports_vision: true,
+            supports_tools: true,
+            context_window,
+            approx_tokens_per_second: None,
+        };
+        let provider = OpenAiCompatProvider::new(descriptor, base_url, model, api_key);
+        let policy = if is_cloud {
+            PrivacyPolicy::allowing_cloud()
+        } else {
+            PrivacyPolicy::local_only()
+        };
+        return ModelRouter::new(policy).with_provider(Box::new(provider));
+    }
+
+    // mistral.rs is the default cross-OS local backbone when compiled in
+    // (ADR 0007). On load failure we fall back to the MLX backend so the app
+    // keeps working.
+    #[cfg(feature = "local-mistralrs")]
+    if backend == "mistralrs" || backend.is_empty() {
+        if let Some(router) = try_build_mistralrs_router() {
+            return router;
+        }
+    }
+
+    build_mlx_router(gemma_runtime_url)
+}
+
+/// Wraps the local MLX runtime (`RuntimeClient`) as a provider. Conservative
+/// context window keeps the compact action frame for the small local model.
+fn build_mlx_router(gemma_runtime_url: &str) -> ModelRouter {
+    let descriptor = CapabilityDescriptor {
+        id: "mlx:gemma4".to_string(),
+        locality: Locality::Local,
+        supports_vision: true,
+        supports_tools: true,
+        context_window: 8_192,
+        approx_tokens_per_second: None,
+    };
+    let provider =
+        JsonRuntimeProvider::new(descriptor, RuntimeClient::new(gemma_runtime_url.to_string()));
+    ModelRouter::new(PrivacyPolicy::local_only()).with_provider(Box::new(provider))
+}
+
+/// Default in-process model for the mistral.rs backbone. A text model, because
+/// the provider currently serves text `generate_json` (the browser loop reads
+/// the textual aria snapshot). Override with `LOCAL_FIRST_INFERENCE_MODEL`.
+#[cfg(feature = "local-mistralrs")]
+const DEFAULT_LOCAL_MISTRALRS_MODEL: &str = "Qwen/Qwen3-4B";
+
+/// Loads the mistral.rs in-process model as a router, or returns `None` (with a
+/// logged reason) so the caller can fall back to MLX.
+#[cfg(feature = "local-mistralrs")]
+fn try_build_mistralrs_router() -> Option<ModelRouter> {
+    let model = env::var("LOCAL_FIRST_INFERENCE_MODEL")
+        .unwrap_or_else(|_| DEFAULT_LOCAL_MISTRALRS_MODEL.to_string());
+    let context_window = env::var("LOCAL_FIRST_INFERENCE_CONTEXT_WINDOW")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(32_768);
+    let descriptor = CapabilityDescriptor {
+        id: format!("mistralrs:{model}"),
+        locality: Locality::Local,
+        // Text-only for now; vision (analyze_image) is not wired through this provider yet.
+        supports_vision: false,
+        supports_tools: true,
+        context_window,
+        approx_tokens_per_second: None,
+    };
+    match local_first_inference::MistralRsProvider::load(descriptor, model) {
+        Ok(provider) => {
+            Some(ModelRouter::new(PrivacyPolicy::local_only()).with_provider(Box::new(provider)))
+        }
+        Err(error) => {
+            eprintln!("[inference] mistral.rs load failed ({error}); falling back to MLX backend");
+            None
+        }
+    }
+}
+
+fn browser_loop_goal_for_source(
+    goal: &str,
+    source_label: &str,
+    draft: Option<&TrainSearchDraft>,
+) -> String {
+    let Some(draft) = draft else {
+        return format!("{goal}\nFonte: {source_label}");
+    };
+    format!(
+        "{goal}\nFonte: {source_label}\nDati estratti: partenza={}, arrivo={}, data={}, ora={}\nObiettivo: se lo snapshot contiene gia' righe risultato con treno/orari/durata/prezzo, completa subito con options strutturate; altrimenti compila la ricerca se necessario, raccogli opzioni reali visibili, fermati prima di selezione treno, login, passeggeri, pagamento o acquisto.",
+        draft.origin,
+        draft.destination,
+        draft.date.as_deref().unwrap_or("non specificata"),
+        draft.time.as_deref().unwrap_or("non specificata"),
+    )
+}
+
+/// Ordered, concrete sub-goal checklist handed to the browser loop planner.
+///
+/// Today this is derived from the extracted train-search draft so a small local
+/// model (Gemma 4 E4B) always sees an explicit, stateful plan instead of having
+/// to re-derive ordering from prose every turn. When the OrchestratorBrain
+/// generates an `OperationalPlan` with browser-level steps, this is where that
+/// plan should flow in instead of the heuristic below.
+fn browser_loop_plan_for_source(draft: Option<&TrainSearchDraft>) -> Vec<String> {
+    let Some(draft) = draft else {
+        return Vec::new();
+    };
+    let mut plan = vec![
+        "Dismiss any cookie/consent banner if present".to_string(),
+        format!("Set the departure station field to: {}", draft.origin),
+        "Click the correct departure suggestion from the autocomplete list".to_string(),
+        format!("Set the arrival station field to: {}", draft.destination),
+        "Click the correct arrival suggestion from the autocomplete list".to_string(),
+    ];
+    if let Some(date) = draft.date.as_deref() {
+        plan.push(format!("Open the date field and select the day: {date}"));
+    }
+    if let Some(time) = draft.time.as_deref() {
+        plan.push(format!("Set the departure time to about: {time}"));
+    }
+    plan.push("Click the search button (Cerca) to run the search".to_string());
+    plan.push(
+        "Read the result rows and complete with structured options (train, times, duration, price). Stop before train selection, login, passengers, payment or purchase."
+            .to_string(),
+    );
+    plan
+}
+
+fn loop_output_excerpt(output: &Value, fallback_excerpt: &str) -> String {
+    let rendered = serde_json::to_string_pretty(output).unwrap_or_default();
+    if rendered.trim().is_empty() || rendered == "{}" {
+        return fallback_excerpt.to_string();
+    }
+    truncate_chars(&rendered, 1_800)
+}
+
+fn browser_loop_final_answer_markdown(output: &Value) -> String {
+    let summary = output
+        .get("summary")
+        .and_then(Value::as_str)
+        .unwrap_or("Ho completato il controllo browser e raccolto l'output disponibile.");
+    let mut lines = vec![
+        "### Ricerca completata".to_string(),
+        String::new(),
+        summary.to_string(),
+    ];
+    if let Some(options) = output.get("options").and_then(Value::as_array)
+        && !options.is_empty()
+    {
+        lines.push(String::new());
+        lines.push("**Opzioni trovate**".to_string());
+        for option in options.iter().take(10) {
+            lines.push(format!("- {}", browser_loop_option_line(option)));
+        }
+    }
+    if let Some(sources) = output.get("sources").and_then(Value::as_array)
+        && !sources.is_empty()
+    {
+        lines.push(String::new());
+        lines.push("**Fonti**".to_string());
+        for source in sources.iter().take(8) {
+            if let Some(source) = source.as_str() {
+                lines.push(format!("- {source}"));
+            } else {
+                lines.push(format!("- {}", truncate_chars(&source.to_string(), 180)));
+            }
+        }
+    }
+    lines.push(String::new());
+    lines.push(
+        "Dimmi quale opzione vuoi prenotare e procedo fino al prossimo gate sicuro. Prima di login, dati passeggero, pagamento o acquisto ti chiedero' conferma esplicita."
+            .to_string(),
+    );
+    lines.join("\n")
+}
+
+fn browser_loop_option_line(option: &Value) -> String {
+    if let Some(text) = option.as_str() {
+        return text.to_string();
+    }
+    let mut parts = Vec::new();
+    for key in [
+        "operator",
+        "train",
+        "departure",
+        "arrival",
+        "duration",
+        "price",
+        "changes",
+    ] {
+        if let Some(value) = option.get(key).and_then(Value::as_str)
+            && !value.trim().is_empty()
+        {
+            parts.push(value.to_string());
+        }
+    }
+    if parts.is_empty() {
+        truncate_chars(&option.to_string(), 240)
+    } else {
+        parts.join(" - ")
+    }
+}
+
+fn browser_loop_output_has_train_options(output: &Value, fallback_snapshot: &str) -> bool {
+    for key in ["options", "trains", "results", "journeys"] {
+        if output
+            .get(key)
+            .and_then(Value::as_array)
+            .is_some_and(|items| !items.is_empty())
+        {
+            return true;
+        }
+    }
+    if output
+        .get("summary")
+        .and_then(Value::as_str)
+        .is_some_and(|summary| !train_option_lines(summary).is_empty())
+    {
+        return true;
+    }
+    !train_option_lines(fallback_snapshot).is_empty()
+}
+
+fn browser_loop_output_from_snapshot_options(snapshot: &str, label: &str, url: &str) -> Value {
+    serde_json::json!({
+        "summary": format!("Ho estratto opzioni treno visibili da {label}."),
+        "options": train_option_lines(snapshot),
+        "sources": [url],
+    })
+}
+
+fn verified_train_option_lines(
+    sources: &[BrowserSourceSummary],
+    form_drafts: &[BrowserFormDraftSummary],
+) -> Vec<String> {
+    let mut options = Vec::new();
+    for draft in form_drafts {
+        if draft.search_status.as_deref() == Some("completed") {
+            if let Some(excerpt) = draft.search_excerpt.as_deref() {
+                options.extend(train_option_lines(excerpt));
+            }
+        }
+    }
+    if options.is_empty() {
+        for source in sources {
+            if let Some(excerpt) = source.excerpt.as_deref() {
+                options.extend(train_option_lines(excerpt));
+            }
+        }
+    }
+    dedupe_strings(options)
+}
+
+fn train_success_criteria_met(
+    sources: &[BrowserSourceSummary],
+    form_drafts: &[BrowserFormDraftSummary],
+) -> bool {
+    !verified_train_option_lines(sources, form_drafts).is_empty()
+}
+
+fn dedupe_strings(values: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    values
+        .into_iter()
+        .filter(|value| seen.insert(normalize_for_match(value)))
+        .collect()
+}
+
+fn train_option_lines(excerpt: &str) -> Vec<String> {
+    excerpt
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.chars().count() > 8)
+        .filter(|line| {
+            let normalized = normalize_for_match(line);
+            let has_train_kind = normalized.contains("frecciarossa")
+                || normalized.contains("italo")
+                || normalized.contains("intercity")
+                || normalized.contains("regionale")
+                || normalized.starts_with("fr ")
+                || normalized.starts_with("it ")
+                || normalized.starts_with("ic ")
+                || normalized.starts_with("rv ");
+            let has_route_hint = normalized.contains("napoli") || normalized.contains("milano");
+            let has_duration_hint = normalized.contains(" intermed")
+                || normalized.contains(" fermat")
+                || normalized.contains(" cambio")
+                || normalized.contains(" cambi")
+                || normalized.contains(" h ");
+            has_train_kind
+                && count_time_like_tokens(line) >= 2
+                && (has_route_hint || has_duration_hint)
+        })
+        .map(clean_train_option_line)
+        .take(8)
+        .collect()
+}
+
+fn clean_train_option_line(line: &str) -> String {
+    let trimmed = line.trim();
+    let mut cleaned = if let Some(start) = trimmed.find("row \"") {
+        let after_start = &trimmed[start + "row \"".len()..];
+        after_start
+            .find("\" [ref=")
+            .map(|end| after_start[..end].to_string())
+            .unwrap_or_else(|| trimmed.to_string())
+    } else {
+        trimmed.to_string()
+    };
+    for unsafe_cta in [
+        " Acquista subito →",
+        " Compra su Italo →",
+        " Confronta su Omio →",
+    ] {
+        cleaned = cleaned.replace(unsafe_cta, "");
+    }
+    truncate_chars(&cleaned.replace('\n', " "), 180)
+}
+
+fn count_time_like_tokens(line: &str) -> usize {
+    line.split_whitespace()
+        .filter(|token| {
+            token.split_once(':').is_some_and(|(hour, minute)| {
+                hour.parse::<u8>().is_ok() && minute.parse::<u8>().is_ok()
+            })
+        })
+        .count()
+}
+
+async fn local_computer_session(
+    State(state): State<AppState>,
+    Path(session_id): Path<String>,
+) -> Result<Json<Option<local_first_local_computer_session::ComputerSessionSnapshot>>, GatewayError>
+{
+    let store = lock_computer_store(&state)?;
+    let snapshot = LocalComputerReadModel::new(&store)
+        .snapshot(
+            &session_id,
+            gateway_user_id().as_str(),
+            gateway_workspace_id().as_str(),
+        )
+        .map_err(GatewayError::local_computer)?;
+    Ok(Json(snapshot))
+}
+
+async fn local_computer_artifact_preview(
+    State(state): State<AppState>,
+    Path((session_id, artifact_id)): Path<(String, String)>,
+) -> Result<Json<Option<ComputerArtifactPreviewResponse>>, GatewayError> {
+    let store = lock_computer_store(&state)?;
+    let artifacts = store
+        .artifacts_for_session(
+            &session_id,
+            gateway_user_id().as_str(),
+            gateway_workspace_id().as_str(),
+        )
+        .map_err(GatewayError::local_computer)?;
+    let Some(artifact) = artifacts
+        .into_iter()
+        .find(|artifact| artifact.artifact_id == artifact_id)
+    else {
+        return Ok(Json(None));
+    };
+    let path = PathBuf::from(&artifact.path_ref);
+    let bytes = fs::read(&path).map_err(|error| GatewayError {
+        status: StatusCode::BAD_GATEWAY,
+        code: "artifact_preview_unavailable",
+        message: error.to_string(),
+    })?;
+    let mime = match path.extension().and_then(|extension| extension.to_str()) {
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("png") => "image/png",
+        _ => "application/octet-stream",
+    };
+    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+    Ok(Json(Some(ComputerArtifactPreviewResponse {
+        artifact_id: artifact.artifact_id,
+        title_redacted: redact_sensitive_text(&artifact.title),
+        kind: artifact.kind,
+        size_bytes: artifact.size_bytes,
+        data_url: format!("data:{mime};base64,{encoded}"),
+    })))
+}
+
+async fn memory_dashboard(
+    State(state): State<AppState>,
+) -> Result<Json<MemoryDashboard>, GatewayError> {
+    let request = gateway_memory_access_request();
+    let facade = lock_memory_facade(&state)?;
+    let dashboard = MemoryUiReadModel::new(&facade)
+        .dashboard(&request)
+        .map_err(GatewayError::memory)?;
+    Ok(Json(dashboard))
+}
+
+async fn capability_snapshot(
+    State(state): State<AppState>,
+) -> Result<Json<CapabilitySnapshotResponse>, GatewayError> {
+    let user = gateway_capability_user_id();
+    let workspace = gateway_capability_workspace_id();
+    let registry = lock_capability_registry(&state)?;
+    let policy = registry
+        .policy_context(&user, &workspace)
+        .map_err(GatewayError::capability)?;
+    let snapshot = capability_snapshot_response(&registry, &user, &workspace, policy)?;
+    Ok(Json(snapshot))
+}
+
+async fn proxy_runtime_json(
+    state: &AppState,
+    path: &str,
+) -> Result<serde_json::Value, GatewayError> {
+    let response = state
+        .http
+        .post(format!("{}{}", state.gemma_runtime_url, path))
+        .send()
+        .await
+        .map_err(|error| GatewayError::bad_gateway("runtime_request_failed", error))?;
+    let status = response.status();
+    if !status.is_success() {
+        let message = response.text().await.unwrap_or_else(|_| status.to_string());
+        return Err(GatewayError::from_status(
+            status,
+            "runtime_request_failed",
+            message,
+        ));
+    }
+    response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|error| GatewayError::bad_gateway("runtime_response_decode_failed", error))
+}
+
+fn runtime_health_response(
+    status: &'static str,
+    message: impl Into<String>,
+    health_check: serde_json::Value,
+    control: Option<RuntimeControlSnapshot>,
+) -> RuntimeHealthResponse {
+    let message = message.into();
+    let process_pid = control
+        .as_ref()
+        .and_then(|snapshot| snapshot.managed.pid)
+        .or_else(|| {
+            control
+                .as_ref()
+                .and_then(|snapshot| snapshot.port_owner.as_ref().map(|process| process.pid))
+        });
+    let control_status = control
+        .as_ref()
+        .map(|snapshot| runtime_control_status_label(&snapshot.status))
+        .unwrap_or(status);
+    RuntimeHealthResponse {
+        processes: vec![RuntimeProcessResponse {
+            id: "llm-gemma4-mlx",
+            kind: "local_runtime",
+            status: if matches!(control_status, "duplicate_conflict" | "unhealthy") {
+                "attention"
+            } else {
+                status
+            },
+            pid: process_pid,
+            message: message.clone(),
+            health_check,
+            command_label: "Gemma 4 MLX",
+        }],
+        controls: vec![RuntimeControlResponse {
+            process_id: "llm-gemma4-mlx",
+            status: control_status,
+            port: control
+                .as_ref()
+                .and_then(|snapshot| snapshot.port)
+                .unwrap_or(8765),
+            port_owner_pid: control
+                .as_ref()
+                .and_then(|snapshot| snapshot.port_owner.as_ref().map(|process| process.pid)),
+            duplicate_count: control
+                .as_ref()
+                .map(|snapshot| snapshot.duplicates.len() as u32)
+                .unwrap_or(0),
+            total_memory_mb: control
+                .as_ref()
+                .and_then(|snapshot| snapshot.resources.total_memory_mb),
+            available_memory_mb: control
+                .as_ref()
+                .and_then(|snapshot| snapshot.resources.available_memory_mb),
+            process_memory_mb: control
+                .as_ref()
+                .and_then(|snapshot| snapshot.resources.process_memory_mb),
+            process_cpu_percent: control
+                .as_ref()
+                .and_then(|snapshot| snapshot.resources.process_cpu_percent.map(f64::from)),
+            message: control
+                .as_ref()
+                .map(|snapshot| snapshot.message.clone())
+                .unwrap_or(message),
+        }],
+    }
+}
+
+async fn ensure_runtime_available(state: &AppState) -> Result<(), GatewayError> {
+    if runtime_health_ok(state).await {
+        return Ok(());
+    }
+
+    let discovery = LocalRuntimeDiscovery;
+    lock_process_manager(state)?
+        .ensure_runtime_started("llm-gemma4-mlx", &discovery)
+        .map_err(|error| GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "runtime_start_failed",
+            message: error.to_string(),
+        })?;
+
+    let deadline =
+        tokio::time::Instant::now() + std::time::Duration::from_secs(RUNTIME_START_TIMEOUT_SECS);
+    while tokio::time::Instant::now() < deadline {
+        if runtime_health_ok(state).await {
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(350)).await;
+    }
+
+    Err(GatewayError {
+        status: StatusCode::BAD_GATEWAY,
+        code: "runtime_start_timeout",
+        message: format!(
+            "Runtime Gemma avviato ma health non pronto entro {RUNTIME_START_TIMEOUT_SECS}s"
+        ),
+    })
+}
+
+fn ensure_runtime_available_for_task(state: &AppState) -> Result<(), LocalTaskExecutionError> {
+    if runtime_health_ok_blocking(state) {
+        return Ok(());
+    }
+
+    {
+        let discovery = LocalRuntimeDiscovery;
+        lock_process_manager(state)
+            .map_err(local_task_gateway_error)?
+            .ensure_runtime_started("llm-gemma4-mlx", &discovery)
+            .map_err(|error| LocalTaskExecutionError {
+                message: format!("Runtime Gemma non avviabile per il loop browser: {error}"),
+            })?;
+    }
+
+    let deadline = std::time::Instant::now() + StdDuration::from_secs(RUNTIME_START_TIMEOUT_SECS);
+    while std::time::Instant::now() < deadline {
+        if runtime_health_ok_blocking(state) {
+            return Ok(());
+        }
+        std::thread::sleep(StdDuration::from_millis(500));
+    }
+
+    Err(LocalTaskExecutionError {
+        message: format!(
+            "Runtime Gemma avviato ma non pronto entro {RUNTIME_START_TIMEOUT_SECS}s per il loop browser."
+        ),
+    })
+}
+
+async fn runtime_health_ok(state: &AppState) -> bool {
+    state
+        .http
+        .get(format!("{}/health", state.gemma_runtime_url))
+        .send()
+        .await
+        .is_ok_and(|response| response.status().is_success())
+}
+
+fn runtime_health_ok_blocking(state: &AppState) -> bool {
+    runtime_health_ok_with_std_http(&state.gemma_runtime_url)
+}
+
+fn runtime_health_ok_with_std_http(runtime_url: &str) -> bool {
+    let Some((host, port)) = parse_loopback_http_host_port(runtime_url) else {
+        return false;
+    };
+    let Ok(mut stream) = TcpStream::connect((host.as_str(), port)) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(StdDuration::from_secs(2)));
+    let _ = stream.set_write_timeout(Some(StdDuration::from_secs(2)));
+    let request =
+        format!("GET /health HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\n\r\n");
+    if stream.write_all(request.as_bytes()).is_err() {
+        return false;
+    }
+    let mut response = [0u8; 64];
+    let Ok(read) = stream.read(&mut response) else {
+        return false;
+    };
+    std::str::from_utf8(&response[..read])
+        .is_ok_and(|text| text.starts_with("HTTP/1.1 200") || text.starts_with("HTTP/1.0 200"))
+}
+
+fn parse_loopback_http_host_port(runtime_url: &str) -> Option<(String, u16)> {
+    let without_scheme = runtime_url
+        .trim()
+        .trim_end_matches('/')
+        .strip_prefix("http://")?;
+    let host_port = without_scheme.split('/').next().unwrap_or(without_scheme);
+    let (host, port) = host_port.rsplit_once(':')?;
+    let port = port.parse::<u16>().ok()?;
+    Some((host.to_string(), port))
+}
+
+fn runtime_control_snapshot(state: &AppState) -> Result<RuntimeControlSnapshot, GatewayError> {
+    let discovery = LocalRuntimeDiscovery;
+    lock_process_manager(state)?
+        .runtime_control_snapshot("llm-gemma4-mlx", &discovery)
+        .map_err(|error| GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "runtime_control_failed",
+            message: error.to_string(),
+        })
+}
+
+fn runtime_control_status_label(status: &RuntimeControlStatus) -> &'static str {
+    match status {
+        RuntimeControlStatus::Configured => "configured",
+        RuntimeControlStatus::ManagedRunning => "managed_running",
+        RuntimeControlStatus::ExternalRunning => "external_running",
+        RuntimeControlStatus::Ready => "ready",
+        RuntimeControlStatus::Unhealthy => "unhealthy",
+        RuntimeControlStatus::DuplicateConflict => "duplicate_conflict",
+        RuntimeControlStatus::Stopped => "stopped",
+    }
+}
+
+fn task_queue_response_for_state(state: &AppState) -> Result<TaskQueueResponse, GatewayError> {
+    let user = gateway_user_id();
+    let workspace = gateway_workspace_id();
+    let store = lock_task_store(state)?;
+    let snapshot = TaskUiReadModel::new(&store)
+        .queue_snapshot(&user, &workspace)
+        .map_err(GatewayError::task)?;
+    task_queue_response(snapshot)
+}
+
+fn task_queue_response(snapshot: TaskQueueSnapshot) -> Result<TaskQueueResponse, GatewayError> {
+    let mut resource_usage = snapshot
+        .resource_usage
+        .into_iter()
+        .map(|(resource_class, units)| ResourceUsageResponse {
+            resource_class: resource_class_label(resource_class).to_string(),
+            units,
+        })
+        .collect::<Vec<_>>();
+    resource_usage.sort_by(|left, right| left.resource_class.cmp(&right.resource_class));
+
+    Ok(TaskQueueResponse {
+        queued: snapshot
+            .queued
+            .into_iter()
+            .map(task_item_response)
+            .collect::<Result<Vec<_>, _>>()?,
+        active: snapshot
+            .active
+            .into_iter()
+            .map(task_item_response)
+            .collect::<Result<Vec<_>, _>>()?,
+        blocked: snapshot
+            .blocked
+            .into_iter()
+            .map(task_item_response)
+            .collect::<Result<Vec<_>, _>>()?,
+        waiting_approvals: snapshot
+            .waiting_approvals
+            .into_iter()
+            .map(approval_item_response)
+            .collect::<Result<Vec<_>, _>>()?,
+        recent_failures: snapshot
+            .recent_failures
+            .into_iter()
+            .map(task_item_response)
+            .collect::<Result<Vec<_>, _>>()?,
+        resource_usage,
+    })
+}
+
+fn task_detail_response(detail: TaskUiDetail) -> Result<TaskDetailResponse, GatewayError> {
+    Ok(TaskDetailResponse {
+        item: task_item_response(TaskUiItem {
+            task_id: detail.task_id,
+            kind: detail.kind,
+            goal: detail.goal,
+            status: detail.status,
+            priority: detail.priority,
+            blocked_reason: detail.blocked_reason,
+        })?,
+        latest_checkpoint: detail.latest_checkpoint,
+        runtime_metadata: detail.runtime_metadata,
+        exposes_raw_input: detail.exposes_raw_input,
+    })
+}
+
+fn task_item_response(item: TaskUiItem) -> Result<TaskItemResponse, GatewayError> {
+    Ok(TaskItemResponse {
+        task_id: item.task_id.as_str().to_string(),
+        kind: item.kind,
+        goal: item.goal,
+        status: enum_label(&item.status)?,
+        priority: enum_label(&item.priority)?,
+        blocked_reason: item.blocked_reason,
+    })
+}
+
+fn approval_item_response(approval: ApprovalRequest) -> Result<ApprovalItemResponse, GatewayError> {
+    let browser_scoped = approval.action == "browser.manual_action"
+        || approval.action == "prompt_plan.approve_step"
+        || approval.data_boundary.contains("browser")
+        || approval.explanation.to_lowercase().contains("browser");
+    Ok(ApprovalItemResponse {
+        approval_id: approval.approval_id,
+        task_id: approval.task_id.as_str().to_string(),
+        action: approval.action,
+        risk_level: approval.risk_level,
+        data_boundary: approval.data_boundary,
+        explanation: approval.explanation,
+        status: enum_label(&approval.status)?,
+        scope_options: if browser_scoped {
+            vec!["once".to_string(), "always".to_string()]
+        } else {
+            vec!["once".to_string()]
+        },
+        browser_visibility_options: if browser_scoped {
+            vec![
+                "auto".to_string(),
+                "visible".to_string(),
+                "headless".to_string(),
+            ]
+        } else {
+            Vec::new()
+        },
+        default_browser_visibility: "auto".to_string(),
+    })
+}
+
+fn ensure_operational_task_for_thread(
+    state: &AppState,
+    thread_id: &str,
+    source_message_id: &str,
+    goal: &str,
+    mode: TaskCreationMode,
+) -> Result<Option<String>, GatewayError> {
+    let thread = lock_store(state)?
+        .thread(thread_id)
+        .map_err(GatewayError::store)?
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "chat_thread_not_found",
+            message: format!("chat thread not found: {thread_id}"),
+        })?;
+    let task_id = thread.task_id.clone();
+    let session_id = thread.computer_session_id.clone();
+    let user = gateway_user_id();
+    let workspace = gateway_workspace_id();
+    let task_id_ref = TaskId::new(task_id.clone());
+    let goal_redacted = task_goal_summary(goal);
+    let prompt_redacted = redact_sensitive_text(goal);
+    let task_kind = task_kind_for_prompt(goal);
+    let operational_plan = operational_plan_for_goal(goal, &task_kind);
+    let requires_approval = (requires_operational_approval(goal)
+        || mode == TaskCreationMode::AutoFromPrompt)
+        && !browser_plan_is_preapproved(state, &task_kind, goal);
+
+    {
+        let store = lock_task_store(state)?;
+        if store
+            .get_task(&task_id_ref, &user, &workspace)
+            .map_err(GatewayError::task)?
+            .is_none()
+        {
+            let mut task = TaskRecord::new(
+                task_id.clone(),
+                user.clone(),
+                workspace.clone(),
+                task_kind,
+                goal_redacted.clone(),
+                serde_json::json!({
+                    "source": "desktop_chat",
+                    "thread_id": thread_id,
+                    "message_id": source_message_id,
+                    "mode": match mode {
+                        TaskCreationMode::AutoFromPrompt => "auto_from_prompt",
+                        TaskCreationMode::ExplicitMessageAction => "explicit_message_action",
+                    },
+                    "operational_plan": operational_plan_payload(&operational_plan),
+                    "prompt_redacted": prompt_redacted,
+                    "raw_prompt_stored": false
+                }),
+            )
+            .with_priority(if mode == TaskCreationMode::ExplicitMessageAction {
+                TaskPriority::High
+            } else {
+                TaskPriority::Normal
+            })
+            .with_resource(ResourceRequirement::new(ResourceClass::ComputerSession, 1));
+            for resource in resources_for_prompt(goal) {
+                task = task.with_resource(resource);
+            }
+            task.risk_level = if requires_approval {
+                "medium".to_string()
+            } else {
+                "low".to_string()
+            };
+            task.permission_context = serde_json::json!({
+                "privacy_domains": ["local", "browser"],
+                "requires_user_approval": requires_approval,
+                "cloud_allowed": false
+            });
+            store.insert_task(&task).map_err(GatewayError::task)?;
+            store
+                .append_checkpoint(
+                    &task_id_ref,
+                    &user,
+                    &workspace,
+                    serde_json::json!({
+                        "kind": "operational_plan",
+                        "plan": operational_plan_payload(&operational_plan),
+                    }),
+                    serde_json::json!({
+                        "kind": "operational_plan",
+                        "plan": operational_plan_payload(&operational_plan),
+                    }),
+                )
+                .map_err(GatewayError::task)?;
+        }
+
+        let latest_approval = store
+            .latest_approval(&task_id_ref, &user, &workspace)
+            .map_err(GatewayError::task)?;
+        if requires_approval
+            && !matches!(
+                latest_approval.as_ref().map(|approval| approval.status),
+                Some(ApprovalStatus::Pending)
+            )
+        {
+            ApprovalGate::new()
+                .request_approval(
+                    &store,
+                    &task_id_ref,
+                    &user,
+                    &workspace,
+                    "prompt_plan.approve_step",
+                    "medium",
+                    "local_computer",
+                    &approval_explanation_for_plan(&operational_plan),
+                )
+                .map_err(GatewayError::task)?;
+        }
+    }
+
+    ensure_computer_session_for_task(
+        state,
+        &session_id,
+        &task_id,
+        thread_id,
+        &goal_redacted,
+        requires_approval,
+    )?;
+    lock_store(state)?
+        .link_message_task(thread_id, source_message_id, &task_id)
+        .map_err(GatewayError::store)?;
+    Ok(Some(task_id))
+}
+
+fn ensure_computer_session_for_task(
+    state: &AppState,
+    session_id: &str,
+    task_id: &str,
+    thread_id: &str,
+    goal_redacted: &str,
+    requires_approval: bool,
+) -> Result<(), GatewayError> {
+    let user = gateway_user_id();
+    let workspace = gateway_workspace_id();
+    let mut store = lock_computer_store(state)?;
+    if store
+        .session(session_id, user.as_str(), workspace.as_str())
+        .map_err(GatewayError::local_computer)?
+        .is_some()
+    {
+        return Ok(());
+    }
+
+    let now = OffsetDateTime::now_utc();
+    let session = ComputerSessionRecord {
+        session_id: session_id.to_string(),
+        task_id: task_id.to_string(),
+        workflow_id: Some(format!("workflow_{thread_id}")),
+        user_id: user.as_str().to_string(),
+        workspace_id: workspace.as_str().to_string(),
+        status: if requires_approval {
+            SessionStatus::WaitingUser
+        } else {
+            SessionStatus::Running
+        },
+        active_surface: if goal_redacted.to_lowercase().contains("terminal") {
+            SurfaceKind::Shell
+        } else {
+            SurfaceKind::Browser
+        },
+        surfaces: default_computer_surfaces(now),
+        title: "Computer locale".to_string(),
+        subtitle: goal_redacted.to_string(),
+        progress_current: 0,
+        progress_total: if requires_approval { 3 } else { 2 },
+        approval_state: if requires_approval {
+            ApprovalState::WaitingUser
+        } else {
+            ApprovalState::None
+        },
+        takeover_state: TakeoverState::None,
+        risk_level: if requires_approval { "medium" } else { "low" }.to_string(),
+        last_error: None,
+        started_at: now,
+        updated_at: now,
+    };
+    store
+        .upsert_session(&session)
+        .map_err(GatewayError::local_computer)?;
+    append_computer_event(
+        &mut store,
+        session_id,
+        &user,
+        &workspace,
+        SurfaceKind::Logs,
+        "computer_session_started",
+        "done",
+        "Task locale creato",
+        "Sessione Computer locale associata alla chat.",
+        false,
+    )?;
+    if requires_approval {
+        append_computer_event(
+            &mut store,
+            session_id,
+            &user,
+            &workspace,
+            SurfaceKind::Logs,
+            "computer_approval_required",
+            "waiting",
+            "Approval richiesta",
+            "Conferma il piano prima di eseguire azioni locali.",
+            true,
+        )?;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_computer_event(
+    store: &mut LocalComputerSessionStore,
+    session_id: &str,
+    user: &UserId,
+    workspace: &WorkspaceId,
+    surface: SurfaceKind,
+    kind: &str,
+    status: &str,
+    title: &str,
+    subtitle: &str,
+    approval_required: bool,
+) -> Result<(), GatewayError> {
+    store
+        .append_event(&ComputerEventRecord {
+            event_id: format!(
+                "event_{}_{}",
+                OffsetDateTime::now_utc().unix_timestamp_nanos(),
+                kind
+            ),
+            session_id: session_id.to_string(),
+            user_id: user.as_str().to_string(),
+            workspace_id: workspace.as_str().to_string(),
+            surface,
+            kind: kind.to_string(),
+            status: status.to_string(),
+            title: title.to_string(),
+            subtitle: subtitle.to_string(),
+            payload: serde_json::json!({ "payload_redacted": true }),
+            artifact_refs: vec![],
+            approval_required,
+            created_at: OffsetDateTime::now_utc(),
+        })
+        .map_err(GatewayError::local_computer)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_computer_event_with_payload(
+    store: &mut LocalComputerSessionStore,
+    session_id: &str,
+    user: &UserId,
+    workspace: &WorkspaceId,
+    surface: SurfaceKind,
+    kind: &str,
+    status: &str,
+    title: &str,
+    subtitle: &str,
+    payload: Value,
+    approval_required: bool,
+    artifact_refs: Vec<String>,
+) -> Result<(), GatewayError> {
+    store
+        .append_event(&ComputerEventRecord {
+            event_id: format!(
+                "event_{}_{}",
+                OffsetDateTime::now_utc().unix_timestamp_nanos(),
+                kind
+            ),
+            session_id: session_id.to_string(),
+            user_id: user.as_str().to_string(),
+            workspace_id: workspace.as_str().to_string(),
+            surface,
+            kind: kind.to_string(),
+            status: status.to_string(),
+            title: title.to_string(),
+            subtitle: subtitle.to_string(),
+            payload,
+            artifact_refs,
+            approval_required,
+            created_at: OffsetDateTime::now_utc(),
+        })
+        .map_err(GatewayError::local_computer)
+}
+
+fn default_computer_surfaces(now: OffsetDateTime) -> Vec<ComputerSurfaceRecord> {
+    [
+        (SurfaceKind::Browser, "Browser"),
+        (SurfaceKind::Shell, "Terminale"),
+        (SurfaceKind::Files, "File"),
+        (SurfaceKind::Logs, "Log"),
+    ]
+    .into_iter()
+    .map(|(surface, label)| ComputerSurfaceRecord {
+        surface,
+        label: label.to_string(),
+        status: SurfaceStatus::Idle,
+        detail: None,
+        updated_at: now,
+    })
+    .collect()
+}
+
+fn surface_for_task(task: &TaskRecord) -> SurfaceKind {
+    match task.kind.as_str() {
+        "local_shell_task" => SurfaceKind::Shell,
+        "browser_task" => SurfaceKind::Browser,
+        kind if kind.starts_with("capability.browser.") => SurfaceKind::Browser,
+        _ => SurfaceKind::Logs,
+    }
+}
+
+fn browser_automation_dir() -> PathBuf {
+    if let Ok(path) = env::var("LOCAL_FIRST_BROWSER_AUTOMATION_DIR") {
+        return PathBuf::from(path);
+    }
+    FsPath::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../runtimes/browser-automation")
+        .components()
+        .collect()
+}
+
+fn browser_headless_env_value() -> String {
+    env::var("LOCAL_FIRST_BROWSER_HEADLESS").unwrap_or_else(|_| "0".to_string())
+}
+
+fn browser_headless_env_value_for_task(state: &AppState, task: &TaskRecord) -> String {
+    let fallback = browser_headless_env_value();
+    browser_visibility_for_task(state, task).headless_env_value(&fallback)
+}
+
+fn browser_visibility_for_task(state: &AppState, task: &TaskRecord) -> BrowserVisibilityMode {
+    if !task_uses_browser(task) {
+        return BrowserVisibilityMode::Auto;
+    }
+    let latest_checkpoint_visibility = task
+        .checkpoint_json
+        .as_ref()
+        .and_then(|checkpoint| checkpoint.get("browser_visibility"))
+        .and_then(Value::as_str)
+        .map(|value| parse_browser_visibility(Some(value)))
+        .filter(|visibility| *visibility != BrowserVisibilityMode::Auto);
+    if let Some(visibility) = latest_checkpoint_visibility {
+        return visibility;
+    }
+
+    let Ok(policy_store) = lock_browser_url_policies(state) else {
+        return BrowserVisibilityMode::Auto;
+    };
+    for target in browser_targets_for_goal(&task_effective_goal(task)) {
+        let Ok(Some(rule)) = policy_store.rule_for_url(
+            gateway_user_id().as_str(),
+            gateway_workspace_id().as_str(),
+            &target.url,
+            "navigate",
+        ) else {
+            continue;
+        };
+        if rule.visibility != BrowserVisibilityMode::Auto {
+            return rule.visibility;
+        }
+    }
+    BrowserVisibilityMode::Auto
+}
+
+fn task_uses_browser(task: &TaskRecord) -> bool {
+    task.kind == "browser_task"
+        || task.kind.starts_with("capability.browser.")
+        || task
+            .resource_requirements
+            .iter()
+            .any(|resource| resource.class == ResourceClass::BrowserSession)
+}
+
+fn browser_plan_is_preapproved(state: &AppState, task_kind: &str, goal: &str) -> bool {
+    if task_kind != "browser_task" {
+        return false;
+    }
+    let targets = browser_targets_for_goal(goal);
+    if targets.is_empty() {
+        return false;
+    }
+    let Ok(policy_store) = lock_browser_url_policies(state) else {
+        return false;
+    };
+    targets.iter().all(|target| {
+        policy_store
+            .rule_for_url(
+                gateway_user_id().as_str(),
+                gateway_workspace_id().as_str(),
+                &target.url,
+                "navigate",
+            )
+            .ok()
+            .flatten()
+            .is_some()
+    })
+}
+
+fn parse_approval_scope(value: Option<&str>) -> BrowserUrlApprovalScope {
+    match value {
+        Some("always") => BrowserUrlApprovalScope::Always,
+        _ => BrowserUrlApprovalScope::Once,
+    }
+}
+
+fn parse_browser_visibility(value: Option<&str>) -> BrowserVisibilityMode {
+    match value {
+        Some("headless") => BrowserVisibilityMode::Headless,
+        Some("visible") => BrowserVisibilityMode::Visible,
+        _ => BrowserVisibilityMode::Auto,
+    }
+}
+
+fn approval_scope_label(value: BrowserUrlApprovalScope) -> &'static str {
+    match value {
+        BrowserUrlApprovalScope::Once => "once",
+        BrowserUrlApprovalScope::Always => "always",
+    }
+}
+
+fn browser_visibility_label(value: BrowserVisibilityMode) -> &'static str {
+    match value {
+        BrowserVisibilityMode::Auto => "auto",
+        BrowserVisibilityMode::Headless => "headless",
+        BrowserVisibilityMode::Visible => "visible",
+    }
+}
+
+#[derive(Debug, Clone)]
+struct BrowserTarget {
+    label: String,
+    url: String,
+}
+
+fn browser_targets_for_goal(goal: &str) -> Vec<BrowserTarget> {
+    let normalized = goal.to_lowercase();
+    if normalized.contains("treno")
+        || normalized.contains("trenitalia")
+        || normalized.contains("italo")
+        || normalized.contains("milano")
+        || normalized.contains("napoli")
+    {
+        let wants_trenitalia = normalized.contains("trenitalia");
+        let wants_italo = normalized.contains("italotreno")
+            || normalized.contains("italo treno")
+            || normalized.contains("italo");
+        if wants_trenitalia && !wants_italo {
+            return vec![BrowserTarget {
+                label: "Trenitalia".to_string(),
+                url: "https://www.trenitalia.com/".to_string(),
+            }];
+        }
+        if wants_italo && !wants_trenitalia {
+            return vec![BrowserTarget {
+                label: "Italo".to_string(),
+                url: "https://www.italotreno.com/it".to_string(),
+            }];
+        }
+        let trovatreno_url = train_search_draft_for_goal(goal)
+            .map(|draft| trovatreno_search_url(&draft))
+            .unwrap_or_else(|| "https://www.trovatreno.it/cerca".to_string());
+        return vec![
+            BrowserTarget {
+                label: "TrovaTreno".to_string(),
+                url: trovatreno_url,
+            },
+            BrowserTarget {
+                label: "Trenitalia".to_string(),
+                url: "https://www.trenitalia.com/".to_string(),
+            },
+            BrowserTarget {
+                label: "Italo".to_string(),
+                url: "https://www.italotreno.com/".to_string(),
+            },
+            BrowserTarget {
+                label: "Ricerca web".to_string(),
+                url: browser_url_for_goal(goal),
+            },
+        ];
+    }
+    vec![BrowserTarget {
+        label: "Ricerca web".to_string(),
+        url: browser_url_for_goal(goal),
+    }]
+}
+
+fn operational_plan_for_goal(goal: &str, task_kind: &str) -> OperationalPlan {
+    let is_train = train_search_draft_for_goal(goal).is_some();
+    if is_train {
+        return OperationalPlan {
+            objective: task_goal_summary(goal),
+            intent_type: OperationalIntentType::Transactional,
+            autonomy: OperationalAutonomy::AutomaticUntilGate,
+            tools: vec!["browser".to_string()],
+            steps: train_operational_plan_steps(goal),
+            constraints: vec![
+                "Non fare login.".to_string(),
+                "Non inserire dati passeggero o dati sensibili.".to_string(),
+                "Non selezionare una corsa finale senza scelta utente.".to_string(),
+                "Non acquistare e non pagare.".to_string(),
+            ],
+            success_criteria: vec![
+                "Almeno una opzione treno reale e leggibile e' stata estratta.".to_string(),
+                "La risposta include fonte, orario e prossimo gate utente.".to_string(),
+            ],
+            stop_conditions: vec![
+                "Login richiesto.".to_string(),
+                "Pagamento/acquisto richiesto.".to_string(),
+                "Captcha o blocco anti-bot non superabile in modo locale sicuro.".to_string(),
+            ],
+            approval_gates: vec![
+                "Uso browser e compilazione form read-only.".to_string(),
+                "Login, scelta corsa, dati passeggero, invio finale o pagamento richiedono nuova conferma."
+                    .to_string(),
+            ],
+            data_schema: vec![
+                "operator".to_string(),
+                "departure_time".to_string(),
+                "arrival_time_or_duration".to_string(),
+                "changes".to_string(),
+                "price".to_string(),
+                "source_url".to_string(),
+            ],
+        };
+    }
+
+    let needs_browser = task_kind == "browser_task";
+    OperationalPlan {
+        objective: task_goal_summary(goal),
+        intent_type: if needs_browser {
+            OperationalIntentType::Navigational
+        } else {
+            OperationalIntentType::Informational
+        },
+        autonomy: if needs_browser {
+            OperationalAutonomy::AutomaticUntilGate
+        } else {
+            OperationalAutonomy::AskBeforeEachExternalAction
+        },
+        tools: if needs_browser {
+            vec!["browser".to_string()]
+        } else {
+            Vec::new()
+        },
+        steps: vec![
+            operational_step(
+                "understand_request",
+                "Comprendere richiesta",
+                "Capire obiettivo e vincoli dichiarati dall'utente.",
+                None,
+            ),
+            operational_step(
+                "execute_safe_actions",
+                "Eseguire azioni consentite",
+                "Usare solo strumenti locali e fermarsi ai gate di rischio.",
+                if needs_browser { Some("browser") } else { None },
+            ),
+            operational_step(
+                "answer",
+                "Rispondere",
+                "Sintetizzare risultato e limiti in chat.",
+                None,
+            ),
+        ],
+        constraints: vec!["Tutto local-first; nessuna API cloud.".to_string()],
+        success_criteria: vec!["Risposta utile prodotta senza violare i vincoli.".to_string()],
+        stop_conditions: vec!["Serve conferma utente per azioni rischiose.".to_string()],
+        approval_gates: Vec::new(),
+        data_schema: Vec::new(),
+    }
+}
+
+fn train_operational_plan_steps(goal: &str) -> Vec<OperationalPlanStep> {
+    let mut steps = vec![operational_step(
+        "understand_request",
+        "Comprendere richiesta",
+        "Estrarre tratta, data, orario indicativo e vincolo di non acquistare. Check: origin, destination, date e time sono disponibili prima di aprire il browser.",
+        None,
+    )];
+
+    for target in browser_targets_for_goal(goal) {
+        let open_id = source_step_id(&target.label, "open");
+        steps.push(operational_step(
+            open_id,
+            format!("Aprire {}", target.label),
+            format!(
+                "Aprire {} in browser locale e salvare URL finale/snapshot redatto. Fonte: {}",
+                target.label, target.url
+            ),
+            Some("browser"),
+        ));
+
+        if is_train_operator(&target.label) {
+            steps.push(operational_step(
+                source_step_id(&target.label, "fill"),
+                format!("Compilare {}", target.label),
+                "Inserire partenza, arrivo, data e ora nei campi riconoscibili. Check: i campi compilati devono essere riportati nel checkpoint.",
+                Some("browser"),
+            ));
+            steps.push(operational_step(
+                source_step_id(&target.label, "search"),
+                format!("Cercare risultati su {}", target.label),
+                "Avviare solo un controllo di ricerca sicuro. Vietato premere acquisto, login, pagamento o selezione definitiva.",
+                Some("browser"),
+            ));
+            steps.push(operational_step(
+                source_step_id(&target.label, "extract"),
+                format!("Estrarre opzioni da {}", target.label),
+                "Estrarre righe con operatore/treno, partenza, arrivo o durata e fonte. Se non ci sono righe affidabili, segnare lo step bloccato.",
+                Some("browser"),
+            ));
+        }
+    }
+
+    steps.push(operational_step(
+        "consolidate_options",
+        "Consolidare opzioni",
+        "Unire le opzioni affidabili, rimuovere duplicati e ordinare per vicinanza all'orario richiesto.",
+        None,
+    ));
+    steps.push(operational_step(
+        "answer_and_next_gate",
+        "Rispondere e chiedere scelta",
+        "Mostrare opzioni ordinate e chiedere quale procedere a prenotare. Prima di login, dati passeggero o pagamento serve nuova conferma.",
+        None,
+    ));
+    steps
+}
+
+fn source_step_id(label: &str, action: &str) -> String {
+    format!("source_{}_{}", slug_label(label), action)
+}
+
+fn slug_label(label: &str) -> String {
+    normalize_for_match(label)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("_")
+}
+
+fn operational_plan_payload(plan: &OperationalPlan) -> Value {
+    serde_json::to_value(plan).unwrap_or_else(|_| serde_json::json!({ "error": "plan_encode" }))
+}
+
+fn operational_plan_markdown(plan: &OperationalPlan) -> String {
+    let mut lines = Vec::new();
+    lines.push(format!(
+        "# Piano operativo\n\nObiettivo: {}",
+        plan.objective
+    ));
+    lines.push(format!(
+        "Intento: {:?}  \nAutonomia: {:?}  \nTool: {}",
+        plan.intent_type,
+        plan.autonomy,
+        if plan.tools.is_empty() {
+            "nessuno".to_string()
+        } else {
+            plan.tools.join(", ")
+        }
+    ));
+    lines.push("\n## Tasklist".to_string());
+    for step in &plan.steps {
+        let marker = match step.status {
+            OperationalStepStatus::Pending => "[ ]",
+            OperationalStepStatus::InProgress => "[-]",
+            OperationalStepStatus::Completed => "[x]",
+            OperationalStepStatus::Blocked => "[!]",
+        };
+        let tool = step
+            .tool
+            .as_deref()
+            .map(|tool| format!(" `{tool}`"))
+            .unwrap_or_default();
+        lines.push(format!(
+            "- {marker} **{}**{} (`{}`): {}",
+            step.title, tool, step.id, step.detail
+        ));
+    }
+    if !plan.success_criteria.is_empty() {
+        lines.push("\n## Criteri di successo".to_string());
+        lines.extend(plan.success_criteria.iter().map(|item| format!("- {item}")));
+    }
+    if !plan.constraints.is_empty() {
+        lines.push("\n## Vincoli".to_string());
+        lines.extend(plan.constraints.iter().map(|item| format!("- {item}")));
+    }
+    if !plan.stop_conditions.is_empty() {
+        lines.push("\n## Stop condition".to_string());
+        lines.extend(plan.stop_conditions.iter().map(|item| format!("- {item}")));
+    }
+    if !plan.approval_gates.is_empty() {
+        lines.push("\n## Gate di approvazione".to_string());
+        lines.extend(plan.approval_gates.iter().map(|item| format!("- {item}")));
+    }
+    lines.join("\n")
+}
+
+fn write_operational_plan_artifact(
+    task: &TaskRecord,
+    plan: &OperationalPlan,
+) -> Result<TaskArtifactOutput, LocalTaskExecutionError> {
+    let artifact_id = format!("artifact_{}_operational_plan", task.task_id.as_str());
+    let file_name = format!("{artifact_id}.md");
+    let artifact_root = env::temp_dir().join("local-first-browser-artifacts");
+    fs::create_dir_all(&artifact_root).map_err(|error| LocalTaskExecutionError {
+        message: format!("Creazione directory artifact piano fallita: {error}"),
+    })?;
+    let path = artifact_root.join(file_name);
+    let markdown = operational_plan_markdown(plan);
+    fs::write(&path, markdown.as_bytes()).map_err(|error| LocalTaskExecutionError {
+        message: format!("Scrittura artifact piano fallita: {error}"),
+    })?;
+    Ok(TaskArtifactOutput {
+        artifact_id,
+        title: "Piano operativo seguito".to_string(),
+        kind: "markdown".to_string(),
+        path_ref: path.display().to_string(),
+        size_bytes: markdown.len() as u64,
+        preview_ref: None,
+    })
+}
+
+fn approval_explanation_for_plan(plan: &OperationalPlan) -> String {
+    let steps = plan
+        .steps
+        .iter()
+        .map(|step| step.title.as_str())
+        .collect::<Vec<_>>()
+        .join(" -> ");
+    let gates = if plan.approval_gates.is_empty() {
+        "Mi fermo prima di azioni rischiose o non comprese nel piano.".to_string()
+    } else {
+        plan.approval_gates.join(" ")
+    };
+    format!(
+        "Conferma il piano operativo prima di usare browser, terminale o azioni locali. Piano: {steps}. {gates}"
+    )
+}
+
+fn browser_url_for_goal(goal: &str) -> String {
+    let normalized = goal.to_lowercase();
+    if normalized.contains("trenitalia") {
+        return "https://www.trenitalia.com/".to_string();
+    }
+    let query = if normalized.contains("treno")
+        || normalized.contains("milano")
+        || normalized.contains("napoli")
+    {
+        format!("{goal} Trenitalia Italo orari")
+    } else {
+        goal.to_string()
+    };
+    format!("https://duckduckgo.com/?q={}", url_encode(&query))
+}
+
+fn is_train_operator(label: &str) -> bool {
+    matches!(label, "TrovaTreno" | "Trenitalia" | "Italo")
+}
+
+fn train_search_draft_for_goal(goal: &str) -> Option<TrainSearchDraft> {
+    let normalized = normalize_for_match(goal);
+    if !(normalized.contains("treno")
+        || normalized.contains("trenitalia")
+        || normalized.contains("italo")
+        || normalized.contains("milano")
+        || normalized.contains("napoli"))
+    {
+        return None;
+    }
+
+    let cities = [
+        ("napoli", "Napoli"),
+        ("milano", "Milano"),
+        ("roma", "Roma"),
+        ("torino", "Torino"),
+        ("bologna", "Bologna"),
+        ("firenze", "Firenze"),
+        ("venezia", "Venezia"),
+        ("genova", "Genova"),
+        ("salerno", "Salerno"),
+        ("verona", "Verona"),
+    ];
+    let mut found = cities
+        .iter()
+        .filter_map(|(needle, label)| normalized.find(needle).map(|index| (index, *label)))
+        .collect::<Vec<_>>();
+    found.sort_by_key(|(index, _)| *index);
+    found.dedup_by(|left, right| left.1 == right.1);
+    let (origin, destination) = if found.len() >= 2 {
+        (found[0].1.to_string(), found[1].1.to_string())
+    } else if normalized.contains("napoli") && normalized.contains("milano") {
+        ("Napoli".to_string(), "Milano".to_string())
+    } else {
+        return None;
+    };
+
+    Some(TrainSearchDraft {
+        origin,
+        destination,
+        date: extract_italian_date(goal),
+        time: extract_time_label(goal),
+    })
+}
+
+fn extract_italian_date(goal: &str) -> Option<String> {
+    for token in goal.split_whitespace() {
+        if let Some(date) = parse_numeric_date(token) {
+            return Some(date);
+        }
+    }
+
+    let normalized = normalize_for_match(goal);
+    let tokens = normalized.split_whitespace().collect::<Vec<_>>();
+    for window in tokens.windows(2) {
+        let Ok(day) = window[0].parse::<u8>() else {
+            continue;
+        };
+        if !(1..=31).contains(&day) {
+            continue;
+        }
+        let Some(month) = italian_month_number(window[1]) else {
+            continue;
+        };
+        return Some(format!(
+            "{day:02}/{month:02}/{}",
+            OffsetDateTime::now_utc().year()
+        ));
+    }
+    None
+}
+
+fn parse_numeric_date(token: &str) -> Option<String> {
+    let separator = if token.contains('/') {
+        '/'
+    } else if token.contains('-') {
+        '-'
+    } else {
+        return None;
+    };
+    let parts = token.split(separator).collect::<Vec<_>>();
+    if parts.len() < 2 {
+        return None;
+    }
+    let day = parts[0].parse::<u8>().ok()?;
+    let month = parts[1].parse::<u8>().ok()?;
+    if !(1..=31).contains(&day) || !(1..=12).contains(&month) {
+        return None;
+    }
+    let year = parts
+        .get(2)
+        .and_then(|value| value.parse::<i32>().ok())
+        .unwrap_or_else(|| OffsetDateTime::now_utc().year());
+    Some(format!("{day:02}/{month:02}/{year}"))
+}
+
+fn italian_month_number(value: &str) -> Option<u8> {
+    match value {
+        "gennaio" => Some(1),
+        "febbraio" => Some(2),
+        "marzo" => Some(3),
+        "aprile" => Some(4),
+        "maggio" => Some(5),
+        "giugno" => Some(6),
+        "luglio" => Some(7),
+        "agosto" => Some(8),
+        "settembre" => Some(9),
+        "ottobre" => Some(10),
+        "novembre" => Some(11),
+        "dicembre" => Some(12),
+        _ => None,
+    }
+}
+
+fn extract_time_label(goal: &str) -> Option<String> {
+    let normalized = normalize_for_match(goal);
+    let tokens = normalized.split_whitespace().collect::<Vec<_>>();
+    for (index, token) in tokens.iter().enumerate() {
+        if let Some((hour, minute)) = parse_time_token(token) {
+            let previous = index
+                .checked_sub(1)
+                .and_then(|prev| tokens.get(prev).copied());
+            let previous_two = index
+                .checked_sub(2)
+                .and_then(|prev| tokens.get(prev).copied());
+            if matches!(previous, Some("alle" | "ore" | "verso" | "h" | "le"))
+                || matches!(previous_two, Some("verso"))
+            {
+                return Some(format!("{hour:02}:{minute:02}"));
+            }
+        }
+    }
+    None
+}
+
+fn parse_time_token(token: &str) -> Option<(u8, u8)> {
+    if let Some((hour, minute)) = token.split_once(':') {
+        let hour = hour.parse::<u8>().ok()?;
+        let minute = minute.parse::<u8>().ok()?;
+        if hour <= 23 && minute <= 59 {
+            return Some((hour, minute));
+        }
+        return None;
+    }
+    let hour = token.parse::<u8>().ok()?;
+    if hour <= 23 { Some((hour, 0)) } else { None }
+}
+
+fn train_draft_redacted_payload(draft: &TrainSearchDraft) -> Value {
+    serde_json::json!({
+        "origin": draft.origin,
+        "destination": draft.destination,
+        "date": draft.date,
+        "time": draft.time,
+    })
+}
+
+fn browser_form_draft_payload(draft: &BrowserFormDraftSummary) -> Value {
+    serde_json::json!({
+        "label": draft.label,
+        "url": draft.url,
+        "status": draft.status,
+        "filled_fields": draft.filled_fields,
+        "reason": draft.reason,
+        "search_status": draft.search_status,
+        "search_excerpt": draft.search_excerpt,
+    })
+}
+
+fn select_train_station_autocompletes(
+    client: &BrowserAutomationClient<BrowserSidecarSession>,
+    target_id: &str,
+    draft: &TrainSearchDraft,
+    snapshot: &Value,
+    operator_label: &str,
+) -> Result<TrainStationSelectionResult, LocalTaskExecutionError> {
+    let mut result = TrainStationSelectionResult {
+        filled_fields: Vec::new(),
+        failed_fields: Vec::new(),
+        latest_snapshot: Some(snapshot.clone()),
+    };
+
+    for station in train_station_autocomplete_targets(snapshot, draft) {
+        let typed = client.call(
+            BrowserMethod::Act,
+            serde_json::json!({
+                "target_id": target_id,
+                "kind": "type",
+                "ref": station.input_ref,
+                "text": station.query,
+                "snapshot_after": true,
+            }),
+        );
+        let typed_snapshot = match typed {
+            Ok(value) => value,
+            Err(error) => {
+                result.failed_fields.push(format!(
+                    "{}: {}",
+                    station.field_label,
+                    redact_sensitive_text(&truncate_chars(&error.to_string(), 160))
+                ));
+                continue;
+            }
+        };
+        result.latest_snapshot = Some(typed_snapshot.clone());
+        let Some((suggestion_ref, suggestion_name)) =
+            train_station_suggestion_for_snapshot(&typed_snapshot, &station.preferred_names)
+        else {
+            result.failed_fields.push(format!(
+                "{}: nessun suggerimento stazione affidabile per {}",
+                station.field_label, operator_label
+            ));
+            continue;
+        };
+        match client.call(
+            BrowserMethod::Act,
+            serde_json::json!({
+                "target_id": target_id,
+                "kind": "click",
+                "ref": suggestion_ref,
+                "snapshot_after": true,
+            }),
+        ) {
+            Ok(value) => {
+                result.latest_snapshot = Some(value);
+                result
+                    .filled_fields
+                    .push(format!("{} ({})", station.field_label, suggestion_name));
+            }
+            Err(error) => result.failed_fields.push(format!(
+                "{}: {}",
+                station.field_label,
+                redact_sensitive_text(&truncate_chars(&error.to_string(), 160))
+            )),
+        }
+    }
+
+    Ok(result)
+}
+
+struct TrainStationAutocompleteTarget {
+    field_label: String,
+    input_ref: String,
+    query: String,
+    preferred_names: Vec<String>,
+}
+
+fn train_station_autocomplete_targets(
+    snapshot: &Value,
+    draft: &TrainSearchDraft,
+) -> Vec<TrainStationAutocompleteTarget> {
+    let refs = snapshot
+        .get("refs")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut targets = Vec::new();
+    if let Some(input_ref) = ref_for_station_textbox(&refs, &["partenza", "origine", "from"]) {
+        targets.push(TrainStationAutocompleteTarget {
+            field_label: "partenza".to_string(),
+            input_ref,
+            query: draft.origin.clone(),
+            preferred_names: preferred_station_names(&draft.origin),
+        });
+    }
+    if let Some(input_ref) =
+        ref_for_station_textbox(&refs, &["arrivo", "destinazione", "destination", "to"])
+    {
+        targets.push(TrainStationAutocompleteTarget {
+            field_label: "arrivo".to_string(),
+            input_ref,
+            query: draft.destination.clone(),
+            preferred_names: preferred_station_names(&draft.destination),
+        });
+    }
+    targets
+}
+
+fn ref_for_station_textbox(refs: &[Value], needles: &[&str]) -> Option<String> {
+    refs.iter().find_map(|candidate| {
+        let role = candidate.get("role").and_then(Value::as_str).unwrap_or("");
+        if role != "textbox" {
+            return None;
+        }
+        let name = normalize_for_match(candidate.get("name").and_then(Value::as_str).unwrap_or(""));
+        if needles
+            .iter()
+            .any(|needle| normalized_name_matches(&name, needle))
+        {
+            candidate
+                .get("ref")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        } else {
+            None
+        }
+    })
+}
+
+fn normalized_name_matches(normalized_name: &str, needle: &str) -> bool {
+    let normalized_needle = normalize_for_match(needle);
+    if normalized_needle.contains(' ') {
+        return normalized_name.contains(&normalized_needle);
+    }
+    normalized_name
+        .split_whitespace()
+        .any(|token| token == normalized_needle)
+}
+
+fn preferred_station_names(city: &str) -> Vec<String> {
+    let normalized = normalize_for_match(city);
+    if normalized.contains("napoli") {
+        return vec![
+            "Napoli Centrale".to_string(),
+            "Napoli Afragola".to_string(),
+            "Napoli ( Tutte Le Stazioni )".to_string(),
+            "Napoli".to_string(),
+        ];
+    }
+    if normalized.contains("milano") {
+        return vec![
+            "Milano Centrale".to_string(),
+            "Milano Rogoredo".to_string(),
+            "Milano Porta Garibaldi".to_string(),
+            "Milano ( Tutte le stazioni )".to_string(),
+            "Milano".to_string(),
+        ];
+    }
+    vec![city.to_string()]
+}
+
+fn train_station_suggestion_for_snapshot(
+    snapshot: &Value,
+    preferred_names: &[String],
+) -> Option<(String, String)> {
+    let refs = snapshot.get("refs").and_then(Value::as_array)?;
+    for preferred in preferred_names {
+        let preferred_normalized = normalize_for_match(preferred);
+        if let Some(match_ref) = refs.iter().find_map(|candidate| {
+            let role = candidate.get("role").and_then(Value::as_str).unwrap_or("");
+            if role != "button" {
+                return None;
+            }
+            let name = candidate.get("name").and_then(Value::as_str).unwrap_or("");
+            if normalize_for_match(name) == preferred_normalized {
+                Some((
+                    candidate.get("ref")?.as_str()?.to_string(),
+                    name.to_string(),
+                ))
+            } else {
+                None
+            }
+        }) {
+            return Some(match_ref);
+        }
+    }
+    None
+}
+
+fn attempt_train_options_search(
+    state: &AppState,
+    task: &TaskRecord,
+    client: &BrowserAutomationClient<BrowserSidecarSession>,
+    target_id: &str,
+    label: &str,
+    draft: Option<&TrainSearchDraft>,
+) -> Result<BrowserSearchResult, LocalTaskExecutionError> {
+    if label == "TrovaTreno" {
+        if let Some(draft) = draft {
+            return navigate_trovatreno_results(state, task, client, target_id, draft);
+        }
+    }
+    let snapshot = client
+        .call(
+            BrowserMethod::Snapshot,
+            serde_json::json!({ "target_id": target_id }),
+        )
+        .map_err(|error| LocalTaskExecutionError {
+            message: format!("Snapshot ricerca {label} non disponibile: {error}"),
+        })?;
+    let Some((ref_id, button_name)) = train_search_button_for_snapshot(&snapshot) else {
+        append_task_progress_checkpoint(
+            state,
+            task,
+            "browser_train_search_blocked",
+            SurfaceKind::Browser,
+            &format!("{label} ricerca non avviata"),
+            "Non ho trovato un pulsante Cerca/Mostra risultati sicuro nello snapshot corrente.",
+            serde_json::json!({
+                "kind": "browser_train_search_blocked",
+                "label": label,
+                "reason": "no_safe_search_button",
+            }),
+        )
+        .map_err(local_task_gateway_error)?;
+        return Ok(BrowserSearchResult {
+            status: "blocked".to_string(),
+            excerpt: None,
+            snapshot: None,
+        });
+    };
+
+    append_task_progress_checkpoint(
+        state,
+        task,
+        "browser_train_search_started",
+        SurfaceKind::Browser,
+        &format!("Cerco opzioni {label}"),
+        &format!("Premo il controllo di ricerca sicuro `{button_name}` per leggere le opzioni. Non procedo a login, scelta posto, acquisto o pagamento."),
+        serde_json::json!({
+            "kind": "browser_train_search_started",
+            "label": label,
+            "target_id": target_id,
+            "button": button_name,
+        }),
+    )
+    .map_err(local_task_gateway_error)?;
+
+    match client.call(
+        BrowserMethod::Act,
+        serde_json::json!({
+            "target_id": target_id,
+            "kind": "click",
+            "ref": ref_id,
+            "snapshot_after": true,
+        }),
+    ) {
+        Ok(result) => {
+            let excerpt = result
+                .get("snapshot")
+                .and_then(Value::as_str)
+                .map(|text| truncate_chars(text, 1_400));
+            append_task_progress_checkpoint(
+                state,
+                task,
+                "browser_train_search_completed",
+                SurfaceKind::Browser,
+                &format!("{label} risultati letti"),
+                "Ho letto la pagina risultante dopo la ricerca senza selezionare opzioni o acquistare.",
+                serde_json::json!({
+                    "kind": "browser_train_search_completed",
+                    "label": label,
+                    "target_id": target_id,
+                    "button": button_name,
+                    "excerpt": excerpt,
+                }),
+            )
+            .map_err(local_task_gateway_error)?;
+            Ok(BrowserSearchResult {
+                status: "completed".to_string(),
+                excerpt,
+                snapshot: Some(result),
+            })
+        }
+        Err(error) => {
+            let redacted_error = redact_sensitive_text(&truncate_chars(&error.to_string(), 180));
+            append_task_progress_checkpoint(
+                state,
+                task,
+                "browser_train_search_failed",
+                SurfaceKind::Browser,
+                &format!("{label} ricerca non completata"),
+                "Il click di ricerca non ha prodotto risultati leggibili.",
+                serde_json::json!({
+                    "kind": "browser_train_search_failed",
+                    "label": label,
+                    "target_id": target_id,
+                    "button": button_name,
+                    "error": redacted_error,
+                }),
+            )
+            .map_err(local_task_gateway_error)?;
+            Ok(BrowserSearchResult {
+                status: "failed".to_string(),
+                excerpt: Some(redacted_error),
+                snapshot: None,
+            })
+        }
+    }
+}
+
+fn navigate_trovatreno_results(
+    state: &AppState,
+    task: &TaskRecord,
+    client: &BrowserAutomationClient<BrowserSidecarSession>,
+    target_id: &str,
+    draft: &TrainSearchDraft,
+) -> Result<BrowserSearchResult, LocalTaskExecutionError> {
+    let url = trovatreno_search_url(draft);
+    append_task_progress_checkpoint(
+        state,
+        task,
+        "browser_train_search_started",
+        SurfaceKind::Browser,
+        "Cerco opzioni TrovaTreno",
+        "Apro la pagina risultati con parametri di ricerca; non seleziono treni, acquisti o pagamenti.",
+        serde_json::json!({
+            "kind": "browser_train_search_started",
+            "label": "TrovaTreno",
+            "target_id": target_id,
+            "url": url,
+        }),
+    )
+    .map_err(local_task_gateway_error)?;
+    let navigated = client.call(
+        BrowserMethod::Navigate,
+        serde_json::json!({
+            "target_id": target_id,
+            "url": url,
+        }),
+    );
+    if let Err(error) = navigated {
+        let redacted_error = redact_sensitive_text(&truncate_chars(&error.to_string(), 180));
+        append_task_progress_checkpoint(
+            state,
+            task,
+            "browser_train_search_failed",
+            SurfaceKind::Browser,
+            "TrovaTreno ricerca non completata",
+            "La navigazione alla pagina risultati non ha prodotto una pagina leggibile.",
+            serde_json::json!({
+                "kind": "browser_train_search_failed",
+                "label": "TrovaTreno",
+                "target_id": target_id,
+                "error": redacted_error,
+            }),
+        )
+        .map_err(local_task_gateway_error)?;
+        return Ok(BrowserSearchResult {
+            status: "failed".to_string(),
+            excerpt: Some(redacted_error),
+            snapshot: None,
+        });
+    }
+    let snapshot = client
+        .call(
+            BrowserMethod::Snapshot,
+            serde_json::json!({ "target_id": target_id }),
+        )
+        .map_err(|error| LocalTaskExecutionError {
+            message: format!("Snapshot risultati TrovaTreno non disponibile: {error}"),
+        })?;
+    let excerpt = snapshot
+        .get("snapshot")
+        .and_then(Value::as_str)
+        .map(|text| truncate_chars(text, 1_800));
+    append_task_progress_checkpoint(
+        state,
+        task,
+        "browser_train_search_completed",
+        SurfaceKind::Browser,
+        "TrovaTreno risultati letti",
+        "Ho letto la pagina risultati senza selezionare opzioni o acquistare.",
+        serde_json::json!({
+            "kind": "browser_train_search_completed",
+            "label": "TrovaTreno",
+            "target_id": target_id,
+            "excerpt": excerpt,
+        }),
+    )
+    .map_err(local_task_gateway_error)?;
+    Ok(BrowserSearchResult {
+        status: "completed".to_string(),
+        excerpt,
+        snapshot: Some(snapshot),
+    })
+}
+
+fn trovatreno_search_url(draft: &TrainSearchDraft) -> String {
+    let origin = preferred_station_names(&draft.origin)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| draft.origin.clone());
+    let destination = preferred_station_names(&draft.destination)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| draft.destination.clone());
+    let date = draft
+        .date
+        .as_deref()
+        .and_then(italian_date_to_iso)
+        .unwrap_or_else(|| OffsetDateTime::now_utc().date().to_string());
+    let time = draft.time.as_deref().unwrap_or("");
+    format!(
+        "https://www.trovatreno.it/cerca?cat=all&modalita=partenza&tipo=oneway&da={}&a={}&data={}&ora={}&passeggeri=1",
+        url_encode(&origin),
+        url_encode(&destination),
+        url_encode(&date),
+        url_encode(time)
+    )
+}
+
+fn train_search_button_for_snapshot(snapshot: &Value) -> Option<(String, String)> {
+    let refs = snapshot.get("refs").and_then(Value::as_array)?;
+    refs.iter().find_map(|candidate| {
+        let role = candidate.get("role").and_then(Value::as_str).unwrap_or("");
+        if role != "button" {
+            return None;
+        }
+        let ref_id = candidate.get("ref").and_then(Value::as_str)?;
+        let name = candidate.get("name").and_then(Value::as_str).unwrap_or("");
+        let normalized_name = normalize_for_match(name);
+        if is_safe_train_search_button(&normalized_name) {
+            Some((ref_id.to_string(), name.to_string()))
+        } else {
+            None
+        }
+    })
+}
+
+fn privacy_accept_button_for_snapshot(snapshot: &Value) -> Option<(String, String)> {
+    let refs = snapshot.get("refs").and_then(Value::as_array)?;
+    refs.iter().find_map(|candidate| {
+        let role = candidate.get("role").and_then(Value::as_str).unwrap_or("");
+        if role != "button" {
+            return None;
+        }
+        let name = candidate.get("name").and_then(Value::as_str).unwrap_or("");
+        let normalized_name = normalize_for_match(name);
+        let accepts = matches!(
+            normalized_name.as_str(),
+            "accetta" | "accetta tutto" | "accetta tutti" | "accept" | "accept all"
+        ) || normalized_name.contains("accetta tutti")
+            || normalized_name.contains("accept all");
+        if accepts {
+            Some((
+                candidate.get("ref")?.as_str()?.to_string(),
+                name.to_string(),
+            ))
+        } else {
+            None
+        }
+    })
+}
+
+fn is_safe_train_search_button(normalized_name: &str) -> bool {
+    let positive = [
+        "cerca",
+        "search",
+        "trova",
+        "find",
+        "mostra risultati",
+        "vedi risultati",
+        "visualizza risultati",
+        "consulta",
+    ];
+    let negative = [
+        "login",
+        "accedi",
+        "registrati",
+        "paga",
+        "pagamento",
+        "acquista",
+        "compra",
+        "conferma",
+        "continua pagamento",
+        "procedi al pagamento",
+        "prenota",
+    ];
+    positive
+        .iter()
+        .any(|needle| normalized_name.contains(needle))
+        && !negative
+            .iter()
+            .any(|needle| normalized_name.contains(needle))
+}
+
+fn browser_form_draft_result_labels(
+    result: &Value,
+    label_by_ref: &HashMap<String, String>,
+) -> (Vec<String>, Vec<String>) {
+    let filled_fields = result
+        .get("filledRefs")
+        .or_else(|| result.get("filled_refs"))
+        .and_then(Value::as_array)
+        .map(|refs| {
+            refs.iter()
+                .filter_map(Value::as_str)
+                .map(|ref_id| {
+                    label_by_ref
+                        .get(ref_id)
+                        .cloned()
+                        .unwrap_or_else(|| ref_id.to_string())
+                })
+                .collect::<Vec<_>>()
+        })
+        .filter(|labels| !labels.is_empty())
+        .unwrap_or_else(|| label_by_ref.values().cloned().collect());
+
+    let failed_fields = result
+        .get("failedRefs")
+        .or_else(|| result.get("failed_refs"))
+        .and_then(Value::as_array)
+        .map(|refs| {
+            refs.iter()
+                .filter_map(|failure| {
+                    let ref_id = failure.get("ref").and_then(Value::as_str)?;
+                    let field_label = label_by_ref
+                        .get(ref_id)
+                        .cloned()
+                        .unwrap_or_else(|| ref_id.to_string());
+                    let error = failure
+                        .get("error")
+                        .and_then(Value::as_str)
+                        .map(|message| redact_sensitive_text(&truncate_chars(message, 120)))
+                        .unwrap_or_else(|| "errore non specificato".to_string());
+                    Some(format!("{field_label}: {error}"))
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    (filled_fields, failed_fields)
+}
+
+fn browser_form_fields_for_snapshot(
+    snapshot: &Value,
+    draft: &TrainSearchDraft,
+) -> (Vec<Value>, Vec<String>) {
+    let refs = snapshot
+        .get("refs")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut used_refs = Vec::new();
+    let mut fields = Vec::new();
+    let mut labels = Vec::new();
+
+    push_form_field(
+        &refs,
+        &mut used_refs,
+        &mut fields,
+        &mut labels,
+        "partenza",
+        &draft.origin,
+        &[
+            "partenza",
+            "origine",
+            "from",
+            "departure",
+            "stazione partenza",
+        ],
+        &["da"],
+    );
+    push_form_field(
+        &refs,
+        &mut used_refs,
+        &mut fields,
+        &mut labels,
+        "arrivo",
+        &draft.destination,
+        &[
+            "arrivo",
+            "destinazione",
+            "to",
+            "destination",
+            "stazione arrivo",
+        ],
+        &["a"],
+    );
+    if let Some(date) = draft.date.as_deref() {
+        push_form_field(
+            &refs,
+            &mut used_refs,
+            &mut fields,
+            &mut labels,
+            "data",
+            date,
+            &["data", "date", "andata", "giorno", "departure date"],
+            &[],
+        );
+    }
+    if let Some(time) = draft.time.as_deref() {
+        push_form_field(
+            &refs,
+            &mut used_refs,
+            &mut fields,
+            &mut labels,
+            "ora",
+            time,
+            &["ora", "orario", "time", "partenza ore"],
+            &[],
+        );
+    }
+
+    (fields, labels)
+}
+
+fn browser_form_detection_summary(snapshot: &Value, draft: &TrainSearchDraft) -> Value {
+    let refs = snapshot
+        .get("refs")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let (_, labels) = browser_form_fields_for_snapshot(snapshot, draft);
+    let candidates = refs
+        .iter()
+        .filter_map(|candidate| {
+            let role = candidate.get("role").and_then(Value::as_str).unwrap_or("");
+            if !matches!(role, "textbox" | "combobox" | "button") {
+                return None;
+            }
+            let ref_id = candidate.get("ref").and_then(Value::as_str).unwrap_or("");
+            let name = candidate.get("name").and_then(Value::as_str).unwrap_or("");
+            Some(serde_json::json!({
+                "ref": ref_id,
+                "role": role,
+                "name": redact_sensitive_text(&truncate_chars(name, 90)),
+                "normalized_name": truncate_chars(&normalize_for_match(name), 90),
+            }))
+        })
+        .take(80)
+        .collect::<Vec<_>>();
+
+    serde_json::json!({
+        "recognized_labels": labels,
+        "candidate_count": candidates.len(),
+        "candidates": candidates,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_form_field(
+    refs: &[Value],
+    used_refs: &mut Vec<String>,
+    fields: &mut Vec<Value>,
+    labels: &mut Vec<String>,
+    label: &str,
+    value: &str,
+    contains: &[&str],
+    exact: &[&str],
+) {
+    let Some((ref_id, visible_name)) = refs.iter().find_map(|candidate| {
+        let role = candidate.get("role").and_then(Value::as_str).unwrap_or("");
+        if !matches!(role, "textbox" | "combobox") {
+            return None;
+        }
+        let ref_id = candidate.get("ref").and_then(Value::as_str)?;
+        if used_refs.iter().any(|used| used == ref_id) {
+            return None;
+        }
+        let name = candidate.get("name").and_then(Value::as_str).unwrap_or("");
+        let normalized_name = normalize_for_match(name);
+        if exact.iter().any(|needle| normalized_name == *needle)
+            || contains
+                .iter()
+                .any(|needle| normalized_name.contains(needle))
+        {
+            Some((ref_id.to_string(), name.to_string()))
+        } else {
+            None
+        }
+    }) else {
+        return;
+    };
+    used_refs.push(ref_id.clone());
+    fields.push(serde_json::json!({
+        "ref": ref_id,
+        "value": form_value_for_field(label, &visible_name, value)
+    }));
+    if visible_name.trim().is_empty() {
+        labels.push(label.to_string());
+    } else {
+        labels.push(format!("{label} ({})", truncate_chars(&visible_name, 40)));
+    }
+}
+
+fn form_value_for_field(label: &str, visible_name: &str, value: &str) -> String {
+    if label == "data" {
+        let normalized_name = normalize_for_match(visible_name);
+        if matches!(normalized_name.as_str(), "data" | "date" | "andata") {
+            if let Some(iso) = italian_date_to_iso(value) {
+                return iso;
+            }
+        }
+    }
+    value.to_string()
+}
+
+fn italian_date_to_iso(value: &str) -> Option<String> {
+    let parts = value.split('/').collect::<Vec<_>>();
+    if parts.len() != 3 {
+        return None;
+    }
+    let day = parts[0].parse::<u8>().ok()?;
+    let month = parts[1].parse::<u8>().ok()?;
+    let year = parts[2].parse::<i32>().ok()?;
+    if !(1..=31).contains(&day) || !(1..=12).contains(&month) {
+        return None;
+    }
+    Some(format!("{year:04}-{month:02}-{day:02}"))
+}
+
+fn normalize_for_match(value: &str) -> String {
+    value
+        .to_lowercase()
+        .chars()
+        .map(|character| match character {
+            'à' | 'á' | 'â' | 'ä' => 'a',
+            'è' | 'é' | 'ê' | 'ë' => 'e',
+            'ì' | 'í' | 'î' | 'ï' => 'i',
+            'ò' | 'ó' | 'ô' | 'ö' => 'o',
+            'ù' | 'ú' | 'û' | 'ü' => 'u',
+            character if character.is_alphanumeric() => character,
+            _ => ' ',
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn url_encode(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(byte as char)
+            }
+            b' ' => encoded.push('+'),
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
+}
+
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    let mut truncated = value.chars().take(max_chars).collect::<String>();
+    if value.chars().count() > max_chars {
+        truncated.push_str("\n...");
+    }
+    truncated
+}
+
+fn evaluate_simple_arithmetic(text: &str) -> Option<String> {
+    let expression = text
+        .chars()
+        .filter(|char| {
+            char.is_ascii_digit() || matches!(char, '+' | '-' | '*' | '/' | 'x' | 'X' | ' ' | '.')
+        })
+        .collect::<String>()
+        .replace(['x', 'X'], "*");
+    let compact = expression.split_whitespace().collect::<String>();
+    if compact.is_empty()
+        || !compact
+            .chars()
+            .any(|char| matches!(char, '+' | '-' | '*' | '/'))
+    {
+        return None;
+    }
+    let (left, operator, right) = split_binary_expression(&compact)?;
+    let left = left.parse::<f64>().ok()?;
+    let right = right.parse::<f64>().ok()?;
+    let value = match operator {
+        '+' => left + right,
+        '-' => left - right,
+        '*' => left * right,
+        '/' if right != 0.0 => left / right,
+        '/' => return None,
+        _ => return None,
+    };
+    if value.fract() == 0.0 {
+        Some(format!("{}", value as i64))
+    } else {
+        Some(
+            format!("{value:.4}")
+                .trim_end_matches('0')
+                .trim_end_matches('.')
+                .to_string(),
+        )
+    }
+}
+
+fn split_binary_expression(expression: &str) -> Option<(&str, char, &str)> {
+    for operator in ['*', '/', '+', '-'] {
+        if let Some(index) = expression[1..].find(operator).map(|index| index + 1) {
+            let left = &expression[..index];
+            let right = &expression[index + 1..];
+            if !left.is_empty() && !right.is_empty() {
+                return Some((left, operator, right));
+            }
+        }
+    }
+    None
+}
+
+fn operational_task_acknowledgement(prompt: &str) -> String {
+    let normalized = prompt.to_lowercase();
+    if normalized.contains("treno")
+        || normalized.contains("trenitalia")
+        || normalized.contains("italo")
+    {
+        return "Ho capito. Avvio un task locale: apro i siti utili, compilo i form necessari, raccolgo le opzioni disponibili e poi ti chiedo quale vuoi prenotare. Non faro' login, invii, acquisti o pagamenti senza una conferma esplicita.".to_string();
+    }
+    if normalized.contains("browser") || normalized.contains("cerca") || normalized.contains("apri")
+    {
+        return "Ho capito. Avvio un task locale con browser controllato, raccolgo le informazioni e torno con una risposta sintetica. Mi fermo prima di qualunque invio, login, acquisto o pagamento.".to_string();
+    }
+    "Ho capito. Creo un task locale e procedo fino al prossimo punto che richiede una conferma esplicita.".to_string()
+}
+
+fn should_create_operational_task(prompt: &str) -> bool {
+    let normalized = prompt.to_lowercase();
+    [
+        "prenota",
+        "trova opzioni",
+        "cerca",
+        "compila",
+        "apri il browser",
+        "browser",
+        "terminal",
+        "terminale",
+        "shell",
+        "scarica",
+        "invia",
+        "crea un task",
+        "pianifica",
+        "automatizza",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
+}
+
+fn requires_operational_approval(prompt: &str) -> bool {
+    let normalized = prompt.to_lowercase();
+    [
+        "prenota",
+        "acquista",
+        "compra",
+        "invia",
+        "pubblica",
+        "login",
+        "accedi",
+        "compila",
+        "browser",
+        "pagamento",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
+}
+
+fn task_kind_for_prompt(prompt: &str) -> &'static str {
+    let normalized = prompt.to_lowercase();
+    if normalized.contains("terminal")
+        || normalized.contains("terminale")
+        || normalized.contains("shell")
+    {
+        "local_shell_task"
+    } else if normalized.contains("browser")
+        || normalized.contains("prenota")
+        || normalized.contains("compila")
+        || normalized.contains("cerca")
+        || normalized.contains("trova opzioni")
+        || normalized.contains("treno")
+        || normalized.contains("trenitalia")
+        || normalized.contains("italo")
+    {
+        "browser_task"
+    } else {
+        "local_task"
+    }
+}
+
+fn resources_for_prompt(prompt: &str) -> Vec<ResourceRequirement> {
+    let normalized = prompt.to_lowercase();
+    let mut resources = Vec::new();
+    if normalized.contains("terminal")
+        || normalized.contains("terminale")
+        || normalized.contains("shell")
+    {
+        resources.push(ResourceRequirement::new(ResourceClass::ShellProcess, 1));
+    }
+    if normalized.contains("browser")
+        || normalized.contains("prenota")
+        || normalized.contains("compila")
+        || normalized.contains("cerca")
+        || normalized.contains("trova opzioni")
+        || normalized.contains("treno")
+        || normalized.contains("trenitalia")
+        || normalized.contains("italo")
+    {
+        resources.push(ResourceRequirement::new(ResourceClass::BrowserSession, 1));
+        resources.push(ResourceRequirement::new(ResourceClass::NetworkIo, 1));
+    }
+    resources
+}
+
+fn task_goal_summary(goal: &str) -> String {
+    let redacted = redact_sensitive_text(goal)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let compact = compact_thread_title(&redacted);
+    if compact.is_empty() {
+        "Task locale dalla chat".to_string()
+    } else {
+        compact
+    }
+}
+
+fn task_effective_goal(task: &TaskRecord) -> String {
+    task.input_json
+        .get("prompt_redacted")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(task.goal.as_str())
+        .to_string()
+}
+
+fn capability_snapshot_response(
+    registry: &CapabilityRegistryStore,
+    user: &CapabilityUserId,
+    workspace: &CapabilityWorkspaceId,
+    policy: PolicyContext,
+) -> Result<CapabilitySnapshotResponse, GatewayError> {
+    let connections = registry
+        .connection_configs(user, workspace)
+        .map_err(GatewayError::capability)?
+        .into_iter()
+        .map(capability_connection_response)
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut tools = Vec::new();
+    for provider in &policy.enabled_providers {
+        for cached in registry
+            .cached_tools(provider)
+            .map_err(GatewayError::capability)?
+        {
+            tools.push(capability_tool_response(cached)?);
+        }
+    }
+    tools.sort_by(|left, right| {
+        left.provider_id
+            .cmp(&right.provider_id)
+            .then(left.name.cmp(&right.name))
+    });
+
+    Ok(CapabilitySnapshotResponse {
+        connections,
+        tools,
+        policy: CapabilityPolicyResponse {
+            enabled_providers: policy
+                .enabled_providers
+                .into_iter()
+                .map(|provider| provider.as_str().to_string())
+                .collect(),
+            allow_managed_cloud: policy.allow_managed_cloud,
+            privacy_domains: policy.privacy_domains,
+            max_autonomy_level: policy.max_autonomy_level,
+        },
+    })
+}
+
+fn capability_connection_response(
+    config: CapabilityConnectionConfig,
+) -> Result<CapabilityConnectionResponse, GatewayError> {
+    Ok(CapabilityConnectionResponse {
+        id: config.connection_id,
+        provider_id: config.provider_id.as_str().to_string(),
+        display_name: config.display_name,
+        status: enum_label(&config.status)?,
+        privacy_domains: config.privacy_domains,
+        metadata: config.metadata,
+    })
+}
+
+fn capability_tool_response(
+    cached: CachedCapabilityTool,
+) -> Result<CapabilityToolResponse, GatewayError> {
+    Ok(CapabilityToolResponse {
+        provider_id: cached.tool.provider_id.as_str().to_string(),
+        name: cached.tool.name,
+        provider_kind: enum_label(&cached.tool.provider_kind)?,
+        action: enum_label(&cached.tool.action)?,
+        description: cached.tool.description,
+        privacy_domains: cached.tool.privacy_domains,
+        sensitivity: cached.tool.sensitivity,
+    })
+}
+
+fn open_seeded_capability_registry() -> Result<CapabilityRegistryStore, std::io::Error> {
+    let registry = CapabilityRegistryStore::open(gateway_capability_database_path()?)
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    seed_default_capabilities(&registry)
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    Ok(registry)
+}
+
+fn seed_default_capabilities(
+    registry: &CapabilityRegistryStore,
+) -> Result<(), local_first_capabilities::CapabilityError> {
+    let browser_provider = CapabilityProviderId::new("browser");
+    registry.upsert_provider_config(&CapabilityProviderConfig::new(
+        browser_provider.clone(),
+        CapabilityProviderKind::Browser,
+        "Il mio browser".to_string(),
+        true,
+    ))?;
+    registry.upsert_provider_grant(
+        &CapabilityProviderGrant::new(
+            browser_provider.clone(),
+            gateway_capability_user_id(),
+            gateway_capability_workspace_id(),
+        )
+        .with_privacy_domains(vec!["browser".to_string(), "local".to_string()])
+        .with_allowed_actions(vec![ActionClass::Read, ActionClass::WriteWithConfirmation])
+        .with_max_autonomy_level(3),
+    )?;
+    registry.upsert_connection_config(
+        &CapabilityConnectionConfig::new(
+            "browser-local",
+            browser_provider.clone(),
+            gateway_capability_user_id(),
+            gateway_capability_workspace_id(),
+            "Il mio browser",
+            "local-browser-profile",
+        )
+        .with_privacy_domains(vec!["browser".to_string()])
+        .with_metadata(serde_json::json!({
+            "data_boundary": "local",
+            "transport": "playwright_cdp",
+            "requires_confirmation": true
+        })),
+    )?;
+
+    for (name, action, description) in [
+        (
+            "browser.health",
+            ActionClass::Read,
+            "Stato del browser locale",
+        ),
+        (
+            "browser.tabs",
+            ActionClass::Read,
+            "Elenco tab browser locali",
+        ),
+        (
+            "browser.snapshot",
+            ActionClass::Read,
+            "Snapshot redatto della pagina corrente",
+        ),
+        (
+            "browser.navigate",
+            ActionClass::WriteWithConfirmation,
+            "Navigazione browser con conferma",
+        ),
+        (
+            "browser.act",
+            ActionClass::WriteWithConfirmation,
+            "Azione controllata su pagina web",
+        ),
+        (
+            "browser.screenshot",
+            ActionClass::WriteWithConfirmation,
+            "Screenshot locale redatto",
+        ),
+    ] {
+        registry.upsert_cached_tool(&CachedCapabilityTool::new(
+            browser_provider.clone(),
+            name,
+            CapabilityProviderKind::Browser,
+            action,
+            description,
+            vec!["browser".to_string()],
+            "private",
+            serde_json::json!({"type": "object"}),
+        ))?;
+    }
+    Ok(())
+}
+
+fn enum_label(value: &impl Serialize) -> Result<String, GatewayError> {
+    serde_json::to_value(value)
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "enum_serialize_failed",
+            message: error.to_string(),
+        })?
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "enum_serialize_failed",
+            message: "enum did not serialize to string".to_string(),
+        })
+}
+
+fn resource_class_label(resource: ResourceClass) -> &'static str {
+    resource.as_str()
+}
+
+fn redacted_runtime_log_entry(entry: LogEntry) -> RuntimeLogEntryResponse {
+    RuntimeLogEntryResponse {
+        stream: format!("{:?}", entry.stream).to_lowercase(),
+        line_redacted: redact_sensitive_text(&entry.line),
+    }
+}
+
+fn runtime_logs_unavailable_message(error: &str) -> String {
+    if error.contains("process not found") {
+        return "Runtime esterno: i log gestiti sono disponibili solo quando Gemma e' avviato dal gateway.".to_string();
+    }
+
+    format!(
+        "Log runtime gestiti non disponibili: {}",
+        redact_sensitive_text(error)
+    )
+}
+
+fn redact_sensitive_text(input: &str) -> String {
+    let mut output = strip_terminal_control_sequences(input);
+    for marker in [
+        "sk-",
+        "sk_proj_",
+        "token=",
+        "Authorization:",
+        "Bearer ",
+        "password=",
+        "secret=",
+    ] {
+        if let Some(index) = output.to_lowercase().find(&marker.to_lowercase()) {
+            output.truncate(index + marker.len());
+            output.push_str("[REDACTED]");
+            return output;
+        }
+    }
+    output
+}
+
+fn strip_terminal_control_sequences(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(char) = chars.next() {
+        if char == '\u{1b}' {
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                for next in chars.by_ref() {
+                    if ('@'..='~').contains(&next) {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        if char.is_control() && char != '\n' && char != '\t' {
+            continue;
+        }
+        output.push(char);
+    }
+    output
+}
+
+#[derive(Debug)]
+struct GatewayError {
+    status: StatusCode,
+    code: &'static str,
+    message: String,
+}
+
+impl GatewayError {
+    fn bad_gateway(code: &'static str, error: impl std::fmt::Display) -> Self {
+        Self {
+            status: StatusCode::BAD_GATEWAY,
+            code,
+            message: error.to_string(),
+        }
+    }
+
+    fn from_status(status: reqwest::StatusCode, code: &'static str, message: String) -> Self {
+        Self {
+            status: StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY),
+            code,
+            message,
+        }
+    }
+
+    fn store(error: rusqlite::Error) -> Self {
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "chat_store_error",
+            message: error.to_string(),
+        }
+    }
+
+    fn process(error: local_first_process_manager::ProcessManagerError) -> Self {
+        Self {
+            status: StatusCode::BAD_GATEWAY,
+            code: "process_manager_error",
+            message: error.to_string(),
+        }
+    }
+
+    fn task(error: local_first_task_runtime::TaskRuntimeError) -> Self {
+        Self {
+            status: StatusCode::BAD_GATEWAY,
+            code: "task_runtime_error",
+            message: error.to_string(),
+        }
+    }
+
+    fn local_computer(error: String) -> Self {
+        Self {
+            status: StatusCode::BAD_GATEWAY,
+            code: "local_computer_error",
+            message: error,
+        }
+    }
+
+    fn memory(error: String) -> Self {
+        Self {
+            status: StatusCode::BAD_GATEWAY,
+            code: "memory_error",
+            message: error,
+        }
+    }
+
+    fn capability(error: local_first_capabilities::CapabilityError) -> Self {
+        Self {
+            status: StatusCode::BAD_GATEWAY,
+            code: "capability_error",
+            message: error.to_string(),
+        }
+    }
+}
+
+fn lock_store(state: &AppState) -> Result<MutexGuard<'_, ChatStore>, GatewayError> {
+    state.chat_store.lock().map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "chat_store_lock_error",
+        message: error.to_string(),
+    })
+}
+
+fn lock_task_store(state: &AppState) -> Result<MutexGuard<'_, TaskStore>, GatewayError> {
+    state.task_store.lock().map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "task_store_lock_error",
+        message: error.to_string(),
+    })
+}
+
+fn lock_computer_store(
+    state: &AppState,
+) -> Result<MutexGuard<'_, LocalComputerSessionStore>, GatewayError> {
+    state.computer_store.lock().map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "local_computer_store_lock_error",
+        message: error.to_string(),
+    })
+}
+
+fn lock_browser_url_policies(
+    state: &AppState,
+) -> Result<MutexGuard<'_, BrowserUrlPolicyStore>, GatewayError> {
+    state
+        .browser_url_policies
+        .lock()
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "browser_url_policy_lock_error",
+            message: error.to_string(),
+        })
+}
+
+fn lock_memory_facade(state: &AppState) -> Result<MutexGuard<'_, MemoryFacade>, GatewayError> {
+    state.memory_facade.lock().map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "memory_store_lock_error",
+        message: error.to_string(),
+    })
+}
+
+fn lock_capability_registry(
+    state: &AppState,
+) -> Result<MutexGuard<'_, CapabilityRegistryStore>, GatewayError> {
+    state
+        .capability_registry
+        .lock()
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "capability_registry_lock_error",
+            message: error.to_string(),
+        })
+}
+
+fn lock_process_manager(
+    state: &AppState,
+) -> Result<MutexGuard<'_, ProcessManager<LocalProcessSupervisor>>, GatewayError> {
+    state.process_manager.lock().map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "process_manager_lock_error",
+        message: error.to_string(),
+    })
+}
+
+fn lock_task_executor_status(
+    state: &AppState,
+) -> Result<MutexGuard<'_, TaskExecutorStatus>, GatewayError> {
+    state
+        .task_executor_status
+        .lock()
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "task_executor_status_lock_error",
+            message: error.to_string(),
+        })
+}
+
+fn gateway_database_path() -> Result<PathBuf, std::io::Error> {
+    if let Ok(path) = env::var("LOCAL_FIRST_DESKTOP_GATEWAY_DB") {
+        let path = PathBuf::from(path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        return Ok(path);
+    }
+
+    let base = env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| env::temp_dir())
+        .join(".local-first-personal-assistant");
+    fs::create_dir_all(&base)?;
+    Ok(base.join("desktop-gateway.sqlite"))
+}
+
+fn gateway_process_database_path() -> Result<PathBuf, std::io::Error> {
+    if let Ok(path) = env::var("LOCAL_FIRST_PROCESS_REGISTRY_DB") {
+        let path = PathBuf::from(path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        return Ok(path);
+    }
+
+    let base = env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| env::temp_dir())
+        .join(".local-first-personal-assistant");
+    fs::create_dir_all(&base)?;
+    Ok(base.join("process-registry.sqlite"))
+}
+
+fn gateway_task_database_path() -> Result<PathBuf, std::io::Error> {
+    if let Ok(path) = env::var("LOCAL_FIRST_TASK_RUNTIME_DB") {
+        let path = PathBuf::from(path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        return Ok(path);
+    }
+
+    let base = env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| env::temp_dir())
+        .join(".local-first-personal-assistant");
+    fs::create_dir_all(&base)?;
+    Ok(base.join("task-runtime.sqlite"))
+}
+
+fn gateway_local_computer_database_path() -> Result<PathBuf, std::io::Error> {
+    if let Ok(path) = env::var("LOCAL_FIRST_LOCAL_COMPUTER_DB") {
+        let path = PathBuf::from(path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        return Ok(path);
+    }
+
+    let base = env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| env::temp_dir())
+        .join(".local-first-personal-assistant");
+    fs::create_dir_all(&base)?;
+    Ok(base.join("local-computer-session.sqlite"))
+}
+
+fn gateway_browser_policy_database_path() -> Result<PathBuf, std::io::Error> {
+    if let Ok(path) = env::var("LOCAL_FIRST_BROWSER_POLICY_DB") {
+        let path = PathBuf::from(path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        return Ok(path);
+    }
+
+    let base = env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| env::temp_dir())
+        .join(".local-first-personal-assistant");
+    fs::create_dir_all(&base)?;
+    Ok(base.join("browser-url-policy.sqlite"))
+}
+
+fn gateway_memory_database_path() -> Result<PathBuf, std::io::Error> {
+    if let Ok(path) = env::var("LOCAL_FIRST_MEMORY_DB") {
+        let path = PathBuf::from(path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        return Ok(path);
+    }
+
+    let base = env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| env::temp_dir())
+        .join(".local-first-personal-assistant");
+    fs::create_dir_all(&base)?;
+    Ok(base.join("memory.sqlite"))
+}
+
+fn gateway_capability_database_path() -> Result<PathBuf, std::io::Error> {
+    if let Ok(path) = env::var("LOCAL_FIRST_CAPABILITY_REGISTRY_DB") {
+        let path = PathBuf::from(path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        return Ok(path);
+    }
+
+    let base = env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| env::temp_dir())
+        .join(".local-first-personal-assistant");
+    fs::create_dir_all(&base)?;
+    Ok(base.join("capability-registry.sqlite"))
+}
+
+fn gateway_process_log_dir() -> Result<PathBuf, std::io::Error> {
+    if let Ok(path) = env::var("LOCAL_FIRST_PROCESS_LOG_DIR") {
+        let path = PathBuf::from(path);
+        fs::create_dir_all(&path)?;
+        return Ok(path);
+    }
+
+    let base = env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| env::temp_dir())
+        .join(".local-first-personal-assistant")
+        .join("logs")
+        .join("processes");
+    fs::create_dir_all(&base)?;
+    Ok(base)
+}
+
+fn gateway_workspace_root() -> Result<PathBuf, std::io::Error> {
+    if let Ok(path) = env::var("LOCAL_FIRST_WORKSPACE_ROOT") {
+        return Ok(PathBuf::from(path));
+    }
+    env::current_dir()
+}
+
+fn gateway_python_venv(workspace_root: &std::path::Path) -> PathBuf {
+    env::var("LOCAL_FIRST_GEMMA_PYTHON_VENV")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| workspace_root.join(".venv-mlx"))
+}
+
+fn gemma_runtime_port(url: &str) -> u16 {
+    url.rsplit_once(':')
+        .and_then(|(_, tail)| tail.split('/').next())
+        .and_then(|port| port.parse::<u16>().ok())
+        .unwrap_or(8765)
+}
+
+fn gateway_token() -> String {
+    env::var("LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN")
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+fn gateway_data_dir() -> Result<PathBuf, std::io::Error> {
+    let base = env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| env::temp_dir())
+        .join(".local-first-personal-assistant");
+    fs::create_dir_all(&base)?;
+    Ok(base)
+}
+
+/// Resolves the gateway bearer token, deny-by-default. The gateway binds to
+/// loopback and drives the browser/local computer, so it must never run with
+/// auth disabled. Order: explicit env (set by the Electron shell) -> previously
+/// persisted local token -> a freshly generated token stored 0600 so a
+/// same-user client can read it but other-user/sandboxed processes cannot.
+fn resolve_gateway_auth_token() -> Result<String, std::io::Error> {
+    let from_env = gateway_token();
+    if !from_env.is_empty() {
+        return Ok(from_env);
+    }
+
+    let token_path = gateway_data_dir()?.join("desktop-gateway-token");
+    if let Ok(existing) = fs::read_to_string(&token_path) {
+        let existing = existing.trim().to_string();
+        if !existing.is_empty() {
+            return Ok(existing);
+        }
+    }
+
+    let token = format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    );
+    write_private_file(&token_path, token.as_bytes())?;
+    eprintln!(
+        "[gateway] no LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN set; generated a local token at {} (auth required)",
+        token_path.display()
+    );
+    Ok(token)
+}
+
+/// Writes a file readable/writable only by the current user (0600 on Unix).
+#[cfg(unix)]
+fn write_private_file(path: &std::path::Path, bytes: &[u8]) -> Result<(), std::io::Error> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?;
+    file.write_all(bytes)
+}
+
+#[cfg(not(unix))]
+fn write_private_file(path: &std::path::Path, bytes: &[u8]) -> Result<(), std::io::Error> {
+    fs::write(path, bytes)
+}
+
+fn gateway_user_id() -> UserId {
+    UserId::new(
+        env::var("LOCAL_FIRST_USER_ID")
+            .unwrap_or_else(|_| "local-user".to_string())
+            .trim()
+            .to_string(),
+    )
+}
+
+fn gateway_workspace_id() -> WorkspaceId {
+    WorkspaceId::new(
+        env::var("LOCAL_FIRST_WORKSPACE_ID")
+            .unwrap_or_else(|_| "local-workspace".to_string())
+            .trim()
+            .to_string(),
+    )
+}
+
+fn gateway_memory_user_id() -> MemoryUserId {
+    MemoryUserId::new(
+        env::var("LOCAL_FIRST_USER_ID")
+            .unwrap_or_else(|_| "local-user".to_string())
+            .trim()
+            .to_string(),
+    )
+}
+
+fn gateway_memory_workspace_id() -> MemoryWorkspaceId {
+    MemoryWorkspaceId::new(
+        env::var("LOCAL_FIRST_WORKSPACE_ID")
+            .unwrap_or_else(|_| "local-workspace".to_string())
+            .trim()
+            .to_string(),
+    )
+}
+
+fn gateway_capability_user_id() -> CapabilityUserId {
+    CapabilityUserId::new(
+        env::var("LOCAL_FIRST_USER_ID")
+            .unwrap_or_else(|_| "local-user".to_string())
+            .trim()
+            .to_string(),
+    )
+}
+
+fn gateway_capability_workspace_id() -> CapabilityWorkspaceId {
+    CapabilityWorkspaceId::new(
+        env::var("LOCAL_FIRST_WORKSPACE_ID")
+            .unwrap_or_else(|_| "local-workspace".to_string())
+            .trim()
+            .to_string(),
+    )
+}
+
+fn gateway_memory_access_request() -> MemoryAccessRequest {
+    MemoryAccessRequest {
+        actor_id: "desktop-ui".to_string(),
+        user_id: gateway_memory_user_id(),
+        workspace_id: gateway_memory_workspace_id(),
+        purpose: "desktop_memory_dashboard".to_string(),
+        allowed_domains: vec![
+            PrivacyDomain::new("local"),
+            PrivacyDomain::new("personal"),
+            PrivacyDomain::new("work"),
+            PrivacyDomain::new("browser"),
+        ],
+        max_sensitivity: MemoryDataSensitivity::Private,
+        allow_raw_payload: false,
+        allow_export: false,
+        broad_query: true,
+    }
+}
+
+fn cors_layer() -> CorsLayer {
+    let mut origins = vec![
+        HeaderValue::from_static("http://127.0.0.1:1420"),
+        HeaderValue::from_static("http://localhost:1420"),
+        HeaderValue::from_static("http://127.0.0.1:1421"),
+        HeaderValue::from_static("http://localhost:1421"),
+        HeaderValue::from_static("null"),
+    ];
+    if let Ok(origin) = env::var("LOCAL_FIRST_DESKTOP_ALLOWED_ORIGIN") {
+        if let Ok(header) = HeaderValue::from_str(origin.trim()) {
+            origins.push(header);
+        }
+    }
+
+    CorsLayer::new()
+        .allow_origin(AllowOrigin::list(origins))
+        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
+        .allow_headers([CONTENT_TYPE, AUTHORIZATION])
+}
+
+impl IntoResponse for GatewayError {
+    fn into_response(self) -> Response {
+        (
+            self.status,
+            Json(ErrorResponse {
+                error: ErrorBody {
+                    code: self.code,
+                    message: self.message,
+                },
+            }),
+        )
+            .into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        BrowserFormDraftSummary, BrowserSourceSummary, browser_final_answer_for_task,
+        browser_form_draft_result_labels, browser_form_fields_for_snapshot,
+        browser_loop_output_has_train_options, browser_method_for_capability_tool,
+        browser_targets_for_goal, browser_url_for_goal, evaluate_simple_arithmetic,
+        is_safe_train_search_button, normalize_for_match, operational_plan_for_goal,
+        operational_plan_markdown, operational_task_acknowledgement, parse_loopback_http_host_port,
+        privacy_accept_button_for_snapshot, redact_sensitive_text, resources_for_prompt,
+        runtime_logs_unavailable_message, should_create_operational_task, task_effective_goal,
+        task_execution_outcome_from_executor_result, task_goal_summary, task_kind_for_prompt,
+        task_queue_response, train_option_lines, train_search_draft_for_goal,
+        train_station_suggestion_for_snapshot, train_success_criteria_met, trovatreno_search_url,
+    };
+    use local_first_browser_automation::BrowserMethod;
+    use local_first_task_runtime::{
+        ApprovalRequest, ExecutorResult, ResourceClass, TaskId, TaskPriority, TaskQueueSnapshot,
+        TaskRecord, TaskStatus, TaskUiItem, UserId, WorkspaceId,
+    };
+    use std::collections::HashMap;
+
+    #[test]
+    fn runtime_logs_unavailable_hides_internal_process_not_found() {
+        let message = runtime_logs_unavailable_message("process not found: llm-gemma4-mlx");
+
+        assert_eq!(
+            message,
+            "Runtime esterno: i log gestiti sono disponibili solo quando Gemma e' avviato dal gateway."
+        );
+        assert!(!message.contains("process not found"));
+    }
+
+    #[test]
+    fn runtime_log_redaction_hides_tokens() {
+        assert_eq!(
+            redact_sensitive_text("Authorization: Bearer secret-token next"),
+            "Authorization:[REDACTED]"
+        );
+    }
+
+    #[test]
+    fn runtime_log_redaction_strips_terminal_control_sequences() {
+        assert_eq!(
+            redact_sensitive_text("\u{1b}[2m  - navigating\u{1b}[22m\nok"),
+            "  - navigating\nok"
+        );
+    }
+
+    #[test]
+    fn task_queue_response_serializes_ui_read_model_for_renderer() {
+        let user = UserId::new("local-user");
+        let workspace = WorkspaceId::new("local-workspace");
+        let mut resource_usage = HashMap::new();
+        resource_usage.insert(ResourceClass::LlmInference, 1);
+        let response = task_queue_response(TaskQueueSnapshot {
+            queued: vec![TaskUiItem {
+                task_id: TaskId::new("task-1"),
+                kind: "browser_automation".to_string(),
+                goal: "Find train options".to_string(),
+                status: TaskStatus::Queued,
+                priority: TaskPriority::High,
+                blocked_reason: None,
+            }],
+            active: Vec::new(),
+            blocked: Vec::new(),
+            waiting_approvals: vec![ApprovalRequest::new(
+                "approval-1",
+                TaskId::new("task-2"),
+                user,
+                workspace,
+                "book train",
+                "high",
+                "browser",
+                "Purchase requires confirmation",
+            )],
+            recent_failures: Vec::new(),
+            resource_usage,
+        })
+        .unwrap();
+
+        assert_eq!(response.queued[0].task_id, "task-1");
+        assert_eq!(response.queued[0].status, "queued");
+        assert_eq!(response.queued[0].priority, "high");
+        assert_eq!(response.waiting_approvals[0].status, "pending");
+        assert_eq!(response.resource_usage[0].resource_class, "llm_inference");
+    }
+
+    #[test]
+    fn operational_prompt_prefilter_is_conservative_but_task_aware() {
+        assert!(!should_create_operational_task("quanto fa 6*3?"));
+        assert!(should_create_operational_task(
+            "Devo prenotare un treno Napoli Milano domani, trova opzioni"
+        ));
+        assert_eq!(
+            task_kind_for_prompt("usa il terminale per verificare un file"),
+            "local_shell_task"
+        );
+        assert_eq!(
+            task_kind_for_prompt("apri il browser e cerca opzioni"),
+            "browser_task"
+        );
+        assert_eq!(
+            task_kind_for_prompt("Guarda direttamente su Trenitalia treni Napoli Milano"),
+            "browser_task"
+        );
+        assert_eq!(resources_for_prompt("quanto fa 6*3?").len(), 0);
+        assert!(
+            resources_for_prompt("apri il browser e cerca opzioni")
+                .iter()
+                .any(|resource| resource.class == ResourceClass::BrowserSession)
+        );
+        assert!(
+            resources_for_prompt("Guarda direttamente su ItaloTreno treni Napoli Milano")
+                .iter()
+                .any(|resource| resource.class == ResourceClass::BrowserSession)
+        );
+    }
+
+    #[test]
+    fn task_goal_summary_redacts_and_compacts_prompt() {
+        let summary = task_goal_summary(
+            "cerca documenti con token=super-secret e poi mostrami le opzioni principali disponibili",
+        );
+
+        assert!(summary.contains("token=[REDACTED]"));
+        assert!(!summary.contains("super-secret"));
+        assert!(summary.chars().count() <= 44);
+    }
+
+    #[test]
+    fn local_executor_understands_simple_arithmetic() {
+        assert_eq!(
+            evaluate_simple_arithmetic("quanto fa 6*3?"),
+            Some("18".to_string())
+        );
+        assert_eq!(evaluate_simple_arithmetic("12 / 4"), Some("3".to_string()));
+        assert_eq!(evaluate_simple_arithmetic("ciao"), None);
+    }
+
+    #[test]
+    fn browser_executor_uses_read_only_search_urls() {
+        let url = browser_url_for_goal("Devo prenotare un treno Napoli Milano il 10 giugno");
+
+        assert!(url.starts_with("https://duckduckgo.com/?q="));
+        assert!(url.contains("Trenitalia"));
+        assert!(url.contains("Italo"));
+    }
+
+    #[test]
+    fn browser_executor_uses_multiple_read_only_train_sources() {
+        let targets =
+            browser_targets_for_goal("Devo prenotare un treno Napoli Milano il 10 giugno");
+
+        assert_eq!(targets.len(), 4);
+        assert_eq!(targets[0].label, "TrovaTreno");
+        assert!(
+            targets[0]
+                .url
+                .starts_with("https://www.trovatreno.it/cerca?")
+        );
+        assert!(targets[0].url.contains("Napoli+Centrale"));
+        assert!(targets[0].url.contains("Milano+Centrale"));
+        assert_eq!(targets[1].label, "Trenitalia");
+        assert_eq!(targets[1].url, "https://www.trenitalia.com/");
+        assert_eq!(targets[2].label, "Italo");
+        assert_eq!(targets[2].url, "https://www.italotreno.com/");
+        assert_eq!(targets[3].label, "Ricerca web");
+        assert!(targets[3].url.starts_with("https://duckduckgo.com/?q="));
+    }
+
+    #[test]
+    fn capability_browser_tool_names_resolve_to_browser_methods() {
+        assert_eq!(
+            browser_method_for_capability_tool("browser.open"),
+            Some(BrowserMethod::Open)
+        );
+        assert_eq!(
+            browser_method_for_capability_tool("browser.act"),
+            Some(BrowserMethod::Act)
+        );
+        assert_eq!(browser_method_for_capability_tool("github.search"), None);
+    }
+
+    #[test]
+    fn executor_needs_approval_is_not_treated_as_generic_block() {
+        let task = TaskRecord::new(
+            "task_approval",
+            UserId::new("user"),
+            WorkspaceId::new("workspace"),
+            "capability.browser.browser.act",
+            "Click a protected browser control",
+            serde_json::json!({}),
+        );
+
+        let outcome = task_execution_outcome_from_executor_result(
+            &task,
+            "browser-capability-executor",
+            "browser.act",
+            ExecutorResult::NeedsApproval {
+                action: "browser.manual_action".to_string(),
+                risk_level: "medium".to_string(),
+                data_boundary: "local_browser".to_string(),
+                explanation: "Manual confirmation required".to_string(),
+            },
+        )
+        .unwrap();
+
+        let pending = outcome
+            .pending_approval
+            .as_ref()
+            .expect("executor approval should be preserved");
+        assert!(!outcome.completed);
+        assert_eq!(pending.action, "browser.manual_action");
+        assert_eq!(pending.data_boundary, "local_browser");
+        assert_eq!(
+            outcome.checkpoint_payload["kind"],
+            "executor_needs_approval"
+        );
+    }
+
+    #[test]
+    fn browser_final_answer_keeps_snapshot_dump_out_of_chat() {
+        let task = TaskRecord::new(
+            "task_1",
+            UserId::new("user"),
+            WorkspaceId::new("workspace"),
+            "browser_task",
+            "Devo prenotare un treno Napoli Milano il 10 giugno",
+            serde_json::json!({}),
+        );
+        let answer = browser_final_answer_for_task(
+            &task,
+            &[
+                BrowserSourceSummary {
+                    label: "Ricerca web".to_string(),
+                    url: "https://duckduckgo.com/?q=treno".to_string(),
+                    status: "completed".to_string(),
+                    excerpt: Some("Trenitalia Napoli Milano".to_string()),
+                },
+                BrowserSourceSummary {
+                    label: "Italo".to_string(),
+                    url: "https://www.italotreno.com/".to_string(),
+                    status: "failed".to_string(),
+                    excerpt: None,
+                },
+            ],
+            &[],
+        )
+        .to_markdown();
+
+        assert!(answer.contains("Ricerca treni non conclusa"));
+        assert!(answer.contains("Fonti controllate"));
+        assert!(answer.contains("non raggiungibile in questa sessione"));
+        assert!(!answer.contains("```text"));
+        assert!(!answer.contains("Snapshot"));
+    }
+
+    #[test]
+    fn train_search_draft_extracts_route_date_and_time() {
+        let draft = train_search_draft_for_goal(
+            "Devo prenotare un treno Napoli Milano il 10 giugno verso le 9",
+        )
+        .unwrap();
+
+        assert_eq!(draft.origin, "Napoli");
+        assert_eq!(draft.destination, "Milano");
+        assert!(
+            draft
+                .date
+                .as_deref()
+                .is_some_and(|date| date.starts_with("10/06/"))
+        );
+        assert_eq!(draft.time.as_deref(), Some("09:00"));
+    }
+
+    #[test]
+    fn train_browser_targets_prioritize_direct_sources_before_web_search() {
+        let targets = browser_targets_for_goal(
+            "Devo prenotare un treno Napoli Milano il 10 giugno verso le 9",
+        );
+
+        assert_eq!(targets[0].label, "TrovaTreno");
+        assert!(targets[0].url.contains("Napoli+Centrale"));
+        assert!(targets[0].url.contains("Milano+Centrale"));
+        assert_eq!(targets[1].label, "Trenitalia");
+        assert_eq!(targets[2].label, "Italo");
+        assert_eq!(targets[3].label, "Ricerca web");
+    }
+
+    #[test]
+    fn explicit_train_operator_request_uses_only_that_source() {
+        let targets = browser_targets_for_goal(
+            "Guarda direttamente su Trenitalia treni Napoli Milano il 10 giugno verso le 9",
+        );
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].label, "Trenitalia");
+        assert_eq!(targets[0].url, "https://www.trenitalia.com/");
+
+        let targets = browser_targets_for_goal(
+            "Guarda direttamente su ItaloTreno treni Napoli Milano il 10 giugno verso le 9",
+        );
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].label, "Italo");
+        assert_eq!(targets[0].url, "https://www.italotreno.com/it");
+    }
+
+    #[test]
+    fn task_effective_goal_uses_redacted_prompt_for_execution() {
+        let task = TaskRecord::new(
+            "task_1",
+            UserId::new("user"),
+            WorkspaceId::new("workspace"),
+            "browser_task",
+            "Devo prenotare un treno Napoli Milano il ...",
+            serde_json::json!({
+                "prompt_redacted": "Devo prenotare un treno Napoli Milano il 10 giugno verso le 9, trova opzioni ma non acquistare nulla"
+            }),
+        );
+
+        let draft = train_search_draft_for_goal(&task_effective_goal(&task)).unwrap();
+
+        assert_eq!(draft.origin, "Napoli");
+        assert_eq!(draft.destination, "Milano");
+        assert!(
+            draft
+                .date
+                .as_deref()
+                .is_some_and(|date| date.starts_with("10/06/"))
+        );
+        assert_eq!(draft.time.as_deref(), Some("09:00"));
+    }
+
+    #[test]
+    fn trovatreno_search_url_uses_query_params_for_results_page() {
+        let draft = train_search_draft_for_goal(
+            "Devo prenotare un treno Napoli Milano il 10 giugno verso le 9",
+        )
+        .unwrap();
+        let url = trovatreno_search_url(&draft);
+
+        assert!(url.starts_with("https://www.trovatreno.it/cerca?"));
+        assert!(url.contains("da=Napoli+Centrale"));
+        assert!(url.contains("a=Milano+Centrale"));
+        assert!(url.contains("data=2026-06-10"));
+        assert!(url.contains("ora=09%3A00"));
+    }
+
+    #[test]
+    fn browser_form_fields_map_semantic_refs_without_submit() {
+        let draft = train_search_draft_for_goal(
+            "Devo prenotare un treno Napoli Milano il 10 giugno verso le 9",
+        )
+        .unwrap();
+        let snapshot = serde_json::json!({
+            "refs": [
+                {"ref": "e1", "role": "textbox", "name": "Da"},
+                {"ref": "e2", "role": "textbox", "name": "A"},
+                {"ref": "e3", "role": "textbox", "name": "Data andata"},
+                {"ref": "e4", "role": "textbox", "name": "Ora"},
+                {"ref": "e5", "role": "button", "name": "Cerca"}
+            ]
+        });
+
+        let (fields, labels) = browser_form_fields_for_snapshot(&snapshot, &draft);
+
+        assert_eq!(fields.len(), 4);
+        assert_eq!(labels.len(), 4);
+        assert_eq!(fields[0]["ref"], "e1");
+        assert_eq!(fields[0]["value"], "Napoli");
+        assert_eq!(fields[1]["ref"], "e2");
+        assert_eq!(fields[1]["value"], "Milano");
+        assert_eq!(fields[2]["value"], "10/06/2026");
+        assert_eq!(fields[3]["value"], "09:00");
+    }
+
+    #[test]
+    fn browser_form_fields_use_iso_date_for_plain_date_inputs() {
+        let draft = train_search_draft_for_goal(
+            "Devo prenotare un treno Napoli Milano il 10 giugno verso le 9",
+        )
+        .unwrap();
+        let snapshot = serde_json::json!({
+            "refs": [
+                {"ref": "e1", "role": "textbox", "name": "da"},
+                {"ref": "e2", "role": "textbox", "name": "a"},
+                {"ref": "e3", "role": "textbox", "name": "data"},
+                {"ref": "e4", "role": "combobox", "name": "ora"}
+            ]
+        });
+
+        let (fields, _) = browser_form_fields_for_snapshot(&snapshot, &draft);
+
+        assert_eq!(fields[2]["value"], "2026-06-10");
+        assert_eq!(fields[3]["value"], "09:00");
+    }
+
+    #[test]
+    fn train_station_suggestion_prefers_central_station() {
+        let snapshot = serde_json::json!({
+            "refs": [
+                {"ref": "e1", "role": "button", "name": "Napoli ( Tutte Le Stazioni )"},
+                {"ref": "e2", "role": "button", "name": "Napoli Centrale"}
+            ]
+        });
+
+        let (ref_id, name) = train_station_suggestion_for_snapshot(
+            &snapshot,
+            &super::preferred_station_names("Napoli"),
+        )
+        .unwrap();
+
+        assert_eq!(ref_id, "e2");
+        assert_eq!(name, "Napoli Centrale");
+    }
+
+    #[test]
+    fn browser_form_draft_result_labels_batch_fill_outcome() {
+        let labels = HashMap::from([
+            ("e1".to_string(), "partenza (Da)".to_string()),
+            ("e2".to_string(), "arrivo (A)".to_string()),
+        ]);
+        let result = serde_json::json!({
+            "ok": true,
+            "filledRefs": ["e1"],
+            "failedRefs": [{"ref": "e2", "error": "element is detached"}],
+        });
+
+        let (filled, failed) = browser_form_draft_result_labels(&result, &labels);
+
+        assert_eq!(filled, vec!["partenza (Da)"]);
+        assert_eq!(failed.len(), 1);
+        assert!(failed[0].contains("arrivo (A)"));
+        assert!(failed[0].contains("element is detached"));
+    }
+
+    #[test]
+    fn train_search_button_policy_allows_search_but_not_purchase() {
+        assert!(is_safe_train_search_button(&normalize_for_match("Cerca")));
+        assert!(is_safe_train_search_button(&normalize_for_match(
+            "Mostra risultati"
+        )));
+        assert!(!is_safe_train_search_button(&normalize_for_match(
+            "Acquista"
+        )));
+        assert!(!is_safe_train_search_button(&normalize_for_match(
+            "Procedi al pagamento"
+        )));
+    }
+
+    #[test]
+    fn privacy_accept_button_matches_only_safe_accept_controls() {
+        let snapshot = serde_json::json!({
+            "refs": [
+                {"ref": "e1", "role": "button", "name": "Configura"},
+                {"ref": "e2", "role": "button", "name": "ACCETTA"},
+                {"ref": "e3", "role": "button", "name": "Acquista"}
+            ]
+        });
+
+        let (ref_id, name) = privacy_accept_button_for_snapshot(&snapshot).unwrap();
+
+        assert_eq!(ref_id, "e2");
+        assert_eq!(name, "ACCETTA");
+    }
+
+    #[test]
+    fn operational_train_plan_has_steps_gates_and_success_criteria() {
+        let plan = operational_plan_for_goal(
+            "Devo prenotare un treno Napoli Milano il 10 giugno verso le 9",
+            "browser_task",
+        );
+
+        assert!(matches!(
+            plan.intent_type,
+            super::OperationalIntentType::Transactional
+        ));
+        assert!(plan.tools.contains(&"browser".to_string()));
+        assert!(
+            plan.steps
+                .iter()
+                .any(|step| step.id == "source_trovatreno_fill"
+                    && step.tool.as_deref() == Some("browser"))
+        );
+        assert!(
+            plan.steps
+                .iter()
+                .any(|step| step.id == "source_italo_extract"
+                    && step.detail.contains("Se non ci sono righe affidabili"))
+        );
+        assert!(
+            plan.success_criteria
+                .iter()
+                .any(|criterion| criterion.contains("opzione treno reale"))
+        );
+        assert!(
+            plan.approval_gates
+                .iter()
+                .any(|gate| gate.contains("Login"))
+        );
+        let markdown = operational_plan_markdown(&plan);
+        assert!(markdown.contains("# Piano operativo"));
+        assert!(markdown.contains("source_trovatreno_search"));
+        assert!(markdown.contains("source_trenitalia_extract"));
+    }
+
+    #[test]
+    fn parses_loopback_runtime_health_url_without_reqwest_blocking_runtime() {
+        assert_eq!(
+            parse_loopback_http_host_port("http://127.0.0.1:8765"),
+            Some(("127.0.0.1".to_string(), 8765))
+        );
+        assert_eq!(
+            parse_loopback_http_host_port("http://localhost:8765/health"),
+            Some(("localhost".to_string(), 8765))
+        );
+        assert_eq!(
+            parse_loopback_http_host_port("https://127.0.0.1:8765"),
+            None
+        );
+    }
+
+    #[test]
+    fn train_success_requires_verified_option_lines() {
+        let sources = vec![BrowserSourceSummary {
+            label: "Trenitalia".to_string(),
+            url: "https://www.trenitalia.com/".to_string(),
+            status: "completed".to_string(),
+            excerpt: Some("Pagina ricerca senza orari leggibili".to_string()),
+        }];
+        let drafts = vec![BrowserFormDraftSummary {
+            label: "Trenitalia".to_string(),
+            url: "https://www.trenitalia.com/".to_string(),
+            status: "completed".to_string(),
+            filled_fields: vec!["partenza".to_string(), "arrivo".to_string()],
+            reason: None,
+            search_status: Some("completed".to_string()),
+            search_excerpt: Some("Nessun risultato leggibile".to_string()),
+        }];
+
+        assert!(!train_success_criteria_met(&sources, &drafts));
+
+        let drafts = vec![BrowserFormDraftSummary {
+            search_excerpt: Some(
+                "Frecciarossa Napoli Centrale 09:10 Milano Centrale 13:45".to_string(),
+            ),
+            ..drafts[0].clone()
+        }];
+
+        assert!(train_success_criteria_met(&sources, &drafts));
+    }
+
+    #[test]
+    fn browser_loop_train_output_must_contain_verified_options() {
+        assert!(!browser_loop_output_has_train_options(
+            &serde_json::json!({
+                "summary": "Ho aperto Trenitalia e compilato alcuni campi."
+            }),
+            "Pagina ricerca senza orari leggibili",
+        ));
+        assert!(browser_loop_output_has_train_options(
+            &serde_json::json!({
+                "options": [
+                    {
+                        "operator": "Trenitalia",
+                        "departure": "09:10",
+                        "arrival": "13:45",
+                        "train": "Frecciarossa"
+                    }
+                ]
+            }),
+            "",
+        ));
+    }
+
+    #[test]
+    fn train_option_lines_accept_compact_train_codes_from_result_tables() {
+        let options = train_option_lines("FR 9606\t05:09\t09:24\t4h 15m\t2 intermedie");
+
+        assert_eq!(options[0], "FR 9606\t05:09\t09:24\t4h 15m\t2 intermedie");
+        assert!(train_option_lines("Italo homepage 09:00").is_empty());
+
+        let options = train_option_lines(
+            "- row \"Frecciarossa 9310 08:55 13:54 arriva a Milano Rogoredo 4h 59m 5 intermedie Acquista subito →\" [ref=e87]:",
+        );
+        assert_eq!(
+            options[0],
+            "Frecciarossa 9310 08:55 13:54 arriva a Milano Rogoredo 4h 59m 5 intermedie"
+        );
+    }
+
+    #[test]
+    fn operational_task_acknowledgement_sets_autonomous_train_expectation() {
+        let text = operational_task_acknowledgement(
+            "Devo prenotare un treno Napoli Milano il 10 giugno verso le 9",
+        );
+
+        assert!(text.contains("raccolgo le opzioni disponibili"));
+        assert!(text.contains("quale vuoi prenotare"));
+        assert!(text.contains("Non faro' login"));
+    }
+
+    #[test]
+    fn browser_final_answer_after_search_is_proactive_about_booking_choice() {
+        let task = TaskRecord::new(
+            "task_1",
+            UserId::new("user"),
+            WorkspaceId::new("workspace"),
+            "browser_task",
+            "Devo prenotare un treno Napoli Milano il 10 giugno verso le 9",
+            serde_json::json!({}),
+        );
+        let answer = browser_final_answer_for_task(
+            &task,
+            &[BrowserSourceSummary {
+                label: "Trenitalia".to_string(),
+                url: "https://www.trenitalia.com/".to_string(),
+                status: "completed".to_string(),
+                excerpt: Some("Frecciarossa Napoli Centrale Milano Centrale 09:10".to_string()),
+            }],
+            &[BrowserFormDraftSummary {
+                label: "Trenitalia".to_string(),
+                url: "https://www.trenitalia.com/".to_string(),
+                status: "completed".to_string(),
+                filled_fields: vec!["partenza".to_string(), "arrivo".to_string()],
+                reason: None,
+                search_status: Some("completed".to_string()),
+                search_excerpt: Some(
+                    "Frecciarossa Napoli Centrale 09:10 Milano Centrale 13:45".to_string(),
+                ),
+            }],
+        )
+        .to_markdown();
+
+        assert!(answer.contains("ricerca opzioni avviata"));
+        assert!(answer.contains("Opzione rilevata"));
+        assert!(answer.contains("Dimmi quale opzione vuoi prenotare"));
+        assert!(!answer.contains("Posso procedere allo step successivo"));
+    }
+
+    #[test]
+    fn browser_final_answer_does_not_overclaim_sources_without_options() {
+        let task = TaskRecord::new(
+            "task_1",
+            UserId::new("user"),
+            WorkspaceId::new("workspace"),
+            "browser_task",
+            "Devo prenotare un treno Napoli Milano il 10 giugno verso le 9",
+            serde_json::json!({}),
+        );
+        let answer = browser_final_answer_for_task(
+            &task,
+            &[BrowserSourceSummary {
+                label: "TrovaTreno".to_string(),
+                url: "https://www.trovatreno.it/".to_string(),
+                status: "completed".to_string(),
+                excerpt: Some("FR 9310\t08:55\t13:54\t4h 59m\t5 intermedie".to_string()),
+            }],
+            &[
+                BrowserFormDraftSummary {
+                    label: "TrovaTreno".to_string(),
+                    url: "https://www.trovatreno.it/".to_string(),
+                    status: "completed".to_string(),
+                    filled_fields: vec!["partenza".to_string(), "arrivo".to_string()],
+                    reason: None,
+                    search_status: Some("completed".to_string()),
+                    search_excerpt: Some("FR 9310\t08:55\t13:54\t4h 59m\t5 intermedie".to_string()),
+                },
+                BrowserFormDraftSummary {
+                    label: "Trenitalia".to_string(),
+                    url: "https://www.trenitalia.com/".to_string(),
+                    status: "completed".to_string(),
+                    filled_fields: vec!["partenza".to_string(), "arrivo".to_string()],
+                    reason: None,
+                    search_status: Some("completed".to_string()),
+                    search_excerpt: Some("Homepage Trenitalia senza lista risultati".to_string()),
+                },
+            ],
+        )
+        .to_markdown();
+
+        assert!(answer.contains("TrovaTreno: ricerca opzioni avviata"));
+        assert!(answer.contains("Trenitalia: ricerca avviata, ma nessuna opzione affidabile"));
+    }
+}

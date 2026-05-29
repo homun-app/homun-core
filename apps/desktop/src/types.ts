@@ -41,6 +41,35 @@ export interface ChatMessage {
   text: string;
   timestamp: string;
   metadata?: string;
+  metrics?: ChatMessageMetrics;
+  feedback?: "useful" | "not_useful";
+  savedMemoryRef?: string;
+  linkedTaskId?: string;
+  linkedAutomationRef?: string;
+  attachments?: ChatAttachment[];
+}
+
+export interface ChatMessageMetrics {
+  promptTokens: number;
+  generationTokens: number;
+  promptTps: number;
+  generationTps: number;
+  peakMemoryGb: number;
+  elapsedSeconds: number;
+  maxTokens: number;
+  promptBuildSeconds?: number;
+  timeToFirstTokenSeconds?: number;
+  totalElapsedSeconds?: number;
+  runtimeStatusBefore?: string;
+}
+
+export interface ChatAttachment {
+  artifactId: string;
+  title: string;
+  kind: "image" | "text" | "file";
+  sizeBytes: number;
+  previewAvailable: boolean;
+  privacyDomain: string;
 }
 
 export interface ChatThread {
@@ -48,6 +77,7 @@ export interface ChatThread {
   title: string;
   subtitle: string;
   status: "active" | "archived";
+  pinned: boolean;
   computerSessionId: string;
   taskId: string;
   updatedAt: string;
@@ -68,7 +98,20 @@ export interface BrainRunDetail {
   plannerRounds: number;
   loadedTools: number;
   memoryRefs: string[];
+  contextBudget: ContextBudgetMetric[];
   steps: BrainStep[];
+}
+
+export interface ContextBudgetMetric {
+  label: string;
+  compressed: boolean;
+  redacted: boolean;
+  inputChars: number;
+  outputChars: number;
+  estimatedInputTokens: number;
+  estimatedOutputTokens: number;
+  compressionRatio: number;
+  redactionCount: number;
 }
 
 export interface TaskItem {
@@ -116,6 +159,7 @@ export interface ComputerTimelineItem {
   detail: string;
   status: "done" | "running" | "waiting";
   timestamp: string;
+  markdown?: string;
 }
 
 export interface ComputerArtifact {
@@ -139,6 +183,7 @@ export interface ComputerSession {
   previewDetail: string;
   previewArtifactId?: string;
   terminalExcerpt: string[];
+  operationalPlanMarkdown?: string;
   surfaces: ComputerSurface[];
   timeline: ComputerTimelineItem[];
   artifacts: ComputerArtifact[];
@@ -153,12 +198,41 @@ export interface ApprovalItem {
   boundary: string;
   risk: "medium" | "high";
   requestedBy: string;
+  scopeOptions?: Array<"once" | "always">;
+  browserVisibilityOptions?: Array<"auto" | "visible" | "headless">;
+  defaultBrowserVisibility?: "auto" | "visible" | "headless";
 }
 
 export interface RuntimeHealth {
   label: string;
   status: "ready" | "running" | "attention";
   detail: string;
+}
+
+export interface RuntimeControl {
+  processId: string;
+  label: string;
+  status: string;
+  port?: number;
+  portOwnerPid?: number;
+  duplicateCount: number;
+  totalMemoryMb?: number;
+  availableMemoryMb?: number;
+  memoryMb?: number;
+  cpuPercent?: number;
+  message: string;
+}
+
+export interface RuntimeLogLine {
+  stream: string;
+  line: string;
+}
+
+export interface RuntimeLogs {
+  processId: string;
+  source: string;
+  entries: RuntimeLogLine[];
+  message: string;
 }
 
 export interface MemorySummary {

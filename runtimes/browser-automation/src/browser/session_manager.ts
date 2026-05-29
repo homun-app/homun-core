@@ -4,7 +4,7 @@ import path from "node:path";
 import type { Browser, BrowserContext, Dialog, Locator, Page } from "playwright-core";
 import { chromium } from "playwright-core";
 import { BrowserAutomationError } from "../contracts.js";
-import { executeAction, requireRef, type BrowserActRequest } from "./actions.js";
+import { executeAction, requireRef, type BrowserActRequest, type BrowserActionResult } from "./actions.js";
 import { BrowserArtifactRoot } from "./artifacts.js";
 import { assertNavigationAllowed } from "./navigation_guard.js";
 import {
@@ -13,7 +13,7 @@ import {
   type BrowserProfileConfig,
   type BrowserProfileSummary,
 } from "./profiles.js";
-import { createSnapshot, type BrowserRef } from "./snapshot.js";
+import { createSnapshot, type BrowserRef, type BrowserSnapshotOptions } from "./snapshot.js";
 
 export type BrowserSessionOptions = {
   headless?: boolean;
@@ -29,6 +29,9 @@ export type BrowserTab = {
   targetId: string;
   url: string;
   label?: string;
+  profile?: "assistant" | "user";
+  headless?: boolean;
+  fallbackFromHeadless?: boolean;
 };
 
 type PageState = {
@@ -61,6 +64,10 @@ export class BrowserSessionManager {
   private profile?: BrowserProfileConfig;
   private artifactRoot?: BrowserArtifactRoot;
   private pages = new Map<string, PageState>();
+  // Persistent per-target metadata that survives context restarts and page
+  // crashes, so a lost target can be re-materialized instead of failing hard
+  // with BROWSER_TAB_NOT_FOUND mid-loop.
+  private targetMeta = new Map<string, { url?: string; label?: string }>();
   private nextTargetId = 1;
 
   constructor(options?: BrowserSessionOptions) {
@@ -75,18 +82,18 @@ export class BrowserSessionManager {
     if (profile === "user") {
       return await this.startUserProfile();
     }
-    this.profile = await resolveAssistantProfile(this.options);
-    await mkdir(this.profile.userDataDir, { recursive: true });
-    this.context = await chromium.launchPersistentContext(this.profile.userDataDir, {
-      headless: this.profile.headless,
-      executablePath: this.profile.executablePath,
-      acceptDownloads: true,
-    });
-    this.activeProfile = "assistant";
-    return { status: "started", profile: this.profile.name };
+    return await this.startAssistantProfile(this.options.headless ?? true);
   }
 
   async stop(): Promise<void> {
+    await this.closeContext();
+    // A full stop ends the session: forget how to recover targets too.
+    this.targetMeta.clear();
+  }
+
+  // Closes the browser context without forgetting target metadata, so the
+  // headless->visible restart can re-materialize targets afterwards.
+  private async closeContext(): Promise<void> {
     await this.context?.close().catch(() => undefined);
     await this.attachedBrowser?.close().catch(() => undefined);
     this.context = undefined;
@@ -120,16 +127,21 @@ export class BrowserSessionManager {
       allowPrivateNetwork: this.options.allowPrivateNetwork,
     });
     const targetId = params.label ?? `t${this.nextTargetId++}`;
-    const existing = this.pages.get(targetId);
-    const page = existing?.page ?? (await this.requireContext().newPage());
-    const state = existing ?? this.createPageState(page, params.label);
-    this.pages.set(targetId, state);
-    await page.goto(params.url);
-    return { targetId, url: page.url(), ...(params.label ? { label: params.label } : {}) };
+    const tracked = this.pages.get(targetId);
+    // A closed page handle cannot be navigated; treat it as if absent so a
+    // fresh page is created instead of throwing on the dead handle.
+    const existing = tracked && !tracked.page.isClosed() ? tracked : undefined;
+    const result = await this.gotoWithHeadlessFallback({
+      targetId,
+      label: params.label,
+      url: params.url,
+      existing,
+    });
+    return this.browserTab(targetId, result.state, result.fallbackFromHeadless);
   }
 
   async focus(params: { targetId: string }): Promise<BrowserTab> {
-    const state = this.requirePage(params.targetId);
+    const state = await this.resolvePage(params.targetId);
     await state.page.bringToFront();
     return {
       targetId: params.targetId,
@@ -139,9 +151,13 @@ export class BrowserSessionManager {
   }
 
   async closeTab(params: { targetId: string }): Promise<{ closed: true; targetId: string }> {
-    const state = this.requirePage(params.targetId);
-    await state.page.close();
+    // Closing is idempotent: a tab that is already gone is still "closed".
+    const state = this.pages.get(params.targetId);
+    if (state && !state.page.isClosed()) {
+      await state.page.close().catch(() => undefined);
+    }
     this.pages.delete(params.targetId);
+    this.targetMeta.delete(params.targetId);
     return { closed: true, targetId: params.targetId };
   }
 
@@ -150,36 +166,49 @@ export class BrowserSessionManager {
       url: params.url,
       allowPrivateNetwork: this.options.allowPrivateNetwork,
     });
-    const state = this.requirePage(params.targetId);
-    await state.page.goto(params.url);
-    state.refs.clear();
-    return {
+    const state = await this.resolvePage(params.targetId);
+    const result = await this.gotoWithHeadlessFallback({
       targetId: params.targetId,
-      url: state.page.url(),
-      ...(state.label ? { label: state.label } : {}),
-    };
+      label: state.label,
+      url: params.url,
+      existing: state,
+    });
+    result.state.refs.clear();
+    return this.browserTab(params.targetId, result.state, result.fallbackFromHeadless);
   }
 
-  async snapshot(params: { targetId: string }): Promise<{
+  async snapshot(params: { targetId: string } & BrowserSnapshotOptions): Promise<{
     targetId: string;
     url: string;
     snapshot: string;
     refs: BrowserRef[];
+    refsMode: "aria" | "locator";
+    snapshotFormat: "ai" | "legacy";
+    stats: {
+      lines: number;
+      chars: number;
+      refs: number;
+    };
   }> {
-    const state = this.requirePage(params.targetId);
-    const snapshot = await createSnapshot(state.page, params.targetId);
+    const state = await this.resolvePage(params.targetId);
+    await dismissCommonOverlays(state.page);
+    const snapshot = await createSnapshot(state.page, params.targetId, params);
     state.refs = snapshot.refLocators;
     return {
       targetId: snapshot.targetId,
       url: snapshot.url,
       snapshot: snapshot.snapshot,
       refs: snapshot.refs,
+      refsMode: snapshot.refsMode,
+      snapshotFormat: snapshot.snapshotFormat,
+      stats: snapshot.stats,
     };
   }
 
-  async act(action: BrowserActRequest): Promise<{ ok: true; url: string }> {
-    const state = this.requirePage(action.targetId);
-    if (action.kind === "click" && state.armedFileChooser) {
+  async act(action: BrowserActRequest): Promise<BrowserActionResult> {
+    const state = await this.resolvePage(action.targetId);
+    await dismissCommonOverlays(state.page);
+    if (action.kind === "click" && action.ref && state.armedFileChooser) {
       const files = state.armedFileChooser;
       state.armedFileChooser = undefined;
       const chooserPromise = state.page.waitForEvent("filechooser", { timeout: 10_000 });
@@ -189,7 +218,22 @@ export class BrowserSessionManager {
       await clickPromise;
       return { ok: true, url: state.page.url() };
     }
-    return await executeAction(state.page, state.refs, action);
+    const result = await executeAction(state.page, state.refs, action);
+    if (!shouldSnapshotAfterAction(action)) {
+      return result;
+    }
+    await waitForPageToSettle(state.page, action);
+    const snapshot = await createSnapshot(state.page, action.targetId);
+    state.refs = snapshot.refLocators;
+    return {
+      ...result,
+      targetId: snapshot.targetId,
+      snapshot: snapshot.snapshot,
+      refs: snapshot.refs,
+      refsMode: snapshot.refsMode,
+      snapshotFormat: snapshot.snapshotFormat,
+      stats: snapshot.stats,
+    };
   }
 
   async screenshot(params: {
@@ -197,7 +241,7 @@ export class BrowserSessionManager {
     fileName: string;
     fullPage?: boolean;
   }): Promise<ArtifactMetadata> {
-    const state = this.requirePage(params.targetId);
+    const state = await this.resolvePage(params.targetId);
     const root = this.requireArtifactRoot();
     await root.ensureKind("screenshots");
     const outputPath = root.outputPath("screenshots", params.fileName);
@@ -206,7 +250,7 @@ export class BrowserSessionManager {
   }
 
   async pdf(params: { targetId: string; fileName: string; format?: string }): Promise<ArtifactMetadata> {
-    const state = this.requirePage(params.targetId);
+    const state = await this.resolvePage(params.targetId);
     const root = this.requireArtifactRoot();
     await root.ensureKind("pdf");
     const outputPath = root.outputPath("pdf", params.fileName);
@@ -215,7 +259,7 @@ export class BrowserSessionManager {
   }
 
   async console(params: { targetId: string; limit?: number }): Promise<{ messages: ConsoleEntry[] }> {
-    const state = this.requirePage(params.targetId);
+    const state = await this.resolvePage(params.targetId);
     const limit = Math.max(1, Math.min(params.limit ?? 100, 500));
     return { messages: state.consoleMessages.slice(-limit) };
   }
@@ -226,7 +270,7 @@ export class BrowserSessionManager {
     promptText?: string;
     timeoutMs?: number;
   }): Promise<{ handled: true; message: string }> {
-    const state = this.requirePage(params.targetId);
+    const state = await this.resolvePage(params.targetId);
     const dialog = state.pendingDialog ?? (await waitForDialog(state, params.timeoutMs ?? 5_000));
     state.pendingDialog = undefined;
     const message = dialog.message();
@@ -249,7 +293,7 @@ export class BrowserSessionManager {
         retryable: false,
       });
     }
-    const state = this.requirePage(params.targetId);
+    const state = await this.resolvePage(params.targetId);
     const root = this.requireArtifactRoot();
     state.armedFileChooser = await Promise.all(params.files.map((file) => root.inputUploadPath(file)));
     return { armed: true, fileCount: state.armedFileChooser.length };
@@ -261,7 +305,7 @@ export class BrowserSessionManager {
     action?: BrowserActRequest;
     timeoutMs?: number;
   }): Promise<ArtifactMetadata & { suggestedFilename: string }> {
-    const state = this.requirePage(params.targetId);
+    const state = await this.resolvePage(params.targetId);
     const root = this.requireArtifactRoot();
     await root.ensureKind("downloads");
     const downloadPromise = state.page.waitForEvent("download", {
@@ -292,17 +336,6 @@ export class BrowserSessionManager {
     return this.context;
   }
 
-  private requirePage(targetId: string): PageState {
-    const state = this.pages.get(targetId);
-    if (!state) {
-      throw new BrowserAutomationError({
-        code: "BROWSER_TAB_NOT_FOUND",
-        message: `tab not found: ${targetId}`,
-        retryable: false,
-      });
-    }
-    return state;
-  }
 
   private createPageState(page: Page, label?: string): PageState {
     const state: PageState = {
@@ -330,6 +363,100 @@ export class BrowserSessionManager {
       }
     });
     return state;
+  }
+
+  private async gotoWithHeadlessFallback(params: {
+    targetId: string;
+    label?: string;
+    url: string;
+    existing?: PageState;
+  }): Promise<{ state: PageState; fallbackFromHeadless: boolean }> {
+    let state =
+      params.existing ?? this.createPageState(await this.requireContext().newPage(), params.label);
+    this.pages.set(params.targetId, state);
+    try {
+      await state.page.goto(params.url);
+      await dismissCommonOverlays(state.page);
+      this.rememberTarget(params.targetId, state, params.label);
+      return { state, fallbackFromHeadless: false };
+    } catch (error) {
+      if (!this.canRetryNavigationVisible(error)) {
+        throw error;
+      }
+    }
+
+    await this.restartAssistantVisible();
+    state = this.createPageState(await this.requireContext().newPage(), params.label);
+    this.pages.set(params.targetId, state);
+    await state.page.goto(params.url);
+    await dismissCommonOverlays(state.page);
+    this.rememberTarget(params.targetId, state, params.label);
+    return { state, fallbackFromHeadless: true };
+  }
+
+  // Records where a target currently is so it can be re-opened after a crash,
+  // page close, or context restart.
+  private rememberTarget(targetId: string, state: PageState, label?: string): void {
+    this.targetMeta.set(targetId, {
+      url: state.page.url(),
+      label: label ?? state.label,
+    });
+  }
+
+  // Returns a live page for the target, transparently re-opening it at its last
+  // known URL if the previous page was closed or lost. Operational callers use
+  // this instead of requirePage so a single dead tab does not abort the loop.
+  private async resolvePage(targetId: string): Promise<PageState> {
+    const existing = this.pages.get(targetId);
+    if (existing && !existing.page.isClosed()) {
+      return existing;
+    }
+    const meta = this.targetMeta.get(targetId);
+    if (!meta?.url) {
+      throw new BrowserAutomationError({
+        code: "BROWSER_TAB_NOT_FOUND",
+        message: `tab not found: ${targetId}`,
+        retryable: false,
+      });
+    }
+    await this.start();
+    const state = this.createPageState(await this.requireContext().newPage(), meta.label);
+    this.pages.set(targetId, state);
+    await state.page.goto(meta.url);
+    await dismissCommonOverlays(state.page);
+    return state;
+  }
+
+  private browserTab(targetId: string, state: PageState, fallbackFromHeadless: boolean): BrowserTab {
+    return {
+      targetId,
+      url: state.page.url(),
+      ...(state.label ? { label: state.label } : {}),
+      profile: this.activeProfile,
+      headless: this.profile?.headless,
+      ...(fallbackFromHeadless ? { fallbackFromHeadless } : {}),
+    };
+  }
+
+  private async startAssistantProfile(headless: boolean): Promise<{ status: "started"; profile: string }> {
+    this.profile = await resolveAssistantProfile({ ...this.options, headless });
+    await mkdir(this.profile.userDataDir, { recursive: true });
+    this.context = await chromium.launchPersistentContext(this.profile.userDataDir, {
+      headless: this.profile.headless,
+      executablePath: this.profile.executablePath,
+      acceptDownloads: true,
+    });
+    this.activeProfile = "assistant";
+    return { status: "started", profile: this.profile.name };
+  }
+
+  private async restartAssistantVisible(): Promise<void> {
+    await this.closeContext();
+    await this.startAssistantProfile(false);
+  }
+
+  private canRetryNavigationVisible(error: unknown): boolean {
+    return this.activeProfile === "assistant" && this.profile?.headless === true && isHeadlessNavigationFailure(error);
   }
 
   private requireArtifactRoot(): BrowserArtifactRoot {
@@ -364,6 +491,151 @@ export class BrowserSessionManager {
 async function artifactMetadata(kind: ArtifactMetadata["kind"], outputPath: string): Promise<ArtifactMetadata> {
   const file = await stat(outputPath);
   return { kind, path: outputPath, bytes: file.size };
+}
+
+function shouldSnapshotAfterAction(action: BrowserActRequest): boolean {
+  if (
+    ("snapshotAfter" in action && action.snapshotAfter === true) ||
+    ("snapshot_after" in action && action.snapshot_after === true)
+  ) {
+    return true;
+  }
+  return [
+    "click",
+    "clickCoords",
+    "type",
+    "fill",
+    "fill_form",
+    "press",
+    "press_key",
+    "select",
+    "select_option",
+    "hover",
+    "scrollIntoView",
+    "scroll_into_view",
+    "scroll",
+    "wait",
+    "evaluate",
+    "batch",
+  ].includes(action.kind);
+}
+
+function snapshotDelayForAction(action: BrowserActRequest): number {
+  if (action.kind === "click" || action.kind === "clickCoords") {
+    return 1_000;
+  }
+  if (action.kind === "type") {
+    return 400;
+  }
+  if (action.kind === "fill" || action.kind === "fill_form") {
+    return 500;
+  }
+  if (action.kind === "press" || action.kind === "press_key" || action.kind === "select" || action.kind === "select_option") {
+    return 300;
+  }
+  if (action.kind === "hover" || action.kind === "scrollIntoView" || action.kind === "scroll_into_view") {
+    return 150;
+  }
+  if (action.kind === "wait") {
+    return 100;
+  }
+  if (action.kind === "batch") {
+    return 600;
+  }
+  return 250;
+}
+
+async function waitForPageToSettle(page: Page, action: BrowserActRequest): Promise<void> {
+  await page.waitForTimeout(snapshotDelayForAction(action));
+  if (action.kind !== "click" && action.kind !== "clickCoords" && action.kind !== "press" && action.kind !== "press_key") {
+    return;
+  }
+
+  await page.waitForLoadState("domcontentloaded", { timeout: 2_000 }).catch(() => undefined);
+  await page.waitForLoadState("networkidle", { timeout: 3_000 }).catch(() => undefined);
+  await page.waitForTimeout(250);
+}
+
+const COMMON_OVERLAY_DISMISS_SELECTORS = [
+  "#onetrust-reject-all-handler",
+  "#onetrust-pc-btn-handler",
+  "button:has-text(\"Rifiuta tutto\")",
+  "button:has-text(\"Solo necessari\")",
+  "button:has-text(\"Reject all\")",
+  "button:has-text(\"Necessary only\")",
+  "#onetrust-accept-btn-handler",
+  "#accept-recommended-btn-handler",
+  "button:has-text(\"ACCETTA\")",
+  "button:has-text(\"Accetta\")",
+  "button:has-text(\"Accetta tutto\")",
+  "button:has-text(\"Accetta tutti\")",
+  "button:has-text(\"Accept all\")",
+];
+
+const COMMON_BACKDROP_SELECTORS = [
+  ".offcanvas-backdrop.show",
+  ".offcanvas-backdrop",
+  ".modal-backdrop.show",
+  ".modal-backdrop",
+];
+
+async function dismissCommonOverlays(page: Page): Promise<void> {
+  for (const selector of COMMON_OVERLAY_DISMISS_SELECTORS) {
+    const locator = page.locator(selector).first();
+    const count = await locator.count().catch(() => 0);
+    if (count === 0) {
+      continue;
+    }
+    const visible = await locator.isVisible().catch(() => false);
+    if (!visible) {
+      continue;
+    }
+    const clicked = await locator.click({ timeout: 800 }).then(
+      () => true,
+      () => false,
+    );
+    if (clicked) {
+      await page.waitForTimeout(150);
+      return;
+    }
+  }
+  for (const selector of COMMON_BACKDROP_SELECTORS) {
+    const locator = page.locator(selector).first();
+    const count = await locator.count().catch(() => 0);
+    if (count === 0) {
+      continue;
+    }
+    const visible = await locator.isVisible().catch(() => false);
+    if (!visible) {
+      continue;
+    }
+    await page.keyboard.press("Escape").catch(() => undefined);
+    await page.waitForTimeout(150);
+    const stillVisible = await locator.isVisible().catch(() => false);
+    if (!stillVisible) {
+      return;
+    }
+    const clicked = await locator.click({ timeout: 800, force: true }).then(
+      () => true,
+      () => false,
+    );
+    if (clicked) {
+      await page.waitForTimeout(150);
+      return;
+    }
+  }
+}
+
+export function isHeadlessNavigationFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return [
+    "ERR_HTTP2_PROTOCOL_ERROR",
+    "ERR_CONNECTION_RESET",
+    "ERR_CONNECTION_CLOSED",
+    "ERR_EMPTY_RESPONSE",
+    "ERR_BLOCKED_BY_CLIENT",
+    "ERR_TUNNEL_CONNECTION_FAILED",
+  ].some((needle) => message.includes(needle));
 }
 
 async function waitForDialog(state: PageState, timeoutMs: number): Promise<Dialog> {

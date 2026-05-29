@@ -2,11 +2,14 @@ use crate::{
     LogBuffer, LogEntry, LogStream, ProcessKind, ProcessManagerError, ProcessManagerResult,
     ProcessSnapshot, ProcessSpec, ProcessStatus,
 };
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader};
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::collections::{BTreeMap, BTreeSet};
 
 pub trait ProcessSupervisor {
     fn start(&mut self, spec: &ProcessSpec) -> ProcessManagerResult<ProcessSnapshot>;
@@ -46,8 +49,10 @@ impl ProcessSupervisor for FakeProcessSupervisor {
 
     fn snapshot(&mut self, spec: &ProcessSpec) -> ProcessManagerResult<ProcessSnapshot> {
         if self.running.contains(&spec.id) {
-            Ok(ProcessSnapshot::new(&spec.id, spec.kind.clone(), ProcessStatus::Running)
-                .with_pid(*self.pids.get(&spec.id).unwrap_or(&10_001)))
+            Ok(
+                ProcessSnapshot::new(&spec.id, spec.kind.clone(), ProcessStatus::Running)
+                    .with_pid(*self.pids.get(&spec.id).unwrap_or(&10_001)),
+            )
         } else {
             Err(ProcessManagerError::NotFound(spec.id.clone()))
         }
@@ -68,6 +73,8 @@ fn _kind_used(_kind: ProcessKind) {}
 
 pub struct LocalProcessSupervisor {
     children: BTreeMap<String, LocalProcessState>,
+    log_dir: Option<PathBuf>,
+    persistent_log_capacity: usize,
 }
 
 struct LocalProcessState {
@@ -81,21 +88,42 @@ impl LocalProcessSupervisor {
     pub fn new() -> Self {
         Self {
             children: BTreeMap::new(),
+            log_dir: None,
+            persistent_log_capacity: 2_000,
         }
     }
 
-    pub fn logs(&self, id: &str) -> ProcessManagerResult<Vec<LogEntry>> {
-        let Some(state) = self.children.get(id) else {
-            return Err(ProcessManagerError::NotFound(id.to_string()));
-        };
-        Ok(state
-            .logs
-            .lock()
-            .map_err(|_| ProcessManagerError::InvalidSpec("log buffer lock poisoned".to_string()))?
-            .entries())
+    pub fn with_log_dir(mut self, log_dir: impl Into<PathBuf>, capacity: usize) -> Self {
+        self.log_dir = Some(log_dir.into());
+        self.persistent_log_capacity = capacity;
+        self
     }
 
-    fn snapshot_for_state(id: &str, state: &mut LocalProcessState) -> ProcessManagerResult<ProcessSnapshot> {
+    pub fn logs(&self, id: &str) -> ProcessManagerResult<Vec<LogEntry>> {
+        if let Some(state) = self.children.get(id) {
+            return Ok(state
+                .logs
+                .lock()
+                .map_err(|_| {
+                    ProcessManagerError::InvalidSpec("log buffer lock poisoned".to_string())
+                })?
+                .entries());
+        }
+
+        if let Some(log_dir) = &self.log_dir {
+            let entries = read_persistent_log(&persistent_log_path(log_dir, id))?;
+            if !entries.is_empty() {
+                return Ok(entries);
+            }
+        }
+
+        Err(ProcessManagerError::NotFound(id.to_string()))
+    }
+
+    fn snapshot_for_state(
+        id: &str,
+        state: &mut LocalProcessState,
+    ) -> ProcessManagerResult<ProcessSnapshot> {
         match state.child.try_wait()? {
             Some(status) => {
                 state.exit_code = status.code();
@@ -105,8 +133,10 @@ impl LocalProcessSupervisor {
                 snapshot.exit_code = state.exit_code;
                 Ok(snapshot)
             }
-            None => Ok(ProcessSnapshot::new(id, state.kind.clone(), ProcessStatus::Running)
-                .with_pid(state.child.id())),
+            None => Ok(
+                ProcessSnapshot::new(id, state.kind.clone(), ProcessStatus::Running)
+                    .with_pid(state.child.id()),
+            ),
         }
     }
 }
@@ -137,11 +167,33 @@ impl ProcessSupervisor for LocalProcessSupervisor {
 
         let mut child = command.spawn()?;
         let logs = Arc::new(Mutex::new(LogBuffer::new(spec.log_capacity)));
+        let persistent_log = self
+            .log_dir
+            .as_ref()
+            .map(|log_dir| {
+                fs::create_dir_all(log_dir)?;
+                Ok::<_, std::io::Error>(Arc::new(Mutex::new(PersistentLogFile {
+                    path: persistent_log_path(log_dir, &spec.id),
+                    capacity: self.persistent_log_capacity,
+                })))
+            })
+            .transpose()?;
+
         if let Some(stdout) = child.stdout.take() {
-            spawn_log_reader(Arc::clone(&logs), LogStream::Stdout, stdout);
+            spawn_log_reader(
+                Arc::clone(&logs),
+                persistent_log.clone(),
+                LogStream::Stdout,
+                stdout,
+            );
         }
         if let Some(stderr) = child.stderr.take() {
-            spawn_log_reader(Arc::clone(&logs), LogStream::Stderr, stderr);
+            spawn_log_reader(
+                Arc::clone(&logs),
+                persistent_log.clone(),
+                LogStream::Stderr,
+                stderr,
+            );
         }
 
         let pid = child.id();
@@ -187,16 +239,123 @@ impl ProcessSupervisor for LocalProcessSupervisor {
     }
 }
 
-fn spawn_log_reader<R>(logs: Arc<Mutex<LogBuffer>>, stream: LogStream, reader: R)
-where
+struct PersistentLogFile {
+    path: PathBuf,
+    capacity: usize,
+}
+
+impl PersistentLogFile {
+    fn push(&self, stream: LogStream, line: &str) -> ProcessManagerResult<()> {
+        if self.capacity == 0 {
+            return Ok(());
+        }
+        if let Some(parent) = self.path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let entry = LogEntry {
+            stream,
+            line: redact_sensitive_log_line(line),
+        };
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)?;
+        writeln!(
+            file,
+            "{}",
+            serde_json::to_string(&entry).map_err(|error| {
+                ProcessManagerError::InvalidSpec(format!("serialize log entry failed: {error}"))
+            })?
+        )?;
+        trim_persistent_log(&self.path, self.capacity)?;
+        Ok(())
+    }
+}
+
+fn spawn_log_reader<R>(
+    logs: Arc<Mutex<LogBuffer>>,
+    persistent_log: Option<Arc<Mutex<PersistentLogFile>>>,
+    stream: LogStream,
+    reader: R,
+) where
     R: std::io::Read + Send + 'static,
 {
     thread::spawn(move || {
         let reader = BufReader::new(reader);
         for line in reader.lines().map_while(Result::ok) {
             if let Ok(mut logs) = logs.lock() {
-                logs.push(stream, line);
+                logs.push(stream, line.clone());
+            }
+            if let Some(persistent_log) = &persistent_log
+                && let Ok(writer) = persistent_log.lock()
+            {
+                let _ = writer.push(stream, &line);
             }
         }
     });
+}
+
+fn read_persistent_log(path: &Path) -> ProcessManagerResult<Vec<LogEntry>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let mut content = String::new();
+    OpenOptions::new()
+        .read(true)
+        .open(path)?
+        .read_to_string(&mut content)?;
+    let entries = content
+        .lines()
+        .filter_map(|line| serde_json::from_str::<LogEntry>(line).ok())
+        .collect();
+    Ok(entries)
+}
+
+fn trim_persistent_log(path: &Path, capacity: usize) -> ProcessManagerResult<()> {
+    let mut content = String::new();
+    OpenOptions::new()
+        .read(true)
+        .open(path)?
+        .read_to_string(&mut content)?;
+    let lines: Vec<&str> = content.lines().collect();
+    if lines.len() <= capacity {
+        return Ok(());
+    }
+    let retained = lines[lines.len() - capacity..].join("\n");
+    fs::write(path, format!("{retained}\n"))?;
+    Ok(())
+}
+
+fn persistent_log_path(log_dir: &Path, id: &str) -> PathBuf {
+    let safe_id: String = id
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    log_dir.join(format!("{safe_id}.jsonl"))
+}
+
+fn redact_sensitive_log_line(input: &str) -> String {
+    let mut output = input.to_string();
+    for marker in [
+        "sk-",
+        "sk_proj_",
+        "token=",
+        "Authorization:",
+        "Bearer ",
+        "password=",
+        "secret=",
+    ] {
+        if let Some(index) = output.to_lowercase().find(&marker.to_lowercase()) {
+            output.truncate(index + marker.len());
+            output.push_str("[REDACTED]");
+            return output;
+        }
+    }
+    output
 }

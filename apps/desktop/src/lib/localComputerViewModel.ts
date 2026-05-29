@@ -10,6 +10,9 @@ export function mapCoreComputerSession(
   const previewArtifact = [...snapshot.artifact_refs]
     .reverse()
     .find((artifact) => artifact.preview_ref);
+  const operationalPlanMarkdown = [...snapshot.timeline]
+    .reverse()
+    .find((item) => item.markdown_redacted)?.markdown_redacted ?? undefined;
   const timeline = snapshot.timeline.map((item) => ({
     id: item.event_id,
     surface: toSurfaceKind(item.surface),
@@ -19,6 +22,7 @@ export function mapCoreComputerSession(
       : "Dettaglio non mostrato: payload non redatto",
     status: toTimelineStatus(item.status, item.approval_required),
     timestamp: formatClock(item.started_at),
+    markdown: item.markdown_redacted ?? undefined,
   }));
 
   return {
@@ -36,6 +40,7 @@ export function mapCoreComputerSession(
       : "Preview non ancora disponibile",
     previewArtifactId: previewArtifact?.artifact_id,
     terminalExcerpt: snapshot.terminal_excerpt_redacted,
+    operationalPlanMarkdown,
     surfaces: snapshot.surfaces.map((surface) => ({
       id: toSurfaceKind(surface.surface),
       label: surface.label,
@@ -67,6 +72,7 @@ export function createLoadingComputerSession(sessionId: string): ComputerSession
     previewTitle: "Connessione al Rust Core",
     previewDetail: "Lettura del read model UI-safe in corso",
     terminalExcerpt: [],
+    operationalPlanMarkdown: undefined,
     surfaces: defaultSurfaces("waiting"),
     timeline: [],
     artifacts: [],
@@ -87,9 +93,10 @@ export function createUnavailableComputerSession(
     elapsed: "0s",
     progressCurrent: 0,
     progressTotal: 1,
-    previewTitle: "Tauri bridge non disponibile",
-    previewDetail: "Apri la shell Tauri per provare il read model reale.",
-    terminalExcerpt: ["local-computer % waiting for tauri core"],
+    previewTitle: "Gateway locale non disponibile",
+    previewDetail: "Il read model operativo sara' esposto dal gateway Rust autonomo.",
+    terminalExcerpt: ["local-computer % waiting for local gateway"],
+    operationalPlanMarkdown: undefined,
     surfaces: defaultSurfaces("waiting"),
     timeline: [
       {

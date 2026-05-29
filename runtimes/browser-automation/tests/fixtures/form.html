@@ -7,18 +7,91 @@
   <body>
     <main>
       <h1>Booking Form</h1>
+      <a href="/docs">Docs</a>
       <label>
         Name
         <input aria-label="Name" name="name" />
       </label>
+      <label>
+        Destination
+        <input id="destination" placeholder="Destination" />
+      </label>
+      <ul id="suggestions" aria-label="Destination suggestions"></ul>
+      <label>
+        Class
+        <select aria-label="Class">
+          <option value="standard">Standard</option>
+          <option value="business">Business</option>
+        </select>
+      </label>
+      <label for="travel-date">Travel date</label>
+      <input id="travel-date" type="button" value="Today" />
+      <div id="calendar" role="dialog" aria-label="Calendar" hidden>
+        <button type="button" data-date="2026-06-10">10 giugno 2026</button>
+        <button type="button" data-date="2026-06-11">11 giugno 2026</button>
+      </div>
+      <div style="height: 110vh"></div>
+      <p id="below">Below fold</p>
       <button id="submit" type="button">Submit</button>
+      <button id="help" type="button">Help</button>
+      <button id="delayed" type="button">Load delayed options</button>
+      <p id="tooltip" hidden>Helpful booking hint</p>
       <p id="result" aria-live="polite"></p>
     </main>
     <script>
       document.querySelector("#submit").addEventListener("click", () => {
         const value = document.querySelector("input[name='name']").value;
-        document.querySelector("#result").textContent = `Submitted ${value}`;
+        const destination = document.querySelector("#destination").value;
+        const travelClass = document.querySelector("select[aria-label='Class']").value;
+        document.querySelector("#result").textContent =
+          `Submitted ${value} to ${destination} in ${travelClass}`;
       });
+      document.querySelector("#delayed").addEventListener("click", () => {
+        setTimeout(() => {
+          document.querySelector("#result").textContent =
+            "Option 09:10 Napoli Centrale to Milano Centrale";
+        }, 900);
+      });
+      document.querySelector("#help").addEventListener("mouseenter", () => {
+        document.querySelector("#tooltip").hidden = false;
+      });
+      document.querySelector("#destination").addEventListener("input", (event) => {
+        if (event.target.dataset.typed !== "true") {
+          return;
+        }
+        event.target.dataset.typed = "";
+        const suggestions = document.querySelector("#suggestions");
+        suggestions.innerHTML = "";
+        if (!event.target.value.trim()) {
+          return;
+        }
+        for (const city of ["Milano Centrale", "Milano Rogoredo"]) {
+          const item = document.createElement("li");
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = city;
+          button.addEventListener("click", () => {
+            event.target.value = city;
+            suggestions.innerHTML = "";
+          });
+          item.appendChild(button);
+          suggestions.appendChild(item);
+        }
+      });
+      document.querySelector("#destination").addEventListener("keydown", (event) => {
+        if (event.key.length === 1) {
+          event.target.dataset.typed = "true";
+        }
+      });
+      document.querySelector("#travel-date").addEventListener("click", () => {
+        document.querySelector("#calendar").hidden = false;
+      });
+      for (const button of document.querySelectorAll("[data-date]")) {
+        button.addEventListener("click", () => {
+          document.querySelector("#travel-date").value = button.textContent;
+          document.querySelector("#calendar").hidden = true;
+        });
+      }
     </script>
   </body>
 </html>

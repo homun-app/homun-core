@@ -1,5 +1,6 @@
 mod audit;
 mod browser_provider;
+mod cached_provider;
 mod channel;
 mod composio;
 mod error;
@@ -14,6 +15,7 @@ mod types;
 
 pub use audit::{CapabilityAuditEvent, InMemoryCapabilityAudit};
 pub use browser_provider::BrowserCapabilityProvider;
+pub use cached_provider::CachedToolProvider;
 pub use channel::{
     ChannelCapabilities, ChannelMessage, ChannelProvider, FakeChannelProvider,
     OutboundChannelMessage,

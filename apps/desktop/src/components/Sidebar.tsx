@@ -1,14 +1,23 @@
 import {
   ArrowLeft,
+  Archive,
+  ArchiveRestore,
   Bell,
+  ChevronDown,
+  ChevronRight,
   FolderPlus,
   PanelLeftClose,
   PanelLeftOpen,
+  Pin,
+  PinOff,
   Search,
   Settings,
-  SlidersHorizontal,
   SquarePen,
+  Trash2,
+  X,
 } from "lucide-react";
+import { useEffect, useState } from "react";
+import type { MouseEvent } from "react";
 import {
   drawerProjects,
   navItems,
@@ -19,22 +28,18 @@ import type { ChatThread, SettingsSectionId, ViewId } from "../types";
 interface NavigationRailProps {
   activeView: ViewId;
   onNavigate: (view: ViewId) => void;
+  onSearch: () => void;
   onToggleDrawer: () => void;
 }
 
 export function NavigationRail({
   activeView,
   onNavigate,
+  onSearch,
   onToggleDrawer,
 }: NavigationRailProps) {
   return (
     <aside className="navigation-rail" aria-label="Navigazione rapida">
-      <div className="window-controls compact" aria-hidden="true">
-        <span className="control red" />
-        <span className="control yellow" />
-        <span className="control green" />
-      </div>
-
       <button
         className="rail-logo"
         type="button"
@@ -45,7 +50,12 @@ export function NavigationRail({
       </button>
 
       <nav className="rail-nav">
-        <button className="rail-button" type="button" aria-label="Cerca">
+        <button
+          className="rail-button"
+          type="button"
+          aria-label="Cerca"
+          onClick={onSearch}
+        >
           <Search size={18} />
         </button>
         {navItems.map((item) => {
@@ -86,29 +96,72 @@ interface NavDrawerProps {
   activeView: ViewId;
   activeThreadId: string;
   chatThreads: ChatThread[];
+  onArchiveChatThread: (threadId: string) => void;
   onCreateChatThread: () => void;
+  onDeleteChatThread: (threadId: string) => void;
   onNavigate: (view: ViewId) => void;
+  onSearchChat: () => void;
   onSelectThread: (threadId: string) => void;
+  onSetChatThreadPinned: (threadId: string, pinned: boolean) => void;
   onToggleDrawer: () => void;
+  onUnarchiveChatThread: (threadId: string) => void;
 }
 
 export function NavDrawer({
   activeView,
   activeThreadId,
   chatThreads,
+  onArchiveChatThread,
   onCreateChatThread,
+  onDeleteChatThread,
   onNavigate,
+  onSearchChat,
   onSelectThread,
+  onSetChatThreadPinned,
   onToggleDrawer,
+  onUnarchiveChatThread,
 }: NavDrawerProps) {
+  const [collapsedSections, setCollapsedSections] = useState({
+    projects: false,
+    tasks: false,
+    archived: false,
+  });
+  const [deleteCandidate, setDeleteCandidate] = useState<ChatThread | null>(null);
+  const [threadMenu, setThreadMenu] = useState<{
+    thread: ChatThread;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!threadMenu) return;
+    function closeMenu() {
+      setThreadMenu(null);
+    }
+    window.addEventListener("click", closeMenu);
+    window.addEventListener("keydown", closeMenu);
+    return () => {
+      window.removeEventListener("click", closeMenu);
+      window.removeEventListener("keydown", closeMenu);
+    };
+  }, [threadMenu]);
+
+  function runThreadAction(action: () => void) {
+    action();
+    setThreadMenu(null);
+  }
+
+  function toggleSection(section: keyof typeof collapsedSections) {
+    setCollapsedSections((current) => ({
+      ...current,
+      [section]: !current[section],
+    }));
+  }
+
+  const activeThreads = chatThreads.filter((thread) => thread.status === "active");
+  const archivedThreads = chatThreads.filter((thread) => thread.status === "archived");
   return (
     <aside className="nav-drawer" aria-label="Menu principale">
-      <div className="window-controls" aria-hidden="true">
-        <span className="control red" />
-        <span className="control yellow" />
-        <span className="control green" />
-      </div>
-
       <header className="drawer-header">
         <div>
           <strong>Assistant locale</strong>
@@ -131,15 +184,18 @@ export function NavDrawer({
       <nav className="drawer-nav">
         {navItems.map((item) => {
           const Icon = item.icon;
+          const isSearch = item.id === "chat";
           return (
             <button
-              className={`drawer-nav-item ${activeView === item.id ? "active" : ""}`}
+              className={`drawer-nav-item ${
+                !isSearch && activeView === item.id ? "active" : ""
+              }`}
               key={item.id}
               type="button"
-              onClick={() => onNavigate(item.id)}
+              onClick={() => (isSearch ? onSearchChat() : onNavigate(item.id))}
             >
-              <Icon size={17} />
-              <span>{item.label}</span>
+              {isSearch ? <Search size={17} /> : <Icon size={17} />}
+              <span>{isSearch ? "Cerca" : item.label}</span>
               {item.badge && <em>{item.badge}</em>}
             </button>
           );
@@ -148,40 +204,187 @@ export function NavDrawer({
 
       <div className="drawer-scroll">
         <section className="drawer-section">
-          <div className="drawer-section-title">
+          <button
+            className="drawer-section-title"
+            type="button"
+            onClick={() => toggleSection("projects")}
+          >
             <span>Progetti</span>
-            <button className="icon-button small-icon-button" type="button" aria-label="Nuovo progetto">
-              <FolderPlus size={15} />
-            </button>
-          </div>
-          {drawerProjects.map((project) => (
-            <button className="drawer-link" type="button" key={project}>
-              {project}
-            </button>
-          ))}
+            {collapsedSections.projects ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
+          </button>
+          {!collapsedSections.projects && (
+            <>
+              {drawerProjects.map((project) => (
+                <button className="drawer-link" type="button" key={project}>
+                  <span>{project}</span>
+                </button>
+              ))}
+              <button className="drawer-link drawer-link-muted" type="button">
+                <span>Nuovo progetto</span>
+                <FolderPlus size={14} />
+              </button>
+            </>
+          )}
         </section>
 
         <section className="drawer-section">
-          <div className="drawer-section-title">
+          <button
+            className="drawer-section-title"
+            type="button"
+            onClick={() => toggleSection("tasks")}
+          >
             <span>Tutti i compiti</span>
-            <SlidersHorizontal size={15} />
-          </div>
-          {chatThreads.map((thread) => (
-            <button
-              className={`drawer-link ${
-                thread.threadId === activeThreadId && activeView === "chat"
-                  ? "active"
-                  : ""
-              }`}
-              type="button"
-              key={thread.threadId}
-              onClick={() => onSelectThread(thread.threadId)}
-            >
-              {thread.title}
-            </button>
-          ))}
+            {collapsedSections.tasks ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
+          </button>
+          {!collapsedSections.tasks &&
+            activeThreads.map((thread) => (
+              <ThreadLink
+                active={thread.threadId === activeThreadId && activeView === "chat"}
+                key={thread.threadId}
+                thread={thread}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setThreadMenu({
+                    thread,
+                    x: event.clientX,
+                    y: event.clientY,
+                  });
+                }}
+                onSelect={() => onSelectThread(thread.threadId)}
+              />
+            ))}
         </section>
+
+        {archivedThreads.length > 0 && (
+          <section className="drawer-section">
+            <button
+              className="drawer-section-title"
+              type="button"
+              onClick={() => toggleSection("archived")}
+            >
+              <span>Archiviati</span>
+              {collapsedSections.archived ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
+            </button>
+            {!collapsedSections.archived &&
+              archivedThreads.map((thread) => (
+                <ThreadLink
+                  active={thread.threadId === activeThreadId && activeView === "chat"}
+                  key={thread.threadId}
+                  thread={thread}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setThreadMenu({
+                      thread,
+                      x: event.clientX,
+                      y: event.clientY,
+                    });
+                  }}
+                  onSelect={() => onSelectThread(thread.threadId)}
+                />
+              ))}
+          </section>
+        )}
       </div>
+
+      {deleteCandidate && (
+        <div className="confirm-modal-backdrop" role="presentation">
+          <div className="confirm-modal" role="dialog" aria-label="Conferma eliminazione">
+            <header>
+              <strong>Eliminare questa chat?</strong>
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="Chiudi conferma"
+                onClick={() => setDeleteCandidate(null)}
+              >
+                <X size={17} />
+              </button>
+            </header>
+            <p>{deleteCandidate.title}</p>
+            <footer>
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => setDeleteCandidate(null)}
+              >
+                Annulla
+              </button>
+              <button
+                className="danger-button"
+                type="button"
+                onClick={() => {
+                  onDeleteChatThread(deleteCandidate.threadId);
+                  setDeleteCandidate(null);
+                }}
+              >
+                Elimina
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
+
+      {threadMenu && (
+        <div
+          className="thread-context-menu"
+          role="menu"
+          style={{ left: threadMenu.x, top: threadMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {threadMenu.thread.status === "active" && (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() =>
+                  runThreadAction(() =>
+                    onSetChatThreadPinned(
+                      threadMenu.thread.threadId,
+                      !threadMenu.thread.pinned,
+                    ),
+                  )
+                }
+              >
+                {threadMenu.thread.pinned ? <PinOff size={15} /> : <Pin size={15} />}
+                <span>{threadMenu.thread.pinned ? "Rimuovi pin" : "Pin in alto"}</span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() =>
+                  runThreadAction(() => onArchiveChatThread(threadMenu.thread.threadId))
+                }
+              >
+                <Archive size={15} />
+                <span>Archivia</span>
+              </button>
+            </>
+          )}
+          {threadMenu.thread.status === "archived" && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() =>
+                runThreadAction(() =>
+                  onUnarchiveChatThread(threadMenu.thread.threadId),
+                )
+              }
+            >
+              <ArchiveRestore size={15} />
+              <span>Rimuovi dall'archivio</span>
+            </button>
+          )}
+          <button
+            className="danger"
+            type="button"
+            role="menuitem"
+            onClick={() => runThreadAction(() => setDeleteCandidate(threadMenu.thread))}
+          >
+            <Trash2 size={15} />
+            <span>Elimina</span>
+          </button>
+        </div>
+      )}
 
       <footer className="drawer-footer">
         <div className="drawer-persistent-actions" aria-label="Azioni persistenti">
@@ -216,12 +419,6 @@ export function SettingsDrawer({
 }: SettingsDrawerProps) {
   return (
     <aside className="nav-drawer settings-drawer" aria-label="Impostazioni">
-      <div className="window-controls" aria-hidden="true">
-        <span className="control red" />
-        <span className="control yellow" />
-        <span className="control green" />
-      </div>
-
       <header className="drawer-header">
         <div>
           <strong>Impostazioni</strong>
@@ -251,5 +448,94 @@ export function SettingsDrawer({
         })}
       </nav>
     </aside>
+  );
+}
+
+interface ChatSearchModalProps {
+  chatThreads: ChatThread[];
+  onClose: () => void;
+  onSelectThread: (threadId: string) => void;
+}
+
+export function ChatSearchModal({
+  chatThreads,
+  onClose,
+  onSelectThread,
+}: ChatSearchModalProps) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const searchResults = chatThreads
+    .filter((thread) => {
+      if (!normalizedQuery) return true;
+      return `${thread.title} ${thread.subtitle}`
+        .toLowerCase()
+        .includes(normalizedQuery);
+    })
+    .slice(0, 9);
+
+  return (
+    <div className="search-modal-backdrop" role="presentation">
+      <div className="chat-search-modal" role="dialog" aria-label="Cerca chat">
+        <header>
+          <strong>Cerca chat</strong>
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="Chiudi ricerca"
+            onClick={onClose}
+          >
+            <X size={17} />
+          </button>
+        </header>
+        <label className="chat-search-input">
+          <Search size={16} />
+          <input
+            autoFocus
+            placeholder="Cerca nelle chat"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+          />
+        </label>
+        <div className="chat-search-results">
+          <small>{normalizedQuery ? "Risultati" : "Chat recenti"}</small>
+          {searchResults.map((thread, index) => (
+            <button
+              className="chat-search-row"
+              type="button"
+              key={thread.threadId}
+              onClick={() => onSelectThread(thread.threadId)}
+            >
+              <span>{thread.title}</span>
+              <em>local-first-personal-assistant</em>
+              <kbd>⌘{index + 1}</kbd>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ThreadLink({
+  active,
+  onContextMenu,
+  onSelect,
+  thread,
+}: {
+  active: boolean;
+  onContextMenu: (event: MouseEvent<HTMLButtonElement>) => void;
+  onSelect: () => void;
+  thread: ChatThread;
+}) {
+  return (
+    <button
+      className={`drawer-link ${active ? "active" : ""} ${thread.pinned ? "pinned" : ""}`}
+      type="button"
+      onContextMenu={onContextMenu}
+      onClick={onSelect}
+    >
+      <span>{thread.title}</span>
+      {thread.pinned && <Pin size={12} aria-hidden="true" />}
+    </button>
   );
 }

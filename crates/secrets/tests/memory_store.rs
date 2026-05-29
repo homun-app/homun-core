@@ -14,7 +14,14 @@ fn in_memory_store_round_trips_secret_material_and_metadata() {
     assert_eq!(metadata.status, SecretStatus::Active);
     assert_eq!(metadata.version, 1);
     assert_eq!(store.get(&metadata.reference).unwrap(), Some(material));
-    assert_eq!(store.metadata(&metadata.reference).unwrap().unwrap().version, 1);
+    assert_eq!(
+        store
+            .metadata(&metadata.reference)
+            .unwrap()
+            .unwrap()
+            .version,
+        1
+    );
 }
 
 #[test]
@@ -31,7 +38,12 @@ fn in_memory_store_rotates_versions_and_deletes_secrets() {
 
     assert_eq!(rotated.version, 2);
     assert_eq!(
-        store.get(&reference).unwrap().unwrap().expose_utf8().unwrap(),
+        store
+            .get(&reference)
+            .unwrap()
+            .unwrap()
+            .expose_utf8()
+            .unwrap(),
         "second"
     );
     store.delete(&reference).unwrap();

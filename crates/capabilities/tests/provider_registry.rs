@@ -176,7 +176,12 @@ fn registry_stores_connection_secret_material_outside_database() {
     assert_eq!(loaded[0].secret_ref, reference.as_str());
     assert_eq!(loaded[0].metadata, serde_json::json!({}));
     assert_eq!(
-        secrets.get(&reference).unwrap().unwrap().expose_utf8().unwrap(),
+        secrets
+            .get(&reference)
+            .unwrap()
+            .unwrap()
+            .expose_utf8()
+            .unwrap(),
         "ghp_secret_value"
     );
 }

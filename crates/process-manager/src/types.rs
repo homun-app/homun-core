@@ -42,6 +42,57 @@ pub enum ProcessStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeControlStatus {
+    Configured,
+    ManagedRunning,
+    ExternalRunning,
+    Ready,
+    Unhealthy,
+    DuplicateConflict,
+    Stopped,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RuntimeResourceSnapshot {
+    pub total_memory_mb: Option<u64>,
+    pub available_memory_mb: Option<u64>,
+    pub process_memory_mb: Option<u64>,
+    pub process_cpu_percent: Option<f32>,
+}
+
+impl RuntimeResourceSnapshot {
+    pub fn empty() -> Self {
+        Self {
+            total_memory_mb: None,
+            available_memory_mb: None,
+            process_memory_mb: None,
+            process_cpu_percent: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiscoveredProcess {
+    pub pid: u32,
+    pub command: String,
+    pub cwd: Option<String>,
+    pub port: Option<u16>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RuntimeControlSnapshot {
+    pub process_id: String,
+    pub status: RuntimeControlStatus,
+    pub managed: ProcessSnapshot,
+    pub port: Option<u16>,
+    pub port_owner: Option<DiscoveredProcess>,
+    pub duplicates: Vec<DiscoveredProcess>,
+    pub resources: RuntimeResourceSnapshot,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProcessSpec {
     pub id: String,
     pub kind: ProcessKind,
@@ -56,11 +107,7 @@ pub struct ProcessSpec {
 }
 
 impl ProcessSpec {
-    pub fn new(
-        id: impl Into<String>,
-        kind: ProcessKind,
-        command: impl Into<String>,
-    ) -> Self {
+    pub fn new(id: impl Into<String>, kind: ProcessKind, command: impl Into<String>) -> Self {
         Self {
             id: id.into(),
             kind,
@@ -121,11 +168,7 @@ pub struct ProcessSnapshot {
 }
 
 impl ProcessSnapshot {
-    pub fn new(
-        process_id: impl Into<String>,
-        kind: ProcessKind,
-        status: ProcessStatus,
-    ) -> Self {
+    pub fn new(process_id: impl Into<String>, kind: ProcessKind, status: ProcessStatus) -> Self {
         Self {
             process_id: process_id.into(),
             kind,

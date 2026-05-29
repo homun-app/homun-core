@@ -90,9 +90,82 @@ fn audit_store_records_planner_failures_for_ui_diagnostics() {
     assert!(!ui_json.contains("raw failure prompt"));
 }
 
+#[test]
+fn audit_store_exposes_context_budget_without_raw_context() {
+    let runtime = StubRuntime::new(vec![serde_json::json!({
+        "route": "direct_answer",
+        "direct_answer": {
+            "answer": "Budget registrato.",
+            "reason": "Il contesto e' stato compresso.",
+            "confidence": 0.9
+        },
+        "steps": []
+    })]);
+    let audit_store = OrchestratorAuditStore::open_in_memory().unwrap();
+    let long_memory = MemoryContextSnippet {
+        reference: "memory:user:workspace:long".to_string(),
+        summary: format!(
+            "private recap fabio@example.com {} final useful preference",
+            "older context ".repeat(260)
+        ),
+        privacy_domain: "work".to_string(),
+        sensitivity: "private".to_string(),
+    };
+    let mut brain = brain_with_memory(
+        runtime,
+        vec![tool(
+            "calendar.search",
+            &format!(
+                "Search calendar access_token=secret-token {}",
+                "docs ".repeat(400)
+            ),
+            ActionClass::Read,
+            CapabilityProviderKind::Native,
+        )],
+        vec![long_memory],
+    )
+    .with_audit_store(audit_store);
+
+    brain.run(request("usa la memoria")).unwrap();
+
+    let read_model = OrchestratorUiReadModel::new(brain.audit_store().unwrap());
+    let detail = read_model
+        .run_detail("req_1", &task_user(), &task_workspace())
+        .unwrap()
+        .unwrap();
+    let budget = &detail.context_budget;
+    let ui_json = serde_json::to_string(&detail).unwrap();
+
+    assert!(budget.iter().any(|item| item.label == "memory_context"));
+    assert!(
+        budget
+            .iter()
+            .any(|item| item.label == "loaded_tool_details" && item.compressed)
+    );
+    assert!(!ui_json.contains("fabio@example.com"));
+    assert!(!ui_json.contains("secret-token"));
+}
+
 fn brain(
     runtime: StubRuntime,
     tools: Vec<CapabilityTool>,
+) -> OrchestratorBrain<StubRuntime, StaticMemoryContextProvider> {
+    brain_with_memory(
+        runtime,
+        tools,
+        vec![MemoryContextSnippet {
+            reference: "memory:user:workspace:project".to_string(),
+            summary: "User prefers local-first execution.".to_string(),
+            privacy_domain: "work".to_string(),
+            sensitivity: "private".to_string(),
+        }],
+    )
+}
+
+fn brain_with_memory(
+    runtime: StubRuntime,
+    tools: Vec<CapabilityTool>,
+    memory: Vec<MemoryContextSnippet>,
 ) -> OrchestratorBrain<StubRuntime, StaticMemoryContextProvider> {
     let mut provider = FakeCapabilityProvider::new(
         ProviderId::new("calendar"),
@@ -111,12 +184,7 @@ fn brain(
 
     OrchestratorBrain::new(
         runtime,
-        StaticMemoryContextProvider::new(vec![MemoryContextSnippet {
-            reference: "memory:user:workspace:project".to_string(),
-            summary: "User prefers local-first execution.".to_string(),
-            privacy_domain: "work".to_string(),
-            sensitivity: "private".to_string(),
-        }]),
+        StaticMemoryContextProvider::new(memory),
         facade,
         ToolSearchIndexStore::open_in_memory().unwrap(),
         TaskStore::open_in_memory().unwrap(),

@@ -10,5 +10,8 @@ members = [
     "crates/secrets",
     "crates/skill-runtime",
     "crates/orchestrator",
+    "crates/context-compression",
+    "crates/desktop-gateway",
+    "crates/inference",
 ]
 resolver = "3"

@@ -34,8 +34,14 @@ fn catalog_builds_browser_sidecar_process_spec() {
     assert_eq!(spec.id, "browser-automation");
     assert_eq!(spec.kind, ProcessKind::BrowserSidecar);
     assert_eq!(spec.command, "node");
-    assert_eq!(spec.args, vec!["node_modules/tsx/dist/cli.mjs", "src/server.ts"]);
-    assert_eq!(spec.cwd.as_deref(), Some("/workspace/runtimes/browser-automation"));
+    assert_eq!(
+        spec.args,
+        vec!["node_modules/tsx/dist/cli.mjs", "src/server.ts"]
+    );
+    assert_eq!(
+        spec.cwd.as_deref(),
+        Some("/workspace/runtimes/browser-automation")
+    );
     assert_eq!(spec.env["BROWSER_AUTOMATION_HEADLESS"], "1");
     assert_eq!(spec.health_check, HealthCheck::ProcessAlive);
 }

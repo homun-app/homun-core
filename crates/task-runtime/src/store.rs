@@ -1,6 +1,6 @@
 use crate::{
-    ApprovalRequest, ResourceClass, TaskCheckpoint, TaskId, TaskRecord, TaskRuntimeError,
-    TaskRuntimeResult, TaskStatus, UserId, WorkspaceId,
+    ApprovalRequest, ResourceClass, TaskCheckpoint, TaskDependencyOutput, TaskId, TaskRecord,
+    TaskRuntimeError, TaskRuntimeResult, TaskStatus, UserId, WorkspaceId,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
@@ -288,6 +288,39 @@ impl TaskStore {
             dependencies.push(TaskId::new(row?));
         }
         Ok(dependencies)
+    }
+
+    pub fn dependency_outputs_for(
+        &self,
+        task_id: &TaskId,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> TaskRuntimeResult<Vec<TaskDependencyOutput>> {
+        let dependencies = self.dependencies_for(task_id, user_id, workspace_id)?;
+        let mut outputs = Vec::new();
+        for dependency in dependencies {
+            let Some(checkpoint) = self.latest_checkpoint(&dependency, user_id, workspace_id)?
+            else {
+                return Err(TaskRuntimeError::Store(format!(
+                    "dependency_output_missing:{}",
+                    dependency.as_str()
+                )));
+            };
+            outputs.push(TaskDependencyOutput {
+                task_id: dependency,
+                output: checkpoint
+                    .payload
+                    .get("output")
+                    .cloned()
+                    .unwrap_or(checkpoint.payload),
+                redacted_output: checkpoint
+                    .redacted_payload
+                    .get("output")
+                    .cloned()
+                    .unwrap_or(checkpoint.redacted_payload),
+            });
+        }
+        Ok(outputs)
     }
 
     pub fn reserve_resources(&self, task: &TaskRecord, owner: &str) -> TaskRuntimeResult<()> {

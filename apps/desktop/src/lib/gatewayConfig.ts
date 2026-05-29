@@ -1,0 +1,39 @@
+interface LocalFirstDesktopConfig {
+  gatewayUrl?: string;
+  gatewayToken?: string;
+}
+
+declare global {
+  interface Window {
+    localFirstDesktop?: LocalFirstDesktopConfig;
+  }
+}
+
+const viteEnv = (import.meta as unknown as {
+  env?: Record<string, string | undefined>;
+}).env;
+
+const desktopConfig =
+  typeof window === "undefined" ? undefined : window.localFirstDesktop;
+
+function normalizeGatewayUrl(value: string) {
+  return value.endsWith("/") ? value.slice(0, -1) : value;
+}
+
+export const DESKTOP_GATEWAY_URL = normalizeGatewayUrl(
+  viteEnv?.VITE_LOCAL_FIRST_DESKTOP_GATEWAY_URL ??
+    desktopConfig?.gatewayUrl ??
+    "http://127.0.0.1:18765",
+);
+
+const gatewayToken =
+  viteEnv?.VITE_LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN ??
+  desktopConfig?.gatewayToken;
+
+export function gatewayHeaders(extra: HeadersInit = {}): HeadersInit {
+  return {
+    "Content-Type": "application/json",
+    ...(gatewayToken ? { Authorization: `Bearer ${gatewayToken}` } : {}),
+    ...extra,
+  };
+}

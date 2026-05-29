@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 local-first-capabilities = { path = "../capabilities" }
+local-first-context-compression = { path = "../context-compression" }
 local-first-memory = { path = "../memory" }
 local-first-subagents = { path = "../subagents" }
 local-first-task-runtime = { path = "../task-runtime" }

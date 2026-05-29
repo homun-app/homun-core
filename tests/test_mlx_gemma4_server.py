@@ -33,10 +33,22 @@ class MlxGemma4ServerTests(unittest.TestCase):
         routes = {(route.path, ",".join(sorted(route.methods))) for route in server.app.routes}
 
         self.assertIn(("/health", "GET"), routes)
+        self.assertIn(("/warmup", "POST"), routes)
+        self.assertIn(("/classify_intent", "POST"), routes)
         self.assertIn(("/generate_json", "POST"), routes)
+        self.assertIn(("/generate_stream", "POST"), routes)
+        self.assertIn(("/cancel_generation", "POST"), routes)
         self.assertIn(("/tool_call", "POST"), routes)
         self.assertIn(("/analyze_image", "POST"), routes)
         self.assertIn(("/benchmark", "POST"), routes)
+
+    def test_app_allows_localhost_browser_preview_cors(self):
+        server = load_server_module()
+
+        middleware_names = [item.cls.__name__ for item in server.app.user_middleware]
+
+        self.assertIn("CORSMiddleware", middleware_names)
+        self.assertIn("http://127.0.0.1:1420", server.LOCAL_BROWSER_ORIGINS)
 
     def test_extract_json_accepts_fenced_model_output(self):
         server = load_server_module()
@@ -89,6 +101,25 @@ class MlxGemma4ServerTests(unittest.TestCase):
 
         self.assertEqual(runtime.get_model(), ("model", "processor"))
         self.assertEqual(runtime.get_model(), ("model", "processor"))
+        self.assertEqual(calls, ["local-test-model"])
+
+    def test_runtime_warmup_loads_model_without_generating_text(self):
+        server = load_server_module()
+        calls = []
+
+        def fake_loader(model_name):
+            calls.append(model_name)
+            return "model", "processor"
+
+        runtime = server.GemmaRuntime(model_name="local-test-model", loader=fake_loader)
+
+        payload = server.warmup_payload(runtime)
+
+        self.assertEqual(payload["ok"], True)
+        self.assertEqual(payload["model"], "local-test-model")
+        self.assertEqual(payload["loaded"], True)
+        self.assertEqual(payload["load_seconds"], runtime.load_seconds)
+        self.assertGreaterEqual(payload["elapsed_seconds"], 0)
         self.assertEqual(calls, ["local-test-model"])
 
     def test_metrics_are_serializable_with_required_fields(self):
@@ -215,6 +246,121 @@ class MlxGemma4ServerTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, "request_timeout")
         self.assertEqual(raised.exception.status_code, 408)
 
+    def test_runtime_streams_generation_deltas_and_final_metrics(self):
+        server = load_server_module()
+
+        def fake_streamer(*_args, **_kwargs):
+            yield type(
+                "Chunk",
+                (),
+                {
+                    "text": "Ciao",
+                    "prompt_tokens": 8,
+                    "generation_tokens": 1,
+                    "prompt_tps": 100.0,
+                    "generation_tps": 10.0,
+                    "peak_memory": 2.0,
+                },
+            )()
+            yield type(
+                "Chunk",
+                (),
+                {
+                    "text": " Fabio",
+                    "prompt_tokens": 8,
+                    "generation_tokens": 2,
+                    "prompt_tps": 100.0,
+                    "generation_tps": 20.0,
+                    "peak_memory": 2.5,
+                },
+            )()
+
+        runtime = server.GemmaRuntime(
+            model_name="local-test-model",
+            loader=lambda _: (type("Model", (), {"config": object()})(), type("Processor", (), {})()),
+            streamer=fake_streamer,
+            template_applier=lambda *args, **kwargs: "prompt",
+        )
+
+        events = list(
+            runtime.stream_text(
+                "hello",
+                max_tokens=4,
+                temperature=0.2,
+                wait_if_busy=True,
+                request_timeout_seconds=1,
+            )
+        )
+
+        self.assertEqual(
+            events[:2],
+            [
+                {"type": "delta", "text": "Ciao"},
+                {"type": "delta", "text": " Fabio"},
+            ],
+        )
+        self.assertEqual(events[-1]["type"], "done")
+        self.assertEqual(events[-1]["text"], "Ciao Fabio")
+        self.assertEqual(events[-1]["metrics"]["generation_tokens"], 2)
+
+    def test_runtime_stream_can_be_cancelled_by_request_id(self):
+        server = load_server_module()
+
+        def fake_streamer(*_args, **_kwargs):
+            yield type(
+                "Chunk",
+                (),
+                {
+                    "text": "Ciao",
+                    "prompt_tokens": 8,
+                    "generation_tokens": 1,
+                    "prompt_tps": 100.0,
+                    "generation_tps": 10.0,
+                    "peak_memory": 2.0,
+                },
+            )()
+            yield type(
+                "Chunk",
+                (),
+                {
+                    "text": " Fabio",
+                    "prompt_tokens": 8,
+                    "generation_tokens": 2,
+                    "prompt_tps": 100.0,
+                    "generation_tps": 20.0,
+                    "peak_memory": 2.5,
+                },
+            )()
+
+        runtime = server.GemmaRuntime(
+            model_name="local-test-model",
+            loader=lambda _: (type("Model", (), {"config": object()})(), type("Processor", (), {})()),
+            streamer=fake_streamer,
+            template_applier=lambda *args, **kwargs: "prompt",
+        )
+
+        stream = runtime.stream_text(
+            "hello",
+            max_tokens=4,
+            temperature=0.2,
+            wait_if_busy=True,
+            request_timeout_seconds=1,
+            request_id="cancel-me",
+        )
+
+        self.assertEqual(next(stream), {"type": "delta", "text": "Ciao"})
+        self.assertTrue(runtime.cancel_generation("cancel-me"))
+        self.assertEqual(
+            next(stream),
+            {
+                "type": "error",
+                "code": "generation_cancelled",
+                "message": "Generation cancelled by user",
+            },
+        )
+        with self.assertRaises(StopIteration):
+            next(stream)
+
     def test_image_paths_must_stay_inside_configured_roots(self):
         server = load_server_module()
         root = pathlib.Path("/tmp/local-first-images").resolve()
@@ -276,6 +422,78 @@ class MlxGemma4ServerTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.status_code, 403)
         self.assertEqual(raised.exception.detail["error"]["code"], "shutdown_disabled")
+
+    def test_classify_intent_uses_compact_prompt_and_no_repair_for_valid_json(self):
+        server = load_server_module()
+        original_runtime = server.runtime
+        calls = []
+
+        class FakeRuntime:
+            def generate_text(self, prompt, **kwargs):
+                calls.append({"prompt": prompt, **kwargs})
+                return {
+                    "text": '{"route":"local_calculation","calculation_left":6,"calculation_operator":"*","calculation_right":3}',
+                    "metrics": {
+                        "prompt_tokens": 90,
+                        "generation_tokens": 14,
+                        "prompt_tps": 200.0,
+                        "generation_tps": 30.0,
+                        "peak_memory_gb": 5.5,
+                        "elapsed_seconds": 0.4,
+                    },
+                }
+
+        server.runtime = FakeRuntime()
+        try:
+            response = server.classify_intent(
+                server.ClassifyIntentRequest(
+                    text="quanto fa 6*3",
+                    request_timeout_seconds=8,
+                )
+            )
+        finally:
+            server.runtime = original_runtime
+
+        self.assertTrue(response["valid"])
+        self.assertFalse(response["repaired"])
+        self.assertEqual(len(calls), 1)
+        self.assertLessEqual(calls[0]["max_tokens"], 120)
+        self.assertLessEqual(len(calls[0]["prompt"]), 900)
+        self.assertNotIn('"properties"', calls[0]["prompt"])
+        self.assertEqual(response["json"]["route"], "local_calculation")
+
+    def test_classify_intent_defaults_missing_calculation_fields_without_repair(self):
+        server = load_server_module()
+        original_runtime = server.runtime
+
+        class FakeRuntime:
+            def generate_text(self, prompt, **kwargs):
+                return {
+                    "text": '{"route":"needs_planning","summary":"short safe summary"}',
+                    "metrics": {
+                        "prompt_tokens": 120,
+                        "generation_tokens": 12,
+                        "prompt_tps": 200.0,
+                        "generation_tps": 30.0,
+                        "peak_memory_gb": 5.5,
+                        "elapsed_seconds": 0.4,
+                    },
+                }
+
+        server.runtime = FakeRuntime()
+        try:
+            response = server.classify_intent(
+                server.ClassifyIntentRequest(text="trova un treno senza acquistare")
+            )
+        finally:
+            server.runtime = original_runtime
+
+        self.assertTrue(response["valid"])
+        self.assertFalse(response["repaired"])
+        self.assertEqual(response["errors"], [])
+        self.assertIsNone(response["json"]["calculation_left"])
+        self.assertIsNone(response["json"]["calculation_operator"])
+        self.assertIsNone(response["json"]["calculation_right"])
 
 
 class SharedContractTests(unittest.TestCase):

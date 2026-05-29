@@ -1,4 +1,7 @@
-use crate::{OrchestratorAuditStore, OrchestratorResult, OrchestratorRoute, StepExecutionPolicy};
+use crate::{
+    ContextBudgetUsage, OrchestratorAuditStore, OrchestratorResult, OrchestratorRoute,
+    StepExecutionPolicy,
+};
 use local_first_capabilities::{ActionClass, CapabilityProviderKind, ProviderId};
 use local_first_subagents::{AgentId, TokenMetrics};
 use local_first_task_runtime::{TaskId, UserId, WorkspaceId};
@@ -35,6 +38,7 @@ pub struct OrchestratorRunDetail {
     pub enqueued_tasks: Vec<UiEnqueuedTask>,
     pub subagent_tasks: Vec<UiSubagentTask>,
     pub metrics: TokenMetrics,
+    pub context_budget: Vec<ContextBudgetUsage>,
     pub error_message: Option<String>,
     pub exposes_raw_input: bool,
 }

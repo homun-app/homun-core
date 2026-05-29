@@ -80,6 +80,24 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
         result
     }
 
+    /// Produces a validated [`ExecutionPlan`] WITHOUT materializing durable
+    /// tasks or executing immediate steps. For callers (e.g. the desktop
+    /// gateway) that adapt the plan into their own execution model and must not
+    /// trigger the Brain's side effects.
+    pub fn plan_only(
+        &mut self,
+        request: &OrchestratorRequest,
+    ) -> OrchestratorResult<ExecutionPlan> {
+        let access = self.capabilities.list_tools(&request.policy_context)?;
+        self.tool_index.rebuild_from_tools(&access.visible_tools)?;
+        let memory = self.memory.load_context(request)?;
+        let (initial_cards, initial_tools) = self.load_initial_tools(request, &access)?;
+        let (plan, _metrics, _rounds, _cards, loaded_tools, _budget) =
+            self.plan_with_retry(request, &memory, &initial_cards, &initial_tools)?;
+        self.validate_plan(&plan, &loaded_tools, request.budgets.max_steps)?;
+        Ok(plan)
+    }
+
     fn run_inner(
         &mut self,
         request: OrchestratorRequest,
@@ -88,7 +106,7 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
         self.tool_index.rebuild_from_tools(&access.visible_tools)?;
         let memory = self.memory.load_context(&request)?;
         let (initial_cards, initial_tools) = self.load_initial_tools(&request, &access)?;
-        let (plan, metrics, planner_rounds, loaded_cards, loaded_tools) =
+        let (plan, metrics, planner_rounds, loaded_cards, loaded_tools, context_budget) =
             self.plan_with_retry(&request, &memory, &initial_cards, &initial_tools)?;
         self.validate_plan(&plan, &loaded_tools, request.budgets.max_steps)?;
 
@@ -134,6 +152,7 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
                 enqueued_task_count: enqueued_tasks.len(),
                 subagent_task_count: enqueued_subagent_tasks.len(),
                 planner_rounds,
+                context_budget,
             },
             loaded_tools: loaded_cards,
             immediate_results,
@@ -186,6 +205,7 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
         usize,
         Vec<ToolCard>,
         Vec<CapabilityTool>,
+        Vec<crate::ContextBudgetUsage>,
     )> {
         let mut rounds = 1;
         let first = self.call_planner(request, memory, initial_cards, initial_tools)?;
@@ -196,6 +216,7 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
                 rounds,
                 initial_cards.to_vec(),
                 initial_tools.to_vec(),
+                first.2,
             ));
         }
         if request.budgets.max_tool_search_rounds == 0 {
@@ -205,6 +226,7 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
                 rounds,
                 initial_cards.to_vec(),
                 initial_tools.to_vec(),
+                first.2,
             ));
         }
 
@@ -228,7 +250,9 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
         }
         rounds += 1;
         let second = self.call_planner(request, memory, &cards, &tools)?;
-        Ok((second.0, second.1, rounds, cards, tools))
+        let mut context_budget = first.2;
+        context_budget.extend(second.2);
+        Ok((second.0, second.1, rounds, cards, tools, context_budget))
     }
 
     fn call_planner(
@@ -237,9 +261,10 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
         memory: &[crate::MemoryContextSnippet],
         loaded_cards: &[ToolCard],
         loaded_tools: &[CapabilityTool],
-    ) -> OrchestratorResult<(ExecutionPlan, TokenMetrics)> {
+    ) -> OrchestratorResult<(ExecutionPlan, TokenMetrics, Vec<crate::ContextBudgetUsage>)> {
+        let prompt = planner_prompt(request, memory, loaded_cards, loaded_tools)?;
         let planner_request = GenerateJsonRequest {
-            prompt: planner_prompt(request, memory, loaded_cards, loaded_tools)?,
+            prompt: prompt.prompt,
             max_tokens: request.budgets.max_planner_tokens,
             temperature: 0.0,
             wait_if_busy: true,
@@ -256,7 +281,7 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
             return Err(OrchestratorError::Planner(response.errors.join("; ")));
         }
         let plan = serde_json::from_value(response.json)?;
-        Ok((plan, response.metrics))
+        Ok((plan, response.metrics, prompt.context_budget))
     }
 
     fn validate_plan(

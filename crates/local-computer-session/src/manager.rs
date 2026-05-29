@@ -215,8 +215,12 @@ impl LocalComputerSessionManager {
         workspace_id: &str,
         reason: &str,
     ) -> Result<(), String> {
-        self.store
-            .update_session_status(session_id, user_id, workspace_id, SessionStatus::Paused)?;
+        self.store.update_session_status(
+            session_id,
+            user_id,
+            workspace_id,
+            SessionStatus::Paused,
+        )?;
         self.append_event(ComputerEventCreate {
             session_id: session_id.to_string(),
             surface: SurfaceKind::Logs,
@@ -237,8 +241,12 @@ impl LocalComputerSessionManager {
         user_id: &str,
         workspace_id: &str,
     ) -> Result<(), String> {
-        self.store
-            .update_session_status(session_id, user_id, workspace_id, SessionStatus::Running)?;
+        self.store.update_session_status(
+            session_id,
+            user_id,
+            workspace_id,
+            SessionStatus::Running,
+        )?;
         self.append_event(ComputerEventCreate {
             session_id: session_id.to_string(),
             surface: SurfaceKind::Logs,

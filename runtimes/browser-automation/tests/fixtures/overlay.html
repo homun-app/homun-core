@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <title>Overlay Fixture</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 40px;
+      }
+      #onetrust-consent-sdk {
+        position: fixed;
+        inset: 0;
+        z-index: 10;
+        display: grid;
+        place-items: center;
+        background: rgb(255 255 255 / 84%);
+      }
+      #onetrust-banner {
+        padding: 24px;
+        background: white;
+        border: 1px solid #ccc;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Action target</h1>
+      <button id="primary" type="button">Primary action</button>
+      <p id="result" aria-live="polite"></p>
+    </main>
+    <section id="onetrust-consent-sdk">
+      <div id="onetrust-banner">
+        <p>Cookie overlay</p>
+        <button id="onetrust-accept-btn-handler" type="button">ACCETTA</button>
+      </div>
+    </section>
+    <script>
+      document.querySelector("#onetrust-accept-btn-handler").addEventListener("click", () => {
+        document.querySelector("#onetrust-consent-sdk").remove();
+      });
+      document.querySelector("#primary").addEventListener("click", () => {
+        document.querySelector("#result").textContent = "Clicked underlay";
+      });
+    </script>
+  </body>
+</html>

@@ -2,7 +2,7 @@ UV_ENV := .venv-mlx
 PYTHON := $(UV_ENV)/bin/python
 SERVER := runtimes/mlx-gemma4/server.py
 
-.PHONY: sync test test-python test-rust test-browser browser-sync browser-test server health smoke-generate benchmark workflow-smoke
+.PHONY: sync test test-python test-rust test-browser browser-sync browser-test server health smoke-generate benchmark chat-latency workflow-smoke
 
 sync:
 	UV_PROJECT_ENVIRONMENT=$(UV_ENV) uv sync
@@ -10,7 +10,7 @@ sync:
 test: test-python test-browser test-rust
 
 test-python:
-	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest tests/test_mlx_gemma4_server.py
+	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest discover -s tests -p 'test*.py'
 
 test-rust:
 	cargo test --workspace
@@ -36,6 +36,9 @@ smoke-generate:
 
 benchmark:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/gemma4_benchmark.py
+
+chat-latency:
+	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/chat_latency_probe.py
 
 workflow-smoke:
 	cargo run -p local-first-subagents --bin workflow_smoke

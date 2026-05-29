@@ -46,6 +46,32 @@ fn brain_returns_direct_answer_without_creating_tasks_or_loading_tool_schemas() 
 }
 
 #[test]
+fn plan_only_returns_plan_without_materializing_tasks() {
+    let runtime = StubRuntime::new(vec![serde_json::json!({
+        "route": "direct_answer",
+        "direct_answer": {
+            "answer": "Risposta diretta.",
+            "reason": "Nessun tool necessario.",
+            "confidence": 0.9
+        },
+        "steps": []
+    })]);
+    let mut brain = brain(runtime, vec![]);
+
+    let plan = brain.plan_only(&request("Che ore sono a Roma?")).unwrap();
+
+    assert_eq!(plan.route, OrchestratorRoute::DirectAnswer);
+    // plan_only must have NO side effects: no durable tasks created.
+    assert!(
+        brain
+            .task_store()
+            .list_tasks(&task_user(), &task_workspace())
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
 fn brain_uses_lazy_tool_details_when_tool_catalog_is_large() {
     let runtime = StubRuntime::new(vec![serde_json::json!({
         "route": "direct_answer",
@@ -85,6 +111,67 @@ fn brain_uses_lazy_tool_details_when_tool_catalog_is_large() {
     let prompt = brain.runtime().requests()[0].prompt.clone();
     assert!(prompt.contains("Tool catalog compact cards"));
     assert!(prompt.contains("Loaded tool details"));
+}
+
+#[test]
+fn brain_compresses_memory_and_tool_context_before_planner_prompt() {
+    let runtime = StubRuntime::new(vec![serde_json::json!({
+        "route": "direct_answer",
+        "direct_answer": {
+            "answer": "Contesto ricevuto in forma compressa.",
+            "reason": "Il prompt resta nel budget.",
+            "confidence": 0.8
+        },
+        "steps": []
+    })]);
+    let mut tools = Vec::new();
+    for index in 0..8 {
+        tools.push(tool(
+            &format!("calendar.long_tool_{index}"),
+            &format!(
+                "Search calendar records with repeated docs {} access_token=secret-token {}",
+                index,
+                "very long tool description ".repeat(80)
+            ),
+            ActionClass::Read,
+            CapabilityProviderKind::Native,
+        ));
+    }
+    let long_memory = MemoryContextSnippet {
+        reference: "memory:user:workspace:long".to_string(),
+        summary: format!(
+            "User private recap fabio@example.com {} final useful preference: local-first",
+            "older noisy memory ".repeat(260)
+        ),
+        privacy_domain: "work".to_string(),
+        sensitivity: "private".to_string(),
+    };
+    let mut brain = brain_with_memory(runtime, tools, vec![long_memory]);
+
+    let outcome = brain
+        .run(request("Usa il contesto disponibile per rispondere"))
+        .unwrap();
+
+    let prompt = brain.runtime().requests()[0].prompt.clone();
+    assert!(prompt.contains("context compressed"));
+    assert!(prompt.contains("final useful preference"));
+    assert!(!prompt.contains("fabio@example.com"));
+    assert!(!prompt.contains("secret-token"));
+    assert!(prompt.chars().count() < 9_000);
+    assert!(
+        outcome
+            .audit
+            .context_budget
+            .iter()
+            .any(|item| item.label == "memory_context" && item.compressed)
+    );
+    assert!(
+        outcome
+            .audit
+            .context_budget
+            .iter()
+            .any(|item| item.label == "loaded_tool_details" && item.redaction_count > 0)
+    );
 }
 
 #[test]
@@ -250,6 +337,23 @@ fn brain(
     runtime: StubRuntime,
     tools: Vec<CapabilityTool>,
 ) -> OrchestratorBrain<StubRuntime, StaticMemoryContextProvider> {
+    brain_with_memory(
+        runtime,
+        tools,
+        vec![MemoryContextSnippet {
+            reference: "memory:user:workspace:project".to_string(),
+            summary: "User prefers local-first execution.".to_string(),
+            privacy_domain: "work".to_string(),
+            sensitivity: "private".to_string(),
+        }],
+    )
+}
+
+fn brain_with_memory(
+    runtime: StubRuntime,
+    tools: Vec<CapabilityTool>,
+    memory: Vec<MemoryContextSnippet>,
+) -> OrchestratorBrain<StubRuntime, StaticMemoryContextProvider> {
     let mut provider = FakeCapabilityProvider::new(
         ProviderId::new("calendar"),
         CapabilityProviderKind::Native,
@@ -276,12 +380,7 @@ fn brain(
 
     OrchestratorBrain::new(
         runtime,
-        StaticMemoryContextProvider::new(vec![MemoryContextSnippet {
-            reference: "memory:user:workspace:project".to_string(),
-            summary: "User prefers local-first execution.".to_string(),
-            privacy_domain: "work".to_string(),
-            sensitivity: "private".to_string(),
-        }]),
+        StaticMemoryContextProvider::new(memory),
         facade,
         ToolSearchIndexStore::open_in_memory().unwrap(),
         TaskStore::open_in_memory().unwrap(),
@@ -312,6 +411,10 @@ fn request(message: &str) -> OrchestratorRequest {
             max_tool_search_rounds: 1,
             max_steps: 8,
             max_planner_tokens: 768,
+            max_conversation_summary_chars: 1_200,
+            max_memory_context_chars: 2_000,
+            max_tool_cards_context_chars: 2_400,
+            max_loaded_tool_context_chars: 3_200,
         },
     }
 }

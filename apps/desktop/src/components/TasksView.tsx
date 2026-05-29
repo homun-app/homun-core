@@ -22,7 +22,13 @@ interface TasksViewProps {
   taskDetailLoading: boolean;
   approvalBusyId: string | null;
   selectedTaskId: string;
-  onApproveApproval: (approvalId: string) => void;
+  onApproveApproval: (
+    approvalId: string,
+    options?: {
+      scope?: "once" | "always";
+      browser_visibility?: "auto" | "visible" | "headless";
+    },
+  ) => void;
   onRejectApproval: (approvalId: string) => void;
   onSelectTask: (taskId: string) => void;
 }

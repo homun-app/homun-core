@@ -18,6 +18,28 @@ Principi:
 - estendibile: connettori, MCP, skill e runtime LLM devono essere modulari.
 - modulare nei file: i componenti vanno separati presto per dominio, evitando file troppo lunghi che costringano a refactor tardivi.
 
+## Product Loop
+
+Il documento operativo per giudicare la UX e' `docs/PRODUCT_LOOP.md`.
+
+Prima di aggiungere nuove superfici o rendere visibili altri moduli interni,
+il prodotto deve rispettare il loop base:
+
+```text
+utente scrive -> Gemma risponde -> utente capisce la risposta
+```
+
+Task runtime, browser, approval, memoria, subagenti e computer locale restano
+capacita' fondamentali, ma non devono comparire come comportamento base della
+chat. La prossima priorita' e' rendere usabili i cinque flussi descritti in
+`docs/PRODUCT_LOOP.md`, partendo da una chat Gemma semplice, stabile e senza
+interruzioni.
+
+La chat experience non e' polish finale. E' una fondazione: Markdown, codice,
+tabelle, diagrammi, allegati, azioni sui messaggi, streaming e activity
+progressive disclosure devono essere solidi prima di cablare nuove funzioni
+operative complesse.
+
 ## Decisioni Gia' Validate
 
 ### Riferimento di ispirazione
@@ -25,12 +47,12 @@ Principi:
 - OpenHuman (`tinyhumansai/openhuman`) e' uno spunto di riferimento per capire come altri hanno affrontato assistant personali, agenti, memoria, tool e UX operativa.
 - Non e' un progetto da copiare o forkare.
 - Lo usiamo per leggere soluzioni concrete, confrontare tradeoff e decidere consapevolmente cosa adattare al nostro progetto.
-- Le nostre decisioni restano autonome: local-first per default, Rust Core, Tauri, runtime Python/MLX con Gemma 4, subagenti auditabili e permessi deny-by-default.
+- Le nostre decisioni restano autonome: local-first per default, Electron desktop shell, Rust Core/gateway locale, runtime Python/MLX con Gemma 4, subagenti auditabili e permessi deny-by-default.
 - Ogni idea presa da OpenHuman deve passare da una decisione esplicita: cosa risolve, come viene adattata, quali parti non importiamo.
 
 ### Stack applicazione
 
-- Desktop shell: Tauri.
+- Desktop shell: Electron.
 - UI: React + TypeScript.
 - Core locale: Rust.
 - Runtime inference Mac: Python + MLX + mlx-vlm.
@@ -45,6 +67,8 @@ Principi:
 - Browser automation: OpenClaw e' il riferimento principale per profili browser, Playwright/CDP, snapshot/refs, azioni atomiche, tab tracking, navigation guard e manual blockers. Lo stack operativo sara' sidecar locale Node/TypeScript con `playwright-core`, orchestrato dal Rust Core.
 - Orchestrator Brain: router ibrido nel Rust Core con registry tool lazy. Il modello vede card compatte e solo pochi tool detail caricati on demand; Rust resta owner di policy, execution, queue, approval e audit.
 - Local Computer Session: la UX di riferimento e' Manus per task operativi visibili, ma adattata al nostro local-first. Non e' solo browser: e' una sessione locale multi-superficie con browser, shell/terminal, file/artifact e log, governata dal Rust Core e mostrata in chat con timeline inline, activity card, preview/thumbnail, progress, approvals e takeover controllato.
+- Chat UI complex rendering: assistant-ui e' riferimento architetturale per thread, composer, attachments, message actions, suggestions, tool activity e external-store runtime. Non adottiamo automaticamente la CLI shadcn/Tailwind; adattiamo i pattern alla nostra UI Electron custom e al Rust gateway locale come owner dello stato.
+- Desktop Chat Gateway: la chat non deve dipendere da bridge nativi per stream lunghi. Il trasporto chat passa a un gateway HTTP Rust locale su `127.0.0.1`, con token locale, CORS stretto, stream NDJSON/SSE o WebSocket e UI via `fetch`/browser APIs. Il gateway diventa il boundary per thread, messaggi, streaming, cancel, metriche, artifact e read model redatti.
 
 ### Test Gemma 4 locale
 
@@ -80,7 +104,10 @@ Conclusione: Gemma 4 locale e' utilizzabile come componente operativo se viene g
 ## Architettura Generale
 
 ```text
-Tauri React UI
+Electron React UI
+  -> Desktop Chat HTTP Gateway / Rust Desktop Gateway
+    -> Chat Threads / Messages / Streaming
+    -> Metrics / Cancellation / Redacted Read Models
   -> Rust Core
     -> Permission Manager
     -> Process Manager
@@ -153,29 +180,45 @@ Responsabilita':
 
 Tecnologie:
 
-- Tauri.
+- Electron.
 - React.
 - TypeScript.
-- Rust commands.
+- Rust HTTP Gateway locale per chat, streaming, artifact, processi, task,
+  memoria, capability e read model ad alto volume.
+- Python/MLX locale per Gemma.
 
 La UI non deve essere una landing page. La prima schermata deve essere il prodotto operativo.
 
 Implementato:
 
-- `apps/desktop` con shell Tauri 2 + React + TypeScript + Vite.
+- `apps/desktop` con shell Electron + React + TypeScript + Vite.
 - UI light-first in direzione Manus pulita, con struttura settings ispirata a Codex.
 - Primo layout operativo con sidebar sinistra, canvas centrale e inspector destro contestuale.
 - Viste complete di primo slice: Chat, Task/Approval center e Settings privacy/runtime/connettori.
 - Viste shallow navigabili: Memoria, Connessioni, Automazioni, Browser e Brain Audit.
 - View-model mock separati dai componenti, allineati a task queue, run Brain, health runtime, memoria e provider/connection read model.
 - Inspector e task detail mostrano dati redatti, senza raw prompt, raw payload, raw tool args o raw output.
-- Tauri Core Bridge V1 in `apps/desktop/src-tauri`: stato applicativo locale, command Rust e DTO serializzabili/redatti per status core, health processi, task queue/detail, memory dashboard e capability snapshot.
-- Wrapper TypeScript `apps/desktop/src/lib/coreBridge.ts` separato dai componenti, cosi' i mock UI possono essere sostituiti da `invoke(...)` senza riscrivere le schermate.
+- Electron bridge V1 in `apps/desktop/src/lib/coreBridge.ts`: shell desktop Chromium, chat via Desktop HTTP Gateway Rust locale, prompt builder Rust, streaming/cancel gateway e runtime health/warmup/shutdown senza chiamate dirette renderer -> Gemma.
+- Wrapper TypeScript `apps/desktop/src/lib/coreBridge.ts` separato dai componenti, cosi' i fallback UI possono essere sostituiti da endpoint HTTP locali senza riscrivere le schermate.
 - Il bridge espone solo read model UI-safe: task detail usa checkpoint redatti, capability snapshot omette `secret_ref`, memory dashboard passa da `MemoryUiReadModel` e process health non espone env o log raw.
 - Command `local_computer_session_snapshot` collegato al read model reale `crates/local-computer-session`, con sessione seeded redatta per preparare la sostituzione dei mock della activity card.
 - La Chat ora carica la Local Computer activity card da `coreBridge.localComputerSession(...)` tramite mapper dedicato `localComputerViewModel.ts`; il mock non viene piu' passato da `App`.
 - Command `local_computer_run_smoke_test` collegato alla card: esegue un health check reale del sidecar browser via stdio, un comando shell read-only `date`, registra eventi/artifact redatti e aggiorna lo snapshot UI.
-- Command `submit_user_prompt` collegato al composer: il prompt entra nel Tauri Core, non viene salvato come raw payload nel read model, viene compreso tramite `PromptBrain`/Gemma locale con JSON validato e solo dopo la route strutturata esegue azioni locali come ora/data o calcolo. Se la route e' `needs_planning`, `PromptTaskPlanner` genera un piano operativo e il core lo materializza in task durevoli con checkpoint redatti, resource class e approval gate.
+- Composer collegato al runtime Gemma locale via Desktop HTTP Gateway Rust: il prompt non passa da API cloud e non viene salvato come raw payload operativo. Il gateway autonomo in `crates/desktop-gateway` costruisce il prompt con `local-first-context-compression`, proxy stream/cancel verso Gemma, espone runtime health/warmup/shutdown, usa `ProcessManager` per avviare Gemma via `.venv-mlx` quando non e' gia' in ascolto, persiste thread/messaggi in SQLite locale e protegge gli endpoint chat/runtime con token bearer locale + CORS allowlist.
+- Le richieste operative seguono un percorso operational-first: la UI prova prima il gateway task locale; se il prompt richiede azioni, crea task, approval e Computer locale senza passare dalla risposta Gemma generica. La risposta finale deve arrivare dall'executor con dati raccolti, fonti, limiti e prossimo passo proattivo.
+- Per il primo caso browser reale, i task treno devono aprire i siti, compilare i form riconoscibili, avviare solo ricerche risultati sicure, raccogliere le opzioni e chiedere quale prenotare. Login, dati sensibili, scelta finale, acquisto e pagamento restano sempre dietro approval esplicita.
+
+Decisione architetturale aggiornata:
+
+- Tauri e' stato rimosso come shell desktop dopo benchmark reale: Electron/Chromium
+  fornisce streaming chat fluido, mentre WKWebView restava visivamente bloccata;
+- il prossimo step tecnico e' introdurre un Desktop Chat HTTP Gateway Rust
+  autonomo, accessibile solo su loopback e protetto da token locale;
+- la UI usera' `fetch`/stream browser per inviare prompt, ricevere delta,
+  cancellare stream, leggere thread, aggiornare messaggi e caricare artifact;
+- Electron gestisce lifecycle/window shell; native file/system actions passeranno
+  da gateway o moduli Electron isolati con `contextIsolation`, sandbox e niente
+  Node nel renderer.
 
 Direzione UX aggiornata dopo analisi Manus live:
 
@@ -256,7 +299,7 @@ Non ancora incluso:
 - policy di restart/backoff eseguita automaticamente in background.
 - UI live per logs/process timeline dettagliata; il primo slice desktop mostra solo health sintetico mock.
 - adapter WASI con preopen/capability host controllate e SDK language-friendly per creare skill non trusted senza scrivere WAT/Rust manuale.
-- cablaggio Tauri commands verso read model reali e audit timeline persistita.
+- cablaggio del nuovo gateway Rust autonomo verso read model reali e audit timeline persistita.
 - embeddings locali opzionali per tool retrieval semantico; il primo slice usa FTS/BM25 deterministico.
 
 API interne previste:
@@ -376,7 +419,7 @@ Implementato:
 - `LocalComputerReadModel` per materializzare snapshot redatti: URL senza query/frammenti, terminal excerpt redatto, artifact senza path raw, timeline senza payload raw.
 - `ShellCommandPolicy` per classificare comandi read-only, write, network/install e destructive con richiesta approval.
 - `TaskRuntime::ResourceClass` esteso con `computer_session` e `shell_process`, inclusi nei limiti del Resource Governor e nel read model task.
-- Bridge Tauri verso `local_computer_session_snapshot`.
+- Read model pronto per essere esposto dal gateway desktop verso `local_computer_session_snapshot`.
 
 Non e' una feature browser separata. E' una sessione operativa locale, legata a `task_id` e `workflow_id`, che puo' includere piu' superfici:
 
@@ -1073,7 +1116,7 @@ Implementato:
 
 Non ancora incluso in questo slice:
 
-- UI Tauri per osservare/intervenire sui task browser dentro la Local Computer Session.
+- UI Electron/gateway per osservare e intervenire sui task browser dentro la Local Computer Session.
 - install helper Playwright browser esplicito e packaging desktop.
 
 ### Fase 6.5 - Local Computer Session
@@ -1089,7 +1132,7 @@ Deliverable:
 - integrazione browser surface con `crates/browser-automation`.
 - integrazione con Durable Task Runtime per task di ore/giorni, retry, queue, approvals e resource limits.
 - integrazione con Brain/Capability Layer: il Brain richiede azioni, il core classifica, il task runtime esegue, la sessione computer visualizza.
-- read model Tauri per activity card, timeline inline, computer detail panel e takeover.
+- read model gateway per activity card, timeline inline, computer detail panel e takeover.
 - test di redaction su terminale/log/artifact e test UI che impediscono esposizione di raw payload.
 
 Regola: il "computer" del prodotto e' multi-superficie. Browser e shell sono due viste dello stesso lavoro operativo, non due feature scollegate.
@@ -1106,7 +1149,7 @@ Deliverable:
 - event batching.
 - routine proposal.
 
-### Fase 8 - Tauri UI
+### Fase 8 - Electron UI
 
 Deliverable:
 
@@ -1150,7 +1193,7 @@ Deliverable:
 - osservabilita' locale.
 - limiti risorse reali per LLM, browser, Graphify e connettori.
 - test end-to-end su workflow durevoli.
-- packaging Tauri per macOS, Windows e Linux.
+- packaging Electron per macOS, Windows e Linux.
 
 ## Struttura Repository Proposta
 
@@ -1159,8 +1202,9 @@ local-first-personal-assistant/
   apps/
     desktop/
       src/
-      src-tauri/
+      electron/
   crates/
+    desktop-gateway/
     core/
     memory/
     task-runtime/
@@ -1210,7 +1254,7 @@ local-first-personal-assistant/
 - MLX: https://github.com/ml-explore/mlx
 - MLX LM: https://github.com/ml-explore/mlx-lm
 - MLX VLM: https://github.com/Blaizzy/mlx-vlm
-- Tauri: https://tauri.app/
+- Electron: https://www.electronjs.org/
 - MCP: https://modelcontextprotocol.io/
 - Composio MCP: https://docs.composio.dev/mcp/introduction
 - Zapier MCP: https://zapier.com/mcp
@@ -1219,18 +1263,19 @@ local-first-personal-assistant/
 
 ## Prossima Azione Consigliata
 
-Collegare progressivamente le schermate React rimanenti ai Tauri commands gia' introdotti e poi collegare Browser/Shell reali alla Local Computer Session:
+Completare il gateway Rust autonomo gia' estratto e collegare progressivamente le schermate React agli endpoint locali:
 
 ```text
 apps/desktop/
 apps/desktop/src/
-apps/desktop/src-tauri/
+apps/desktop/electron/
+crates/desktop-gateway/
 crates/local-computer-session/
 crates/browser-automation/
 crates/task-runtime/
 ```
 
-Runtime Python/MLX, memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager, Secrets/Keychain, Skill/Plugin Registry, Skill Runtime Sandbox, process adapter trusted, WASM adapter non trusted, Assistant Orchestrator Brain e Local Computer Session hanno una base operativa testata. La UI Tauri esiste con direzione rail/drawer, chat attiva, activity card e progressive disclosure. Il Tauri Core Bridge espone read model reali per task, memoria, processi, capability e Local Computer; la Chat legge gia' la sessione computer reale via Tauri command, puo' avviare un smoke test reale browser-sidecar + shell dalla card e puo' inviare prompt reali al core. La comprensione iniziale del prompt passa ora da `PromptBrain`/Gemma locale con JSON validato, non da keyword/regex nel composer. Le richieste `needs_planning` generano gia' un `PromptExecutionPlan` e vengono materializzate in Durable Task Runtime con checkpoint redatti e approval gate. Restano da collegare l'esecuzione effettiva degli step browser/shell ai worker runtime, sostituire progressivamente Tasks/Approvals, Connections e Settings con i command reali, promuovere il planner prompt-level nell'OrchestratorBrain completo per subagenti/tool complessi, e lasciare l'auto-apprendimento per ultimo quando gli eventi PC reali saranno disponibili.
+Runtime Python/MLX, memoria, subagenti, Durable Task Runtime, Capability Layer, Browser Automation, Process Manager, Secrets/Keychain, Skill/Plugin Registry, Skill Runtime Sandbox, process adapter trusted, WASM adapter non trusted, Assistant Orchestrator Brain e Local Computer Session hanno una base operativa testata. La UI Electron esiste con direzione rail/drawer, chat attiva, activity card e progressive disclosure; lo streaming Gemma locale e' fluido in Chromium. Il vecchio core desktop Tauri e' stato rimosso per pulizia: le sue responsabilita' stanno rientrando nel gateway Rust autonomo e nei crate riusabili. Il gateway ora possiede prompt building, streaming/cancel, runtime health/warmup/shutdown, autostart Gemma via `ProcessManager`, thread e messaggi persistenti. Restano da collegare read model reali per task, memoria, processi, capability e Local Computer al gateway, aggiungere packaging e diagnostica del runtime Python/MLX, collegare l'esecuzione effettiva degli step browser/shell ai worker runtime, promuovere il planner prompt-level nell'OrchestratorBrain completo per subagenti/tool complessi, e lasciare l'auto-apprendimento per ultimo quando gli eventi PC reali saranno disponibili.
 
 Nota UI/core: la sessione chat default deve restare neutra (`computer_active_prompt`) e non contenere dati demo di task specifici. Contesto come ricerche treni, prenotazioni o form deve entrare solo quando un prompt/task reale lo genera.
 
@@ -1239,6 +1284,14 @@ Nota composer: il core non deve comprendere richieste tramite regex o keyword lo
 Nota Brain understanding: i campi per calcoli devono essere espliciti (`calculation_left`, `calculation_operator`, `calculation_right`), non generici (`left/right`), per evitare che il modello li usi come origine/destinazione o altri concetti non aritmetici.
 
 Nota task da prompt: `needs_planning` deve sempre produrre un piano persistente e redatto. Gli step rischiosi come login, invio, acquisto o pagamento devono avere `requires_user_approval=true` e passare da `ApprovalGate` prima dell'esecuzione.
+
+Nota piano operativo browser: il riferimento interno Homun ha confermato che i
+task browser non vanno eseguiti come "apri siti e sintetizza". Devono avere un
+`OperationalPlan` persistente con step, vincoli, success criteria, stop
+conditions e gate. Il browser task resta un loop continuo guidato dal piano.
+Un task treno e' completato solo se vengono estratte opzioni reali e leggibili;
+in caso contrario resta bloccato con motivo esplicito e snapshot/artifact
+consultabili nel Computer locale.
 
 Nota UI timeline: la timeline Computer e' progress disclosure, non un log sempre aperto. Deve partire collassata, mostrare solo gli ultimi eventi e offrire espansione con stato accessibile (`aria-expanded`).
 

@@ -13,9 +13,13 @@ fn store_creates_schema_and_round_trips_specs_and_snapshots() {
     let loaded = store.get_spec("browser").unwrap().unwrap();
     assert_eq!(loaded, spec);
 
-    let snapshot = ProcessSnapshot::new("browser", ProcessKind::BrowserSidecar, ProcessStatus::Healthy)
-        .with_pid(1234)
-        .with_message("ready");
+    let snapshot = ProcessSnapshot::new(
+        "browser",
+        ProcessKind::BrowserSidecar,
+        ProcessStatus::Healthy,
+    )
+    .with_pid(1234)
+    .with_message("ready");
     store.record_snapshot(&snapshot).unwrap();
 
     let loaded_snapshot = store.latest_snapshot("browser").unwrap().unwrap();

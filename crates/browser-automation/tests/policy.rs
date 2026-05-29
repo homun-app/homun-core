@@ -44,12 +44,29 @@ fn policy_allows_form_fill_drafts_without_submit() {
     let decision = BrowserPolicy::default().classify_tool_call(
         BrowserMethod::Act,
         &serde_json::json!({
-            "kind": "fill",
+            "kind": "fill_form",
             "fields": [{"ref": "e1", "value": "redacted"}]
         }),
     );
 
     assert_eq!(decision, BrowserActionDecision::Allow);
+}
+
+#[test]
+fn policy_allows_observation_actions_without_approval() {
+    for params in [
+        serde_json::json!({"kind": "hover", "ref": "e1"}),
+        serde_json::json!({"kind": "scroll_into_view", "ref": "e1"}),
+        serde_json::json!({"kind": "wait", "text": "Risultati"}),
+        serde_json::json!({"kind": "batch", "actions": [
+            {"kind": "hover", "ref": "e1"},
+            {"kind": "wait", "text": "Risultati"}
+        ]}),
+    ] {
+        let decision = BrowserPolicy::default().classify_tool_call(BrowserMethod::Act, &params);
+
+        assert_eq!(decision, BrowserActionDecision::Allow);
+    }
 }
 
 #[test]
@@ -62,7 +79,39 @@ fn policy_requires_approval_for_clicks_and_submit_typing() {
         BrowserMethod::Act,
         &serde_json::json!({"kind": "type", "ref": "e1", "text": "hello", "submit": true}),
     );
+    let enter = BrowserPolicy::default().classify_tool_call(
+        BrowserMethod::Act,
+        &serde_json::json!({"kind": "press_key", "text": "Enter"}),
+    );
+    let tab = BrowserPolicy::default().classify_tool_call(
+        BrowserMethod::Act,
+        &serde_json::json!({"kind": "press_key", "text": "Tab"}),
+    );
 
     assert!(matches!(click, BrowserActionDecision::NeedsApproval { .. }));
-    assert!(matches!(submit, BrowserActionDecision::NeedsApproval { .. }));
+    assert!(matches!(
+        submit,
+        BrowserActionDecision::NeedsApproval { .. }
+    ));
+    assert!(matches!(enter, BrowserActionDecision::NeedsApproval { .. }));
+    assert_eq!(tab, BrowserActionDecision::Allow);
+}
+
+#[test]
+fn policy_requires_approval_when_batch_contains_manual_action() {
+    let decision = BrowserPolicy::default().classify_tool_call(
+        BrowserMethod::Act,
+        &serde_json::json!({
+            "kind": "batch",
+            "actions": [
+                {"kind": "wait", "text": "Risultati"},
+                {"kind": "click", "ref": "e1"}
+            ]
+        }),
+    );
+
+    assert!(matches!(
+        decision,
+        BrowserActionDecision::NeedsApproval { .. }
+    ));
 }

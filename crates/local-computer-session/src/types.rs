@@ -192,6 +192,7 @@ pub struct TimelineItem {
     pub status: String,
     pub title: String,
     pub subtitle_redacted: String,
+    pub markdown_redacted: Option<String>,
     pub artifact_refs: Vec<String>,
     pub started_at: OffsetDateTime,
     pub completed_at: Option<OffsetDateTime>,
