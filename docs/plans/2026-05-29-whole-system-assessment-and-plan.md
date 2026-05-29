@@ -115,3 +115,10 @@ real build-out.
   Live-validated: A1.6 default-on Brain (no flag) + Trenitalia prompt → queued
   `orchestrator_browser_*` of kind `browser_task`. Closes the example↔app gap and
   the A1.6 regression. Next: P2 (wire non-browser capability execution).
+- **P2 — DONE (MCP wired; Composio/skill typed-pending)** (this commit):
+  `execute_capability_generic` builds a live provider from the registry and
+  dispatches via `CapabilityFacade::call_tool`. MCP executes end-to-end through
+  the crate's real `McpStdioTransport`; Composio/skill report a typed
+  "kind not yet wired". Removed the `execute_unwired_registered_task` stub.
+  Remaining for full P2: a real Composio HTTP transport + skill-runner provider
+  wiring, and a configured MCP connection to demo live (pairs with P4 connectors).
