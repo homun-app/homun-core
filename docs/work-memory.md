@@ -6986,3 +6986,25 @@ Test: budgets_scale_with_model_context_window (bin),
 large_budget_lifts_the_per_message_clamp_for_capable_models (lib). lib 24 + bin 61.
 RESIDUO de-gemma: browser cap Full + PLAN opzionale; prompt planner OUTPUT FORMAT;
 ritiro keyword routing (A1.5+A1.6).
+
+### De-gemma #2: Brain default ON su backend capace (A1.6) + cap Full
+
+- brain_materialize_enabled: env esplicito vince; se non settato, default =
+  !brain_planner_uses_local_mlx_runtime() -> ON quando e' configurato un backend
+  capace (anthropic/openai-router), OFF sul path puro MLX/gemma. Cosi' il path
+  capace pianifica col Brain SENZA flag, e le euristiche keyword
+  (operational_plan_for_goal, browser_targets_for_goal, train_search_draft_for_goal,
+  task_kind_for_prompt, resources_for_prompt, operational_task_acknowledgement)
+  restano SOLO come fallback del modello locale debole (strategia dual). NON
+  cancellate: sono il percorso small-model.
+- MAX_FULL_SNAPSHOT_CHARS_FOR_DECISION 12K->40K (Full = solo modelli capaci).
+
+SCOPE item 4 corretto: "ritiro keyword" sul percorso capace = il Brain le
+SCAVALCA (default ON), non eliminazione (servono come fallback). Il gate
+`should_create_operational_task` resta come pre-filtro cheap "e' un task?"
+(evita una chiamata LLM su ogni "ciao") — trade-off costo/latenza, non una pura
+stampella gemma; sostituirlo con classificazione via Brain e' un passo separato
+e opzionale. Le euristiche di PIANO (operational_plan_for_goal ecc.) erano la
+vera stampella e ora sono fuori dal percorso capace.
+
+lib 24 + bin 61 verdi.
