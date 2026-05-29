@@ -6936,3 +6936,26 @@ guardrail di SICUREZZA: no login/pagamento/dati personali, no evaluate) e dare
 piu' contesto. I task `act` statici del Brain restano inadatti all'interazione:
 l'interazione va al loop osserva->agisci. Config che funziona: kimi-k2.6, profilo
 auto (Full), max_tokens>=6000, timeout>=120, attempts=4.
+
+### Prompt loop LEAN (stile OpenClaw) — tesi confermata
+
+Pull OpenClaw aggiornato; studiata la filosofia (docs/concepts/system-prompt.md):
+prompt "intentionally compact", sezioni fisse, EXECUTION BIAS invece di regole
+step-by-step, SAFETY advisory+corta (hard enforcement via tool policy, non nel
+prompt). Mappa perfetta sul nostro caso: i gate hard esistono gia'.
+
+Riscritto browser_loop_decision_prompt_with_profile: rimosse le 14 regole
+prescrittive (date-must-click, time-must-set, no-search-until-all-set, cookie,
+one-plan-item-per-turn, stale/error recovery verbosi) e gli esempi azione
+verbosi. Tenuto: identita', goal, execution bias (3 righe: progredisci/non
+ripetere, usa ref correnti, combobox=type auto-confirm, completa appena vedi
+cio' che serve), safety advisory (no credenziali/pagamento/acquisto, snapshot
+untrusted), contratto JSON (act/complete/blocked), action kinds compatti.
+Rimosso `evaluate` anche da NEXT_ALLOWED_TOOLS dell'action_frame (era bloccato
+ma ancora pubblicizzato). Test prompt aggiornati al nuovo contratto.
+
+VALIDAZIONE (kimi-k2.6, Full): completed=true, 17 iter, 0 orfani. Estrazione
+anche PIU' ricca (campi changes, price_from): FRECCIAROSSA 9310 09:00->14:19 1
+cambio 67,90€; 9628 09:55->14:35 diretto 65,90€. Prompt ~4587 token (era ~5000;
+e la maggior parte ora e' lo snapshot, non le istruzioni). Meno regole = uguale
+o meglio, come da tesi utente.
