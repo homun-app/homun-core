@@ -135,7 +135,10 @@ export function parseRequestLine(line: string): BrowserRequest {
 }
 
 export function makeSuccessResponse(id: string, result: unknown): BrowserResponse {
-  return { id, ok: true, result };
+  // Always carry a `result` field: `JSON.stringify` drops `undefined`, which
+  // would emit `{id, ok:true}` and break strict consumers (the Rust client's
+  // BrowserResponse::Success requires `result`). Coerce undefined -> null.
+  return { id, ok: true, result: result ?? null };
 }
 
 export function makeErrorResponse(id: string, error: unknown): BrowserResponse {

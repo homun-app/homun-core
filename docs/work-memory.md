@@ -64,13 +64,36 @@ UNA tab fissa label "primary": `navigate{url}` -> `open{url,label:"primary"}`
 `normalize_browser_call_manages_tab_for_planner_steps`. LIVE: s1 navigate ora
 COMPLETATO end-to-end (apre primary + naviga su trenitalia.com).
 
-PROSSIMO BLOCCO (act): s2 act -> client error `invalid_response: data did not
-match any variant of untagged enum BrowserResponse` (il self-heal A1.3 ha
-resettato+ritentato). La risposta di `act` non deserializza nel
-`BrowserResponse` Rust. Nessun `console.log`/stdout nel sorgente sidecar ->
-serve CATTURARE LA RIGA RAW (aggiungere log raw su InvalidResponse in
-browser-automation/client o sidecar) per capire se e' inquinamento stdout da
-dipendenza (Playwright) o uno shape inatteso del result di act. Debug a sé.
+### Bug act DIAGNOSTICATO + 2 fix sidecar (riga raw catturata)
+
+Probe diretto del sidecar (open about:blank + act con lo shape del modello) ->
+`act` rispondeva `{"id":"r2","ok":true}` (22 byte, SENZA `result`). Causa: il
+modello manda `{actions:[{field,type,value},...]}`, ma `manager.act` si aspetta
+una SINGOLA azione `{kind, ref, ...}` (o `{kind:"batch", actions:[{kind,...}]}`).
+Con `action.kind` undefined lo switch di `executeActionUnchecked` (niente
+`default`) cadeva a vuoto -> ritornava `undefined` -> `makeSuccessResponse(id,
+undefined)` -> `JSON.stringify` DROPPA `result:undefined` -> `{id,ok:true}` ->
+il Rust `BrowserResponse::Success` RICHIEDE `result` -> "did not match any
+variant" -> il self-heal A1.3 lo scambiava per sidecar morto.
+
+FIX (sidecar TS, 43 test verdi + typecheck):
+1. `makeSuccessResponse`: `result: result ?? null` (l'envelope ha SEMPRE result).
+2. `executeActionUnchecked`: aggiunto `default` che lancia
+   `BROWSER_INVALID_REQUEST: unknown action kind: ...` (niente piu' no-op
+   silenzioso riportato come successo).
+Verificato col probe: ora act -> `{ok:false, error:{code:BROWSER_INVALID_REQUEST,
+message:"unknown action kind: undefined", retryable:false}}` -> deserializza come
+Error -> messaggio chiaro in chat.
+
+CONCLUSIONE ARCHITETTURALE (prossimo passo per la prenotazione): l'interazione
+form (fill+click multi-campo) e' intrinsecamente un loop OSSERVA->AGISCI: i `ref`
+vengono da uno snapshot a RUNTIME e i selettori del DOM (Trenitalia) non sono
+noti al planner. Un `capability.browser.act` STATICO non puo' funzionare. Il
+Brain deve ROUTARE l'interazione browser a un SUBAGENT browser-loop
+(snapshot->fill->verify), non materializzare step act statici. Le
+`capability.browser.navigate/snapshot` vanno bene (stateless-ish); l'interazione
+no. E' il lavoro A1.4/A1.5 (routing) + integrazione del BrowserLoopRunner come
+executor di un subagent_task. DA DECIDERE con l'utente.
 
 ### A1.3 FATTA (core) — superficie d'esecuzione browser UNICA + self-heal
 

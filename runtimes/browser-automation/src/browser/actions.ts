@@ -411,6 +411,17 @@ async function executeActionUnchecked(
       }
       return { ok: true, url: page.url(), batchResults };
     }
+    default: {
+      // An unrecognized action shape (e.g. a planner that emitted
+      // `{actions:[...]}` without `kind:"batch"`, or a typo'd kind) previously
+      // fell through the switch and returned `undefined` — a silent no-op
+      // reported as success. Fail loudly so the caller sees the contract error.
+      throw new BrowserAutomationError({
+        code: "BROWSER_INVALID_REQUEST",
+        message: `unknown action kind: ${JSON.stringify((action as { kind?: unknown }).kind)}`,
+        retryable: false,
+      });
+    }
   }
 }
 
