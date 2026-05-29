@@ -44,18 +44,13 @@ impl OpenAiCompatProvider {
             "model": self.model,
             "messages": [{ "role": "user", "content": request.prompt }],
             "temperature": request.temperature,
+            // `json_object` is the universally-supported structured-output hint
+            // (OpenAI, OpenRouter, Ollama local AND cloud). The stricter
+            // `json_schema` response_format is NOT accepted by ollama.com/v1
+            // (it 400s), so we rely on json_object + the schema described in the
+            // prompt; capable models honor it.
+            "response_format": { "type": "json_object" },
         });
-        // Enforce the schema when one is provided (OpenAI / OpenRouter / recent
-        // Ollama support `json_schema`); otherwise ask for a generic JSON object.
-        // Without this, weak models omit required fields and structured planning
-        // fails — the gap observed live with the OrchestratorBrain planner.
-        body["response_format"] = match request.json_schema.as_ref() {
-            Some(schema) => json!({
-                "type": "json_schema",
-                "json_schema": { "name": "response", "strict": false, "schema": schema },
-            }),
-            None => json!({ "type": "json_object" }),
-        };
         if request.max_tokens > 0 {
             body["max_tokens"] = json!(request.max_tokens);
         }
@@ -89,7 +84,15 @@ impl InferenceProvider for OpenAiCompatProvider {
             return Err(RuntimeClientError::Status(response.status().as_u16()));
         }
         let body: Value = response.json().map_err(RuntimeClientError::Request)?;
-        Ok(parse_chat_completion(&body, request))
+        let parsed = parse_chat_completion(&body, request);
+        if !parsed.valid && std::env::var("LOCAL_FIRST_INFERENCE_DEBUG").is_ok() {
+            eprintln!(
+                "[inference-debug] invalid response ({:?}); raw_output:\n{}",
+                parsed.errors,
+                parsed.raw_output.chars().take(1200).collect::<String>()
+            );
+        }
+        Ok(parsed)
     }
 }
 

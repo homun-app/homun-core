@@ -157,7 +157,10 @@ fn brain_compresses_memory_and_tool_context_before_planner_prompt() {
     assert!(prompt.contains("final useful preference"));
     assert!(!prompt.contains("fabio@example.com"));
     assert!(!prompt.contains("secret-token"));
-    assert!(prompt.chars().count() < 9_000);
+    // Bound = compressed variable context + the fixed OUTPUT FORMAT preamble
+    // (an explicit schema example, ~1.2k chars, that makes models emit the
+    // correct {route, steps} shape even without server-side schema enforcement).
+    assert!(prompt.chars().count() < 10_500);
     assert!(
         outcome
             .audit
@@ -415,6 +418,7 @@ fn request(message: &str) -> OrchestratorRequest {
             max_memory_context_chars: 2_000,
             max_tool_cards_context_chars: 2_400,
             max_loaded_tool_context_chars: 3_200,
+            planner_timeout_seconds: 30,
         },
     }
 }
