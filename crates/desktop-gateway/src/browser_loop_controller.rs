@@ -90,38 +90,52 @@ impl<R: JsonRuntime> BrowserLoopPlanner for RuntimeBrowserLoopPlanner<R> {
         if browser_loop_debug_enabled() {
             let _ = std::fs::write(format!("last_prompt_{}.txt", request.target_id), &prompt);
         }
-        let response = self
-            .runtime
-            .generate_json(&GenerateJsonRequest {
-                prompt,
+        // Resilience: a single empty/invalid planner response (common with
+        // reasoning cloud models, whose CoT can crowd out the JSON, and which
+        // are not grammar-constrained through the cloud relay) must not abort
+        // the whole loop. Retry a few times. Crucially, retries bump the
+        // temperature: at 0.0 a deterministic model would just re-emit the same
+        // bad output, so we resample to actually get a different answer.
+        let attempts = browser_loop_planner_attempts();
+        let mut last_errors = vec!["no attempts run".to_string()];
+        for attempt in 0..attempts {
+            let temperature = if attempt == 0 { 0.0 } else { 0.4 };
+            let outcome = self.runtime.generate_json(&GenerateJsonRequest {
+                prompt: prompt.clone(),
                 max_tokens: browser_loop_planner_max_tokens(),
-                temperature: 0.0,
+                temperature,
                 wait_if_busy: true,
                 request_timeout_seconds: Some(browser_loop_planner_timeout_seconds()),
                 json_schema: Some(browser_loop_decision_schema()),
                 required_keys: vec!["decision".to_string()],
                 repair: true,
-            })
-            .map_err(|error| {
-                BrowserAutomationError::InvalidResponse(format!(
-                    "browser loop planner runtime failed: {error:?}"
-                ))
-            })?;
-        if browser_loop_debug_enabled() {
-            let _ = std::fs::write(
-                format!("last_response_{}.txt", request.target_id),
-                &response.raw_output,
-            );
-        }
-        if !response.valid {
-            return Ok(BrowserLoopDecision::Blocked {
-                reason: format!(
-                    "browser loop planner returned invalid JSON: {}",
-                    response.errors.join("; ")
-                ),
             });
+            let response = match outcome {
+                Ok(response) => response,
+                // Transport errors (timeouts, dropped cloud connections) are
+                // also worth one more shot rather than killing the run.
+                Err(error) => {
+                    last_errors = vec![format!("runtime: {error:?}")];
+                    continue;
+                }
+            };
+            if browser_loop_debug_enabled() {
+                let _ = std::fs::write(
+                    format!("last_response_{}.txt", request.target_id),
+                    &response.raw_output,
+                );
+            }
+            if response.valid {
+                return parse_browser_loop_decision(&response.json, observation);
+            }
+            last_errors = response.errors.clone();
         }
-        parse_browser_loop_decision(&response.json, observation)
+        Ok(BrowserLoopDecision::Blocked {
+            reason: format!(
+                "browser loop planner returned invalid JSON after {attempts} attempts: {}",
+                last_errors.join("; ")
+            ),
+        })
     }
 }
 
@@ -134,6 +148,17 @@ fn browser_loop_planner_timeout_seconds() -> f64 {
         .and_then(|value| value.parse::<f64>().ok())
         .filter(|seconds| *seconds > 0.0)
         .unwrap_or(20.0)
+}
+
+/// How many times to ask the planner for a valid decision before blocking.
+/// Retries resample (temperature > 0) so a deterministic model does not just
+/// repeat a bad answer. Default 3.
+fn browser_loop_planner_attempts() -> u32 {
+    std::env::var("LOCAL_FIRST_BROWSER_PLANNER_ATTEMPTS")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|attempts| *attempts > 0)
+        .unwrap_or(3)
 }
 
 /// Per-decision generation budget. Configurable because reasoning models emit a
