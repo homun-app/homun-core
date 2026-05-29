@@ -186,7 +186,7 @@ Goal: {goal}
 RULES:
 0. Follow the PLAN top to bottom. Do exactly ONE plan item per turn. Use "Recent actions" to judge which items are already done, and act on the FIRST item that is not done yet. Do not skip ahead and do not redo a completed item.
 1. Output ONE JSON object: {{"decision":"act","action":{{...}},"expected_observation":"..."}}
-2. After typing in an autocomplete field, the NEXT action must be clicking the suggestion. Example: you typed "Napoli" → snapshot shows a listbox with options → you MUST click the correct option (e.g. "Napoli Centrale") before doing anything else.
+2. For an autocomplete/station field (role "combobox"), use the "type" action with the full value (e.g. "Napoli Centrale") — it auto-confirms the suggestion by keyboard. Do NOT use "fill" for autocomplete fields, and do NOT expect a separately clickable suggestion. If after typing a listbox option IS shown as a ref, you may click it instead.
 3. If the goal includes a DATE: you must click the date field to open the calendar, then click the correct day. Do NOT skip this.
 4. If the goal includes a TIME: you must set the time field. Do NOT skip this.
 5. Do NOT click search/submit buttons ("Cerca", "Search", etc.) until ALL fields including autocomplete suggestions, date, and time are set.

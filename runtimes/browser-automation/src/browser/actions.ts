@@ -85,6 +85,11 @@ type BrowserActRequestInner =
       submit?: boolean;
       slowly?: boolean;
       timeoutMs?: number;
+      // How to confirm an autocomplete/combobox after typing. "arrow_enter"
+      // presses ArrowDown+Enter (the keyboard pattern most station/date
+      // autocompletes require); "enter" just presses Enter; "none" disables.
+      // When unset, autocomplete comboboxes are auto-confirmed with arrow_enter.
+      commit?: "arrow_enter" | "enter" | "none";
     }
   | {
       kind: "press";
@@ -252,7 +257,18 @@ async function executeActionUnchecked(
       await locator.click({ timeout });
       await locator.press(process.platform === "darwin" ? "Meta+A" : "Control+A", { timeout });
       await locator.type(action.text, { delay: action.slowly ? 75 : 20 });
-      if (action.submit) {
+      // Resolve the confirmation strategy: explicit `commit`, else `submit`
+      // (legacy Enter), else auto-confirm autocomplete comboboxes by keyboard
+      // so weak local models that cannot click a non-ref suggestion still
+      // select an option deterministically.
+      const commit =
+        action.commit ?? (action.submit ? "enter" : await autocompleteCommitMode(locator));
+      if (commit === "arrow_enter") {
+        await page.waitForTimeout(500); // let the suggestion list render
+        await locator.press("ArrowDown", { timeout });
+        await page.waitForTimeout(150);
+        await locator.press("Enter", { timeout });
+      } else if (commit === "enter") {
         await locator.press("Enter", { timeout });
       }
       await page.waitForTimeout(1000);
@@ -494,6 +510,23 @@ export function requireRef(refs: Map<string, Locator>, ref: string): Locator {
     });
   }
   return locator;
+}
+
+/// Detects whether a just-typed field is an autocomplete combobox (ARIA
+/// `role=combobox` or `aria-autocomplete=list|both`). Such fields commonly
+/// expose suggestions only as a transient listbox with no stable ref, so the
+/// reliable way to pick a suggestion is the keyboard (ArrowDown+Enter).
+async function autocompleteCommitMode(locator: Locator): Promise<"arrow_enter" | "none"> {
+  try {
+    const isAutocomplete = await locator.evaluate((element) => {
+      const role = (element.getAttribute("role") ?? "").toLowerCase();
+      const autocomplete = (element.getAttribute("aria-autocomplete") ?? "").toLowerCase();
+      return role === "combobox" || autocomplete === "list" || autocomplete === "both";
+    });
+    return isAutocomplete ? "arrow_enter" : "none";
+  } catch {
+    return "none";
+  }
 }
 
 function requireRefOrSelector(

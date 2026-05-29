@@ -4,6 +4,29 @@ Questo file e' la memoria operativa del lavoro svolto nel repository. Va aggiorn
 
 ## 2026-05-29
 
+### M3 (B1) — conferma combobox deterministica per modelli locali deboli
+
+- CAUSA originale (test live Trenitalia): i campi stazione sono `role=combobox`
+  con suggerimenti SOLO via tastiera (nessun ref `option` cliccabile); i modelli
+  deboli usavano `fill` (programmatico, niente keystroke) o ri-digitavano senza
+  mai confermare.
+- FIX deterministico nel sidecar (`runtimes/browser-automation/src/browser/
+  actions.ts`): l'azione `type` ora, dopo aver digitato, **auto-conferma** se il
+  campo e' un autocomplete combobox (`role=combobox` o `aria-autocomplete=
+  list|both`, via `autocompleteCommitMode`): `ArrowDown` + `Enter`. Opzione
+  esplicita `commit: "arrow_enter"|"enter"|"none"` per override. I textbox
+  normali NON vengono auto-confermati.
+- Fixture rappresentativo `tests/fixtures/combobox.html` (suggerimenti
+  keyboard-only, niente click) + 2 test (auto-conferma combobox; nessuna
+  auto-conferma su textbox normale). Suite sidecar 43/43 verde, nessuna
+  regressione (il fixture train usa suggerimenti cliccabili, non combobox).
+- Prompt planner (RULE 2): indirizza i modelli deboli a usare `type` (auto
+  conferma) e NON `fill` sui campi autocomplete; non aspettarsi un suggerimento
+  cliccabile separato. Gateway controller 19/19 verde.
+- Gridcell-retention nel profilo compact (altra parte di M3): gia' fatta prima.
+- M3 residuo (enhancement, non blocker): B2 stato-piano esplicito nel loop;
+  B4 fallback vision quando l'aria-snapshot e' povero.
+
 ### M1/A1 #3 — de-stub executor Subagent (GAP 4)
 
 - `subagent.*` non e' piu' uno stub: `execute_subagent_task` usa il vero

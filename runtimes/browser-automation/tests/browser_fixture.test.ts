@@ -13,10 +13,12 @@ beforeEach(async () => {
   const trainFixture = path.join(import.meta.dirname, "fixtures", "train.html");
   const overlayFixture = path.join(import.meta.dirname, "fixtures", "overlay.html");
   const offcanvasFixture = path.join(import.meta.dirname, "fixtures", "offcanvas.html");
+  const comboboxFixture = path.join(import.meta.dirname, "fixtures", "combobox.html");
   const html = await readFile(fixture, "utf8");
   const trainHtml = await readFile(trainFixture, "utf8");
   const overlayHtml = await readFile(overlayFixture, "utf8");
   const offcanvasHtml = await readFile(offcanvasFixture, "utf8");
+  const comboboxHtml = await readFile(comboboxFixture, "utf8");
   server = createServer((req, res) => {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     if (req.url?.startsWith("/train")) {
@@ -29,6 +31,10 @@ beforeEach(async () => {
     }
     if (req.url?.startsWith("/offcanvas")) {
       res.end(offcanvasHtml);
+      return;
+    }
+    if (req.url?.startsWith("/combobox")) {
+      res.end(comboboxHtml);
       return;
     }
     res.end(html);
@@ -84,6 +90,36 @@ describe("browser sidecar engine", () => {
 
     const secondSnapshot = await manager.snapshot({ targetId: "booking" });
     expect(secondSnapshot.snapshot).toContain("Submitted Ada to Milano Centrale in standard");
+  });
+
+  it("auto-confirms an autocomplete combobox by keyboard when typing (no clickable suggestion)", async () => {
+    await manager.start();
+    await manager.open({ url: `${baseUrl}/combobox`, label: "combobox" });
+
+    // Type only — no `commit` given. The field is role=combobox with
+    // keyboard-only suggestions, so the sidecar must auto-confirm with
+    // ArrowDown+Enter and select the first match "Napoli Centrale".
+    await manager.act({
+      targetId: "combobox",
+      kind: "type",
+      selector: "#station",
+      text: "Nap",
+    });
+
+    const snapshot = await manager.snapshot({ targetId: "combobox" });
+    expect(snapshot.snapshot).toContain("selezionato: Napoli Centrale");
+  });
+
+  it("does not auto-confirm a plain textbox (commit none)", async () => {
+    await manager.start();
+    await manager.open({ url: baseUrl, label: "plain" });
+    const snapshot = await manager.snapshot({ targetId: "plain" });
+    const name = snapshot.refs.find((ref) => ref.name === "Name");
+    // A plain textbox typed with text + Enter would submit; without submit it
+    // must just hold the value, proving auto-confirm is scoped to comboboxes.
+    await manager.act({ targetId: "plain", kind: "type", ref: name!.ref, text: "Ada" });
+    const after = await manager.snapshot({ targetId: "plain" });
+    expect(after.snapshot).not.toContain("Submitted");
   });
 
   it("types into autocomplete-style fields and returns a fresh snapshot", async () => {
