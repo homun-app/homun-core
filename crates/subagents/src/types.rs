@@ -254,6 +254,17 @@ pub struct SubagentReview {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GenerateRequest {
+    pub prompt: String,
+    pub max_tokens: u32,
+    pub temperature: f32,
+    pub wait_if_busy: bool,
+    pub request_timeout_seconds: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GenerateJsonRequest {
     pub prompt: String,
     pub max_tokens: u32,
@@ -267,6 +278,16 @@ pub struct GenerateJsonRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IntentClassifyRequest {
+    pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locale: Option<String>,
+    pub max_tokens: u32,
+    pub wait_if_busy: bool,
+    pub request_timeout_seconds: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GenerateJsonResponse {
     pub valid: bool,
     pub errors: Vec<String>,
@@ -274,6 +295,30 @@ pub struct GenerateJsonResponse {
     pub raw_output: String,
     pub repaired: bool,
     pub metrics: TokenMetrics,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GenerateResponse {
+    pub text: String,
+    pub metrics: TokenMetrics,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RuntimeWarmupResponse {
+    pub ok: bool,
+    pub model: String,
+    pub loaded: bool,
+    pub load_seconds: Option<f64>,
+    pub elapsed_seconds: f64,
+    pub local_first: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum GenerateStreamEvent {
+    Delta { text: String },
+    Done { text: String, metrics: TokenMetrics },
+    Error { code: String, message: String },
 }
 
 impl TokenMetrics {

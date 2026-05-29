@@ -2,6 +2,9 @@ use crate::{
     ArtifactRecord, ArtifactSnapshot, ComputerEventRecord, ComputerSessionSnapshot,
     ComputerSurfaceSnapshot, LocalComputerSessionStore, TimelineItem, redact_text, redact_url,
 };
+use local_first_context_compression::{
+    CompressionPolicy, ContextCompressor, ContextItem, ContextKind,
+};
 use serde_json::Value;
 use time::OffsetDateTime;
 
@@ -76,12 +79,25 @@ fn timeline_item(event: ComputerEventRecord) -> TimelineItem {
         status: event.status,
         title: redact_text(&event.title),
         subtitle_redacted: redact_text(&event.subtitle),
+        markdown_redacted: event
+            .payload
+            .get("operational_plan_markdown")
+            .and_then(Value::as_str)
+            .map(redact_multiline_text),
         artifact_refs: event.artifact_refs,
         started_at: event.created_at,
         completed_at: Some(event.created_at),
         approval_required: event.approval_required,
         payload_redacted: true,
     }
+}
+
+fn redact_multiline_text(value: &str) -> String {
+    value
+        .lines()
+        .map(redact_text)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn artifact_snapshot(artifact: ArtifactRecord) -> ArtifactSnapshot {
@@ -117,10 +133,19 @@ fn terminal_excerpt(events: &[ComputerEventRecord]) -> Vec<String> {
     for event in events {
         if event.kind == "computer_terminal_output" {
             if let Some(output) = event.payload.get("output").and_then(Value::as_str) {
-                lines.extend(output.lines().map(redact_text));
+                lines.push(output.to_string());
             }
         }
     }
-    let keep_from = lines.len().saturating_sub(12);
-    lines.into_iter().skip(keep_from).collect()
+    if lines.is_empty() {
+        return Vec::new();
+    }
+
+    let result = ContextCompressor::default().compress(
+        &ContextItem::new(ContextKind::ShellOutput, lines.join("\n")),
+        &CompressionPolicy::for_kind(ContextKind::ShellOutput).with_max_chars(1_800),
+    );
+    let redacted_lines = result.text.lines().map(redact_text).collect::<Vec<_>>();
+    let keep_from = redacted_lines.len().saturating_sub(24);
+    redacted_lines.into_iter().skip(keep_from).collect()
 }

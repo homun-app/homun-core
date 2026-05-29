@@ -67,7 +67,11 @@ fn put_system_secret(service: &str, account: &str, material: SecretMaterial) -> 
 }
 
 #[cfg(not(target_os = "macos"))]
-fn put_system_secret(_service: &str, _account: &str, _material: SecretMaterial) -> SecretResult<()> {
+fn put_system_secret(
+    _service: &str,
+    _account: &str,
+    _material: SecretMaterial,
+) -> SecretResult<()> {
     Err(SecretError::Unsupported(
         "system keychain backend is not implemented for this platform".to_string(),
     ))

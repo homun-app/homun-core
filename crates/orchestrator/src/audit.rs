@@ -1,12 +1,15 @@
 use crate::{
-    DirectAnswer, ExecutionPlan, OrchestratorError, OrchestratorOutcome, OrchestratorRequest,
-    OrchestratorResult, ToolCard,
+    ContextBudgetUsage, DirectAnswer, ExecutionPlan, OrchestratorError, OrchestratorOutcome,
+    OrchestratorRequest, OrchestratorResult, ToolCard,
     ui::{
         OrchestratorRunDetail, OrchestratorRunSummary, UiDirectAnswerSummary, UiEnqueuedTask,
         UiExecutionPlan, UiImmediateResult, UiPlanStep, UiSubagentTask, UiToolCard, route_label,
     },
 };
 use local_first_capabilities::CapabilityCallResult;
+use local_first_context_compression::{
+    CompressionPolicy, ContextCompressor, ContextItem, ContextKind,
+};
 use local_first_subagents::TokenMetrics;
 use local_first_task_runtime::{UserId, WorkspaceId};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -56,6 +59,7 @@ impl OrchestratorAuditStore {
                 enqueued_tasks_json TEXT NOT NULL,
                 subagent_tasks_json TEXT NOT NULL,
                 metrics_json TEXT NOT NULL,
+                context_budget_json TEXT NOT NULL DEFAULT '[]',
                 error_message TEXT,
                 created_at INTEGER NOT NULL,
                 finished_at INTEGER,
@@ -65,6 +69,11 @@ impl OrchestratorAuditStore {
             CREATE INDEX IF NOT EXISTS idx_orchestrator_runs_scope
                 ON orchestrator_runs(user_id, workspace_id, created_at);
             ",
+        )?;
+        self.ensure_column(
+            "orchestrator_runs",
+            "context_budget_json",
+            "TEXT NOT NULL DEFAULT '[]'",
         )?;
         Ok(())
     }
@@ -127,6 +136,7 @@ impl OrchestratorAuditStore {
             &enqueued_tasks,
             &subagent_tasks,
             &outcome.metrics,
+            &outcome.audit.context_budget,
             None,
             now,
             Some(now),
@@ -161,6 +171,7 @@ impl OrchestratorAuditStore {
             &Vec::<UiEnqueuedTask>::new(),
             &Vec::<UiSubagentTask>::new(),
             &TokenMetrics::zero(),
+            &Vec::<ContextBudgetUsage>::new(),
             Some(&safe_error_message(error, request)),
             now,
             Some(now),
@@ -195,6 +206,7 @@ impl OrchestratorAuditStore {
                     enqueued_tasks_json,
                     subagent_tasks_json,
                     metrics_json,
+                    context_budget_json,
                     error_message,
                     created_at,
                     finished_at
@@ -266,6 +278,7 @@ impl OrchestratorAuditStore {
         enqueued_tasks: &[UiEnqueuedTask],
         subagent_tasks: &[UiSubagentTask],
         metrics: &TokenMetrics,
+        context_budget: &[ContextBudgetUsage],
         error_message: Option<&str>,
         created_at: i64,
         finished_at: Option<i64>,
@@ -291,11 +304,12 @@ impl OrchestratorAuditStore {
                 enqueued_tasks_json,
                 subagent_tasks_json,
                 metrics_json,
+                context_budget_json,
                 error_message,
                 created_at,
                 finished_at
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)
             ON CONFLICT(request_id, user_id, workspace_id) DO UPDATE SET
                 route = excluded.route,
                 status = excluded.status,
@@ -312,6 +326,7 @@ impl OrchestratorAuditStore {
                 enqueued_tasks_json = excluded.enqueued_tasks_json,
                 subagent_tasks_json = excluded.subagent_tasks_json,
                 metrics_json = excluded.metrics_json,
+                context_budget_json = excluded.context_budget_json,
                 error_message = excluded.error_message,
                 finished_at = excluded.finished_at
             ",
@@ -334,10 +349,28 @@ impl OrchestratorAuditStore {
                 serde_json::to_string(enqueued_tasks)?,
                 serde_json::to_string(subagent_tasks)?,
                 serde_json::to_string(metrics)?,
+                serde_json::to_string(context_budget)?,
                 error_message,
                 created_at,
                 finished_at,
             ],
+        )?;
+        Ok(())
+    }
+
+    fn ensure_column(&self, table: &str, column: &str, definition: &str) -> OrchestratorResult<()> {
+        let mut statement = self
+            .connection
+            .prepare(&format!("PRAGMA table_info({table})"))?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+        for row in rows {
+            if row? == column {
+                return Ok(());
+            }
+        }
+        self.connection.execute(
+            &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+            [],
         )?;
         Ok(())
     }
@@ -388,11 +421,20 @@ fn ui_tool_card(card: &ToolCard) -> UiToolCard {
         provider_kind: card.provider_kind,
         tool_name: card.tool_name.clone(),
         action: card.action,
-        description: card.description.clone(),
+        description: redact_ui_text(&card.description),
         privacy_domains: card.privacy_domains.clone(),
         sensitivity: card.sensitivity.clone(),
         schema_hash: card.schema_hash.clone(),
     }
+}
+
+fn redact_ui_text(value: &str) -> String {
+    ContextCompressor::default()
+        .compress(
+            &ContextItem::new(ContextKind::GenericToolOutput, value),
+            &CompressionPolicy::for_kind(ContextKind::GenericToolOutput).with_max_chars(1_000),
+        )
+        .text
 }
 
 fn ui_immediate_result(result: &CapabilityCallResult) -> UiImmediateResult {
@@ -435,8 +477,8 @@ fn run_detail_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Orchestrator
         enqueued_task_count: row.get(8)?,
         subagent_task_count: row.get(9)?,
         blocked_reason: row.get(10)?,
-        created_at_unix: row.get(19)?,
-        finished_at_unix: row.get(20)?,
+        created_at_unix: row.get(20)?,
+        finished_at_unix: row.get(21)?,
     };
     let plan_json: String = row.get(11)?;
     let loaded_tools_json: String = row.get(12)?;
@@ -445,6 +487,7 @@ fn run_detail_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Orchestrator
     let enqueued_tasks_json: String = row.get(15)?;
     let subagent_tasks_json: String = row.get(16)?;
     let metrics_json: String = row.get(17)?;
+    let context_budget_json: String = row.get(18)?;
     Ok(OrchestratorRunDetail {
         summary,
         plan: serde_json::from_str(&plan_json).map_err(json_error)?,
@@ -454,7 +497,8 @@ fn run_detail_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Orchestrator
         enqueued_tasks: serde_json::from_str(&enqueued_tasks_json).map_err(json_error)?,
         subagent_tasks: serde_json::from_str(&subagent_tasks_json).map_err(json_error)?,
         metrics: serde_json::from_str(&metrics_json).map_err(json_error)?,
-        error_message: row.get(18)?,
+        context_budget: serde_json::from_str(&context_budget_json).map_err(json_error)?,
+        error_message: row.get(19)?,
         exposes_raw_input: false,
     })
 }

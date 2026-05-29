@@ -1,0 +1,21 @@
+[package]
+name = "local-first-inference"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+local-first-subagents = { path = "../subagents" }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Optional in-process local engine (Rust-native, vision-capable). Heavy build,
+# so it is off by default; enable with `--features local-mistralrs`.
+mistralrs = { version = "0.8", optional = true }
+tokio = { version = "1", optional = true, features = ["rt-multi-thread"] }
+
+[features]
+default = []
+local-mistralrs = ["dep:mistralrs", "dep:tokio"]
+# Apple Silicon GPU acceleration for the in-process mistral.rs engine.
+local-mistralrs-metal = ["local-mistralrs", "mistralrs/metal", "mistralrs/accelerate"]

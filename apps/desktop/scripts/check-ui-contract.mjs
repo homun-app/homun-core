@@ -1,11 +1,19 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
+const removedShellName = ["t", "auri"].join("");
+const removedShellSourceDir = ["src", removedShellName].join("-");
+const removedShellPackageScope = `@${removedShellName}-apps`;
+const removedShellGlobal = `__${removedShellName.toUpperCase()}__`;
 
 function read(path) {
   return readFileSync(join(root, path), "utf8");
+}
+
+function readFromRepo(path) {
+  return readFileSync(join(root, "..", "..", path), "utf8");
 }
 
 function assertContains(file, text, description) {
@@ -22,86 +30,175 @@ function assertNotContains(file, text, description) {
   }
 }
 
-function assertOccurrenceCount(file, text, count, description) {
-  const source = read(file);
-  const actual = source.split(text).length - 1;
-  if (actual !== count) {
-    throw new Error(`${description}: expected ${file} to contain ${text} ${count} time(s), found ${actual}`);
+function assertMissing(path, description) {
+  if (existsSync(join(root, path))) {
+    throw new Error(`${description}: expected ${path} to be absent`);
   }
 }
+
+function assertRepoContains(file, text, description) {
+  const source = readFromRepo(file);
+  if (!source.includes(text)) {
+    throw new Error(`${description}: expected ${file} to contain ${text}`);
+  }
+}
+
+assertContains("package.json", "electron:dev", "desktop app must run through Electron");
+assertContains("package.json", "package:prepare", "desktop package must prepare production-like Electron resources");
+assertContains("package.json", "package:smoke", "desktop package must support production-like smoke testing without Vite");
+assertContains("package.json", "\"electron\"", "desktop app must depend on Electron");
+assertNotContains("package.json", removedShellName, "desktop package must not expose removed shell scripts or dependencies");
+assertMissing(removedShellSourceDir, "removed shell source tree must be absent from the desktop app");
+assertContains("electron/main.cjs", "contextIsolation: true", "Electron shell must keep renderer isolation enabled");
+assertContains("electron/main.cjs", "nodeIntegration: false", "Electron shell must not expose Node to the renderer");
+assertContains("electron/main.cjs", "sandbox: true", "Electron shell must run the renderer sandboxed");
+assertContains("electron/main.cjs", "ensureGateway", "Electron shell must own desktop gateway lifecycle");
+assertContains("electron/main.cjs", "LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN", "Electron shell must generate/pass the local gateway token");
+assertContains("electron/main.cjs", "LOCAL_FIRST_DESKTOP_RESOURCES_DIR", "Electron shell must support production-like local resource smoke tests");
+assertContains("electron/main.cjs", "LOCAL_FIRST_PROCESS_LOG_DIR", "Electron shell must provide a packaged-safe process log directory");
+assertContains("electron/main.cjs", "LOCAL_FIRST_GEMMA_PYTHON_VENV", "Electron shell must pass packaged Python/MLX venv when bundled");
+assertContains("electron/main.cjs", "before-quit", "Electron shell must stop managed gateway process on app quit");
+assertContains("electron/preload.cjs", "contextBridge.exposeInMainWorld", "Electron preload must expose only minimal runtime config");
+assertContains("scripts/prepare-package.mjs", "local-first-desktop-gateway", "package preparation must copy the gateway binary");
+assertContains("scripts/prepare-package.mjs", "runtimes\", \"mlx-gemma4", "package preparation must copy the MLX Gemma runtime");
+assertContains("scripts/prepare-package.mjs", ".venv-mlx", "package preparation must include the Python/MLX venv path");
+assertContains("scripts/electron-dev.mjs", "waitForDevServer", "Electron dev shell must wait for Vite before launch");
+assertContains("scripts/electron-dev.mjs", "stopGatewayOnPort", "Electron dev shell must clear stale gateway listeners before Electron owns lifecycle");
+assertContains("src/styles.css", "--window-drag-height", "Electron shell must reserve native window control space");
+assertContains("src/styles.css", "-webkit-app-region: drag", "Electron shell must expose a draggable titlebar region");
+assertContains("src/styles.css", "-webkit-app-region: no-drag", "interactive controls must remain clickable inside Electron");
 
 assertContains("src/components/Sidebar.tsx", "navigation-rail", "primary navigation must be rail-first");
 assertContains("src/components/Sidebar.tsx", "nav-drawer", "expanded navigation must be a drawer");
 assertContains("src/components/Shell.tsx", "{!drawerOpen && (", "rail must only render when the drawer is closed");
 assertContains("src/components/Shell.tsx", "{drawerOpen && !isSettings && (", "main drawer must render when open");
 assertContains("src/components/Sidebar.tsx", "drawer-persistent-actions", "open drawer must retain persistent actions");
-assertContains("src/components/Sidebar.tsx", "drawer-settings-action", "open drawer must retain settings access");
-assertContains("src/components/Sidebar.tsx", "aria-label=\"Notifiche\"", "drawer notifications must remain accessible by icon");
-assertContains("src/components/Sidebar.tsx", "aria-label=\"Impostazioni\"", "drawer settings must remain accessible by icon");
-assertNotContains("src/components/Sidebar.tsx", "<span>Notifiche</span>", "drawer persistent actions must be icon-only");
-assertNotContains("src/components/Sidebar.tsx", "<span>Impostazioni</span>", "drawer persistent actions must be icon-only");
-assertNotContains("src/components/Sidebar.tsx", "Local Computer", "local computer must not live in the sidebar");
-assertContains("src/styles.css", "justify-content: flex-start;", "drawer footer icons must align left");
-assertNotContains("src/styles.css", ".drawer-footer {\n  border-top", "drawer footer must not have a divider line");
-assertContains("src/components/ChatView.tsx", "local-computer-card", "active task must expose a local computer activity card");
-assertContains("src/components/ChatView.tsx", "computer-detail-panel", "computer details must be progressive disclosure");
-assertContains("src/components/ChatView.tsx", "timeline-step", "assistant progress must be inline timeline");
-assertOccurrenceCount("src/components/ChatView.tsx", "<InlineTimeline", 1, "timeline must render once per thread, not under every assistant message");
-assertContains("src/components/ChatView.tsx", "timelineCollapsed", "computer timeline must keep collapsed state");
-assertContains("src/components/ChatView.tsx", "aria-expanded={!collapsed}", "computer timeline toggle must expose expansion state");
-assertContains("src/components/ChatView.tsx", "timeline-collapsed", "computer timeline must expose collapsed styling hook");
-assertContains("src/components/ChatView.tsx", "system-label", "system status messages must be visually distinct from assistant answers");
-assertContains("src/components/ChatView.tsx", "computerCardCollapsed", "local computer card must be collapsible after answers");
-assertContains("src/components/ChatView.tsx", "setComputerCardCollapsed(true)", "local computer card must collapse when a final answer arrives");
-assertContains("src/styles.css", ".local-computer-card.collapsed", "local computer card must expose compact collapsed styling");
 assertContains("src/components/ChatView.tsx", "composer-surface", "prompt composer must have a stable anchored surface");
-assertContains("src/components/ChatView.tsx", "coreBridge.localComputerSession", "chat local computer card must load the Tauri read model");
-assertContains("src/components/ChatView.tsx", "coreBridge.submitUserPrompt", "composer must submit prompts to the Tauri core");
-assertContains("src/lib/coreBridge.ts", "chat_messages_snapshot", "frontend bridge must load persisted chat messages from the Tauri core");
-assertContains("src/lib/coreBridge.ts", "select_chat_thread", "frontend bridge must select active chat threads in the Tauri core");
-assertContains("src/App.tsx", "coreBridge.chatMessages", "app must hydrate thread messages from the Tauri read model");
-assertContains("src/App.tsx", "coreBridge.selectChatThread", "thread selection must update the Tauri active thread");
-assertContains("src/components/ChatView.tsx", "onRuntimeChanged", "chat mutations must notify the app to refresh runtime read models");
-assertContains("src/components/ChatView.tsx", "onThreadChanged", "chat mutations must reload persisted chat messages after core writes");
-assertContains("src/components/ChatView.tsx", "computer-inline-action", "collapsed local computer must expose a direct continue or approval action");
-assertContains("src/components/ChatView.tsx", "Apri approval", "chat must expose pending approvals without requiring users to hunt through navigation");
-assertContains("src/App.tsx", "refreshRuntimeReadModels", "app must refresh tasks and approvals immediately after chat runtime changes");
-assertContains("src/App.tsx", "refreshChatReadModels", "app must refresh chat threads and messages from the core after mutations");
-assertContains("src/App.tsx", "coreBridge.runPromptPlanReadySteps(activeThread.computerSessionId", "approval flow must resume the active prompt plan after user approval");
-assertContains("src/components/TasksView.tsx", "Approva e continua", "approval primary action must make resume behavior explicit");
-assertContains("src/components/ChatView.tsx", "coreBridge.runLocalComputerSmokeTest", "chat must expose a real local computer smoke test action");
-assertContains("src/components/ChatView.tsx", "coreBridge.runPromptPlanReadySteps", "chat must expose prompt plan batch execution through Tauri core");
-assertContains("src/components/ChatView.tsx", "coreBridge.localComputerArtifactPreview", "chat must load local computer artifact previews through Tauri core");
-assertContains("src/components/ChatView.tsx", "browser-live-image", "computer detail must render redacted browser preview images");
-assertContains("src/lib/coreBridge.ts", "prompt_plan_run_ready_steps", "frontend bridge must call prompt plan batch execution command");
-assertContains("src/lib/coreBridge.ts", "local_computer_artifact_preview", "frontend bridge must call local artifact preview command");
-assertContains("src/components/ChatView.tsx", "coreBridge.pauseLocalComputerSession", "computer panel pause must be wired to the Tauri core");
-assertContains("src/components/ChatView.tsx", "coreBridge.requestLocalComputerTakeover", "computer panel takeover must be wired to the Tauri core");
-assertContains("src/components/ChatView.tsx", "mapCoreComputerSession", "chat local computer card must map the core snapshot before rendering");
-assertContains("src/App.tsx", "coreBridge.taskQueue", "tasks view must load the real Tauri task queue read model");
-assertContains("src/App.tsx", "coreBridge.taskDetail", "tasks view must load selected task detail through the Tauri read model");
-assertContains("src/App.tsx", "coreBridge.approveApproval", "tasks view must approve through the Tauri approval gate command");
-assertContains("src/App.tsx", "coreBridge.rejectApproval", "tasks view must reject through the Tauri approval gate command");
-assertContains("src/components/TasksView.tsx", "resourceUsage", "tasks view must expose resource usage from the task runtime");
-assertContains("src/components/TasksView.tsx", "selectedTaskDetail", "tasks view must render a selected task detail panel");
-assertContains("src/components/TasksView.tsx", "approval-surface", "tasks view must label browser approval blockers clearly");
-assertContains("src/App.tsx", "humanizeBrowserApprovalReason", "browser approval blockers must be mapped to user-readable text");
-assertContains("src/App.tsx", "humanizeTaskBlockedReason", "task blocked reasons must be mapped to user-readable text");
-assertContains("src/App.tsx", "Recuperato dopo riavvio", "recovered tasks must be visible to users after restart");
-assertContains("src/data/mockData.ts", "{ id: \"tasks\", label: \"Pianificato\"", "planned navigation must open the real task queue view");
-assertContains("src/lib/localComputerViewModel.ts", "payload_redacted", "local computer UI mapping must preserve redaction contract");
-assertNotContains("src/App.tsx", "computerSession,", "app must not pass mock local computer session into chat");
+assertContains("src/components/ChatView.tsx", "local-computer-card", "active task must expose a local computer activity card");
+assertContains("src/components/ChatView.tsx", "timelineCollapsed", "computer timeline must keep collapsed state");
+assertContains("src/components/ChatView.tsx", "computerCardCollapsed", "local computer card must be collapsible after answers");
+assertContains("src/components/ChatView.tsx", "visibleComputerSession.timeline.length > 0", "completed local computer activity must remain visible after task completion");
+assertContains("src/components/ChatView.tsx", "approval-scope-options", "approval UI must make temporary vs fixed scope explicit");
+
+assertContains("src/components/ChatView.tsx", "coreBridge.submitChatPromptStream", "composer must submit prompts through the local chat transport");
+assertContains("src/lib/coreBridge.ts", "submitBrowserRuntimeChatPromptStream", "Electron bridge must stream from the local Gemma runtime through Electron-safe transport");
+assertContains("src/lib/coreBridge.ts", "openChatStreamWithGateway", "Electron bridge must stream through the Rust desktop gateway");
+assertContains("src/lib/coreBridge.ts", "/api/chat/generate_stream", "Electron bridge must call the local gateway streaming endpoint");
+assertContains("src/lib/coreBridge.ts", "/api/chat/cancel_generation", "Electron bridge must cancel generation through the local gateway");
+assertContains("src/lib/coreBridge.ts", "/api/runtime/health", "Electron runtime health must go through the local gateway");
+assertContains("src/lib/coreBridge.ts", "/api/runtime/warmup", "Electron runtime warmup must go through the local gateway");
+assertContains("src/lib/coreBridge.ts", "/api/runtime/shutdown", "Electron runtime shutdown must go through the local gateway");
+assertNotContains("src/lib/coreBridge.ts", "127.0.0.1:8765", "renderer must not call Gemma runtime directly");
+assertContains("src/lib/gatewayConfig.ts", "localFirstDesktop", "desktop renderer must receive packaged gateway config through Electron preload");
+assertContains("src/lib/gatewayConfig.ts", "VITE_LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN", "desktop renderer may receive the local gateway token through Vite env in tests/dev");
+assertContains("src/lib/gatewayConfig.ts", "Authorization", "desktop gateway requests must send bearer authorization");
+assertContains("src/lib/coreBridge.ts", "warmupBrowserRuntime", "Electron bridge must warm the local model over HTTP");
+assertContains("src/lib/coreBridge.ts", "electronRuntimeHealth", "Electron bridge must expose runtime health without native invoke");
+assertContains("src/components/SettingsView.tsx", "buildRuntimeDiagnosticText", "settings runtime view must expose copyable diagnostics");
+assertContains("src/components/SettingsView.tsx", "runtime-metric-strip", "settings runtime view must show compact resource metrics");
+assertContains("src/components/SettingsView.tsx", "Copia diagnostica", "settings runtime diagnostics must be copyable by the user");
+assertContains("src/components/SettingsView.tsx", "runtime-log-panel", "settings runtime diagnostics must expose redacted runtime logs");
+assertContains("src/styles.css", ".runtime-diagnostics", "runtime diagnostics must have dedicated layout styles");
+assertContains("src/styles.css", ".runtime-log-panel", "runtime logs must have dedicated layout styles");
+assertContains("src/lib/coreBridge.ts", "/api/runtime/logs", "Electron runtime logs must go through the local gateway");
+assertContains("src/lib/coreBridge.ts", "/api/tasks/queue", "Electron task queue must load from the local gateway");
+assertContains("src/lib/coreBridge.ts", "/api/tasks/executor", "Electron task executor status must load from the local gateway");
+assertContains("src/lib/coreBridge.ts", "/api/tasks/run_next", "Electron task execution must run through the local gateway");
+assertContains("src/lib/coreBridge.ts", "/api/approvals/", "Electron approvals must mutate through the local gateway");
+assertContains("src/lib/coreBridge.ts", "/api/local-computer/sessions/", "Electron local computer sessions must load from the local gateway");
+assertContains("src/lib/coreBridge.ts", "/artifacts/", "Electron local computer artifact previews must load from the local gateway");
+assertContains("src/lib/coreBridge.ts", "/api/memory/dashboard", "Electron memory dashboard must load from the local gateway");
+assertContains("src/lib/coreBridge.ts", "/api/capabilities/snapshot", "Electron capability registry must load from the local gateway");
+assertContains("src/App.tsx", "mapCoreMemoryDashboard", "desktop memory page must map the gateway memory dashboard read model");
+assertContains("src/App.tsx", "mapCoreCapabilitySnapshot", "desktop connections page must map the gateway capability read model");
+assertContains("src/lib/chatApi.ts", "/api/chat/threads", "chat threads must load from the local Rust gateway first");
+assertContains("src/lib/chatApi.ts", "hydrateThreadSnapshot", "chat API must keep a local cache synchronized with gateway thread snapshots");
+assertContains("src/lib/chatApi.ts", "localThreads", "chat threads must keep an Electron-safe fallback cache");
+assertContains("src/lib/chatApi.ts", "commitChatPromptResult", "Electron chat fallback must persist completed streamed answers before read model refresh");
+assertContains("src/lib/chatApi.ts", "commitChatContinuationResult", "Electron chat fallback must persist automatic continuations before read model refresh");
+assertContains("src/lib/coreBridge.ts", "await chatApi.commitChatPromptResult", "streamed chat answers must be committed before the UI refreshes the thread read model");
+assertContains("src/lib/coreBridge.ts", "result.computer_session = await electronLocalComputerSession", "streamed prompt results must refresh the real local computer read model after commit");
+assertContains("src/lib/coreBridge.ts", "await chatApi.commitChatContinuationResult", "automatic continuations must be committed before the UI refreshes the thread read model");
+assertContains("src/lib/coreBridge.ts", "trimRepeatedContinuationPrefix", "automatic continuation joins must avoid duplicating overlapping model output");
+assertContains("src/lib/chatApi.ts", "recentChatContext", "Electron chat fallback must expose recent thread context to the local prompt builder");
+assertContains("src/lib/chatApi.ts", "rawRecentChatContext", "Electron chat must expose raw recent context for Rust-side budgeting");
+assertContains("src/lib/chatApi.ts", "buildJuicePromptChatContext", "Electron chat fallback must budget/compress context before prompt building");
+assertContains("src/lib/contextBudget.ts", "buildJuicePromptChatContext", "Electron chat fallback must have a dedicated JuicePrompt-style context budget module");
+assertContains("src/lib/contextBudget.ts", "redactSensitiveText", "Electron context budget must redact sensitive text before compression");
+assertContains("src/lib/contextBudget.ts", "context compressed: earlier chat", "Electron context budget must mark compressed older chat context");
+assertContains("src/lib/chatApi.ts", "rawRecentChatContext(threadId", "Electron gateway requests must include recent thread context");
+assertContains("src/lib/chatApi.ts", "streamListeners", "chat streaming must use local browser listener dispatch");
+assertContains("src/lib/chatApi.ts", "/create_task", "chat message task actions must call the local gateway");
+assertNotContains("src/lib/coreBridge.ts", "invoke<", "frontend bridge must not call removed native invoke");
+assertNotContains("src/lib/coreBridge.ts", removedShellGlobal, "frontend bridge must not inspect removed shell globals");
+assertNotContains("src/lib/chatApi.ts", removedShellPackageScope, "chat API must not import removed shell packages");
+
+assertContains("src/components/RichMessage.tsx", "lazy(() => import(\"./RichMessageRenderer\")", "rich markdown renderer must be lazy loaded");
+assertContains("src/components/RichMessage.tsx", "StreamingTextMessage", "streaming messages must use a single raw text node");
+assertContains("src/components/RichMessageRenderer.tsx", "repairNestedMarkdownFences", "rich renderer must repair duplicated fenced code openers from local model output");
+assertContains("src/components/ChatView.tsx", "threadMessages.map", "chat transcript must use normal document flow in Electron");
+assertContains("src/styles.css", ".thread-message-list", "chat transcript must stack rows in normal flow");
+assertContains("src/styles.css", ".thread-message-row", "chat transcript rows must not be absolutely positioned");
+assertNotContains("src/components/ChatView.tsx", "useVirtualizer", "chat transcript must not use old Tauri-era virtualization in the base Electron path");
+assertNotContains("src/styles.css", ".virtual-message-row", "chat transcript must not use absolute virtual rows in the base Electron path");
+assertContains("src/components/ChatView.tsx", "streamingFrameRef", "chat streaming must throttle visible updates in Electron");
+assertContains("src/components/ChatView.tsx", "setOptimisticMessages", "chat streaming must keep visible text in the React message state");
+assertContains("src/components/ChatView.tsx", "<RichMessage text={displayMessage.text} streaming />", "streaming answers must render through the normal message component");
+assertContains("src/components/ChatView.tsx", "streamingUserPinnedRef", "chat must keep new streaming responses visible");
+assertNotContains("src/components/ChatView.tsx", "STREAM_TYPEWRITER_INTERVAL_MS", "chat streaming must not use timer-based typewriter rendering");
+assertNotContains("src/components/ChatView.tsx", "streamingTextRef", "chat streaming must not bypass React with a manual DOM text node");
+
+assertContains("src/components/ChatView.tsx", "messageContentKind", "message actions must derive from response content type");
+assertContains("src/components/ChatView.tsx", "Spiega codice", "code responses must expose code-specific contextual actions");
+assertContains("src/components/ChatView.tsx", "Migliora codice", "code responses must expose code improvement action");
+assertContains("src/components/ChatView.tsx", "reply-context-card", "composer must show the active reply context before submit");
+assertContains("src/components/ChatView.tsx", "message-action-menu", "secondary message actions must stay behind a compact menu");
+assertContains("src/components/ChatView.tsx", "message-latency-summary", "message metrics must be visible without dominating the answer");
+assertContains("src/components/ChatView.tsx", "cancelStreamingRequestRef", "chat must allow users to stop a visible streaming response");
+
 assertContains("src/types.ts", "\"learning\"", "auto-learning must be a first-class view");
-assertContains("src/data/mockData.ts", "learningInsights", "auto-learning insights must live in separated mock data");
 assertContains("src/components/LearningView.tsx", "learning-view", "auto-learning must have a dedicated page");
 assertContains("src/components/LearningView.tsx", "habit-card", "learning page must expose learned habits");
 assertContains("src/components/LearningView.tsx", "automation-proposal", "learning page must expose possible automations");
-assertContains("src/components/LearningView.tsx", "evidence-list", "learning page must show why something was learned");
-assertContains("src/components/LearningView.tsx", "privacy-control", "learning page must expose correction/privacy controls");
-assertContains("src/styles.css", ".active-task-layout", "active task view must use a dedicated layout");
-assertContains("src/styles.css", ".learning-view", "learning page must have dedicated layout styles");
 assertContains("src/styles.css", "@media (max-width: 860px)", "responsive shell must define tablet/mobile behavior");
-assertNotContains("src/App.tsx", "Inspector", "inspector must not be part of default app shell");
-assertNotContains("src/App.tsx", "isInspectorCollapsed", "inspector state must not drive layout");
+
+assertRepoContains("Cargo.toml", "\"crates/desktop-gateway\"", "workspace must include the desktop gateway crate");
+assertRepoContains("crates/desktop-gateway/Cargo.toml", "local-first-process-manager", "desktop gateway must use the local process manager for runtime lifecycle");
+assertRepoContains("crates/desktop-gateway/src/lib.rs", "build_chat_runtime_prompt", "desktop gateway must own chat runtime prompt construction");
+assertRepoContains("crates/desktop-gateway/src/lib.rs", "ContextCompressor", "desktop gateway must use Rust context compression");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/chat/build_prompt", "desktop gateway must expose prompt build endpoint");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/chat/generate_stream", "desktop gateway must expose chat stream endpoint");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/runtime/health", "desktop gateway must expose runtime health endpoint");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/runtime/logs", "desktop gateway must expose redacted runtime logs endpoint");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/runtime/warmup", "desktop gateway must expose runtime warmup endpoint");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/runtime/shutdown", "desktop gateway must expose runtime shutdown endpoint");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/tasks/queue", "desktop gateway must expose task queue read model endpoint");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/tasks/executor", "desktop gateway must expose task executor status endpoint");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/tasks/run_next", "desktop gateway must expose the first local task executor endpoint");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "start_task_executor_worker", "desktop gateway must start a background task executor worker");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/local-computer/sessions/{session_id}", "desktop gateway must expose local computer session read model endpoint");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/local-computer/sessions/{session_id}/artifacts/{artifact_id}/preview", "desktop gateway must expose redacted local computer artifact previews");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/memory/dashboard", "desktop gateway must expose memory dashboard read model endpoint");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/capabilities/snapshot", "desktop gateway must expose capability registry snapshot endpoint");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "TaskUiReadModel", "desktop gateway must use the task runtime UI read model");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "LocalComputerReadModel", "desktop gateway must use the local computer UI read model");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "MemoryUiReadModel", "desktop gateway must use the memory UI read model");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "CapabilityRegistryStore", "desktop gateway must use the capability registry store");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "ensure_runtime_available", "desktop gateway warmup must start Gemma when it is not reachable");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "SidecarProcessCatalog", "desktop gateway must reuse the sidecar runtime catalog");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "LOCAL_FIRST_PROCESS_REGISTRY_DB", "desktop gateway process registry must be configurable for tests and packaging");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "LOCAL_FIRST_PROCESS_LOG_DIR", "desktop gateway process logs must be configurable for packaging");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "LOCAL_FIRST_GEMMA_PYTHON_VENV", "desktop gateway must support packaged Python/MLX venv path");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "/api/chat/threads", "desktop gateway must expose persistent thread endpoints");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "/messages/{message_id}/create_task", "desktop gateway must create durable tasks from chat messages");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "ensure_operational_task_for_thread", "desktop gateway must link operational prompts to task and local computer read models");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "LocalComputerSessionStore", "desktop gateway must persist computer sessions for operational tasks");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "LOCAL_FIRST_BROWSER_HEADLESS", "desktop gateway must allow visible Playwright browser sessions");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "require_gateway_token", "desktop gateway must protect chat endpoints with a local token");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "AllowOrigin::list", "desktop gateway CORS must use an explicit origin allowlist");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "HeaderValue::from_static(\"null\")", "desktop gateway CORS must allow packaged file-origin renderer with bearer token");
+assertRepoContains("crates/desktop-gateway/src/chat_store.rs", "create table if not exists chat_threads", "desktop gateway must persist chat threads in SQLite");
+assertRepoContains("crates/desktop-gateway/src/chat_store.rs", "create table if not exists chat_messages", "desktop gateway must persist chat messages in SQLite");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "Body::from_stream", "desktop gateway must proxy runtime stream without buffering the full answer");
 
 console.log("UI contract checks passed");

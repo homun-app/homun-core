@@ -7,21 +7,26 @@
     "dev": "vite --host 127.0.0.1 --port 1420",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 1421",
+    "electron:dev": "node scripts/electron-dev.mjs",
+    "package:prepare": "node scripts/prepare-package.mjs",
+    "package:smoke": "npm run package:prepare -- --skip-build && LOCAL_FIRST_DESKTOP_RESOURCES_DIR=\"$PWD/.package/resources\" LOCAL_FIRST_DESKTOP_GATEWAY_PORT=18766 LOCAL_FIRST_DESKTOP_GATEWAY_URL=http://127.0.0.1:18766 npx electron electron/main.cjs",
     "test:ui-contract": "node scripts/check-ui-contract.mjs",
-    "typecheck": "tsc --noEmit",
-    "tauri": "tauri"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.9.0",
     "lucide-react": "^0.554.0",
+    "mermaid": "^11.15.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "react-markdown": "^10.1.0",
+    "rehype-sanitize": "^6.0.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.9.5",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
+    "electron": "^42.2.0",
     "typescript": "^5.9.3",
     "vite": "^7.2.4"
   }

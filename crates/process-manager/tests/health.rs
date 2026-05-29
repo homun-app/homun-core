@@ -21,7 +21,11 @@ impl HealthProbe for FakeProbe {
 fn health_check_uses_process_alive_for_running_status() {
     let spec = ProcessSpec::new("browser", ProcessKind::BrowserSidecar, "node")
         .with_health_check(HealthCheck::ProcessAlive);
-    let snapshot = ProcessSnapshot::new("browser", ProcessKind::BrowserSidecar, ProcessStatus::Running);
+    let snapshot = ProcessSnapshot::new(
+        "browser",
+        ProcessKind::BrowserSidecar,
+        ProcessStatus::Running,
+    );
 
     let result = evaluate_health(&spec, &snapshot, &FakeProbe { ok: false });
 
@@ -31,11 +35,12 @@ fn health_check_uses_process_alive_for_running_status() {
 
 #[test]
 fn health_check_delegates_http_get_to_probe() {
-    let spec = ProcessSpec::new("llm", ProcessKind::LlmRuntime, "python")
-        .with_health_check(HealthCheck::HttpGet {
+    let spec = ProcessSpec::new("llm", ProcessKind::LlmRuntime, "python").with_health_check(
+        HealthCheck::HttpGet {
             url: "http://127.0.0.1:8765/health".to_string(),
             timeout_ms: 500,
-        });
+        },
+    );
     let snapshot = ProcessSnapshot::new("llm", ProcessKind::LlmRuntime, ProcessStatus::Running);
 
     let result = evaluate_health(&spec, &snapshot, &FakeProbe { ok: true });

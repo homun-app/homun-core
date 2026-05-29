@@ -89,7 +89,10 @@ impl SidecarProcessCatalog {
         spec
     }
 
-    pub fn register_default_sidecars(&self, store: &ProcessRegistryStore) -> ProcessManagerResult<()> {
+    pub fn register_default_sidecars(
+        &self,
+        store: &ProcessRegistryStore,
+    ) -> ProcessManagerResult<()> {
         store.upsert_spec(&self.gemma_runtime())?;
         store.upsert_spec(&self.browser_sidecar())?;
         Ok(())

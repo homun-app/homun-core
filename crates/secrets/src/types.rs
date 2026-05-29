@@ -178,7 +178,9 @@ fn validate_part(part: &str) -> SecretResult<()> {
         || part == ".."
         || part.contains("..")
     {
-        return Err(SecretError::InvalidRef(format!("invalid path segment: {part}")));
+        return Err(SecretError::InvalidRef(format!(
+            "invalid path segment: {part}"
+        )));
     }
     Ok(())
 }

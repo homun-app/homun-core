@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <title>Offcanvas Fixture</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 40px;
+      }
+      .offcanvas-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        background: rgb(0 0 0 / 20%);
+      }
+    </style>
+  </head>
+  <body>
+    <label>
+      Partenza
+      <input id="partenza" placeholder="Inserisci stazione di partenza" />
+    </label>
+    <label for="arrivo">
+      <span class="visually-hidden">Stazione di arrivo, digita la stazione poi seleziona</span>
+    </label>
+    <input id="arrivo" placeholder="Inserisci stazione di arrivo" />
+    <p id="result" aria-live="polite"></p>
+    <div class="offcanvas-backdrop fade show"></div>
+    <script>
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          document.querySelector(".offcanvas-backdrop")?.remove();
+        }
+      });
+      for (const input of document.querySelectorAll("input")) {
+        input.addEventListener("input", (event) => {
+        document.querySelector("#result").textContent = event.target.value;
+        });
+      }
+    </script>
+  </body>
+</html>

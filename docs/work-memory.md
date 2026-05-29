@@ -2,6 +2,503 @@
 
 Questo file e' la memoria operativa del lavoro svolto nel repository. Va aggiornato durante lo sviluppo per conservare non solo cosa e' stato fatto, ma anche perche'.
 
+## 2026-05-29
+
+### M1/A1 #3 — de-stub executor Subagent (GAP 4)
+
+- `subagent.*` non e' piu' uno stub: `execute_subagent_task` usa il vero
+  `SubagentTaskExecutor` (trait `TaskExecutor`, solo runtime locale) e ne mappa
+  l'`ExecutorResult` con il ponte GIA' ESISTENTE
+  `task_execution_outcome_from_executor_result` (lo stesso del path browser
+  capability). EVITATO un duplicato: avevo scritto un `executor_result_to_outcome`
+  ridondante, poi scoperto il ponte esistente (testato a riga ~7806) e rimosso il
+  mio.
+- Dispatcher: `GatewayTaskExecutorKind::Subagent -> execute_subagent_task`.
+- Browser-as-capability-tool: gia' wired (`execute_capability_browser_task`,
+  kind `capability.browser.*`). Resta stub solo `CapabilityGeneric`
+  (connettori/MCP vivi).
+- Test: gateway 23+55, subagents/capabilities/orchestrator verdi; build light e
+  default (mistral.rs) verdi.
+- NOTA: il consumatore (Brain che materializza subagent task in produzione) non
+  e' ancora wired -> questo de-stub e' davanti al suo consumatore, ma e' un pezzo
+  reale/corretto di GAP 4 e prepara la convergenza sul trait. Il pezzo grande
+  residuo di #3 e' far materializzare i task al Brain (Brain.run in produzione,
+  serve provider VIVI) + convergere il run loop su TaskRuntime (A2-residual).
+
+### M1/A1 — ADR 0008 + Brain LIVE nel path piano (opt-in) + CachedToolProvider
+
+- ADR `docs/decisions/0008-orchestrator-brain-single-planner.md`: stato finale
+  definitivo di A1 (5 pilastri: un cervello, una facade, un task runtime,
+  ExecutionPlan come modello unico con OperationalPlan->read-model, store
+  condivisi in AppState; + A4/A5). Convergenza definitiva = migrare a
+  ExecutionPlan (l'adattatore diventa il deriver del read-model). Sequenza
+  incrementale documentata.
+- Pilastro #2 (shim transitorio): `crates/capabilities/src/cached_provider.rs`
+  `CachedToolProvider` — `CapabilityProvider` read-only che espone i tool dalla
+  cache registry per la VISIBILITA' di pianificazione; `call_tool` rifiuta
+  (`ProviderUnavailable`) -> niente esecuzione finta. 2 test.
+- Pilastri #1/#4 (primo wiring live): nel gateway
+  `try_brain_operational_plan(state, goal)` assembla un `OrchestratorBrain`
+  (RuntimeClient + NoopMemoryContextProvider + CapabilityFacade con
+  CachedToolProvider per provider + ToolSearchIndexStore in-memory + TaskStore
+  in-memory), chiama `plan_only`, adatta a OperationalPlan. Cablato al punto-piano
+  in `execute_browser_loop_read_only_task` come opzione intermedia:
+  input_json plan -> Brain (se flag) -> legacy. Gate
+  `LOCAL_FIRST_USE_BRAIN_PLANNER` (default OFF: opt-in, fallback su qualunque
+  errore). Rimosso `#[allow(dead_code)]` da brain_adapter (ora usato).
+- Test: capabilities (CachedToolProvider 2), gateway 23+55, orchestrator brain 7
+  verdi. Build light e default (mistral.rs) verdi. Solo warning preesistente.
+
+STATO A1: il Brain ora PUO' girare in produzione (opt-in) e produrre il piano
+operativo, con fallback sicuro. CHIUSO lo slice "Brain live nel path piano".
+RESTA per A1-full: provider VIVI (call_tool reale, non solo cache) ->
+de-hardcodare l'ESECUZIONE (browser-as-capability-tool, executor reali
+capability/subagent oggi stub, GAP 4) -> Brain in AppState con store condivisi
+(ora costruito per-call) -> default flag ON + ritiro keyword/train -> A4/A5.
+NOTA valore: con i CachedToolProvider il call_tool non esegue, quindi finche'
+non ci sono provider vivi + executor reali, il piano Brain e' soprattutto
+struttura/display; il valore alto e' il prossimo passo (esecuzione).
+
+### M1 — primo incremento (adattatore Brain->OperationalPlan)
+
+- SCOPERTA verificando il codice reale: A2 (dispatcher per task.kind via
+  `TaskExecutorRegistry` -> `execute_read_only_task`, con governor/lease/
+  scheduler reali) e A3 (worker background `start_task_executor_worker`,
+  abilitato di default, polling+spawn_blocking su `run_next_task_once`) sono
+  GIA' FATTI. Il report dell'agente su "nessun worker" era datato. Quindi M1
+  si riduce ad A1.
+- Resta A1 (il piu' rischioso): l'OrchestratorBrain non e' in produzione; il
+  routing usa `should_create_operational_task` + `operational_plan_for_goal`/
+  `train_search_draft_for_goal` (keyword/treni hardcoded). Executor
+  CapabilityGeneric/Subagent sono ancora stub "non collegato".
+- Scelta utente per A1: "Adattatore + test prima" (zero rischio) +
+  convergenza "Adattatore -> OperationalPlan".
+- FATTO questo incremento: `crates/desktop-gateway/src/brain_adapter.rs`
+  (`execution_plan_to_operational_plan`): converte l'`ExecutionPlan` del Brain
+  nell'`OperationalPlan` del gateway. Mapping: route->intent_type,
+  approval/risk->autonomy+approval_gates+stop_conditions, tool_name->tools,
+  contract->data_schema, step->operational_step. 3 unit test. Aggiunta dep
+  `local-first-orchestrator` al gateway; aggiunto `PartialEq/Eq` a
+  OperationalIntentType/Autonomy. Modulo `#[allow(dead_code)]` perche' NON ancora
+  cablato nel path live (scelta utente: cablaggio = step successivo).
+- NON fatto di proposito: istanziare l'OrchestratorBrain in AppState. Farlo ora,
+  inutilizzato, aggiungerebbe la complessita' owned-TaskStore-vs-Mutex +
+  MemoryContextProvider + CapabilityFacade senza valore finche' non si cabla.
+  Va fatto insieme al wiring.
+- Test: gateway 23+55 (light) verdi, default build (mistral.rs+orchestrator)
+  verde. Unico warning preesistente.
+
+Secondo incremento A1 (utente: "fallo, non siamo in produzione"): aggiunto il
+PRIMITIVO mancante `OrchestratorBrain::plan_only(&request) -> ExecutionPlan`
+(`crates/orchestrator/src/brain.rs`): esegue solo la fase di planning
+(list_tools -> rebuild index -> load memory -> load tools -> plan_with_retry ->
+validate) e ritorna il piano SENZA materializzare task/eseguire step. `run_inner`
+intatto (rischio minimo). Test `plan_only_returns_plan_without_materializing_tasks`
+(orchestrator brain 7/7).
+
+SCOPERTA che ridimensiona "il wiring": il Brain ha 3 mismatch architetturali col
+gateway, quindi il wiring live e' un'integrazione a 3 ponti, NON un wiring
+bounded:
+1. plan-vs-execute: `run` materializza task (doppioni + colpisce executor stub).
+   RISOLTO dal nuovo `plan_only`.
+2. capability model: il Brain usa `CapabilityFacade` con provider VIVI
+   (`register_provider`, trait a 11 metodi); il gateway legge dalla CACHE della
+   registry (`registry.cached_tools`). Serve un `RegistryCacheProvider:
+   CapabilityProvider` che serva i tool cache -> facade. NON ancora fatto.
+3. ownership: Brain vuole TaskStore/CapabilityFacade/ToolSearchIndexStore owned;
+   il gateway li ha dietro Arc<Mutex>. Per plan-only basta costruire una facade
+   con RegistryCacheProvider + ToolSearchIndexStore::open_in_memory +
+   NoopMemoryContextProvider + RuntimeClient (memory nel Brain = A5, separato).
+
+VALORE IMMEDIATO LIMITATO del wiring al punto-piano: oggi l'`OperationalPlan` e'
+soprattutto DISPLAY/step-tracking; l'esecuzione browser reale usa
+`browser_targets_for_goal` (keyword). Cablare il Brain al punto-piano cambia il
+piano MOSTRATO ma non l'esecuzione -> potenzialmente confondente. Il valore alto
+di A1 e' de-hardcodare l'ESECUZIONE (route + browser targets), che e' piu' grande
+(gli step CapabilityCall del Brain dovrebbero passare dagli executor reali, oggi
+stub - vedi GAP 4).
+
+STATO: 2 primitivi puliti pronti (`plan_only` + `execution_plan_to_operational_plan`,
+entrambi testati e verdi). Il wiring live = costruire `RegistryCacheProvider` +
+assemblare il Brain + instradare con fallback. A1-full e' un milestone a se',
+non un wiring veloce. Decisione utente attesa: costruire il ponte
+RegistryCacheProvider come prossimo step discreto, oppure trattare A1-full come
+milestone dedicato (de-hardcodare anche l'esecuzione, non solo il display).
+
+### M0 Sicurezza (dal piano di elevazione) — FATTO
+
+- S1 — Auth gateway obbligatoria di default. `resolve_gateway_auth_token()`
+  (`desktop-gateway/src/main.rs`): env -> file persistito -> token generato
+  (due uuid v4) scritto 0600 in `~/.local-first-personal-assistant/
+  desktop-gateway-token`. Mai piu' "auth off": rimosso il bypass in
+  `require_gateway_token`, ora fail-closed se il token fosse vuoto. Aggiunta dep
+  `uuid` v4 al gateway + helper `gateway_data_dir`/`write_private_file` (cfg unix
+  0600, fallback Windows).
+- S2 — Gate di sicurezza nel loop browser (path attivo). In
+  `parse_browser_loop_decision` aggiunto `browser_action_high_risk_reason`:
+  click/submit su controlli con label che matchano pattern
+  acquisto/login/prenotazione (EN+IT, `HIGH_RISK_LABEL_PATTERNS`) -> ritorna
+  `Blocked` invece di eseguire. Backstop indipendente dal prompt dell'LLM.
+  `snapshot_label_for_ref` risale dal ref al testo dell'elemento. "Cerca"/search
+  resta permesso.
+- S3 — `evaluate` (JS arbitrario) sempre bloccato nel loop (catena
+  prompt-injection->esecuzione chiusa).
+- S4 (slice) — API key cloud da FILE 0600 preferito all'env
+  (`LOCAL_FIRST_INFERENCE_API_KEY_FILE`), `resolve_inference_api_key()`; env
+  ancora supportato ma con warning (e' ereditato dai processi figli). NOTA: la
+  piena integrazione `local-first-secrets` (secret_ref + store cifrato/keychain)
+  resta un task dedicato (S4-full) — farla a meta' sarebbe security theater.
+- Test: gateway controller 19 (4 nuovi gate), gateway 52, inference 23,
+  browser-automation suite verdi. Build light (`--no-default-features`) e default
+  (mistral.rs) verdi. Unico warning preesistente: `browser_loop_decision_prompt`.
+
+### Analisi sistema completa + piano di elevazione + foundation chat-streaming
+
+- Lanciati 5 agenti di analisi (inference/gateway/chat, browser, runtime/
+  capability/brain/subagenti, memory/skill/secrets/process, desktop UI).
+- Sintesi in `docs/plans/2026-05-29-system-elevation-plan.md`. DIAGNOSI DI FONDO:
+  il sistema e' un insieme di librerie ben testate, ma il GATEWAY IN PRODUZIONE
+  e' una seconda implementazione parallela che le bypassa (routing a keyword +
+  piano treni hardcoded, run loop task re-implementato a mano, memoria usata
+  solo in lettura, chat accoppiata a MLX fuori dal router). Leva #1: chiudere il
+  gap tra cio' che e' testato e cio' che gira.
+- Buchi di sicurezza nel path attivo: auth gateway DISABILITATA di default se
+  token vuoto (`main.rs:700/7213`); gate di policy NON applicati nel loop
+  browser (`browser_loop.rs:206`); `evaluate` JS arbitrario senza gate; API key
+  cloud da env invece che da local-first-secrets.
+- Parte A (chat): costruito il MATTONE riutilizzabile e testato
+  `crates/inference/src/streaming.rs` (parser streaming OpenAI/SSE -> delta,
+  6 test). Il rewiring completo dell'handler chat NON fatto: tocca la fondazione
+  (la chat reale passa da `submit_operational_prompt`, flusso operational-first
+  via PromptBrain) e richiede prima lo streaming nel trait InferenceProvider +
+  router. E' il workstream A4 del piano. Inference: 23 test verdi. Niente rotto,
+  MLX intatto.
+
+## 2026-05-28
+
+### Inference provider routing: ADR 0007 + scaffold crates/inference
+
+- Decisione (ADR `docs/decisions/0007-inference-provider-routing.md`): si passa
+  da runtime unico MLX a uno strato di routing inferenza. Router + gate privacy
+  SEMPRE in Rust (confine di sicurezza); engine pluggable dietro trait. Engine
+  locale: mistral.rs (Rust-native, vision, cross-OS, in-process), llama.cpp via
+  `llama-cpp-2` come fallback in Rust; MLX retrocede a provider opzionale Apple;
+  Python solo provider opzionale per modelli che esistono solo li'. Cloud
+  opt-in/gated via due adapter: OpenAI-compatibile (OpenAI/OpenRouter/Together/
+  Groq + Ollama locale e cloud su /v1) e Anthropic.
+- Scaffold `crates/inference` (fette 1-2 dell'ADR):
+  - `provider.rs`: trait `InferenceProvider` + `CapabilityDescriptor`
+    (locality, vision, tools, context_window, tps) + `Requirements`.
+  - `policy.rs`: `PrivacyPolicy` deny-by-default sul cloud (`local_only` /
+    `allowing_cloud`).
+  - `router.rs`: `ModelRouter` selezione local-first (locale prima del cloud,
+    ordine di inserimento come tie-break), implementa il trait `JsonRuntime`
+    gia' consumato da Brain/subagenti/gateway -> drop-in, nessun cambio ai
+    chiamanti. Errore `no_provider_available` quando nulla e' eleggibile.
+  - `openai_compat.rs`: `OpenAiCompatProvider` su `{base}/chat/completions`
+    (copre OpenAI-likes + Ollama local/cloud). Parsing isolato in
+    `parse_chat_completion` (puro, testabile senza rete): estrae content,
+    unwrap fence markdown, valida required_keys, mappa usage->TokenMetrics.
+  - 9 test unit verdi (router selection/policy/vision + parse JSON/missing/
+    non-JSON/fenced). Aggiunto ai workspace members.
+
+Perche': "tutto locale sempre" non regge su HW piccoli e OS diversi; serve
+local-first per default con delega cloud esplicita. Il trait rende l'engine
+sostituibile senza toccare il resto; il router resta in Rust per non spostare
+il gate privacy fuori dal Core.
+
+A/B inference path validato live (2026-05-28):
+- `ModelRouter` + `OpenAiCompatProvider` puntato a Ollama
+  (`http://127.0.0.1:11434/v1`) usato come `JsonRuntime` del
+  `RuntimeBrowserLoopPlanner` sul vero loop Trenitalia. 6 iterazioni pulite,
+  tutte `observed`, `loop_0` stabile, JSON azione valido a ogni passo →
+  il nuovo crate `inference` guida il loop browser end-to-end senza toccare
+  Brain/gateway. Path architetturale confermato.
+- Harness aggiornato: `examples/trenitalia_live.rs` con
+  `INFERENCE_BACKEND=ollama|mlx`, `OLLAMA_MODEL`, `OLLAMA_API_KEY`.
+- Reso configurabile il timeout planner via
+  `LOCAL_FIRST_BROWSER_PLANNER_TIMEOUT_SECONDS` (default 20s): un 8B a freddo
+  con prefill ~2.7k token supera i 20s, backend diversi hanno latenze diverse.
+- `OpenAiCompatProvider` ora onora `request_timeout_seconds`.
+- Modelli Ollama disponibili: locali `gemma4:latest` (8B), `llama3.1:8b`;
+  cloud (opt-in, richiedono auth) `qwen3-vl:235b-cloud` (VISION), `qwen3.5:397b`,
+  `deepseek-v3.2:671b`, `glm-4.6:355b`, `kimi-k2.5`, `ministral-3:14b`, ecc.
+- BLOCCO cloud: i modelli `:cloud` rispondono `unauthorized` / "internal
+  service error": serve `ollama signin` (il daemon tiene la credenziale) oppure
+  `OLLAMA_API_KEY` come bearer. Nessuna credenziale Ollama in env qui.
+- Nota comportamentale: `gemma4:8b` mostra lo STESSO pattern del 4B MLX
+  (clicca/digita stazioni ma non conferma l'autocomplete) → coerente con
+  "il blocco e' il loop/combobox, non solo la taglia del modello". La prova
+  definitiva (modello frontier completa o no) richiede il modello cloud.
+
+TASK TRENITALIA COMPLETATO end-to-end (2026-05-28) con qwen3-vl:235b via Ollama
+Cloud (`https://ollama.com/v1`, bearer key) attraverso il `ModelRouter` +
+`OpenAiCompatProvider`. Estratte 3 opzioni reali (Frecciarossa 9734/9736/9738,
+09:05-09:25, ~3h40m, €47-52) e stop prima dell'acquisto, esattamente come da
+goal. Path: stazioni+conferma autocomplete -> calendario+giorno+ora -> click
+ricerca -> handoff cross-dominio a lefrecce.it (loop_0 stabile anche li') ->
+estrazione e complete. 11 iterazioni.
+
+Cosa e' servito (in ordine di scoperta):
+1. Auth Ollama Cloud: i modelli `:cloud` sul daemon locale danno "internal
+   service error"; funziona l'endpoint diretto `https://ollama.com/v1` con
+   bearer API key e nome modello SENZA suffisso `-cloud` (es. `qwen3-vl:235b`).
+2. Parser robusto nel provider: qwen emetteva JSON valido + token di troppo
+   (`...}"}`); `serde_json::from_str` falliva su "trailing characters" e
+   uccideva run buoni. Aggiunto `first_json_object` (estrazione primo oggetto
+   bilanciato, rispetta stringhe/escape) dietro `repair`. 11 test verdi.
+3. Context profile = leva decisiva: col profilo `compact` (pensato per Gemma
+   E4B) qwen si auto-bloccava perche' la compattazione TAGLIAVA le celle-giorno
+   del calendario ("day 10 not visible in truncated snapshot"). Col profilo
+   `full` ha completato. LEZIONE: la compattazione va legata alla
+   `context_window` del provider (gia' nel CapabilityDescriptor): modelli a
+   contesto ampio -> snapshot full; modelli piccoli -> compact.
+
+SICUREZZA: la API key Ollama e' stata usata solo come env transitoria, mai
+scritta su file/codice/commit. E' comparsa in chiaro nella conversazione ->
+va considerata esposta e ruotata; in produzione deve stare in
+`local-first-secrets` (secret_ref), non in env.
+
+FATTO (a) auto context-profile dalla capability del modello:
+- `ModelRouter::active_context_window(requirements)` espone la finestra del
+  provider selezionato.
+- `BrowserContextProfile::for_context_window(window)`: env override vince
+  sempre (ablation/debug); altrimenti window >= 16_384 -> Full, ignota/piccola
+  -> Compact. `from_env` refattorizzato su `from_env_override() -> Option`.
+- `RuntimeBrowserLoopPlanner::with_context_profile(runtime, profile)` nuovo
+  costruttore; `new` invariato (from_env).
+- Harness sceglie il profilo dalla finestra del router (ramo Ollama) o None
+  (ramo MLX -> Compact). Verificato live: log
+  `context_window=Some(32768) -> profile Full` senza flag manuale, comportamento
+  corretto. Test: inference 12, gateway controller 14 (incl.
+  `context_profile_scales_with_model_context_window`).
+
+FATTO (e) ModelRouter cablato nel gateway reale:
+- `JsonRuntimeProvider` (inference): incapsula un `JsonRuntime` esistente (es.
+  `RuntimeClient` MLX) come `InferenceProvider`.
+- `build_browser_inference_router(gemma_url)` in main.rs: default = MLX locale
+  (comportamento invariato); opt-in OpenAI-compat con
+  `LOCAL_FIRST_INFERENCE_BACKEND=openai` + `_BASE_URL`/`_MODEL`/`_API_KEY`/
+  `_CONTEXT_WINDOW`/`_CLOUD`. Cloud gated dalla privacy policy del router.
+- `execute_browser_loop_read_only_task` ora costruisce il router e sceglie il
+  profilo via `BrowserContextProfile::for_context_window(active_context_window)`,
+  poi `RuntimeBrowserLoopPlanner::with_context_profile`. Rimossi `new`/`from_env`
+  ora inutili. Build workspace pulita, test 18 (gateway controller) + 47 + 13.
+
+FATTO (b) LocalProvider mistral.rs (feature-gated, ADR 0007):
+- Estratto parser JSON-da-testo condiviso in `inference/src/json_parse.rs`
+  (`json_response_from_text`, fence strip, `first_json_object` con repair);
+  `openai_compat` ora lo riusa.
+- `mistralrs_provider.rs` (cfg feature `local-mistralrs`): `MistralRsProvider`
+  in-process, possiede un runtime tokio e fa block_on su
+  `ModelBuilder::new(id).with_auto_isq(Four).build()` e
+  `model.send_chat_request(TextMessages)`. API verificata sull'esempio ufficiale
+  mistral.rs 0.8.1 (`response.choices[0].message.content`, `response.usage`).
+- Dep opzionali `mistralrs`/`tokio` dietro feature `local-mistralrs`; build
+  DEFAULT non le compila (verificato: mistralrs assente dal cargo tree default,
+  13 test verdi). Su Apple Silicon va aggiunta la feature `metal` di mistral.rs.
+
+FATTO: mistral.rs cablato come backbone locale DEFAULT (scelta utente: default
+cross-OS, allineato ad ADR 0007). MLX retrocede a fallback/opzione.
+- `impl<T: JsonRuntime + ?Sized> JsonRuntime for Arc<T>` in subagents: permette
+  di condividere un router (e quindi un modello caricato una volta) tra i target
+  clonando l'Arc.
+- gateway: feature `default = ["local-mistralrs"]`, con escape hatch
+  `--no-default-features` per build leggera MLX-only. `local-mistralrs` inoltra
+  alla feature del crate inference.
+- `build_browser_inference_router`: selezione backend via
+  `LOCAL_FIRST_INFERENCE_BACKEND` = openai | mistralrs | mlx. Default quando la
+  feature e' compilata = mistralrs (`try_build_mistralrs_router`); su errore di
+  load fa fallback a `build_mlx_router` con warning. Modello default
+  `Qwen/Qwen3-4B` (text; override `LOCAL_FIRST_INFERENCE_MODEL`),
+  supports_vision=false (il provider fa solo generate_json testuale per ora).
+- `execute_browser_loop_read_only_task`: il router e' costruito UNA volta per
+  task (Arc) e clonato per ogni target -> il modello mistral.rs si carica una
+  sola volta, non per-target. Profilo contesto calcolato una volta dalla
+  context_window del router.
+- Verificato: build default (feature on) Finished, build `--no-default-features`
+  pulito, gateway controller 14 test. UNICO warning = preesistente
+  `browser_loop_decision_prompt` (usato solo nei test).
+
+NON ancora validato a runtime: il caricamento/inferenza in-process di mistral.rs
+su questa macchina (scaricherebbe il modello da HF e girerebbe CPU-only finche'
+non si abilita la feature `metal` di mistralrs). Compile-verificato contro API
+0.8.1; il fallback MLX garantisce che l'app resti funzionante se il load fallisce.
+
+Risposta a "abbiamo ancora MLX?": MLX non e' piu' il default forzato. mistral.rs
+e' il default cross-OS (quando compilato); MLX e' fallback su errore load e
+opzione esplicita (`--no-default-features` o `LOCAL_FIRST_INFERENCE_BACKEND=mlx`).
+
+Piano "ritiro MLX" (scelto: sequenza sicura). MLX NON e' un fallback rimovibile:
+alimenta la CHAT (`/api/chat/generate_stream` -> `{gemma}/generate_stream`),
+intent, health, cancel, autostart (17 rif. a `gemma_runtime_url`). mistral.rs
+oggi fa solo `generate_json` (loop browser), niente streaming chat. Quindi
+l'eliminazione e' l'ULTIMO passo. Nessun modello e' stato scaricato da
+mistral.rs prima dello smoke; su disco c'erano solo i modelli MLX Gemma
+(~10,7 GB: e4b-it-4bit 4,9G, E2B-it-4bit 3,4G, google/gemma-4-E2B-it 2,4G) +
+`.venv-mlx` 718M.
+
+FATTO step validazione runtime mistral.rs (smoke
+`crates/inference/examples/mistralrs_smoke.rs`, `--features local-mistralrs`):
+caricato `Qwen/Qwen3-0.6B`, ISQ Q4K su CPU, `generate_json` -> valid=true,
+json `{"ok":true,"engine":"mistralrs"}`. Il parser condiviso ha spacchettato il
+fence markdown. CPU: ~1.5 tok/s (scaricato Qwen3-0.6B in HF cache durante lo
+smoke). CORRETTEZZA ok; VELOCITA' richiede feature `metal` (MLX fa ~28-32 tok/s).
+
+### Lavoro autonomo notturno (2026-05-28, utente a dormire)
+
+Vincolo dato: andare avanti in autonomia MA non fare azioni distruttive
+(niente rimozione MLX / cancellazione modelli), tenere l'albero verde, lasciare
+le decisioni a lui.
+
+VALIDAZIONE VELOCITA' METAL (decisiva per il ritiro MLX):
+- Aggiunta feature `local-mistralrs-metal = ["local-mistralrs","mistralrs/metal",
+  "mistralrs/accelerate"]`. Build Metal OK.
+- Smoke su `google/gemma-4-E2B-it` (gia' in cache, nessun download) via Metal:
+  **11.4 tok/s** (vs 1.5 su CPU, vs ~28-32 di MLX sull'E4B). Funziona ma e'
+  ~2-3x piu' lento di MLX sulla stessa famiglia Gemma, e per giunta su un
+  modello PIU' PICCOLO (E2B/2B vs E4B/4B).
+- Provato anche con PagedAttention (`with_paged_attn`, fallback grazioso se non
+  disponibile): **11.0 tok/s**, invariato sul single-request (il beneficio di
+  paged attn e' sul throughput concorrente, non sulla latenza per-token). Dummy
+  run piu' rapido (1s vs 26s). paged_attn TENUTO nel provider.
+- CONCLUSIONE/RACCOMANDAZIONE (decisione utente): NON rimuovere MLX ovunque.
+  Su Apple MLX resta piu' veloce; conviene la strategia PER-PIATTAFORMA
+  (mistral.rs cross-OS su Win/Linux, MLX su Apple) gia' prevista. Per questo
+  NON ho fatto il refactor async della chat-su-mistral.rs (sarebbe un downgrade
+  su Apple) ne' rimosso nulla.
+
+FATTO (c) AnthropicProvider:
+- `crates/inference/src/anthropic.rs`: Messages API (`/v1/messages`, header
+  `x-api-key`+`anthropic-version`), parsing isolato `parse_anthropic_message`
+  (concatena i blocchi text, usage input/output_tokens -> TokenMetrics, riusa
+  `json_response_from_text` con repair). 4 unit test.
+- Cablato nel gateway: `LOCAL_FIRST_INFERENCE_BACKEND=anthropic` +
+  `LOCAL_FIRST_INFERENCE_MODEL` (default `claude-sonnet-4-6`) +
+  `LOCAL_FIRST_INFERENCE_API_KEY`. Locality Cloud, policy allowing_cloud.
+
+FATTO (d) parte sicura - ritenzione snapshot nel profilo compact:
+- `is_interactive_snapshot_line` ora include `gridcell`, `cell`, `row`,
+  `menuitemradio`: le celle-giorno del calendario e le righe risultato
+  sopravvivono alla compattazione (era la causa del blocco qwen "day 10 not
+  visible in truncated snapshot"). Test `compact_frame_retains_calendar_gridcell`.
+- NON fatto (tocca il runner, rischioso overnight): iniezione deterministica
+  type->ArrowDown->Enter per combobox. Lasciato come follow-up.
+
+Stato test: inference 17, gateway (light, --no-default-features) 19+48,
+controller 15. Albero verde sia light sia default (mistral.rs).
+
+DECISIONI CHE RESTANO A TE (non eseguite di proposito):
+1. Strategia backend locale alla luce dei 11.4 tok/s Metal: per-piattaforma
+   (consigliata) vs mistral.rs ovunque vs tenere MLX di default su tutto.
+2. Se per-piattaforma/mantieni MLX: forse RIVEDERE la scelta "mistral.rs default"
+   fatta prima (oggi il gateway prova mistralrs di default quando compilato;
+   potrebbe avere senso default=mlx su Apple).
+3. Solo se si decide di ritirare MLX su una piattaforma: chat streaming su
+   mistral.rs (refactor async + modello in AppState) e POI rimozione MLX +
+   cancellazione ~10,7 GB modelli + `.venv-mlx`. NON toccato.
+4. Ruotare la API key Ollama incollata in chat (esposta nel transcript).
+
+Altre fette in coda: (f) vision in-process via `VisionModelBuilder` di mistral.rs;
+ottimizzare perf mistral.rs (paged_attn, GGUF prequantizzato) se si vuole
+avvicinare MLX.
+
+### Tab hygiene sidecar + piano esplicito nel prompt browser
+
+- Risolto il fallimento live `BROWSER_TAB_NOT_FOUND: tab not found: loop_0`.
+  Causa: `restartAssistantVisible` (fallback headless->visibile) chiamava
+  `stop()` che faceva `pages.clear()` distruggendo la mappa dei tab, e non
+  c'era recovery se la pagina moriva a meta' loop (popup/crash/target chiuso).
+- `session_manager.ts`: introdotto `closeContext()` (chiude il context ma
+  preserva i metadati target) usato dal restart; `stop()` resta il reset totale.
+  Aggiunta mappa persistente `targetMeta` (url+label per targetId) e
+  `resolvePage()` async auto-recuperante che riapre il target all'ultimo URL
+  noto invece di lanciare `BROWSER_TAB_NOT_FOUND`. `closeTab` reso idempotente,
+  `open` gestisce un target esistente ma chiuso. Regression test reale in
+  `tests/browser_methods.test.ts` (chiude il Page interno e verifica il
+  recupero). 41/41 test sidecar verdi.
+- `BrowserLoopRequest` ha ora un campo `plan: Vec<String>` (checklist ordinata
+  di sotto-obiettivi). Il loop la renderizza come sezione `PLAN:` in cima
+  all'action frame; resta agnostico sulla sorgente del piano. Aggiunta RULE 0
+  "Follow the PLAN top to bottom, one item per turn, usa Recent actions per
+  capire cosa e' fatto".
+- Il gateway riempie il piano da `browser_loop_plan_for_source(draft)`
+  (cookie -> partenza -> suggerimento -> arrivo -> suggerimento -> data -> ora
+  -> Cerca -> estrai opzioni). E' ancora derivato dal draft euristico treno:
+  quando l'OrchestratorBrain generera' un OperationalPlan con step browser,
+  il piano dovra' arrivare da li' (vedi TODO step #3).
+- `last_prompt_*.txt`/`last_response_*.txt` ora dietro
+  `LOCAL_FIRST_BROWSER_LOOP_DEBUG=1`, non piu' I/O di debug nel path di prod.
+
+Perche': il loop browser era reattivo puro (snapshot -> 1 azione) e il piano
+non arrivava mai al modello; un E4B su una pagina Trenitalia con decine di ref
+sceglieva azioni a caso o saltava step. E senza tab hygiene nessun
+miglioramento di planning era nemmeno osservabile end-to-end.
+
+Test live Trenitalia (2026-05-28, headless, 14 iter, profilo compact) via
+`cargo run -p local-first-desktop-gateway --example trenitalia_live`:
+- Tab hygiene CONFERMATA: `loop_0` stabile su tutte le 14 iterazioni, nessun
+  `BROWSER_TAB_NOT_FOUND`. Il blocker duro e' risolto.
+- Plan injection PARZIALE: il modello segue la struttura (partenza, arrivo,
+  data) ma oscilla e non completa. Esce con `max browser loop iterations
+  reached`, senza opzioni.
+- Causa esatta (da snapshot catturato): i campi stazione sono combobox con
+  label "digita la stazione poi selezionala dall'elenco con i tasti frecce e
+  conferma con invio". Il listbox dei suggerimenti NON compare come ref `option`
+  nello snapshot, quindi la RULE 2 ("clicca il suggerimento") non e'
+  applicabile: non c'e' nulla da cliccare. Il modello ri-digita all'infinito
+  (la partenza finiva "Napoli CentraleNapoli Centrale", doppia) e non conferma
+  mai, non arriva a data/ora/Cerca.
+
+TODO prossimi step (in ordine):
+1. Conferma combobox deterministica nel loop: per i campi autocomplete che
+   chiedono "conferma con invio", dopo il `type` eseguire `press ArrowDown` +
+   `press Enter` invece di aspettare un suggerimento cliccabile. In
+   alternativa/aggiunta: primitiva sidecar "seleziona da combobox" e/o cattura
+   del listbox dei suggerimenti negli snapshot (gap di coverage del sidecar).
+2. Stato di avanzamento esplicito: il loop dovrebbe tracciare quali step del
+   piano sono soddisfatti e dire al modello "step corrente = N" invece di farlo
+   inferire dalle azioni recenti (con 14 iter perde il filo e ri-compila campi
+   gia' pieni).
+3. De-hardcodare il draft treno: far generare a Gemma un OperationalPlan
+   strutturato a inizio task e alimentare `with_plan` da li' (coerente con la
+   nota PROJECT.md "niente regex/keyword nel core").
+
+Note infra test: example `crates/desktop-gateway/examples/trenitalia_live.rs`;
+`browser_loop_controller` ora `pub mod` nel lib del gateway per essere
+richiamabile da example/harness. Debug prompt/response dietro
+`LOCAL_FIRST_BROWSER_LOOP_DEBUG=1`. Runtime MLX: `make server` su :8765.
+
+### Browser context firewall per Gemma 4
+
+- Sostituito il taglio grezzo dello snapshot nel planner browser con una
+  action frame compatta: task, pagina, refs, controlli rilevanti, ultimo passo,
+  fallimenti recenti e tool ammessi.
+- Aggiunto supporto runtime a `LOCAL_FIRST_BROWSER_CONTEXT_PROFILE` con profili
+  `full`, `compact` e `minimal` per misurare overload vs over-compression senza
+  cambiare modello, quantizzazione o runner.
+- Il profilo default resta `compact`: seleziona linee con ref interattivi,
+  match col goal, keyword browser e ref coinvolti in errori recenti.
+- Aggiunto benchmark operativo
+  `docs/benchmarks/gemma4-browser-context-ablation.md` per registrare quando
+  il contesto compatto mantiene il piano e quando invece toglie informazioni
+  necessarie.
+- Eseguito smoke benchmark live
+  `output/gemma4-browser-context-smoke-20260528-193119/result.md`:
+  `full` 16.177 char medi, `compact` 8.666, `minimal` 4.986; tutti hanno
+  prodotto JSON planner valido 4/4, ma `minimal` ha risposte meno grounded.
+  La failure comune e' `BROWSER_TAB_NOT_FOUND: tab not found: loop_0`, quindi
+  il prossimo collo di bottiglia live e' tab hygiene/target reuse del sidecar,
+  non la sola dimensione del contesto.
+- Dal post Reddit OpenClaw/Gemma 4 TurboQuant: il problema osservato e'
+  coerente con agenti locali su Mac medio che faticano quando l'agente aggiunge
+  molto contesto a ogni richiesta; la mitigazione da perseguire qui resta
+  context preparation/action frame piccolo prima di ottimizzazioni cache.
+
+Perche': Gemma 4 E4B non regge payload browser troppo grandi. Il problema va
+risolto prima del tuning KV/cache: il modello deve scegliere la prossima azione
+da un frame piccolo ma sufficiente, non ingerire DOM/snapshot/storia completa.
+
 ## 2026-05-22
 
 ### OpenHuman come spunto, non copia
@@ -239,6 +736,36 @@ Perche': il runtime LLM non deve diventare l'agente. Il coordinamento, i permess
 
 - `make test`: Python e Rust passano.
 - `make benchmark`: suite Gemma reale 7/7 passata.
+
+## 2026-05-26
+
+### Analisi performance rendering chat
+
+- Analizzato il problema di blocchi/lentezza chat con messaggi lunghi,
+  streaming token, Markdown/code block e scrollback grande.
+- Creato piano `docs/plans/2026-05-26-chat-rendering-performance.md`.
+- Creati appunti benchmark `docs/benchmarks/chat-rendering-performance.md`.
+- Evidenza locale iniziale: lo stream usa gia' WebSocket locale invece di
+  `invoke`; dopo la Fase 64 `ChatView` usa anche
+  `@tanstack/react-virtual`, quindi il problema residuo non e' piu' assenza
+  totale di virtualizzazione ma validazione della virtualizzazione con righe
+  dinamiche.
+- Evidenza locale secondaria: lo streaming visibile scrive su text node via
+  `requestAnimationFrame`, ma il commit finale passa l'intera risposta a
+  Markdown/GFM/sanitize/Mermaid e puo' bloccare su risposte lunghe.
+- Ricerca aggiornata al 2026-05-26: Tauri usa WebView2 su Windows, WKWebView su
+  macOS e WebKitGTK su Linux; esistono issue Tauri su performance DOM Linux,
+  freeze WebView Linux e comportamenti WebView macOS Intel.
+- Decisione raccomandata: restare su Tauri, completare l'architettura rendering
+  chat con row memoization, cache Markdown, correzione scroll/measurement e
+  benchmark UI prima di considerare Electron.
+- Electron resta fallback misurato, non prima scelta: Chromium puo' ridurre
+  varianza WebKitGTK, ma non risolve DOM/Markdown non limitati.
+
+Perche': il collo di bottiglia piu' probabile e' ora nel rendering frontend
+post-virtualizzazione e nel parse/layout finale del Markdown. Cambiare shell
+prima di misurare e limitare DOM/render cost rischia di spostare il problema
+senza risolverlo.
 
 ## Prossimo blocco
 
@@ -2092,3 +2619,3925 @@ approval.
 Perche': questo conferma che `Approva e continua` non e' solo un'etichetta UI:
 il Core sa riprendere il piano dopo un gate utente e persiste l'avanzamento
 nella cronologia chat locale.
+
+### Fase 12 - Ottimizzazione chiamata Gemma per intent routing
+
+- Aggiunto endpoint runtime locale `POST /classify_intent` in
+  `runtimes/mlx-gemma4/server.py`.
+- Il nuovo endpoint:
+  - incapsula prompt e schema di classificazione lato runtime;
+  - riceve dal Core solo testo, locale opzionale, token budget e timeout;
+  - usa `max_tokens` breve di default;
+  - non usa JSON repair;
+  - normalizza a `null` i campi `calculation_*` mancanti per route non
+    matematiche, evitando una seconda generazione inutile.
+- `crates/subagents` ora espone `IntentClassifyRequest` e `IntentRuntime`.
+- `RuntimeClient` chiama `/classify_intent`; il planner continua a usare
+  `/generate_json` per piani piu' ricchi.
+- `RuntimePromptBrain` nel Tauri Core usa il nuovo endpoint:
+  - timeout intent routing 8s;
+  - `max_tokens` 96;
+  - niente schema e niente repair nel payload client.
+- Migliorati i fallback del prompt:
+  - runtime non raggiungibile;
+  - contratto Brain non valido;
+  - planner non raggiungibile;
+  - piano non valido.
+- Misure live su Gemma 4 MLX dopo warm-up:
+  - vecchio `/generate_json` per richiesta treno: ~7.99s, 394 prompt token,
+    `repaired=true`;
+  - nuovo `/classify_intent` su `quanto fa 6*3`: ~1.75s, 220 prompt token,
+    `repaired=false`;
+  - nuovo `/classify_intent` su richiesta treno: ~2.13s, 240 prompt token,
+    `repaired=false`.
+- Verifica TDD:
+  - RED: endpoint `/classify_intent`, tipo Rust `IntentClassifyRequest` e
+    `RuntimePromptBrain` su endpoint compatto mancavano;
+  - GREEN: test Python e Rust passano e il runtime live produce JSON valido
+    senza repair.
+
+Perche': tutto continua a passare dal Brain Gemma, ma l'intent routing non usa
+piu' il contratto generico pesante. La latenza percepita per richieste semplici
+scende senza introdurre routing nel frontend o regex nel composer.
+
+### Fase 12 - Runtime Control Center per Gemma e sidecar
+
+- Aggiunto control layer in `crates/process-manager`:
+  - `RuntimeDiscoveryProbe` per scoprire processi esterni;
+  - `LocalRuntimeDiscovery` basato su `lsof`, `ps` e `sysctl`;
+  - `DiscoveredProcess`, `RuntimeResourceSnapshot`,
+    `RuntimeControlSnapshot`, `RuntimeControlStatus`;
+  - `ProcessManager::runtime_control_snapshot`;
+  - `ProcessManager::restart`.
+- Il control snapshot rileva:
+  - processo gestito dal nostro supervisor;
+  - processo esterno gia' in ascolto sulla porta del runtime;
+  - duplicati del server Gemma;
+  - porta, pid, memoria processo, CPU processo e memoria totale quando
+    disponibili.
+- Aggiunti test TDD:
+  - runtime Gemma esterno su porta `8765` senza snapshot gestito;
+  - conflitto duplicati quando piu' processi Gemma sono presenti;
+  - restart del processo gestito.
+- Esteso il read model Tauri:
+  - `RuntimeHealthSnapshot` ora include `controls`;
+  - comando `process_restart`;
+  - pagina Settings/Runtime mostra stato control, porta, pid, memoria, CPU,
+    duplicati e azioni `Avvia`, `Riavvia`, `Ferma`.
+- Verifiche eseguite:
+  - `cargo test -p local-first-process-manager`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml runtime_snapshot_lists_default_sidecars_without_env`;
+  - `npm run build`.
+
+Perche': prima potevamo controllare solo processi avviati dal nostro supervisor.
+Ora possiamo capire se Gemma e' gia' attivo esternamente, se ci sono duplicati,
+quali risorse sta usando e abbiamo un'azione di restart esplicita dal Core/UI.
+
+### Fase 12 - Verifica runtime e blocker Tauri nativo
+
+- Verifiche automatiche fresche eseguite il 2026-05-24:
+  - `python3 -m unittest tests.test_mlx_gemma4_server`: 18 test verdi;
+  - `cargo test -p local-first-subagents --test runtime_client`: 3 test verdi;
+  - `cargo test -p local-first-process-manager`: suite verde;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`: 32 test
+    verdi;
+  - `npm run build` in `apps/desktop`: build Vite verde.
+- Test live con `./.venv-mlx/bin/python runtimes/mlx-gemma4/server.py`:
+  - `/health` risponde in ~0.01s prima del load modello;
+  - primo `/classify_intent` include cold load e wall time ~7.20s;
+  - warm `quanto fa 6*3`: ~1.84s, route `local_calculation`,
+    `repaired=false`;
+  - warm `che ore sono?`: ~1.17s, route `local_time`, `repaired=false`;
+  - warm `what is 12 times 7?`: ~1.76s, route `local_calculation`,
+    `repaired=false`;
+  - warm richiesta treno Napoli-Milano: ~1.75s, route `needs_planning`,
+    `repaired=false`.
+- Verifica controllo processi su runtime reale:
+  - porta `127.0.0.1:8765` in ascolto;
+  - processo rilevato come `./.venv-mlx/bin/python
+    runtimes/mlx-gemma4/server.py`;
+  - RSS osservato ~5.8GB dopo load Gemma.
+- Verifica UI:
+  - versione browser `http://127.0.0.1:1420/` renderizza e non mostra overflow
+    verticale a 1280x720;
+  - finestra Tauri nativa `Local First Assistant` resta bianca anche se Vite
+    serve correttamente la UI.
+
+Perche': il core locale e il runtime Gemma sono verificabili, ma il test utente
+reale deve passare dall'app Tauri nativa. Il prossimo intervento deve quindi
+risolvere la finestra bianca Tauri prima di continuare con test manuali
+end-to-end.
+
+### Fase 12 - Auto-start runtime Gemma con Tauri
+
+- Aggiunto `ProcessManager::ensure_runtime_started`.
+- Il metodo:
+  - avvia il runtime se e' `configured`, `stopped` o `unhealthy`;
+  - non avvia duplicati se trova un processo esterno gia' in ascolto sulla
+    porta;
+  - non riavvia un processo gia' gestito o healthy;
+  - non interviene in caso di conflitto duplicati, lasciando visibile il
+    problema al Runtime Control Center.
+- Tauri chiama `DesktopCoreState::ensure_required_runtimes_started()` durante
+  il bootstrap dell'app.
+- Per ora il runtime obbligatorio auto-avviato e' `llm-gemma4-mlx`.
+- Test TDD aggiunti:
+  - auto-start quando Gemma non e' disponibile;
+  - riuso di un listener Gemma esterno senza spawn duplicato.
+- Verifica live:
+  - riavvio pulito Tauri;
+  - processo `runtimes/mlx-gemma4/server.py` avviato automaticamente;
+  - porta `127.0.0.1:8765` in ascolto.
+- Verifiche eseguite:
+  - `cargo test -p local-first-process-manager`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`;
+  - `npm run build` in `apps/desktop`.
+
+Perche': l'utente non deve sapere che Gemma e' un sidecar separato. Se apre
+l'app e Gemma e' spento, il runtime locale deve partire automaticamente; se
+Gemma e' gia' acceso, l'app deve agganciarsi senza creare processi doppi.
+
+### Fase 12 - Chiarezza UX per piani e approval in chat
+
+- Problema osservato: la richiesta "trova/prenota un treno" esponeva troppo il
+  workflow interno:
+  - approval comprensibile solo aprendo Tasks;
+  - bottone generico `Approval`/`Continua`;
+  - messaggi tecnici in chat come "Nessuno step prompt_plan pronto".
+- Aggiornata la chat:
+  - le approval della sessione attiva compaiono inline nella conversazione;
+  - la scheda spiega cosa si sta approvando, cosa fara' il prossimo step e cosa
+    resta bloccato;
+  - pulsanti diretti `Rifiuta` e `Approva e continua`;
+  - label `Conferma richiesta` al posto di `Approval`;
+  - l'azione `Continua` viene disabilitata quando non ci sono step in attesa
+    secondo il read model visibile.
+- Aggiornato `mapCoreApproval`:
+  - `prompt_plan.approve_step` diventa `Conferma piano operativo`;
+  - copy piu' chiaro: non autorizza acquisti, login, invii o pagamenti
+    automatici.
+- Aggiornato `run_prompt_plan_ready_steps`:
+  - non scrive piu' in chat messaggi idle quando non e' stato eseguito niente;
+  - quando completa step e poi si ferma, usa una frase orientata all'utente.
+- Verifiche:
+  - `npm run build` in `apps/desktop`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml prompt_plan`.
+
+Perche': la chat deve restare centrata sulla risposta e sul prossimo passo
+comprensibile. Timeline, task runtime e approval sono utili, ma non devono
+sembrare comandi interni da decifrare.
+
+### Fase 13 - Stop, reset del criterio prodotto e Product Loop
+
+- Decisione presa dopo revisione critica: il progetto stava procedendo dal
+  sistema verso l'utente, mostrando troppa infrastruttura nella UX.
+- Nuovo criterio guida:
+  - prima chat Gemma semplice e stabile;
+  - poi strumenti assistiti;
+  - infine orchestrazione avanzata visibile solo quando serve.
+- Creato `docs/PRODUCT_LOOP.md`.
+- Il documento definisce cinque flussi obbligatori:
+  - domanda semplice;
+  - calcolo o risposta breve;
+  - richiesta informativa senza azione;
+  - richiesta con strumento visibile;
+  - richiesta rischiosa con approval.
+- Aggiornato `PROJECT.md` con riferimento esplicito al Product Loop.
+- Processi dev spenti per evitare di continuare debugging UI senza prima
+  riallineare il prodotto:
+  - Tauri dev;
+  - Vite;
+  - Gemma runtime.
+
+Perche': abbiamo gia' molti moduli, ma non un'esperienza base usabile. Da ora
+una modifica e' utile solo se rende uno dei cinque flussi piu' chiaro, veloce o
+affidabile senza peggiorare gli altri.
+
+### Fase 13 - Chat Gemma semplice come percorso base
+
+- Aggiunto supporto client Rust per il runtime `/generate`:
+  - `GenerateRequest`;
+  - `GenerateResponse`;
+  - trait `TextRuntime`;
+  - `RuntimeClient::generate`.
+- Aggiunto percorso Tauri separato per chat semplice:
+  - `PromptChatResponder`;
+  - `RuntimePromptChatResponder`;
+  - `prompt_submission::submit_chat_prompt`;
+  - `DesktopCoreState::submit_chat_prompt`;
+  - command Tauri `submit_chat_prompt`.
+- Il composer React ora usa `coreBridge.submitChatPrompt(...)` come percorso
+  base, non `submit_user_prompt(...)`.
+- Il vecchio `submit_user_prompt` con Brain/planner/task resta disponibile nel
+  Core, ma non e' piu' il comportamento base della chat.
+- La chat semplice:
+  - non crea piani;
+  - non crea task `prompt_plan`;
+  - non mostra timeline/computer locale se non c'e' attivita' operativa reale;
+  - non mostra messaggi di bootstrap sul computer locale;
+  - apre con "Sono pronto. Scrivimi pure: rispondo con Gemma locale."
+- Test aggiunto:
+  - `submit_chat_prompt_uses_plain_gemma_answer_without_creating_plan_or_tasks`.
+- Verifiche automatiche:
+  - `cargo test -p local-first-subagents --test runtime_client`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`;
+  - `npm run build` in `apps/desktop`.
+- Test live `/generate` su Gemma:
+  - `Ciao, chi sei?`: primo giro con cold load ~5.9s wall, generazione ~1.3s;
+  - domanda su mutuo: ~2.0s wall;
+  - bozza mail breve: ~3.9s wall.
+
+Perche': il Product Loop ora ha un primo percorso coerente: scrivi in chat,
+Gemma risponde, nessuna orchestrazione visibile viene attivata per default.
+
+### Fase 13 - Pulizia UX chat base
+
+- Dopo test manuale e screenshot, corretti altri residui tecnici nel loop base:
+  - nascosta la Local Computer card nella chat semplice anche se la sessione ha
+    timeline/artifact storici;
+  - rimosso il chip `Computer locale` dal composer base;
+  - aggiunto messaggio inline `Gemma sta rispondendo` con indicatore testuale,
+    al posto di un feedback generico da loading;
+  - nascosti dalla UI i metadati tecnici `Tauri core locale`, `Inviato al core
+    locale` e `Non salvato come payload raw`, anche per thread vecchi;
+  - badge assistant cambiato da `Local` a `Gemma`;
+  - le nuove user message non persistono piu' metadata tecnici;
+  - le risposte assistant usano `white-space: pre-wrap` per non comprimere
+    email/testi multilinea in un blocco sporco;
+  - prompt chat aggiornato per evitare markdown salvo richiesta esplicita.
+- Verifiche:
+  - `npm run build` in `apps/desktop`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+    submit_chat_prompt_uses_plain`.
+- Stato residuo dichiarato: manca ancora streaming reale token-by-token. Per
+  farlo bene serve un endpoint streaming nel runtime Gemma e un bridge Tauri
+  event/channel dedicato.
+
+Perche': la chat base deve apparire come una chat pulita anche su thread con
+storia sporca salvata dai test precedenti.
+
+### Fase 13 - Timestamp e invio rapido chat
+
+- Aggiunta formattazione oraria `HH:mm` nella chat desktop per i timestamp
+  numerici salvati dal core.
+- I nuovi messaggi utente creati in UI usano timestamp Unix in secondi invece
+  di `ora`.
+- Il core Tauri salva timestamp reali per:
+  - messaggi utente;
+  - risposte assistant;
+  - messaggi system;
+  - messaggio iniziale dei nuovi thread.
+- Il composer ora invia con `Enter`.
+- `Shift+Enter` resta disponibile per inserire una nuova riga nel prompt.
+- Verifiche:
+  - `npm run build` in `apps/desktop`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+    submit_chat_prompt_uses_plain`.
+- Tauri dev ha ricompilato automaticamente e il browser locale carica ancora
+  composer e pulsante invio.
+
+Perche': la chat deve comportarsi come una chat normale. L'utente non deve
+cliccare sempre il pulsante e deve vedere quando una risposta e' arrivata.
+
+### Fase 13 - Streaming risposte Gemma
+
+- Aggiunto endpoint runtime locale `POST /generate_stream`.
+- Il runtime usa `mlx_vlm.generate.stream_generate`, quindi emette delta reali
+  durante la generazione invece di simulare lo streaming dopo la risposta.
+- Il formato stream e' NDJSON locale:
+  - `{"type":"delta","text":"..."}`;
+  - `{"type":"done","text":"...","metrics":{...}}`.
+- Le metriche finali restano disponibili:
+  - `prompt_tokens`;
+  - `generation_tokens`;
+  - `prompt_tps`;
+  - `generation_tps`;
+  - `peak_memory_gb`;
+  - `elapsed_seconds`.
+- `crates/subagents` ora deserializza `GenerateStreamEvent` e il
+  `RuntimeClient` legge `/generate_stream` riga per riga.
+- Tauri espone `submit_chat_prompt_stream` e inoltra i delta alla UI con evento
+  `chat_stream_delta`.
+- La chat React:
+  - crea subito il messaggio assistant;
+  - mostra `Gemma sta iniziando a rispondere...` finche' non arriva il primo
+    delta;
+  - aggiorna il testo progressivamente mentre arrivano chunk;
+  - salva/sostituisce il messaggio finale con quello persistito dal Core.
+- Riavviato il runtime Gemma locale per caricare il nuovo endpoint.
+- Verifica live:
+  - `curl -sN /generate_stream` ha prodotto un evento `delta` e un evento
+    `done` con metriche reali.
+- Verifiche automatiche:
+  - `python3 -m unittest tests.test_mlx_gemma4_server`;
+  - `cargo test -p local-first-subagents --test runtime_client`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+    submit_chat_prompt`;
+  - `npm run build` in `apps/desktop`.
+
+Perche': la chat non deve attendere un blocco finale prima di dare feedback. Lo
+streaming e' il primo passo per far percepire Gemma come un assistente
+interattivo e non come una chiamata batch.
+
+### Fase 14 - Azioni contestuali sulle chat
+
+- Aggiunte azioni di gestione thread:
+  - `Pin in alto` / `Rimuovi pin`;
+  - `Archivia`;
+  - `Elimina`.
+- Le azioni sono accessibili con tasto destro sulla chat nella sidebar.
+- Il pin e' persistito nel core e riordina i thread pinnati sopra gli altri.
+- L'archiviazione sposta la chat nella sezione `Archiviati` e conserva messaggi
+  e stato locale.
+- L'eliminazione rimuove thread e messaggi dalla persistenza locale.
+- Se l'azione riguarda la chat attiva, il core seleziona automaticamente la
+  prossima chat attiva disponibile.
+- Protezione temporanea: non si puo' archiviare o eliminare l'ultima chat
+  attiva.
+- Verifiche:
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+    chat_thread`;
+  - `npm run build` in `apps/desktop`.
+
+Perche': la lista chat deve diventare gestibile senza introdurre ancora una
+pagina archivio completa. Il menu contestuale mantiene la sidebar pulita e
+aggiunge solo azioni quando servono.
+
+### Fase 15 - Sidebar pulita, ricerca e archivi
+
+- Rimossi i controlli finestra finti da drawer e rail; Tauri fornisce gia' i
+  controlli nativi della finestra.
+- La sidebar ora separa chiaramente:
+  - `Nuovo compito` come azione primaria;
+  - `Cerca` come modale di ricerca chat;
+  - `Progetti`;
+  - `Tutti i compiti`;
+  - `Archiviati`, visibile quando esistono thread archiviati.
+- `Progetti`, `Tutti i compiti` e `Archiviati` sono collassabili.
+- I pulsanti della sidebar sono tornati a superficie trasparente di default:
+  testo/icona puliti, hover grigio chiaro e stato attivo discreto.
+- `Elimina` ora apre una conferma esplicita prima di cancellare la chat.
+- Nel core Tauri gli snapshot includono anche i thread archiviati; il vincolo
+  `non eliminare l'ultima chat attiva` vale solo per thread attivi, quindi una
+  chat archiviata puo' essere eliminata anche se resta una sola chat attiva.
+- Le chat archiviate possono essere ripristinate con `Rimuovi dall'archivio`
+  dal menu contestuale, tornando in `Tutti i compiti` senza perdere messaggi.
+- La modale `Cerca chat` mostra titolo chat, progetto a destra e shortcut
+  visivi, senza esporre payload interni.
+- La stessa modale si apre sia dalla sidebar estesa sia dalla rail collassata.
+- Verifiche:
+  - `npm run build` in `apps/desktop`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml chat_thread`;
+  - verifica browser su `http://127.0.0.1:1420/` per layout sidebar, modale
+    ricerca e conferma eliminazione.
+
+Perche': la gestione chat deve essere ovvia e poco rumorosa. Le azioni
+distruttive richiedono conferma, gli archivi restano recuperabili, e la sidebar
+mantiene la stessa grammatica visiva in tutti gli stati.
+
+### Fase 16 - Rendering ricco dei messaggi chat
+
+- Analizzata la documentazione assistant-ui CLI:
+  - utile come riferimento per pattern `Thread`, composer e message renderer;
+  - non adottata via CLI perche' porta shadcn/Tailwind e una grammatica UI
+    diversa dalla nostra shell custom Tauri.
+- Aggiunto renderer locale `RichMessage` ispirato al pattern assistant-ui:
+  - Markdown;
+  - GitHub Flavored Markdown;
+  - link esterni sicuri;
+  - tabelle;
+  - liste;
+  - blockquote;
+  - codice inline;
+  - blocchi codice con header lingua e pulsante copia;
+  - blocchi Mermaid renderizzati come diagrammi.
+- Aggiunte dipendenze desktop:
+  - `react-markdown`;
+  - `remark-gfm`;
+  - `rehype-sanitize`;
+  - `mermaid`.
+- Mermaid e' caricato con import dinamico solo quando compare un blocco
+  `mermaid`, cosi' il bundle principale resta piu' leggero.
+- Il renderer usa `rehype-sanitize` per evitare HTML arbitrario nei messaggi.
+- `ChatView` ora usa `RichMessage` per user, assistant e system message,
+  mantenendo il fallback typing durante lo streaming.
+- Verifiche:
+  - `npm run build` in `apps/desktop`;
+  - `git diff --check`.
+
+Perche': la chat non puo' essere solo testo semplice. Risposte reali di un
+assistente includono codice, markdown, tabelle e diagrammi; il rendering deve
+essere una superficie dedicata e sostituibile, non logica sparsa dentro
+`ChatView`.
+
+### Fase 17 - Chat Experience Foundation in roadmap
+
+- Aggiunto assistant-ui come riferimento architetturale, non come CLI/theme da
+  importare automaticamente.
+- Creato `docs/decisions/0003-assistant-ui-chat-reference.md`.
+- Aggiornato `docs/PRODUCT_LOOP.md` con `Chat Experience Foundation`.
+- Aggiornato `docs/architecture/final-roadmap.md`:
+  - nuova Fase 0.5 prima del cablaggio avanzato degli executor/tool;
+  - la chat complessa non e' piu' relegata a UI polish finale;
+  - definiti deliverable per renderer, composer, attachments, message actions,
+    suggestions e activity rendering.
+- Aggiornato `docs/architecture/system-map.md`:
+  - Desktop UI deve renderizzare contenuti complessi;
+  - Chat Thread segue external-store pattern con Tauri Core owner dello stato.
+- Aggiornato `PROJECT.md`:
+  - la chat experience e' fondazione, non rifinitura finale;
+  - assistant-ui e' riferimento per thread, composer, attachments, actions,
+    suggestions, tool activity ed external-store runtime.
+
+Decisione operativa:
+
+- Prima chiudere la Chat Experience Foundation abbastanza da testare bene:
+  - Markdown/codice/tabelle/Mermaid;
+  - composer avanzato;
+  - cancel streaming;
+  - allegati/artifact;
+  - azioni messaggio;
+  - suggestions;
+  - activity Local Computer collassata e leggibile.
+- Poi riprendere il cablaggio delle funzioni operative complesse:
+  - executor task browser/shell;
+  - Brain tool orchestration;
+  - connettori/MCP;
+  - subagenti;
+  - memoria nel ciclo Brain.
+
+Perche': se cabliamo funzioni complesse prima che la chat sappia mostrarle, ogni
+test reale sembrera' confuso. La UI chat deve diventare il banco di prova
+stabile, mentre il routing/tool execution resta nel Core.
+
+### Fase 18 - Chat rendering streaming-safe e azioni messaggio
+
+- Aggiornato il contratto UI automatico per il flusso streaming reale:
+  - il composer deve usare `submitChatPromptStream`;
+  - `RichMessage` deve ricevere stato streaming;
+  - Mermaid non deve renderizzare durante una risposta incompleta;
+  - i messaggi devono esporre almeno un'azione contestuale leggera.
+- `RichMessage` ora crea i componenti Markdown in base allo stato streaming.
+- I blocchi `mermaid` restano in forma codice mentre la risposta e' in corso e
+  vengono renderizzati solo a risposta completa.
+- Aggiunta azione messaggio `Copia`, visibile solo su hover/focus per non
+  sporcare la gerarchia della risposta.
+- Verifiche:
+  - `npm run test:ui-contract` in `apps/desktop`;
+  - `npm run typecheck` in `apps/desktop`;
+  - `npm run build` in `apps/desktop`;
+  - snapshot browser a 1440x900 su `http://127.0.0.1:1420/`.
+
+Perche': durante lo streaming il testo puo' contenere Markdown incompleto; i
+renderer pesanti devono aspettare la fine della risposta. Le azioni messaggio
+servono, ma non devono competere con il contenuto principale della chat.
+
+### Fase 19 - Composer avanzato minimale
+
+- Aggiunto stop streaming lato UI:
+  - durante una risposta compare il pulsante `Interrompi risposta`;
+  - la chat smette di mostrare delta/finali tardivi per quella richiesta;
+  - la risposta resta marcata come interrotta localmente.
+- Aggiunta crescita controllata del textarea fino a 180px, mantenendo il
+  composer ancorato e senza spingere fuori la chat.
+- Aggiunta selezione allegati locale nel composer:
+  - nome file;
+  - dimensione;
+  - rimozione prima dell'invio.
+- Gli allegati non vengono ancora inviati al backend: serve prima un Tauri
+  command dedicato con policy privacy/redazione.
+- Aggiunti suggerimenti prompt contestuali:
+  - appaiono solo mentre l'utente sta scrivendo;
+  - non occupano spazio nella chat inattiva.
+- Verifiche:
+  - `npm run test:ui-contract` in `apps/desktop`;
+  - `npm run typecheck` in `apps/desktop`;
+  - `npm run build` in `apps/desktop`;
+  - snapshot browser a 1440x900.
+
+Perche': il composer deve diventare uno strumento operativo, ma non deve
+diventare una toolbar rumorosa. Stop, allegati e suggerimenti servono alla chat
+complessa; devono pero' rimanere contestuali e subordinati alla risposta.
+
+### Fase 20 - Stop streaming reale e cancellazione cooperativa Gemma
+
+- Aggiunto `request_id` opzionale al payload locale `GenerateRequest`.
+- Il composer continua a interrompere subito la UI, ma ora chiama anche il core
+  Tauri con `cancel_chat_prompt_stream`.
+- Il core Tauri:
+  - espone il command `cancel_chat_prompt_stream`;
+  - mantiene un set di stream cancellati;
+  - blocca delta successivi;
+  - non registra una risposta finale dopo cancellazione;
+  - inoltra best-effort la cancellazione al runtime Gemma.
+- Il client runtime locale (`RuntimeClient`) ora espone `cancel_generation` e
+  riconosce eventi streaming di tipo `error`.
+- Il runtime Python Gemma:
+  - espone `POST /cancel_generation`;
+  - traccia `request_id` cancellati;
+  - durante `/generate_stream` emette `generation_cancelled` e termina il loop;
+  - libera il lock di generazione nel `finally`.
+- Limite noto: e' cancellazione cooperativa tra token/chunk. Se `mlx-vlm` e'
+  bloccato dentro la generazione di un singolo step, lo stop effettivo avviene
+  appena il controllo torna al loop Python.
+- Verifiche:
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml chat_prompt_stream`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`;
+  - `cargo test -p local-first-subagents`;
+  - `python -m unittest tests.test_mlx_gemma4_server`;
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `npm run build`.
+
+Perche': una chat usabile deve poter fermare davvero una risposta lunga. Solo
+nascondere il loading lato UI non basta: Gemma continuerebbe a usare risorse e
+potrebbe inquinare lo stato con finali tardivi.
+
+### Fase 21 - Allegati chat come artifact locali
+
+- Esteso il read model chat con `attachments` redatti per messaggio.
+- Aggiunto contratto frontend `ChatAttachmentInput`:
+  - path locale;
+  - nome display;
+  - MIME type;
+  - size.
+- Il composer ora prova a leggere il path locale esposto da Tauri (`File.path`):
+  - se disponibile, passa l'allegato al core;
+  - se non disponibile, mostra che l'allegato funziona solo dall'app Tauri e
+    blocca l'invio con errore locale invece di creare un riferimento finto.
+- Il core Tauri registra gli allegati nel `LocalComputerSessionManager` come
+  artifact:
+  - massimo 8 allegati per messaggio;
+  - massimo 50 MB per allegato;
+  - solo file locali;
+  - preview locale solo per immagini entro 5 MB;
+  - path e contenuto non vengono esposti nel messaggio chat.
+- I messaggi utente mostrano chip allegati con:
+  - nome redatto;
+  - tipo;
+  - dimensione.
+- Test aggiunto:
+  - l'allegato viene registrato come artifact del Computer locale;
+  - il messaggio chat non contiene il path raw.
+- Verifiche:
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `npm run build`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`;
+  - `git diff --check`;
+  - snapshot browser a 1440x900.
+
+Perche': gli allegati sono parte della chat operativa, ma devono rispettare il
+principio local-first. La chat conserva riferimenti redatti e metadata, mentre
+il contenuto resta sul filesystem locale e gli artifact vivono nel Computer
+locale.
+
+### Fase 22 - Azione messaggio: rigenera risposta
+
+- Aggiunta l'azione `Rigenera` sulle risposte assistant.
+- L'azione resta dentro la barra azioni del messaggio, visibile su hover/focus,
+  per non competere con il contenuto principale della risposta.
+- La rigenerazione recupera il messaggio utente precedente e lo reinvia al core
+  locale nello stesso flusso streaming della chat.
+- Gli allegati gia' mostrati nel messaggio utente vengono conservati nella UI
+  come riferimenti redatti durante la rigenerazione.
+- Scelta privacy: la rigenerazione non riapre automaticamente i path raw degli
+  allegati, perche' la chat persistente conserva solo metadata redatti. Il
+  riuso effettivo del contenuto allegato andra' gestito dal layer artifact /
+  Brain quando colleghiamo l'ingestione completa.
+- Verifiche:
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `npm run build`;
+  - `git diff --check`.
+
+Perche': le azioni messaggio sono parte della chat production-ready. Prima di
+aggiungere quote/edit/copy avanzati, rigenerare una risposta consente di testare
+il ciclo piu' importante: riprendere una richiesta esistente senza sporcare la
+conversazione con controlli invasivi.
+
+### Fase 23 - Azione messaggio: continua risposta
+
+- Aggiunta l'azione `Continua` sulle risposte assistant.
+- L'azione usa lo stesso flusso streaming locale della chat, senza creare un
+  nuovo pannello o una nuova modalita' operativa.
+- Il prompt visibile all'utente resta breve (`Continua`), mentre il prompt
+  interno passato a Gemma include il contesto della risposta precedente e chiede
+  di proseguire senza ripetere.
+- L'azione resta nella stessa `message-action-bar` di copia/rigenera, quindi
+  compare solo quando il messaggio e' attivo/leggibile e non compete con la
+  risposta.
+- Verifiche:
+  - test contratto prima fatto fallire su `continueAssistantResponse`;
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `npm run build`;
+  - `git diff --check`.
+
+Perche': continuare una risposta lunga o incompleta e' un comportamento base di
+una chat seria. Va risolto nella superficie conversazionale prima di tornare a
+orchestrazione, tool e task complessi.
+
+### Fase 24 - Quote/reply nel composer
+
+- Aggiunta l'azione `Rispondi` sui messaggi della chat.
+- Quando l'utente risponde a un messaggio, il composer mostra una card leggera
+  con:
+  - ruolo del messaggio citato;
+  - anteprima redatta e accorciata;
+  - pulsante per rimuovere la citazione.
+- Il testo visibile nel thread resta solo quello scritto dall'utente.
+- Il prompt interno passato a Gemma include invece il contesto citato, cosi' la
+  risposta puo' riferirsi al messaggio corretto senza costringere l'utente a
+  copiare/incollare.
+- La card e' dentro il composer, non nella timeline o nel Computer locale, per
+  mantenere la chat come centro dell'esperienza.
+- Verifiche:
+  - test contratto prima fatto fallire su `replyToMessage`;
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `npm run build`;
+  - `git diff --check`;
+  - controllo browser con click su `Rispondi` e screenshot del composer.
+
+Perche': una chat che deve sostenere task lunghi e risposte tecniche deve poter
+ancorare una nuova richiesta a un messaggio specifico. Questo riduce ambiguita'
+senza introdurre un planner visibile o una UI piu' pesante.
+
+### Fase 25 - Feedback utile/non utile persistente
+
+- Aggiunto feedback `useful` / `not_useful` sui messaggi assistant.
+- Il feedback non resta solo nello stato React: viene salvato nel read model
+  persistente della chat tramite il core Tauri.
+- Aggiunto command locale `chat_message_set_feedback`.
+- Il core valida i valori ammessi:
+  - `useful`;
+  - `not_useful`;
+  - `null` per rimuovere il feedback.
+- Il feedback e' ammesso solo su messaggi assistant, non su prompt utente o
+  messaggi di stato.
+- La UI usa due icone discrete nella `message-action-bar`, senza testo visibile,
+  per non rubare attenzione alla risposta.
+- Test aggiunto:
+  - il feedback viene persistito;
+  - il testo del messaggio non cambia;
+  - il feedback puo' essere rimosso.
+- Verifiche:
+  - test contratto prima fatto fallire su `setMessageFeedback`;
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml chat_message_feedback`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`;
+  - `npm run build`;
+  - `git diff --check`;
+  - controllo browser della barra azioni.
+
+Perche': il feedback e' un segnale importante per migliorare ranking, memoria e
+apprendimento futuro. Va raccolto in modo leggero, ma deve essere persistente e
+validato dal core locale.
+
+### Fase 26 - Salva messaggio in memoria
+
+- Aggiunta azione `Salva in memoria` sui messaggi assistant.
+- L'azione non e' solo UI:
+  - crea una `MemoryEvent` locale con payload redatto;
+  - crea una `MemoryRecord` candidate nel Memory Core;
+  - collega l'evento come evidence della candidate;
+  - salva sul messaggio chat il `saved_memory_ref`.
+- Il salvataggio e' idempotente lato chat: se il messaggio ha gia' un
+  `saved_memory_ref`, non crea una seconda candidate.
+- La memoria usa:
+  - `memory_type = chat_note`;
+  - `privacy_domain = chat`;
+  - `sensitivity = private`;
+  - metadata redatti con `thread_id`, `message_id` e source locale.
+- Esteso il read model chat con `saved_memory_ref`.
+- Esteso il filtro dashboard memoria per includere il dominio `chat`.
+- Aggiunto command Tauri `chat_message_save_to_memory`.
+- La UI mostra un'icona discreta nella barra azioni, attiva quando il messaggio
+  e' gia' stato salvato.
+- Test aggiunto:
+  - crea candidate memory;
+  - marca il messaggio con `saved_memory_ref`;
+  - espone il dominio `chat` nel dashboard;
+  - evita duplicazione su secondo salvataggio.
+- Verifiche:
+  - test contratto prima fatto fallire su `saveMessageToMemory`;
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml chat_message_save_to_memory`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`;
+  - `npm run build`;
+  - `git diff --check`;
+  - controllo browser della barra azioni.
+
+Perche': la chat deve alimentare memoria e apprendimento senza automatismi
+opachi. Salvare esplicitamente una risposta come candidate memory crea un ponte
+controllato tra conversazione e Memory Core.
+
+### Fase 27 - Azioni messaggio compatte, task e automazioni
+
+- Rifinita la `message-action-bar`:
+  - visibili solo azioni frequenti: `Rispondi`, `Copia`, `Continua`;
+  - azioni operative dietro menu `...`;
+  - feedback utile/non utile spostato nel menu;
+  - i messaggi utente non mostrano azioni operative assistant-only.
+- Aggiunte suggestions contestuali sotto l'ultima risposta assistant:
+  - `Approfondisci`;
+  - `Salva nota`;
+  - `Crea task`;
+  - `Crea automazione`.
+- Aggiunto command Tauri `chat_message_create_task`:
+  - crea task `chat_followup`;
+  - input raw non salvato;
+  - checkpoint redatto;
+  - marca il messaggio con `linked_task_id`;
+  - idempotente se il task e' gia' stato creato.
+- Aggiunto command Tauri `chat_message_create_automation`:
+  - crea `AutomationCandidateRecord` nel Memory Core;
+  - evidence event redatto;
+  - `privacy_domain = chat`;
+  - `sensitivity = private`;
+  - autonomia iniziale `1`, risk `low`;
+  - marca il messaggio con `linked_automation_ref`;
+  - idempotente se la proposta esiste gia'.
+- Esteso il read model chat con:
+  - `linked_task_id`;
+  - `linked_automation_ref`.
+- Test aggiunti:
+  - creazione task da messaggio assistant;
+  - creazione automation candidate da messaggio assistant;
+  - idempotenza di entrambi.
+- Verifiche:
+  - test contratto prima fatto fallire su menu/task/automation/suggestions;
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml chat_message_create`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`;
+  - `npm run build`;
+  - `git diff --check`;
+  - controllo browser con menu `...` aperto.
+
+Perche': la chat ora puo' trasformare una risposta in lavoro persistente senza
+aprire subito orchestrazioni complesse. Il menu mantiene la risposta al centro,
+mentre task e automazioni restano locali, redatti e tracciabili.
+
+### Fase 28 - Test reale Gemma chat e diagnosi tempi
+
+- Verificato runtime locale Gemma 4 MLX su `http://127.0.0.1:8765`.
+- Stato iniziale osservato:
+  - processo Python gia' in ascolto sulla porta `8765`;
+  - `/health` raggiungibile;
+  - modello inizialmente non caricato.
+- Misure reali:
+  - prima richiesta `/generate`: `TIME_TOTAL=11.879s`;
+  - `load_seconds=8.947s`;
+  - generazione effettiva prima richiesta: `elapsed_seconds=1.365s`;
+  - seconda richiesta a modello caldo: `TIME_TOTAL=0.402s`,
+    `elapsed_seconds=0.388s`;
+  - streaming `/generate_stream`: `TIME_TOTAL=1.549s`,
+    `elapsed_seconds=1.184s`.
+- Conclusione tecnica:
+  - Gemma non e' lento a modello caldo per prompt brevi;
+  - la percezione di lentezza deriva soprattutto dal cold start e da come la UI
+    comunica lo stato di caricamento;
+  - la chat semplice usa gia' lo streaming dedicato, separato dal percorso
+    Brain/planner.
+- Verifica visuale:
+  - preview web a `1440x900`;
+  - risposta al centro;
+  - composer fisso;
+  - computer locale nascosto finche' non ci sono dettagli, approvazioni o task
+    operativi visibili.
+- Verifiche:
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `npm run build`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`;
+  - `cargo test --manifest-path crates/process-manager/Cargo.toml`.
+
+Perche': prima di continuare con tool e orchestrazione era necessario separare
+la lentezza reale del modello dalla UX. Il prossimo intervento deve rendere il
+cold start esplicito: runtime che si avvia/precarica all'apertura, stato chiaro
+"Gemma in caricamento", e primo token mostrato appena arriva.
+
+### Fase 29 - Warmup runtime Gemma all'avvio Tauri
+
+- Aggiunto endpoint locale `POST /warmup` nel runtime Gemma MLX.
+- Il warmup carica il modello senza generare testo:
+  - usa `GemmaRuntime.get_model()`;
+  - restituisce `loaded`, `load_seconds`, `elapsed_seconds`, `model`,
+    `local_first`;
+  - rimane idempotente perche' `get_model()` carica una sola volta.
+- Aggiunto contratto Rust `RuntimeWarmupResponse` in `crates/subagents`.
+- Aggiunto `RuntimeClient::warmup()` verso `/warmup`.
+- Aggiunto comando Tauri `runtime_warmup`.
+- L'app React chiama `coreBridge.warmupRuntime("llm-gemma4-mlx")` solo quando
+  gira dentro Tauri, non nella preview web.
+- Durante il warmup la pill del runtime diventa:
+  - `Gemma 4 MLX`;
+  - stato `running`;
+  - dettaglio `Caricamento modello locale in corso`.
+- A warmup completato la pill torna `ready` e viene ricaricato il read model
+  runtime.
+- Verifiche:
+  - test Python endpoint/runtime warmup;
+  - test Rust runtime client;
+  - test contratto UI per warmup;
+  - `npm run typecheck`;
+  - `npm run build`;
+  - `cargo test --manifest-path crates/subagents/Cargo.toml`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`.
+
+Perche': la prima richiesta non deve sembrare una chat lenta. Il modello puo'
+richiedere circa 9 secondi di cold start, quindi l'app deve pagare quel costo
+all'apertura e renderlo leggibile come stato di runtime, non come blocco
+inaspettato della conversazione.
+
+### Fase 30 - Contesto conversazionale nella chat semplice
+
+- Corretto un problema reale emerso in UI:
+  - utente: `fammi un esempio di codice in rist`;
+  - assistant chiedeva il linguaggio;
+  - utente: `rust`;
+  - assistant ripartiva da zero e chiedeva di nuovo cosa fare.
+- Causa:
+  - `submit_chat_prompt` passava al runtime solo l'ultimo messaggio;
+  - Gemma non vedeva la conversazione precedente.
+- Fix:
+  - il core Tauri costruisce un `runtime_prompt` con gli ultimi messaggi
+    utente/assistant della chat;
+  - il contesto viene inviato solo al modello;
+  - il read model continua a salvare come messaggio utente solo il testo pulito
+    appena scritto, non il prompt contestualizzato.
+- Rafforzato il prompt di sistema della chat:
+  - se la richiesta e' chiara, risponde direttamente;
+  - se l'utente chiede un esempio di codice e indica il linguaggio, fornisce
+    direttamente un esempio breve e completo.
+- Test aggiunto:
+  - due turni `fammi un esempio di codice` -> `rust`;
+  - il prompt runtime contiene contesto e nuovo messaggio;
+  - la chat persistita contiene solo i messaggi utente puliti.
+- Prova reale con Gemma caldo:
+  - con contesto e `rust`, risposta ottenuta:
+    `Ecco un esempio semplice in Rust:` seguito da blocco `rust`;
+  - niente ulteriore domanda di chiarimento.
+
+Perche': la chat deve comportarsi come una conversazione, non come singole
+richieste isolate. Questo e' il prerequisito prima di rendere affidabili tool,
+task e orchestrazione.
+
+### Fase 31 - Rendering codice dedicato nella chat
+
+- Corretto un problema UI emerso con una risposta reale:
+  - Gemma ha prodotto `fn main() { println!("Hello, world!"); }` come testo
+    semplice;
+  - la chat lo mostrava come paragrafo, non come blocco codice.
+- Rafforzato il prompt della chat:
+  - quando include codice, deve usare sempre blocchi markdown fenced con
+    linguaggio, per esempio `rust`.
+- Rafforzato `RichMessage` lato frontend:
+  - normalizza righe Rust stand-alone non fenced;
+  - le trasforma in blocchi ```rust prima del rendering markdown;
+  - i blocchi senza linguaggio ma multilinea diventano blocchi `text`, non
+    inline code.
+- Aggiornato il contratto UI per impedire regressioni sul rendering di codice
+  non fenced.
+- Verifiche:
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml submit_chat_prompt`.
+
+Perche': una chat operativa deve trattare codice, markdown e diagrammi come
+contenuti strutturati. Non possiamo dipendere solo dalla perfetta formattazione
+del modello.
+
+### Fase 32 - Code block completo e azioni contestuali per tipo risposta
+
+- Corretto il caso in cui una `}` finale restava fuori dal blocco codice:
+  - il normalizzatore ora riconosce anche continuazioni Rust come `}` e `};`;
+  - la chiusura viene inclusa nello stesso blocco ```rust.
+- Introdotta classificazione leggera del contenuto messaggio in UI:
+  - `user`;
+  - `system`;
+  - `text`;
+  - `code`;
+  - `diagram`.
+- La barra azioni non e' piu' identica per ogni risposta:
+  - le risposte testuali mantengono `Continua`, task e automazioni;
+  - le risposte codice non propongono subito `Crea task` o `Crea automazione`;
+  - le risposte codice espongono suggerimenti dedicati:
+    `Spiega codice`, `Migliora codice`, `Salva nota`.
+- Aggiornato il contratto UI per bloccare regressioni su:
+  - normalizzazione della chiusura Rust;
+  - classificazione contenuto;
+  - azioni contestuali codice.
+- Verifiche:
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `npm run build`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml submit_chat_prompt`.
+
+Perche': l'utente deve vedere azioni coerenti con cio' che sta guardando. Una
+risposta di codice deve privilegiare lettura, copia e iterazione sul codice, non
+azioni operative generiche.
+
+### Fase 33 - QA autonomo chat markdown e azioni contenuto
+
+- Eseguiti test reali contro Gemma caldo su:
+  - codice Rust;
+  - tabella Markdown;
+  - diagramma Mermaid.
+- Risultati:
+  - il codice Rust viene prodotto correttamente con blocco fenced `rust`;
+  - le tabelle Markdown sono renderizzabili dal pipeline GFM;
+  - Mermaid viene prodotto correttamente, ma risposte troppo lunghe possono
+    arrivare incomplete se il limite token e' basso.
+- Fix UI aggiuntivi:
+  - i blocchi fenced senza linguaggio vengono normalizzati a `text`, quindi
+    restano blocchi codice e non inline code;
+  - le risposte diagramma hanno azioni contestuali dedicate:
+    `Spiega diagramma`, `Modifica diagramma`, `Salva nota`;
+  - le risposte incomplete mantengono affordance di continuazione tramite
+    euristiche semplici:
+    fence non chiusa, parentesi aperta finale, lista/heading troncata.
+- Verifiche:
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `npm run build`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml submit_chat_prompt`.
+
+Perche': il centro dell'app e' la risposta. Il sistema deve capire quando sta
+mostrando testo, codice o diagrammi e proporre solo azioni coerenti con quel
+contenuto.
+
+### Fase 34 - Metriche token nella chat e rilevamento troncamenti
+
+- Propagate le metriche reali di generazione dal runtime Gemma fino alla UI:
+  - `prompt_tokens`;
+  - `generation_tokens`;
+  - `prompt_tps`;
+  - `generation_tps`;
+  - `elapsed_seconds`;
+  - `max_tokens`.
+- Aggiornato il core Tauri:
+  - le risposte chat ora trasportano testo + metriche;
+  - i messaggi assistant salvati nello stato mantengono le metriche;
+  - lo streaming mantiene le metriche anche dopo il messaggio finale.
+- Aggiornato il frontend:
+  - `ChatMessage` espone le metriche;
+  - il pulsante `Continua` viene mostrato quando la risposta arriva vicina al
+    limite token, oltre alle euristiche su markdown incompleto.
+- Aggiornato il contratto UI per bloccare regressioni su `maxTokens` e sul
+  rilevamento `generationTokens >= maxTokens`.
+- Verifiche:
+  - `cargo fmt`;
+  - `npm run build`;
+  - `git diff --check`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml submit_chat_prompt`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml runtime_snapshot_lists_default_sidecars_without_env`;
+  - `npm run typecheck`;
+  - `npm run test:ui-contract`.
+
+Perche': il limite token e' del runtime/inferenza, non della UI. Senza metriche
+non possiamo distinguere una risposta breve da una risposta tagliata, quindi
+l'utente non capisce quando deve continuare la generazione.
+
+### Fase 35 - Continuazione pulita della chat Gemma
+
+- Separato il prompt usato dal runtime dal testo visibile nello storico chat:
+  - la UI puo' inviare un'istruzione tecnica breve a Gemma;
+  - il core Tauri salva solo il testo visibile scelto per l'utente.
+- `Continua` ora usa un prompt runtime esplicito:
+  - continua dal punto interrotto;
+  - non ripete parti gia' scritte;
+  - mantiene lingua e formato.
+- `Continua` non viene piu' mostrato su ogni risposta testuale:
+  - appare quando la risposta sembra incompleta;
+  - le risposte complete mantengono l'azione piu' corretta `Approfondisci`.
+- Aggiunto un avviso leggero e non tecnico quando la risposta sembra troncata.
+- Aggiunto test core per garantire che:
+  - il runtime riceve il prompt tecnico;
+  - la conversazione persistita mostra solo `Continua`;
+  - il prompt tecnico non sporca la cronologia visibile.
+- Verifiche:
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml submit_chat_prompt_can_use_hidden_runtime_prompt_and_store_visible_text`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml submit_chat_prompt`;
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `cargo fmt`;
+  - `npm run build`.
+
+Perche': la chat deve restare leggibile. Le istruzioni operative servono al
+modello, ma non devono comparire come messaggi utente nello storico, altrimenti
+l'esperienza diventa confusa e poco naturale.
+
+### Fase 36 - QA reale chat Gemma e prompt base ottimizzato
+
+- Eseguita una suite reale contro il runtime Gemma locale su:
+  - ora corrente;
+  - calcolo semplice;
+  - codice Rust;
+  - tabella Markdown;
+  - diagramma Mermaid;
+  - risposta lunga;
+  - follow-up in inglese;
+  - continuazione.
+- Problemi trovati:
+  - `che ore sono?` non poteva funzionare bene senza data/ora locale nel prompt;
+  - `quanto fa 6*3?` ha risposto `24` con il prompt precedente;
+  - le risposte lunghe arrivano correttamente a `max_tokens`, quindi il rilevamento
+    di troncamento e `Continua` e' necessario.
+- Fix applicato:
+  - il prompt base della chat include ora la data/ora locale corrente;
+  - il prompt base contiene una regola breve per aritmetica semplice;
+  - la temperatura chat e' stata portata a `0.0` per ridurre risposte casuali;
+  - il prompt e' stato compattato per ridurre latenza sui prompt semplici.
+- Misure indicative dopo il fix:
+  - `che ore sono?`: circa 1.7s, risposta corretta dal contesto temporale;
+  - `quanto fa 6*3?`: circa 0.8s, risposta `18`;
+  - codice Rust: circa 2.6s, blocco fenced `rust` corretto.
+- Aggiornato `time` con feature `local-offset` nel runtime Tauri per esporre
+  l'ora locale, non solo UTC.
+- Verifiche:
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml chat_prompt_includes_local_time_and_arithmetic_guidance`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml submit_chat_prompt`;
+  - `npm run typecheck`;
+  - `npm run test:ui-contract`;
+  - `cargo fmt`;
+  - `npm run build`.
+
+Perche': prima di riattaccare Brain/tool/browser serve una chat Gemma base
+credibile. Le richieste semplici devono sembrare immediate e corrette, non task
+macchinosi.
+
+### Fase 37 - Context budget e compressione locale del prompt chat
+
+- Analizzato il pattern OpenHuman/TokenJuice come riferimento, senza copiarne
+  lo stack.
+- Aggiunto crate `crates/context-compression` con contratti locali:
+  - `ContextKind`;
+  - `ContextItem`;
+  - `CompressionPolicy`;
+  - `ContextCompressor`;
+  - metriche `input_chars`, `output_chars`, token stimati, ratio e redaction.
+- Il compressore ora copre:
+  - output shell, preservando errori/fallimenti/tail e deduplicando righe rumorose;
+  - testo browser, preservando titolo/URL puliti e risultati utili;
+  - cronologia chat, comprimendo contesto vecchio e mantenendo gli ultimi turni;
+  - JSON tool output, con redaction ricorsiva di chiavi sensibili.
+- La redaction avviene prima della compressione e rimuove email, token, API key,
+  password e query string sensibili.
+- Collegato il compressore al prompt builder della chat Tauri:
+  - la cronologia recente non viene piu' inviata grezza quando supera il budget;
+  - i dettagli vecchi e lunghi vengono collassati;
+  - l'ultimo scambio utile resta disponibile a Gemma.
+- Aggiunto test core per garantire che una conversazione lunga venga compressa
+  prima del runtime senza sporcare lo storico visibile.
+- Verifiche:
+  - `cargo test -p local-first-context-compression`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml submit_chat_prompt`.
+
+Perche': una chat locale con Gemma deve restare veloce e coerente anche dopo
+molti messaggi. Il contesto non puo' crescere senza controllo, e tool/browser
+devono poter passare solo risultati sintetizzati, redatti e utili.
+
+### Fase 38 - Context budget su Computer locale e audit tool
+
+- Esteso l'uso di `crates/context-compression` oltre la chat:
+  - `local-computer-session` comprime ora l'excerpt terminale del read model;
+  - `capabilities` comprime i risultati tool grandi salvati nell'audit.
+- Il Computer locale non espone piu' solo le ultime righe terminale:
+  - preserva errori e fallimenti importanti;
+  - deduplica righe rumorose;
+  - mantiene marker `context compressed`;
+  - redige token/API key anche dopo compressione.
+- L'audit dei tool/connettori mantiene invariati i risultati piccoli.
+- Per output grandi, l'audit salva un payload `compressed=true` con testo
+  redatto e metriche di compressione, senza cambiare il risultato restituito al
+  caller.
+- Aggiunti test dedicati:
+  - terminal excerpt lungo con failure e segreti;
+  - audit tool grande con token sensibile.
+- Verifiche:
+  - `cargo test -p local-first-local-computer-session read_model`;
+  - `cargo test -p local-first-capabilities facade`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml local_computer_snapshot_is_redacted_for_ui`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml local_computer_smoke_test_records_real_shell_output`.
+
+Perche': quando browser, shell, MCP e connettori produrranno output reali, non
+possiamo far crescere audit, prompt e UI con payload grezzi. La compressione
+deve stare nei boundary locali, non solo nella chat.
+
+### Fase 39 - Context budget nel Brain orchestrator
+
+- Collegato `crates/context-compression` anche al crate `orchestrator`.
+- Il prompt del planner Brain ora comprime e redige prima di chiamare Gemma:
+  - conversation summary;
+  - memory context;
+  - tool catalog compact cards;
+  - loaded tool details.
+- Aggiunti budget configurabili in `OrchestratorBudgets`:
+  - `max_conversation_summary_chars`;
+  - `max_memory_context_chars`;
+  - `max_tool_cards_context_chars`;
+  - `max_loaded_tool_context_chars`.
+- I default mantengono prompt piccoli, ma ora possono essere tarati dal runtime
+  o dalla UI senza modificare il builder.
+- Aggiunto test end-to-end sul Brain:
+  - contesto memoria/tool molto lungo;
+  - token e email sensibili;
+  - verifica che il prompt al runtime contenga `context compressed`;
+  - verifica che non passino segreti grezzi.
+- Verifiche:
+  - `cargo test -p local-first-orchestrator`.
+
+Perche': il Brain e' il punto piu' delicato per costo token e qualita' della
+decisione. Deve vedere contesto utile e compatto, non payload lunghi o dati
+sensibili provenienti da memoria, tool registry o connettori.
+
+### Fase 40 - Osservabilita' del context budget
+
+- Aggiunto `ContextBudgetUsage` nel contratto orchestrator.
+- L'audit runtime del Brain espone ora, senza payload raw:
+  - label del contesto;
+  - kind compresso;
+  - input/output chars;
+  - token stimati prima/dopo;
+  - ratio di compressione;
+  - numero di redazioni;
+  - flag compressed/redacted.
+- Il planner prompt continua a ricevere solo testo compresso/redatto, ma le
+  metriche vengono propagate in `OrchestratorAudit`.
+- `OrchestratorAuditStore` persiste `context_budget_json` con migrazione
+  idempotente per database gia' esistenti.
+- `OrchestratorRunDetail` espone il budget alla UI senza includere testo del
+  contesto o output tool raw.
+- Redatta anche la descrizione dei tool nel read model audit, per evitare che
+  segreti accidentali nei metadata dei provider arrivino alla UI.
+- La UI Brain Audit mostra un riepilogo leggero:
+  - quanti contesti sono stati compressi;
+  - token stimati prima/dopo;
+  - numero di redazioni;
+  - ratio sintetica nel pannello statistiche.
+- Verifiche:
+  - `cargo test -p local-first-orchestrator`;
+  - `npm run typecheck`;
+  - `npm run test:ui-contract`.
+
+Perche': comprimere senza osservabilita' rende difficile capire se Gemma riceve
+troppo poco, troppo rumore o dati sensibili. Le metriche permettono debug e UX
+trasparente senza esporre payload raw.
+
+### Fase 41 - Lazy rich rendering della chat
+
+- Separato il rendering avanzato dei messaggi chat:
+  - `RichMessage.tsx` ora e' una shell leggera;
+  - `RichMessageRenderer.tsx` contiene markdown, codice, GFM, sanitize e
+    Mermaid.
+- Il renderer pesante viene caricato con `React.lazy` solo quando il messaggio
+  contiene markdown, codice, tabelle, link markdown o pattern simili.
+- I messaggi di testo semplice restano renderizzati senza caricare
+  `react-markdown`, `remark-gfm`, `rehype-sanitize` o Mermaid.
+- Aggiunto fallback semplice per evitare flash vuoti durante il caricamento del
+  renderer avanzato.
+- Aggiornato `vite.config.ts` con `manualChunks` per separare il blocco markdown
+  dal chunk principale.
+- Risultato build:
+  - chunk iniziale app circa 281 kB minificati;
+  - markdown circa 170 kB in chunk separato;
+  - Mermaid resta lazy e granulare per diagrammi.
+- Verifiche:
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `npm run build`;
+  - verifica browser a 1440x900 su `http://127.0.0.1:1420/`.
+
+Perche': la chat deve poter gestire markdown, codice e diagrammi, ma una
+risposta testuale semplice non deve pagare il costo dei renderer complessi.
+Questo mantiene l'esperienza piu' reattiva senza rinunciare alla ricchezza dei
+messaggi quando serve.
+
+### Fase 42 - Metriche di latenza per messaggio chat
+
+- Esteso `PromptMessageMetrics` con metriche operative opzionali:
+  - `prompt_build_seconds`;
+  - `time_to_first_token_seconds`;
+  - `total_elapsed_seconds`;
+  - `runtime_status_before`.
+- Il core Tauri misura ora il percorso reale del submit chat:
+  - tempo di preparazione prompt/contesto;
+  - stato runtime Gemma prima della richiesta;
+  - tempo fino al primo delta streaming;
+  - tempo totale del roundtrip.
+- Le metriche vengono salvate nel read model chat insieme al messaggio
+  assistant, quindi restano disponibili dopo refresh o riapertura.
+- La UI espone le prestazioni nel menu compatto del messaggio, non nel corpo
+  della risposta:
+  - la risposta rimane il focus;
+  - i dettagli sono disponibili quando serve debug;
+  - il menu mostra "Tempo al primo token", "Generazione", "Totale",
+    "Prompt build" e "Runtime prima".
+- Aggiornati bridge TypeScript e mapping UI per mantenere il contratto coerente.
+- Verifiche:
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`;
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `npm run build`.
+
+Perche': prima vedevamo solo lentezza percepita. Ora possiamo distinguere se il
+problema e' avvio/runtime Gemma, costruzione prompt, attesa del primo token,
+generazione o rendering UI. Questo e' necessario prima di ottimizzare ancora.
+
+### Fase 43 - Probe ripetibile della latenza chat Gemma
+
+- Aggiunto `scripts/chat_latency_probe.py`.
+- Il probe chiama il runtime locale `/generate_stream` e misura:
+  - stato runtime prima del test;
+  - tempo al primo token;
+  - tempo totale;
+  - metriche runtime Gemma;
+  - preview redatta dell'output.
+- Aggiunto target `make chat-latency`.
+- Aggiunto `--repeat` per misurare piu' run in ordine stabile.
+- Il report viene scritto in JSONL:
+  - `reports/chat_latency_probe.jsonl`;
+  - `reports/chat_latency_probe_repeat.jsonl` per run ripetuti.
+- Aggiornato `make test-python` per eseguire tutti i test Python via discovery.
+- Risultati reali con runtime gia' carico:
+  - primo run: media primo token 1,809s, media totale 3,752s;
+  - repeat 2x: media primo token 0,236s, media totale 2,183s;
+  - prompt brevi: circa 0,54-0,66s totali;
+  - codice breve: circa 5,3s perche' arriva al limite `max_tokens=160`;
+  - throughput generazione stabile intorno a 30-34 token/s.
+- Verifiche:
+  - `.venv-mlx/bin/python -m unittest tests/test_chat_latency_probe.py`;
+  - `.venv-mlx/bin/python scripts/chat_latency_probe.py --repeat 2 --out reports/chat_latency_probe_repeat.jsonl`.
+
+Perche': ora abbiamo un benchmark leggero e ripetibile per distinguere lentezza
+percepita, spike isolati, runtime caldo/freddo e risposte semplicemente troppo
+lunghe. Il dato suggerisce che, con Gemma gia' carico, il collo di bottiglia
+principale non e' il primo token ma il numero di token generati.
+
+### Fase 44 - Budget compatto per la prima risposta chat
+
+- Ridotto il budget token della chat diretta da 768 a 320 token.
+- Aggiornato il prompt runtime della chat:
+  - prima risposta compatta;
+  - 1-4 paragrafi brevi o blocco codice essenziale;
+  - risposte lunghe complete ma continuabili.
+- Non e' stato aggiunto routing a regex o intent euristico: il limite e'
+  conservativo e uniforme per la prima risposta.
+- Il flusso "Continua" gia' presente resta il modo esplicito per estendere una
+  risposta lunga o troncata.
+- Aggiunto test sul responder chat per verificare che il runtime riceva davvero
+  il budget compatto.
+- Verifiche:
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml runtime_chat_responder_uses_compact_default_token_budget`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`;
+  - `cargo fmt`.
+
+Perche': i benchmark hanno mostrato primo token veloce con runtime caldo, ma
+latenza totale proporzionale ai token generati. Limitare la prima risposta rende
+la chat piu' reattiva e lascia all'utente il controllo dell'approfondimento.
+
+### Fase 45 - Riavvio Tauri e verifica post-budget
+
+- Riavviata l'app Tauri per caricare il backend Rust aggiornato: il limite
+  `CHAT_MAX_TOKENS=320` non puo' essere applicato solo con HMR React.
+- Stato dopo riavvio:
+  - Vite attivo su `127.0.0.1:1420`;
+  - app `target/debug/local-first-desktop` attiva;
+  - runtime Gemma MLX attivo e gia' `loaded` su `127.0.0.1:8765`.
+- Verificata la UI web a 1440x900:
+  - nessun errore console;
+  - sidebar, thread e composer dentro viewport;
+  - composer ancorato e utilizzabile.
+- Eseguito probe runtime dopo l'ottimizzazione:
+  - `reports/chat_latency_probe_after_320.jsonl`;
+  - repeat 2x, 6 richieste;
+  - media primo token 0,313s;
+  - media totale 2,220s;
+  - prompt brevi intorno a 0,58-1,14s;
+  - caso codice ancora circa 5,2s perche' il probe diretto usa
+    `max_tokens=160`.
+
+Nota: il probe misura il runtime `/generate_stream` diretto, mentre il limite
+320 e' applicato nel percorso Tauri chat. Il test prodotto finale va quindi
+fatto dalla finestra Tauri aperta, usando il menu Prestazioni sui messaggi per
+leggere `time_to_first_token`, totale e stato runtime.
+
+### Fase 46 - Stabilizzazione chat in anteprima web
+
+- Corretto il percorso di streaming quando la UI viene aperta nel browser
+  Vite (`http://127.0.0.1:1420`) invece che nella webview Tauri:
+  - la UI non chiama piu' `@tauri-apps/api/event.listen` se mancano gli
+    internals Tauri;
+  - l'anteprima web usa un listener locale e chiama direttamente il runtime
+    Gemma su `127.0.0.1:8765`;
+  - le richieste restano local-first e non usano API cloud.
+- Aggiunto CORS solo per origini locali del dev preview:
+  - `http://127.0.0.1:1420`;
+  - `http://localhost:1420`;
+  - `tauri://localhost`.
+- Reso diagnostico-only il refresh dei read model dopo una risposta chat:
+  se il refresh Tauri non e' disponibile in browser preview, la risposta gia'
+  ottenuta da Gemma resta visibile e non viene sostituita da un messaggio di
+  errore di sistema.
+- Verifica reale effettuata nel browser locale con prompt `quanto fa 6*3`:
+  - risposta: `6 moltiplicato per 3 fa 18.`;
+  - nessun `transformCallback`;
+  - nessun `Cannot read properties`;
+  - nessun `Failed to fetch`.
+- Verifiche:
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `.venv-mlx/bin/python -m unittest tests.test_mlx_gemma4_server.MlxGemma4ServerTests.test_app_allows_localhost_browser_preview_cors tests.test_chat_latency_probe`.
+
+Perche': durante i test rapidi il browser preview deve comportarsi in modo
+abbastanza fedele alla app Tauri. Il bug non era nella comprensione di Gemma,
+ma nel ponte UI/runtime quando mancavano gli internals Tauri.
+
+### Fase 47 - Popover prestazioni sopra il composer
+
+- Corretto il menu contestuale dei messaggi quando si aprono le metriche
+  "Prestazioni" vicino al composer.
+- Il menu ora calcola lo spazio disponibile rispetto all'area scroll della chat,
+  non solo rispetto al viewport:
+  - apre verso il basso quando c'e' spazio;
+  - apre verso l'alto quando rischia di finire sotto il composer o fuori
+    dall'area visibile;
+  - si aggiorna su resize e scroll.
+- Aumentato lo `z-index` del popover e aggiunto un limite di altezza solo come
+  fallback, senza rendere il menu pesante.
+- Verifiche:
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`.
+
+Perche': le metriche devono essere consultabili senza costringere l'utente a
+scrollare o perdere il contesto della risposta.
+
+### Fase 48 - Azioni messaggio solo contestuali
+
+- Rimossa la riga sempre visibile di suggerimenti sotto l'ultima risposta
+  (`Approfondisci`, `Salva nota`, `Crea task`, `Crea automazione`).
+- La action bar del messaggio resta leggera e compare solo su hover/focus:
+  - `Rispondi`;
+  - `Copia`;
+  - menu `...` quando il messaggio ha azioni operative.
+- Le azioni operative ora vivono solo nel menu compatto:
+  - testo: `Approfondisci`, `Salva in memoria`, `Crea task`,
+    `Crea automazione`, feedback e metriche;
+  - codice: `Spiega codice`, `Migliora codice`, memoria, feedback e metriche;
+  - diagrammi: `Spiega diagramma`, `Modifica diagramma`, memoria, feedback e
+    metriche;
+  - risposte incomplete: `Continua` appare nel menu al posto di
+    `Approfondisci`.
+- Rimosse le classi CSS della riga contestuale non piu' usata.
+- Aggiunti contratti UI per impedire il ritorno della duplicazione.
+- Verifiche:
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `npm run build`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`;
+  - `cargo test --workspace`;
+  - `make test-python`;
+  - verifica browser su `http://127.0.0.1:1420/`: nessuna
+    `.contextual-suggestion-row`, azioni operative presenti solo nel menu.
+
+Perche': la risposta deve restare il centro visivo della chat. Le azioni sono
+necessarie, ma devono essere accessibili senza trasformare ogni messaggio in una
+toolbar permanente.
+
+### Fase 49 - Feedback immediato dopo Invio
+
+- Aggiunto uno stato visibile nel thread appena l'utente invia un prompt.
+- La chat ora mostra una card leggera con indicatore animato e stato:
+  - `Prompt ricevuto`;
+  - `Gemma sta pensando`;
+  - `Gemma sta scrivendo` appena arriva il primo token.
+- Lo stato vive dentro la conversazione, non solo nel composer, cosi' l'utente
+  vede subito che Invio o il pulsante di invio sono stati presi in carico.
+- Lo stato sparisce quando arriva la risposta finale o quando la generazione
+  viene interrotta.
+- Aggiunti contratti UI per mantenere:
+  - `streamStatus`;
+  - componente `AssistantThinkingState`;
+  - stile dedicato `.assistant-thinking-state`.
+- Verifica browser reale su `http://127.0.0.1:1420/`:
+  - dopo 250 ms dal submit appare `Gemma sta pensando`;
+  - a risposta completata lo stato sparisce e resta solo il messaggio finale.
+- Correzione specifica per Tauri:
+  - prima di invocare il runtime via IPC, la UI attende due frame di rendering
+    con `waitForAssistantStatusPaint`;
+  - questo evita che la webview sembri ferma mentre l'IPC locale parte subito;
+  - Tauri/Vite sono stati riavviati dopo la modifica.
+- Rafforzamento successivo dopo test Tauri:
+  - aggiunto `ComposerSubmitStatus`, un banner ancorato dentro il composer;
+  - aggiunto stato locale `handoffPending` che si attiva nel momento esatto in
+    cui l'utente preme Invio, prima che il parent o Tauri rispondano;
+  - il banner viene sostituito dallo stato runtime reale quando `streamStatus`
+    arriva, poi sparisce a risposta conclusa;
+  - verifica browser: entro 100 ms dal submit sono visibili sia lo stato nel
+    composer sia lo stato nel thread.
+- Verifiche:
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `npm run build`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`;
+  - `cargo test --workspace`;
+  - `make test-python`.
+
+Perche': una chat che resta ferma dopo Invio sembra bloccata anche quando il
+runtime sta lavorando. Il feedback immediato rende il sistema percepibile e
+riduce l'incertezza senza aggiungere rumore permanente.
+
+### Fase 50 - Streaming Tauri non bloccante
+
+- Analizzato il problema di UX Tauri: non era principalmente un problema di
+  rendering WKWebView, ma il fatto che la generazione Gemma passava dentro un
+  command Tauri sincrono.
+- Rifatto il bridge nativo:
+  - nuovo command `submit_chat_prompt_stream_start`;
+  - il command valida e ritorna subito;
+  - la generazione viene eseguita in background con
+    `tauri::async_runtime::spawn_blocking`;
+  - i token continuano ad arrivare con `chat_stream_delta`;
+  - il risultato finale arriva con `chat_stream_done`;
+  - gli errori arrivano con `chat_stream_error`.
+- Il bridge TypeScript mantiene l'API `submitChatPromptStream`, ma internamente
+  registra gli eventi `done/error`, avvia il job Tauri e risolve la Promise solo
+  quando arriva l'evento finale.
+- Rimossi i workaround visuali che peggioravano l'esperienza:
+  - `waitForAssistantStatusPaint`;
+  - `handoffPending`;
+  - `ComposerSubmitStatus`;
+  - CSS `.composer-submit-status`.
+- Lo stato di attesa resta solo nel thread, tramite `AssistantThinkingState`,
+  cosi' la risposta resta il centro dell'esperienza.
+- Aggiornato il contratto UI per impedire regressioni verso command bloccanti o
+  banner duplicati nel composer.
+- Riavviato Tauri dopo la modifica.
+- Verifiche:
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `npm run build`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`;
+  - `cargo test --workspace`;
+  - `make test-python`;
+  - `git diff --check`;
+  - verifica browser su `http://127.0.0.1:1420/`: nessun
+    `.composer-submit-status`, console senza errori.
+
+Perche': il fix corretto e' architetturale. Il frontend non deve aspettare una
+chiamata IPC lunga per poter comunicare che l'assistente sta lavorando; Tauri
+deve solo avviare il job e poi streammare eventi.
+
+### Fase 51 - Fluidita' streaming in WKWebView
+
+- Dopo test utente, il flusso Tauri non risultava ancora fluido.
+- Misurato il runtime Gemma diretto con `scripts/chat_latency_probe.py`:
+  - 6 casi;
+  - primo token medio 0.23s;
+  - totale medio 2.18s;
+  - runtime gia' `loaded`.
+- Conclusione: il collo non era Gemma, ma il rendering/event-loop della UI.
+- Correzioni:
+  - durante lo streaming `RichMessage` bypassa sempre il renderer markdown e
+    usa testo leggero;
+  - il renderer markdown/diagrammi/codice viene usato solo dopo la risposta
+    finale;
+  - i delta di streaming vengono bufferizzati con `requestAnimationFrame`, cosi'
+    React non ridisegna la chat per ogni micro-delta;
+  - il frame pendente viene cancellato su stop, errore e finalizzazione.
+- Aggiornato il contratto UI per mantenere:
+  - bypass rich rendering durante streaming;
+  - `scheduleStreamRender`;
+  - cancellazione con `cancelAnimationFrame`.
+- Riavviato Tauri dopo la modifica.
+- Verifiche:
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `npm run build`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`;
+  - `git diff --check`;
+  - probe runtime: `reports/chat_latency_probe_latest.jsonl`.
+
+Perche': una chat deve dare la percezione di scrittura progressiva. Markdown,
+code block e diagrammi sono necessari, ma vanno applicati dopo la generazione,
+non su ogni token in arrivo.
+
+### Fase 52 - Streaming locale alla chat
+
+- Dopo ulteriore test utente, la chat risultava ancora poco fluida.
+- Individuato un secondo collo di bottiglia frontend:
+  - ogni delta aggiornava lo stato globale `App.tsx`;
+  - questo faceva aggiornare anche preview thread/sidebar;
+  - lo scroll lanciava animazioni `smooth` ripetute durante la generazione.
+- Correzioni:
+  - introdotto `optimisticMessages` locale in `ChatView`;
+  - durante lo streaming i delta aggiornano solo la vista chat locale;
+  - `App.tsx` viene aggiornato solo a cancellazione, errore o risposta finale;
+  - lo scroll durante lo streaming usa `auto`, non `smooth`;
+  - le animazioni smooth restano solo per cambi non-streaming.
+- Aggiornato il contratto UI per impedire regressioni:
+  - streaming locale alla chat;
+  - buffering frame;
+  - niente smooth scroll ripetuto durante streaming.
+- Riavviato Tauri dopo la modifica.
+- Verifiche:
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `npm run build`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml submit_chat_prompt_stream -- --nocapture`;
+  - `git diff --check`.
+
+Perche': il rendering progressivo deve essere isolato dal resto della shell.
+La sidebar, le preview delle chat e i read model non devono ridisegnarsi su ogni
+token.
+
+### Fase 53 - Typewriter buffer per percezione fluida
+
+- Dopo test utente, lo streaming era migliorato ma ancora non abbastanza
+  fluido.
+- Correzione:
+  - il testo in arrivo dal runtime resta in un buffer interno;
+  - `streamDisplayText` e' separato dall'array dei messaggi;
+  - la UI mostra il testo con un cadence esplicito
+    `STREAM_TYPEWRITER_INTERVAL_MS`;
+  - ogni tick mostra una porzione controllata di caratteri invece di seguire
+    fedelmente i chunk grezzi del runtime;
+  - il typewriter e' cancellabile con `cancelTypewriterRender`.
+- Il messaggio streammato resta stabile nella lista; cambia solo il testo
+  visibile. Questo riduce jitter da chunk irregolari e da riconciliazione React.
+- Aggiornato il contratto UI per mantenere:
+  - `streamDisplayText`;
+  - `scheduleTypewriterRender`;
+  - `cancelTypewriterRender`;
+  - costanti di cadence esplicite.
+- Riavviato Tauri dopo la modifica.
+- Verifiche:
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `npm run build`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml submit_chat_prompt_stream -- --nocapture`;
+  - `git diff --check`.
+
+Perche': i delta del modello non arrivano con ritmo visivamente uniforme.
+Decouplare ricezione e visualizzazione rende la chat piu' simile a un prodotto
+maturo: stabile, prevedibile, senza salti.
+
+### Fase 54 - Nessun dump finale sopra il typewriter
+
+- Test utente: la risposta iniziava bene, poi si fermava e infine appariva tutta
+  insieme.
+- Root cause trovata in `ChatView`:
+  - alla fine dello stream veniva chiamato
+    `setStreamDisplayText(result.assistant_message.text || streamedText)`;
+  - questo bypassava il typewriter e scaricava il testo finale in un colpo.
+- Correzione:
+  - aggiunto `waitForTypewriterDrain`;
+  - quando arriva il risultato finale, il testo finale viene messo nel buffer
+    `streamedText`;
+  - la risposta viene committata nei messaggi finali solo dopo che il typewriter
+    ha mostrato tutto il buffer;
+  - il contratto UI vieta esplicitamente il dump finale diretto.
+- Riavviato Tauri dopo la modifica.
+- Verifiche:
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `npm run build`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml submit_chat_prompt_stream -- --nocapture`;
+  - `git diff --check`.
+
+Perche': la percezione di fluidita' si rompe se il modello conclude prima della
+UI e il messaggio finale sostituisce il buffer. Il commit finale deve attendere
+la visualizzazione progressiva.
+
+### Fase 55 - Cadence typewriter bounded
+
+- Test utente: il flusso era quasi corretto, ma restava una piccola latenza a
+  meta' risposta.
+- Root cause probabile:
+  - il typewriter drenava percentuali grandi del backlog;
+  - raggiungeva il buffer troppo presto;
+  - poi attendeva il prossimo chunk creando una micro-pausa visibile.
+- Correzione:
+  - rimosso il drain percentuale `Math.ceil(remaining * 0.34)`;
+  - aggiunto `typewriterSliceSize`;
+  - slice bounded: 2, 4, 6 o 8 caratteri in base al backlog;
+  - `STREAM_TYPEWRITER_MAX_CHARS` ridotto da 28 a 8.
+- Aggiornato il contratto UI per impedire il ritorno a burst percentuali.
+- Riavviato Tauri dopo la modifica.
+- Verifiche:
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `npm run build`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml submit_chat_prompt_stream -- --nocapture`;
+  - `git diff --check`.
+
+Perche': per sembrare fluida, la chat deve scrivere con ritmo regolare, non
+correre sul backlog e poi fermarsi in attesa del modello.
+
+### Fase 56 - Decisione Desktop Chat HTTP Gateway
+
+- Dopo i test Tauri, la direzione di micro-ottimizzare ancora lo streaming via
+  `invoke` e' stata fermata.
+- Decisione fissata:
+  - la chat deve passare da un gateway HTTP Rust locale;
+  - il gateway espone API prodotto su `127.0.0.1`;
+  - la UI usa `fetch` e stream browser NDJSON/SSE;
+  - `invoke` Tauri resta solo per funzioni native discrete;
+  - Gemma Python/MLX resta locale e viene chiamato dietro al Rust Core;
+  - token locale, CORS stretto, bind loopback e read model redatti sono
+    requisiti obbligatori.
+- Creata ADR `docs/decisions/0004-desktop-chat-http-gateway.md`.
+- Aggiornati:
+  - `PROJECT.md`;
+  - `docs/architecture/system-map.md`;
+  - `docs/architecture/final-roadmap.md`.
+
+Perche': la chat e' il prodotto percepito. Se lo streaming dipende da Tauri IPC
+e da workaround React/typewriter, l'esperienza resta fragile e a scatti. Un
+gateway HTTP locale usa il trasporto naturale della WebView, rende la UI
+testabile anche in browser e prepara artifact, preview e payload grandi senza
+serializzarli dentro `invoke`.
+
+### Fase 57 - Primo slice Desktop Chat HTTP Gateway
+
+- Implementato `apps/desktop/src-tauri/src/gateway.rs`.
+- Il gateway:
+  - si avvia dentro Tauri;
+  - usa un runtime Tokio dedicato in un thread `desktop-chat-gateway`, per non
+    dipendere dal reactor durante `setup`;
+  - fa bind solo su `127.0.0.1` con porta dinamica;
+  - genera un token locale per sessione app;
+  - applica CORS ristretto a origini locali/Tauri;
+  - espone `GET /api/health`;
+  - espone thread/messages endpoints;
+  - espone `POST /api/chat/threads/{thread_id}/messages/stream`;
+  - espone `POST /api/chat/streams/{request_id}/cancel`.
+- Aggiunto command bootstrap `desktop_gateway_config` per passare alla UI solo
+  `base_url` e token del gateway.
+- Aggiunto `apps/desktop/src/lib/chatApi.ts`.
+- `coreBridge.submitChatPromptStream` ora delega a `chatApi` quando gira in
+  Tauri:
+  - invio prompt via `fetch`;
+  - lettura stream NDJSON con `ReadableStreamDefaultReader`;
+  - delta propagati ai listener locali;
+  - done restituisce il `PromptSubmissionResult` esistente;
+  - cancel passa dal gateway HTTP.
+- Il fallback browser preview verso Gemma diretto resta solo quando mancano gli
+  internals Tauri.
+- I vecchi command/event Tauri per chat streaming restano nel core come percorso
+  transitorio finche' il gateway non viene verificato in Tauri reale e ripulito.
+- Verifiche:
+  - RED iniziale: `npm run test:ui-contract` falliva per assenza di
+    `src/lib/chatApi.ts`;
+  - `npm run test:ui-contract`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml gateway -- --nocapture`;
+  - `npm run typecheck`;
+  - `npm run build`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml -- --test-threads=1`.
+- Verifica runtime manuale:
+  - Tauri dev riavviato;
+  - processo `local-first-desktop` in ascolto su loopback con porta dinamica;
+  - `GET /api/health` senza token risponde `401 unauthorized`, confermando che
+    il gateway non e' aperto senza bootstrap locale.
+
+Nota: la suite Rust Tauri parallela ha mostrato una flake preesistente su un
+test prompt-plan approval; lo stesso test passa isolato e la suite passa con
+`--test-threads=1`.
+
+Perche': questo applica la decisione di non usare piu' `invoke`/event IPC come
+trasporto primario della chat. La webview ora usa il canale naturale del browser
+per lo stream, mentre Rust Core continua a possedere stato, policy, metriche e
+runtime locale.
+
+### Fase 58 - Chat API completa su gateway locale
+
+- Spostate sul gateway HTTP locale anche le operazioni chat non-stream:
+  - lista thread;
+  - creazione thread;
+  - selezione thread;
+  - pin/unpin;
+  - archive/unarchive;
+  - delete;
+  - snapshot messaggi;
+  - feedback messaggio;
+  - save-to-memory;
+  - create-task;
+  - create-automation.
+- Esteso `apps/desktop/src-tauri/src/gateway.rs`:
+  - `PATCH /api/chat/threads/{thread_id}` ora gestisce `selected`, `pinned` e
+    `status`;
+  - `DELETE /api/chat/threads/{thread_id}`;
+  - `POST /api/chat/messages/{message_id}/create-automation`.
+- Esteso `apps/desktop/src/lib/chatApi.ts` con i metodi thread/action.
+- `coreBridge` ora delega la chat a `chatApi` invece di usare `invoke`.
+- Rimossi dalla registrazione Tauri i command legacy chat/thread/stream:
+  - thread snapshot;
+  - message snapshot;
+  - message actions;
+  - thread actions;
+  - submit chat prompt non-stream;
+  - stream start/event path.
+- Rimosso dal Core il command/event path `chat_stream_delta/done/error`.
+- Soppressi gli warning dev del vecchio percorso non-stream usato solo dai test,
+  cosi' il rebuild Tauri resta leggibile.
+- Verifiche:
+  - RED iniziale: `npm run test:ui-contract` falliva finche' `coreBridge` non
+    usava `chatApi.chatMessages`;
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `npm run build`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml gateway -- --nocapture`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml -- --test-threads=1`;
+  - `git diff --check`.
+- Tauri dev riavviato con successo dopo la migrazione; il gateway e' in ascolto
+  su loopback con porta dinamica e senza token risponde `401 unauthorized`.
+
+Perche': fermarsi allo stream non bastava. Se thread e azioni messaggio
+restavano su `invoke`, la chat avrebbe continuato ad avere due canali con due
+semantiche diverse. Ora il boundary chat e' unico: HTTP locale per la superficie
+chat, `invoke` solo per funzioni native e moduli non ancora migrati.
+
+### Fase 59 - Output lunghi, scroll streaming e continuazione automatica
+
+- Analizzato il problema emerso con prompt tipo:
+  `scrivimi un esempio di codice Rust di 200 righe`.
+- Root cause:
+  - lo scroll seguiva soprattutto l'array di messaggi, ma durante lo streaming
+    cambia un buffer separato `streamDisplayText`;
+  - il budget chat era ancora troppo basso per output lunghi/codice;
+  - la continuazione era una normale azione manuale, quindi creava una nuova
+    mini-conversazione invece di completare lo stesso risultato.
+- Aggiornato il runtime chat:
+  - budget default chat portato a 768 token;
+  - budget esteso per codice/output lunghi;
+  - budget massimo 4096 token per richieste esplicite di codice lungo;
+  - timeout esteso per risposte lunghe.
+- Aggiunto endpoint HTTP locale:
+  - `POST /api/chat/messages/{message_id}/continue/stream`;
+  - usa lo stesso canale NDJSON/fetch;
+  - appende la continuazione allo stesso messaggio assistant nel read model;
+  - non aggiunge un messaggio utente "Continua".
+- Aggiornati frontend e bridge:
+  - `chatApi.continueChatMessageStream`;
+  - `coreBridge.continueChatMessageStream`;
+  - auto-continua fino a 2 volte se le metriche indicano truncation;
+  - stato visibile `auto-continue-status` nel messaggio;
+  - fallback manuale `Continua` visibile fuori dal menu a tre puntini;
+  - scroll agganciato anche a `streamDisplayText`.
+- Aggiunti test/contratti:
+  - UI contract per scroll buffer, auto-continue, fallback visibile e gateway
+    continuation;
+  - test Rust per budget lungo codice;
+  - test Rust per append continuation nello stesso messaggio.
+- Verifiche eseguite:
+  - RED: `npm run test:ui-contract` falliva su `scrollToLatestMessage`;
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml continue_chat_message_stream_appends_to_existing_assistant_message -- --test-threads=1`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml -- --test-threads=1`.
+
+Perche': per una chat usabile la risposta deve restare il centro
+dell'esperienza. Se il modello arriva al limite token, il sistema deve
+continuare in modo leggibile e nello stesso risultato, non scaricare sul
+utente una sequenza di azioni "Continua" poco evidenti.
+
+### Fase 60 - Streaming lungo senza blocchi di rendering
+
+- Dopo test utente su output Rust lungo, la continuazione automatica proseguiva
+  fino alla fine ma la UI continuava a bloccarsi a tratti.
+- Misura diretta su runtime MLX:
+  - prompt: `scrivimi un esempio di codice Rust di 200 righe`;
+  - primo token: ~0.28s;
+  - durata totale: ~65s;
+  - token generati: ~2017;
+  - delta ricevuti: 763;
+  - gap principali intorno a 0.3-0.55s.
+- Conclusione: il runtime streamma davvero; il blocco percepito era nel
+  frontend. Durante lo streaming `RichMessage` ricostruiva paragrafi e span su
+  tutto il testo a ogni tick, costo crescente con output lunghi.
+- Correzione:
+  - aggiunto `StreamingTextMessage`;
+  - durante lo streaming si renderizza un singolo nodo testo con
+    `white-space: pre-wrap`;
+  - il renderer markdown/diagrammi/codice resta disattivato fino alla risposta
+    finale;
+  - ottimizzato anche `PlainTextMessage` evitando split ripetuti delle righe.
+- Verifiche:
+  - RED: `npm run test:ui-contract` falliva per assenza di
+    `StreamingTextMessage`;
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`.
+
+Perche': per output lunghi non possiamo far dipendere la fluidita' da un
+renderer markdown incrementale. Lo streaming deve essere prima di tutto un
+flusso testo leggero; la formattazione ricca arriva solo quando il messaggio e'
+stabile.
+
+### Fase 61 - Stream chat su WebSocket locale
+
+- Test utente dopo Fase 60: la UI mostrava subito i primi caratteri e poi
+  restava bloccata anche con pochissimo testo renderizzato.
+- Nuova diagnosi:
+  - il runtime MLX diretto streamma;
+  - il renderer React leggero non spiega un blocco dopo pochi caratteri;
+  - il sintomo e' compatibile con buffering di `fetch` streaming dentro
+    WKWebView/Tauri su macOS.
+- Decisione tecnica:
+  - non migrare subito a Electron;
+  - spostare il canale token da HTTP `fetch` NDJSON a WebSocket locale;
+  - mantenere HTTP JSON per snapshot, thread, azioni e fallback/debug.
+- Implementato:
+  - abilitato `axum` feature `ws`;
+  - aggiunto `GET /api/chat/stream/ws`;
+  - autenticazione tramite token locale del gateway su query string;
+  - protocollo WS con messaggio iniziale `{ kind: "submit" | "continue", ... }`;
+  - eventi WS `accepted`, `delta`, `done`, `error` uguali al contratto NDJSON;
+  - `chatApi.submitChatPromptStream` e `continueChatMessageStream` ora usano
+    `new WebSocket(...)`;
+  - gli endpoint HTTP `/messages/stream` e `/continue/stream` restano fallback.
+- Verifiche:
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`;
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml gateway -- --nocapture`;
+  - `npm run build`.
+
+Perche': se il problema e' buffering HTTP della WebView, continuare a rifinire
+React non basta. WebSocket e' il canale piu' adatto per stream token lunghi in
+una desktop webview mantenendo Tauri e il core locale.
+
+### Fase 62 - Lettura byte-level dello stream Python nel client Rust
+
+- Test utente dopo WebSocket: lo stream restava comunque bloccato.
+- Nuova ipotesi verificata sul codice:
+  - lo stream dalla WebView al gateway non basta se il gateway riceve gia'
+    delta in ritardo dal runtime Python;
+  - `RuntimeClient::generate_stream` usava `BufReader::lines()` sopra
+    `reqwest::blocking::Response`;
+  - questo introduce un altro punto di buffering non necessario tra Python MLX
+    e Rust Core.
+- Correzione:
+  - rimosso `BufReader::lines()`;
+  - introdotta lettura incrementale con `Read::read` su buffer byte;
+  - parsing NDJSON progressivo: mantiene un buffer stringa e processa ogni
+    riga appena arriva il newline;
+  - aggiunto test unitario per righe NDJSON spezzate su chunk separati.
+- Verifiche:
+  - `cargo test -p local-first-subagents stream_parser_accepts_split_ndjson_chunks -- --test-threads=1`;
+  - `cargo test -p local-first-subagents --test runtime_client -- --test-threads=1`;
+  - `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`;
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `git diff --check`.
+
+Perche': ora il percorso lungo e' coerente end-to-end: Python genera NDJSON,
+Rust legge byte incrementali, gateway invia WebSocket, React renderizza testo
+leggero durante lo streaming.
+
+### Fase 63 - Streaming UI senza typewriter React in Tauri
+
+- Test utente dopo Fase 62: in Tauri lo stream mostrava pochi caratteri, poi
+  restava bloccato e infine appariva la risposta completa.
+- Diagnosi eseguita:
+  - probe diretto sul gateway WebSocket desktop
+    `ws://127.0.0.1:<porta>/api/chat/stream/ws`;
+  - prompt lungo: `scrivimi un esempio di codice Rust di 300 righe`;
+  - risultato: primo delta 1,26s, 504 chunk, 5.225 caratteri, 0 gap sopra 2s,
+    totale 50,4s.
+- Root cause aggiornata:
+  - runtime Python, client Rust e gateway WebSocket streammano correttamente;
+  - il blocco e' nel rendering della WebView Tauri;
+  - il typewriter precedente faceva micro-update React e scroll su piccoli
+    slice di testo, saturando il main thread di WKWebView su output lunghi.
+- Correzione:
+  - rimosso il typewriter timer-based dal percorso caldo;
+  - durante lo streaming React crea solo il messaggio e lo stato iniziale;
+  - i delta vengono accumulati e dipinti con `requestAnimationFrame` in un
+    singolo nodo testo dedicato (`streamingTextRef`);
+  - scroll automatico agganciato al paint del nodo, non a ogni `setState`;
+  - a fine stream React torna a renderizzare il messaggio stabile con markdown,
+    codice e diagrammi;
+  - aggiornato il contratto UI per bloccare regressioni verso typewriter
+    timer-based in Tauri.
+- Verifiche:
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `npm run build`.
+
+Perche': se il canale token e' fluido fuori dalla webview, la UI non deve
+passare ogni token da riconciliazione React. Il rendering live resta volutamente
+grezzo e leggero; la qualita' markdown arriva quando il testo e' completo.
+
+### Fase 64 - Transcript virtualizzato e startup solo thread attivo
+
+- Input utente: analisi performance esterna con ipotesi principale su DOM
+  non virtualizzato, markdown pesante e caricamento troppo ampio dello
+  scrollback.
+- Diagnosi accettata:
+  - il blocco non e' piu' nel trasporto;
+  - `ChatView` renderizzava l'intero `threadMessages.map(...)`;
+  - `App` caricava i messaggi di tutti i thread all'avvio;
+  - lo stream live riscriveva testo crescente e forzava scroll continuo.
+- Correzione:
+  - aggiunto `@tanstack/react-virtual`;
+  - introdotta virtualizzazione delle righe messaggio nel transcript;
+  - overscan contenuto e stime diverse per user/assistant/output lunghi;
+  - lo stream live resta su nodo testo dedicato, ma ora usa append incrementale
+    invece di riscrivere tutto `textContent`;
+  - la riga streaming viene ridimensionata con stima progressiva, non con
+    layout measure a ogni token;
+  - autoscroll solo se l'utente e' gia' vicino al fondo;
+  - startup desktop: carica solo i messaggi del thread attivo, gli altri thread
+    caricano i messaggi on-demand alla selezione;
+  - aggiornato il contratto UI per impedire regressioni a render full
+    scrollback o preload di tutti i thread.
+- Verifiche:
+  - `npm run typecheck`;
+  - `npm run test:ui-contract`;
+  - `npm run build`.
+
+Perche': questa e' la prima correzione strutturale coerente con i dati. Se
+anche dopo DOM virtualizzato e stream append-only Tauri resta non fluido, allora
+il confronto con Electron diventa un benchmark architetturale serio, non una
+reazione al sintomo.
+
+### Fase 65 - Diagnostica stream dentro WebView Tauri
+
+- Test utente dopo Fase 64: comportamento invariato.
+- Interpretazione:
+  - il full scrollback non e' la causa primaria del freeze percepito durante lo
+    stream;
+  - serve distinguere tra due casi:
+    1. WebView riceve i delta ma non dipinge;
+    2. WebView riceve/consegna gli eventi WebSocket solo a fine risposta.
+- Implementato:
+  - endpoint locale `POST /api/chat/streams/:request_id/debug`;
+  - il gateway logga i checkpoint solo quando `LOCAL_FIRST_STREAM_DEBUG=1`;
+  - `chatApi` invia checkpoint `ws_open`, `client_received_delta`,
+    `client_received_done`;
+  - `ChatView` invia checkpoint `paint_first_delta`,
+    `paint_frame_checkpoint`, `paint_done_before_commit`;
+  - riavviata Tauri con `LOCAL_FIRST_STREAM_DEBUG=1`.
+- Verifiche:
+  - `npm run typecheck`;
+  - `npm run test:ui-contract`;
+  - `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`.
+
+Perche': dopo piu' ottimizzazioni senza effetto visibile, la prossima decisione
+deve basarsi su un confine misurato dentro la WebView, non su ipotesi.
+
+### Fase 66 - Paint stream sincrono, senza requestAnimationFrame
+
+- Risultato della diagnostica Fase 65:
+  - `client_received_delta` arrivava regolarmente per tutta la generazione;
+  - `paint_first_delta` arrivava subito;
+  - i checkpoint schedulati con `requestAnimationFrame` arrivavano solo a fine
+    stream, insieme a `client_received_done`.
+- Conclusione:
+  - WebSocket e callback JS ricevono i token;
+  - il problema e' l'affidamento a `requestAnimationFrame` per il paint live in
+    WKWebView/Tauri durante lo stream;
+  - RAF viene affamato o rimandato fino alla fine della generazione.
+- Correzione:
+  - `scheduleStreamingPaint` ora dipinge sincronicamente nel callback
+    WebSocket;
+  - mantiene append incrementale sul nodo testo dedicato;
+  - rimossa la dipendenza da `streamingPaintFrameRef`;
+  - checkpoint debug rinominato in `paint_checkpoint`;
+  - aggiornato il contratto UI per vietare regressioni su RAF nel percorso hot
+    dello streaming.
+- Verifiche:
+  - `npm run typecheck`;
+  - `npm run test:ui-contract`;
+  - `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`.
+
+Perche': in questa WebView il browser non garantisce frame RAF intermedi
+durante la generazione, mentre il callback WebSocket arriva. Per una chat locale
+la priorita' e' mostrare progressivamente testo, anche rinunciando a una
+cadence animata.
+
+### Fase 67 - Streaming visibile: scroll pin e indice virtuale stabile
+
+- Risultato diagnostica dopo Fase 66:
+  - `dom_chars` cresceva durante lo stream, quindi il testo veniva scritto nel
+    DOM;
+  - `scrollTop` restava 0 mentre `scrollHeight` cresceva molto;
+  - `virtual=-1`, quindi il resize virtualizzato non trovava l'indice del
+    messaggio streaming nella closure corrente.
+- Conclusione:
+  - il testo veniva aggiornato, ma la viewport non seguiva la crescita della
+    risposta;
+  - l'utente vedeva l'inizio della risposta e poi il resto cresceva sotto la
+    parte visibile, dando ancora percezione di blocco.
+- Correzione:
+  - aggiunto `streamingUserPinnedRef`: durante uno stream appena inviato la chat
+    resta ancorata in fondo;
+  - se l'utente scrolla molto verso l'alto, il pin viene rilasciato;
+  - aggiunto `streamingMessageIndexRef` per non dipendere da closure React
+    vecchie quando si ridimensiona la riga virtualizzata;
+  - debug DOM arricchito con `pinned` e indice virtuale stabile.
+- Verifiche:
+  - `npm run typecheck`;
+  - `npm run test:ui-contract`.
+
+Perche': ora abbiamo separato tre livelli: token ricevuti, DOM aggiornato,
+viewport che segue. Il problema osservato era nel terzo livello.
+
+### Fase 68 - Stop patch Tauri e benchmark Electron
+
+- Test utente dopo Fase 67: esperienza invariata, la risposta appare ancora in
+  blocco dopo circa un minuto.
+- Stato misurato:
+  - la WebView riceve delta durante tutta la generazione;
+  - il DOM cresce durante tutta la generazione;
+  - nonostante questo l'esperienza visiva resta non accettabile.
+- Decisione:
+  - interrompere le micro-correzioni su Tauri/WKWebView;
+  - creare una shell Electron dev non invasiva per confronto reale usando la
+    stessa UI React;
+  - se Chromium rende lo stream fluido, la chat desktop deve migrare a Electron
+    o avere una superficie Chromium dedicata.
+- Implementato:
+  - aggiunto `electron` come dev dependency;
+  - aggiunto `apps/desktop/electron/main.cjs`;
+  - aggiunto `apps/desktop/scripts/electron-dev.mjs`;
+  - aggiunto script `npm run electron:dev`;
+  - Electron avviato con `contextIsolation`, `sandbox`, `nodeIntegration=false`;
+  - aggiornato il contratto UI per mantenere disponibile il benchmark.
+- Verifiche:
+  - `npm run typecheck`;
+  - `npm run test:ui-contract`.
+
+Perche': dopo avere provato e misurato trasporto, DOM, virtualizzazione e
+scroll, il rischio maggiore e' continuare a perdere giorni su WKWebView senza
+migliorare il prodotto. Serve un confronto Chromium sullo stesso frontend.
+
+### Fase 65 - Analisi performance rendering chat aggiornata
+
+- Riletto il contesto durevole e corretto il piano precedente: il codice non e'
+  piu' nella fase "nessuna virtualizzazione"; `ChatView` usa gia'
+  `@tanstack/react-virtual`.
+- Evidenza locale aggiornata:
+  - streaming token via gateway WebSocket locale in `chatApi.ts` e
+    `gateway.rs`;
+  - streaming live dipinto con `requestAnimationFrame` su `streamingTextRef`,
+    fuori dalla riconciliazione React per ogni delta;
+  - transcript virtualizzato con stime di altezza e `measureElement`;
+  - commit finale ancora costoso per messaggi ricchi: `RichMessageRenderer`
+    normalizza tutto il testo e poi usa `react-markdown`, `remark-gfm`,
+    `rehype-sanitize`, code block UI e Mermaid;
+  - rischio tecnico TanStack: il codice usa anche `resizeItem` sulla riga
+    streaming, mentre la documentazione avverte di non combinare cambio manuale
+    dimensione e `measureElement` sullo stesso item.
+- Ricerca aggiornata al 2026-05-26:
+  - Tauri usa WebView2/Chromium su Windows, WKWebView/WebKit su macOS e
+    WebKitGTK su Linux;
+  - controllate issue Tauri su large DOM Linux, memory/resize Linux, freeze
+    Linux e comportamenti macOS Intel;
+  - controllate alternative: Electron, TanStack Virtual, Virtuoso Message List,
+    Wails e Flutter desktop.
+- Decisione raccomandata:
+  - restare su Tauri e completare l'architettura rendering chat misurata;
+  - non passare a Electron finche' benchmark UI non dimostra che il residuo e'
+    specifico della WebView Tauri dopo ottimizzazioni frontend.
+- Aggiornati:
+  - `docs/plans/2026-05-26-chat-rendering-performance.md`;
+  - `docs/benchmarks/chat-rendering-performance.md`;
+  - `docs/architecture/final-roadmap.md`.
+- Verifiche fresche:
+  - `npm run typecheck`;
+  - `npm run test:ui-contract`;
+  - `python -m unittest tests/test_chat_latency_probe.py`;
+  - WebKit locale macOS: `21624.2.5.11.4`.
+
+Perche': la scelta Tauri/Electron non va presa sul sintomo. Ora il collo va
+misurato con benchmark UI: DOM montato, frame time, long task, commit Markdown,
+scroll anchoring e differenza browser preview/Tauri/Electron.
+
+### Fase 69 - Rimozione Tauri e desktop shell Electron
+
+- Test utente dopo il benchmark Electron: lo streaming nello stesso frontend
+  React e' fluido in Chromium/Electron, mentre in Tauri/WKWebView restava
+  percepito come bloccato anche quando WebSocket e DOM ricevevano i delta.
+- Decisione applicata:
+  - Tauri e' rimosso dal desktop app;
+  - `apps/desktop/src-tauri` e' eliminato;
+  - `@tauri-apps/api`, `@tauri-apps/cli` e lo script `npm run tauri` sono
+    rimossi da `apps/desktop/package.json`;
+  - `npm run electron:dev` diventa l'entrypoint desktop di sviluppo.
+- Aggiunta shell Electron in:
+  - `apps/desktop/electron/main.cjs`;
+  - `apps/desktop/scripts/electron-dev.mjs`.
+- Sicurezza Electron iniziale:
+  - `contextIsolation: true`;
+  - `sandbox: true`;
+  - `nodeIntegration: false`;
+  - niente tag `<webview>`;
+  - navigazioni esterne aperte nel browser di sistema.
+- `coreBridge.ts` non importa piu' API Tauri e non usa `invoke`.
+- `chatApi.ts` usa fallback locali per thread/messaggi finche' il gateway Rust
+  autonomo non verra' estratto.
+- La chat continua a usare il runtime Gemma locale diretto per mantenere
+  streaming reale e fluido durante la migrazione.
+- Aggiornati:
+  - `PROJECT.md`;
+  - `docs/architecture/system-map.md`;
+  - `docs/architecture/final-roadmap.md`;
+  - `docs/decisions/0004-desktop-chat-http-gateway.md`;
+  - `docs/decisions/0005-electron-desktop-shell.md`;
+  - `apps/desktop/scripts/check-ui-contract.mjs`.
+
+Perche': la chat e' la superficie principale del prodotto. Dopo aver verificato
+che runtime, gateway, WebSocket e DOM ricevevano dati ma la WebView Tauri non
+dava un'esperienza fluida, continuare con micro-fix su WKWebView non era piu'
+pragmatico. Electron diventa la shell, mentre le responsabilita' native vanno
+riportate in un gateway Rust autonomo e in crate riusabili.
+
+### Fase 70 - Pulizia streaming chat dopo migrazione Electron
+
+- Corretto il bug per cui la risposta streammata restava visibile durante la
+  generazione ma spariva al refresh finale:
+  - `chatApi.commitChatPromptResult` salva messaggio utente e risposta assistant
+    nello store locale Electron;
+  - `chatApi.commitChatContinuationResult` aggiorna lo stesso messaggio durante
+    le continuazioni automatiche.
+- Rimosso dal percorso chat il workaround nato per Tauri/WKWebView:
+  - niente piu' `streamingTextRef` e append manuale su text node DOM;
+  - lo stream visibile passa dallo stato React `optimisticMessages`;
+  - gli update sono throttled con `requestAnimationFrame`;
+  - `RichMessage` gestisce anche il rendering streaming come testo semplice,
+    mentre il renderer Markdown completo resta per il commit finale.
+- Aggiornato il contratto UI per imporre:
+  - persistenza del risultato prima del refresh;
+  - streaming visibile dentro lo stato React;
+  - divieto di bypassare React con text node manuali.
+
+Perche': dopo il passaggio a Electron, i workaround specifici per WKWebView
+creavano due fonti di verita' per la risposta: DOM manuale durante lo stream e
+messaggi React al commit. La chat deve avere un solo modello mentale e tecnico:
+messaggi nello stato/read model, con streaming come aggiornamento progressivo
+dello stesso messaggio.
+
+### Fase 71 - Analisi CoderSteroids rendering chat Electron
+
+- Eseguita analisi field-depth del rendering chat Electron in
+  `docs/plans/2026-05-26-electron-chat-rendering-field-report.md`.
+- Mappa attuale:
+  - Electron carica la UI React/Vite in `BrowserWindow` con `sandbox`,
+    `contextIsolation` e `nodeIntegration=false`;
+  - `ChatView` aggiorna lo stream nello stato React locale
+    `optimisticMessages`, throttled con `requestAnimationFrame`;
+  - `RichMessage` usa un singolo nodo testo durante lo streaming;
+  - il renderer Markdown completo e' lazy e parte solo a risposta conclusa;
+  - il transcript Electron base usa document flow con `threadMessages.map`,
+    senza virtualizzazione.
+- Evidenza runtime fresca:
+  - `npm run typecheck`: ok;
+  - `npm run test:ui-contract`: ok;
+  - `python -m unittest tests/test_chat_latency_probe.py`: ok;
+  - `npm run build`: ok, con warning su chunk grandi;
+  - runtime Gemma locale su `127.0.0.1:8765/health`: ok e loaded;
+  - ispezione Playwright su `http://127.0.0.1:1420/`: nessun errore console;
+  - prompt Markdown/codice breve renderizzato con 0 long task osservati,
+    `requestAnimationFrame` p95 circa 14.2 ms e 1 code block finale.
+- Limite dichiarato:
+  - l'ispezione automatizzata e' stata su Chromium/Vite, non su una sessione
+    Electron strumentata;
+  - Electron e' stato avviato contro il dev server senza errori terminale, ma
+    manca ancora cattura automatica di console, screenshot e performance del
+    `BrowserWindow`.
+- Conclusione:
+  - il problema non e' piu' dimostrare che Electron streamma nel caso piccolo;
+  - il rischio principale e' non avere benchmark su scrollback grande, commit
+    finale Markdown/code/Mermaid, memoria e profilo Electron reale.
+- Prossima azione consigliata:
+  - implementare `bench:chat-render` per browser preview ed Electron;
+  - misurare `tiny`, `long-markdown`, `large-scrollback`, `streaming-4k`,
+    `code-heavy` e `mermaid-heavy`;
+  - decidere solo dopo i numeri se servono row split/memo, virtualizzazione
+    bounded, cache Markdown o preprocessing fuori dal percorso caldo.
+
+### Fase 71 - Rimozione virtualizzazione transcript dal percorso base Electron
+
+- Dopo test utente, le risposte potevano ancora sovrapporsi ai messaggi
+  precedenti.
+- Causa piu' probabile: la lista virtualizzata usava righe assolute con altezze
+  dinamiche; durante streaming/commit il posizionamento poteva basarsi su misure
+  obsolete.
+- Decisione:
+  - rimuovere `@tanstack/react-virtual` dal desktop app;
+  - sostituire `.virtual-thread` / `.virtual-message-row` con
+    `.thread-message-list` / `.thread-message-row` in normale document flow;
+  - aggiornare il contratto UI per vietare la virtualizzazione nel percorso
+    base Electron.
+
+Perche': la chat deve prima essere corretta e prevedibile. La virtualizzazione
+potra' tornare solo dopo benchmark e con test visuali specifici; nel prodotto
+base Electron non deve introdurre rischio di overlap tra messaggi.
+
+### Fase 72 - Contesto recente nella chat Electron
+
+- Dopo il riavvio Electron, richieste ellittiche come "dimmene un'altra" non
+  usavano la risposta precedente perche' il fallback Electron chiamava Gemma con
+  il solo prompt corrente.
+- Aggiunto `chatApi.recentChatContext(threadId, limit)`:
+  - legge gli ultimi messaggi user/assistant del thread locale;
+  - esclude il messaggio seeded di ready;
+  - tronca ogni messaggio lungo per non gonfiare troppo il prompt.
+- `coreBridge.submitBrowserRuntimeChatPromptStream` passa il contesto recente a
+  `browserChatPrompt`.
+- Il prompt locale ora include una sezione esplicita `Contesto recente della
+  chat` e una regola per risolvere riferimenti come "un'altra", "continua" o
+  "quello di prima".
+- Aggiornato il contratto UI per obbligare il fallback Electron a usare il
+  contesto recente finche' il gateway Rust autonomo non ripristina il prompt
+  builder completo.
+
+Perche': nella migrazione da Tauri al fallback Electron avevamo salvato la
+cronologia a UI/read model, ma non la stavamo usando nella chiamata al runtime.
+Una chat senza contesto rompe subito l'esperienza conversazionale.
+
+### Fase 73 - JuicePrompt locale nel fallback Electron
+
+- Aggiunto `apps/desktop/src/lib/contextBudget.ts` come adattamento TypeScript
+  temporaneo del pattern OpenHuman/TokenJuice per il fallback Electron.
+- Il modulo espone `buildJuicePromptChatContext`:
+  - redige email, bearer token, API key, password, secret e token comuni;
+  - redige parametri query sensibili negli URL;
+  - limita ogni messaggio a un budget locale;
+  - comprime il contesto vecchio con marker `[context compressed: earlier chat]`;
+  - preserva gli ultimi turni della conversazione.
+- `chatApi.recentChatContext` ora passa sempre da questo budget/compressore
+  prima di inviare contesto al prompt builder.
+- `coreBridge.browserChatPrompt` dichiara al runtime che il contesto e' gia'
+  stato redatto e compresso con budget stile JuicePrompt locale.
+- Aggiornato il contratto UI per impedire regressioni: il fallback Electron non
+  deve tornare a inviare cronologia grezza.
+
+Perche': il crate Rust `context-compression` resta la soluzione definitiva, ma
+finche' il gateway autonomo non e' estratto la chat Electron deve comunque
+avere contesto limitato, redatto e stabile. Questo chiude il buco introdotto
+dalla rimozione del core Tauri senza bloccare l'esperienza utente.
+
+### Fase 74 - Prompt builder Rust estratto per Electron
+
+- Aggiunto crate `crates/desktop-gateway` come primo pezzo del Desktop HTTP
+  Gateway Rust autonomo.
+- Endpoint locali loopback:
+  - `GET /api/health`;
+  - `POST /api/chat/build_prompt`.
+- Il gateway usa direttamente `local-first-context-compression`:
+  - riceve il contesto recente raw dal renderer Electron;
+  - redige e comprime in Rust con `ContextKind::ChatHistory`;
+  - costruisce il prompt runtime con sezione `Contesto recente della chat`;
+  - preserva riferimenti conversazionali come "dimmene un'altra" senza
+    lasciare la responsabilita' al fallback TypeScript.
+- `coreBridge.ts` prova prima il gateway Rust per costruire il prompt e poi
+  streamma ancora verso Gemma su `/generate_stream`; se il gateway non e'
+  raggiungibile mantiene il fallback TypeScript per non rompere la chat.
+- `chatApi.ts` espone anche `rawRecentChatContext`, cosi' il renderer non deve
+  piu' comprimere prima di passare dati al core.
+- `scripts/electron-dev.mjs` avvia automaticamente
+  `cargo run -p local-first-desktop-gateway` prima di Electron quando il gateway
+  non e' gia' in ascolto su `127.0.0.1:18765`.
+- Aggiornato il contratto UI per imporre:
+  - crate gateway nel workspace;
+  - endpoint `/api/chat/build_prompt`;
+  - uso di `ContextCompressor` nel gateway;
+  - fallback TypeScript solo come percorso di continuita'.
+
+Perche': il fallback `contextBudget.ts` era utile per chiudere subito il buco
+di contesto dopo la rimozione di Tauri, ma non deve diventare architettura
+definitiva. Il prompt building, la redazione e il token budget devono stare nel
+core locale Rust; Electron deve restare shell UI e streaming client.
+
+### Fase 75 - Streaming chat migrato nel Desktop Gateway
+
+- Esteso `crates/desktop-gateway`:
+  - `POST /api/chat/generate_stream`;
+  - `POST /api/chat/cancel_generation`.
+- Il gateway ora riceve prompt + contesto raw, costruisce il prompt runtime con
+  `local-first-context-compression` e inoltra lo stream a Gemma
+  `/generate_stream` senza bufferizzare l'intera risposta (`Body::from_stream`).
+- `coreBridge.ts` ora prova prima `/api/chat/generate_stream` sul gateway Rust;
+  il percorso diretto renderer -> Gemma resta solo fallback se il gateway non e'
+  raggiungibile.
+- La cancellazione chiama sia il gateway sia il runtime diretto come fallback
+  compatibile con le sessioni in corso.
+- Aggiunto test Rust per il payload runtime dello stream:
+  - clamp `max_tokens` e `temperature`;
+  - preservazione del contesto recente;
+  - prompt finale con `Contesto recente della chat`.
+- Smoke reale eseguito:
+  - gateway locale su `127.0.0.1:18765`;
+  - runtime Gemma gia' in ascolto su `127.0.0.1:8765`;
+  - `curl -sN /api/chat/generate_stream` con "quanto fa 6*3?" ha prodotto
+    delta `18` e done con metriche token/memoria.
+
+Perche': il renderer non deve possedere il trasporto runtime definitivo. Con
+questo slice Electron resta client dello stream, ma il confine prodotto passa
+dal gateway Rust locale: prompt budget, redazione e proxy NDJSON sono nello
+stesso punto, pronto per token locale, CORS ristretto, persistenza thread e
+Brain.
+
+### Fase 76 - Thread e messaggi persistenti nel Desktop Gateway
+
+- Aggiunto store SQLite locale al `crates/desktop-gateway`:
+  - tabella `chat_threads`;
+  - tabella `chat_messages`;
+  - tabella `settings` per `active_thread_id`.
+- Il DB usa `LOCAL_FIRST_DESKTOP_GATEWAY_DB` se presente, altrimenti
+  `~/.local-first-personal-assistant/desktop-gateway.sqlite`.
+- Nuovi endpoint chat persistenti:
+  - `GET /api/chat/threads`;
+  - `POST /api/chat/threads`;
+  - `POST /api/chat/threads/{thread_id}/select`;
+  - `POST /api/chat/threads/{thread_id}/pin`;
+  - `POST /api/chat/threads/{thread_id}/archive`;
+  - `POST /api/chat/threads/{thread_id}/unarchive`;
+  - `DELETE /api/chat/threads/{thread_id}`;
+  - `GET /api/chat/threads/{thread_id}/messages`;
+  - `POST /api/chat/threads/{thread_id}/messages/commit_prompt_result`;
+  - `POST /api/chat/threads/{thread_id}/messages/{message_id}/commit_continuation_result`.
+- `apps/desktop/src/lib/chatApi.ts` ora prova prima il gateway per thread,
+  messaggi, pin, archive/delete e commit dei risultati; mantiene una cache
+  locale solo come fallback e per il context builder sincrono della UI.
+- Aggiunto test Rust `store_seeds_and_commits_chat_messages`.
+- Smoke HTTP su DB temporaneo verificato:
+  - seed thread;
+  - create thread;
+  - read ready message;
+  - commit user/assistant;
+  - thread title aggiornato a `quanto fa 6*3`;
+  - message count a 3.
+
+Perche': la chat non puo' essere credibile se al riavvio perde contesto e
+thread. Questo sposta il read model minimo nel core locale Rust, mantenendo
+Electron come client e preparando Brain, task e audit su una cronologia stabile.
+
+### Fase 77 - Token locale e CORS ristretto per Desktop Gateway
+
+- Aggiunto token bearer locale opzionale al `crates/desktop-gateway`:
+  - env `LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN`;
+  - tutti gli endpoint `/api/chat/*` richiedono
+    `Authorization: Bearer <token>` quando il token e' configurato;
+  - `/api/health` resta pubblico e indica `auth_required`.
+- `apps/desktop/scripts/electron-dev.mjs` genera un token random a ogni avvio
+  se non viene fornito via env:
+  - passa `LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN` al gateway;
+  - passa `VITE_LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN` al renderer Vite.
+- Aggiunto `apps/desktop/src/lib/gatewayConfig.ts`:
+  - URL gateway unico;
+  - header `Authorization` centralizzato per `chatApi` e `coreBridge`.
+- Rimosso il fallback diretto chat renderer -> Gemma per stream/cancel:
+  - `coreBridge` usa `/api/chat/generate_stream`;
+  - `coreBridge` usa `/api/chat/cancel_generation`;
+  - se il gateway non e' raggiungibile la chat fallisce in modo esplicito,
+    invece di bypassare il confine Rust.
+- Sostituito `CorsLayer::permissive()` con allowlist esplicita:
+  - `http://127.0.0.1:1420`;
+  - `http://localhost:1420`;
+  - `http://127.0.0.1:1421`;
+  - `http://localhost:1421`;
+  - override singolo via `LOCAL_FIRST_DESKTOP_ALLOWED_ORIGIN`.
+- Smoke HTTP con token verificato:
+  - health pubblico con `auth_required: true`;
+  - `/api/chat/threads` senza token -> `401`;
+  - `/api/chat/threads` con bearer token e origin Vite -> `200`;
+  - CORS response include `access-control-allow-origin:
+    http://127.0.0.1:1420`.
+
+Perche': dopo aver spostato prompt, stream e persistenza nel gateway, lasciare
+un bypass diretto dal renderer a Gemma avrebbe reso fragile il confine
+architetturale. Ora la chat passa dal gateway locale Rust; il prossimo hardening
+e' lifecycle/packaging del gateway e poi collegamento Brain.
+
+### Fase 78 - Runtime e contesto consolidati nel Desktop Gateway
+
+- Esteso `crates/desktop-gateway` con endpoint runtime protetti dallo stesso
+  token locale della chat:
+  - `GET /api/runtime/health`;
+  - `POST /api/runtime/warmup`;
+  - `POST /api/runtime/shutdown`.
+- `coreBridge.ts` non chiama piu' direttamente `127.0.0.1:8765`:
+  - health runtime passa dal gateway;
+  - warmup passa dal gateway;
+  - stop/restart passano da shutdown/warmup gateway;
+  - il contratto UI fallisce se ricompare il bypass renderer -> Gemma.
+- Il gateway usa `local-first-process-manager`:
+  - registra `llm-gemma4-mlx` dal `SidecarProcessCatalog`;
+  - usa `.venv-mlx/bin/python runtimes/mlx-gemma4/server.py`;
+  - mantiene il registry processi in
+    `~/.local-first-personal-assistant/process-registry.sqlite` o
+    `LOCAL_FIRST_PROCESS_REGISTRY_DB`;
+  - se `/api/runtime/warmup` non trova Gemma in health, prova ad avviare il
+    runtime prima di chiamare `/warmup`.
+- `electron-dev.mjs` controlla se il gateway gia' in ascolto e' compatibile con
+  il token corrente; se non lo e', termina il listener sulla porta e avvia un
+  gateway fresco. Questo evita sessioni Electron collegate a gateway vecchi.
+- Il commit delle risposte streaming e delle continuazioni ora viene `await`ato
+  prima che `ChatView` ricarichi i messaggi dal read model. Prima era
+  fire-and-forget e poteva causare perdita apparente della risposta, contesto
+  mancante al turno successivo o refresh su snapshot vecchio.
+- Aggiornati i contratti UI per imporre:
+  - endpoint runtime nel gateway;
+  - assenza di chiamate dirette renderer -> Gemma;
+  - commit chat atteso prima del refresh.
+- Smoke verificato su gateway temporaneo `127.0.0.1:18766`:
+  - `/api/health` pubblico con `auth_required: true`;
+  - `/api/chat/threads` senza token -> `401`;
+  - `/api/chat/threads` con token -> `200`;
+  - `/api/chat/build_prompt` conserva il contesto per follow-up come
+    `dimmene un'altra`;
+  - `/api/runtime/health` proxy verso Gemma loaded;
+  - runtime health espone `pid`, owner porta, memoria totale e memoria/cpu
+    processo quando `lsof`/`ps` sono disponibili;
+  - `/api/runtime/warmup` con Gemma gia' esterno restituisce `200` e non crea
+    duplicati;
+  - `/api/chat/generate_stream` con `quanto fa 6*3?` produce delta `18` e done
+    con metriche runtime.
+- Verifiche finali:
+  - `cargo test -p local-first-desktop-gateway`;
+  - `cargo check --workspace`;
+  - `npm run typecheck`;
+  - `npm run test:ui-contract`;
+  - `npm run build`;
+  - `git diff --check`.
+
+Perche': il problema osservato dopo Electron non era solo visuale. La UI aveva
+streaming fluido, ma il read model poteva rientrare in uno stato vecchio dopo il
+refresh e il runtime lifecycle era ancora parzialmente fuori dal boundary Rust.
+Ora chat, contesto, stream, cancel, runtime controls e autostart passano dallo
+stesso gateway locale. Il prossimo blocco e' packaging/diagnostica del runtime
+Python/MLX e poi collegamento dei read model non-chat.
+
+### Fase 79 - Rifinitura rendering chat dopo test utente
+
+- Corretto rendering delle bubble utente:
+  - lo stile della bubble ora si applica solo al contenitore diretto del
+    messaggio utente;
+  - i paragrafi interni non ricevono piu' padding/background duplicati;
+  - `overflow-wrap` sulle bubble utente usa `break-word`, evitando parole corte
+    impilate verticalmente come `s` / `i`.
+- Corretto rendering markdown dei blocchi codice generati da Gemma:
+  - `RichMessageRenderer` ripara fence duplicati come un secondo ````rust`
+    emesso dentro un blocco gia' aperto;
+  - il renderer evita di spezzare quel caso in molti blocchi `rust`/`text`.
+- Corretto join delle continuazioni automatiche:
+  - `joinContinuationText` rimuove prefissi gia' presenti quando il modello
+    ripete l'inizio del chunk successivo;
+  - questo riduce duplicazioni nei messaggi lunghi completati con `Continua`.
+- Aggiornato il contratto UI per coprire:
+  - riparazione fence duplicati;
+  - overlap trimming nelle continuazioni.
+- Verifiche:
+  - `npm run typecheck`;
+  - `npm run test:ui-contract`;
+  - `npm run build`.
+
+Perche': dopo il passaggio a Electron lo streaming e i tempi sono migliorati,
+ma l'esperienza chat restava fragile su output reali di Gemma: codice lungo con
+fence imperfetti e bubble utente troppo strette su risposte brevi. La soluzione
+resta nel layer UI/rendering, non nel runtime.
+
+### Fase 80 - Runtime diagnostics UI
+
+- Aggiunto piano operativo:
+  - `docs/plans/2026-05-27-runtime-diagnostics-ui.md`.
+- Estesa la sezione Settings -> Runtime locale:
+  - stato sintetico di Gemma;
+  - porta;
+  - PID;
+  - memoria processo / memoria totale;
+  - CPU;
+  - duplicati;
+  - azioni avvia/riavvia/ferma con icone;
+  - pulsante `Copia diagnostica`.
+- Estesi i read model TypeScript:
+  - `RuntimeControl.totalMemoryMb`;
+  - `RuntimeControl.availableMemoryMb`;
+  - mapping da `RuntimeControlItem.total_memory_mb` e
+    `available_memory_mb`.
+- La diagnostica copiata contiene solo stato tecnico redatto:
+  - health;
+  - process id;
+  - porta/PID;
+  - memoria/CPU;
+  - messaggio runtime.
+  Non include prompt utente, raw payload o segreti.
+- Aggiornato il contratto UI per imporre layout diagnostico e copia
+  diagnostica.
+- Verifica visiva con Playwright:
+  - desktop `1365x900`: sezione Runtime leggibile, metriche compatte, azioni
+    allineate;
+  - mobile `390x844`: metriche a due colonne e azioni sotto al dettaglio senza
+    overflow orizzontale.
+- Verifiche:
+  - `npm run typecheck`;
+  - `npm run test:ui-contract`;
+  - `npm run build`;
+  - `cargo check --workspace`.
+
+Perche': dopo aver reso il gateway owner del runtime, l'utente deve poter
+capire cosa e' acceso, quale processo occupa la porta, quante risorse usa e
+copiare una diagnostica utile senza aprire terminale o console.
+
+### Fase 81 - Runtime logs redatti nel gateway
+
+- Esteso `ProcessManager` con lettura limitata dei log catturati dal
+  supervisor locale.
+- Aggiunto endpoint gateway:
+  - `GET /api/runtime/logs`.
+- L'endpoint restituisce solo log redatti:
+  - ultimi 80 record;
+  - stream `stdout`/`stderr`;
+  - token, bearer, password e secret mascherati.
+- Se Gemma e' gia' avviato fuori dal gateway, la UI non mostra piu' errori
+  interni come `process not found`; mostra invece uno stato leggibile:
+  runtime esterno, log gestiti non disponibili.
+- Estesa Settings -> Runtime locale:
+  - pannello `Log runtime`;
+  - ultime righe redatte quando il processo e' gestito;
+  - fallback esplicito quando il runtime e' esterno;
+  - copia diagnostica include anche la sezione log redatta.
+- Aggiornato il contratto UI per imporre la presenza del pannello log e della
+  route `/api/runtime/logs`.
+- Verifiche:
+  - `cargo test -p local-first-process-manager -p local-first-desktop-gateway`;
+  - `npm run typecheck`;
+  - `npm run test:ui-contract`;
+  - `npm run build`;
+  - `git diff --check`;
+  - verifica browser su `http://127.0.0.1:1420/`, Settings -> Runtime locale:
+    nessun errore console, nessuna stringa tecnica `process not found` esposta.
+
+Perche': la diagnostica runtime non basta se Gemma fallisce in avvio o resta
+in uno stato ambiguo. I log devono essere visibili dall'app, ma sempre redatti e
+senza esporre prompt, payload o segreti.
+
+### Fase 82 - Lifecycle Electron/gateway allineato a produzione
+
+- Spostata la responsabilita' di avvio del Desktop Gateway dentro
+  `apps/desktop/electron/main.cjs`.
+- Electron ora:
+  - genera o riceve `LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN`;
+  - espone al renderer solo `gatewayUrl` e `gatewayToken` tramite preload
+    isolato (`contextBridge`);
+  - avvia o riusa il gateway locale;
+  - in dev usa `cargo run -p local-first-desktop-gateway`, quindi ricompila il
+    gateway quando Rust cambia;
+  - in packaged usa `LOCAL_FIRST_DESKTOP_GATEWAY_BIN` o
+    `resources/bin/local-first-desktop-gateway`;
+  - termina il gateway gestito su `before-quit`.
+- Semplificato `scripts/electron-dev.mjs`:
+  - avvia Vite;
+  - pulisce listener gateway stale sulla porta;
+  - avvia Electron;
+  - non gestisce piu' token/gateway in parallelo.
+- Aggiornato `gatewayConfig.ts`:
+  - usa il preload Electron in app packaged;
+  - conserva fallback `VITE_LOCAL_FIRST_DESKTOP_GATEWAY_*` per test/dev;
+  - normalizza l'URL gateway.
+- Gateway CORS:
+  - aggiunto origin `null` per consentire renderer `file://` packaged;
+  - la protezione resta sul bearer token locale e su bind loopback.
+- Smoke production-like:
+  - `npm run build`;
+  - avvio Electron senza `LOCAL_FIRST_DESKTOP_URL`, quindi da `dist/index.html`;
+  - porta gateway separata `18766`;
+  - richiesta autorizzata a `/api/chat/threads` OK;
+  - richiesta senza token a `/api/chat/threads` restituisce `401`;
+  - chiusura Electron libera la porta gateway.
+- Verifiche:
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `cargo test -p local-first-desktop-gateway`;
+  - `npm run build`;
+  - `git diff --check`.
+
+Perche': il comportamento dev e packaged devono convergere. La chat non deve
+dipendere da variabili Vite per autenticarsi al gateway locale, e il lifecycle
+del processo Rust deve essere governato dalla shell desktop che l'utente avvia.
+
+### Fase 83 - Log processi persistenti e runtime assets packaged
+
+- Esteso `LocalProcessSupervisor`:
+  - `with_log_dir(path, capacity)`;
+  - scrittura JSONL redatta dei log di processo;
+  - retention a righe;
+  - lettura dei log persistenti anche dopo restart del supervisor.
+- I log persistenti redigono marker sensibili prima di scrivere su disco:
+  - `token=`;
+  - `Authorization:`;
+  - `Bearer `;
+  - `password=`;
+  - `secret=`;
+  - chiavi `sk-*` / `sk_proj_*`.
+- Il Desktop Gateway ora configura il supervisor con:
+  - `LOCAL_FIRST_PROCESS_LOG_DIR`, se presente;
+  - fallback `~/.local-first-personal-assistant/logs/processes`;
+  - retention default 2.000 righe.
+- Il Desktop Gateway supporta `LOCAL_FIRST_GEMMA_PYTHON_VENV`:
+  - in dev resta `.venv-mlx`;
+  - in packaged Electron puo' puntare alla venv bundlata.
+- Electron passa al gateway:
+  - `LOCAL_FIRST_PROCESS_LOG_DIR` sotto `app.getPath("userData")`;
+  - `LOCAL_FIRST_GEMMA_PYTHON_VENV` se trova `resources/.venv-mlx`;
+  - `LOCAL_FIRST_WORKSPACE_ROOT` diverso tra dev e packaged.
+- Aggiunto test:
+  - `local_supervisor_persists_redacted_logs_with_retention`.
+- Verifiche:
+  - `cargo fmt`;
+  - `cargo test -p local-first-process-manager -p local-first-desktop-gateway`;
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `npm run build`;
+  - `git diff --check`;
+  - smoke dev: `npm run electron:dev` avvia Electron, Electron avvia il gateway,
+    crea la directory log processi e `/api/chat/threads` senza token risponde
+    `401`.
+
+Perche': i log diagnostici non devono vivere solo in RAM. Se il runtime Python
+fallisce, l'app deve poter mostrare l'ultimo output redatto dopo refresh o
+restart, senza chiedere all'utente di aprire terminali o cercare processi.
+
+### Fase 84 - Layout risorse packaging Electron
+
+- Aggiunto script:
+  - `apps/desktop/scripts/prepare-package.mjs`.
+- Aggiunti script npm:
+  - `package:prepare`;
+  - `package:smoke`.
+- `package:prepare`:
+  - esegue `npm run build`;
+  - esegue `cargo build -p local-first-desktop-gateway --release`;
+  - prepara `apps/desktop/.package/resources`;
+  - copia `target/release/local-first-desktop-gateway` in `resources/bin`;
+  - copia `runtimes/mlx-gemma4` in `resources/runtimes/mlx-gemma4`;
+  - collega `.venv-mlx` come symlink per smoke locale;
+  - supporta `--copy-venv` quando serve produrre una cartella autosufficiente.
+- Electron supporta ora `LOCAL_FIRST_DESKTOP_RESOURCES_DIR`:
+  - permette smoke locale senza Vite e senza app bundle;
+  - usa `resources/bin/local-first-desktop-gateway`;
+  - usa `resources/.venv-mlx` se presente.
+- Smoke production-like eseguito:
+  - frontend caricato da `dist/index.html`;
+  - gateway release avviato da `.package/resources/bin`;
+  - runtime assets presenti in `.package/resources/runtimes/mlx-gemma4`;
+  - gateway su porta `18766`;
+  - `/api/health` OK;
+  - `/api/chat/threads` con token OK;
+  - `/api/chat/threads` senza token `401`;
+  - chiusura Electron libera la porta.
+- Verifiche:
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `cargo test -p local-first-process-manager -p local-first-desktop-gateway`;
+  - `npm run package:prepare`;
+  - `git diff --check`.
+
+Perche': prima avevamo un'app dev funzionante, ma non un layout riproducibile
+per avvicinarci al packaging reale. Ora esiste una directory risorse verificata
+che rispecchia il futuro bundle Electron.
+
+### Fase 85 - Read model non-chat nel Desktop Gateway
+
+- Esteso `crates/desktop-gateway` con store locali persistenti:
+  - `TaskStore`;
+  - `LocalComputerSessionStore`;
+  - `MemoryFacade` su `SQLiteMemoryStore`;
+  - `CapabilityRegistryStore`.
+- Aggiunti endpoint protetti da bearer token:
+  - `GET /api/tasks/queue`;
+  - `GET /api/tasks/{task_id}`;
+  - `POST /api/approvals/{approval_id}/approve`;
+  - `POST /api/approvals/{approval_id}/reject`;
+  - `GET /api/local-computer/sessions/{session_id}`;
+  - `GET /api/memory/dashboard`;
+  - `GET /api/capabilities/snapshot`.
+- Il task endpoint usa `TaskUiReadModel` e restituisce solo dati UI-safe:
+  stati, priorita', approval, resource usage, checkpoint e metadata redatti.
+- Il local computer endpoint usa `LocalComputerReadModel` e mantiene la policy
+  multiutente/workspace.
+- Il memory endpoint usa `MemoryUiReadModel` con richiesta desktop:
+  domini `local`, `personal`, `work`, `browser`, sensibilita' massima
+  `private`, `allow_raw_payload=false`, `allow_export=false`.
+- Il capability endpoint legge il registry locale e semina i default minimi
+  local-first:
+  - provider `browser`;
+  - grant locale per `browser`/`local`;
+  - connection `browser-local`;
+  - tool cache per health, tabs, snapshot, navigate, act e screenshot.
+- `apps/desktop/src/lib/coreBridge.ts` ora legge task, approvals, sessioni
+  computer, memoria e capability dal gateway HTTP locale.
+- `apps/desktop/src/App.tsx` mappa dashboard memoria e capability snapshot in
+  UI state, usando i mock solo come fallback se il gateway non risponde.
+- `apps/desktop/scripts/electron-dev.mjs` genera ora un token condiviso fra
+  Vite ed Electron:
+  - Electron continua a ricevere il token via preload isolato;
+  - il browser dev diretto riceve `VITE_LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN`;
+  - evita 401 ripetuti quando si apre `http://127.0.0.1:1420/` fuori dalla
+    finestra Electron.
+- Verifiche:
+  - `cargo fmt`;
+  - `cargo check -p local-first-desktop-gateway`;
+  - `cargo test -p local-first-desktop-gateway`;
+  - `cargo test -p local-first-task-runtime -p local-first-local-computer-session`;
+  - `cargo test -p local-first-memory -p local-first-capabilities`;
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `npm run build`;
+  - `git diff --check`;
+  - smoke HTTP gateway su porta `18767`:
+    - `/api/tasks/queue` senza token `401`;
+    - `/api/tasks/queue` con token OK;
+    - `/api/local-computer/sessions/missing-session` con token `null`;
+    - `/api/memory/dashboard` con token OK;
+    - `/api/capabilities/snapshot` con token OK e provider browser locale;
+    - `/api/capabilities/snapshot` senza token `401`.
+  - smoke browser dev su `http://127.0.0.1:1420/` dopo restart Electron:
+    UI caricata, token Vite applicato e nessun loop di 401.
+
+Perche': la shell Electron non deve piu' ragionare su mock per le aree di base.
+Chat, runtime, task, computer locale, memoria e capability ora passano tutti dal
+Desktop Gateway Rust, con confine local-first e dati redatti.
+
+### Fase 86 - Task operativi creati dalla chat
+
+- Collegato il primo percorso operativo reale sopra il Desktop Gateway:
+  - `POST /api/chat/threads/{thread_id}/messages/commit_prompt_result`
+    riconosce in modo conservativo i prompt operativi e crea un task locale;
+  - `POST /api/chat/threads/{thread_id}/messages/{message_id}/create_task`
+    permette la creazione esplicita di un task da un messaggio;
+  - il messaggio assistant viene collegato al `task_id` persistente;
+  - la chat rilegge la sessione Computer locale reale dal gateway dopo il
+    commit.
+- Il task creato usa `TaskStore` persistente, risorse dichiarate e governance:
+  - `browser_task` per navigazione/prenotazioni/ricerca web;
+  - `shell_task` per operazioni terminale/file;
+  - `computer_task` come fallback operativo;
+  - risorse `ComputerSession`, `BrowserSession` e/o `ShellSession`.
+- Sicurezza e privacy:
+  - il prompt raw non viene salvato nell'input task;
+  - il goal task viene compattato/redatto;
+  - i task operativi auto-creati richiedono approval prima di usare browser,
+    terminale o azioni locali;
+  - l'approval non autorizza login, acquisti, invii o pagamenti automatici.
+- Aggiunta sincronizzazione task/sessione Computer:
+  - prima dell'approvazione la sessione e' `waiting_user`;
+  - approvando, il task torna in coda e la sessione diventa
+    `running/approved`;
+  - rifiutando, il task viene cancellato e la sessione diventa
+    `cancelled/rejected`;
+  - la timeline Computer registra eventi redatti di richiesta/conferma/rifiuto.
+- Verifiche:
+  - `cargo fmt`;
+  - `cargo check -p local-first-desktop-gateway`;
+  - `cargo test -p local-first-desktop-gateway`;
+  - `cargo test -p local-first-task-runtime -p local-first-local-computer-session`;
+  - `npm run test:ui-contract`;
+  - `npm run typecheck`;
+  - `npm run build`;
+  - `git diff --check`;
+  - smoke HTTP gateway su porta `18768`:
+    - prompt treno operativo crea task, approval e sessione Computer;
+    - messaggio chat collegato al `task_id`;
+    - approval pending visibile in `/api/tasks/queue`;
+    - sessione Computer `waiting_user/waiting_user`;
+    - dopo approve, task in `queued` e sessione
+      `running/approved`.
+
+Perche': prima la chat poteva rispondere con Gemma ma non materializzava lavoro
+duraturo. Ora una richiesta operativa produce uno stato persistente governabile:
+task, approval, sessione Computer, timeline e collegamento al messaggio.
+
+### Fase 87 - Primo executor locale read-only
+
+- Aggiunto il primo executor locale nel Desktop Gateway:
+  - `POST /api/tasks/run_next`;
+  - consuma il primo task `queued` approvato;
+  - marca il task `running`, poi `completed` o `failed`;
+  - scrive checkpoint redatto nel `TaskStore`;
+  - aggiorna sessione Computer, progress e timeline;
+  - pubblica un messaggio risultato nella chat collegato al `task_id`.
+- Supporto iniziale per task read-only:
+  - `browser_task` avvia il sidecar locale `runtimes/browser-automation`
+    via stdio, apre una pagina/search URL in headless, raccoglie snapshot e
+    salva URL/snapshot in checkpoint e timeline;
+  - `local_shell_task` esegue solo comando read-only `date` quando il task e'
+    chiaramente una richiesta di ora/data;
+  - `local_task` supporta calcoli aritmetici semplici senza strumenti esterni.
+- La UI ora chiama l'executor dopo approval:
+  - `coreBridge.runPromptPlanReadySteps` usa `/api/tasks/run_next`;
+  - le approval vengono associate sia al `task_id` sia al
+    `computer_session_id`, quindi appaiono nella chat corretta;
+  - dopo approve la chat refresh-a task, Computer session e messaggi.
+- Sicurezza:
+  - nessuna azione browser write;
+  - nessun click/submit/login/pagamento;
+  - browser sidecar usato solo per open/snapshot read-only;
+  - output terminale e URL passano dal read model redatto.
+- Verifiche:
+  - `cargo fmt`;
+  - `cargo check -p local-first-desktop-gateway`;
+  - `cargo test -p local-first-desktop-gateway`;
+  - `cargo test -p local-first-task-runtime -p local-first-local-computer-session -p local-first-browser-automation`;
+  - `npm run typecheck`;
+  - `npm run test:ui-contract`;
+  - `npm run build`;
+  - `git diff --check`;
+  - smoke HTTP gateway su porta `18768`:
+    - prompt treno crea task+approval;
+    - approve mette il task in coda;
+    - `/api/tasks/run_next` completa il task browser read-only;
+    - task detail `completed` con checkpoint `browser_read_only`;
+    - sessione Computer `completed/approved`, progress `3/3`, URL redatto;
+    - timeline include `computer_browser_snapshot`;
+    - chat riceve messaggio risultato collegato al task.
+
+Perche': questo e' il primo punto in cui il sistema non solo risponde, ma
+esegue un lavoro locale governato e osservabile. Rimane volutamente read-only:
+gli step write/destructive andranno introdotti solo con policy/approval piu'
+granulari.
+
+### Fase 88 - Preview artifact reali per il Computer locale
+
+- Esteso l'executor browser read-only:
+  - dopo `open` + `snapshot` produce anche uno screenshot PNG;
+  - salva l'artifact nel `LocalComputerSessionStore`;
+  - collega l'artifact all'evento `computer_browser_snapshot`;
+  - valorizza `preview_frame_ref` nel read model Computer.
+- Aggiunto endpoint protetto dal Desktop Gateway:
+  - `GET /api/local-computer/sessions/{session_id}/artifacts/{artifact_id}/preview`;
+  - legge solo artifact della sessione/user/workspace corrente;
+  - restituisce `data:image/png;base64,...` per la preview UI.
+- Aggiornata la UI Electron:
+  - `coreBridge.localComputerArtifactPreview` ora chiama il gateway locale;
+  - la card Computer e la live view possono mostrare la miniatura reale del
+    browser invece dello skeleton.
+- Verifiche:
+  - `cargo fmt`;
+  - `cargo check -p local-first-desktop-gateway`;
+  - `cargo test -p local-first-desktop-gateway`;
+  - `npm run typecheck`;
+  - `npm run test:ui-contract`;
+  - `npm run build`;
+  - `git diff --check`;
+  - smoke gateway su porta `18768`:
+    - task browser read-only completato;
+    - artifact screenshot creato con byte > 0;
+    - `preview_frame_ref` presente;
+    - endpoint preview restituisce `data:image/png;base64,...`.
+
+Perche': la parte "Computer" deve far vedere cosa e' successo, non solo
+raccontarlo. Questo avvicina l'esperienza al modello Manus: risultato in chat
+centrale, ma evidenza visiva consultabile quando serve.
+
+### Fase 89 - Executor governato e browser multi-fonte resiliente
+
+- Rafforzato l'executor del Desktop Gateway:
+  - prima di eseguire acquisisce un lease locale con owner
+    `desktop-gateway-executor`;
+  - recupera lease scaduti prima di scegliere il prossimo task;
+  - passa dal `ResourceGovernor` con limiti conservativi;
+  - se le risorse non bastano marca il task `waiting_resource`;
+  - a completamento o errore rilascia sempre lease e risorse.
+- Esteso il task browser read-only:
+  - per richieste treno controlla ricerca web, Trenitalia e Italo;
+  - conserva nel checkpoint una lista di `sources` con stato per fonte;
+  - se una fonte fallisce, registra errore redatto e continua con le altre;
+  - fallisce solo quando nessuna fonte browser e' raggiungibile;
+  - genera la preview PNG dalla prima pagina aperta con successo.
+- Smoke reale:
+  - prompt treno Napoli-Milano crea task+approval;
+  - approve mette il task in coda;
+  - `/api/tasks/run_next` completa il task;
+  - checkpoint `browser_read_only` contiene tre fonti:
+    `Ricerca web:completed`, `Trenitalia:completed`, `Italo:failed`;
+  - l'errore Italo HTTP/2 non blocca il task;
+  - endpoint preview restituisce `data:image/png;base64,...`;
+  - `resource_usage` torna vuoto dopo l'esecuzione.
+- Verifiche:
+  - `cargo fmt`;
+  - `cargo check -p local-first-desktop-gateway`;
+  - `cargo test -p local-first-desktop-gateway`;
+  - `cargo test -p local-first-task-runtime -p local-first-local-computer-session -p local-first-browser-automation`;
+  - `npm run typecheck`;
+  - `npm run test:ui-contract`;
+  - `npm run build`;
+  - `git diff --check`.
+
+Perche': i task lunghi e multipli devono essere eseguiti senza doppie
+esecuzioni e senza saturare risorse locali. Inoltre il browser deve comportarsi
+come uno strumento operativo robusto: una fonte fragile non deve cancellare il
+risultato quando altre fonti sono disponibili.
+
+### Fase 90 - Worker background per task approvati
+
+- Aggiunto piano operativo
+  `docs/plans/2026-05-27-background-task-worker.md`.
+- Aggiunto worker background nel Desktop Gateway:
+  - parte insieme al gateway;
+  - controlla la coda ogni secondo;
+  - usa `TaskScheduler` per rispettare priorita', `not_before` e dipendenze;
+  - usa lease `desktop-gateway-background-worker`;
+  - usa resource governance gia' introdotta;
+  - esegue task approvati senza chiamata manuale dalla UI;
+  - aggiorna contatori e ultimo stato executor.
+- Aggiunto endpoint locale protetto:
+  - `GET /api/tasks/executor`;
+  - espone stato sintetico UI-safe del worker.
+- Aggiornata la UI Electron:
+  - non chiama piu' automaticamente `/api/tasks/run_next` dopo approval;
+  - mantiene `run_next` come fallback/debug esplicito;
+  - poll locale ogni 2.5s per queue, detail e chat read model, cosi' il
+    risultato scritto dal worker appare senza intervento utente.
+- Test-first:
+  - aggiornato `test:ui-contract` prima del codice;
+  - fallimento iniziale atteso:
+    `expected src/lib/coreBridge.ts to contain /api/tasks/executor`.
+- Smoke reale:
+  - creato task browser da prompt treno;
+  - approvato task;
+  - nessuna chiamata a `/api/tasks/run_next`;
+  - worker ha portato il task da `queued` a `completed`;
+  - checkpoint `browser_read_only` con fonti multiple;
+  - Computer session `completed`;
+  - messaggio chat finale collegato al task;
+  - `completed_count` worker incrementato;
+  - risorse rilasciate.
+- Verifiche:
+  - `cargo fmt`;
+  - `cargo check -p local-first-desktop-gateway`;
+  - `cargo test -p local-first-desktop-gateway`;
+  - `npm run typecheck`;
+  - `npm run test:ui-contract`;
+  - `npm run build`;
+  - `git diff --check`.
+
+Perche': l'utente non deve capire quando premere "continua" per far partire un
+task approvato. L'approvazione deve sbloccare la coda, poi il sistema deve
+procedere autonomamente entro limiti locali, con stato osservabile ma non
+invadente.
+
+### Fase 91 - Checkpoint intermedi durante l'esecuzione
+
+- Aggiunto piano operativo
+  `docs/plans/2026-05-27-task-progress-checkpoints.md`.
+- Il Desktop Gateway ora scrive checkpoint/eventi intermedi mentre il task e'
+  in esecuzione:
+  - `execution_started`;
+  - `browser_runtime_starting`;
+  - `browser_runtime_ready`;
+  - `browser_source_started`;
+  - `browser_source_completed`;
+  - `browser_source_failed`;
+  - `browser_synthesis_started`.
+- Il browser executor registra ogni fonte nella timeline Computer:
+  - ricerca web;
+  - Trenitalia;
+  - Italo o errore redatto se non raggiungibile.
+- Il checkpoint finale resta `browser_read_only`, quindi il dettaglio task
+  continua a puntare al risultato finale invece che a uno step intermedio.
+- Smoke reale:
+  - task treno approvato;
+  - worker automatico;
+  - timeline popolata durante l'esecuzione;
+  - almeno sei eventi `browser_source_*`;
+  - ultima risposta in chat collegata al task;
+  - risorse rilasciate.
+- Verifiche:
+  - `cargo fmt`;
+  - `cargo check -p local-first-desktop-gateway`;
+  - `cargo test -p local-first-desktop-gateway`;
+  - `npm run typecheck`;
+  - `npm run test:ui-contract`;
+  - `npm run build`;
+  - `git diff --check`.
+
+Perche': l'esperienza utente deve far capire che il sistema sta lavorando,
+senza costringere l'utente a leggere log tecnici. La risposta finale resta il
+centro, ma il Computer locale ora racconta il percorso in modo consultabile.
+
+### Fase 92 - Risposta finale pulita per task browser
+
+- Aggiunto piano operativo
+  `docs/plans/2026-05-27-task-final-answer.md`.
+- Introdotta struttura `TaskFinalAnswer` nel Desktop Gateway:
+  - titolo;
+  - summary;
+  - risultato;
+  - fonti controllate;
+  - limiti;
+  - prossimo passo.
+- La chat non riceve piu' dump raw degli snapshot browser:
+  - rimossi blocchi ` ```text ` dal risultato task browser;
+  - rimossi estratti lunghi dalla risposta finale;
+  - errori tecnici sidecar/ANSI restano fuori dalla chat.
+- I dati tecnici restano nel checkpoint e nel Computer locale:
+  - `sources`;
+  - stato fonte;
+  - errori redatti;
+  - artifact screenshot.
+- Aggiunta sanitizzazione delle sequenze terminali ANSI in
+  `redact_sensitive_text`.
+- Test:
+  - `browser_final_answer_keeps_snapshot_dump_out_of_chat`;
+  - `runtime_log_redaction_strips_terminal_control_sequences`.
+- Smoke reale:
+  - prompt treno;
+  - worker automatico;
+  - risposta finale contiene `Ricerca treni completata`, fonti, limiti e
+    prossimo passo;
+  - nessun dump snapshot;
+  - nessuna sequenza terminale nella chat.
+- Verifiche:
+  - `cargo fmt`;
+  - `cargo test -p local-first-desktop-gateway`;
+  - `npm run typecheck`;
+  - `npm run test:ui-contract`;
+  - `npm run build`;
+  - `git diff --check`.
+
+Perche': l'utente deve leggere una risposta, non un log. I dettagli tecnici
+sono utili per audit e ispezione, ma devono restare nel Computer locale e nei
+checkpoint redatti.
+
+### Fase 93 - Correzione UX Computer e browser visibile
+
+- Corretto bug UI: la card Computer locale spariva dopo il completamento del
+  task perche' veniva renderizzata solo con approval attive, run manuale, smoke
+  o dettaglio aperto.
+- La chat ora mantiene visibile il Computer locale quando la sessione ha
+  timeline o artifact, anche se il task e' completato e la card e' collassata.
+- L'approval mostra esplicitamente l'ambito:
+  - `Solo questa volta` attivo;
+  - `Regola fissa` visibile ma non ancora abilitata;
+  - nota che le regole fisse richiederanno policy dedicate.
+- Il browser automation gestito dal gateway non forza piu' headless:
+  - default desktop `LOCAL_FIRST_BROWSER_HEADLESS` assente => browser visibile;
+  - smoke/test possono usare `LOCAL_FIRST_BROWSER_HEADLESS=1`.
+- Verifiche:
+  - `cargo fmt`;
+  - `cargo test -p local-first-desktop-gateway`;
+  - `npm run typecheck`;
+  - `npm run test:ui-contract`;
+  - `npm run build`;
+  - smoke gateway con `LOCAL_FIRST_BROWSER_HEADLESS=1`: task treno completato,
+    timeline Computer con 16 eventi, artifact screenshot presente.
+
+Perche': per task operativi l'utente deve vedere che esiste una sessione
+Computer consultabile anche dopo la risposta. Inoltre e' importante distinguere
+approvazioni temporanee da regole fisse: non dobbiamo far sembrare persistente
+un consenso che oggi e' solo per la singola esecuzione.
+
+### Fase 94 - Browser form draft per task treno
+
+- Aggiunto piano operativo
+  `docs/plans/2026-05-27-browser-form-draft.md`.
+- Corretto il limite segnalato dall'utente: il browser apriva i siti ma non
+  compilava nessun form.
+- Il sidecar browser ora include anche placeholder/id/data-testid/autocomplete
+  e title nei nomi dei ref interattivi, mantenendo il testo visibile prima
+  dell'id per bottoni e link.
+- Il Desktop Gateway estrae una bozza treno conservativa da prompt come
+  "Napoli Milano il 10 giugno verso le 9":
+  - partenza;
+  - arrivo;
+  - data;
+  - ora.
+- Per fonti operatore (`Trenitalia`, `Italo`) il gateway prova a compilare i
+  campi riconoscibili con `browser.act` `kind=fill`:
+  - non preme Cerca/Continua;
+  - non invia form;
+  - non fa login;
+  - non effettua acquisti o pagamenti.
+- L'approval iniziale ora esplicita che autorizza solo lettura e compilazione
+  bozza senza invio; click/submit/login/pagamenti restano fuori e richiedono
+  un livello successivo.
+- Aggiunti checkpoint Computer locale:
+  - `browser_form_draft_started`;
+  - `browser_form_draft_completed`;
+  - `browser_form_draft_blocked`.
+- La risposta finale distingue tra:
+  - form compilato in bozza;
+  - form non compilabile per campi non riconoscibili;
+  - fonti non raggiungibili;
+  - prossimo step con conferma esplicita.
+- Test aggiunti:
+  - estrazione bozza treno;
+  - mapping ref semantici verso campi form senza submit;
+  - snapshot sidecar con placeholder.
+- Verifiche:
+  - `cargo test -p local-first-desktop-gateway`;
+  - `npm --prefix runtimes/browser-automation test`;
+  - `npm --prefix runtimes/browser-automation run typecheck`;
+  - `npm --prefix apps/desktop run typecheck`;
+  - `npm --prefix apps/desktop run test:ui-contract`;
+  - `npm --prefix apps/desktop run build`;
+  - `git diff --check`.
+- Smoke tecnico live:
+  - Trenitalia espone `partenza` e `arrivo` come textbox;
+  - `browser.act fill` compila la bozza almeno su quei campi;
+  - Italo in headless ha restituito `ERR_HTTP2_PROTOCOL_ERROR`, quindi resta
+    trattato come fonte non raggiungibile in quella sessione.
+
+Perche': il primo browser operativo non puo' limitarsi a "guardare" pagine.
+Serve un livello intermedio sicuro tra lettura e azioni mutative: compilare una
+bozza visibile senza avanzare workflow, cosi' l'utente vede progresso reale ma
+mantiene controllo su click, submit e acquisti.
+
+### Fase 95 - Browser controller pulito ispirato a Homun
+
+- Allineato il progetto alla decisione dell'utente: Homun e' un riferimento
+  interno da cui prendere il browser funzionante, ma non va copiato interamente
+  perche' l'obiettivo e' una versione piu' pulita e meno complessa.
+- Il piano operativo e' in
+  `docs/plans/2026-05-27-homun-inspired-browser-controller.md`.
+- Il sidecar `runtimes/browser-automation` ora tratta `fill_form` come azione
+  batch reale:
+  - compila piu' campi in una sola chiamata;
+  - restituisce `filledRefs` e `failedRefs`;
+  - fallisce solo se nessun campo viene compilato.
+- `browser.act` supporta anche `snapshot_after` snake_case oltre a
+  `snapshotAfter`, cosi' Rust e TypeScript restano allineati.
+- Snapshot automatico esteso a `press_key`, `select_option` e `scroll`, oltre a
+  `click` e `type`.
+- La policy Rust ora blocca `press_key` con `Enter`/`Return`, mentre consente
+  `fill_form` come bozza non-submit.
+- Il Desktop Gateway usa `fill_form` batch per la bozza treno e traduce il
+  risultato in campi compilati/falliti, invece di orchestrare ref per ref.
+- Test aggiunti/aggiornati:
+  - `fill_form` batch su fixture locale;
+  - `type` che fa emergere autocomplete;
+  - `select_option`;
+  - mapping risultato batch nel gateway;
+  - policy per `press_key`.
+- Verifiche:
+  - `npm --prefix runtimes/browser-automation test`;
+  - `npm --prefix runtimes/browser-automation run typecheck`;
+  - `cargo test -p local-first-browser-automation`;
+  - `cargo test -p local-first-desktop-gateway`.
+
+Perche': il gateway non deve conoscere tutti i dettagli del DOM. Deve chiedere
+al browser capability azioni operative alte e ricevere snapshot/risultati
+redatti. Questo ci avvicina al comportamento funzionante di Homun mantenendo
+una base piu' semplice da far crescere.
+
+### Fase 96 - Approval URL e modalita browser
+
+- Portata nel progetto una seconda idea utile da Homun: approval URL con scelta
+  tra singola esecuzione e regola persistente.
+- Aggiunto `BrowserUrlPolicyStore` in `crates/browser-automation`:
+  - SQLite locale;
+  - regole per `user_id`, `workspace_id`, origin URL e azione;
+  - scope `once` non persistito;
+  - scope `always` persistito;
+  - modalita browser `auto`, `visible`, `headless`.
+- Il Desktop Gateway apre `browser-url-policy.sqlite` sotto
+  `~/.local-first-personal-assistant`, configurabile con
+  `LOCAL_FIRST_BROWSER_POLICY_DB`.
+- L'endpoint approve accetta ora opzioni opzionali:
+  - `scope`;
+  - `browser_visibility`.
+- Quando l'utente approva `always`, il gateway salva regole locali per i domini
+  coinvolti nel task browser corrente.
+- Se tutti i domini browser del task sono gia' approvati, il task puo' evitare
+  la nuova approval iniziale di sola navigazione/bozza.
+- La scelta `visible/headless/auto` viene salvata nel checkpoint del task e
+  usata per impostare `BROWSER_AUTOMATION_HEADLESS` quando parte il sidecar.
+- La UI approval inline mostra:
+  - `Solo questa volta`;
+  - `Sempre per questi URL`;
+  - `Auto`;
+  - `Visibile`;
+  - `Headless`.
+- Test aggiunti:
+  - normalizzazione origin URL;
+  - grant `once` non persistente;
+  - grant `always` persistente con visibility.
+
+Perche': l'utente deve poter ridurre conferme ripetitive senza perdere
+controllo. Le regole sono locali, scoped per dominio/azione e non autorizzano
+submit, login, pagamento o invio dati: quei passaggi restano approval separate.
+
+### Fase 97 - Operational-first per task autonomi
+
+- Corretto un errore di direzione UX: per richieste operative non deve partire
+  prima una normale risposta Gemma che chiede preferenze generiche.
+- Aggiunto endpoint gateway
+  `/api/chat/threads/{thread_id}/messages/submit_operational_prompt`:
+  - se il prompt richiede azioni locali, salva il messaggio utente;
+  - aggiunge un acknowledgement operativo;
+  - crea task, approval e sessione Computer locale;
+  - lascia al worker/executor la risposta finale con dati raccolti.
+- La UI Electron prova prima il percorso operativo; se il gateway risponde che
+  non e' un task, usa la chat Gemma in streaming come prima.
+- Per i task treno il browser ora prova a proseguire oltre la sola bozza:
+  - compila i form riconoscibili;
+  - cerca un controllo sicuro di ricerca risultati;
+  - preme solo controlli tipo `Cerca`/`Mostra risultati`;
+  - blocca login, registrazione, acquisto, pagamento, prenotazione finale o
+    invio dati sensibili.
+- La risposta finale treno diventa proattiva: se legge opzioni, le evidenzia e
+  chiede quale l'utente vuole prenotare, invece di fermarsi a "posso
+  procedere".
+- Aggiornata la copy dell'approval: autorizza lettura, compilazione form e
+  ricerca risultati, ma non autorizza login, scelta finale, pagamento o acquisto.
+- Test aggiunti:
+  - policy click ricerca sicura contro click di acquisto/pagamento;
+  - acknowledgement operativo per richiesta treno;
+  - risposta finale che chiede quale opzione prenotare.
+- Verifiche:
+  - `cargo test -p local-first-desktop-gateway`;
+  - `npm --prefix apps/desktop run typecheck`;
+  - `npm --prefix apps/desktop run test:ui-contract`;
+  - `git diff --check`.
+
+Perche': l'assistente deve essere autonomo fino al punto sicuro. Il flusso
+corretto e': capire la richiesta, usare strumenti locali, raccogliere dati,
+formattare la risposta e chiedere conferma sulla decisione successiva. Chiedere
+preferenze prima di aver raccolto opzioni reali rende il prodotto equivalente a
+una ricerca manuale.
+
+### Fase 98 - Piano operativo persistente per browser task
+
+- Analizzato Homun come riferimento interno per il flusso operativo:
+  - cognition plan-first;
+  - piano esplicito con criteri di successo;
+  - browser task come loop continuo, non come sotto-task indipendenti;
+  - completion solo dopo verifica del risultato.
+- Aggiunto nel Desktop Gateway un primo `OperationalPlan` serializzabile:
+  - `intent_type`;
+  - autonomia;
+  - tool previsti;
+  - step con stato;
+  - vincoli;
+  - success criteria;
+  - stop conditions;
+  - approval gates;
+  - schema dati atteso.
+- Per richieste treno il piano ora include step espliciti:
+  - comprendere tratta/data/orario;
+  - aprire fonti;
+  - compilare form;
+  - cercare opzioni;
+  - estrarre risultati;
+  - rispondere chiedendo quale opzione prenotare.
+- Il piano viene salvato in `TaskRecord.input_json` e nei checkpoint redatti,
+  cosi' UI e read model possono mostrare cosa il sistema sta tentando di fare.
+- L'approval iniziale ora riassume il piano e i gate, invece di chiedere una
+  conferma generica.
+- Il task treno non viene piu' marcato completato se non estrae almeno una
+  opzione leggibile. In quel caso:
+  - la risposta non dice "ricerca completata";
+  - il checkpoint contiene `success_criteria_met=false`;
+  - il task va in `waiting_external_event` con motivo esplicito;
+  - il Computer locale resta consultabile con snapshot/artifact.
+- Test aggiunti:
+  - piano treno con step/gate/success criteria;
+  - criteri di successo treno negativi se non ci sono opzioni;
+  - criteri di successo positivi solo con righe opzione contenenti orario e
+    operatore/tratta.
+- Verifica:
+  - `cargo test -p local-first-desktop-gateway`.
+
+Perche': il bug osservato dall'utente non era UI ma architettura: senza un
+piano operativo verificabile l'executor puo' solo aprire pagine e sintetizzare,
+anche quando non ha davvero ottenuto il risultato. Questo e' il primo taglio
+per sostituire gli hardcoded executor con un browser loop guidato da piano.
+
+### Fase 99 - Browser task end-to-end con prompt completo e risultati reali
+
+- Corretto un bug bloccante del flusso operativo: il `TaskRecord.goal` resta
+  volutamente compatto per UI/privacy, ma l'executor browser usava quel titolo
+  troncato come sorgente di verita'. Ora il task salva `prompt_redacted` in
+  `input_json` e l'executor usa `task_effective_goal()` per planning, target,
+  parsing tratta/data/orario e risposta finale.
+- Aggiunto un `TaskExecutorRegistry` nel Desktop Gateway per evitare dispatch
+  fragile via string matching e preparare il wiring uniforme di browser,
+  capability, subagent e fallback legacy.
+- Aggiunto `PlanContextStore` lato task-runtime per risolvere gli output dei
+  task dipendenti dai checkpoint redatti, primo pezzo per piani multi-step con
+  passaggio stato esplicito.
+- Migliorato il browser sidecar:
+  - attende stabilizzazione pagina dopo click/snapshot;
+  - supporta `selectOption` per campi select/combobox;
+  - test fixture con risultati client-side ritardati.
+- Per il caso treni:
+  - aggiunto target TrovaTreno come fonte aggregatrice leggibile;
+  - compilazione stazioni con preferenza per `Napoli Centrale` e
+    `Milano Centrale`;
+  - URL risultati diretto con `data=2026-06-10` e `ora=09%3A00`;
+  - parsing righe compatte tipo `FR 9310 08:55 13:54`;
+  - risposta finale non sovrastima fonti senza opzioni affidabili.
+- Test reale via gateway/Electron headless eseguito sul prompt:
+  `Devo prenotare un treno Napoli Milano il 10 giugno verso le 9, trova opzioni ma non acquistare nulla`.
+  Risultato: task completato, TrovaTreno aperto con data/orario corretti,
+  47 treni trovati, opzioni estratte (`FR 9310 08:55 13:54`,
+  `IT 9924 09:20 14:09`, `FR 9524 08:40 13:39`, ecc.), nessun login,
+  acquisto o pagamento.
+- Verifiche:
+  - `cargo fmt --all`;
+  - `cargo test -p local-first-desktop-gateway`;
+  - `npm --prefix apps/desktop run typecheck`;
+  - `npm --prefix runtimes/browser-automation run typecheck`;
+  - `npm --prefix runtimes/browser-automation test -- tests/browser_fixture.test.ts`.
+
+Perche': il sistema deve agire come agente autonomo fino al prossimo gate
+realmente sensibile. L'utente non deve approvare micro-step inutili ne'
+ricevere una risposta che dice "ho cercato" senza opzioni verificabili.
+
+### Fase 100 - Piano operativo ispezionabile per capire dove si blocca l'agente
+
+- Problema osservato: dal comportamento UI non era chiaro se il fallimento
+  fosse dovuto al modello, al piano, al browser o a un singolo sito. Il piano
+  precedente era troppo macro (`compilare form`, `cercare opzioni`) e non
+  permetteva di capire se l'agente avesse davvero tentato TrovaTreno,
+  Trenitalia e Italo.
+- Il piano treno ora viene generato come tasklist dettagliata per fonte:
+  - aprire ricerca web;
+  - aprire, compilare, cercare ed estrarre da TrovaTreno;
+  - aprire, compilare, cercare ed estrarre da Trenitalia;
+  - aprire, compilare, cercare ed estrarre da Italo;
+  - consolidare opzioni;
+  - rispondere e chiedere il prossimo gate.
+- Ogni step ha un id stabile (`source_trovatreno_search`,
+  `source_trenitalia_extract`, `source_italo_fill`, ecc.) e stato leggibile:
+  `[ ]` pending, `[-]` running, `[x]` done, `[!]` blocked.
+- Ogni checkpoint di avanzamento ora include anche
+  `operational_plan_markdown`, cosi' possiamo leggere il piano senza
+  interpretare JSON.
+- A fine task viene creato un artifact markdown locale
+  `artifact_<task>_operational_plan`, insieme allo screenshot browser.
+- Test reale eseguito sul prompt treno:
+  - TrovaTreno: aperto, compilato, ricerca avviata, opzioni estratte;
+  - Trenitalia: aperto e compilato, ma estrazione opzioni bloccata per assenza
+    di righe affidabili nello snapshot;
+  - Italo: aperto, ma compilazione bloccata per assenza di campi form
+    riconoscibili;
+  - task completato perche' il criterio minimo e' soddisfatto da TrovaTreno
+    con opzioni reali.
+- Verifiche:
+  - `cargo fmt --all`;
+  - `cargo test -p local-first-desktop-gateway`;
+  - `npm --prefix apps/desktop run typecheck`.
+
+Perche': prima di migliorare la capacita' dell'agente dobbiamo poter osservare
+il suo ragionamento operativo. Se fallisce, deve essere ovvio se il problema e'
+nel piano, nel tool, nel sito o nel criterio di successo.
+
+### Fase 101 - Piano operativo visibile nella UI
+
+- Verifica sul task reale dell'utente:
+  - il backend aveva creato il piano dettagliato e l'artifact markdown;
+  - la UI continuava a sembrare uguale perche' il read model del Computer
+    locale esponeva solo titolo/sottotitolo degli eventi e scartava il markdown
+    del piano.
+- Aggiunto `markdown_redacted` agli item della timeline del read model locale.
+- La redazione del markdown ora preserva le righe, invece di comprimere tutta
+  la tasklist in una singola riga; altrimenti la UI non puo' parsare gli step.
+- La Chat UI ora mostra un riquadro `Piano operativo` sotto la risposta, con:
+  - conteggio step completati/bloccati;
+  - step bloccati principali;
+  - step chiave come estrazione TrovaTreno, Trenitalia e Italo.
+- Verifica visuale con Playwright su `http://127.0.0.1:1420/`:
+  il riquadro `Piano operativo` appare e mostra `12 completati · 4 bloccati`,
+  con blocchi su `Estrarre opzioni da Trenitalia`, `Compilare Italo`,
+  `Cercare risultati su Italo`, `Estrarre opzioni da Italo`.
+- Verifiche:
+  - `cargo fmt --all`;
+  - `cargo test -p local-first-local-computer-session`;
+  - `cargo test -p local-first-desktop-gateway`;
+  - `npm --prefix apps/desktop run typecheck`.
+
+Perche': senza visibilita' del piano l'utente non puo' capire se il sistema ha
+ragionato male o se uno specifico tool/sito si e' bloccato.
+
+### Fase 102 - Diagnosi browser confrontata con Homun
+
+- Analizzato Homun in dettaglio:
+  - `src/tools/browser.rs` usa un BrowserTool unico sopra Playwright MCP;
+  - ogni `navigate`, `click`, `type`, `scroll` restituisce uno snapshot fresco;
+  - il tool compatta lo snapshot, annota l'ordine dei campi, rileva banner
+    privacy/cookie, gestisce ref stale, loop/stuck state e switch
+    headless/visible;
+  - `BrowserTaskPlanState` decide approval URL, modalita' headless/visible,
+    retry budget e loop detection.
+- Diagnosi sul nostro executor:
+  - il browser sidecar era gia' capace di snapshot dopo alcune azioni, ma il
+    gateway calcolava i campi form prima dell'autocomplete delle stazioni e
+    tentava poi un batch fill su ref/stato non piu' affidabile;
+  - Trenitalia espone data e ora come `button`/widget calendario, non come
+    textbox/combobox compilabili; quindi riusciamo a selezionare le stazioni,
+    ma lasciamo data e ora di default;
+  - Italo, dopo accettazione cookie, espone i controlli principali come
+    `button`/widget custom; non ci sono textbox affidabili per partenza/arrivo
+    nello snapshot del nostro sidecar.
+- Correzioni applicate:
+  - `fill_form` nel sidecar ora produce snapshot automatico come pattern Homun;
+  - lo snapshot non classifica piu' `input type=button` come textbox;
+  - i nomi campo includono anche `value`, label associate e testo vicino;
+  - il gateway accetta banner privacy/cookie safe (`Accetta`/`Accept all`) e
+    acquisisce snapshot aggiornato;
+  - dopo autocomplete stazioni il gateway rivaluta i campi form dalla pagina
+    aggiornata e salva checkpoint `browser_form_fields_refreshed` con
+    candidate refs.
+- Test reale dopo le correzioni:
+  - TrovaTreno resta completo e produce 47 opzioni;
+  - Trenitalia: cookie accettato, stazioni selezionate, ma data/orario restano
+    widget button (`28 Mag 2026`, `Seleziona orario 8:00`) e richiedono un
+    loop azione->snapshot->decisione o adapter specifico;
+  - Italo: cookie accettato, i campi visibili nel testo pagina non sono esposti
+    come textbox/combobox compilabili; l'executor deterministico quindi blocca
+    correttamente invece di fare fill su un bottone.
+- Verifiche:
+  - `npm --prefix runtimes/browser-automation run typecheck`;
+  - `npm --prefix runtimes/browser-automation test`;
+  - `cargo fmt --all`;
+  - `cargo test -p local-first-desktop-gateway`;
+  - run reale gateway sul prompt Napoli-Milano 10 giugno ore 9.
+
+Perche': il problema non e' Gemma e non e' solo Playwright. Il blocco nasce
+dal fatto che il nuovo progetto ha un executor browser deterministico troppo
+semplice, mentre Homun usava un loop operativo con snapshot fresco dopo ogni
+azione e guard decisionale. La prossima implementazione deve portare quel
+pattern, non aggiungere altri riconoscimenti hardcoded sito per sito.
+
+### Fase 103 - Analisi dettagliata OpenClaw browser automation
+
+- Clonato OpenClaw in `/tmp/openclaw` e analizzato il commit
+  `00fb15253cbdfacec3cd2c34a22ace4d753c6184`.
+- Creato report:
+  `docs/research/2026-05-28-openclaw-browser-automation-analysis.md`.
+- Confermato che OpenClaw usa un singolo tool modello `browser` con schema
+  action-based (`open`, `snapshot`, `act`, `tabs`, `screenshot`, `dialog`,
+  ecc.), non un set di executor hardcoded per sito.
+- Pattern principale:
+  - `snapshot` prima di agire;
+  - azione stretta via `act`;
+  - stesso `targetId`;
+  - ref Playwright `aria-ref` quando possibile;
+  - nuovo snapshot dopo azione/navigazione/modale;
+  - recovery esplicita su ref stale e dialog blocker.
+- Dettaglio tecnico rilevante:
+  - OpenClaw usa `page.ariaSnapshot({ mode: "ai" })` e preserva refs `eN`;
+  - `refLocator()` risolve refs con `page.locator("aria-ref=eN")`;
+  - fallback role/name usa `getByRole(... exact: true)` e `nth` per duplicati;
+  - le routes `/act` e `/snapshot` applicano policy URL, dialog state e
+    controllo post-navigazione.
+- Diagnosi aggiornata:
+  - il nostro blocco su Trenitalia/Italo non si risolve con altre regex sui
+    campi;
+  - serve portare il browser operating loop OpenClaw/Homun:
+    `snapshot -> decide action -> act -> snapshot -> verify -> next action`.
+- Decisione:
+  - prossimo lavoro browser: aggiungere snapshot AI/aria refs al sidecar,
+    poi spostare la logica fuori da `desktop-gateway/src/main.rs` verso un
+    `browser_loop` guidato dal piano e validato da policy.
+
+Perche': OpenClaw conferma la stessa lezione vista in Homun. Il browser non va
+trattato come "compila questi campi una volta"; va trattato come una sessione
+stateful osservabile, con il modello/controller che decide un passo alla volta
+su snapshot corrente e il core che valida sicurezza e completamento.
+
+### Fase 104 - Primo porting concreto OpenClaw/Homun browser loop
+
+- Aggiornato `runtimes/browser-automation`:
+  - `browser.snapshot` usa di default Playwright
+    `page.ariaSnapshot({ mode: "ai" })`;
+  - i refs Playwright `eN` vengono preservati e risolti con
+    `page.locator("aria-ref=eN")`;
+  - resta fallback legacy DOM/locator se lo snapshot AI fallisce;
+  - la risposta snapshot ora include `refsMode`, `snapshotFormat` e `stats`;
+  - `browser.act` continua a produrre snapshot fresco post-azione e ora ritorna
+    anche metadati di formato/ref.
+- Estesa la fixture browser locale:
+  - autocomplete stazione;
+  - date picker custom aperto da bottone;
+  - risultati asincroni post-click.
+- Aggiunto test sidecar che verifica il loop reale:
+  - snapshot AI;
+  - type su campo autocomplete via ref;
+  - nuovo snapshot con suggerimento;
+  - click suggerimento via `aria-ref`;
+  - click date picker;
+  - selezione data da snapshot aggiornato.
+- Aggiunto `crates/browser-automation/src/browser_loop.rs`:
+  - `BrowserLoopRequest`;
+  - `BrowserObservation`;
+  - `BrowserLoopDecision`;
+  - `BrowserLoopPlanner`;
+  - `BrowserLoopRunner`;
+  - `BrowserLoopIteration`;
+  - payload compatto per audit senza dump raw snapshot.
+- Il loop Rust impone il contratto corretto:
+  - opzionale `browser.open`;
+  - `browser.snapshot` con `snapshot_format=ai` e `refs_mode=aria`;
+  - una sola `browser.act` per iterazione;
+  - `snapshot_after=true` forzato dal runner;
+  - decisione successiva solo dopo nuova osservazione.
+- Verifiche:
+  - `npm run typecheck` in `runtimes/browser-automation`;
+  - `npm test` in `runtimes/browser-automation`: 31 test verdi;
+  - `cargo test -p local-first-browser-automation`: 20 test verdi;
+  - `cargo test -p local-first-desktop-gateway train -- --nocapture`: 8 test
+    train/gateway verdi.
+
+Perche': questo non completa ancora il task reale Trenitalia/Italo, ma cambia
+il basamento tecnico nel punto giusto. Ora il sidecar espone refs Playwright AI
+come OpenClaw e il core ha un runner che impedisce il vecchio errore
+"calcolo campi una volta e provo batch fill". Il prossimo passaggio e' cablare
+questo runner al gateway/Brain per sostituire il blocco legacy dentro
+`desktop-gateway/src/main.rs`.
+
+### Fase 105 - Gateway cablato al browser loop controller
+
+- Aggiunto `crates/desktop-gateway/src/browser_loop_controller.rs`.
+- Il modulo introduce `RuntimeBrowserLoopPlanner`:
+  - usa il runtime locale Gemma via `JsonRuntime`;
+  - costruisce un prompt operativo con goal, URL, snapshot AI corrente,
+    hash, ref mode e iterazioni recenti;
+  - il modello puo' restituire solo `act`, `complete` o `blocked`;
+  - la risposta viene validata prima di passare al browser;
+  - azioni ammesse: `click`, `type`, `press_key`, `select_option`, `scroll`,
+    `wait`;
+  - refs non presenti nello snapshot corrente vengono rifiutati.
+- Il gateway ora usa il nuovo percorso per task treno/browser quando
+  `LOCAL_FIRST_BROWSER_LOOP_CONTROLLER` non e' `0`/`false`.
+- Il percorso legacy resta disponibile disattivando:
+  `LOCAL_FIRST_BROWSER_LOOP_CONTROLLER=0`.
+- `execute_browser_loop_read_only_task`:
+  - avvia sidecar browser;
+  - usa `BrowserLoopRunner::from_client`;
+  - apre fonti con target id stabile;
+  - fa decidere una micro-azione per volta a Gemma;
+  - salva checkpoint compatti `browser_loop_iteration`;
+  - produce screenshot e piano operativo come prima;
+  - marca completion solo se il loop produce output o success criteria reali.
+- Verifiche:
+  - `cargo test -p local-first-desktop-gateway browser_loop_controller -- --nocapture`;
+  - `cargo test -p local-first-desktop-gateway`: 36 test verdi;
+  - `cargo test -p local-first-browser-automation`: 20 test verdi;
+  - `npm run typecheck` in `runtimes/browser-automation`;
+  - `npm test` in `runtimes/browser-automation`: 31 test verdi.
+- Stato runtime reale:
+  - Gemma non era inizialmente in ascolto su `127.0.0.1:8765`;
+  - avvio manuale con `.venv-mlx/bin/python runtimes/mlx-gemma4/server.py`;
+  - `/health` OK con modello non caricato;
+  - `/warmup` OK: `load_seconds=3.548`, `elapsed_seconds=4.742`;
+  - processo chiuso dopo la verifica per non lasciare runtime appesi.
+  - non e' ancora stato eseguito un test live sui siti reali con il planner
+    Gemma, perche' va fatto tramite gateway/app per salvare artifact e
+    timeline leggibili.
+
+Perche': questo e' il primo cablaggio reale del loop OpenClaw/Homun nel gateway.
+Il vecchio batch-fill non e' piu' il percorso principale per i task treno: il
+controller vede uno snapshot corrente, sceglie una sola azione, poi aspetta un
+nuovo snapshot prima di proseguire. Rimane da fare il test live con Gemma
+avviato e correggere il prompt/azioni sulla base degli artifact reali, non a
+tentativi ciechi.
+
+### Fase 106 - Test reale browser loop e primo task treno end-to-end
+
+- Eseguito test gateway reale con Gemma caldo e browser visibile su:
+  `Devo prenotare un treno Napoli Milano il 10 giugno verso le 9, trova opzioni ma non acquistare nulla`.
+- Prima prova fallita in modo utile:
+  - il task rimaneva `running` per troppo tempo;
+  - il planner inviava snapshot troppo grandi a Gemma;
+  - ogni decisione costava migliaia di token di prefill;
+  - il loop poteva chiudere una fonte senza opzioni reali.
+- Correzioni introdotte:
+  - snapshot decisionale compatto in `browser_loop_controller`;
+  - solo ultime tre iterazioni nel prompt planner;
+  - `browser.snapshot` AI limitato a `max_chars`;
+  - fonti treno ordinate prima su fonti dirette, poi ricerca web;
+  - TrovaTreno aperto con URL parametrizzato da draft tratta/data/ora;
+  - completion valida solo con opzioni treno verificate;
+  - fallback di estrazione righe risultato dallo snapshot quando il planner non
+    chiude esplicitamente ma i risultati sono visibili;
+  - pulizia delle righe risultato per non mostrare refs/snapshot raw o CTA di
+    acquisto.
+- Test reale finale:
+  - approval piano richiesta e approvata;
+  - browser ha aperto TrovaTreno con
+    `da=Napoli+Centrale`, `a=Milano+Centrale`, `data=2026-06-10`,
+    `ora=09:00`;
+  - risposta finale prodotta in chat con opzioni reali:
+    Frecciarossa 08:55, Italo 09:20, Frecciarossa 08:40, Frecciarossa 08:25,
+    Italo 08:20, Frecciarossa 09:55, Frecciarossa 09:56, Frecciarossa 07:45;
+  - nessun login, selezione treno, pagamento o acquisto;
+  - task queue finale vuota, nessuna approval pendente.
+- Verifiche:
+  - `cargo test -p local-first-desktop-gateway train -- --nocapture`;
+  - `cargo test -p local-first-desktop-gateway browser_loop_controller -- --nocapture`;
+  - `cargo test -p local-first-browser-automation browser_loop -- --nocapture`;
+  - test live gateway + Gemma + browser reale su dati TrovaTreno.
+
+Perche': questo e' il primo caso in cui il flusso operativo arriva davvero a
+una risposta utile end-to-end. Non e' ancora un agente browser generale:
+Trenitalia/Italo restano piu' fragili e il loop deve ancora avere progress
+streaming durante l'esecuzione. Pero' il criterio corretto e' ora stabilito:
+non si dichiara successo senza risultati reali e la risposta finale e' il
+centro dell'esperienza, con Computer locale come audit.
+
+### Fase 107 - Prova diretta via sistema su Trenitalia e ItaloTreno
+
+- Richiesta utente: testare tramite il nostro sistema, non con Playwright
+  esterno, due prompt separati:
+  - `Guarda direttamente su Trenitalia treni Napoli Milano il 10 giugno verso
+    le 9, trova opzioni ma non acquistare nulla`;
+  - `Guarda direttamente su ItaloTreno treni Napoli Milano il 10 giugno verso
+    le 9, trova opzioni ma non acquistare nulla`.
+- Primo problema trovato e corretto:
+  - i prompt con `Guarda direttamente su Trenitalia/ItaloTreno...` creavano un
+    piano browser corretto, ma `task_kind_for_prompt` li classificava come
+    `local_task`;
+  - risultato: il worker completava subito senza aprire browser;
+  - fix: `task_kind_for_prompt` e `resources_for_prompt` ora riconoscono
+    `trova opzioni`, `treno`, `trenitalia`, `italo`;
+  - test aggiunto in
+    `operational_prompt_prefilter_is_conservative_but_task_aware`.
+- Routing fonti:
+  - se il prompt cita solo Trenitalia, il target e' solo Trenitalia;
+  - se il prompt cita solo Italo/ItaloTreno, il target e' solo Italo;
+  - test aggiunto in `explicit_train_operator_request_uses_only_that_source`.
+- Test reale dopo il fix:
+  - Entrambi i task sono diventati `browser_task`;
+  - approvazione piano richiesta e approvata;
+  - nessun login, acquisto o pagamento.
+- Esito Trenitalia:
+  - aperto `https://www.trenitalia.com/`;
+  - il loop ha cliccato ripetutamente lo stesso ref (`e89`) senza progresso;
+  - poi ha digitato Napoli/Milano/data nello stesso ref (`e103`) invece di
+    avanzare sui campi giusti;
+  - dopo 10 iterazioni: `max browser loop iterations reached`;
+  - task concluso come `waiting_external_event`, senza inventare risultati.
+- Esito ItaloTreno:
+  - aperto `https://www.italotreno.com/it`;
+  - il loop ha iniziato a digitare partenza/arrivo;
+  - ha gestito cookie solo dopo alcuni input;
+  - ha cliccato ripetutamente lo stesso controllo search-like (`e118`);
+  - non ha gestito data/ora in modo affidabile;
+  - dopo 10 iterazioni: `max browser loop iterations reached`;
+  - task concluso come `waiting_external_event`, senza inventare risultati.
+- Verifiche:
+  - `cargo test -p local-first-desktop-gateway operational_prompt_prefilter_is_conservative_but_task_aware -- --nocapture`;
+  - `cargo test -p local-first-desktop-gateway train -- --nocapture`;
+  - test live gateway + Gemma + browser reale per Trenitalia e ItaloTreno.
+
+Perche': il test chiarisce il prossimo problema reale. Il loop generico ora
+parte sulla fonte richiesta, ma Gemma non basta come unico controller per form
+complessi: servono guardie deterministiche di progresso, riconoscimento campi
+per nome/ruolo, gestione cookie prima della compilazione, e step planner piu'
+vincolati per data/ora/autocomplete. TrovaTreno funziona perche' URL e risultati
+sono leggibili; Trenitalia/Italo richiedono adapter browser/form piu' solidi.
+
+### Fase 108 - Porting mirato del contratto browser OpenClaw
+
+- L'utente ha chiarito che OpenClaw funziona bene e che dobbiamo copiarne la
+  meccanica operativa, non continuare a fare tentativi casuali.
+- Analisi locale su `/tmp/openclaw`:
+  - licenza MIT;
+  - estensione browser basata su Playwright/CDP;
+  - snapshot AI/aria con ref persistenti;
+  - azioni validate (`click`, `type`, `fill`, `select`, `wait`, `batch`);
+  - snapshot dopo le azioni;
+  - stale-ref recovery esplicitata nelle skill;
+  - timeout bounded e guardie contro navigazioni/azioni pericolose;
+  - `urls=true` per includere link visibili nello snapshot quando serve
+    disambiguare la navigazione.
+- Porting fatto nel nostro runtime:
+  - il planner browser ora puo' usare `fill_form` con piu' campi visibili in
+    un'unica micro-azione;
+  - validazione lato gateway: ogni campo di `fill_form` deve avere ref presente
+    nello snapshot corrente e valore stringa;
+  - il prompt del controller esplicita che, davanti a piu' campi dello stesso
+    form, deve preferire `fill_form` invece di una sequenza fragile di `type`;
+  - il runner browser ora marca iterazioni `no_progress` quando URL e snapshot
+    hash non cambiano dopo un'azione;
+  - dopo due iterazioni senza progresso il loop si blocca con motivo esplicito,
+    invece di consumare tutte le iterazioni cliccando lo stesso controllo;
+  - snapshot browser supporta `urls=true`, appende i link visibili e accetta ref
+    Playwright non solo nel formato `eN`;
+  - il loop richiede snapshot AI con `urls=true`.
+  - il loop espone un observer per iterazione: il gateway ora salva checkpoint
+    Computer locale mentre l'azione avviene, non solo a fine fonte.
+- Test aggiunti:
+  - loop si ferma dopo azioni ripetute senza progresso;
+  - il controller accetta `fill_form` solo con ref correnti;
+  - il controller rifiuta `fill_form` con ref stale;
+  - il runtime browser include link visibili nello snapshot con `urls=true`.
+- Verifiche passate:
+  - `npm run typecheck` in `runtimes/browser-automation`;
+  - `npm test -- --run` in `runtimes/browser-automation` (32 test);
+  - `cargo test -p local-first-browser-automation --test browser_loop -- --nocapture`;
+  - `cargo test -p local-first-desktop-gateway browser_loop_controller -- --nocapture`;
+  - `cargo test -p local-first-desktop-gateway train -- --nocapture`.
+
+Perche': questo porta dentro il pezzo piu' importante del pattern OpenClaw:
+un browser tool con contratto stretto, snapshot freschi, ref validati e blocco
+esplicito quando non c'e' progresso. Non rende ancora Trenitalia/Italo
+production-ready, ma elimina il comportamento peggiore: loop ciechi e azioni
+monocampo quando il form espone piu' controlli compilabili.
+
+### Fase 109 - OpenClaw come riferimento browser principale
+
+- Chiarimento utente: OpenClaw funziona bene, e la licenza consente il riuso;
+  quindi non dobbiamo limitarci a prendere spunti superficiali.
+- Decisione registrata:
+  - `docs/decisions/0006-openclaw-browser-runtime-reference.md`;
+  - OpenClaw diventa il riferimento principale per il browser runtime;
+  - possiamo riusare metodologia e codice MIT, mantenendo notice/attribuzione
+    quando copiamo parti sostanziali.
+- Piano operativo registrato:
+  - `docs/plans/2026-05-28-openclaw-browser-parity.md`;
+  - sequenza: hardening sidecar, recovery rules, fixture parity tests, real-site
+    validation, UI/observability.
+- Roadmap aggiornata:
+  - il prossimo blocco non e' piu' "aggiungere euristiche sito-specifiche";
+  - il prossimo blocco e' parita' metodologica OpenClaw: action schema,
+    stale-ref recovery, cookie/banner preflight, tab hygiene, dialog blocker,
+    wait predicates bounded e extractor strutturati.
+
+Perche': serve una direzione unica. Il progetto nasce per essere piu' pulito di
+Homun, ma non deve reinventare un browser agent da zero quando OpenClaw ha gia'
+un modello libero e testato. Il vincolo resta: porting a slice, senza importare
+tutta la complessita' del loro plugin system.
+
+### Fase 110 - Primo slice di parita' OpenClaw nel runtime browser
+
+- Esteso il runtime browser Playwright con primitive operative piu' vicine a
+  OpenClaw:
+  - `hover`;
+  - `scroll_into_view`;
+  - `wait` con `text`, `textGone`, `selector`, `url`, `loadState`, timeout
+    bounded e delay bounded;
+  - `batch` con limite di profondita' e numero massimo di azioni.
+- Aggiunta normalizzazione errori nel sidecar:
+  - timeout classificato come `BROWSER_ACTION_TIMEOUT`;
+  - dialog come `BROWSER_DIALOG_BLOCKED`;
+  - ref stale resta `BROWSER_STALE_REF`;
+  - batch troppo grande/profondo come errore non retryable.
+- Il sidecar ora restituisce snapshot fresco anche dopo hover, scroll,
+  scroll-into-view, wait e batch, cosi' il loop non ragiona su DOM vecchio.
+- Aggiunto preflight sidecar per overlay cookie/consenso comuni:
+  - preferisce rifiuto/solo necessari quando disponibile;
+  - gestisce OneTrust (`#onetrust-reject-all-handler`,
+    `#onetrust-accept-btn-handler`) anche quando il banner non emerge come ref
+    utile nello snapshot AI;
+  - viene eseguito su open, navigate, snapshot e act.
+- Aggiornata la policy Rust:
+  - azioni osservative (`hover`, `scroll_into_view`, `wait`) non richiedono
+    approval;
+  - `batch` eredita approval se contiene azioni manuali come click o submit.
+- Aggiornato il browser loop:
+  - se un'azione fallisce con `BROWSER_STALE_REF`, il runner fa snapshot
+    immediato, registra `stale_ref_recovered` e continua con refs correnti;
+  - il prompt del controller ora spiega cookie/banner preflight, hover,
+    scroll_into_view e stale-ref recovery.
+- Test aggiunti:
+  - fixture browser per hover, scroll_into_view, rich wait e batch;
+  - fixture treni end-to-end con cookie banner, autocomplete stazioni, date
+    picker, time select, click Cerca, wait asincrono e opzioni estratte;
+  - fixture overlay OneTrust-like che dimostra che il click sull'elemento
+    sottostante non viene bloccato dal banner;
+  - policy Rust per azioni osservative e batch con click;
+  - recovery stale-ref nel browser loop;
+  - validazione controller per nuove azioni.
+- Diagnostica reale:
+  - Trenitalia espone oggi nello snapshot AI campi accessibili per partenza,
+    arrivo, andata, orario e CERCA;
+  - prima del preflight, il click sul suggerimento `Napoli Centrale` veniva
+    intercettato da OneTrust;
+  - dopo il preflight, la prova diretta su Trenitalia compila/seleziona
+    correttamente Napoli Centrale e Milano Centrale;
+  - Italo in headless ha fallito in apertura con `ERR_HTTP2_PROTOCOL_ERROR`,
+    quindi richiede fallback/profilo browser prima del form.
+- Verifiche passate:
+  - `npm run typecheck` in `runtimes/browser-automation`;
+  - `npm test -- --run` in `runtimes/browser-automation` (37 test);
+  - `cargo test -p local-first-browser-automation --test policy -- --nocapture`;
+  - `cargo test -p local-first-browser-automation --test browser_loop -- --nocapture`;
+  - `cargo test -p local-first-desktop-gateway browser_loop_controller -- --nocapture`;
+  - `cargo test -p local-first-desktop-gateway train -- --nocapture`.
+
+Perche': questo chiude il primo gap concreto emerso dalla comparazione con
+OpenClaw: il browser deve avere azioni granulari ma robuste, snapshot dopo ogni
+azione, errori interpretabili e recovery deterministica su ref stale. Non basta
+ancora per Trenitalia/Italo end-to-end: il prossimo pezzo e' completare data,
+orario, click CERCA ed estrazione opzioni su Trenitalia, poi introdurre fallback
+per Italo quando il browser headless viene rifiutato o chiude la connessione.
+
+### Fase 111 - Fallback automatico headless -> visible per siti che bloccano headless
+
+- Implementato fallback nel `BrowserSessionManager`:
+  - `browser.open` e `browser.navigate` provano prima con il profilo corrente;
+  - se il profilo assistant e' headless e la navigazione fallisce con errori di
+    protocollo/connessione tipici del blocco headless (`ERR_HTTP2_PROTOCOL_ERROR`,
+    `ERR_CONNECTION_RESET`, `ERR_EMPTY_RESPONSE`, ecc.), il runtime chiude il
+    contesto, riavvia l'assistant profile in visible e ritenta una sola volta;
+  - il risultato espone `headless: false` e `fallbackFromHeadless: true`.
+- Il fallback non si attiva su timeout generici: una pagina lenta non deve
+  aprire automaticamente una finestra visibile.
+- Allargato il dismiss overlay per cookie banner con solo pulsante `ACCETTA`.
+- Test aggiunti:
+  - classificazione errori headless-only;
+  - fixture overlay con pulsante `ACCETTA`.
+- Diagnostica reale Italo:
+  - prima falliva in headless con `ERR_HTTP2_PROTOCOL_ERROR`;
+  - ora apre in visible con `fallbackFromHeadless: true`;
+  - lo snapshot mostra campi `Parti da`, `Arriva a`, `Andata`, `Passeggeri` e
+    `Cerca`;
+  - il banner cookie viene rimosso (`hasCookie: false` nella prova).
+
+Perche': questo mantiene l'esperienza autonoma. Se un sito rifiuta headless, il
+sistema non deve fermarsi subito: deve passare a browser visibile, rendere
+osservabile il computer locale e continuare finche' resta entro i gate sicuri.
+
+### Fase 112 - Port metodologico OpenClaw del browser loop
+
+- Stop ai tentativi sito-specifici come percorso primario: con
+  `LOCAL_FIRST_BROWSER_LOOP_CONTROLLER` attivo, `browser_task` passa sempre dal
+  loop observe -> act -> observe; il vecchio executor read-only guidato da
+  euristiche resta solo fallback.
+- Allineato il contratto azioni del sidecar a OpenClaw:
+  - aggiunti nomi canonici `fill`, `select`, `press`, `scrollIntoView`,
+    `clickCoords`, `evaluate`, `resize`, `close`;
+  - mantenuti alias legacy (`fill_form`, `select_option`, `press_key`,
+    `scroll_into_view`) per compatibilita';
+  - `type` usa typing reale per supportare autocomplete; `fill` usa fill diretto
+    per campi stabili.
+- Allineato lo snapshot al modello OpenClaw:
+  - aggiunti `mode=efficient`, `interactive`, `compact`, `depth`;
+  - lo snapshot del browser loop ora include controlli interattivi compatti e
+    completi, non piu' filtrati da parole chiave come treni/date/prezzi;
+  - questo evita di perdere giorni di calendario, option menu o pulsanti non
+    previsti dalle euristiche.
+- Aggiornato il planner Rust:
+  - prompt OpenClaw-style: stable tab, latest refs, one action, narrow act,
+    blocker esplicito, niente login/dati personali/pagamenti senza gate;
+  - azioni ammesse canoniche e schema validato;
+  - validazione ref/selector per le azioni compatibili.
+- Verifiche passate:
+  - `npm run typecheck` in `runtimes/browser-automation`;
+  - `npm test -- --run` in `runtimes/browser-automation` (38 test);
+  - `cargo test -p local-first-browser-automation -- --nocapture`;
+  - `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway browser_loop_controller -- --nocapture`;
+  - `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway operational_prompt_prefilter_is_conservative_but_task_aware -- --nocapture`.
+
+Perche': il blocco reale non era "Trenitalia difficile", ma che stavamo ancora
+mescolando un loop agentico con euristiche specifiche. OpenClaw funziona perche'
+il modello riceve un contratto stabile e snapshot freschi, non perche' conosce
+un sito. Il prossimo test deve usare il nostro sistema con Gemma e verificare
+direttamente se il planner riesce a seguire questo contratto su Trenitalia e
+ItaloTreno; se fallisce, il punto da misurare sara' la capacita' del planner, non
+piu' la mancanza delle primitive browser.
+
+### Fase 113 - Fix warmup Gemma per browser loop
+
+- Il test reale diretto su Trenitalia del 28 maggio 2026 alle 15:30 non e'
+  fallito per il sito o per Playwright: il checkpoint
+  `browser_loop_source_failed` riportava `Connection refused` su
+  `http://127.0.0.1:8765/generate_json`.
+- Root cause: il browser loop usava Gemma come planner JSON ma non verificava
+  ne' avviava il runtime prima di chiamarlo; l'errore veniva poi presentato
+  all'utente come fonte non raggiungibile.
+- Modificato `crates/desktop-gateway/src/main.rs`:
+  - `generate_stream` fa `ensure_runtime_available` prima di chiamare
+    `/generate_stream`;
+  - `execute_browser_loop_read_only_task` aggiunge checkpoint
+    `planner_runtime_starting` e `planner_runtime_ready`;
+  - il task executor usa `ensure_runtime_available_for_task` sincrono prima di
+    avviare il browser loop;
+  - timeout di bootstrap runtime portato a 120s per non fallire durante il
+    primo caricamento a freddo del modello.
+- Modificato `crates/desktop-gateway/Cargo.toml` per abilitare
+  `reqwest/blocking`, necessario al worker sincrono.
+- Dopo un nuovo test, trovata una seconda root cause: il process registry
+  conservava uno snapshot `running` con PID morto (`2554`), quindi
+  `ensure_runtime_started` non rilanciava Gemma e restava fermo in attesa di
+  health.
+- Modificato `crates/process-manager/src/manager.rs`:
+  - per `RuntimeControlStatus::ManagedRunning` verifica lo snapshot reale del
+    supervisor;
+  - se il processo supervisionato non esiste e la porta runtime non e'
+    occupata, registra `Stopped` e avvia un nuovo processo;
+  - se esiste un listener esterno, evita duplicati.
+- Aggiunto test
+  `ensure_runtime_started_recovers_stale_running_snapshot_without_listener`.
+- Verifiche passate:
+  - `cargo test -p local-first-process-manager --test runtime_control -- --nocapture`;
+  - `cargo test -p local-first-desktop-gateway --bin local-first-desktop-gateway browser_loop_controller -- --nocapture`;
+  - `npm run typecheck` in `apps/desktop`.
+
+Perche': il sistema deve essere autonomo anche nel bootstrap dei propri pezzi
+locali. Se il planner non e' pronto, il task non deve mascherare il problema
+come fallimento del sito: deve avviare Gemma o mostrare un errore di runtime
+esplicito. Il prossimo test su Trenitalia deve distinguere runtime, planner e
+browser con checkpoint separati.

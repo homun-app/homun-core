@@ -3,24 +3,38 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import re
 import signal
 import threading
 import time
+from concurrent.futures import Future
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 
 
 DEFAULT_MODEL = "mlx-community/gemma-4-e4b-it-4bit"
 STARTED_AT = time.time()
+LOCAL_BROWSER_ORIGINS = [
+    "http://127.0.0.1:1420",
+    "http://localhost:1420",
+    "tauri://localhost",
+]
 
 
 app = FastAPI(title="Local Gemma 4 MLX Runtime", version="0.2.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=LOCAL_BROWSER_ORIGINS,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type"],
+)
 
 
 @dataclass
@@ -106,6 +120,11 @@ class GenerateRequest(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     wait_if_busy: bool = True
     request_timeout_seconds: float | None = Field(default=None, ge=0.0, le=3600.0)
+    request_id: str | None = Field(default=None, min_length=1, max_length=160)
+
+
+class CancelGenerationRequest(BaseModel):
+    request_id: str = Field(min_length=1, max_length=160)
 
 
 class GenerateJsonRequest(GenerateRequest):
@@ -114,6 +133,14 @@ class GenerateJsonRequest(GenerateRequest):
     json_schema: dict[str, Any] | None = Field(default=None, alias="schema")
     required_keys: list[str] = Field(default_factory=list)
     repair: bool = True
+
+
+class ClassifyIntentRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+    locale: str | None = None
+    max_tokens: int = Field(default=96, ge=1, le=512)
+    wait_if_busy: bool = True
+    request_timeout_seconds: float | None = Field(default=8.0, ge=0.0, le=120.0)
 
 
 class ToolCallRequest(GenerateRequest):
@@ -148,6 +175,7 @@ class GemmaRuntime:
         config: RuntimeConfig | None = None,
         loader: Any | None = None,
         generator: Any | None = None,
+        streamer: Any | None = None,
         template_applier: Any | None = None,
         tool_parser: Any | None = None,
     ):
@@ -155,6 +183,7 @@ class GemmaRuntime:
         self.model_name = self.config.model_name
         self.loader = loader
         self.generator = generator
+        self.streamer = streamer
         self.template_applier = template_applier
         self.tool_parser = tool_parser
         self.model = None
@@ -163,12 +192,47 @@ class GemmaRuntime:
         self.load_seconds = None
         self._lock = threading.Lock()
         self._generation_lock = threading.Lock()
+        self._cancelled_requests: set[str] = set()
+        self._cancelled_requests_lock = threading.Lock()
+        self._worker_queue: queue.Queue[tuple[Any, Future]] = queue.Queue()
+        self._worker_ready = threading.Event()
+        self._worker_thread_id: int | None = None
+        self._worker_thread = threading.Thread(
+            target=self._worker_loop,
+            name="gemma-mlx-worker",
+            daemon=True,
+        )
+        self._worker_thread.start()
+        self._worker_ready.wait(timeout=5)
 
     @property
     def loaded(self) -> bool:
         return self.model is not None and self.processor is not None
 
+    def _worker_loop(self) -> None:
+        self._worker_thread_id = threading.get_ident()
+        self._worker_ready.set()
+        while True:
+            fn, future = self._worker_queue.get()
+            try:
+                if future.set_running_or_notify_cancel():
+                    future.set_result(fn())
+            except BaseException as exc:
+                future.set_exception(exc)
+            finally:
+                self._worker_queue.task_done()
+
+    def _run_on_worker(self, fn: Any) -> Any:
+        if threading.get_ident() == self._worker_thread_id:
+            return fn()
+        future: Future = Future()
+        self._worker_queue.put((fn, future))
+        return future.result()
+
     def get_model(self):
+        return self._run_on_worker(self._get_model_on_worker)
+
+    def _get_model_on_worker(self):
         if self.loaded:
             return self.model, self.processor
 
@@ -186,6 +250,23 @@ class GemmaRuntime:
             self.load_seconds = round(time.perf_counter() - started, 3)
             self.loaded_at = time.time()
             return self.model, self.processor
+
+    def cancel_generation(self, request_id: str) -> bool:
+        with self._cancelled_requests_lock:
+            self._cancelled_requests.add(request_id)
+        return True
+
+    def _generation_cancelled(self, request_id: str | None) -> bool:
+        if request_id is None:
+            return False
+        with self._cancelled_requests_lock:
+            return request_id in self._cancelled_requests
+
+    def _clear_cancelled_generation(self, request_id: str | None) -> None:
+        if request_id is None:
+            return
+        with self._cancelled_requests_lock:
+            self._cancelled_requests.discard(request_id)
 
     def generate_text(
         self,
@@ -225,8 +306,99 @@ class GemmaRuntime:
             )
 
         try:
+            return self._run_on_worker(
+                lambda: self._generate_text_on_worker(
+                    prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    image=image,
+                    tools=tools,
+                )
+            )
+        finally:
+            self._generation_lock.release()
+
+    def _generate_text_on_worker(
+        self,
+        prompt: str,
+        *,
+        max_tokens: int,
+        temperature: float,
+        image: str | None,
+        tools: list[dict[str, Any]] | None,
+    ) -> dict[str, Any]:
+        model, processor = self._get_model_on_worker()
+        mx, apply_chat_template, generate = self._mlx_functions()
+        mx.reset_peak_memory()
+        prompt_kwargs: dict[str, Any] = {}
+        if tools is not None:
+            prompt_kwargs["tools"] = tools
+
+        formatted_prompt = apply_chat_template(
+            processor,
+            model.config,
+            prompt,
+            num_images=1 if image else 0,
+            **prompt_kwargs,
+        )
+
+        started = time.perf_counter()
+        result = generate(
+            model,
+            processor,
+            formatted_prompt,
+            image=image,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            verbose=False,
+        )
+        elapsed = time.perf_counter() - started
+        return {
+            "text": result.text.strip(),
+            "metrics": metrics_from_result(result, elapsed),
+        }
+
+    def stream_text(
+        self,
+        prompt: str,
+        *,
+        max_tokens: int,
+        temperature: float = 0.0,
+        image: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        wait_if_busy: bool | None = None,
+        request_timeout_seconds: float | None = None,
+        request_id: str | None = None,
+    ):
+        timeout = self.config.default_request_timeout_seconds
+        if request_timeout_seconds is not None:
+            timeout = request_timeout_seconds
+        if timeout <= 0:
+            raise RuntimeServiceError(
+                "request_timeout",
+                "Request deadline expired before generation started",
+                status_code=408,
+                retryable=True,
+            )
+
+        wait = wait_if_busy
+        if wait is None:
+            wait = not self.config.reject_when_busy
+        if wait:
+            acquired = self._generation_lock.acquire(timeout=timeout)
+        else:
+            acquired = self._generation_lock.acquire(blocking=False)
+        if not acquired:
+            raise RuntimeServiceError(
+                "runtime_busy",
+                "Runtime is busy",
+                status_code=429,
+                retryable=True,
+            )
+
+        try:
             model, processor = self.get_model()
-            mx, apply_chat_template, generate = self._mlx_functions()
+            mx, apply_chat_template, stream_generate = self._mlx_stream_functions()
             mx.reset_peak_memory()
             prompt_kwargs: dict[str, Any] = {}
             if tools is not None:
@@ -241,7 +413,9 @@ class GemmaRuntime:
             )
 
             started = time.perf_counter()
-            result = generate(
+            text = ""
+            last_response = None
+            for response in stream_generate(
                 model,
                 processor,
                 formatted_prompt,
@@ -249,15 +423,31 @@ class GemmaRuntime:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 verbose=False,
-            )
-            elapsed = time.perf_counter() - started
-        finally:
-            self._generation_lock.release()
+            ):
+                if self._generation_cancelled(request_id):
+                    yield {
+                        "type": "error",
+                        "code": "generation_cancelled",
+                        "message": "Generation cancelled by user",
+                    }
+                    return
+                delta = response.text
+                if delta:
+                    text += delta
+                    yield {"type": "delta", "text": delta}
+                last_response = response
 
-        return {
-            "text": result.text.strip(),
-            "metrics": metrics_from_result(result, elapsed),
-        }
+            elapsed = time.perf_counter() - started
+            if last_response is None:
+                last_response = empty_generation_result()
+            yield {
+                "type": "done",
+                "text": text.strip(),
+                "metrics": metrics_from_result(last_response, elapsed),
+            }
+        finally:
+            self._clear_cancelled_generation(request_id)
+            self._generation_lock.release()
 
     def parse_tool_call(self, text: str) -> dict[str, Any]:
         if self.tool_parser is None:
@@ -279,6 +469,25 @@ class GemmaRuntime:
         import mlx.core as mx
 
         return mx, self.template_applier, self.generator
+
+    def _mlx_stream_functions(self):
+        if self.streamer is None:
+            from mlx_vlm.generate import stream_generate
+
+            self.streamer = stream_generate
+        if self.template_applier is None:
+            from mlx_vlm import apply_chat_template
+
+            self.template_applier = apply_chat_template
+
+        try:
+            import mlx.core as mx
+        except ModuleNotFoundError:
+            if self.streamer is None:
+                raise
+            mx = type("MxStub", (), {"reset_peak_memory": staticmethod(lambda: None)})
+
+        return mx, self.template_applier, self.streamer
 
 
 runtime = GemmaRuntime(config=RuntimeConfig.from_env())
@@ -309,6 +518,24 @@ def health() -> dict[str, Any]:
     }
 
 
+def warmup_payload(target_runtime: GemmaRuntime) -> dict[str, Any]:
+    started = time.perf_counter()
+    target_runtime.get_model()
+    return {
+        "ok": True,
+        "model": target_runtime.model_name,
+        "loaded": target_runtime.loaded,
+        "load_seconds": target_runtime.load_seconds,
+        "elapsed_seconds": round(time.perf_counter() - started, 3),
+        "local_first": True,
+    }
+
+
+@app.post("/warmup")
+def warmup() -> dict[str, Any]:
+    return warmup_payload(runtime)
+
+
 @app.post("/generate")
 def generate(request: GenerateRequest) -> dict[str, Any]:
     return runtime.generate_text(
@@ -320,9 +547,42 @@ def generate(request: GenerateRequest) -> dict[str, Any]:
     )
 
 
+@app.post("/generate_stream")
+def generate_stream(request: GenerateRequest) -> StreamingResponse:
+    def events():
+        for event in runtime.stream_text(
+            request.prompt,
+            max_tokens=request.max_tokens,
+            temperature=request.temperature,
+            wait_if_busy=request.wait_if_busy,
+            request_timeout_seconds=request.request_timeout_seconds,
+            request_id=request.request_id,
+        ):
+            yield json.dumps(event, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(events(), media_type="application/x-ndjson")
+
+
+@app.post("/cancel_generation")
+def cancel_generation(request: CancelGenerationRequest) -> dict[str, Any]:
+    return {"cancelled": runtime.cancel_generation(request.request_id)}
+
+
 @app.post("/generate_json")
 def generate_json(request: GenerateJsonRequest) -> dict[str, Any]:
     return generate_json_response(request)
+
+
+@app.post("/classify_intent")
+def classify_intent(request: ClassifyIntentRequest) -> dict[str, Any]:
+    generated = runtime.generate_text(
+        build_intent_classification_prompt(request.text, locale=request.locale),
+        max_tokens=request.max_tokens,
+        temperature=0.0,
+        wait_if_busy=request.wait_if_busy,
+        request_timeout_seconds=request.request_timeout_seconds,
+    )
+    return validated_intent_classification_response(generated)
 
 
 @app.post("/tool_call")
@@ -469,6 +729,104 @@ def generate_json_response(request: GenerateJsonRequest) -> dict[str, Any]:
         required_keys=request.required_keys,
         repair_source=request if request.repair else None,
     )
+
+
+def build_intent_classification_prompt(text: str, *, locale: str | None = None) -> str:
+    locale_hint = f"Locale hint: {locale}\n" if locale else ""
+    return (
+        "Classify this assistant request. Output ONLY one minified JSON object, no markdown.\n"
+        f"{locale_hint}"
+        "Routes: direct_answer, local_time, local_calculation, needs_planning, ask_clarification, refuse. "
+        "Use needs_planning for browser, shell, connectors, memory, automation, bookings, or multi-step work. "
+        "Never copy the raw request.\n"
+        "Shapes:\n"
+        '{"route":"local_time","calculation_left":null,"calculation_operator":null,"calculation_right":null}\n'
+        '{"route":"local_calculation","calculation_left":6,"calculation_operator":"*","calculation_right":3}\n'
+        '{"route":"needs_planning","summary":"short safe summary","calculation_left":null,"calculation_operator":null,"calculation_right":null}\n'
+        '{"route":"direct_answer","answer":"short answer","calculation_left":null,"calculation_operator":null,"calculation_right":null}\n'
+        "For math, operator must be +, -, *, or /.\n"
+        f"Request: {text}"
+    )
+
+
+def intent_classification_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "required": [
+            "route",
+            "calculation_left",
+            "calculation_operator",
+            "calculation_right",
+        ],
+        "properties": {
+            "route": {
+                "type": "string",
+                "enum": [
+                    "direct_answer",
+                    "local_time",
+                    "local_calculation",
+                    "needs_planning",
+                    "ask_clarification",
+                    "refuse",
+                ],
+            },
+            "answer": {"type": ["string", "null"]},
+            "question": {"type": ["string", "null"]},
+            "summary": {"type": ["string", "null"]},
+            "reason": {"type": ["string", "null"]},
+            "confidence": {"type": ["number", "null"]},
+            "calculation_left": {"type": ["integer", "null"]},
+            "calculation_operator": {
+                "type": ["string", "null"],
+                "enum": [
+                    "+",
+                    "-",
+                    "*",
+                    "/",
+                    "add",
+                    "subtract",
+                    "multiply",
+                    "divide",
+                    "plus",
+                    "minus",
+                    "times",
+                    "x",
+                    None,
+                ],
+            },
+            "calculation_right": {"type": ["integer", "null"]},
+        },
+    }
+
+
+def validated_intent_classification_response(generated: dict[str, Any]) -> dict[str, Any]:
+    output, errors = parse_and_validate_json(generated["text"])
+    if isinstance(output, dict):
+        for key in (
+            "calculation_left",
+            "calculation_operator",
+            "calculation_right",
+        ):
+            output.setdefault(key, None)
+        errors = validate_json_payload(
+            output,
+            schema=intent_classification_schema(),
+            required_keys=[
+                "route",
+                "calculation_left",
+                "calculation_operator",
+                "calculation_right",
+            ],
+        )
+
+    return {
+        "valid": not errors,
+        "errors": errors,
+        "json": output,
+        "raw_output": generated["text"],
+        "repaired": False,
+        "metrics": generated["metrics"],
+    }
 
 
 def validated_json_response(
@@ -648,6 +1006,20 @@ def metrics_from_result(result: Any, elapsed_seconds: float) -> dict[str, Any]:
         "peak_memory_gb": round(result.peak_memory, 3),
         "elapsed_seconds": round(elapsed_seconds, 3),
     }
+
+
+def empty_generation_result() -> Any:
+    return type(
+        "EmptyGenerationResult",
+        (),
+        {
+            "prompt_tokens": 0,
+            "generation_tokens": 0,
+            "prompt_tps": 0.0,
+            "generation_tps": 0.0,
+            "peak_memory": 0.0,
+        },
+    )()
 
 
 def benchmark_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:

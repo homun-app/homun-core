@@ -62,11 +62,23 @@ impl BrowserPolicy {
         }
         let kind = params.get("kind").and_then(Value::as_str).unwrap_or("");
         let requires_approval = match kind {
-            "click" | "close" => true,
+            "click" | "clickCoords" | "close" => true,
             "type" => params
                 .get("submit")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            "press" => params
+                .get("key")
+                .and_then(Value::as_str)
+                .is_some_and(is_submit_key),
+            "press_key" => params
+                .get("text")
+                .and_then(Value::as_str)
+                .is_some_and(is_submit_key),
+            "batch" => params
+                .get("actions")
+                .and_then(Value::as_array)
+                .is_some_and(|actions| actions.iter().any(action_requires_approval)),
             _ => false,
         };
         if !requires_approval {
@@ -79,6 +91,20 @@ impl BrowserPolicy {
             explanation: format!("browser action requires approval before execution: {kind}"),
         }
     }
+}
+
+fn action_requires_approval(params: &Value) -> bool {
+    matches!(
+        BrowserPolicy::default().classify_tool_call(BrowserMethod::Act, params),
+        BrowserActionDecision::NeedsApproval { .. }
+    )
+}
+
+fn is_submit_key(value: &str) -> bool {
+    matches!(
+        value.to_ascii_lowercase().as_str(),
+        "enter" | "numenter" | "return"
+    )
 }
 
 struct SimpleUrl<'a> {

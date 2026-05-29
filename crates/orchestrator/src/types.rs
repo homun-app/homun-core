@@ -21,6 +21,14 @@ pub struct OrchestratorBudgets {
     pub max_tool_search_rounds: usize,
     pub max_steps: usize,
     pub max_planner_tokens: u32,
+    #[serde(default = "default_max_conversation_summary_chars")]
+    pub max_conversation_summary_chars: usize,
+    #[serde(default = "default_max_memory_context_chars")]
+    pub max_memory_context_chars: usize,
+    #[serde(default = "default_max_tool_cards_context_chars")]
+    pub max_tool_cards_context_chars: usize,
+    #[serde(default = "default_max_loaded_tool_context_chars")]
+    pub max_loaded_tool_context_chars: usize,
 }
 
 impl Default for OrchestratorBudgets {
@@ -30,8 +38,28 @@ impl Default for OrchestratorBudgets {
             max_tool_search_rounds: 1,
             max_steps: 8,
             max_planner_tokens: 768,
+            max_conversation_summary_chars: default_max_conversation_summary_chars(),
+            max_memory_context_chars: default_max_memory_context_chars(),
+            max_tool_cards_context_chars: default_max_tool_cards_context_chars(),
+            max_loaded_tool_context_chars: default_max_loaded_tool_context_chars(),
         }
     }
+}
+
+fn default_max_conversation_summary_chars() -> usize {
+    1_200
+}
+
+fn default_max_memory_context_chars() -> usize {
+    2_000
+}
+
+fn default_max_tool_cards_context_chars() -> usize {
+    2_400
+}
+
+fn default_max_loaded_tool_context_chars() -> usize {
+    3_200
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -56,6 +84,21 @@ pub struct OrchestratorAudit {
     pub enqueued_task_count: usize,
     pub subagent_task_count: usize,
     pub planner_rounds: usize,
+    pub context_budget: Vec<ContextBudgetUsage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ContextBudgetUsage {
+    pub label: String,
+    pub kind: String,
+    pub compressed: bool,
+    pub redacted: bool,
+    pub input_chars: usize,
+    pub output_chars: usize,
+    pub estimated_input_tokens: usize,
+    pub estimated_output_tokens: usize,
+    pub compression_ratio: f64,
+    pub redaction_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

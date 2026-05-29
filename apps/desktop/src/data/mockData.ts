@@ -39,15 +39,9 @@ export const chatMessages: ChatMessage[] = [
   {
     id: "m1",
     role: "assistant",
-    text: "Sono pronto. Scrivi un prompt: per ora posso eseguire controlli locali semplici e registrare tutto nella sessione Computer locale.",
+    text: "Sono pronto. Scrivimi pure: rispondo con Gemma locale.",
     timestamp: "ora",
-    metadata: "Tauri core locale, nessuna API cloud",
-  },
-  {
-    id: "m2",
-    role: "system",
-    text: "Composer cablato al core locale. Il Brain operativo verra' collegato nel prossimo layer.",
-    timestamp: "ora",
+    metadata: "Gemma locale",
   },
 ];
 
@@ -109,6 +103,30 @@ export const brainRun: BrainRunDetail = {
   plannerRounds: 2,
   loadedTools: 5,
   memoryRefs: ["memory:user:workspace:acme", "memory:user:workspace:routine"],
+  contextBudget: [
+    {
+      label: "memory_context",
+      compressed: true,
+      redacted: true,
+      inputChars: 8420,
+      outputChars: 1870,
+      estimatedInputTokens: 2105,
+      estimatedOutputTokens: 468,
+      compressionRatio: 0.22,
+      redactionCount: 2,
+    },
+    {
+      label: "loaded_tool_details",
+      compressed: true,
+      redacted: false,
+      inputChars: 5340,
+      outputChars: 2980,
+      estimatedInputTokens: 1335,
+      estimatedOutputTokens: 745,
+      compressionRatio: 0.56,
+      redactionCount: 0,
+    },
+  ],
   steps: [
     {
       id: "context",

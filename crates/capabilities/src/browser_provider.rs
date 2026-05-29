@@ -43,7 +43,11 @@ impl<T: BrowserTransport> CapabilityProvider for BrowserCapabilityProvider<T> {
     fn list_tools(&self) -> CapabilityResult<Vec<CapabilityTool>> {
         Ok(vec![
             tool("browser.health", ActionClass::Read, "Browser health"),
-            tool("browser.profiles", ActionClass::Read, "List browser profiles"),
+            tool(
+                "browser.profiles",
+                ActionClass::Read,
+                "List browser profiles",
+            ),
             tool("browser.tabs", ActionClass::Read, "List browser tabs"),
             tool(
                 "browser.snapshot",

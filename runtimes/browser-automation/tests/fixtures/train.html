@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <title>Train Search Fixture</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 32px;
+      }
+      label {
+        display: block;
+        margin: 16px 0;
+      }
+      input,
+      select,
+      button {
+        font: inherit;
+      }
+      #cookie-banner {
+        position: fixed;
+        inset: auto 24px 24px 24px;
+        padding: 16px;
+        background: white;
+        border: 1px solid #ddd;
+        box-shadow: 0 12px 40px rgb(0 0 0 / 18%);
+      }
+      #results {
+        margin-top: 24px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Cerca treni</h1>
+      <form id="search-form">
+        <label>
+          Da
+          <input id="from" aria-label="Da" autocomplete="off" />
+        </label>
+        <div id="from-options" aria-label="Suggerimenti partenza"></div>
+
+        <label>
+          A
+          <input id="to" aria-label="A" autocomplete="off" />
+        </label>
+        <div id="to-options" aria-label="Suggerimenti arrivo"></div>
+
+        <button id="date-button" type="button">Scegli data</button>
+        <div id="calendar" role="dialog" aria-label="Calendario" hidden>
+          <button type="button" data-date="10 giugno 2026">10 giugno 2026</button>
+          <button type="button" data-date="11 giugno 2026">11 giugno 2026</button>
+        </div>
+
+        <label>
+          Ora
+          <select id="time" aria-label="Ora">
+            <option value="08:00">08:00</option>
+            <option value="09:00">09:00</option>
+            <option value="10:00">10:00</option>
+          </select>
+        </label>
+
+        <button id="search" type="button">Cerca</button>
+      </form>
+
+      <section id="results" aria-live="polite"></section>
+    </main>
+
+    <section id="cookie-banner" aria-label="Cookie">
+      <p>Usiamo cookie tecnici per la ricerca.</p>
+      <button id="accept-cookies" type="button">Accetta tutto</button>
+    </section>
+
+    <script>
+      const stations = {
+        from: ["Napoli Centrale", "Napoli Afragola"],
+        to: ["Milano Centrale", "Milano Rogoredo"],
+      };
+
+      document.querySelector("#accept-cookies").addEventListener("click", () => {
+        document.querySelector("#cookie-banner").hidden = true;
+      });
+
+      function wireAutocomplete(inputId, optionsId, values) {
+        const input = document.querySelector(`#${inputId}`);
+        const options = document.querySelector(`#${optionsId}`);
+        input.addEventListener("input", () => {
+          options.innerHTML = "";
+          if (!input.value.trim()) {
+            return;
+          }
+          for (const value of values) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.textContent = value;
+            button.addEventListener("click", () => {
+              input.value = value;
+              options.innerHTML = "";
+            });
+            options.appendChild(button);
+          }
+        });
+      }
+
+      wireAutocomplete("from", "from-options", stations.from);
+      wireAutocomplete("to", "to-options", stations.to);
+
+      document.querySelector("#date-button").addEventListener("click", () => {
+        document.querySelector("#calendar").hidden = false;
+      });
+
+      for (const button of document.querySelectorAll("[data-date]")) {
+        button.addEventListener("click", () => {
+          document.querySelector("#date-button").textContent = button.dataset.date;
+          document.querySelector("#calendar").hidden = true;
+        });
+      }
+
+      document.querySelector("#search").addEventListener("click", () => {
+        const results = document.querySelector("#results");
+        results.textContent = "Caricamento risultati";
+        setTimeout(() => {
+          results.innerHTML = `
+            <h2>Risultati Napoli Centrale - Milano Centrale</h2>
+            <ul>
+              <li>FR 9512 - 09:05 - 4h 35m - €49.90</li>
+              <li>Italo 9920 - 09:30 - 4h 45m - €52.90</li>
+            </ul>
+          `;
+        }, 700);
+      });
+    </script>
+  </body>
+</html>

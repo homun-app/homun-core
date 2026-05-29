@@ -36,6 +36,9 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await manager?.stop();
+  if (server) {
+    server.closeAllConnections();
+  }
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
@@ -77,6 +80,28 @@ describe("browser production methods", () => {
     });
     await manager.closeTab({ targetId: "advanced" });
     await expect(manager.tabs()).resolves.toEqual([]);
+  });
+
+  it("recovers a target whose page was lost mid-loop instead of failing hard", async () => {
+    await manager.start();
+    await manager.open({ url: baseUrl, label: "advanced" });
+    await manager.snapshot({ targetId: "advanced" });
+
+    // Simulate the site killing the page mid-loop (popup/crash/closed target):
+    // the previous page handle is dead, but the loop keeps issuing actions.
+    const lostPage = (manager as unknown as { pages: Map<string, { page: { close(): Promise<void> } }> })
+      .pages.get("advanced")!.page;
+    await lostPage.close();
+
+    // The next observation must transparently re-open the target rather than
+    // throwing BROWSER_TAB_NOT_FOUND and aborting the whole task.
+    const recovered = await manager.snapshot({ targetId: "advanced" });
+    expect(recovered.url).toContain("127.0.0.1");
+    const logButton = recovered.refs.find((ref) => ref.name === "Log event");
+    expect(logButton).toBeDefined();
+    await expect(
+      manager.act({ targetId: "advanced", kind: "click", ref: logButton!.ref }),
+    ).resolves.toMatchObject({ ok: true });
   });
 
   it("responds to dialogs raised by page actions", async () => {

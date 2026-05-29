@@ -27,10 +27,11 @@ fn skill_runtime_completes_through_capability_task_executor() {
     let provider = SkillRuntimeCapabilityProvider::new(manifest.clone(), runner);
     let mut facade = CapabilityFacade::new(CapabilityPolicy::new(), InMemoryCapabilityAudit::new());
     facade.register_provider(provider);
-    let context = CapabilityProviderGrant::new(provider_id.clone(), user.clone(), workspace.clone())
-        .with_privacy_domains(vec!["work".to_string()])
-        .with_allowed_actions(vec![ActionClass::Read])
-        .with_max_autonomy_level(0);
+    let context =
+        CapabilityProviderGrant::new(provider_id.clone(), user.clone(), workspace.clone())
+            .with_privacy_domains(vec!["work".to_string()])
+            .with_allowed_actions(vec![ActionClass::Read])
+            .with_max_autonomy_level(0);
     let policy_context = local_first_capabilities::PolicyContext {
         user_id: user,
         workspace_id: workspace,

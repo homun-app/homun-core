@@ -44,9 +44,10 @@ impl BrowserSidecarSession {
             .stdin
             .take()
             .ok_or_else(|| BrowserAutomationError::Sidecar("missing sidecar stdin".to_string()))?;
-        let stdout = child.stdout.take().ok_or_else(|| {
-            BrowserAutomationError::Sidecar("missing sidecar stdout".to_string())
-        })?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| BrowserAutomationError::Sidecar("missing sidecar stdout".to_string()))?;
         Ok(Self {
             child: RefCell::new(child),
             stdin: RefCell::new(stdin),

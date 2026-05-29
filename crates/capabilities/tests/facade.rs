@@ -67,6 +67,66 @@ fn facade_executes_allowed_tool_and_records_redacted_audit() {
 }
 
 #[test]
+fn facade_compresses_large_tool_results_in_audit_payload() {
+    let mut provider = FakeCapabilityProvider::new(
+        ProviderId::new("github"),
+        CapabilityProviderKind::Native,
+        true,
+        None,
+        vec![tool("github.search", ActionClass::Read)],
+    );
+    provider.set_tool_response(
+        "github.search",
+        serde_json::json!({
+            "ok": true,
+            "items": (0..120).map(|index| serde_json::json!({
+                "title": format!("warning: repeated noisy line {index}"),
+                "body": "long body ".repeat(20)
+            })).collect::<Vec<_>>(),
+            "access_token": "secret-token",
+            "final": "error: important failure"
+        }),
+    );
+    let mut facade = test_facade();
+    facade.register_provider(provider);
+
+    let result = facade
+        .call_tool(
+            &policy_context(false),
+            CapabilityCall {
+                provider_id: ProviderId::new("github"),
+                tool_name: "github.search".to_string(),
+                arguments: serde_json::json!({"query": "bug"}),
+            },
+        )
+        .unwrap();
+
+    assert_eq!(result.output["ok"], true);
+    let events = facade.audit().events();
+    let audit_result = &events[0].payload["result"];
+    assert_eq!(audit_result["compressed"], true);
+    assert!(
+        audit_result["text"]
+            .as_str()
+            .unwrap()
+            .contains("context compressed")
+    );
+    assert!(
+        audit_result["text"]
+            .as_str()
+            .unwrap()
+            .contains("[REDACTED]")
+    );
+    assert!(
+        !audit_result["text"]
+            .as_str()
+            .unwrap()
+            .contains("secret-token")
+    );
+    assert_eq!(audit_result["metrics"]["input_chars"].is_number(), true);
+}
+
+#[test]
 fn facade_denies_managed_tool_without_cloud_permission() {
     let mut facade = test_facade();
     facade.register_provider(FakeCapabilityProvider::new(

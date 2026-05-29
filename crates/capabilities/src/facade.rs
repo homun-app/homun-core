@@ -3,6 +3,9 @@ use crate::{
     CapabilityError, CapabilityPolicy, CapabilityProvider, CapabilityResult, CapabilityTool,
     InMemoryCapabilityAudit, PolicyContext, ProviderId, UserId, WorkspaceId,
 };
+use local_first_context_compression::{
+    CompressionPolicy, ContextCompressor, ContextItem, ContextKind,
+};
 
 pub struct CapabilityFacade {
     policy: CapabilityPolicy,
@@ -135,7 +138,7 @@ impl CapabilityFacade {
             decision: "allowed".to_string(),
             payload: serde_json::json!({
                 "arguments": call.arguments,
-                "result": result.output,
+                "result": audit_tool_result_payload(&result.output),
             }),
         });
         Ok(result)
@@ -153,6 +156,30 @@ impl CapabilityFacade {
                 ))
             })
     }
+}
+
+fn audit_tool_result_payload(output: &serde_json::Value) -> serde_json::Value {
+    const MAX_AUDIT_RESULT_CHARS: usize = 2_000;
+
+    let Ok(raw) = serde_json::to_string(output) else {
+        return serde_json::json!({
+            "compressed": true,
+            "text": "[unserializable tool output]",
+        });
+    };
+    if raw.chars().count() <= MAX_AUDIT_RESULT_CHARS {
+        return output.clone();
+    }
+
+    let compressed = ContextCompressor::default().compress(
+        &ContextItem::new(ContextKind::ToolJson, raw),
+        &CompressionPolicy::for_kind(ContextKind::ToolJson).with_max_chars(MAX_AUDIT_RESULT_CHARS),
+    );
+    serde_json::json!({
+        "compressed": true,
+        "text": compressed.text,
+        "metrics": compressed.metrics,
+    })
 }
 
 fn error_from_denial(reasons: Vec<String>) -> CapabilityError {

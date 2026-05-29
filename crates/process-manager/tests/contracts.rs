@@ -26,7 +26,10 @@ fn process_spec_serializes_stable_contracts() {
     assert_eq!(json["id"], "llm-runtime");
     assert_eq!(json["kind"], "llm_runtime");
     assert_eq!(json["command"], ".venv-mlx/bin/python");
-    assert_eq!(json["args"], serde_json::json!(["runtimes/mlx-gemma4/server.py"]));
+    assert_eq!(
+        json["args"],
+        serde_json::json!(["runtimes/mlx-gemma4/server.py"])
+    );
     assert_eq!(json["env"]["PYTHONUNBUFFERED"], "1");
     assert_eq!(json["cwd"], "/tmp/workspace");
     assert_eq!(json["health_check"]["type"], "http_get");

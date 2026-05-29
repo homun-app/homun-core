@@ -20,6 +20,17 @@ Task Runtime, Resource Governor, Approval Gate o privacy policy.
 - Browser, shell, MCP, connettori, skill e subagenti condividono code,
   checkpoint, approval e risorse.
 - L'auto-apprendimento arriva dopo eventi reali affidabili.
+- La chat experience e' fondazione di prodotto: non e' polish finale. Markdown,
+  codice, allegati, azioni messaggio, streaming e activity progressive
+  disclosure devono essere solidi prima di cablare altri tool complessi.
+- Lo streaming chat non deve dipendere da IPC desktop. La shell desktop e'
+  Electron/Chromium e la chat deve passare a un Desktop HTTP Gateway Rust
+  locale, protetto e loopback-only. Il gateway costruisce gia' il prompt con
+  context compression Rust, proxy stream/cancel verso Gemma, espone
+  health/warmup/shutdown runtime, persiste thread/messaggi in SQLite locale e
+  protegge `/api/chat/*` e `/api/runtime/*` con token bearer locale + CORS
+  allowlist; warmup usa il ProcessManager per avviare Gemma se non e' in
+  ascolto. Restano packaging, diagnostica runtime e poi il Brain operativo.
 - Ogni fase aggiorna `docs/work-memory.md`; se cambia architettura o ordine,
   aggiorna anche `docs/architecture/system-map.md` e questo file.
 
@@ -27,7 +38,8 @@ Task Runtime, Resource Governor, Approval Gate o privacy policy.
 
 ```mermaid
 flowchart TD
-  F0["Fase 0: Mappa e contratti"] --> F1["Fase 1: Executor task pianificati"]
+  F0["Fase 0: Mappa e contratti"] --> F0_5["Fase 0.5: Chat Experience Foundation + HTTP Gateway"]
+  F0_5 --> F1["Fase 1: Executor task pianificati"]
   F1 --> F2["Fase 2: UI task e approval reali"]
   F2 --> F3["Fase 3: Local Computer live"]
   F3 --> F4["Fase 4: Browser automation end-to-end"]
@@ -64,6 +76,132 @@ Gate di chiusura:
 - nessun placeholder;
 - roadmap coerente con `PROJECT.md`.
 
+## Fase 0.5 - Chat Experience Foundation
+
+Stato: in corso. Primo slice implementato con `RichMessage` per Markdown, GFM,
+codice, tabelle e Mermaid. Dopo test reali, Tauri/WKWebView e' stato rimosso
+dalla shell desktop: lo stesso frontend in Electron/Chromium streamma in modo
+fluido. Il Desktop HTTP Gateway Rust autonomo esiste in `crates/desktop-gateway`
+e ora possiede prompt building, stream/cancel, runtime health/warmup/shutdown,
+autostart via ProcessManager e thread/messaggi persistenti. Restano composer
+avanzato, allegati completi, action bar, suggestion, benchmark UI, packaging
+gateway/runtime e diagnostica.
+
+Obiettivo:
+
+- rendere la chat abbastanza solida da testare davvero ogni funzione successiva;
+- evitare che tool, browser, subagenti o memoria sembrino confusi per limiti
+  della superficie conversazionale;
+- adottare i pattern assistant-ui utili senza importare la CLI shadcn/Tailwind
+  come dipendenza architetturale.
+
+Componenti:
+
+- `apps/desktop/src/components/ChatView.tsx`
+- `apps/desktop/src/components/RichMessage.tsx`
+- `apps/desktop/src/components` nuovi componenti dedicati per Composer,
+  MessageActions, Attachments e Suggestions
+- `apps/desktop/src/lib/coreBridge.ts`
+- nuovo client `apps/desktop/src/lib/chatApi.ts`
+- `apps/desktop/electron`
+- nuovo crate/processo Rust gateway locale, probabilmente basato su `axum`/`tokio`
+
+Deliverable:
+
+- renderer messaggi ricco:
+  - Markdown;
+  - GitHub Flavored Markdown;
+  - tabelle;
+  - codice inline;
+  - code block con copia;
+  - Mermaid;
+  - link sicuri;
+  - HTML sanitizzato.
+- renderer streaming-aware:
+  - Mermaid renderizzato solo a blocco/messaggio completo;
+  - code block incompleti leggibili durante lo stream;
+  - scroll stabile durante risposte lunghe.
+- Desktop Chat HTTP Gateway:
+  - bind solo su `127.0.0.1`;
+  - token locale per sessione app;
+  - CORS ristretto alle origini localhost/Electron della app;
+  - `GET /api/health`;
+  - thread e messaggi via HTTP;
+  - `POST /messages/stream` con NDJSON/SSE;
+  - cancel per `request_id`;
+  - metriche Gemma preservate;
+  - nessun raw payload in read model UI.
+- composer avanzato:
+  - send;
+  - cancel streaming;
+  - focus e shortcut;
+  - `canSend` separato da `isDisabled`;
+  - allegati;
+  - drag and drop;
+  - quote/reply.
+- attachments:
+  - pending attachments nel composer;
+  - attachment read-only nei messaggi;
+  - immagini, documenti, file generici e artifact locali.
+- message actions:
+  - copia risposta;
+  - rigenera;
+  - continua;
+  - salva in memoria;
+  - crea task o automazione;
+  - feedback utile/non utile.
+- suggestions contestuali:
+  - approfondisci;
+  - apri browser;
+  - salva preferenza;
+  - crea automazione;
+  - mostra dettagli.
+- activity rendering:
+  - tool calls e Local Computer come progressive disclosure;
+  - risultato finale sempre piu' evidente della timeline;
+  - nessun raw payload.
+
+Test minimi:
+
+- build TypeScript;
+- test UI contract per:
+  - renderer Markdown;
+  - code block;
+  - Mermaid;
+  - composer sticky;
+  - cancel streaming;
+  - chat HTTP client;
+  - attachments;
+  - message actions;
+  - assenza raw payload in activity/tool details.
+- verifica browser desktop e viewport stretta:
+  - nessun overlap;
+  - composer sempre utilizzabile;
+  - scroll-to-bottom funziona;
+  - risposta lunga resta leggibile.
+- benchmark rendering chat:
+  - scrollback da 1.000 messaggi con DOM montato limitato;
+  - p95 frame time streaming sotto soglia;
+  - commit finale Markdown misurato;
+  - confronto browser preview ed Electron reale.
+- test Rust gateway:
+  - health locale;
+  - auth token richiesto;
+  - CORS/bind loopback;
+  - stream produce `accepted`, `delta`, `done` o `error`;
+  - cancel interrompe richiesta pendente.
+
+Gate di chiusura:
+
+- demo locale con una chat che contiene testo lungo, lista, tabella, codice,
+  Mermaid, link, allegato/artifact e activity collassata;
+- l'utente puo' leggere la risposta, copiare codice, aprire dettagli e
+  continuare senza aprire log o terminale;
+- la chat resta collegata al gateway/core come external-store pattern: React
+  renderizza e invia comandi, ma non decide tool, policy o routing.
+- la chat non usa IPC desktop per streaming o payload grandi; usa browser
+  networking verso il gateway locale.
+
 ## Fase 1 - Prompt Plan Executor V1
 
 Stato: primo slice read-only governato implementato. Restano da collegare
@@ -77,8 +215,7 @@ Obiettivo:
 
 Componenti:
 
-- `apps/desktop/src-tauri/src/state.rs`
-- nuovo modulo Tauri Core per executor prompt plan;
+- nuovo gateway desktop Rust per executor prompt plan;
 - `crates/task-runtime`
 - `crates/browser-automation`
 - `crates/local-computer-session`
@@ -103,7 +240,7 @@ Test minimi:
 
 Gate di chiusura:
 
-- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`;
+- `cargo test --workspace` o test mirati del gateway/crate executor;
 - test specifici executor;
 - demo locale: prompt complesso -> piano -> task -> esecuzione step read-only
   -> timeline aggiornata.
@@ -123,8 +260,7 @@ Componenti:
 
 - `apps/desktop/src/components/TasksView.tsx`
 - `apps/desktop/src/lib/coreBridge.ts`
-- `apps/desktop/src-tauri/src/commands.rs`
-- `apps/desktop/src-tauri/src/models.rs`
+- DTO/read model esposti dal gateway desktop Rust
 
 Deliverable:
 
@@ -154,7 +290,7 @@ Gate di chiusura:
 Stato: avviata. Il smoke locale registra shell output reale e produce anche un
 artifact screenshot browser dal sidecar Playwright, esposto come preview
 redatta nella sessione Local Computer. La UI puo' caricare la preview artifact
-tramite comando Tauri locale e mostrarla come thumbnail/pannello Browser senza
+tramite gateway locale e mostrarla come thumbnail/pannello Browser senza
 esporre path raw. I controlli base pausa/riprendi/takeover sono cablati al Core
 e persistiti nel read model.
 
@@ -168,7 +304,7 @@ Componenti:
 - `crates/local-computer-session`
 - `apps/desktop/src/components/ChatView.tsx`
 - eventuali componenti separati per computer panel, timeline e artifact;
-- `apps/desktop/src-tauri/src/local_computer_smoke.rs`
+- gateway desktop Rust per snapshot e artifact preview
 
 Deliverable:
 
@@ -278,7 +414,7 @@ Componenti:
 - Capability Registry;
 - Memory Layer;
 - Task Runtime;
-- Prompt submission Tauri.
+- Prompt submission gateway.
 
 Deliverable:
 
@@ -434,7 +570,7 @@ Componenti:
 - LocalComputerSessionStore persistente;
 - ChatThreadStore persistente;
 - Process Manager;
-- app lifecycle Tauri.
+- app lifecycle Electron + gateway.
 
 Deliverable:
 
@@ -498,6 +634,8 @@ Gate di chiusura:
 
 Obiettivo:
 
+- completare la qualita' visiva e di controllo dell'intera app dopo che la Chat
+  Experience Foundation ha gia' reso stabile la superficie conversazionale;
 - arrivare a una UI premium, chiara e operativa ispirata alla pulizia Manus,
   con settings/controlli solidi in stile Codex.
 
@@ -512,7 +650,7 @@ Componenti:
 
 Deliverable:
 
-- chat centrale pulita;
+- rifinitura chat centrale gia' fondata nella Fase 0.5;
 - sidebar/thread minimal;
 - top menu contestuali;
 - Local Computer espandibile;
@@ -542,7 +680,7 @@ Obiettivo:
 
 Componenti:
 
-- Tauri packaging;
+- Electron packaging;
 - process manager;
 - secrets/keychain;
 - migrations;
