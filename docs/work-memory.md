@@ -4,6 +4,42 @@ Questo file e' la memoria operativa del lavoro svolto nel repository. Va aggiorn
 
 ## 2026-05-29
 
+### VALIDAZIONE LIVE A1.1–A1.3 (gateway acceso, HTTP reale) — PASSATA + 2 bug fixati
+
+Setup: gateway leggero (`--no-default-features`), worker auto OFF (validazione
+controllata via `POST /api/tasks/run_next`), `LOCAL_FIRST_BRAIN_MATERIALIZE=1`,
+router -> Ollama locale. Ollama CLOUD relay DOWN (tutti i `:cloud` -> "internal
+service error"; chiave appena ruotata o outage lato Ollama) -> validato con
+`gemma4:latest` LOCALE (modello debole ma sufficiente per il plumbing).
+
+BUG #1 (trovato live): `brain_materialize_tasks` chiamava SEMPRE
+`ensure_runtime_available_for_task` (ping/avvio MLX :8765) anche con backend
+cloud/router -> MLX spento -> errore -> fallback legacy silenzioso (ack "Ho
+capito..." invece di "Ho pianificato N passi"). FIX: gate backend-aware
+`brain_planner_uses_local_mlx_runtime()` (solo backend mlx/default-senza-mistralrs
+necessitano :8765). BUG #2: lo `.ok().and_then` in `submit_operational_prompt`
+inghiottiva l'errore del Brain -> fallimento invisibile. FIX: log esplicito di
+ogni esito (no-tasks / failed / join error).
+
+Dopo i fix, catena A1.2/A1.3 validata END-TO-END:
+- ack "Ho pianificato 1 passi (Brain)" (planner gemma4 ~28s).
+- coda task: `orchestrator_brain_<id>_s1` kind `capability.browser.browser.navigate`
+  status queued NELLO STORE CONDIVISO.
+- sessione del thread `running 0/1` = `progress_total = N` (seeding aggregante OK).
+- `run_next` sul task orchestrator -> dispatch a CapabilityBrowser ->
+  `call_shared_browser_sidecar` (superficie unica A1.3): ha ricevuto una RISPOSTA
+  browser (`BROWSER_INVALID_REQUEST:target_id is required`), prova che il sidecar
+  e' stato raggiunto.
+- RISULTATO IN CHAT con `linked_task_id=orchestrator_brain_<id>_s1`: prova diretta
+  che `append_task_result_to_chat` ha risolto l'id via la LINK-TABLE FALLBACK A1.2
+  (l'id NON e' il task primario del thread). Sessione aggregata correttamente a
+  Running 0/1 (1 membro waiting_external).
+
+FOLLOW-UP (non-wiring): lo step navigate aveva `arguments: {}` (gemma4 non ha
+riempito l'URL) -> `target_id is required`. E' qualita' piano / contratto
+argomenti capability<->sidecar, dipende da un modello capace (oggi bloccato dal
+relay cloud). Da riprendere quando il cloud torna o con backend Anthropic.
+
 ### A1.3 FATTA (core) — superficie d'esecuzione browser UNICA + self-heal
 
 Obiettivo A1.3: "proprieta' UNICA del sidecar -> una sola superficie

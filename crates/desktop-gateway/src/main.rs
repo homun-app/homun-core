@@ -872,13 +872,28 @@ async fn submit_operational_prompt(
         let state_for_brain = state.clone();
         let goal = request.user_message.text.clone();
         let thread_for_brain = thread_id.clone();
-        tokio::task::spawn_blocking(move || {
+        let outcome = tokio::task::spawn_blocking(move || {
             brain_materialize_tasks(&state_for_brain, &thread_for_brain, &goal)
         })
-        .await
-            .ok()
-            .and_then(|result| result.ok())
-            .filter(|ids| !ids.is_empty())
+        .await;
+        match outcome {
+            Ok(Ok(ids)) if !ids.is_empty() => Some(ids),
+            Ok(Ok(_)) => {
+                eprintln!("brain_materialize: planner returned no tasks; using legacy path");
+                None
+            }
+            // Surface the failure instead of silently swallowing it — a silent
+            // fallback masked a real wiring bug (MLX gate firing under a cloud
+            // router backend) during live validation.
+            Ok(Err(error)) => {
+                eprintln!("brain_materialize: failed ({}); using legacy path", error.message);
+                None
+            }
+            Err(join_error) => {
+                eprintln!("brain_materialize: task join error ({join_error}); using legacy path");
+                None
+            }
+        }
     } else {
         None
     };
@@ -2431,6 +2446,61 @@ fn browser_error_indicates_dead_sidecar(error: &BrowserAutomationError) -> bool 
     )
 }
 
+/// Fixed label for the one tab the execution surface manages per session. Using
+/// a constant label (instead of a runtime-generated id) lets the planner emit
+/// high-level steps while the executor keeps a stable target.
+const BROWSER_MANAGED_TARGET: &str = "primary";
+
+/// Maps a planner-level browser call onto the executor-managed tab.
+///
+/// The sidecar's capability tools are tab-scoped: `navigate`/`act`/`snapshot`/…
+/// all require a `target_id`. But the planner emits intent ("navigate to URL",
+/// "fill these fields") and cannot know a tab id that only exists at runtime. So
+/// the single execution surface owns ONE managed tab (label "primary"):
+/// - `navigate {url}` with no target becomes an idempotent `open {url, label}`
+///   (open creates the tab on first use and re-navigates it afterwards),
+/// - other tab-scoped calls get `target_id` injected,
+/// - tabless calls (health/profiles/tabs/open/start/stop) pass through.
+/// A call that already carries an explicit `target_id` is left untouched.
+fn normalize_browser_call(method: BrowserMethod, mut params: Value) -> (BrowserMethod, Value) {
+    let has_target = params
+        .get("target_id")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.is_empty());
+    if has_target {
+        return (method, params);
+    }
+    if !params.is_object() {
+        params = serde_json::json!({});
+    }
+    match method {
+        BrowserMethod::Navigate => {
+            // open is idempotent on the label: creates+navigates the managed tab.
+            params["label"] = serde_json::json!(BROWSER_MANAGED_TARGET);
+            (BrowserMethod::Open, params)
+        }
+        BrowserMethod::Snapshot
+        | BrowserMethod::Act
+        | BrowserMethod::Screenshot
+        | BrowserMethod::Console
+        | BrowserMethod::Pdf
+        | BrowserMethod::Focus
+        | BrowserMethod::CloseTab
+        | BrowserMethod::ArmFileChooser
+        | BrowserMethod::RespondDialog
+        | BrowserMethod::WaitDownload => {
+            params["target_id"] = serde_json::json!(BROWSER_MANAGED_TARGET);
+            (method, params)
+        }
+        BrowserMethod::Health
+        | BrowserMethod::Profiles
+        | BrowserMethod::Tabs
+        | BrowserMethod::Open
+        | BrowserMethod::Start
+        | BrowserMethod::Stop => (method, params),
+    }
+}
+
 /// Outcome of a call against the single shared browser sidecar.
 enum SharedSidecarCall {
     /// The sidecar replied (the response may still be a browser-level error).
@@ -2452,6 +2522,8 @@ fn call_shared_browser_sidecar(
     method: BrowserMethod,
     params: Value,
 ) -> Result<SharedSidecarCall, LocalTaskExecutionError> {
+    // Map the planner-level call onto the managed tab (inject/translate target).
+    let (method, params) = normalize_browser_call(method, params);
     let mut client_guard =
         state
             .browser_capability_client
@@ -4438,12 +4510,40 @@ fn brain_materialize_enabled() -> bool {
 /// planning-only CachedToolProvider is safe) and enqueues every step as a
 /// durable task, executed by the worker's real executors (browser/subagent).
 /// Returns the materialized task ids, or an error so the caller can fall back.
+/// Whether the configured inference backend routes the planner LLM call through
+/// the local MLX runtime on `:8765` (so it must be up before planning). Mirrors
+/// the backend selection in [`build_browser_inference_router`]: cloud/in-process
+/// backends (anthropic, openai-with-base-url, mistralrs) do NOT need it; only
+/// the MLX path (explicit `mlx`, or the default fallback when mistral.rs is not
+/// compiled in / no other backend resolves) does.
+fn brain_planner_uses_local_mlx_runtime() -> bool {
+    let backend = env::var("LOCAL_FIRST_INFERENCE_BACKEND")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    match backend.as_str() {
+        "anthropic" => resolve_inference_api_key().is_none(),
+        "openai" => env::var("LOCAL_FIRST_INFERENCE_BASE_URL")
+            .ok()
+            .filter(|value| !value.is_empty())
+            .is_none(),
+        "mistralrs" => !cfg!(feature = "local-mistralrs"),
+        "mlx" => true,
+        // Empty/default: mistral.rs in-process when compiled in, else MLX :8765.
+        _ => !cfg!(feature = "local-mistralrs"),
+    }
+}
+
 fn brain_materialize_tasks(
     state: &AppState,
     thread_id: &str,
     goal: &str,
 ) -> Result<Vec<String>, LocalTaskExecutionError> {
-    ensure_runtime_available_for_task(state)?;
+    // Only the MLX-backed planner needs the local :8765 runtime; a cloud/router
+    // backend (e.g. Ollama/Anthropic) does its own HTTP call and must not be
+    // gated on (or auto-start) the MLX sidecar.
+    if brain_planner_uses_local_mlx_runtime() {
+        ensure_runtime_available_for_task(state)?;
+    }
     let user = gateway_capability_user_id();
     let workspace = gateway_capability_workspace_id();
 
@@ -8090,6 +8190,44 @@ mod tests {
             aggregate_session_state_from_counts(5, 1, 1, false, true),
             (SessionStatus::WaitingUser, 1)
         );
+    }
+
+    #[test]
+    fn normalize_browser_call_manages_tab_for_planner_steps() {
+        use super::{BROWSER_MANAGED_TARGET, normalize_browser_call};
+        use local_first_browser_automation::BrowserMethod;
+
+        // navigate {url} with no target -> idempotent open of the managed tab.
+        let (method, params) = normalize_browser_call(
+            BrowserMethod::Navigate,
+            serde_json::json!({"url": "https://www.trenitalia.com"}),
+        );
+        assert_eq!(method, BrowserMethod::Open);
+        assert_eq!(params["url"], "https://www.trenitalia.com");
+        assert_eq!(params["label"], BROWSER_MANAGED_TARGET);
+
+        // act with no target -> target injected, payload preserved.
+        let (method, params) = normalize_browser_call(
+            BrowserMethod::Act,
+            serde_json::json!({"actions": [{"type": "click", "selector": "x"}]}),
+        );
+        assert_eq!(method, BrowserMethod::Act);
+        assert_eq!(params["target_id"], BROWSER_MANAGED_TARGET);
+        assert!(params["actions"].is_array());
+
+        // an explicit target_id is never overridden.
+        let (method, params) = normalize_browser_call(
+            BrowserMethod::Snapshot,
+            serde_json::json!({"target_id": "t7"}),
+        );
+        assert_eq!(method, BrowserMethod::Snapshot);
+        assert_eq!(params["target_id"], "t7");
+
+        // tabless calls pass through untouched.
+        let (method, params) =
+            normalize_browser_call(BrowserMethod::Tabs, serde_json::json!({}));
+        assert_eq!(method, BrowserMethod::Tabs);
+        assert!(params.get("target_id").is_none());
     }
 
     #[test]
