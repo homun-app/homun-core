@@ -108,6 +108,10 @@ impl ChatStore {
             params![thread_id],
         )?;
         self.conn.execute(
+            "delete from task_thread_links where thread_id = ?1",
+            params![thread_id],
+        )?;
+        self.conn.execute(
             "delete from chat_threads where thread_id = ?1",
             params![thread_id],
         )?;
@@ -152,7 +156,9 @@ impl ChatStore {
     }
 
     pub fn thread_by_task_id(&self, task_id: &str) -> rusqlite::Result<Option<ChatThread>> {
-        self.conn
+        // Primary (legacy single-task) match wins: a thread's own task_id.
+        if let Some(thread) = self
+            .conn
             .query_row(
                 "select thread_id, title, subtitle, status, pinned, computer_session_id, task_id,
                         updated_at, message_count
@@ -161,7 +167,16 @@ impl ChatStore {
                 params![task_id],
                 thread_from_row,
             )
-            .optional()
+            .optional()?
+        {
+            return Ok(Some(thread));
+        }
+        // Fallback (A1.2): a member task materialized by the Brain — resolve its
+        // owning thread through the link table.
+        match self.thread_id_for_member_task(task_id)? {
+            Some(thread_id) => self.thread(&thread_id),
+            None => Ok(None),
+        }
     }
 
     pub fn message(
@@ -266,8 +281,48 @@ impl ChatStore {
 
             create index if not exists idx_chat_messages_thread
                 on chat_messages(thread_id);
+
+            -- A1.2: a chat thread owns ONE Local Computer session but may drive
+            -- MANY durable tasks (the OrchestratorBrain materializes N steps from
+            -- a single prompt). chat_threads.task_id stays the legacy single
+            -- 'primary' task; this side table maps every additional member task
+            -- back to its owning thread so the executor's session/chat surfacing
+            -- (thread_by_task_id) resolves them too.
+            create table if not exists task_thread_links (
+                task_id text primary key,
+                thread_id text not null,
+                foreign key(thread_id) references chat_threads(thread_id) on delete cascade
+            );
+
+            create index if not exists idx_task_thread_links_thread
+                on task_thread_links(thread_id);
             ",
         )
+    }
+
+    /// Links an additional (non-primary) task to a thread so it resolves via
+    /// [`thread_by_task_id`]. Used by the Brain materialize path, where one
+    /// prompt fans out into N durable tasks that must all surface into the
+    /// thread's single Local Computer session and chat. Idempotent.
+    pub fn link_task_to_thread(&self, task_id: &str, thread_id: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "insert or replace into task_thread_links (task_id, thread_id) values (?1, ?2)",
+            params![task_id, thread_id],
+        )?;
+        Ok(())
+    }
+
+    /// Resolves the owning thread for a member task id via the link table.
+    /// Returns `None` when the task is not a linked member (e.g. it is a
+    /// thread's primary task, resolved by [`thread_by_task_id`] directly).
+    fn thread_id_for_member_task(&self, task_id: &str) -> rusqlite::Result<Option<String>> {
+        self.conn
+            .query_row(
+                "select thread_id from task_thread_links where task_id = ?1",
+                params![task_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
     }
 
     fn seed_if_empty(&self) -> rusqlite::Result<()> {
@@ -555,6 +610,47 @@ mod tests {
                 .threads
                 .iter()
                 .any(|item| item.title == "dimmi una barzelletta")
+        );
+    }
+
+    #[test]
+    fn member_tasks_resolve_to_owning_thread_without_shadowing_primary() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread().unwrap();
+
+        // Brain materializes N member tasks for the same prompt/thread.
+        store
+            .link_task_to_thread("orchestrator_req_s1", &thread.thread_id)
+            .unwrap();
+        store
+            .link_task_to_thread("orchestrator_req_s2", &thread.thread_id)
+            .unwrap();
+
+        // Every member task resolves back to the one owning thread.
+        for member in ["orchestrator_req_s1", "orchestrator_req_s2"] {
+            let resolved = store.thread_by_task_id(member).unwrap();
+            assert_eq!(
+                resolved.map(|t| t.thread_id),
+                Some(thread.thread_id.clone()),
+                "member task {member} should resolve to its thread",
+            );
+        }
+
+        // The legacy primary task_id still resolves directly (link table is a
+        // fallback, it must not shadow the primary match).
+        let primary = store.thread_by_task_id(&thread.task_id).unwrap();
+        assert_eq!(primary.map(|t| t.thread_id), Some(thread.thread_id.clone()));
+
+        // Unknown ids stay unresolved.
+        assert!(store.thread_by_task_id("nope").unwrap().is_none());
+
+        // Deleting the thread also clears its task links.
+        store.delete_thread(&thread.thread_id).unwrap();
+        assert!(
+            store
+                .thread_by_task_id("orchestrator_req_s1")
+                .unwrap()
+                .is_none()
         );
     }
 }
