@@ -39,8 +39,8 @@ use local_first_capabilities::{
     WorkspaceId as CapabilityWorkspaceId,
 };
 use local_first_orchestrator::{
-    NoopMemoryContextProvider, OrchestratorBrain, OrchestratorBudgets, OrchestratorRequest,
-    ToolSearchIndexStore,
+    ExecutionPlan, NoopMemoryContextProvider, OrchestratorBrain, OrchestratorBudgets,
+    OrchestratorRequest, ToolSearchIndexStore,
 };
 use local_first_desktop_gateway::{
     BuildPromptRequest, BuildPromptResponse, CancelGenerationRequest, ChatGenerateStreamRequest,
@@ -4589,6 +4589,52 @@ fn brain_budgets_for_context_window(context_window: Option<u32>) -> Orchestrator
     budgets
 }
 
+/// True when the Brain's plan acts on the browser provider — i.e. it needs live
+/// web INTERACTION, which belongs to the observe-act loop rather than static
+/// per-call capability steps.
+fn plan_targets_browser(plan: &ExecutionPlan) -> bool {
+    plan.steps
+        .iter()
+        .any(|step| step.provider_id.as_deref() == Some("browser"))
+}
+
+/// Materializes ONE durable `browser_task` carrying the user goal. The task
+/// runtime worker dispatches `browser_task` to `execute_browser_loop_read_only_task`
+/// (GatewayTaskExecutorKind::LegacyBrowser), which plans each step with the Brain
+/// and drives the observe→act→verify loop — the validated end-to-end browser
+/// path. The loop self-gates risky in-page actions (login/purchase/payment), so
+/// this task does not require up-front approval.
+fn materialize_browser_loop_task(
+    store: &TaskStore,
+    goal: &str,
+) -> Result<String, LocalTaskExecutionError> {
+    let task_id = format!("orchestrator_browser_{}", uuid::Uuid::new_v4().simple());
+    let mut task = TaskRecord::new(
+        task_id.clone(),
+        gateway_user_id(),
+        gateway_workspace_id(),
+        "browser_task",
+        task_goal_summary(goal),
+        serde_json::json!({
+            "source": "brain_browser_loop",
+            "prompt_redacted": redact_sensitive_text(goal),
+            "raw_prompt_stored": false,
+        }),
+    )
+    .with_resource(ResourceRequirement::new(ResourceClass::ComputerSession, 1));
+    task.risk_level = "low".to_string();
+    task.permission_context = serde_json::json!({
+        "privacy_domains": ["local", "browser"],
+        "requires_user_approval": false,
+        "cloud_allowed": false
+    });
+    store
+        .insert_task(&task)
+        .map_err(GatewayError::task)
+        .map_err(local_task_gateway_error)?;
+    Ok(task_id)
+}
+
 fn brain_materialize_tasks(
     state: &AppState,
     thread_id: &str,
@@ -4667,19 +4713,34 @@ fn brain_materialize_tasks(
         attachments: Vec::new(),
         budgets,
     };
-    let outcome = brain.run(request).map_err(|error| LocalTaskExecutionError {
-        message: format!("brain run: {error}"),
+    let plan = brain.plan_only(&request).map_err(|error| LocalTaskExecutionError {
+        message: format!("brain plan: {error}"),
     })?;
 
-    let mut task_ids = Vec::new();
-    for summary in &outcome.enqueued_tasks {
-        task_ids.push(summary.task_id.as_str().to_string());
-    }
-    for summary in &outcome.enqueued_subagent_tasks {
-        task_ids.push(summary.task_id.as_str().to_string());
-    }
+    // P1: browser INTERACTION is driven by the observe-act loop, not by static
+    // `capability.browser.*` steps (which can navigate but cannot fill a
+    // multi-field form — proven in live tests). When the Brain's plan targets
+    // the browser provider, materialize ONE durable `browser_task`: the worker
+    // runs it via execute_browser_loop_read_only_task, which itself plans each
+    // step with the Brain and drives observe→act→verify. Non-browser plans
+    // materialize their capability/subagent tasks as before.
+    let task_ids = if plan_targets_browser(&plan) {
+        vec![materialize_browser_loop_task(brain.task_store(), goal)?]
+    } else {
+        let outcome = brain.run(request).map_err(|error| LocalTaskExecutionError {
+            message: format!("brain run: {error}"),
+        })?;
+        let mut ids = Vec::new();
+        for summary in &outcome.enqueued_tasks {
+            ids.push(summary.task_id.as_str().to_string());
+        }
+        for summary in &outcome.enqueued_subagent_tasks {
+            ids.push(summary.task_id.as_str().to_string());
+        }
+        ids
+    };
 
-    // A1.2: bind the N materialized tasks to the originating chat thread so the
+    // A1.2: bind the materialized task(s) to the originating chat thread so the
     // worker's existing session/chat surfacing (sync_session_for_task_run,
     // append_task_result_to_chat — both keyed on thread_by_task_id) resolves
     // them into the thread's single Local Computer session. Best-effort: a
