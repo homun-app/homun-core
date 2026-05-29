@@ -145,8 +145,20 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .with_provider(Box::new(provider));
             // Size the snapshot to the model: large-context models get the full
             // page (the calendar grid survives), small ones get a compact frame.
+            // BROWSER_CONTEXT_PROFILE overrides this — Full prompts are huge and
+            // make heavy/reasoning cloud models crawl, so Compact is often the
+            // practical choice even on a large-context model.
             let window = router.active_context_window(&Requirements::default());
-            let profile = BrowserContextProfile::for_context_window(window);
+            let profile = match std::env::var("BROWSER_CONTEXT_PROFILE")
+                .unwrap_or_default()
+                .to_ascii_lowercase()
+                .as_str()
+            {
+                "full" => BrowserContextProfile::Full,
+                "compact" => BrowserContextProfile::Compact,
+                "minimal" => BrowserContextProfile::Minimal,
+                _ => BrowserContextProfile::for_context_window(window),
+            };
             eprintln!("[harness] context_window={window:?} -> profile {profile:?}");
             let planner = RuntimeBrowserLoopPlanner::with_context_profile(router, profile);
             run_browser_loop(session, planner, &request)?

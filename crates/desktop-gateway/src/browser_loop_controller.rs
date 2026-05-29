@@ -94,7 +94,7 @@ impl<R: JsonRuntime> BrowserLoopPlanner for RuntimeBrowserLoopPlanner<R> {
             .runtime
             .generate_json(&GenerateJsonRequest {
                 prompt,
-                max_tokens: 1000,
+                max_tokens: browser_loop_planner_max_tokens(),
                 temperature: 0.0,
                 wait_if_busy: true,
                 request_timeout_seconds: Some(browser_loop_planner_timeout_seconds()),
@@ -134,6 +134,18 @@ fn browser_loop_planner_timeout_seconds() -> f64 {
         .and_then(|value| value.parse::<f64>().ok())
         .filter(|seconds| *seconds > 0.0)
         .unwrap_or(20.0)
+}
+
+/// Per-decision generation budget. Configurable because reasoning models emit a
+/// long chain-of-thought before the JSON: with too small a budget the CoT eats
+/// it all and the `content` comes back empty ("EOF while parsing"). Non-reasoning
+/// models are fine at the default.
+fn browser_loop_planner_max_tokens() -> u32 {
+    std::env::var("LOCAL_FIRST_BROWSER_PLANNER_MAX_TOKENS")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|tokens| *tokens > 0)
+        .unwrap_or(1000)
 }
 
 fn browser_loop_debug_enabled() -> bool {
