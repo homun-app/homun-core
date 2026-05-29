@@ -85,6 +85,33 @@ Verificato col probe: ora act -> `{ok:false, error:{code:BROWSER_INVALID_REQUEST
 message:"unknown action kind: undefined", retryable:false}}` -> deserializza come
 Error -> messaggio chiaro in chat.
 
+### VALIDAZIONE LOOP osserva->agisci col modello capace (example trenitalia_live)
+
+Domanda: il loop osserva->agisci + modello capace fa DAVVERO la ricerca? RISPOSTA: SI'.
+Run `cargo run --example trenitalia_live` (ollama qwen3-vl:235b-cloud via relay,
+headless): iter1 -> type "Napoli Centrale" (ref e106), iter2 -> type "Milano
+Centrale" (ref e117). Il loop ref-based naviga, osserva, sceglie i ref giusti e
+compila i campi. E' la PROVA che la strada per la prenotazione e' il LOOP, non gli
+step act statici.
+
+VINCOLI PRATICI emersi:
+- Il timeout del loop planner di DEFAULT e' 20s (`browser_loop_planner_timeout_seconds`,
+  env `LOCAL_FIRST_BROWSER_PLANNER_TIMEOUT_SECONDS`): troppo poco per un modello
+  cloud capace (~90s/chiamata). Prima run -> TimedOut immediato. Con 180s sblocca.
+  -> In produzione il timeout va alzato per backend cloud.
+- qwen3-vl:235b sulla snapshot profilo Full di trenitalia (DOM enorme) e'
+  IMPRATICABILMENTE LENTO per un loop interattivo; inoltre stallo lato browser
+  dopo iter2 (settle/snapshot su autocomplete) -> serve hardening del
+  settle/snapshot + un modello capace PIU' VELOCE (o profilo Compact per prompt
+  piu' piccoli).
+
+PROSSIMI PASSI per chiudere la prenotazione end-to-end:
+1. Modello del loop: capace MA veloce (provare modelli cloud piu' piccoli, o
+   forzare BrowserContextProfile::Compact per ridurre il prompt).
+2. Hardening settle/snapshot post-azione (timeout) contro stalli del sito.
+3. Brain routing (A1.4/A1.5): il Brain ROUTA l'interazione a un subagent
+   browser-loop invece di materializzare step `capability.browser.act` statici.
+
 CONCLUSIONE ARCHITETTURALE (prossimo passo per la prenotazione): l'interazione
 form (fill+click multi-campo) e' intrinsecamente un loop OSSERVA->AGISCI: i `ref`
 vengono da uno snapshot a RUNTIME e i selettori del DOM (Trenitalia) non sono
