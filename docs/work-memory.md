@@ -4,6 +4,41 @@ Questo file e' la memoria operativa del lavoro svolto nel repository. Va aggiorn
 
 ## 2026-05-29
 
+### Validazione live A1.1 — findings + 2 fix reali
+
+Smoke `crates/desktop-gateway/examples/brain_materialize_smoke.rs`: costruisce il
+Brain come `brain_materialize_tasks` (tool browser cached, policy durable-only,
+runtime configurabile MLX o Ollama via router) e stampa piano + task
+materializzati. Progressione dei fallimenti (= debug iterativo del planner):
+1. Gemma-4-E4B (MLX): `missing required key steps[0].depends_on`.
+   -> FIX: `depends_on` rimosso dai `required` dello schema planner
+   (`orchestrator/src/planner.rs`); ha gia' `#[serde(default)]`. Robustezza.
+2. Gemma-4-E4B: `step_missing_provider:step1` (capability_call senza provider) —
+   limite di qualita' del modello, non un bug.
+3. gemma4:8b via Ollama: `missing required keys: route, steps` (PEGGIO dell'E4B!).
+   CAUSA: `OpenAiCompatProvider` IGNORAVA `request.json_schema` (mandava solo
+   `response_format: json_object`), mentre il path MLX passa lo schema al server.
+   -> FIX: `OpenAiCompatProvider` ora invia `response_format: json_schema` con lo
+   schema quando presente (OpenAI/OpenRouter/Ollama recenti). Alto valore: migliora
+   TUTTE le chiamate strutturate cloud (brain/chat/browser). 
+4. gemma4:8b + schema enforced: avanza a route+steps presenti, poi
+   `missing field query` (round needs_more_tools malformato) — di nuovo qualita'
+   del modello debole.
+
+CONCLUSIONE: il Brain e' meccanicamente solido e lo schema-enforcement aiuta
+molto, ma E4B/8B NON producono piani completi -> il Brain DEVE usare un modello
+capace (conferma la strategia "modello capace via router"). 
+- Una materializzazione end-to-end riuscita richiede un modello frontier via
+  router (qwen3.5/qwen3-vl su Ollama cloud) -> serve la cloud key (quella vecchia
+  e' esposta, da ruotare; non riutilizzata).
+- Per A1.2 NON serve un run frontier live: le FORME dei task sono deterministiche
+  e gia' verificate compatibili (`capability.<provider>.<tool>` con
+  CapabilityTaskPayload -> `execute_capability_browser_task`; `subagent.<agent>`
+  -> SubagentTaskExecutor). A1.2 si progetta da queste forme.
+- FIX ARCHITETTURALE A1 derivato (TODO): `brain_materialize_tasks` /
+  `try_brain_operational_plan` devono usare il ROUTER come runtime del Brain
+  (modello capace), non `RuntimeClient` fisso su Gemma.
+
 ### A1.1 — Brain materializza task durevoli nel TaskStore condiviso (opt-in)
 
 - `brain_materialize_tasks(state, goal)`: costruisce l'`OrchestratorBrain` con un
