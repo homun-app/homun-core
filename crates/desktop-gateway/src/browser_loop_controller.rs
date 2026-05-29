@@ -229,7 +229,7 @@ RULES:
 5. Do NOT click search/submit buttons ("Cerca", "Search", etc.) until ALL fields including autocomplete suggestions, date, and time are set.
 6. If a cookie banner or consent banner blocks the form, dismiss it first.
 7. Use only refs visible in the current snapshot.
-8. If you see search results matching the goal, output: {{"decision":"complete","output":{{"summary":"...","options":[...]}}}}
+8. RESULTS PAGE: as soon as the page shows a list of trains/options matching the goal (departure/arrival times, train type, duration — price if shown), you are DONE. Extract the options that are VISIBLE in the snapshot and output {{"decision":"complete","output":{{"summary":"...","options":[...]}}}}. Do NOT click to expand details/solutions, do NOT open a single train, do NOT navigate further to enrich prices — collecting the visible options and stopping IS the goal.
 9. If stuck, output: {{"decision":"blocked","reason":"..."}}
 10. If iteration status=no_progress, try a different action. Do not repeat the same action.
 11. Do not enter personal data, login, payment details, or confirm a purchase.
@@ -246,7 +246,8 @@ ACTIONS:
 - hover: {{"decision":"act","action":{{"kind":"hover","ref":"eN"}},"expected_observation":"..."}}
 - scrollIntoView: {{"decision":"act","action":{{"kind":"scrollIntoView","ref":"eN"}},"expected_observation":"..."}}
 - wait: {{"decision":"act","action":{{"kind":"wait","text":"...","timeoutMs":5000}},"expected_observation":"..."}}
-- evaluate: {{"decision":"act","action":{{"kind":"evaluate","fn":"() => ..."}},"expected_observation":"..."}}
+
+Never use page scripts/JavaScript ("evaluate") — it is blocked. Read the snapshot instead.
 
 PAGE STATE:
 - url: {url}
@@ -1154,7 +1155,7 @@ mod tests {
         assert!(prompt.contains("cookie banner"));
         assert!(prompt.contains("stale_ref_recovered"));
         assert!(prompt.contains("action_error_recovered"));
-        assert!(prompt.contains("search results"));
+        assert!(prompt.contains("RESULTS PAGE"));
         assert!(prompt.contains("personal data"));
     }
 
