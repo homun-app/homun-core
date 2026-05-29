@@ -29,6 +29,11 @@ pub struct OrchestratorBudgets {
     pub max_tool_cards_context_chars: usize,
     #[serde(default = "default_max_loaded_tool_context_chars")]
     pub max_loaded_tool_context_chars: usize,
+    /// Per-call timeout (seconds) for the planner LLM request. Generous by
+    /// default because capable cloud models on a large planner prompt take well
+    /// over 30s. `u64` keeps the struct's `Eq` derive valid.
+    #[serde(default = "default_planner_timeout_seconds")]
+    pub planner_timeout_seconds: u64,
 }
 
 impl Default for OrchestratorBudgets {
@@ -42,8 +47,13 @@ impl Default for OrchestratorBudgets {
             max_memory_context_chars: default_max_memory_context_chars(),
             max_tool_cards_context_chars: default_max_tool_cards_context_chars(),
             max_loaded_tool_context_chars: default_max_loaded_tool_context_chars(),
+            planner_timeout_seconds: default_planner_timeout_seconds(),
         }
     }
+}
+
+fn default_planner_timeout_seconds() -> u64 {
+    120
 }
 
 fn default_max_conversation_summary_chars() -> usize {

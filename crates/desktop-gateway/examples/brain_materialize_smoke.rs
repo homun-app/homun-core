@@ -122,7 +122,10 @@ fn run_brain<R: JsonRuntime>(runtime: R, goal: &str) {
         user_message: goal.to_string(),
         conversation_summary: None,
         attachments: Vec::new(),
-        budgets: OrchestratorBudgets::default(),
+        budgets: OrchestratorBudgets {
+            max_planner_tokens: 1_500,
+            ..OrchestratorBudgets::default()
+        },
     };
 
     eprintln!("[smoke] goal: {goal}");

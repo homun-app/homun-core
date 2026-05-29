@@ -4,6 +4,42 @@ Questo file e' la memoria operativa del lavoro svolto nel repository. Va aggiorn
 
 ## 2026-05-29
 
+### A1.1 VALIDATA end-to-end con modello frontier (qwen3-vl:235b)
+
+Chiave gestita in sicurezza: file 0600 `~/.local-first-personal-assistant/
+ollama-api-key`, letto via `LOCAL_FIRST_INFERENCE_API_KEY_FILE` (valore mai in
+chat/comandi). Endpoint `https://ollama.com/v1`.
+
+RISULTATO (smoke brain_materialize): qwen3-vl:235b produce un piano CORRETTO a 5
+step (navigate->snapshot->act->act->snapshot) e il Brain materializza 5 task
+durevoli `capability.browser.*` (0 immediate => durable-only confermato). Catena
+Brain->materializza->executor verificata. PRIMA materializzazione reale -> base
+per progettare A1.2.
+
+Catena di fix scoperti dal vivo (ognuno sbloccava il successivo):
+1. planner schema: `depends_on` tolto dai required (serde-default). 
+2. `OpenAiCompatProvider`: `json_schema` ROMPE ollama.com/v1 (400 "unexpected end
+   of JSON input"); l'Ollama LOCALE invece lo supporta. -> revert a `json_object`
+   universale (capable model + schema-nel-prompt basta).
+3. planner timeout 30s fisso -> troppo poco per 235B cloud su prompt grande. ->
+   `OrchestratorBudgets.planner_timeout_seconds` (u64, default 120), usato dal
+   brain (cast f64). NB: u64 per non rompere il derive Eq di OrchestratorBudgets.
+4. IL FIX CHIAVE: il planner prompt diceva "matching the schema" ma NON mostrava
+   la struttura; lo schema arrivava solo via json_schema (ignorato da ollama
+   cloud) -> anche qwen sbagliava forma (emetteva un bare step con `action`).
+   Aggiunto al prompt un blocco OUTPUT FORMAT esplicito + esempio
+   {route, steps:[...]} -> ora la forma e' corretta su qualunque backend.
+- Debug gated `LOCAL_FIRST_INFERENCE_DEBUG=1` nel provider per stampare
+  raw_output su risposta invalida (ha permesso di vedere il bare-step).
+- Test: orchestrator 7 brain + altri verdi (soglia prompt test 9k->10.5k per il
+  preambolo fisso; aggiunto planner_timeout_seconds ai literal di test),
+  inference 23, gateway 23+55. Build default verde.
+
+CONCLUSIONE A1.1: meccanismo VALIDATO con modello capace via router. Il Brain ora
+funziona in produzione SE usa un modello capace (TODO A1: brain_materialize_tasks
+deve usare il router, non RuntimeClient fisso). Prossimo: A1.2 (sessione/chat per
+N task) progettabile su output reale.
+
 ### Validazione live A1.1 — findings + 2 fix reali
 
 Smoke `crates/desktop-gateway/examples/brain_materialize_smoke.rs`: costruisce il

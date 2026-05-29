@@ -268,7 +268,7 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
             max_tokens: request.budgets.max_planner_tokens,
             temperature: 0.0,
             wait_if_busy: true,
-            request_timeout_seconds: Some(30.0),
+            request_timeout_seconds: Some(request.budgets.planner_timeout_seconds as f64),
             json_schema: Some(planner_schema()),
             required_keys: vec!["route".to_string(), "steps".to_string()],
             repair: true,
