@@ -4,6 +4,27 @@ Questo file e' la memoria operativa del lavoro svolto nel repository. Va aggiorn
 
 ## 2026-05-29
 
+### A1.1 — Brain materializza task durevoli nel TaskStore condiviso (opt-in)
+
+- `brain_materialize_tasks(state, goal)`: costruisce l'`OrchestratorBrain` con un
+  handle `TaskStore::open(gateway_task_database_path)` (STESSO DB del worker) +
+  facade `CachedToolProvider` (dai tool in cache) + `NoopMemoryContextProvider`
+  + tool index in-memory; `policy_context.allowed_actions = []` -> tool
+  visibili-ma-non-executable -> `Brain.run` non chiama mai `call_tool` (Cached
+  provider safe) ed enqueue TUTTO come durevole. Ritorna gli id dei task.
+- COMPATIBILITA' verificata: il bridge crea `capability.<provider>.<tool>` con
+  `CapabilityTaskPayload`, ed `execute_capability_browser_task` parsa esattamente
+  `CapabilityTaskPayload` -> la catena Brain->materializza->worker->executor
+  browser SI CONNETTE. subagent.* via l'executor gia' de-stubbato.
+- Wiring opt-in in `submit_operational_prompt` dietro `LOCAL_FIRST_BRAIN_
+  MATERIALIZE` (spawn_blocking per non bloccare il runtime): se materializza,
+  ack chat "pianificato N passi, li eseguo" e i task girano via worker (visibili
+  in coda task); altrimenti path keyword legacy (default invariato).
+- Test: gateway 23+55 verdi; build light e default verdi.
+- NON ancora fatto (A1.2): linkage dettagliato sessione/chat/read-model per N
+  task (la sessione Local Computer e i risultati per-task in chat). Validazione
+  live (Gemma + flow) rimandata. Il path keyword resta default/intatto.
+
 ### A4 — chat dal router (streaming OpenAI-compat)
 
 - L'handler `generate_stream` ora, se `LOCAL_FIRST_INFERENCE_BACKEND=openai` +
