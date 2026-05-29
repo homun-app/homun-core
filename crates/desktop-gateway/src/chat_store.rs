@@ -312,6 +312,18 @@ impl ChatStore {
         Ok(())
     }
 
+    /// Lists every member task linked to a thread (Brain fan-out). Used to
+    /// aggregate progress across the N tasks driving the thread's one session.
+    pub fn member_task_ids_for_thread(&self, thread_id: &str) -> rusqlite::Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("select task_id from task_thread_links where thread_id = ?1")?;
+        let ids = stmt
+            .query_map(params![thread_id], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(ids)
+    }
+
     /// Resolves the owning thread for a member task id via the link table.
     /// Returns `None` when the task is not a linked member (e.g. it is a
     /// thread's primary task, resolved by [`thread_by_task_id`] directly).

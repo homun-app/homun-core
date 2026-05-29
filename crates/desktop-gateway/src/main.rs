@@ -1918,6 +1918,92 @@ fn request_task_executor_approval(
     Ok(approval_request)
 }
 
+/// Computes the session-level `(status, progress_current)` for a thread whose
+/// work was fanned out by the Brain into N member tasks. Reads each member's
+/// terminal state from the durable task store:
+/// - `progress_current` = number of members that have completed,
+/// - status is `WaitingUser` if any member needs approval, else `Failed` if all
+///   members are terminal and at least one failed/cancelled, else `Completed`
+///   when every member is terminal, else `Running`.
+///
+/// Returns `None` when the thread has no linked members (caller keeps the
+/// legacy per-task values), so the single-task path is never affected.
+fn aggregate_member_session_state(
+    state: &AppState,
+    thread: &local_first_desktop_gateway::ChatThread,
+    user: &UserId,
+    workspace: &WorkspaceId,
+) -> Result<Option<(SessionStatus, u32)>, GatewayError> {
+    let member_ids = {
+        let chat_store = lock_store(state)?;
+        chat_store
+            .member_task_ids_for_thread(&thread.thread_id)
+            .map_err(GatewayError::store)?
+    };
+    if member_ids.is_empty() {
+        return Ok(None);
+    }
+
+    let mut completed = 0u32;
+    let mut terminal = 0u32;
+    let mut any_failed = false;
+    let mut any_waiting_user = false;
+    {
+        let store = lock_task_store(state)?;
+        for task_id in &member_ids {
+            let Some(member) = store
+                .get_task(&TaskId::new(task_id.clone()), user, workspace)
+                .map_err(GatewayError::task)?
+            else {
+                continue;
+            };
+            match member.status {
+                TaskStatus::Completed => {
+                    completed += 1;
+                    terminal += 1;
+                }
+                TaskStatus::Failed | TaskStatus::Cancelled | TaskStatus::Expired => {
+                    any_failed = true;
+                    terminal += 1;
+                }
+                TaskStatus::WaitingUserApproval => any_waiting_user = true,
+                _ => {}
+            }
+        }
+    }
+
+    Ok(Some(aggregate_session_state_from_counts(
+        member_ids.len(),
+        completed,
+        terminal,
+        any_failed,
+        any_waiting_user,
+    )))
+}
+
+/// Pure decision for the aggregate session status given member-task counts.
+/// Extracted from [`aggregate_member_session_state`] so the branch logic is
+/// unit-testable without standing up the durable stores.
+fn aggregate_session_state_from_counts(
+    total: usize,
+    completed: u32,
+    terminal: u32,
+    any_failed: bool,
+    any_waiting_user: bool,
+) -> (SessionStatus, u32) {
+    let all_terminal = terminal as usize >= total;
+    let status = if any_waiting_user {
+        SessionStatus::WaitingUser
+    } else if all_terminal && any_failed {
+        SessionStatus::Failed
+    } else if all_terminal {
+        SessionStatus::Completed
+    } else {
+        SessionStatus::Running
+    };
+    (status, completed)
+}
+
 fn sync_session_for_task_run(
     state: &AppState,
     task: &TaskRecord,
@@ -1936,6 +2022,20 @@ fn sync_session_for_task_run(
     };
     let user = gateway_user_id();
     let workspace = gateway_workspace_id();
+
+    // A1.2 aggregation: when this task is a Brain-materialized *member* (its id
+    // differs from the thread's primary task_id, so it resolved via the link
+    // table), the per-task status/progress passed by the run loop describes ONE
+    // step, not the whole session. Recompute session-level status/progress from
+    // the terminal state of all members so the one session reflects N tasks and
+    // only flips to Completed when the last member finishes.
+    let (status, progress_current) = if thread.task_id.as_str() != task.task_id.as_str() {
+        aggregate_member_session_state(state, &thread, &user, &workspace)?
+            .unwrap_or((status, progress_current))
+    } else {
+        (status, progress_current)
+    };
+
     let mut store = lock_computer_store(state)?;
     let Some(mut session) = store
         .session(
@@ -7875,15 +7975,46 @@ mod tests {
         privacy_accept_button_for_snapshot, redact_sensitive_text, resources_for_prompt,
         runtime_logs_unavailable_message, should_create_operational_task, task_effective_goal,
         task_execution_outcome_from_executor_result, task_goal_summary, task_kind_for_prompt,
-        task_queue_response, train_option_lines, train_search_draft_for_goal,
-        train_station_suggestion_for_snapshot, train_success_criteria_met, trovatreno_search_url,
+        aggregate_session_state_from_counts, task_queue_response, train_option_lines,
+        train_search_draft_for_goal, train_station_suggestion_for_snapshot,
+        train_success_criteria_met, trovatreno_search_url,
     };
+    use local_first_local_computer_session::SessionStatus;
     use local_first_browser_automation::BrowserMethod;
     use local_first_task_runtime::{
         ApprovalRequest, ExecutorResult, ResourceClass, TaskId, TaskPriority, TaskQueueSnapshot,
         TaskRecord, TaskStatus, TaskUiItem, UserId, WorkspaceId,
     };
     use std::collections::HashMap;
+
+    #[test]
+    fn aggregate_session_state_reflects_member_progress() {
+        // No member terminal yet -> session stays Running at 0 completed.
+        assert_eq!(
+            aggregate_session_state_from_counts(5, 0, 0, false, false),
+            (SessionStatus::Running, 0)
+        );
+        // Some done, others still running -> Running, progress = completed.
+        assert_eq!(
+            aggregate_session_state_from_counts(5, 2, 2, false, false),
+            (SessionStatus::Running, 2)
+        );
+        // All members completed -> Completed at full progress.
+        assert_eq!(
+            aggregate_session_state_from_counts(5, 5, 5, false, false),
+            (SessionStatus::Completed, 5)
+        );
+        // All terminal but one failed -> Failed (progress counts completed only).
+        assert_eq!(
+            aggregate_session_state_from_counts(5, 4, 5, true, false),
+            (SessionStatus::Failed, 4)
+        );
+        // Any member awaiting approval wins regardless of the rest.
+        assert_eq!(
+            aggregate_session_state_from_counts(5, 1, 1, false, true),
+            (SessionStatus::WaitingUser, 1)
+        );
+    }
 
     #[test]
     fn runtime_logs_unavailable_hides_internal_process_not_found() {
