@@ -6959,3 +6959,30 @@ anche PIU' ricca (campi changes, price_from): FRECCIAROSSA 9310 09:00->14:19 1
 cambio 67,90€; 9628 09:55->14:35 diretto 65,90€. Prompt ~4587 token (era ~5000;
 e la maggior parte ora e' lo snapshot, non le istruzioni). Meno regole = uguale
 o meglio, come da tesi utente.
+
+### De-gemma #1: budget di contesto ADATTIVI (promptjuice = ottimizzazione, non gate)
+
+L'utente ha chiarito: il layer di compressione ("promptjuice", stile JuicePrompt,
+ref in lib.rs render_runtime_prompt) era nato per ottimizzare token per
+costo/tempo, NON per bloccare. Letto il compressore: passthrough sotto budget,
+lossy (clamp_middle/clamp_end) solo sopra, max_chars=0 = illimitato. Il bug erano
+i BUDGET hardcoded minuscoli (gemma4) che lo facevano clampare contenuto
+essenziale anche su modelli capaci.
+
+FIX (budget adattivi al context window del modello attivo, soglia
+CAPABLE_MODEL_CONTEXT_WINDOW=32k):
+- Orchestrator (main.rs `brain_budgets_for_context_window`): modello capace ->
+  max_planner_tokens 768->8000, max_loaded_tools 5->16, tool_search_rounds 1->2,
+  e i 4 cap char di contesto -> 0 (illimitato=passthrough). Piccolo/ignoto ->
+  default gemma4. Cablato nei 2 siti che costruivano il Brain (plan_only +
+  brain_materialize_tasks): ora interrogano router.active_context_window prima.
+- Chat (lib.rs build_chat_runtime_prompt): cap per-messaggio ora adattivo
+  (CAPABLE_CHAT_CONTEXT_CHARS=32k -> niente clamp 2K per-msg quando il budget e'
+  generoso). main.rs stream_chat_via_openai passa un budget = window_tokens*3
+  char (default 32768) invece del default ~3.6K. Il path MLX/gemma resta col
+  default piccolo.
+
+Test: budgets_scale_with_model_context_window (bin),
+large_budget_lifts_the_per_message_clamp_for_capable_models (lib). lib 24 + bin 61.
+RESIDUO de-gemma: browser cap Full + PLAN opzionale; prompt planner OUTPUT FORMAT;
+ritiro keyword routing (A1.5+A1.6).
