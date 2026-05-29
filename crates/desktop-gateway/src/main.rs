@@ -2419,12 +2419,39 @@ fn execute_capability_browser_task(
     )
 }
 
-fn execute_persistent_browser_capability(
+/// True when a browser client error means the single persistent sidecar process
+/// is gone (broken IPC pipe, or a garbled/empty reply because the child closed
+/// its stdout) and the cached handle should be dropped so the next attempt
+/// respawns. `InvalidRequest` is our own serialization bug and the policy/path
+/// blocks are legitimate per-call errors — none of those imply a dead process.
+fn browser_error_indicates_dead_sidecar(error: &BrowserAutomationError) -> bool {
+    matches!(
+        error,
+        BrowserAutomationError::Sidecar(_) | BrowserAutomationError::InvalidResponse(_)
+    )
+}
+
+/// Outcome of a call against the single shared browser sidecar.
+enum SharedSidecarCall {
+    /// The sidecar replied (the response may still be a browser-level error).
+    Response(BrowserResponse),
+    /// The sidecar process was gone; the cached handle has been dropped and the
+    /// task should retry (which respawns a fresh sidecar). Carries the reason.
+    SidecarLost(String),
+}
+
+/// THE single browser execution surface (A1.3). All durable browser capability
+/// execution flows through here so there is exactly one owner of the persistent
+/// sidecar: this function holds `state.browser_capability_client`, lazily spawns
+/// the process once, reuses it across calls/tasks, and self-heals by dropping a
+/// dead handle. Any future live read-only provider must delegate here rather
+/// than spawn a competing sidecar.
+fn call_shared_browser_sidecar(
     state: &AppState,
     task: &TaskRecord,
     method: BrowserMethod,
     params: Value,
-) -> Result<ExecutorResult, LocalTaskExecutionError> {
+) -> Result<SharedSidecarCall, LocalTaskExecutionError> {
     let mut client_guard =
         state
             .browser_capability_client
@@ -2437,16 +2464,47 @@ fn execute_persistent_browser_capability(
             spawn_browser_sidecar_for_task(state, task)?,
         ));
     }
-    let client = client_guard
-        .as_ref()
-        .ok_or_else(|| LocalTaskExecutionError {
-            message: "Browser capability non inizializzato.".to_string(),
-        })?;
-    let response = client
-        .call_response(method, params.clone())
-        .map_err(|error| LocalTaskExecutionError {
+    // Borrow the shared client only for the call so we can replace it afterwards
+    // if the sidecar turns out to be dead.
+    let call_result = {
+        let client = client_guard
+            .as_ref()
+            .ok_or_else(|| LocalTaskExecutionError {
+                message: "Browser capability non inizializzato.".to_string(),
+            })?;
+        client.call_response(method, params)
+    };
+    match call_result {
+        Ok(response) => Ok(SharedSidecarCall::Response(response)),
+        // Self-heal: a broken IPC pipe (Sidecar) or a garbled/empty reply
+        // (InvalidResponse, e.g. the child closed stdout) means the single
+        // persistent sidecar process is gone. Drop the dead handle so the next
+        // attempt respawns a fresh one, and let the durable task runtime retry
+        // instead of failing the task permanently against a corpse.
+        Err(error) if browser_error_indicates_dead_sidecar(&error) => {
+            *client_guard = None;
+            Ok(SharedSidecarCall::SidecarLost(format!(
+                "browser sidecar lost ({error}); respawning on retry"
+            )))
+        }
+        Err(error) => Err(LocalTaskExecutionError {
             message: format!("Browser capability fallita: {error}"),
-        })?;
+        }),
+    }
+}
+
+fn execute_persistent_browser_capability(
+    state: &AppState,
+    task: &TaskRecord,
+    method: BrowserMethod,
+    params: Value,
+) -> Result<ExecutorResult, LocalTaskExecutionError> {
+    let response = match call_shared_browser_sidecar(state, task, method, params.clone())? {
+        SharedSidecarCall::SidecarLost(reason) => {
+            return Ok(ExecutorResult::RetryableFailure { reason });
+        }
+        SharedSidecarCall::Response(response) => response,
+    };
     match response {
         BrowserResponse::Success {
             ok: true, result, ..
@@ -7991,11 +8049,12 @@ mod tests {
         privacy_accept_button_for_snapshot, redact_sensitive_text, resources_for_prompt,
         runtime_logs_unavailable_message, should_create_operational_task, task_effective_goal,
         task_execution_outcome_from_executor_result, task_goal_summary, task_kind_for_prompt,
-        aggregate_session_state_from_counts, collect_member_counts, task_queue_response,
-        train_option_lines, train_search_draft_for_goal, train_station_suggestion_for_snapshot,
-        train_success_criteria_met, trovatreno_search_url,
+        aggregate_session_state_from_counts, browser_error_indicates_dead_sidecar,
+        collect_member_counts, task_queue_response, train_option_lines, train_search_draft_for_goal,
+        train_station_suggestion_for_snapshot, train_success_criteria_met, trovatreno_search_url,
     };
     use crate::chat_store::ChatStore;
+    use local_first_browser_automation::BrowserAutomationError;
     use local_first_local_computer_session::SessionStatus;
     use local_first_browser_automation::BrowserMethod;
     use local_first_task_runtime::{
@@ -8031,6 +8090,28 @@ mod tests {
             aggregate_session_state_from_counts(5, 1, 1, false, true),
             (SessionStatus::WaitingUser, 1)
         );
+    }
+
+    #[test]
+    fn dead_sidecar_errors_trigger_respawn_others_do_not() {
+        // Broken pipe / garbled reply -> the single persistent sidecar is gone.
+        assert!(browser_error_indicates_dead_sidecar(
+            &BrowserAutomationError::Sidecar("broken pipe".into())
+        ));
+        assert!(browser_error_indicates_dead_sidecar(
+            &BrowserAutomationError::InvalidResponse("EOF".into())
+        ));
+        // Our own bug or legitimate per-call policy errors must NOT drop the
+        // shared client (the process is still alive and healthy).
+        assert!(!browser_error_indicates_dead_sidecar(
+            &BrowserAutomationError::InvalidRequest("bad params".into())
+        ));
+        assert!(!browser_error_indicates_dead_sidecar(
+            &BrowserAutomationError::NavigationBlocked("blocked".into())
+        ));
+        assert!(!browser_error_indicates_dead_sidecar(
+            &BrowserAutomationError::PrivateNetworkBlocked("ssrf".into())
+        ));
     }
 
     #[test]
