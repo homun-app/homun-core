@@ -40,8 +40,8 @@ use local_first_capabilities::{
     WorkspaceId as CapabilityWorkspaceId,
 };
 use local_first_orchestrator::{
-    ExecutionPlan, NoopMemoryContextProvider, OrchestratorBrain, OrchestratorBudgets,
-    OrchestratorRequest, ToolSearchIndexStore,
+    ExecutionPlan, MemoryContextProvider, MemoryContextSnippet, OrchestratorBrain,
+    OrchestratorBudgets, OrchestratorRequest, OrchestratorResult, ToolSearchIndexStore,
 };
 use local_first_desktop_gateway::{
     BuildPromptRequest, BuildPromptResponse, CancelGenerationRequest, ChatGenerateStreamRequest,
@@ -4662,7 +4662,7 @@ fn try_brain_operational_plan(state: &AppState, goal: &str) -> Option<Operationa
     );
     let mut brain = OrchestratorBrain::new(
         router,
-        NoopMemoryContextProvider,
+        open_brain_memory(),
         facade,
         ToolSearchIndexStore::open_in_memory().ok()?,
         TaskStore::open_in_memory().ok()?,
@@ -4719,6 +4719,35 @@ fn brain_planner_uses_local_mlx_runtime() -> bool {
         // Empty/default: mistral.rs in-process when compiled in, else MLX :8765.
         _ => !cfg!(feature = "local-mistralrs"),
     }
+}
+
+/// P3 (read): the Brain's memory context provider, backed by a second handle on
+/// the gateway's memory SQLite DB (same pattern as the shared task store). Holds
+/// an `Option` so a memory-DB hiccup degrades to "no memory context" rather than
+/// failing planning. `MemoryFacade` already implements the orchestrator's
+/// `MemoryContextProvider` (policy-filtered `context_pack` → snippets), so this
+/// just delegates.
+struct GatewayBrainMemory(Option<MemoryFacade>);
+
+impl MemoryContextProvider for GatewayBrainMemory {
+    fn load_context(
+        &self,
+        request: &OrchestratorRequest,
+    ) -> OrchestratorResult<Vec<MemoryContextSnippet>> {
+        match &self.0 {
+            Some(facade) => facade.load_context(request),
+            None => Ok(Vec::new()),
+        }
+    }
+}
+
+fn open_brain_memory() -> GatewayBrainMemory {
+    GatewayBrainMemory(
+        gateway_memory_database_path()
+            .ok()
+            .and_then(|path| SQLiteMemoryStore::open(path).ok())
+            .map(MemoryFacade::new),
+    )
 }
 
 /// Context window (tokens) at/above which we treat the model as "capable" and
@@ -4859,7 +4888,7 @@ fn brain_materialize_tasks(
     );
     let mut brain = OrchestratorBrain::new(
         router,
-        NoopMemoryContextProvider,
+        open_brain_memory(),
         facade,
         ToolSearchIndexStore::open_in_memory().map_err(|error| LocalTaskExecutionError {
             message: format!("tool index: {error}"),
