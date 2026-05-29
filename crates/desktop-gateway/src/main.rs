@@ -32,9 +32,10 @@ use local_first_inference::{
     OpenAiCompatProvider, PrivacyPolicy, Requirements,
 };
 use local_first_capabilities::{
-    ActionClass, CachedCapabilityTool, CachedToolProvider, CapabilityConnectionConfig,
-    CapabilityFacade, CapabilityPolicy, CapabilityProviderConfig, CapabilityProviderGrant,
-    CapabilityProviderKind, CapabilityRegistryStore, CapabilityTaskPayload, InMemoryCapabilityAudit,
+    ActionClass, CachedCapabilityTool, CachedToolProvider,
+    CapabilityConnectionConfig, CapabilityFacade, CapabilityPolicy, CapabilityProviderConfig,
+    CapabilityProviderGrant, CapabilityProviderKind, CapabilityRegistryStore, CapabilityTaskPayload,
+    InMemoryCapabilityAudit, McpCapabilityProvider, McpStdioConfig, McpStdioTransport, McpToolPolicy,
     PolicyContext, ProviderId as CapabilityProviderId, UserId as CapabilityUserId,
     WorkspaceId as CapabilityWorkspaceId,
 };
@@ -2394,11 +2395,7 @@ fn execute_read_only_task(
         .unwrap_or(GatewayTaskExecutorKind::LegacyLocal)
     {
         GatewayTaskExecutorKind::CapabilityBrowser => execute_capability_browser_task(state, task),
-        GatewayTaskExecutorKind::CapabilityGeneric => execute_unwired_registered_task(
-            task,
-            "capability-task-executor",
-            "Executor capability generico non ancora collegato al gateway.",
-        ),
+        GatewayTaskExecutorKind::CapabilityGeneric => execute_capability_generic(state, task),
         GatewayTaskExecutorKind::Subagent => execute_subagent_task(state, task),
         GatewayTaskExecutorKind::LegacyShell => execute_shell_read_only_task(task),
         GatewayTaskExecutorKind::LegacyBrowser => execute_browser_read_only_task(state, task),
@@ -2662,47 +2659,211 @@ fn execute_subagent_task(
     task_execution_outcome_from_executor_result(task, &executor_id, "subagent", result)
 }
 
-fn execute_unwired_registered_task(
+/// P2: executes a non-browser `capability.*` task by building a LIVE provider
+/// from the registry and dispatching through `CapabilityFacade::call_tool`.
+///
+/// Today MCP is wired end-to-end (the crate ships a real `McpStdioTransport`):
+/// the registry connection metadata gives the command/args, the provider spawns
+/// the server and speaks JSON-RPC, and the facade enforces the grant-based
+/// policy before calling the tool. Composio (no real HTTP transport yet) and
+/// skills (need a runner) report a clear "kind not yet wired" instead of the
+/// previous blanket "unwired" — so the unlock is incremental and honest.
+fn execute_capability_generic(
+    state: &AppState,
     task: &TaskRecord,
-    executor_id: &str,
-    reason: &str,
 ) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
-    Ok(TaskExecutionOutcome {
+    let payload: CapabilityTaskPayload =
+        serde_json::from_value(task.input_json.clone()).map_err(|error| {
+            LocalTaskExecutionError {
+                message: format!("Payload capability non valido: {error}"),
+            }
+        })?;
+    let call = payload.call;
+    let provider_id = call.provider_id.clone();
+    let user = gateway_capability_user_id();
+    let workspace = gateway_capability_workspace_id();
+
+    let (kind, connection, tool_policies, policy_context) = {
+        let registry = lock_capability_registry(state).map_err(local_task_gateway_error)?;
+        let kind = registry
+            .provider_config(&provider_id)
+            .map_err(|error| LocalTaskExecutionError {
+                message: format!("provider config: {error}"),
+            })?
+            .map(|config| config.provider_kind)
+            .ok_or_else(|| LocalTaskExecutionError {
+                message: format!("provider non configurato: {}", provider_id.as_str()),
+            })?;
+        let connection = registry
+            .connection_configs(&user, &workspace)
+            .map_err(|error| LocalTaskExecutionError {
+                message: format!("connection configs: {error}"),
+            })?
+            .into_iter()
+            .find(|config| config.provider_id == provider_id);
+        let tool_policies = registry
+            .cached_tools(&provider_id)
+            .map_err(|error| LocalTaskExecutionError {
+                message: format!("cached tools: {error}"),
+            })?
+            .into_iter()
+            .map(|cached| McpToolPolicy {
+                tool_name: cached.tool.name,
+                action: cached.tool.action,
+                privacy_domains: cached.tool.privacy_domains,
+                sensitivity: cached.tool.sensitivity,
+            })
+            .collect::<Vec<_>>();
+        let policy_context = registry
+            .policy_context(&user, &workspace)
+            .map_err(|error| LocalTaskExecutionError {
+                message: format!("policy context: {error}"),
+            })?;
+        (kind, connection, tool_policies, policy_context)
+    };
+
+    let result = match kind {
+        CapabilityProviderKind::Mcp => {
+            let connection = connection.ok_or_else(|| LocalTaskExecutionError {
+                message: format!("nessuna connessione per provider {}", provider_id.as_str()),
+            })?;
+            let config = mcp_stdio_config_from_metadata(&connection.metadata)?;
+            let transport =
+                McpStdioTransport::spawn(config).map_err(|error| LocalTaskExecutionError {
+                    message: format!("avvio MCP fallito: {error}"),
+                })?;
+            let mut facade = CapabilityFacade::new(
+                CapabilityPolicy::default(),
+                InMemoryCapabilityAudit::default(),
+            );
+            facade.register_provider(McpCapabilityProvider::new(
+                provider_id.clone(),
+                true,
+                transport,
+                tool_policies,
+            ));
+            facade.call_tool(&policy_context, call)
+        }
+        other => return Ok(capability_kind_not_wired_outcome(task, other)),
+    };
+
+    Ok(match result {
+        Ok(call_result) => capability_call_completed_outcome(task, &call_result),
+        Err(error) => capability_call_failed_outcome(task, &error.to_string()),
+    })
+}
+
+/// Parses an MCP stdio launch config (command/args/env) from a connection's
+/// registry metadata blob.
+fn mcp_stdio_config_from_metadata(
+    metadata: &Value,
+) -> Result<McpStdioConfig, LocalTaskExecutionError> {
+    let command = metadata
+        .get("command")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| LocalTaskExecutionError {
+            message: "metadata MCP senza `command`".to_string(),
+        })?
+        .to_string();
+    let args = metadata
+        .get("args")
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str().map(str::to_string))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let env = metadata
+        .get("env")
+        .and_then(Value::as_object)
+        .map(|map| {
+            map.iter()
+                .filter_map(|(key, value)| value.as_str().map(|value| (key.clone(), value.to_string())))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    Ok(McpStdioConfig { command, args, env })
+}
+
+fn capability_call_completed_outcome(
+    _task: &TaskRecord,
+    result: &local_first_capabilities::CapabilityCallResult,
+) -> TaskExecutionOutcome {
+    let summary = format!("Tool `{}` eseguito.", result.tool_name);
+    TaskExecutionOutcome {
+        completed: true,
+        blocked_reason: None,
+        pending_approval: None,
+        summary: summary.clone(),
+        // Raw output stays in the (audited, non-UI) checkpoint; the redacted
+        // checkpoint and chat message carry only provider/tool identifiers.
+        checkpoint_payload: serde_json::json!({
+            "kind": "capability_tool_completed",
+            "provider": result.provider_id.as_str(),
+            "tool": result.tool_name,
+            "output": result.output,
+        }),
+        checkpoint_redacted: serde_json::json!({
+            "kind": "capability_tool_completed",
+            "provider": result.provider_id.as_str(),
+            "tool": result.tool_name,
+        }),
+        chat_message: format!(
+            "Eseguito `{}` tramite `{}`.",
+            result.tool_name,
+            result.provider_id.as_str()
+        ),
+        surface: SurfaceKind::Logs,
+        event_kind: "capability_tool_completed".to_string(),
+        event_title: "Tool eseguito".to_string(),
+        event_subtitle: summary,
+        event_payload: serde_json::json!({
+            "provider": result.provider_id.as_str(),
+            "tool": result.tool_name,
+        }),
+        artifacts: vec![],
+    }
+}
+
+fn capability_call_failed_outcome(task: &TaskRecord, reason: &str) -> TaskExecutionOutcome {
+    TaskExecutionOutcome {
         completed: false,
         blocked_reason: Some(reason.to_string()),
         pending_approval: None,
         summary: reason.to_string(),
         checkpoint_payload: serde_json::json!({
-            "kind": "executor_unwired",
-            "executor_id": executor_id,
+            "kind": "capability_tool_failed",
             "task_kind": task.kind,
-            "output": {
-                "blocked_reason": reason,
-            },
+            "reason": reason,
         }),
         checkpoint_redacted: serde_json::json!({
-            "kind": "executor_unwired",
-            "executor_id": executor_id,
+            "kind": "capability_tool_failed",
             "task_kind": task.kind,
-            "output": {
-                "blocked_reason": reason,
-            },
+            "reason": reason,
         }),
-        chat_message: format!(
-            "Il piano operativo ha creato un task `{}`, ma {reason}",
-            task.kind
-        ),
+        chat_message: format!("Il tool capability non e' riuscito: {reason}"),
         surface: SurfaceKind::Logs,
-        event_kind: "computer_executor_unwired".to_string(),
-        event_title: "Executor non collegato".to_string(),
+        event_kind: "capability_tool_failed".to_string(),
+        event_title: "Tool non riuscito".to_string(),
         event_subtitle: reason.to_string(),
-        event_payload: serde_json::json!({
-            "executor_id": executor_id,
-            "task_kind": task.kind,
-        }),
+        event_payload: serde_json::json!({ "task_kind": task.kind }),
         artifacts: vec![],
-    })
+    }
 }
+
+fn capability_kind_not_wired_outcome(
+    task: &TaskRecord,
+    kind: CapabilityProviderKind,
+) -> TaskExecutionOutcome {
+    let reason = format!(
+        "Esecuzione capability per provider kind {kind:?} non ancora collegata (MCP e' attivo)."
+    );
+    capability_call_failed_outcome(task, &reason)
+}
+
 
 fn task_execution_outcome_from_executor_result(
     task: &TaskRecord,
@@ -8271,10 +8432,12 @@ mod tests {
         runtime_logs_unavailable_message, should_create_operational_task, task_effective_goal,
         task_execution_outcome_from_executor_result, task_goal_summary, task_kind_for_prompt,
         aggregate_session_state_from_counts, brain_budgets_for_context_window,
-        browser_error_indicates_dead_sidecar, collect_member_counts, task_queue_response,
-        train_option_lines, train_search_draft_for_goal, train_station_suggestion_for_snapshot,
+        browser_error_indicates_dead_sidecar, capability_call_completed_outcome, collect_member_counts,
+        mcp_stdio_config_from_metadata, task_queue_response, train_option_lines,
+        train_search_draft_for_goal, train_station_suggestion_for_snapshot,
         train_success_criteria_met, trovatreno_search_url,
     };
+    use local_first_capabilities::{CapabilityCallResult, ProviderId as CapProviderId};
     use crate::chat_store::ChatStore;
     use local_first_browser_automation::BrowserAutomationError;
     use local_first_local_computer_session::SessionStatus;
@@ -8312,6 +8475,47 @@ mod tests {
             aggregate_session_state_from_counts(5, 1, 1, false, true),
             (SessionStatus::WaitingUser, 1)
         );
+    }
+
+    #[test]
+    fn mcp_stdio_config_parses_command_args_env() {
+        let config = mcp_stdio_config_from_metadata(&serde_json::json!({
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+            "env": { "FOO": "bar" }
+        }))
+        .unwrap();
+        assert_eq!(config.command, "npx");
+        assert_eq!(config.args.len(), 3);
+        assert_eq!(config.env, vec![("FOO".to_string(), "bar".to_string())]);
+
+        // Missing command is a hard error (cannot spawn a server).
+        assert!(mcp_stdio_config_from_metadata(&serde_json::json!({})).is_err());
+    }
+
+    #[test]
+    fn capability_completed_outcome_keeps_raw_output_out_of_redacted_and_chat() {
+        let task = TaskRecord::new(
+            "t1",
+            UserId::new("u"),
+            WorkspaceId::new("w"),
+            "capability.fs.read_file",
+            "read a file",
+            serde_json::json!({}),
+        );
+        let result = CapabilityCallResult {
+            provider_id: CapProviderId::new("fs"),
+            tool_name: "fs.read_file".to_string(),
+            output: serde_json::json!({ "contents": "SECRET-CONTENTS" }),
+        };
+        let outcome = capability_call_completed_outcome(&task, &result);
+        assert!(outcome.completed);
+        // Raw output is preserved in the audited checkpoint...
+        assert_eq!(outcome.checkpoint_payload["output"]["contents"], "SECRET-CONTENTS");
+        // ...but never leaks into the redacted checkpoint or the chat message.
+        assert!(outcome.checkpoint_redacted.get("output").is_none());
+        assert!(!outcome.chat_message.contains("SECRET-CONTENTS"));
+        assert!(outcome.chat_message.contains("fs.read_file"));
     }
 
     #[test]
