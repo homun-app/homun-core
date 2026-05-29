@@ -4,6 +4,36 @@ Questo file e' la memoria operativa del lavoro svolto nel repository. Va aggiorn
 
 ## 2026-05-29
 
+### A1.3 FATTA (core) — superficie d'esecuzione browser UNICA + self-heal
+
+Obiettivo A1.3: "proprieta' UNICA del sidecar -> una sola superficie
+d'esecuzione". Indagine: il registry capability seeda SOLO metadata
+(config/grant/connection + cached tools); `BrowserCapabilityProvider` (crate
+capabilities) NON e' cablato nel gateway; il facade del Brain usa
+`CachedToolProvider` (call_tool -> ProviderUnavailable) + `allowed_actions=[]`.
+Quindi l'unica superficie VIVA e' gia' il durable executor
+(`execute_capability_browser_task` -> `state.browser_capability_client`). I path
+legacy (browser loop / keyword-train) spawnano sidecar effimeri ma sono in
+ritiro (A1.5) e girano solo sul route keyword, sequenziali via lease.
+
+Fatto:
+1. SELF-HEAL: in `call_shared_browser_sidecar`, se `call_response` ritorna
+   `Sidecar`/`InvalidResponse` (pipe rotto / stdout chiuso = processo morto), si
+   scarta il client cached (`*client_guard = None`) e si ritorna
+   `RetryableFailure` -> il task runtime ritenta e rispawna, invece di fallire
+   per sempre contro un sidecar morto. Classificazione in predicato puro
+   `browser_error_indicates_dead_sidecar` (testato: Sidecar/InvalidResponse ->
+   respawn; InvalidRequest/NavigationBlocked/PrivateNetworkBlocked -> no).
+2. PROPRIETA' UNICA: estratto `call_shared_browser_sidecar` come UNICO owner del
+   sidecar persistente (lock + get-or-spawn + call + self-heal). Contratto
+   documentato: ogni futuro provider read-only live DEVE delegare qui, mai
+   spawnare un sidecar concorrente.
+
+Test: `dead_sidecar_errors_trigger_respawn_others_do_not`. Gateway bin 59 verdi.
+RESIDUO A1.3 (quando si cableranno provider live): far passare anche il
+`call_tool` immediato read-only per lo stesso accessor. Per ora non serve (path
+durevole-only). RESIDUO A1: A1.4, A1.5, A1.6.
+
 ### A1.2 FATTA — N task del Brain in UNA sessione aggregante (commit f763dae + c0af062)
 
 Problema: un prompt -> N task durevoli (Brain), ma giravano "headless". Il
