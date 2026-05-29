@@ -6873,3 +6873,27 @@ locali. Se il planner non e' pronto, il task non deve mascherare il problema
 come fallimento del sito: deve avviare Gemma o mostrare un errore di runtime
 esplicito. Il prossimo test su Trenitalia deve distinguere runtime, planner e
 browser con checkpoint separati.
+
+### Confronto modelli per il loop + kimi-k2.6 raggiunge i RISULTATI
+
+Pulizia: i run multipli lasciavano sidecar/Chromium ORFANI (il kill del parent
+harness non uccideva i figli) -> competizione sul profilo. Da gestire nel
+teardown (kill del process-group). Per ora pulizia manuale.
+
+Confronto (loop osserva->agisci, Compact, retry attivo, max_tokens 6000):
+- qwen3-vl:235b-cloud: capace ma LENTISSIMO (Full ~impraticabile); 2 iter corrette.
+- minimax-m2.7:cloud: reasoning; con max_tokens basso -> content vuoto; con 6000
+  una run raggiunse i risultati, ma tende a INCASTRARSI ripetendo lo stesso click.
+- kimi-k2.6:cloud: MIGLIORE. reasoning ma JSON affidabile (~16s/call con
+  max_tokens 6000). Run: form completo (Napoli/Milano/data/ora) -> handoff ->
+  PAGINA RISULTATI lefrecce.it -> scroll dei treni. Stop a iter18 perche' ha
+  tentato `evaluate` (JS) -> BLOCCATO dal gate sicurezza, dopo fatica a cliccare
+  una card (overlay intercetta il pointer).
+
+CONCLUSIONE: la ricerca Napoli->Milano FUNZIONA end-to-end fino ai risultati,
+affidabile, con kimi-k2.6 + i fix loop (retry/resample, max_tokens, Compact).
+Ritocchi residui per "raccogli opzioni e fermati": (1) guidare il modello a
+ESTRARRE/riportare le opzioni alla results page invece di cliccare i dettagli;
+(2) robustezza click su card con overlay (lefrecce); (3) teardown sidecar pulito
+(process-group kill). Config consigliata loop: OLLAMA_MODEL=kimi-k2.6:cloud,
+BROWSER_CONTEXT_PROFILE=compact, MAX_TOKENS>=6000, PLANNER_TIMEOUT>=120, ATTEMPTS=4.
