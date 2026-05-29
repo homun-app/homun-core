@@ -37,6 +37,22 @@ use local_first_inference::{
 };
 use local_first_subagents::RuntimeClient;
 
+/// Resolves the cloud API key from the 0600 file at
+/// `LOCAL_FIRST_INFERENCE_API_KEY_FILE` (preferred, so the value never appears
+/// in a command/env), else from `OLLAMA_API_KEY`.
+fn resolve_api_key() -> Option<String> {
+    if let Ok(path) = std::env::var("LOCAL_FIRST_INFERENCE_API_KEY_FILE")
+        && !path.trim().is_empty()
+        && let Ok(contents) = std::fs::read_to_string(path.trim())
+    {
+        let key = contents.trim().to_string();
+        if !key.is_empty() {
+            return Some(key);
+        }
+    }
+    std::env::var("OLLAMA_API_KEY").ok().filter(|key| !key.is_empty())
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let backend = std::env::var("INFERENCE_BACKEND").unwrap_or_else(|_| "ollama".to_string());
     let headless =
@@ -122,10 +138,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                 context_window: 32_768,
                 approx_tokens_per_second: None,
             };
-            // Cloud models need auth: either `ollama signin` (daemon holds the
-            // credential, no key needed here) or an API key passed as bearer.
-            let api_key = std::env::var("OLLAMA_API_KEY").ok().filter(|key| !key.is_empty());
-            let provider = OpenAiCompatProvider::new(descriptor, base_url, model, api_key);
+            // Cloud key from a 0600 file (LOCAL_FIRST_INFERENCE_API_KEY_FILE),
+            // else OLLAMA_API_KEY env — the value never appears in a command.
+            let provider = OpenAiCompatProvider::new(descriptor, base_url, model, resolve_api_key());
             let router = ModelRouter::new(PrivacyPolicy::allowing_cloud())
                 .with_provider(Box::new(provider));
             // Size the snapshot to the model: large-context models get the full

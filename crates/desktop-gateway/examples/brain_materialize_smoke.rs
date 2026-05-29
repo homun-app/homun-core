@@ -20,6 +20,22 @@ use local_first_orchestrator::{
 use local_first_subagents::{JsonRuntime, RuntimeClient};
 use local_first_task_runtime::TaskStore;
 
+/// Resolves the cloud API key WITHOUT it ever appearing in a command/env value:
+/// reads the 0600 file at `LOCAL_FIRST_INFERENCE_API_KEY_FILE` (preferred), else
+/// falls back to the `OLLAMA_API_KEY` env var.
+fn resolve_api_key() -> Option<String> {
+    if let Ok(path) = std::env::var("LOCAL_FIRST_INFERENCE_API_KEY_FILE")
+        && !path.trim().is_empty()
+        && let Ok(contents) = std::fs::read_to_string(path.trim())
+    {
+        let key = contents.trim().to_string();
+        if !key.is_empty() {
+            return Some(key);
+        }
+    }
+    std::env::var("OLLAMA_API_KEY").ok().filter(|key| !key.is_empty())
+}
+
 fn browser_tool(name: &str, action: ActionClass) -> CapabilityTool {
     CapabilityTool {
         name: name.to_string(),
@@ -52,7 +68,7 @@ fn main() {
             context_window: 32_768,
             approx_tokens_per_second: None,
         };
-        let api_key = std::env::var("OLLAMA_API_KEY").ok().filter(|k| !k.is_empty());
+        let api_key = resolve_api_key();
         let router = ModelRouter::new(PrivacyPolicy::local_only())
             .with_provider(Box::new(OpenAiCompatProvider::new(descriptor, base, model, api_key)));
         run_brain(router, &goal);
