@@ -4,6 +4,27 @@ Questo file e' la memoria operativa del lavoro svolto nel repository. Va aggiorn
 
 ## 2026-05-29
 
+### A4 — chat dal router (streaming OpenAI-compat)
+
+- L'handler `generate_stream` ora, se `LOCAL_FIRST_INFERENCE_BACKEND=openai` +
+  `LOCAL_FIRST_INFERENCE_BASE_URL` (Ollama local/cloud, OpenAI, OpenRouter),
+  streama da `{base}/chat/completions` con `stream:true` e TRADUCE la SSE nel
+  formato NDJSON `GenerateStreamEvent` del gateway (delta/done) — IDENTICO al
+  path MLX, quindi la UI consuma entrambi allo stesso modo. Default invariato =
+  proxy MLX locale.
+- Traduzione async: task spawn legge `bytes_stream`, line-buffer, usa
+  `local_first_inference::streaming::parse_openai_sse_line` (gia' unit-tested),
+  emette `GenerateStreamEvent::Delta/Done` (di subagents → wire identico a MLX)
+  via mpsc → `futures_util::stream::unfold` → `Body::from_stream`.
+- Config: `chat_openai_stream_config()`; key via `resolve_inference_api_key`
+  (file 0600 preferito). Dep aggiunte: `bytes`, `futures-util`, tokio `sync`.
+- Test: gateway 23+55, inference 23 verdi; build light e default verdi.
+- NON ancora fatto: streaming Anthropic (schema SSE diverso: event
+  content_block_delta) → follow-up. Validazione live chat-via-Ollama rimandata
+  (come da decisione "test alla fine"). Il path MLX resta default/intatto.
+- Pilastro #5 ADR 0008 (chat dal ModelRouter) avanzato: ora la chat puo' usare
+  modelli capaci via OpenAI-compat senza essere hard-coupled a MLX.
+
 ### M3 (B1) — conferma combobox deterministica per modelli locali deboli
 
 - CAUSA originale (test live Trenitalia): i campi stazione sono `role=combobox`
@@ -26,6 +47,16 @@ Questo file e' la memoria operativa del lavoro svolto nel repository. Va aggiorn
 - Gridcell-retention nel profilo compact (altra parte di M3): gia' fatta prima.
 - M3 residuo (enhancement, non blocker): B2 stato-piano esplicito nel loop;
   B4 fallback vision quando l'aria-snapshot e' povero.
+
+DECISIONE STRATEGICA (utente, 2026-05-29): con il router inference + delega
+cloud, usare un modello piccolo LOCALE e' ormai OPZIONALE e NON piu' vincolante
+per il browser (si puo' usare un modello capace via router). Conseguenze:
+- B2/B4 (pensati per compensare modelli deboli) -> DEPRIORITIZZATI. B1 resta
+  utile (aiuta qualunque modello), ma non si insegue altro per i modelli piccoli.
+- Il test live di B1 con modello piccolo locale -> rimandato alla FINE, opzionale.
+- Strategia: "modello capace via router" e' il percorso; quindi il valore alto
+  e' portare TUTTO (chat + orchestrazione) sul router (A1 closure + A4 chat dal
+  router), non ottimizzare i modelli locali deboli.
 
 ### M1/A1 #3 — de-stub executor Subagent (GAP 4)
 

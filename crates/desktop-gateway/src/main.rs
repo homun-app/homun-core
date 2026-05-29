@@ -62,7 +62,12 @@ use local_first_process_manager::{
     LocalProcessSupervisor, LocalRuntimeDiscovery, LogEntry, ProcessManager, ProcessRegistryStore,
     RuntimeControlSnapshot, RuntimeControlStatus, SidecarProcessCatalog,
 };
-use local_first_subagents::{RuntimeClient, SubagentTaskExecutor};
+use bytes::Bytes;
+use futures_util::StreamExt;
+use local_first_inference::streaming::{ChatStreamEvent, parse_openai_sse_line};
+use local_first_subagents::{
+    GenerateStreamEvent, RuntimeClient, SubagentTaskExecutor, TokenMetrics,
+};
 use local_first_task_runtime::{
     ApprovalGate, ApprovalRequest, ApprovalStatus, ExecutorResult, LeaseManager, ResourceClass,
     ResourceGovernor, ResourceLimits, ResourceRequirement, TaskExecutor, TaskId, TaskPriority,
@@ -932,6 +937,13 @@ async fn generate_stream(
     State(state): State<AppState>,
     Json(request): Json<ChatGenerateStreamRequest>,
 ) -> Result<Response, GatewayError> {
+    // A4: route chat through the inference layer when an OpenAI-compatible
+    // backend (Ollama local/cloud, OpenAI, ...) is configured, so chat can use a
+    // capable model. Default stays the local MLX proxy.
+    if let Some((base_url, model, api_key)) = chat_openai_stream_config() {
+        return stream_chat_via_openai(&state, request, base_url, model, api_key).await;
+    }
+
     ensure_runtime_available(&state).await?;
 
     let runtime_request = build_gemma_generate_stream_request(&request);
@@ -958,6 +970,135 @@ async fn generate_stream(
         .header("content-type", "application/x-ndjson")
         .body(Body::from_stream(response.bytes_stream()))
         .expect("valid streaming response"))
+}
+
+/// Chat streaming config when an OpenAI-compatible backend is selected
+/// (`LOCAL_FIRST_INFERENCE_BACKEND=openai` + base URL). Returns
+/// `(base_url, model, api_key)`, else `None` to keep the local MLX path.
+fn chat_openai_stream_config() -> Option<(String, String, Option<String>)> {
+    if env::var("LOCAL_FIRST_INFERENCE_BACKEND")
+        .map(|value| value.trim().to_ascii_lowercase())
+        .ok()
+        .as_deref()
+        != Some("openai")
+    {
+        return None;
+    }
+    let base_url = env::var("LOCAL_FIRST_INFERENCE_BASE_URL")
+        .ok()
+        .filter(|value| !value.is_empty())?;
+    let model = env::var("LOCAL_FIRST_INFERENCE_MODEL").unwrap_or_else(|_| "gpt-4o-mini".to_string());
+    Some((base_url, model, resolve_inference_api_key()))
+}
+
+/// Streams a chat completion from an OpenAI-compatible endpoint, translating its
+/// SSE deltas into the gateway's NDJSON `GenerateStreamEvent` format — identical
+/// to the MLX path, so the UI consumes both the same way.
+async fn stream_chat_via_openai(
+    state: &AppState,
+    request: ChatGenerateStreamRequest,
+    base_url: String,
+    model: String,
+    api_key: Option<String>,
+) -> Result<Response, GatewayError> {
+    let prompt = build_chat_runtime_prompt(&BuildPromptRequest {
+        prompt: request.prompt.clone(),
+        context: request.context.clone(),
+        max_context_chars: request.max_context_chars,
+    })
+    .runtime_prompt;
+
+    let mut builder = state
+        .http
+        .post(format!("{}/chat/completions", base_url.trim_end_matches('/')));
+    if let Some(key) = api_key.as_ref() {
+        builder = builder.bearer_auth(key);
+    }
+    let upstream = builder
+        .json(&serde_json::json!({
+            "model": model,
+            "messages": [{ "role": "user", "content": prompt }],
+            "temperature": request.temperature,
+            "max_tokens": request.max_tokens,
+            "stream": true,
+        }))
+        .send()
+        .await
+        .map_err(|error| GatewayError::bad_gateway("chat_stream_request_failed", error))?;
+
+    let status = upstream.status();
+    if !status.is_success() {
+        let message = upstream.text().await.unwrap_or_else(|_| status.to_string());
+        return Err(GatewayError::from_status(status, "chat_stream_failed", message));
+    }
+
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(32);
+    tokio::spawn(async move {
+        let mut stream = upstream.bytes_stream();
+        let mut buffer = String::new();
+        let mut accumulated = String::new();
+        let mut done_emitted = false;
+        'outer: while let Some(chunk) = stream.next().await {
+            let Ok(chunk) = chunk else { break };
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
+            while let Some(newline) = buffer.find('\n') {
+                let line: String = buffer.drain(..=newline).collect();
+                match parse_openai_sse_line(line.trim_end()) {
+                    ChatStreamEvent::Delta(text) => {
+                        accumulated.push_str(&text);
+                        if emit_stream_event(&tx, GenerateStreamEvent::Delta { text })
+                            .await
+                            .is_err()
+                        {
+                            break 'outer;
+                        }
+                    }
+                    ChatStreamEvent::Done => {
+                        let _ = emit_stream_event(
+                            &tx,
+                            GenerateStreamEvent::Done {
+                                text: accumulated.clone(),
+                                metrics: TokenMetrics::zero(),
+                            },
+                        )
+                        .await;
+                        done_emitted = true;
+                        break 'outer;
+                    }
+                    ChatStreamEvent::Ignore => {}
+                }
+            }
+        }
+        if !done_emitted {
+            let _ = emit_stream_event(
+                &tx,
+                GenerateStreamEvent::Done {
+                    text: accumulated,
+                    metrics: TokenMetrics::zero(),
+                },
+            )
+            .await;
+        }
+    });
+
+    let body = Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move {
+        rx.recv().await.map(|item| (item, rx))
+    }));
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/x-ndjson")
+        .body(body)
+        .expect("valid streaming response"))
+}
+
+async fn emit_stream_event(
+    tx: &tokio::sync::mpsc::Sender<Result<Bytes, std::io::Error>>,
+    event: GenerateStreamEvent,
+) -> Result<(), ()> {
+    let line = serde_json::to_string(&event).map_err(|_| ())?;
+    tx.send(Ok(Bytes::from(format!("{line}\n"))))
+        .await
+        .map_err(|_| ())
 }
 
 async fn cancel_generation(
