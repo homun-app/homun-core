@@ -6915,3 +6915,24 @@ page. Prossimi tentativi: (a) profilo Full SOLO sulla results page (le option ro
 sopravvivono) o un profilo "results-aware"; (b) wait-for-options piu' lungo (la
 SPA carica le soluzioni async; iter con wait 5s e' andato in timeout); (c)
 snapshot mirato alla region dei risultati. Config modello confermata: kimi-k2.6.
+
+### OBIETTIVO RAGGIUNTO — ricerca Trenitalia end-to-end con opzioni reali
+
+kimi-k2.6 + profilo FULL (unica variabile cambiata da Compact): completed=true.
+Opzioni estratte: FRECCIAROSSA 9310 09:00->14:19 5h19 1 cambio da 67,90€;
+FRECCIAROSSA 9628 09:55->14:35 4h40 diretto da 65,90€. Fermato prima della
+selezione, come da goal.
+
+TESI VALIDATA (utente): il design era sovra-vincolato per far girare gemma4
+(Compact snapshot, regole prescrittive, piano statico, context piccole). Quei
+tagli DANNEGGIANO i modelli capaci. Prova: l'unico cambio Compact->Full ha
+sbloccato l'estrazione. NB: il profilo e' GIA' auto-selezionato dal
+context_window (Full per >=32k); ero io a forzare Compact via env inseguendo la
+velocita' del 235B. Default gia' corretto per modelli capaci.
+
+DIREZIONE (capable-first): non forzare Compact; riservare Compact/Minimal ai soli
+modelli locali piccoli. Alleggerire le regole del prompt del loop (tenere solo i
+guardrail di SICUREZZA: no login/pagamento/dati personali, no evaluate) e dare
+piu' contesto. I task `act` statici del Brain restano inadatti all'interazione:
+l'interazione va al loop osserva->agisci. Config che funziona: kimi-k2.6, profilo
+auto (Full), max_tokens>=6000, timeout>=120, attempts=4.
