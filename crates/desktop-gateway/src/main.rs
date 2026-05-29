@@ -864,7 +864,30 @@ async fn submit_operational_prompt(
         });
     }
 
+    // A1.1 (opt-in): when enabled, the OrchestratorBrain plans and materializes
+    // durable tasks into the shared store (run by the worker). Falls back to the
+    // legacy keyword task creation on any failure. Run on a blocking thread
+    // because the Brain planner makes a synchronous LLM call.
+    let brain_task_ids = if brain_materialize_enabled() {
+        let state_for_brain = state.clone();
+        let goal = request.user_message.text.clone();
+        tokio::task::spawn_blocking(move || brain_materialize_tasks(&state_for_brain, &goal))
+            .await
+            .ok()
+            .and_then(|result| result.ok())
+            .filter(|ids| !ids.is_empty())
+    } else {
+        None
+    };
+
     let now = OffsetDateTime::now_utc();
+    let ack_text = match brain_task_ids.as_ref() {
+        Some(ids) => format!(
+            "Ho pianificato {} passi e li sto eseguendo (Brain). Trovi l'avanzamento nella coda task.",
+            ids.len()
+        ),
+        None => operational_task_acknowledgement(&request.user_message.text),
+    };
     let assistant_message = ChatMessage {
         id: format!(
             "assistant_operational_{}_{}",
@@ -872,7 +895,7 @@ async fn submit_operational_prompt(
             now.unix_timestamp_nanos()
         ),
         role: "assistant".to_string(),
-        text: operational_task_acknowledgement(&request.user_message.text),
+        text: ack_text,
         timestamp: now.unix_timestamp().to_string(),
         metadata: Some("Executor locale".to_string()),
         metrics: None,
@@ -885,13 +908,17 @@ async fn submit_operational_prompt(
     let snapshot = lock_store(&state)?
         .commit_prompt_result(&thread_id, &request.user_message, &assistant_message)
         .map_err(GatewayError::store)?;
-    ensure_operational_task_for_thread(
-        &state,
-        &thread_id,
-        &assistant_message.id,
-        &request.user_message.text,
-        TaskCreationMode::AutoFromPrompt,
-    )?;
+    // Brain path already materialized tasks; otherwise use the legacy single-task
+    // creation (which also wires the Local Computer session — A1.2 unifies this).
+    if brain_task_ids.is_none() {
+        ensure_operational_task_for_thread(
+            &state,
+            &thread_id,
+            &assistant_message.id,
+            &request.user_message.text,
+            TaskCreationMode::AutoFromPrompt,
+        )?;
+    }
     Ok(Json(snapshot))
 }
 
@@ -4219,6 +4246,98 @@ fn try_brain_operational_plan(state: &AppState, goal: &str) -> Option<Operationa
     };
     let plan = brain.plan_only(&request).ok()?;
     Some(brain_adapter::execution_plan_to_operational_plan(&plan, goal))
+}
+
+fn brain_materialize_enabled() -> bool {
+    env::var("LOCAL_FIRST_BRAIN_MATERIALIZE")
+        .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "on"))
+        .unwrap_or(false)
+}
+
+/// A1.1: runs the OrchestratorBrain so it MATERIALIZES durable tasks into the
+/// shared TaskStore (the same DB the background worker polls). Durable-only:
+/// the request policy has empty `allowed_actions`, so every tool is
+/// visible-but-not-executable -> the Brain never calls `call_tool` (so the
+/// planning-only CachedToolProvider is safe) and enqueues every step as a
+/// durable task, executed by the worker's real executors (browser/subagent).
+/// Returns the materialized task ids, or an error so the caller can fall back.
+fn brain_materialize_tasks(state: &AppState, goal: &str) -> Result<Vec<String>, LocalTaskExecutionError> {
+    ensure_runtime_available_for_task(state)?;
+    let user = gateway_capability_user_id();
+    let workspace = gateway_capability_workspace_id();
+
+    let (mut policy_context, provider_tools) = {
+        let registry = lock_capability_registry(state).map_err(local_task_gateway_error)?;
+        let policy = registry
+            .policy_context(&user, &workspace)
+            .map_err(|error| LocalTaskExecutionError {
+                message: format!("policy context: {error}"),
+            })?;
+        let mut provider_tools = Vec::new();
+        for provider in &policy.enabled_providers {
+            let tools = registry
+                .cached_tools(provider)
+                .map_err(|error| LocalTaskExecutionError {
+                    message: format!("cached tools: {error}"),
+                })?
+                .into_iter()
+                .map(|cached| cached.tool)
+                .collect::<Vec<_>>();
+            provider_tools.push((provider.clone(), tools));
+        }
+        (policy, provider_tools)
+    };
+    // Force durable-only: no executable tools -> no immediate call_tool.
+    policy_context.allowed_actions = Vec::new();
+
+    let mut facade =
+        CapabilityFacade::new(CapabilityPolicy::default(), InMemoryCapabilityAudit::default());
+    for (provider_id, tools) in provider_tools {
+        let kind = tools
+            .first()
+            .map(|tool| tool.provider_kind)
+            .unwrap_or(CapabilityProviderKind::Native);
+        facade.register_provider(CachedToolProvider::new(provider_id, kind, tools));
+    }
+
+    let task_store = TaskStore::open(gateway_task_database_path().map_err(|error| {
+        LocalTaskExecutionError {
+            message: error.to_string(),
+        }
+    })?)
+    .map_err(|error| LocalTaskExecutionError {
+        message: format!("shared task store: {error}"),
+    })?;
+
+    let mut brain = OrchestratorBrain::new(
+        RuntimeClient::new(state.gemma_runtime_url.to_string()),
+        NoopMemoryContextProvider,
+        facade,
+        ToolSearchIndexStore::open_in_memory().map_err(|error| LocalTaskExecutionError {
+            message: format!("tool index: {error}"),
+        })?,
+        task_store,
+    );
+    let request = OrchestratorRequest {
+        request_id: format!("brain_{}", uuid::Uuid::new_v4().simple()),
+        policy_context,
+        user_message: goal.to_string(),
+        conversation_summary: None,
+        attachments: Vec::new(),
+        budgets: OrchestratorBudgets::default(),
+    };
+    let outcome = brain.run(request).map_err(|error| LocalTaskExecutionError {
+        message: format!("brain run: {error}"),
+    })?;
+
+    let mut task_ids = Vec::new();
+    for summary in &outcome.enqueued_tasks {
+        task_ids.push(summary.task_id.as_str().to_string());
+    }
+    for summary in &outcome.enqueued_subagent_tasks {
+        task_ids.push(summary.task_id.as_str().to_string());
+    }
+    Ok(task_ids)
 }
 
 /// Resolves the cloud inference API key, preferring a 0600 key file over the
