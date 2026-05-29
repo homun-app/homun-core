@@ -6897,3 +6897,21 @@ ESTRARRE/riportare le opzioni alla results page invece di cliccare i dettagli;
 (2) robustezza click su card con overlay (lefrecce); (3) teardown sidecar pulito
 (process-group kill). Config consigliata loop: OLLAMA_MODEL=kimi-k2.6:cloud,
 BROWSER_CONTEXT_PROFILE=compact, MAX_TOKENS>=6000, PLANNER_TIMEOUT>=120, ATTEMPTS=4.
+
+### kimi + fix #1/#2: teardown OK, no evaluate, ma estrazione opzioni da fare
+
+Run kimi-k2.6 dopo i fix (prompt results-page + no evaluate; teardown graceful):
+- TEARDOWN: confermato 0 sidecar / 0 chromium orfani dopo l'uscita (fix Drop:
+  chiudi stdin -> sidecar EOF -> manager.stop() -> exit; + handler SIGTERM/SIGINT).
+- PROMPT: il modello NON ha piu' tentato evaluate ne' espanso i dettagli.
+- Form -> handoff -> RESULTS PAGE lefrecce raggiunta in modo affidabile.
+- MA: niente decision:complete; ha scrollato e il guard no_progress ha fermato
+  il loop. Le opzioni treno NON emergono nello snapshot COMPACT della SPA
+  lefrecce (Aurelia, au-target, rendering dinamico) -> il modello non trova nulla
+  da estrarre.
+
+BLOCCO RESIDUO (non modello, non robustezza): qualita' snapshot sulla results
+page. Prossimi tentativi: (a) profilo Full SOLO sulla results page (le option row
+sopravvivono) o un profilo "results-aware"; (b) wait-for-options piu' lungo (la
+SPA carica le soluzioni async; iter con wait 5s e' andato in timeout); (c)
+snapshot mirato alla region dei risultati. Config modello confermata: kimi-k2.6.
