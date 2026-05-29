@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <title>Combobox autocomplete fixture</title>
+  </head>
+  <body>
+    <h1>Stazione</h1>
+    <!-- Autocomplete combobox whose suggestions are NOT individually clickable
+         refs: selection happens only via keyboard (ArrowDown + Enter), like the
+         real Trenitalia station fields. -->
+    <input
+      id="station"
+      role="combobox"
+      aria-autocomplete="list"
+      aria-controls="station-listbox"
+      aria-expanded="false"
+      autocomplete="off"
+      placeholder="digita e conferma con invio"
+    />
+    <ul id="station-listbox" role="listbox" style="display: none"></ul>
+    <div id="confirmed" data-confirmed="false">nessuna selezione</div>
+
+    <script>
+      const OPTIONS = ["Napoli Centrale", "Napoli Campi Flegrei", "Milano Centrale"];
+      const input = document.getElementById("station");
+      const listbox = document.getElementById("station-listbox");
+      const confirmed = document.getElementById("confirmed");
+      let active = -1;
+      let matches = [];
+
+      function render() {
+        listbox.replaceChildren();
+        matches.forEach((text, index) => {
+          const li = document.createElement("li");
+          li.setAttribute("role", "option");
+          li.textContent = text;
+          if (index === active) li.setAttribute("aria-selected", "true");
+          // Deliberately NOT wired for click — keyboard-only selection.
+          listbox.appendChild(li);
+        });
+        const open = matches.length > 0;
+        listbox.style.display = open ? "block" : "none";
+        input.setAttribute("aria-expanded", open ? "true" : "false");
+      }
+
+      input.addEventListener("input", () => {
+        const q = input.value.trim().toLowerCase();
+        matches = q ? OPTIONS.filter((o) => o.toLowerCase().startsWith(q)) : [];
+        // Nothing highlighted until the user presses ArrowDown (real autocomplete
+        // behavior), so the first ArrowDown selects the first match.
+        active = -1;
+        render();
+      });
+
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          if (matches.length) active = (active + 1) % matches.length;
+          render();
+        } else if (event.key === "Enter") {
+          event.preventDefault();
+          if (active >= 0 && matches[active]) {
+            input.value = matches[active];
+            confirmed.textContent = "selezionato: " + matches[active];
+            confirmed.setAttribute("data-confirmed", "true");
+            matches = [];
+            render();
+          }
+        }
+      });
+    </script>
+  </body>
+</html>
