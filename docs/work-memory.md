@@ -4,6 +4,44 @@ Questo file e' la memoria operativa del lavoro svolto nel repository. Va aggiorn
 
 ## 2026-05-29
 
+### A1.2 FATTA — N task del Brain in UNA sessione aggregante (commit f763dae + c0af062)
+
+Problema: un prompt -> N task durevoli (Brain), ma giravano "headless". Il
+surfacing sessione/chat del worker (`sync_session_for_task_run`,
+`append_task_result_to_chat`) risolve task->thread via
+`ChatStore::thread_by_task_id`, che matchava solo il task PRIMARIO del thread:
+gli id `orchestrator_<req>_<step>` davano `None` -> niente eventi sessione ne'
+risultati in chat.
+
+SCOPERTA CHIAVE: il worker `run_next_task_once` -> `execute_read_only_task` ->
+dispatch registry -> `execute_capability_browser_task` E GIA' chiama
+`sync_session_for_task_run` + `append_task_result_to_chat`. Mancava SOLO la
+risoluzione. Quindi A1.2 si e' ridotta a rendere risolvibili gli id dei member.
+
+Slice 1 (f763dae): tabella additiva `task_thread_links(task_id -> thread_id)`;
+`thread_by_task_id` fa fallback alla tabella (match primario vince -> path
+single-task intatto); `delete_thread` pulisce i link. `brain_materialize_tasks`
+ora prende `thread_id`, collega ogni task e seeda la sessione del thread con
+`progress_total = N`. Best-effort: fallimento linkage non perde i task.
+
+Slice 2 (c0af062): `sync_session_for_task_run` riconosce un member (id != task
+primario del thread) e ricalcola stato/progresso a livello SESSIONE leggendo lo
+stato terminale di TUTTI i member dal task store: current = # completati;
+WaitingUser se uno richiede approvazione, altrimenti Failed se tutti terminali
+con un fallimento, altrimenti Completed solo quando tutti terminali, altrimenti
+Running. Logica pura estratta in `aggregate_session_state_from_counts` (5 casi
+unit-testati). Cosi' la sessione non flippa piu' a "Completed" dopo il 1o step.
+
+Test: `member_tasks_resolve_to_owning_thread_without_shadowing_primary`,
+`aggregate_session_state_reflects_member_progress`. Gateway lib 23 + bin 57 verdi.
+
+DA VALIDARE LIVE (non bloccante): far girare un prompt con
+`LOCAL_FIRST_BRAIN_MATERIALIZE=1` + backend capace e osservare la UI Computer
+mostrare 1 sessione che avanza 0..N con i risultati per-step in chat.
+RESIDUO A1: A1.3 (provider live / sidecar singolo), A1.4 (convergere il run loop
+su TaskRuntime), A1.5 (ritirare routing keyword/train + OperationalPlan->read
+model), A1.6 (flag default ON).
+
 ### A1.1 VALIDATA end-to-end con modello frontier (qwen3-vl:235b)
 
 Chiave gestita in sicurezza: file 0600 `~/.local-first-personal-assistant/
