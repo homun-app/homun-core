@@ -4519,9 +4519,15 @@ fn try_brain_operational_plan(state: &AppState, goal: &str) -> Option<Operationa
 }
 
 fn brain_materialize_enabled() -> bool {
-    env::var("LOCAL_FIRST_BRAIN_MATERIALIZE")
-        .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "on"))
-        .unwrap_or(false)
+    match env::var("LOCAL_FIRST_BRAIN_MATERIALIZE") {
+        // Explicit override always wins.
+        Ok(value) => matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "on"),
+        // A1.6: default ON when a capable (cloud/router) backend is configured;
+        // OFF on the pure MLX/gemma path, where the keyword heuristics remain the
+        // small-local-model fallback. So we never hand a weak model the Brain by
+        // default, but a capable setup plans through the Brain without a flag.
+        Err(_) => !brain_planner_uses_local_mlx_runtime(),
+    }
 }
 
 /// A1.1: runs the OrchestratorBrain so it MATERIALIZES durable tasks into the
