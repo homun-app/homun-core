@@ -2386,7 +2386,7 @@ fn execute_subagent_task(
 ) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
     ensure_runtime_available_for_task(state)?;
     let mut executor =
-        SubagentTaskExecutor::new(RuntimeClient::new(state.gemma_runtime_url.to_string()));
+        SubagentTaskExecutor::new(build_browser_inference_router(&state.gemma_runtime_url));
     let executor_id = executor.executor_id().to_string();
     let result = executor.execute_step(task, None).map_err(|error| LocalTaskExecutionError {
         message: format!("subagent executor failed: {error}"),
@@ -4230,7 +4230,7 @@ fn try_brain_operational_plan(state: &AppState, goal: &str) -> Option<Operationa
     }
 
     let mut brain = OrchestratorBrain::new(
-        RuntimeClient::new(state.gemma_runtime_url.to_string()),
+        build_browser_inference_router(&state.gemma_runtime_url),
         NoopMemoryContextProvider,
         facade,
         ToolSearchIndexStore::open_in_memory().ok()?,
@@ -4310,7 +4310,7 @@ fn brain_materialize_tasks(state: &AppState, goal: &str) -> Result<Vec<String>, 
     })?;
 
     let mut brain = OrchestratorBrain::new(
-        RuntimeClient::new(state.gemma_runtime_url.to_string()),
+        build_browser_inference_router(&state.gemma_runtime_url),
         NoopMemoryContextProvider,
         facade,
         ToolSearchIndexStore::open_in_memory().map_err(|error| LocalTaskExecutionError {
