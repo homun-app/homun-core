@@ -37,8 +37,40 @@ Dopo i fix, catena A1.2/A1.3 validata END-TO-END:
 
 FOLLOW-UP (non-wiring): lo step navigate aveva `arguments: {}` (gemma4 non ha
 riempito l'URL) -> `target_id is required`. E' qualita' piano / contratto
-argomenti capability<->sidecar, dipende da un modello capace (oggi bloccato dal
-relay cloud). Da riprendere quando il cloud torna o con backend Anthropic.
+argomenti capability<->sidecar.
+
+### Cloud SBLOCCATO + browser navigate FUNZIONA end-to-end (commit ab5fa9d)
+
+CLOUD: i `:cloud` via relay locale `127.0.0.1:11434` davano 401/internal error
+perche' il daemon ollama NON era loggato. `https://ollama.com/v1` col bearer
+funzionava. L'utente ha fatto `ollama signin` -> ora il RELAY locale funziona
+sui `:cloud` (verificato `/v1` + `response_format json_object`). Setup gateway
+validazione: backend=openai, base=`http://127.0.0.1:11434/v1`,
+model=`qwen3-vl:235b-cloud`, cloud=1.
+
+PIANO con modello capace (qwen3-vl:235b, planner ~90s): 2 step CORRETTI con
+argomenti REALI -> s1 `browser.navigate {"url":"https://www.trenitalia.com"}`,
+s2 `browser.act {actions:[fill departure=Napoli, fill arrival=Milano,
+fill date=10/06/2026, fill time=09:00, click search-button]}`. Il modello NON e'
+piu' il collo di bottiglia.
+
+BLOCCO CONTRATTO TAB (fixato): le capability del sidecar sono tab-scoped
+(`navigate`/`act`/`snapshot` richiedono `target_id`), ma il planner non puo'
+conoscere un id di tab generato a runtime -> navigate falliva `target_id is
+required`. FIX: `normalize_browser_call` nella superficie unica (A1.3) gestisce
+UNA tab fissa label "primary": `navigate{url}` -> `open{url,label:"primary"}`
+(idempotente: crea+ri-naviga), gli altri metodi tab-scoped ricevono
+`target_id:"primary"` iniettato; chiamate con target esplicito intatte. Test
+`normalize_browser_call_manages_tab_for_planner_steps`. LIVE: s1 navigate ora
+COMPLETATO end-to-end (apre primary + naviga su trenitalia.com).
+
+PROSSIMO BLOCCO (act): s2 act -> client error `invalid_response: data did not
+match any variant of untagged enum BrowserResponse` (il self-heal A1.3 ha
+resettato+ritentato). La risposta di `act` non deserializza nel
+`BrowserResponse` Rust. Nessun `console.log`/stdout nel sorgente sidecar ->
+serve CATTURARE LA RIGA RAW (aggiungere log raw su InvalidResponse in
+browser-automation/client o sidecar) per capire se e' inquinamento stdout da
+dipendenza (Playwright) o uno shape inatteso del result di act. Debug a sé.
 
 ### A1.3 FATTA (core) — superficie d'esecuzione browser UNICA + self-heal
 
