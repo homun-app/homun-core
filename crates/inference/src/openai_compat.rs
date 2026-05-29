@@ -44,9 +44,18 @@ impl OpenAiCompatProvider {
             "model": self.model,
             "messages": [{ "role": "user", "content": request.prompt }],
             "temperature": request.temperature,
-            // Ask for a JSON object; broadly supported, including Ollama.
-            "response_format": { "type": "json_object" },
         });
+        // Enforce the schema when one is provided (OpenAI / OpenRouter / recent
+        // Ollama support `json_schema`); otherwise ask for a generic JSON object.
+        // Without this, weak models omit required fields and structured planning
+        // fails — the gap observed live with the OrchestratorBrain planner.
+        body["response_format"] = match request.json_schema.as_ref() {
+            Some(schema) => json!({
+                "type": "json_schema",
+                "json_schema": { "name": "response", "strict": false, "schema": schema },
+            }),
+            None => json!({ "type": "json_object" }),
+        };
         if request.max_tokens > 0 {
             body["max_tokens"] = json!(request.max_tokens);
         }

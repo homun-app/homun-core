@@ -132,7 +132,6 @@ pub(crate) fn planner_schema() -> serde_json::Value {
                     "required": [
                         "step_id",
                         "kind",
-                        "depends_on",
                         "execution_policy",
                         "risk_level",
                         "expected_duration_seconds"
