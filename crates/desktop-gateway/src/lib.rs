@@ -13,6 +13,9 @@ use serde::{Deserialize, Serialize};
 
 const DEFAULT_CONTEXT_BUDGET_CHARS: usize = 3_600;
 const MAX_SINGLE_CONTEXT_MESSAGE_CHARS: usize = 2_000;
+/// At/above this total budget the caller is a capable big-context model, so the
+/// per-message gemma4-era clamp is lifted (the total budget still bounds the sum).
+const CAPABLE_CHAT_CONTEXT_CHARS: usize = 32_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -149,7 +152,16 @@ pub fn build_chat_runtime_prompt(request: &BuildPromptRequest) -> BuildPromptRes
         .max_context_chars
         .unwrap_or(DEFAULT_CONTEXT_BUDGET_CHARS)
         .max(800);
-    let raw_context = render_context_lines(&request.context);
+    // promptjuice is an optimization, not a gate: when a capable model gives a
+    // generous total budget, stop sub-clamping each message to the gemma4-era
+    // 2K cap (a long pasted block would otherwise be truncated even with room
+    // to spare). Small/default budgets keep the cheap per-message cap.
+    let max_message_chars = if max_context_chars >= CAPABLE_CHAT_CONTEXT_CHARS {
+        max_context_chars
+    } else {
+        MAX_SINGLE_CONTEXT_MESSAGE_CHARS
+    };
+    let raw_context = render_context_lines(&request.context, max_message_chars);
     let compression = ContextCompressor::default().compress(
         &ContextItem::new(ContextKind::ChatHistory, raw_context),
         &CompressionPolicy::for_kind(ContextKind::ChatHistory).with_max_chars(max_context_chars),
@@ -226,11 +238,11 @@ fn clean_context_text_for_prompt(result: &CompressionResult) -> String {
         .join("\n")
 }
 
-fn render_context_lines(context: &[ChatContextMessage]) -> String {
+fn render_context_lines(context: &[ChatContextMessage], max_message_chars: usize) -> String {
     context
         .iter()
         .filter_map(|message| {
-            let text = normalize_context_text(&message.text);
+            let text = normalize_context_text(&message.text, max_message_chars);
             if text.is_empty() {
                 return None;
             }
@@ -260,9 +272,9 @@ fn render_runtime_prompt(prompt: &str, compressed_context: &str) -> String {
     .join("\n")
 }
 
-fn normalize_context_text(text: &str) -> String {
+fn normalize_context_text(text: &str, max_message_chars: usize) -> String {
     let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    clamp_end(&normalized, MAX_SINGLE_CONTEXT_MESSAGE_CHARS)
+    clamp_end(&normalized, max_message_chars)
 }
 
 fn role_label(role: &ChatContextRole) -> &'static str {
@@ -352,6 +364,35 @@ mod tests {
                 .contains("Assistente: Perche' gli scienziati")
         );
         assert!(response.runtime_prompt.contains("Utente: dimmene un'altra"));
+    }
+
+    #[test]
+    fn large_budget_lifts_the_per_message_clamp_for_capable_models() {
+        let long_message = "x".repeat(5_000);
+        let context = vec![ChatContextMessage {
+            role: ChatContextRole::User,
+            text: long_message.clone(),
+        }];
+
+        // Default/small budget: the per-message gemma4 clamp (2K) truncates.
+        let small = build_chat_runtime_prompt(&BuildPromptRequest {
+            prompt: "continua".to_string(),
+            context: context.clone(),
+            max_context_chars: Some(DEFAULT_CONTEXT_BUDGET_CHARS),
+        });
+        assert!(!small.runtime_prompt.contains(&long_message));
+
+        // Capable budget: the whole message survives (promptjuice passes through).
+        let capable = build_chat_runtime_prompt(&BuildPromptRequest {
+            prompt: "continua".to_string(),
+            context,
+            max_context_chars: Some(chat_budget_for_window_tokens()),
+        });
+        assert!(capable.runtime_prompt.contains(&long_message));
+    }
+
+    fn chat_budget_for_window_tokens() -> usize {
+        CAPABLE_CHAT_CONTEXT_CHARS * 4
     }
 
     #[test]

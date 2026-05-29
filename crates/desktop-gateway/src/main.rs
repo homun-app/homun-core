@@ -1036,6 +1036,20 @@ fn chat_openai_stream_config() -> Option<(String, String, Option<String>)> {
     Some((base_url, model, resolve_inference_api_key()))
 }
 
+/// Chat context-char budget for the capable backend, derived from the model's
+/// context window (`LOCAL_FIRST_INFERENCE_CONTEXT_WINDOW`, default 32k tokens).
+/// ~3 chars/token leaves headroom for the system prompt and the model's reply;
+/// it is vastly larger than the gemma4-era 3.6K default so chat history is not
+/// clamped on a model that can read it.
+fn chat_context_budget_chars() -> usize {
+    let window = env::var("LOCAL_FIRST_INFERENCE_CONTEXT_WINDOW")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|tokens| *tokens > 0)
+        .unwrap_or(32_768);
+    window.saturating_mul(3)
+}
+
 /// Streams a chat completion from an OpenAI-compatible endpoint, translating its
 /// SSE deltas into the gateway's NDJSON `GenerateStreamEvent` format — identical
 /// to the MLX path, so the UI consumes both the same way.
@@ -1046,10 +1060,13 @@ async fn stream_chat_via_openai(
     model: String,
     api_key: Option<String>,
 ) -> Result<Response, GatewayError> {
+    // This path is the capable (OpenAI-compatible) backend, so size the chat
+    // context to the model's window instead of the gemma4-era ~3.6K-char gate —
+    // promptjuice should optimize, not starve a model with room to spare.
     let prompt = build_chat_runtime_prompt(&BuildPromptRequest {
         prompt: request.prompt.clone(),
         context: request.context.clone(),
-        max_context_chars: request.max_context_chars,
+        max_context_chars: Some(chat_context_budget_chars()),
     })
     .runtime_prompt;
 
@@ -4478,8 +4495,12 @@ fn try_brain_operational_plan(state: &AppState, goal: &str) -> Option<Operationa
         facade.register_provider(CachedToolProvider::new(provider_id, kind, tools));
     }
 
+    let router = build_browser_inference_router(&state.gemma_runtime_url);
+    let budgets = brain_budgets_for_context_window(
+        router.active_context_window(&Requirements::default()),
+    );
     let mut brain = OrchestratorBrain::new(
-        build_browser_inference_router(&state.gemma_runtime_url),
+        router,
         NoopMemoryContextProvider,
         facade,
         ToolSearchIndexStore::open_in_memory().ok()?,
@@ -4491,7 +4512,7 @@ fn try_brain_operational_plan(state: &AppState, goal: &str) -> Option<Operationa
         user_message: goal.to_string(),
         conversation_summary: None,
         attachments: Vec::new(),
-        budgets: OrchestratorBudgets::default(),
+        budgets,
     };
     let plan = brain.plan_only(&request).ok()?;
     Some(brain_adapter::execution_plan_to_operational_plan(&plan, goal))
@@ -4531,6 +4552,35 @@ fn brain_planner_uses_local_mlx_runtime() -> bool {
         // Empty/default: mistral.rs in-process when compiled in, else MLX :8765.
         _ => !cfg!(feature = "local-mistralrs"),
     }
+}
+
+/// Context window (tokens) at/above which we treat the model as "capable" and
+/// stop clamping its context — promptjuice becomes a no-op rather than a gate.
+const CAPABLE_MODEL_CONTEXT_WINDOW: u32 = 32_000;
+
+/// Budgets scaled to the active model's context window.
+///
+/// promptjuice (context compression) was built to optimize tokens for cost/time,
+/// not to block: under budget it passes content through untouched, and a
+/// `max_chars` of 0 means "unlimited". The gemma4-era hard-coded defaults are
+/// tiny (1.2–3.2K chars, 768 planner tokens), which makes the compressor clamp
+/// essential context away even when a capable model has room to spare. So scale
+/// by the window: a big-context model gets generous/unlimited budgets
+/// (passthrough); a small or unknown model keeps the cheap defaults.
+fn brain_budgets_for_context_window(context_window: Option<u32>) -> OrchestratorBudgets {
+    let mut budgets = OrchestratorBudgets::default();
+    if context_window.is_some_and(|window| window >= CAPABLE_MODEL_CONTEXT_WINDOW) {
+        budgets.max_planner_tokens = 8_000;
+        budgets.max_loaded_tools = 16;
+        budgets.max_tool_search_rounds = 2;
+        // 0 = unlimited: let the compressor pass context through instead of
+        // clamping the middle out from under a model that can read it all.
+        budgets.max_conversation_summary_chars = 0;
+        budgets.max_memory_context_chars = 0;
+        budgets.max_tool_cards_context_chars = 0;
+        budgets.max_loaded_tool_context_chars = 0;
+    }
+    budgets
 }
 
 fn brain_materialize_tasks(
@@ -4590,8 +4640,12 @@ fn brain_materialize_tasks(
         message: format!("shared task store: {error}"),
     })?;
 
+    let router = build_browser_inference_router(&state.gemma_runtime_url);
+    let budgets = brain_budgets_for_context_window(
+        router.active_context_window(&Requirements::default()),
+    );
     let mut brain = OrchestratorBrain::new(
-        build_browser_inference_router(&state.gemma_runtime_url),
+        router,
         NoopMemoryContextProvider,
         facade,
         ToolSearchIndexStore::open_in_memory().map_err(|error| LocalTaskExecutionError {
@@ -4605,7 +4659,7 @@ fn brain_materialize_tasks(
         user_message: goal.to_string(),
         conversation_summary: None,
         attachments: Vec::new(),
-        budgets: OrchestratorBudgets::default(),
+        budgets,
     };
     let outcome = brain.run(request).map_err(|error| LocalTaskExecutionError {
         message: format!("brain run: {error}"),
@@ -8149,9 +8203,10 @@ mod tests {
         privacy_accept_button_for_snapshot, redact_sensitive_text, resources_for_prompt,
         runtime_logs_unavailable_message, should_create_operational_task, task_effective_goal,
         task_execution_outcome_from_executor_result, task_goal_summary, task_kind_for_prompt,
-        aggregate_session_state_from_counts, browser_error_indicates_dead_sidecar,
-        collect_member_counts, task_queue_response, train_option_lines, train_search_draft_for_goal,
-        train_station_suggestion_for_snapshot, train_success_criteria_met, trovatreno_search_url,
+        aggregate_session_state_from_counts, brain_budgets_for_context_window,
+        browser_error_indicates_dead_sidecar, collect_member_counts, task_queue_response,
+        train_option_lines, train_search_draft_for_goal, train_station_suggestion_for_snapshot,
+        train_success_criteria_met, trovatreno_search_url,
     };
     use crate::chat_store::ChatStore;
     use local_first_browser_automation::BrowserAutomationError;
@@ -8190,6 +8245,26 @@ mod tests {
             aggregate_session_state_from_counts(5, 1, 1, false, true),
             (SessionStatus::WaitingUser, 1)
         );
+    }
+
+    #[test]
+    fn budgets_scale_with_model_context_window() {
+        // Small / unknown model -> keep the cheap gemma4-era defaults.
+        let small = brain_budgets_for_context_window(Some(8_192));
+        assert_eq!(small.max_planner_tokens, 768);
+        assert_eq!(small.max_memory_context_chars, 2_000);
+        let unknown = brain_budgets_for_context_window(None);
+        assert_eq!(unknown.max_planner_tokens, 768);
+
+        // Capable big-context model -> generous planner budget and unlimited
+        // (0 = passthrough) context so promptjuice never clamps essential text.
+        let capable = brain_budgets_for_context_window(Some(200_000));
+        assert_eq!(capable.max_planner_tokens, 8_000);
+        assert_eq!(capable.max_conversation_summary_chars, 0);
+        assert_eq!(capable.max_memory_context_chars, 0);
+        assert_eq!(capable.max_tool_cards_context_chars, 0);
+        assert_eq!(capable.max_loaded_tool_context_chars, 0);
+        assert!(capable.max_loaded_tools > small.max_loaded_tools);
     }
 
     #[test]
