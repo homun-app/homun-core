@@ -620,6 +620,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         browser_capability_client: Arc::new(Mutex::new(None)),
         auth_token: resolve_gateway_auth_token()?.into(),
     };
+    init_active_workspace_from_disk();
     start_task_executor_worker(state.clone());
     let chat_routes = Router::new()
         .route(
@@ -690,6 +691,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .route("/api/memory/dashboard", get(memory_dashboard))
         .route("/api/capabilities/snapshot", get(capability_snapshot))
+        .route(
+            "/api/workspaces",
+            get(workspaces_list).post(create_workspace),
+        )
+        .route("/api/workspaces/{workspace_id}/select", post(select_workspace))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             require_gateway_token,
@@ -8480,13 +8486,33 @@ fn gateway_user_id() -> UserId {
     )
 }
 
+/// Active workspace ("project") — the scoping unit for tasks, memory, and
+/// capabilities. A project IS a workspace (isolated context), so selecting one
+/// re-scopes everything through the three workspace_id helpers below, which all
+/// read this. Process-global because the helpers are stateless free functions
+/// called from ~25 sites; the select endpoint sets it.
+static ACTIVE_WORKSPACE: std::sync::RwLock<Option<String>> = std::sync::RwLock::new(None);
+
+fn active_workspace_id() -> String {
+    if let Ok(guard) = ACTIVE_WORKSPACE.read() {
+        if let Some(id) = guard.as_ref().filter(|id| !id.trim().is_empty()) {
+            return id.clone();
+        }
+    }
+    env::var("LOCAL_FIRST_WORKSPACE_ID")
+        .unwrap_or_else(|_| "local-workspace".to_string())
+        .trim()
+        .to_string()
+}
+
+fn set_active_workspace(id: &str) {
+    if let Ok(mut guard) = ACTIVE_WORKSPACE.write() {
+        *guard = Some(id.trim().to_string());
+    }
+}
+
 fn gateway_workspace_id() -> WorkspaceId {
-    WorkspaceId::new(
-        env::var("LOCAL_FIRST_WORKSPACE_ID")
-            .unwrap_or_else(|_| "local-workspace".to_string())
-            .trim()
-            .to_string(),
-    )
+    WorkspaceId::new(active_workspace_id())
 }
 
 fn gateway_memory_user_id() -> MemoryUserId {
@@ -8499,12 +8525,7 @@ fn gateway_memory_user_id() -> MemoryUserId {
 }
 
 fn gateway_memory_workspace_id() -> MemoryWorkspaceId {
-    MemoryWorkspaceId::new(
-        env::var("LOCAL_FIRST_WORKSPACE_ID")
-            .unwrap_or_else(|_| "local-workspace".to_string())
-            .trim()
-            .to_string(),
-    )
+    MemoryWorkspaceId::new(active_workspace_id())
 }
 
 fn gateway_capability_user_id() -> CapabilityUserId {
@@ -8517,12 +8538,130 @@ fn gateway_capability_user_id() -> CapabilityUserId {
 }
 
 fn gateway_capability_workspace_id() -> CapabilityWorkspaceId {
-    CapabilityWorkspaceId::new(
-        env::var("LOCAL_FIRST_WORKSPACE_ID")
-            .unwrap_or_else(|_| "local-workspace".to_string())
-            .trim()
-            .to_string(),
-    )
+    CapabilityWorkspaceId::new(active_workspace_id())
+}
+
+// ---- P4.1 Projects = Workspaces ----------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct WorkspaceRecord {
+    id: String,
+    name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct WorkspacesFile {
+    active: String,
+    workspaces: Vec<WorkspaceRecord>,
+}
+
+#[derive(Debug, Serialize)]
+struct WorkspacesResponse {
+    active_workspace_id: String,
+    workspaces: Vec<WorkspaceRecord>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateWorkspaceRequest {
+    name: String,
+}
+
+fn gateway_workspaces_path() -> Result<PathBuf, std::io::Error> {
+    let base = env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| env::temp_dir())
+        .join(".local-first-personal-assistant");
+    fs::create_dir_all(&base)?;
+    Ok(base.join("workspaces.json"))
+}
+
+/// Loads the persisted workspaces, seeding a default ("project") from the
+/// env/default id on first run so there is always at least one.
+fn load_workspaces_file() -> WorkspacesFile {
+    let default_id = env::var("LOCAL_FIRST_WORKSPACE_ID")
+        .unwrap_or_else(|_| "local-workspace".to_string())
+        .trim()
+        .to_string();
+    gateway_workspaces_path()
+        .ok()
+        .and_then(|path| fs::read_to_string(path).ok())
+        .and_then(|raw| serde_json::from_str::<WorkspacesFile>(&raw).ok())
+        .filter(|file| !file.workspaces.is_empty())
+        .unwrap_or_else(|| WorkspacesFile {
+            active: default_id.clone(),
+            workspaces: vec![WorkspaceRecord {
+                id: default_id,
+                name: "Predefinito".to_string(),
+            }],
+        })
+}
+
+fn save_workspaces_file(file: &WorkspacesFile) -> Result<(), std::io::Error> {
+    let path = gateway_workspaces_path()?;
+    let body = serde_json::to_string_pretty(file).unwrap_or_else(|_| "{}".to_string());
+    fs::write(path, body)
+}
+
+/// Sets the in-process active workspace from the persisted selection at startup.
+fn init_active_workspace_from_disk() {
+    set_active_workspace(&load_workspaces_file().active);
+}
+
+async fn workspaces_list() -> Json<WorkspacesResponse> {
+    let file = load_workspaces_file();
+    Json(WorkspacesResponse {
+        active_workspace_id: file.active,
+        workspaces: file.workspaces,
+    })
+}
+
+async fn create_workspace(
+    Json(request): Json<CreateWorkspaceRequest>,
+) -> Result<Json<WorkspacesResponse>, GatewayError> {
+    let name = request.name.trim().to_string();
+    if name.is_empty() {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "workspace_name_required",
+            message: "workspace name must not be empty".to_string(),
+        });
+    }
+    let mut file = load_workspaces_file();
+    let id = format!("workspace_{}", uuid::Uuid::new_v4().simple());
+    file.workspaces.push(WorkspaceRecord { id, name });
+    save_workspaces_file(&file).map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "workspaces_write_failed",
+        message: error.to_string(),
+    })?;
+    Ok(Json(WorkspacesResponse {
+        active_workspace_id: file.active.clone(),
+        workspaces: file.workspaces,
+    }))
+}
+
+async fn select_workspace(
+    Path(workspace_id): Path<String>,
+) -> Result<Json<WorkspacesResponse>, GatewayError> {
+    let mut file = load_workspaces_file();
+    if !file.workspaces.iter().any(|workspace| workspace.id == workspace_id) {
+        return Err(GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "workspace_not_found",
+            message: format!("workspace not found: {workspace_id}"),
+        });
+    }
+    file.active = workspace_id.clone();
+    save_workspaces_file(&file).map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "workspaces_write_failed",
+        message: error.to_string(),
+    })?;
+    set_active_workspace(&workspace_id);
+    Ok(Json(WorkspacesResponse {
+        active_workspace_id: file.active.clone(),
+        workspaces: file.workspaces,
+    }))
 }
 
 fn gateway_memory_access_request() -> MemoryAccessRequest {
