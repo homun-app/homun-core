@@ -345,6 +345,15 @@ export interface CorePromptPlanBatchRunResult {
   results: CorePromptPlanStepRunResult[];
 }
 
+export interface ActiveModelInfo {
+  backend: string;
+  model: string;
+  locality: string;
+  context_window: number;
+  capable: boolean;
+  missing_api_key: boolean;
+}
+
 export interface WorkspaceRecord {
   id: string;
   name: string;
@@ -414,6 +423,10 @@ async function gatewayGetJson<T>(path: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function electronRuntimeModel(): Promise<ActiveModelInfo> {
+  return gatewayGetJson<ActiveModelInfo>("/api/runtime/model");
+}
+
 async function electronWorkspaces(): Promise<WorkspacesSnapshot> {
   return gatewayGetJson<WorkspacesSnapshot>("/api/workspaces");
 }
@@ -459,6 +472,7 @@ async function electronComposioConnections(): Promise<ComposioConnection[]> {
 
 export const coreBridge = {
   status: () => Promise.resolve(electronCoreStatus()),
+  runtimeModel: () => electronRuntimeModel(),
   workspaces: () => electronWorkspaces(),
   createWorkspace: (name: string) => electronCreateWorkspace(name),
   selectWorkspace: (id: string) => electronSelectWorkspace(id),

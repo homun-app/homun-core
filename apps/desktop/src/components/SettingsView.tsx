@@ -1,15 +1,19 @@
 import {
   Activity,
+  AlertTriangle,
   CheckCircle2,
   ChevronRight,
   CircleAlert,
   CircleCheck,
+  Cloud,
   Copy,
+  Cpu,
   Play,
   RotateCcw,
   Square,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { coreBridge, type ActiveModelInfo } from "../lib/coreBridge";
 import { settingsSections } from "../data/mockData";
 import type {
   ConnectionItem,
@@ -220,21 +224,121 @@ export function SettingsView({
           </div>
         )}
 
-        {section !== "privacy" && section !== "runtime" && section !== "connections" && (
-          <div className="settings-section">
-            <div className="settings-row static">
-              <div>
-                <strong>Configurazione pronta</strong>
-                <small>
-                  Questa sezione verra' cablata al relativo read model nel prossimo blocco.
-                </small>
+        {section === "general" && <GeneralSection />}
+
+        {section !== "privacy" &&
+          section !== "runtime" &&
+          section !== "connections" &&
+          section !== "general" && (
+            <div className="settings-section">
+              <div className="settings-row static">
+                <div>
+                  <strong>Configurazione pronta</strong>
+                  <small>
+                    Questa sezione verra' cablata al relativo read model nel prossimo blocco.
+                  </small>
+                </div>
+                <ChevronRight size={18} />
               </div>
-              <ChevronRight size={18} />
             </div>
-          </div>
-        )}
+          )}
       </div>
     </section>
+  );
+}
+
+// Shows which inference backend/model is actually live. The arc that produced
+// the de-gemma sweep started from "am I on cloud or gemma4?" being invisible;
+// this surfaces the truth (read-only) so it is never a guess again.
+function GeneralSection() {
+  const [model, setModel] = useState<ActiveModelInfo | null>(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    coreBridge
+      .runtimeModel()
+      .then((info) => {
+        if (!cancelled) setModel(info);
+      })
+      .catch(() => {
+        if (!cancelled) setError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (error) {
+    return (
+      <div className="settings-section">
+        <div className="settings-row static">
+          <div>
+            <strong>Modello non disponibile</strong>
+            <small>Il gateway non è raggiungibile.</small>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!model) {
+    return (
+      <div className="settings-section">
+        <div className="settings-row static">
+          <div>
+            <strong>Caricamento modello attivo…</strong>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const isCloud = model.locality === "cloud";
+  return (
+    <div className="settings-section">
+      <div className="settings-row static model-hero">
+        <span className={`model-locality ${isCloud ? "cloud" : "local"}`}>
+          {isCloud ? <Cloud size={20} /> : <Cpu size={20} />}
+        </span>
+        <div>
+          <strong>{model.model}</strong>
+          <small>
+            Backend {model.backend} · {isCloud ? "cloud" : "locale"} ·{" "}
+            {model.context_window.toLocaleString()} token di contesto
+          </small>
+        </div>
+        <span className={`model-badge ${model.capable ? "capable" : "limited"}`}>
+          {model.capable ? "Capace" : "Locale leggero"}
+        </span>
+      </div>
+
+      {!model.capable && (
+        <div className="settings-row static model-warning">
+          <AlertTriangle size={18} />
+          <div>
+            <strong>Backend locale leggero (gemma4)</strong>
+            <small>
+              Per attività complesse (browser, tool) configura un backend capace
+              via LOCAL_FIRST_INFERENCE_BACKEND.
+            </small>
+          </div>
+        </div>
+      )}
+
+      {model.missing_api_key && (
+        <div className="settings-row static model-warning">
+          <AlertTriangle size={18} />
+          <div>
+            <strong>Chiave API mancante</strong>
+            <small>
+              Il backend selezionato richiede una chiave cloud: senza, la chat
+              ripiega sul modello locale.
+            </small>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
