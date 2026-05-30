@@ -55,9 +55,10 @@ use local_first_local_computer_session::{
 };
 use local_first_local_computer_session::{LocalComputerReadModel, LocalComputerSessionStore};
 use local_first_memory::{
-    DataSensitivity as MemoryDataSensitivity, MemoryAccessRequest, MemoryDashboard, MemoryFacade,
-    MemoryUiReadModel, PrivacyDomain, SQLiteMemoryStore, UserId as MemoryUserId,
-    WorkspaceId as MemoryWorkspaceId,
+    DataSensitivity as MemoryDataSensitivity, MemoryAccessRequest, MemoryCreateRequest,
+    MemoryDashboard, MemoryFacade, MemoryLifecycleRequest, MemoryRef, MemoryRefKind,
+    MemoryUiReadModel, MemoryWikiProjection, PrivacyDomain, SQLiteMemoryStore,
+    UserId as MemoryUserId, WikiFileStore, WikiPage, WorkspaceId as MemoryWorkspaceId,
 };
 use local_first_process_manager::{
     LocalProcessSupervisor, LocalRuntimeDiscovery, LogEntry, ProcessManager, ProcessRegistryStore,
@@ -659,6 +660,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/chat/threads/{thread_id}/messages/{message_id}/create_task",
             post(create_task_from_chat_message),
         )
+        .route(
+            "/api/chat/threads/{thread_id}/messages/{message_id}/save_to_memory",
+            post(save_chat_message_to_memory),
+        )
         .route("/api/chat/build_prompt", post(build_prompt))
         .route("/api/chat/generate_stream", post(generate_stream))
         .route("/api/chat/cancel_generation", post(cancel_generation))
@@ -977,6 +982,116 @@ async fn create_task_from_chat_message(
             .messages(&thread_id)
             .map_err(GatewayError::store)?,
     ))
+}
+
+async fn save_chat_message_to_memory(
+    State(state): State<AppState>,
+    Path((thread_id, message_id)): Path<(String, String)>,
+) -> Result<Json<ChatMessagesSnapshot>, GatewayError> {
+    let message = lock_store(&state)?
+        .message(&thread_id, &message_id)
+        .map_err(GatewayError::store)?
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "chat_message_not_found",
+            message: format!("chat message not found: {message_id}"),
+        })?;
+    let reference = persist_explicit_memory(&state, &thread_id, &message_id, &message.text)?;
+    lock_store(&state)?
+        .set_message_saved_memory_ref(&thread_id, &message_id, &reference.to_string())
+        .map_err(GatewayError::store)?;
+    Ok(Json(
+        lock_store(&state)?
+            .messages(&thread_id)
+            .map_err(GatewayError::store)?,
+    ))
+}
+
+/// P3 (write): an explicit "save to memory" persists the text as a CONFIRMED
+/// memory record (the user's intent IS the confirmation, and `context_pack`
+/// only returns Confirmed) and projects it to a human-readable, editable wiki
+/// markdown page — the substance of memory per the design (markdown + graph,
+/// indexed by SQLite). Both the dashboard and the Brain's context provider read
+/// the same DB, so the fact becomes retrievable immediately.
+fn persist_explicit_memory(
+    state: &AppState,
+    thread_id: &str,
+    message_id: &str,
+    text: &str,
+) -> Result<MemoryRef, GatewayError> {
+    let user = gateway_memory_user_id();
+    let workspace = gateway_memory_workspace_id();
+    let lifecycle = MemoryLifecycleRequest {
+        actor_id: "desktop-chat".to_string(),
+        user_id: user.clone(),
+        workspace_id: workspace.clone(),
+        purpose: "explicit_save_to_memory".to_string(),
+    };
+    let redacted = redact_sensitive_text(text);
+
+    let facade = lock_memory_facade(state)?;
+    let record = facade
+        .create_memory_candidate(MemoryCreateRequest {
+            request: lifecycle.clone(),
+            memory_type: "note".to_string(),
+            text: redacted.clone(),
+            aliases: Vec::new(),
+            language_hints: Vec::new(),
+            confidence: 1.0,
+            privacy_domain: PrivacyDomain::new("personal"),
+            sensitivity: MemoryDataSensitivity::Private,
+            evidence_refs: Vec::new(),
+            metadata: serde_json::json!({
+                "source": "desktop_chat",
+                "thread_id": thread_id,
+                "message_id": message_id,
+            }),
+        })
+        .map_err(|error| GatewayError::memory(error.to_string()))?;
+    facade
+        .confirm_memory(&lifecycle, &record.reference, "explicit user save")
+        .map_err(|error| GatewayError::memory(error.to_string()))?;
+
+    let wiki = WikiFileStore::new(gateway_memory_wiki_dir().map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "memory_wiki_dir",
+        message: error.to_string(),
+    })?);
+    let page = WikiPage {
+        reference: MemoryRef::generated(MemoryRefKind::Wiki, user.clone(), workspace.clone()),
+        user_id: user,
+        workspace_id: workspace,
+        path: format!("notes/{}.md", sanitize_wiki_filename(&record.reference.to_string())),
+        title: wiki_title_from_text(&redacted),
+        body: redacted,
+        linked_refs: vec![record.reference.clone()],
+        privacy_domain: PrivacyDomain::new("personal"),
+        sensitivity: MemoryDataSensitivity::Private,
+    };
+    facade
+        .project_to_wiki(&wiki, &MemoryWikiProjection { page })
+        .map_err(|error| GatewayError::memory(error.to_string()))?;
+
+    Ok(record.reference)
+}
+
+/// Short human title for a wiki note: first non-empty line, bounded length.
+fn wiki_title_from_text(text: &str) -> String {
+    let first = text.lines().find(|line| !line.trim().is_empty()).unwrap_or("Nota");
+    let trimmed = first.trim();
+    if trimmed.chars().count() <= 60 {
+        trimmed.to_string()
+    } else {
+        format!("{}…", trimmed.chars().take(57).collect::<String>())
+    }
+}
+
+/// Filesystem-safe wiki filename (refs can carry `:`/`/`).
+fn sanitize_wiki_filename(reference: &str) -> String {
+    reference
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
+        .collect()
 }
 
 async fn generate_stream(
@@ -8219,6 +8334,22 @@ fn gateway_memory_database_path() -> Result<PathBuf, std::io::Error> {
     Ok(base.join("memory.sqlite"))
 }
 
+/// Directory for human-readable/editable memory wiki markdown pages.
+fn gateway_memory_wiki_dir() -> Result<PathBuf, std::io::Error> {
+    if let Ok(path) = env::var("LOCAL_FIRST_MEMORY_WIKI_DIR") {
+        let path = PathBuf::from(path);
+        fs::create_dir_all(&path)?;
+        return Ok(path);
+    }
+    let base = env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| env::temp_dir())
+        .join(".local-first-personal-assistant")
+        .join("memory-wiki");
+    fs::create_dir_all(&base)?;
+    Ok(base)
+}
+
 fn gateway_capability_database_path() -> Result<PathBuf, std::io::Error> {
     if let Ok(path) = env::var("LOCAL_FIRST_CAPABILITY_REGISTRY_DB") {
         let path = PathBuf::from(path);
@@ -8462,9 +8593,9 @@ mod tests {
         task_execution_outcome_from_executor_result, task_goal_summary, task_kind_for_prompt,
         aggregate_session_state_from_counts, brain_budgets_for_context_window,
         browser_error_indicates_dead_sidecar, capability_call_completed_outcome, collect_member_counts,
-        mcp_stdio_config_from_metadata, task_queue_response, train_option_lines,
+        mcp_stdio_config_from_metadata, sanitize_wiki_filename, task_queue_response, train_option_lines,
         train_search_draft_for_goal, train_station_suggestion_for_snapshot,
-        train_success_criteria_met, trovatreno_search_url,
+        train_success_criteria_met, trovatreno_search_url, wiki_title_from_text,
     };
     use local_first_capabilities::{CapabilityCallResult, ProviderId as CapProviderId};
     use crate::chat_store::ChatStore;
@@ -8504,6 +8635,17 @@ mod tests {
             aggregate_session_state_from_counts(5, 1, 1, false, true),
             (SessionStatus::WaitingUser, 1)
         );
+    }
+
+    #[test]
+    fn wiki_title_and_filename_helpers_are_safe() {
+        // Title = first non-empty line, length-bounded with an ellipsis.
+        assert_eq!(wiki_title_from_text("\n  Prenota treno  \naltro"), "Prenota treno");
+        let long = "x".repeat(100);
+        let title = wiki_title_from_text(&long);
+        assert!(title.chars().count() <= 60 && title.ends_with('…'));
+        // Filename keeps only alphanumerics (refs can carry ':' and '/').
+        assert_eq!(sanitize_wiki_filename("mem:abc/12-3"), "mem-abc-12-3");
     }
 
     #[test]
