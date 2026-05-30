@@ -122,3 +122,13 @@ real build-out.
   "kind not yet wired". Removed the `execute_unwired_registered_task` stub.
   Remaining for full P2: a real Composio HTTP transport + skill-runner provider
   wiring, and a configured MCP connection to demo live (pairs with P4 connectors).
+- **P3 — DONE (explicit save loop; auto-learning pending)** (commits 2ae5810 +
+  4ebc503): READ — Brain uses a real `MemoryFacade` provider (`context_pack`,
+  policy-filtered) instead of Noop, at both build sites. WRITE — explicit
+  "save to memory" persists a CONFIRMED record + projects a markdown wiki page
+  (stable-ref frontmatter linking record↔page), via a new `/save_to_memory`
+  endpoint; UI wired gateway-first. Live-validated: dashboard memories=1/
+  wiki_pages=1/confirmed, `notes/*.md` written. Memory = markdown + graph indexed
+  by SQLite, per design. Remaining: graph entities/relations from free text +
+  automatic extraction (MemoryAgent) = Phase B/10; Composio/skill capability
+  transports (P2 tail); P4 UI (memory browser shows wiki+graph).
