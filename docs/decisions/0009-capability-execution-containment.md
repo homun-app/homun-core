@@ -66,3 +66,22 @@ documents — isolation becomes a real boundary, not just a data filter.
   in effect now. Composio (P4.3 first) needs no local sandbox — it is remote.
 - The connect UI must show each connector's containment level (remote / WASM /
   sandboxed-process / trusted-process) so the user grants with eyes open.
+
+## Addendum — Composio distribution model: DIRECT / BYO key (local-first)
+
+The product is distributed (downloadable, single-user-per-install). OpenHuman
+(our reference) offers two Composio modes: a **backend tenant** (OpenHuman's
+server holds their Composio key, pays billing, custodies all users' OAuth tokens,
+gets webhooks) and a **direct** mode (the user supplies their own Composio key,
+sovereign, poll-based, no webhooks). The frictionless "no key" experience is the
+backend mode — it requires operating a cloud service.
+
+Decision: **we use DIRECT / BYO key only.** No backend tenant. Each user creates
+their own (free) Composio account and pastes their own API key once (stored
+encrypted, per-workspace); per-service connection uses Composio's **hosted auth
+`link()`** flow (NOT the deprecated `initiate()`, sunset 2026-05-08 for new orgs)
+— click → `connectUrl` → browser OAuth → poll status → connected. Consequences:
+no server to run, no Composio cost or token custody for the maintainer, true
+local-first; trade-off is the one-time Composio signup and poll-based sync (no
+real-time trigger webhooks). The args-aware gate (list/connect free, execute
+behind approval) carries over from OpenHuman.
