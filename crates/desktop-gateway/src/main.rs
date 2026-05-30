@@ -32,9 +32,10 @@ use local_first_inference::{
     OpenAiCompatProvider, PrivacyPolicy, Requirements,
 };
 use local_first_capabilities::{
-    ActionClass, CachedCapabilityTool, CachedToolProvider,
-    CapabilityConnectionConfig, CapabilityFacade, CapabilityPolicy, CapabilityProviderConfig,
-    CapabilityProviderGrant, CapabilityProviderKind, CapabilityRegistryStore, CapabilityTaskPayload,
+    ActionClass, CachedCapabilityTool, CachedToolProvider, CapabilityConnectionConfig,
+    CapabilityError, CapabilityFacade, CapabilityPolicy, CapabilityProvider, CapabilityProviderConfig,
+    CapabilityProviderGrant, CapabilityProviderKind, CapabilityRegistryStore, CapabilityResult,
+    CapabilityTaskPayload, ComposioCapabilityProvider, ComposioProviderConfig, ComposioTransport,
     InMemoryCapabilityAudit, McpCapabilityProvider, McpStdioConfig, McpStdioTransport, McpToolPolicy,
     PolicyContext, ProviderId as CapabilityProviderId, UserId as CapabilityUserId,
     WorkspaceId as CapabilityWorkspaceId,
@@ -42,6 +43,9 @@ use local_first_capabilities::{
 use local_first_orchestrator::{
     ExecutionPlan, MemoryContextProvider, MemoryContextSnippet, OrchestratorBrain,
     OrchestratorBudgets, OrchestratorRequest, OrchestratorResult, ToolSearchIndexStore,
+};
+use local_first_secrets::{
+    DevelopmentSecretKeyProvider, EncryptedFileSecretStore, SecretMaterial, SecretRef, SecretStore,
 };
 use local_first_desktop_gateway::{
     BuildPromptRequest, BuildPromptResponse, CancelGenerationRequest, ChatGenerateStreamRequest,
@@ -112,6 +116,7 @@ struct AppState {
     task_executor_status: Arc<Mutex<TaskExecutorStatus>>,
     task_executor_registry: TaskExecutorRegistry,
     browser_capability_client: Arc<Mutex<Option<BrowserAutomationClient<BrowserSidecarSession>>>>,
+    secret_store: Arc<EncryptedFileSecretStore<DevelopmentSecretKeyProvider>>,
     auth_token: Arc<str>,
 }
 
@@ -618,6 +623,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ))),
         task_executor_registry: TaskExecutorRegistry::with_defaults(),
         browser_capability_client: Arc::new(Mutex::new(None)),
+        secret_store: Arc::new(open_gateway_secret_store()?),
         auth_token: resolve_gateway_auth_token()?.into(),
     };
     init_active_workspace_from_disk();
@@ -696,6 +702,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(workspaces_list).post(create_workspace),
         )
         .route("/api/workspaces/{workspace_id}/select", post(select_workspace))
+        .route("/api/capabilities/composio/connect", post(connect_composio))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             require_gateway_token,
@@ -2865,6 +2872,51 @@ fn execute_capability_generic(
             ));
             facade.call_tool(&policy_context, call)
         }
+        CapabilityProviderKind::Managed => {
+            let connection = connection.ok_or_else(|| LocalTaskExecutionError {
+                message: format!("nessuna connessione per provider {}", provider_id.as_str()),
+            })?;
+            let base_url = connection
+                .metadata
+                .get("base_url")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| composio_base_url(None));
+            let secret_ref =
+                SecretRef::new(user.as_str(), workspace.as_str(), "composio", "default")
+                    .map_err(|error| LocalTaskExecutionError {
+                        message: format!("secret ref: {error}"),
+                    })?;
+            let api_key = state
+                .secret_store
+                .get(&secret_ref)
+                .map_err(|error| LocalTaskExecutionError {
+                    message: format!("secret get: {error}"),
+                })?
+                .ok_or_else(|| LocalTaskExecutionError {
+                    message: "segreto Composio mancante".to_string(),
+                })?
+                .expose_utf8()
+                .map_err(|error| LocalTaskExecutionError {
+                    message: format!("secret decode: {error}"),
+                })?;
+            let mut facade = CapabilityFacade::new(
+                CapabilityPolicy::default(),
+                InMemoryCapabilityAudit::default(),
+            );
+            facade.register_provider(ComposioCapabilityProvider::new(
+                ComposioProviderConfig {
+                    provider_id: provider_id.clone(),
+                    user_id: gateway_capability_user_id(),
+                    workspace_id: gateway_capability_workspace_id(),
+                    enabled: true,
+                    privacy_domains: vec!["managed-cloud".to_string()],
+                    tool_policies: Vec::new(),
+                },
+                GatewayComposioTransport::new(base_url, api_key),
+            ));
+            facade.call_tool(&policy_context, call)
+        }
         other => return Ok(capability_kind_not_wired_outcome(task, other)),
     };
 
@@ -2980,9 +3032,164 @@ fn capability_kind_not_wired_outcome(
     kind: CapabilityProviderKind,
 ) -> TaskExecutionOutcome {
     let reason = format!(
-        "Esecuzione capability per provider kind {kind:?} non ancora collegata (MCP e' attivo)."
+        "Esecuzione capability per provider kind {kind:?} non ancora collegata (MCP e Composio attivi)."
     );
     capability_call_failed_outcome(task, &reason)
+}
+
+// ---- P4.3 Composio connect -------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct ConnectComposioRequest {
+    api_key: String,
+    base_url: Option<String>,
+    display_name: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ConnectComposioResponse {
+    provider_id: String,
+    tools_cached: usize,
+}
+
+fn composio_base_url(explicit: Option<String>) -> String {
+    explicit
+        .filter(|url| !url.trim().is_empty())
+        .or_else(|| env::var("LOCAL_FIRST_COMPOSIO_BASE_URL").ok().filter(|url| !url.is_empty()))
+        .unwrap_or_else(|| "https://backend.composio.dev/api/v3".to_string())
+}
+
+/// Registers a Composio managed provider: stores the API key as an encrypted
+/// secret (only the ref lands in the registry), records provider/grant/
+/// connection config, then lists the available tools through the live HTTP
+/// transport and caches them so the Brain can plan with them. Composio runs in
+/// the cloud, so per ADR 0009 it needs no local sandbox — approval gates govern
+/// its writes.
+fn connect_composio_blocking(
+    state: &AppState,
+    request: ConnectComposioRequest,
+) -> Result<ConnectComposioResponse, GatewayError> {
+    let api_key = request.api_key.trim().to_string();
+    if api_key.is_empty() {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "composio_api_key_required",
+            message: "Composio API key must not be empty".to_string(),
+        });
+    }
+    let base_url = composio_base_url(request.base_url);
+    let display_name = request
+        .display_name
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| "Composio".to_string());
+    let user = gateway_capability_user_id();
+    let workspace = gateway_capability_workspace_id();
+    let provider_id = CapabilityProviderId::new("composio");
+
+    let secret_ref = SecretRef::new(user.as_str(), workspace.as_str(), "composio", "default")
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "secret_ref_invalid",
+            message: error.to_string(),
+        })?;
+    state
+        .secret_store
+        .put(
+            secret_ref.clone(),
+            SecretMaterial::from_string(api_key.clone()),
+        )
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "secret_store_failed",
+            message: error.to_string(),
+        })?;
+
+    {
+        let registry = lock_capability_registry(state)?;
+        registry
+            .upsert_provider_config(&CapabilityProviderConfig::new(
+                provider_id.clone(),
+                CapabilityProviderKind::Managed,
+                display_name.clone(),
+                true,
+            ))
+            .map_err(GatewayError::capability)?;
+        registry
+            .upsert_provider_grant(
+                &CapabilityProviderGrant::new(provider_id.clone(), user.clone(), workspace.clone())
+                    .with_allow_managed_cloud(true)
+                    .with_privacy_domains(vec!["managed-cloud".to_string()])
+                    .with_allowed_actions(vec![
+                        ActionClass::Read,
+                        ActionClass::WriteWithConfirmation,
+                    ])
+                    .with_max_autonomy_level(3),
+            )
+            .map_err(GatewayError::capability)?;
+        registry
+            .upsert_connection_config(
+                &CapabilityConnectionConfig::new(
+                    "composio-default",
+                    provider_id.clone(),
+                    user.clone(),
+                    workspace.clone(),
+                    display_name.clone(),
+                    secret_ref.as_str(),
+                )
+                .with_privacy_domains(vec!["managed-cloud".to_string()])
+                .with_metadata(serde_json::json!({ "base_url": base_url })),
+            )
+            .map_err(GatewayError::capability)?;
+    }
+
+    let provider = ComposioCapabilityProvider::new(
+        ComposioProviderConfig {
+            provider_id: provider_id.clone(),
+            user_id: user,
+            workspace_id: workspace,
+            enabled: true,
+            privacy_domains: vec!["managed-cloud".to_string()],
+            tool_policies: Vec::new(),
+        },
+        GatewayComposioTransport::new(base_url, api_key),
+    );
+    let tools = provider.list_tools().map_err(GatewayError::capability)?;
+    let tools_cached = tools.len();
+    {
+        let registry = lock_capability_registry(state)?;
+        for tool in &tools {
+            registry
+                .upsert_cached_tool(&CachedCapabilityTool::new(
+                    provider_id.clone(),
+                    tool.name.clone(),
+                    CapabilityProviderKind::Managed,
+                    tool.action,
+                    tool.description.clone(),
+                    tool.privacy_domains.clone(),
+                    tool.sensitivity.clone(),
+                    tool.input_schema.clone(),
+                ))
+                .map_err(GatewayError::capability)?;
+        }
+    }
+    Ok(ConnectComposioResponse {
+        provider_id: provider_id.as_str().to_string(),
+        tools_cached,
+    })
+}
+
+async fn connect_composio(
+    State(state): State<AppState>,
+    Json(request): Json<ConnectComposioRequest>,
+) -> Result<Json<ConnectComposioResponse>, GatewayError> {
+    tokio::task::spawn_blocking(move || connect_composio_blocking(&state, request))
+        .await
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "composio_connect_join",
+            message: error.to_string(),
+        })?
+        .map(Json)
 }
 
 
@@ -4898,6 +5105,64 @@ fn brain_budgets_for_context_window(context_window: Option<u32>) -> Orchestrator
         budgets.max_loaded_tool_context_chars = 0;
     }
     budgets
+}
+
+/// Real HTTP transport for Composio (the crate ships only an in-memory double).
+/// It is deliberately API-agnostic: it passes the method/path/body the
+/// `ComposioCapabilityProvider` chooses, with `x-api-key` auth, so the protocol
+/// shape stays owned by the crate and the base URL is configurable.
+struct GatewayComposioTransport {
+    base_url: String,
+    api_key: String,
+    http: reqwest::blocking::Client,
+}
+
+impl GatewayComposioTransport {
+    fn new(base_url: impl Into<String>, api_key: impl Into<String>) -> Self {
+        Self {
+            base_url: base_url.into().trim_end_matches('/').to_string(),
+            api_key: api_key.into(),
+            http: reqwest::blocking::Client::new(),
+        }
+    }
+}
+
+impl ComposioTransport for GatewayComposioTransport {
+    fn request(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<serde_json::Value>,
+    ) -> CapabilityResult<serde_json::Value> {
+        let url = format!("{}{}", self.base_url, path);
+        let mut builder = match method.to_ascii_uppercase().as_str() {
+            "GET" => self.http.get(&url),
+            "POST" => self.http.post(&url),
+            "DELETE" => self.http.delete(&url),
+            other => {
+                return Err(CapabilityError::ProviderUnavailable(format!(
+                    "composio_unsupported_method:{other}"
+                )));
+            }
+        };
+        builder = builder.header("x-api-key", &self.api_key);
+        if let Some(body) = body {
+            builder = builder.json(&body);
+        }
+        let response = builder.send().map_err(|error| {
+            CapabilityError::ProviderUnavailable(format!("composio_http:{error}"))
+        })?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(CapabilityError::ProviderUnavailable(format!(
+                "composio_status:{}",
+                status.as_u16()
+            )));
+        }
+        response
+            .json::<serde_json::Value>()
+            .map_err(|error| CapabilityError::ProviderUnavailable(format!("composio_json:{error}")))
+    }
 }
 
 /// True when the Brain's plan acts on the browser provider — i.e. it needs live
@@ -8605,6 +8870,42 @@ fn save_workspaces_file(file: &WorkspacesFile) -> Result<(), std::io::Error> {
 /// Sets the in-process active workspace from the persisted selection at startup.
 fn init_active_workspace_from_disk() {
     set_active_workspace(&load_workspaces_file().active);
+}
+
+/// 32-byte local key for at-rest secret encryption, generated once into a 0600
+/// file. Connection API keys are encrypted with this; only `secret_ref`s live in
+/// the registry DB (ADR 0009 / memory design: never plaintext in the DB).
+fn gateway_secret_key_seed() -> Result<[u8; 32], std::io::Error> {
+    let base = env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| env::temp_dir())
+        .join(".local-first-personal-assistant");
+    fs::create_dir_all(&base)?;
+    let path = base.join("secret-key");
+    if let Ok(bytes) = fs::read(&path) {
+        if bytes.len() == 32 {
+            let mut seed = [0u8; 32];
+            seed.copy_from_slice(&bytes);
+            return Ok(seed);
+        }
+    }
+    let mut seed = [0u8; 32];
+    seed[..16].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
+    seed[16..].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
+    write_private_file(&path, &seed)?;
+    Ok(seed)
+}
+
+fn open_gateway_secret_store()
+-> Result<EncryptedFileSecretStore<DevelopmentSecretKeyProvider>, std::io::Error> {
+    let seed = gateway_secret_key_seed()?;
+    let base = env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| env::temp_dir())
+        .join(".local-first-personal-assistant");
+    fs::create_dir_all(&base)?;
+    EncryptedFileSecretStore::open(base.join("secrets.json"), DevelopmentSecretKeyProvider::new(seed))
+        .map_err(|error| std::io::Error::other(error.to_string()))
 }
 
 async fn workspaces_list() -> Json<WorkspacesResponse> {
