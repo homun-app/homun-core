@@ -7199,8 +7199,23 @@ fn browser_automation_dir() -> PathBuf {
         .collect()
 }
 
+/// Phase-1 default for the browser surface: HEADLESS.
+///
+/// Previously "0" (visible), which opened a real OS window that grabbed focus —
+/// the behavior users dislike. Headless-by-default means the automated browser
+/// runs invisibly; the user watches it *inside the chat* (the live frame view),
+/// not as a window that takes over the desktop. This does NOT lose capability:
+/// the sidecar's `restartAssistantVisible` self-heal still recovers the rare
+/// site that genuinely fails headless, so it's "invisible by default, a window
+/// only as a last resort" rather than "a window always". Override per install
+/// with `LOCAL_FIRST_BROWSER_HEADLESS=0`.
+fn default_browser_headless_value() -> &'static str {
+    "1"
+}
+
 fn browser_headless_env_value() -> String {
-    env::var("LOCAL_FIRST_BROWSER_HEADLESS").unwrap_or_else(|_| "0".to_string())
+    env::var("LOCAL_FIRST_BROWSER_HEADLESS")
+        .unwrap_or_else(|_| default_browser_headless_value().to_string())
 }
 
 fn browser_headless_env_value_for_task(state: &AppState, task: &TaskRecord) -> String {
@@ -9676,6 +9691,7 @@ mod tests {
         aggregate_session_state_from_counts, brain_budgets_for_context_window,
         browser_error_indicates_dead_sidecar, capability_call_completed_outcome, collect_member_counts,
         resolve_active_model, ActiveModelInputs, DEFAULT_LOCAL_MISTRALRS_MODEL,
+        default_browser_headless_value,
         mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata, mcp_provider_slug,
         sanitize_wiki_filename, task_queue_response, train_option_lines,
         train_search_draft_for_goal, train_station_suggestion_for_snapshot,
@@ -10738,6 +10754,13 @@ mod tests {
         assert_eq!(restored.command, "my-server");
         assert!(restored.args.is_empty());
         assert!(restored.env.is_empty());
+    }
+
+    #[test]
+    fn browser_is_headless_by_default() {
+        // Phase 1: the automated browser must not open a focus-stealing OS
+        // window by default; visibility comes from the in-chat live view.
+        assert_eq!(default_browser_headless_value(), "1");
     }
 
     #[test]
