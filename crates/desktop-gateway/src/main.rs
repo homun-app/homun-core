@@ -704,6 +704,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/workspaces/{workspace_id}/select", post(select_workspace))
         .route("/api/capabilities/composio/connect", post(connect_composio))
         .route("/api/capabilities/composio/toolkits", get(composio_toolkits))
+        .route("/api/capabilities/composio/link", post(composio_link))
+        .route("/api/capabilities/composio/connections", get(composio_connections))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             require_gateway_token,
@@ -3269,6 +3271,186 @@ fn composio_toolkits_blocking(state: &AppState) -> Result<ComposioToolkitsRespon
         })
         .collect::<Vec<_>>();
     Ok(ComposioToolkitsResponse { toolkits, total })
+}
+
+#[derive(Debug, Deserialize)]
+struct ComposioLinkRequest {
+    toolkit_slug: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ComposioLinkResponse {
+    redirect_url: String,
+    connected_account_id: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ComposioConnection {
+    id: String,
+    toolkit_slug: String,
+    status: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ComposioConnectionsResponse {
+    connections: Vec<ComposioConnection>,
+}
+
+/// The Composio "user" (entity) for connected accounts. We scope it to the
+/// active workspace so a project's connected accounts are isolated per project.
+fn composio_entity_id() -> String {
+    active_workspace_id()
+}
+
+/// Resolves a Composio-managed auth_config id for a toolkit, reusing an existing
+/// one or creating a managed OAuth2 config. (Grounded on the real v3 shapes.)
+fn composio_managed_auth_config_id(
+    transport: &GatewayComposioTransport,
+    toolkit_slug: &str,
+) -> Result<String, GatewayError> {
+    let existing = transport
+        .request(
+            "GET",
+            &format!("/auth_configs?toolkit_slug={toolkit_slug}"),
+            None,
+        )
+        .map_err(GatewayError::capability)?;
+    let found = existing
+        .get("items")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|items| items.first())
+        .and_then(|item| {
+            item.get("id")
+                .or_else(|| item.get("auth_config").and_then(|ac| ac.get("id")))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        });
+    if let Some(id) = found {
+        return Ok(id);
+    }
+    let created = transport
+        .request(
+            "POST",
+            "/auth_configs",
+            Some(serde_json::json!({
+                "toolkit": { "slug": toolkit_slug },
+                "auth_config": { "type": "use_composio_managed_auth" }
+            })),
+        )
+        .map_err(GatewayError::capability)?;
+    created
+        .get("auth_config")
+        .and_then(|ac| ac.get("id"))
+        .or_else(|| created.get("id"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "composio_auth_config_failed",
+            message: "Composio auth_config response missing id".to_string(),
+        })
+}
+
+fn composio_link_blocking(
+    state: &AppState,
+    toolkit_slug: &str,
+) -> Result<ComposioLinkResponse, GatewayError> {
+    let transport = composio_transport_for(state)?;
+    let auth_config_id = composio_managed_auth_config_id(&transport, toolkit_slug)?;
+    let link = transport
+        .request(
+            "POST",
+            "/connected_accounts/link",
+            Some(serde_json::json!({
+                "auth_config_id": auth_config_id,
+                "user_id": composio_entity_id(),
+            })),
+        )
+        .map_err(GatewayError::capability)?;
+    let redirect_url = link
+        .get("redirect_url")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "composio_link_failed",
+            message: "Composio link response missing redirect_url".to_string(),
+        })?;
+    let connected_account_id = link
+        .get("connected_account_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    Ok(ComposioLinkResponse {
+        redirect_url,
+        connected_account_id,
+    })
+}
+
+async fn composio_link(
+    State(state): State<AppState>,
+    Json(request): Json<ComposioLinkRequest>,
+) -> Result<Json<ComposioLinkResponse>, GatewayError> {
+    tokio::task::spawn_blocking(move || composio_link_blocking(&state, &request.toolkit_slug))
+        .await
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "composio_link_join",
+            message: error.to_string(),
+        })?
+        .map(Json)
+}
+
+fn composio_connections_blocking(
+    state: &AppState,
+) -> Result<ComposioConnectionsResponse, GatewayError> {
+    let transport = composio_transport_for(state)?;
+    let response = transport
+        .request(
+            "GET",
+            &format!("/connected_accounts?user_ids={}", composio_entity_id()),
+            None,
+        )
+        .map_err(GatewayError::capability)?;
+    let connections = response
+        .get("items")
+        .and_then(serde_json::Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let id = item.get("id").and_then(serde_json::Value::as_str)?.to_string();
+                    let status = item
+                        .get("status")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("UNKNOWN")
+                        .to_string();
+                    let toolkit_slug = item
+                        .get("toolkit")
+                        .and_then(|t| t.get("slug"))
+                        .or_else(|| item.get("toolkit_slug"))
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    Some(ComposioConnection { id, toolkit_slug, status })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    Ok(ComposioConnectionsResponse { connections })
+}
+
+async fn composio_connections(
+    State(state): State<AppState>,
+) -> Result<Json<ComposioConnectionsResponse>, GatewayError> {
+    tokio::task::spawn_blocking(move || composio_connections_blocking(&state))
+        .await
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "composio_connections_join",
+            message: error.to_string(),
+        })?
+        .map(Json)
 }
 
 async fn composio_toolkits(
