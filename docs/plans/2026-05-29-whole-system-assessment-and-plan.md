@@ -180,3 +180,21 @@ Remaining (grounded on v3, build can proceed; final live test needs a valid key)
 - **Remaining**: a final live execute test needs an ACTIVE connection — the user
   completes the OAuth from the UI (click Connect → browser → grant). Everything
   up to and including that click is wired and grounded.
+
+### P4.1 — DONE (workspace scoping complete, chat included)
+
+- Backend re-scoping (tasks/memory/capabilities) on `active_workspace_id()`:
+  prior work.
+- **Switcher UI (179ce93)**: WorkspaceSwitcher in the NavDrawer — list/select
+  (full reload to re-scope every cached view) / create, gateway-first.
+- **Chat threads scoped (this commit)**: `chat_threads` gained a `workspace_id`
+  column (additive, guarded ALTER; existing rows → 'default'); `threads()` /
+  `create_thread()` take a `workspace_id` and the gateway passes
+  `active_workspace_id()`. The active-thread pointer is now a per-project
+  settings key (`active_thread_id::{workspace}`), so switching projects never
+  points chat at a foreign thread. A project is never empty: `threads()`
+  auto-seeds a fresh thread for an empty/new project (mirrors the initial seed);
+  deleting a project's last thread reseeds it. New test
+  `threads_are_scoped_per_project_with_independent_active_pointer` locks
+  isolation + independent active pointer + reseed-on-empty. This closes the
+  cross-project chat-leak gap noted in 179ce93.
