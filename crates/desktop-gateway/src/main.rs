@@ -696,6 +696,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/local-computer/sessions/{session_id}/artifacts/{artifact_id}/preview",
             get(local_computer_artifact_preview),
         )
+        .route("/api/local-computer/live", get(contained_computer_live))
         .route("/api/memory/dashboard", get(memory_dashboard))
         .route("/api/capabilities/snapshot", get(capability_snapshot))
         .route(
@@ -7222,6 +7223,40 @@ fn contained_computer_cdp_endpoint() -> Option<String> {
     )
 }
 
+/// The noVNC live-view URL for the contained computer (ADR 0010), or `None` when
+/// contained mode is off. Pure for testability; the in-chat panel embeds this URL.
+fn resolve_contained_computer_novnc(enabled: bool, explicit: Option<&str>) -> Option<String> {
+    if !enabled {
+        return None;
+    }
+    Some(
+        explicit
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("http://127.0.0.1:6080/vnc.html")
+            .to_string(),
+    )
+}
+
+#[derive(Debug, Serialize)]
+struct ContainedComputerLiveResponse {
+    enabled: bool,
+    novnc_url: Option<String>,
+}
+
+/// Reports whether the contained computer's live view is available and where to
+/// embed it. The desktop "Browser" panel renders the noVNC URL in an iframe.
+async fn contained_computer_live() -> Json<ContainedComputerLiveResponse> {
+    let novnc_url = resolve_contained_computer_novnc(
+        contained_computer_cdp_endpoint().is_some(),
+        env::var("LOCAL_FIRST_CONTAINED_COMPUTER_NOVNC").ok().as_deref(),
+    );
+    Json(ContainedComputerLiveResponse {
+        enabled: novnc_url.is_some(),
+        novnc_url,
+    })
+}
+
 /// Env for the browser sidecar, shared by every spawn site so contained-computer
 /// mode can never be wired into one path and missed in another. In contained
 /// mode we add the CDP endpoint of the in-container real browser; the sidecar
@@ -9721,6 +9756,7 @@ mod tests {
         browser_error_indicates_dead_sidecar, capability_call_completed_outcome, collect_member_counts,
         resolve_active_model, ActiveModelInputs, DEFAULT_LOCAL_MISTRALRS_MODEL,
         default_browser_headless_value, resolve_contained_computer_cdp,
+        resolve_contained_computer_novnc,
         mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata, mcp_provider_slug,
         sanitize_wiki_filename, task_queue_response, train_option_lines,
         train_search_draft_for_goal, train_station_suggestion_for_snapshot,
@@ -10804,6 +10840,24 @@ mod tests {
         assert_eq!(
             resolve_contained_computer_cdp(Some("http://10.0.0.5:9333"), Some("0")),
             Some("http://10.0.0.5:9333".to_string())
+        );
+    }
+
+    #[test]
+    fn contained_computer_novnc_resolves_when_enabled() {
+        assert_eq!(resolve_contained_computer_novnc(false, None), None);
+        assert_eq!(
+            resolve_contained_computer_novnc(true, None),
+            Some("http://127.0.0.1:6080/vnc.html".to_string())
+        );
+        assert_eq!(
+            resolve_contained_computer_novnc(true, Some("http://10.0.0.5:6080/vnc.html")),
+            Some("http://10.0.0.5:6080/vnc.html".to_string())
+        );
+        // Blank explicit falls back to the default.
+        assert_eq!(
+            resolve_contained_computer_novnc(true, Some("  ")),
+            Some("http://127.0.0.1:6080/vnc.html".to_string())
         );
     }
 
