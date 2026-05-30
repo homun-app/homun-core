@@ -78,7 +78,13 @@ export class BrowserSessionManager {
     if (this.context) {
       return { status: "started", profile: this.activeProfile };
     }
-    const profile = params?.profile ?? "assistant";
+    // When a CDP endpoint is configured (contained-computer mode, ADR 0010),
+    // attach to that real browser by default instead of launching a host
+    // Chromium — the endpoint is the single switch. An explicit profile param
+    // still wins (e.g. force "assistant" for the legacy on-host path).
+    const profile =
+      params?.profile ??
+      (this.options.userCdpEndpoint ? "user" : "assistant");
     if (profile === "user") {
       return await this.startUserProfile();
     }
