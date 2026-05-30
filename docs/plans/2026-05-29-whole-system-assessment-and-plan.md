@@ -198,3 +198,32 @@ Remaining (grounded on v3, build can proceed; final live test needs a valid key)
   `threads_are_scoped_per_project_with_independent_active_pointer` locks
   isolation + independent active pointer + reseed-on-empty. This closes the
   cross-project chat-leak gap noted in 179ce93.
+
+### P4.2 — STARTED (General section: active model visible)
+
+- **Active model in Settings → General (4a553d4)**: gateway `GET
+  /api/runtime/model` reports the live backend/model (mirrors
+  `build_browser_inference_router`); the previously-empty General section renders
+  it with cloud/local + capable/limited badges and warns on the gemma fallback
+  or a missing cloud key. Directly addresses the de-gemma origin ("am I on cloud
+  or gemma4?"). Live-validated.
+- **Remaining P4.2**: autonomy-level + privacy-domain toggles wired to real
+  policy read/write (today privacy section is static); audit-log section (stub).
+  Dynamic model *switching* from the UI is deferred — it needs a product decision
+  (hot-swap vs restart of the in-process runtime; where the cloud key is stored)
+  and a router-rebuild path; today the backend is env-configured at startup.
+
+## Session summary (2026-05-30)
+
+Five green, live-validated slices, all on the user's P4 asks (settings, project
+management, connectors) and the de-gemma thesis:
+1. Composio connect UI (6768327) — paste key → toolkits → link → poll.
+2. Composio execute v3-direct (d66facb) — grounded path; fixed entity mismatch.
+3. Project (workspace) switcher UI (179ce93).
+4. Chat threads scoped per project (596d5b4) — closes the switcher's leak gap.
+5. Settings → General active-model visibility (4a553d4).
+
+Open next (no blockers): MCP/skills connect UI (pairs with Composio); audit-log
+section; memory browser + dedicated browser-monitoring viewport (P4.4); dynamic
+model switching (needs the design decision above). A final live Composio *execute*
+needs the user to complete one OAuth from the new UI.
