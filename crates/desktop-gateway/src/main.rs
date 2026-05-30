@@ -69,8 +69,6 @@ use local_first_process_manager::{
     RuntimeControlSnapshot, RuntimeControlStatus, SidecarProcessCatalog,
 };
 use bytes::Bytes;
-use futures_util::StreamExt;
-use local_first_inference::streaming::{ChatStreamEvent, parse_openai_sse_line};
 use local_first_subagents::{
     GenerateStreamEvent, RuntimeClient, SubagentTaskExecutor, TokenMetrics,
 };
@@ -1190,6 +1188,35 @@ fn chat_context_budget_chars() -> usize {
 /// Streams a chat completion from an OpenAI-compatible endpoint, translating its
 /// SSE deltas into the gateway's NDJSON `GenerateStreamEvent` format — identical
 /// to the MLX path, so the UI consumes both the same way.
+/// Max model↔tool round-trips before we stop and answer with what we have.
+const MAX_TOOL_ROUNDS: usize = 4;
+
+/// The browser tool the chat model can invoke. No keyword gate: the MODEL reads
+/// this description and decides to call it when the request needs the live web.
+fn browse_web_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "browse_web",
+            "description": "Naviga il web con un browser reale e contenuto (non headless) per raggiungere un obiettivo concreto e riportare ciò che trovi (orari, prezzi, risultati, contenuti di pagina). USA questo strumento per QUALSIASI richiesta che richieda dati dal web in tempo reale o azioni nel browser (voli, treni, prezzi, ricerche, prenotazioni, consultare un sito) invece di rispondere che non hai accesso a internet.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "goal": {
+                        "type": "string",
+                        "description": "Obiettivo concreto e autonomo da raggiungere nel browser, es: 'cerca voli da Milano a Napoli per il 10 giugno e riporta orari e prezzi'."
+                    }
+                },
+                "required": ["goal"]
+            }
+        }
+    })
+}
+
+/// Capable (OpenAI-compatible) chat path with NATIVE TOOL-CALLING. The model is
+/// given real tools and decides when to use them (no keyword routing). Tool
+/// rounds run non-streamed; the final assistant answer is emitted as Delta+Done
+/// to match the existing UI stream protocol.
 async fn stream_chat_via_openai(
     state: &AppState,
     request: ChatGenerateStreamRequest,
@@ -1197,9 +1224,6 @@ async fn stream_chat_via_openai(
     model: String,
     api_key: Option<String>,
 ) -> Result<Response, GatewayError> {
-    // This path is the capable (OpenAI-compatible) backend, so size the chat
-    // context to the model's window instead of the gemma4-era ~3.6K-char gate —
-    // promptjuice should optimize, not starve a model with room to spare.
     let prompt = build_chat_runtime_prompt(&BuildPromptRequest {
         prompt: request.prompt.clone(),
         context: request.context.clone(),
@@ -1207,72 +1231,181 @@ async fn stream_chat_via_openai(
     })
     .runtime_prompt;
 
-    let mut builder = state
-        .http
-        .post(format!("{}/chat/completions", base_url.trim_end_matches('/')));
-    if let Some(key) = api_key.as_ref() {
-        builder = builder.bearer_auth(key);
-    }
-    let upstream = builder
-        .json(&serde_json::json!({
-            "model": model,
-            "messages": [{ "role": "user", "content": prompt }],
-            "temperature": request.temperature,
-            "max_tokens": request.max_tokens,
-            "stream": true,
-        }))
-        .send()
-        .await
-        .map_err(|error| GatewayError::bad_gateway("chat_stream_request_failed", error))?;
-
-    let status = upstream.status();
-    if !status.is_success() {
-        let message = upstream.text().await.unwrap_or_else(|_| status.to_string());
-        return Err(GatewayError::from_status(status, "chat_stream_failed", message));
-    }
+    let system = "Sei l'assistente locale. Hai accesso a un browser reale e contenuto tramite lo strumento browse_web. Quando la richiesta richiede dati dal web in tempo reale o azioni nel browser (voli, treni, prezzi, ricerche, prenotazioni, consultare un sito), DEVI usare browse_web invece di dire che non hai accesso a internet. Dopo aver ricevuto i risultati dello strumento, rispondi all'utente in italiano in modo chiaro e conciso.";
+    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let tools = serde_json::json!([browse_web_tool_schema()]);
+    let mut messages = vec![
+        serde_json::json!({ "role": "system", "content": system }),
+        serde_json::json!({ "role": "user", "content": prompt }),
+    ];
 
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(32);
+    let http = state.http.clone();
+    let state_owned = state.clone();
+    let temperature = request.temperature;
     tokio::spawn(async move {
-        let mut stream = upstream.bytes_stream();
-        let mut buffer = String::new();
         let mut accumulated = String::new();
-        let mut done_emitted = false;
-        'outer: while let Some(chunk) = stream.next().await {
-            let Ok(chunk) = chunk else { break };
-            buffer.push_str(&String::from_utf8_lossy(&chunk));
-            while let Some(newline) = buffer.find('\n') {
-                let line: String = buffer.drain(..=newline).collect();
-                match parse_openai_sse_line(line.trim_end()) {
-                    ChatStreamEvent::Delta(text) => {
-                        accumulated.push_str(&text);
-                        if emit_stream_event(&tx, GenerateStreamEvent::Delta { text })
-                            .await
-                            .is_err()
-                        {
-                            break 'outer;
-                        }
-                    }
-                    ChatStreamEvent::Done => {
+        let mut final_done = false;
+
+        for _round in 0..MAX_TOOL_ROUNDS {
+            let mut builder = http.post(&endpoint);
+            if let Some(key) = api_key.as_ref() {
+                builder = builder.bearer_auth(key);
+            }
+            let resp = builder
+                .json(&serde_json::json!({
+                    "model": model,
+                    "messages": messages,
+                    "tools": tools,
+                    "tool_choice": "auto",
+                    "temperature": temperature,
+                    "stream": false,
+                }))
+                .send()
+                .await;
+            let resp = match resp {
+                Ok(value) => value,
+                Err(error) => {
+                    let _ = emit_stream_event(
+                        &tx,
+                        GenerateStreamEvent::Delta {
+                            text: format!("Errore di rete verso il modello: {error}"),
+                        },
+                    )
+                    .await;
+                    break;
+                }
+            };
+            if !resp.status().is_success() {
+                let code = resp.status();
+                let detail = resp.text().await.unwrap_or_default();
+                let _ = emit_stream_event(
+                    &tx,
+                    GenerateStreamEvent::Delta {
+                        text: format!(
+                            "Errore modello {code}: {}",
+                            detail.chars().take(200).collect::<String>()
+                        ),
+                    },
+                )
+                .await;
+                break;
+            }
+            let body: serde_json::Value = match resp.json().await {
+                Ok(value) => value,
+                Err(error) => {
+                    let _ = emit_stream_event(
+                        &tx,
+                        GenerateStreamEvent::Delta {
+                            text: format!("Risposta del modello non valida: {error}"),
+                        },
+                    )
+                    .await;
+                    break;
+                }
+            };
+            let message = body
+                .get("choices")
+                .and_then(|choices| choices.get(0))
+                .and_then(|choice| choice.get("message"))
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}));
+            let tool_calls = message
+                .get("tool_calls")
+                .and_then(|value| value.as_array())
+                .filter(|calls| !calls.is_empty())
+                .cloned();
+
+            if let Some(calls) = tool_calls {
+                // Echo the assistant's tool-call turn, then append each tool result.
+                messages.push(serde_json::json!({
+                    "role": "assistant",
+                    "content": message.get("content").cloned().unwrap_or(serde_json::Value::Null),
+                    "tool_calls": calls,
+                }));
+                for call in &calls {
+                    let name = call
+                        .get("function")
+                        .and_then(|f| f.get("name"))
+                        .and_then(|n| n.as_str())
+                        .unwrap_or("");
+                    let args_raw = call
+                        .get("function")
+                        .and_then(|f| f.get("arguments"))
+                        .and_then(|a| a.as_str())
+                        .unwrap_or("{}");
+                    let call_id = call.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
+                    let goal = serde_json::from_str::<serde_json::Value>(args_raw)
+                        .ok()
+                        .and_then(|a| a.get("goal").and_then(|g| g.as_str()).map(String::from))
+                        .unwrap_or_default();
+
+                    let result = if name == "browse_web" {
                         let _ = emit_stream_event(
                             &tx,
-                            GenerateStreamEvent::Done {
-                                text: accumulated.clone(),
-                                metrics: TokenMetrics::zero(),
+                            GenerateStreamEvent::Delta {
+                                text: format!(
+                                    "\n\n_🔧 Uso il browser: {}_\n",
+                                    if goal.is_empty() { "(obiettivo dal contesto)" } else { goal.as_str() }
+                                ),
                             },
                         )
                         .await;
-                        done_emitted = true;
-                        break 'outer;
-                    }
-                    ChatStreamEvent::Ignore => {}
+                        let st = state_owned.clone();
+                        let effective = if goal.is_empty() { prompt.clone() } else { goal.clone() };
+                        match tokio::task::spawn_blocking(move || {
+                            execute_browse_web_tool(&st, &effective)
+                        })
+                        .await
+                        {
+                            Ok(Ok(text)) => text,
+                            Ok(Err(error)) => {
+                                format!("Lo strumento browser ha riportato un errore: {error}")
+                            }
+                            Err(error) => format!("Errore di esecuzione dello strumento: {error}"),
+                        }
+                    } else {
+                        format!("Strumento non disponibile: {name}")
+                    };
+
+                    messages.push(serde_json::json!({
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": result,
+                    }));
                 }
+                continue;
             }
-        }
-        if !done_emitted {
+
+            // No tool call → this is the final answer.
+            let content = message
+                .get("content")
+                .and_then(|c| c.as_str())
+                .unwrap_or("")
+                .to_string();
+            accumulated.push_str(&content);
+            let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: content }).await;
             let _ = emit_stream_event(
                 &tx,
                 GenerateStreamEvent::Done {
-                    text: accumulated,
+                    text: accumulated.clone(),
+                    metrics: TokenMetrics::zero(),
+                },
+            )
+            .await;
+            final_done = true;
+            break;
+        }
+
+        if !final_done {
+            let _ = emit_stream_event(
+                &tx,
+                GenerateStreamEvent::Done {
+                    text: if accumulated.is_empty() {
+                        "Ho raggiunto il limite di passi senza una risposta finale.".to_string()
+                    } else {
+                        accumulated
+                    },
                     metrics: TokenMetrics::zero(),
                 },
             )
@@ -1288,6 +1421,50 @@ async fn stream_chat_via_openai(
         .header("content-type", "application/x-ndjson")
         .body(body)
         .expect("valid streaming response"))
+}
+
+/// Executes the `browse_web` tool: materializes a browser task for the goal and
+/// runs the observe-act loop synchronously (in contained-computer mode it drives
+/// the real browser in the container, visible via noVNC), returning the loop's
+/// human-facing result for the model to read.
+fn execute_browse_web_tool(state: &AppState, goal: &str) -> Result<String, String> {
+    let task_id = format!("chat_browse_{}", uuid::Uuid::new_v4().simple());
+    let mut task = TaskRecord::new(
+        task_id,
+        gateway_user_id(),
+        gateway_workspace_id(),
+        "browser_task",
+        task_goal_summary(goal),
+        serde_json::json!({
+            "source": "chat_tool_browse_web",
+            "prompt_redacted": redact_sensitive_text(goal),
+            "raw_prompt_stored": false,
+        }),
+    )
+    .with_resource(ResourceRequirement::new(ResourceClass::ComputerSession, 1));
+    task.risk_level = "low".to_string();
+    task.permission_context = serde_json::json!({
+        "privacy_domains": ["local", "browser"],
+        "requires_user_approval": false,
+        "cloud_allowed": false
+    });
+
+    {
+        let store = lock_task_store(state).map_err(|error| error.message.to_string())?;
+        store
+            .insert_task(&task)
+            .map_err(|error| format!("inserimento task browser: {error}"))?;
+    }
+
+    let outcome = execute_browser_read_only_task(state, &task).map_err(|error| error.message)?;
+    let result = if !outcome.chat_message.trim().is_empty() {
+        outcome.chat_message
+    } else if !outcome.summary.trim().is_empty() {
+        outcome.summary
+    } else {
+        "Nessun risultato dal browser.".to_string()
+    };
+    Ok(result)
 }
 
 async fn emit_stream_event(
