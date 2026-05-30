@@ -2483,6 +2483,81 @@ small {
   box-shadow: inset 0 0 0 1px var(--line);
 }
 
+.composio-panel .connector-grid {
+  margin-top: 8px;
+}
+
+.composio-search {
+  margin: 6px 0 4px;
+}
+
+.composio-error {
+  color: var(--danger, #d23);
+  font-size: 13px;
+  margin: 4px 0;
+}
+
+.composio-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  margin: 6px 0;
+}
+
+.composio-connect-card {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  margin-top: 8px;
+}
+
+.composio-connect-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.composio-key-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.composio-key-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--bg, var(--surface));
+  color: var(--text);
+  font-family: var(--mono, monospace);
+}
+
+.composio-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 9px;
+  border-radius: var(--radius);
+  white-space: nowrap;
+}
+
+.composio-badge.connected {
+  color: var(--green, #1a8f4c);
+  background: var(--green-soft, rgba(26, 143, 76, 0.12));
+}
+
 .task-columns {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
