@@ -219,12 +219,21 @@ export const chatApi = {
     return Promise.resolve(chatMessagesSnapshot(threadId));
   },
 
-  saveChatMessageToMemory(threadId: string, messageId: string) {
-    updateMessage(threadId, messageId, (message) => ({
-      ...message,
-      saved_memory_ref: message.saved_memory_ref ?? `memory:${messageId}`,
-    }));
-    return Promise.resolve(chatMessagesSnapshot(threadId));
+  async saveChatMessageToMemory(threadId: string, messageId: string) {
+    try {
+      return hydrateMessagesSnapshot(
+        await gatewayJson<CoreChatMessagesSnapshot>(
+          `/api/chat/threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}/save_to_memory`,
+          { method: "POST" },
+        ),
+      );
+    } catch {
+      updateMessage(threadId, messageId, (message) => ({
+        ...message,
+        saved_memory_ref: message.saved_memory_ref ?? `memory:${messageId}`,
+      }));
+      return Promise.resolve(chatMessagesSnapshot(threadId));
+    }
   },
 
   async createTaskFromChatMessage(threadId: string, messageId: string) {
