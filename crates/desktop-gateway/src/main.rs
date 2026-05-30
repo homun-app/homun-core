@@ -703,6 +703,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .route("/api/workspaces/{workspace_id}/select", post(select_workspace))
         .route("/api/capabilities/composio/connect", post(connect_composio))
+        .route("/api/capabilities/composio/toolkits", get(composio_toolkits))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             require_gateway_token,
@@ -3161,6 +3162,126 @@ fn connect_composio_blocking(
         provider_id: provider_id.as_str().to_string(),
         tools_cached,
     })
+}
+
+#[derive(Debug, Serialize)]
+struct ComposioToolkit {
+    slug: String,
+    name: String,
+    managed_oauth: bool,
+    no_auth: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct ComposioToolkitsResponse {
+    toolkits: Vec<ComposioToolkit>,
+    total: u64,
+}
+
+/// Builds a live Composio v3 transport from the stored connection: base URL from
+/// the connection metadata, API key from the encrypted secret store. Errors if
+/// Composio is not connected for the active workspace.
+fn composio_transport_for(state: &AppState) -> Result<GatewayComposioTransport, GatewayError> {
+    let user = gateway_capability_user_id();
+    let workspace = gateway_capability_workspace_id();
+    let connection = {
+        let registry = lock_capability_registry(state)?;
+        registry
+            .connection_configs(&user, &workspace)
+            .map_err(GatewayError::capability)?
+            .into_iter()
+            .find(|config| config.provider_id.as_str() == "composio")
+    }
+    .ok_or_else(|| GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "composio_not_connected",
+        message: "Composio is not connected for this workspace".to_string(),
+    })?;
+    let base_url = connection
+        .metadata
+        .get("base_url")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| composio_base_url(None));
+    let secret_ref = SecretRef::new(user.as_str(), workspace.as_str(), "composio", "default")
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "secret_ref_invalid",
+            message: error.to_string(),
+        })?;
+    let api_key = state
+        .secret_store
+        .get(&secret_ref)
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "secret_get_failed",
+            message: error.to_string(),
+        })?
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "composio_secret_missing",
+            message: "Composio API key not found".to_string(),
+        })?
+        .expose_utf8()
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "secret_decode_failed",
+            message: error.to_string(),
+        })?;
+    Ok(GatewayComposioTransport::new(base_url, api_key))
+}
+
+fn composio_toolkits_blocking(state: &AppState) -> Result<ComposioToolkitsResponse, GatewayError> {
+    let transport = composio_transport_for(state)?;
+    let response = transport
+        .request("GET", "/toolkits", None)
+        .map_err(GatewayError::capability)?;
+    let items = response
+        .get("items")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let total = response
+        .get("total_items")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(items.len() as u64);
+    let toolkits = items
+        .iter()
+        .filter(|item| !item.get("deprecated").and_then(serde_json::Value::as_bool).unwrap_or(false))
+        .filter_map(|item| {
+            let slug = item.get("slug").and_then(serde_json::Value::as_str)?.to_string();
+            let name = item
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(&slug)
+                .to_string();
+            let managed_oauth = item
+                .get("composio_managed_auth_schemes")
+                .and_then(serde_json::Value::as_array)
+                .map(|schemes| {
+                    schemes
+                        .iter()
+                        .any(|s| s.as_str().is_some_and(|s| s.eq_ignore_ascii_case("OAUTH2")))
+                })
+                .unwrap_or(false);
+            let no_auth = item.get("no_auth").and_then(serde_json::Value::as_bool).unwrap_or(false);
+            Some(ComposioToolkit { slug, name, managed_oauth, no_auth })
+        })
+        .collect::<Vec<_>>();
+    Ok(ComposioToolkitsResponse { toolkits, total })
+}
+
+async fn composio_toolkits(
+    State(state): State<AppState>,
+) -> Result<Json<ComposioToolkitsResponse>, GatewayError> {
+    tokio::task::spawn_blocking(move || composio_toolkits_blocking(&state))
+        .await
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "composio_toolkits_join",
+            message: error.to_string(),
+        })?
+        .map(Json)
 }
 
 async fn connect_composio(
