@@ -304,6 +304,102 @@ small {
   font-weight: 500;
 }
 
+.workspace-switcher {
+  position: relative;
+  margin: 4px 0 8px;
+}
+
+.workspace-switcher-trigger {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: var(--radius);
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.workspace-switcher-name {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 550;
+}
+
+.workspace-switcher-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18), inset 0 0 0 1px var(--line);
+}
+
+.workspace-switcher-item {
+  width: 100%;
+  min-height: 32px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: var(--radius);
+  color: var(--text);
+  background: transparent;
+  text-align: left;
+}
+
+.workspace-switcher-item span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-switcher-item:hover {
+  background: var(--blue-soft);
+}
+
+.workspace-switcher-new {
+  margin-top: 2px;
+  border-top: 1px solid var(--line);
+  color: var(--blue);
+}
+
+.workspace-switcher-create {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+}
+
+.workspace-switcher-create input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 9px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--bg, var(--surface));
+  color: var(--text);
+}
+
+.workspace-switcher-error {
+  color: var(--danger, #d23);
+  font-size: 12px;
+  padding: 2px 8px;
+}
+
 .drawer-nav,
 .drawer-section {
   display: flex;

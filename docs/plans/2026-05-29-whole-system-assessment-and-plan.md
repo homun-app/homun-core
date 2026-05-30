@@ -155,3 +155,28 @@ Remaining (grounded on v3, build can proceed; final live test needs a valid key)
   execute behind approval).
 - UI ConnectionsView: paste key once → toolkit list → "Connect" → open connectUrl
   → poll → connected.
+
+#### P4.3 — DONE (connect + execute wired & grounded; final OAuth is the user's)
+
+- **Connect flow (eb78093)**: gateway endpoints connect/toolkits/link/connections,
+  live-validated against real v3 (`POST /composio/link {gmail}` →
+  `{redirect_url, connected_account_id}`; `GET /composio/connections` →
+  INITIALIZING). Per-workspace Composio entity (`composio_entity_id()` =
+  active workspace) isolates connected accounts per project.
+- **Connect UI (6768327)**: `ComposioPanel` in ConnectionsView — probe →
+  needs-key (password input, never echoed) → paste key (`POST /connect`, a 2xx =
+  v3-validated) → searchable toolkit grid (`GET /toolkits`) → "Connect"
+  (`POST /link`) opens redirect_url in the browser → polls connections ~36s so
+  INITIALIZING → ACTIVE flips live → "Connesso" badge. 4 gateway-first bridge
+  methods; `gatewayErrorDetail` unwraps `{error:{message}}`.
+- **Execute v3-direct (d66facb)**: grounded the execute path with a zero-side-
+  effect probe (`POST /api/v3/tools/execute/NONEXISTENT…` → "Tool not found",
+  404) — path routable, x-api-key accepted, `{user_id, arguments}` body is
+  v3-correct. The crate's `call_tool` already targets this exactly (the "pre-v3"
+  issue was only in `list_tools`, off the execute path). Two fixes: provider
+  `user_id` now = `composio_entity_id()` (matches link-time entity; previously
+  "local-user" → no connected account); transport surfaces the v3
+  `{error:{message}}` body on non-2xx.
+- **Remaining**: a final live execute test needs an ACTIVE connection — the user
+  completes the OAuth from the UI (click Connect → browser → grant). Everything
+  up to and including that click is wired and grounded.
