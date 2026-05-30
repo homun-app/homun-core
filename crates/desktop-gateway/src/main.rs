@@ -33,7 +33,7 @@ use local_first_inference::{
 };
 use local_first_capabilities::{
     ActionClass, CachedCapabilityTool, CachedToolProvider, CapabilityConnectionConfig,
-    CapabilityError, CapabilityFacade, CapabilityPolicy, CapabilityProviderConfig,
+    CapabilityError, CapabilityFacade, CapabilityPolicy, CapabilityProvider, CapabilityProviderConfig,
     CapabilityProviderGrant, CapabilityProviderKind, CapabilityRegistryStore, CapabilityResult,
     CapabilityTaskPayload, ComposioCapabilityProvider, ComposioProviderConfig, ComposioTransport,
     InMemoryCapabilityAudit, McpCapabilityProvider, McpStdioConfig, McpStdioTransport, McpToolPolicy,
@@ -703,6 +703,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(workspaces_list).post(create_workspace),
         )
         .route("/api/workspaces/{workspace_id}/select", post(select_workspace))
+        .route("/api/capabilities/mcp/connect", post(connect_mcp))
         .route("/api/capabilities/composio/connect", post(connect_composio))
         .route("/api/capabilities/composio/toolkits", get(composio_toolkits))
         .route("/api/capabilities/composio/link", post(composio_link))
@@ -2970,6 +2971,206 @@ fn mcp_stdio_config_from_metadata(
         })
         .unwrap_or_default();
     Ok(McpStdioConfig { command, args, env })
+}
+
+/// Inverse of [`mcp_stdio_config_from_metadata`]: serializes a stdio config to
+/// the connection metadata shape. Keeping the two as an explicit pair (and
+/// round-trip tested) guarantees what `mcp/connect` writes is exactly what the
+/// executor reads back — the same connect↔execute contract that, left implicit,
+/// produced the earlier model-default and gemma-label drifts.
+fn mcp_stdio_config_to_metadata(config: &McpStdioConfig) -> Value {
+    let env: serde_json::Map<String, Value> = config
+        .env
+        .iter()
+        .map(|(key, value)| (key.clone(), Value::String(value.clone())))
+        .collect();
+    serde_json::json!({
+        "transport": "stdio",
+        "command": config.command,
+        "args": config.args,
+        "env": Value::Object(env),
+    })
+}
+
+/// Slugifies a user-supplied MCP server name into a stable provider id segment:
+/// lowercase, ASCII alphanumerics and dashes only, collapsed, never empty.
+fn mcp_provider_slug(name: &str) -> String {
+    let mut slug = String::new();
+    let mut last_dash = false;
+    for ch in name.trim().to_ascii_lowercase().chars() {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch);
+            last_dash = false;
+        } else if !last_dash && !slug.is_empty() {
+            slug.push('-');
+            last_dash = true;
+        }
+    }
+    let trimmed = slug.trim_end_matches('-');
+    if trimmed.is_empty() {
+        "server".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct ConnectMcpRequest {
+    name: String,
+    command: String,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    env: std::collections::HashMap<String, String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ConnectMcpResponse {
+    provider_id: String,
+    connection_id: String,
+    tools_cached: usize,
+    /// `Some` when the server was registered but tool discovery (spawn +
+    /// initialize + tools/list) failed — surfaced, never swallowed, so the UI can
+    /// say "registered, but couldn't reach the server" instead of faking success.
+    discovery_error: Option<String>,
+}
+
+/// Registers a local stdio MCP server as a capability provider (per ADR 0009 it
+/// is filesystem-confined to the workspace at execution time). The connection
+/// metadata is written via [`mcp_stdio_config_to_metadata`] so the already-wired
+/// executor (`execute_capability_generic`, MCP branch) reads back the identical
+/// stdio config. Tool discovery is BEST-EFFORT: we try to spawn + initialize +
+/// list so the Brain can plan with the server's tools, but a server that can't
+/// start here still registers (with `discovery_error` set) rather than failing
+/// the whole connect.
+fn connect_mcp_blocking(
+    state: &AppState,
+    request: ConnectMcpRequest,
+) -> Result<ConnectMcpResponse, GatewayError> {
+    let name = request.name.trim().to_string();
+    let command = request.command.trim().to_string();
+    if name.is_empty() || command.is_empty() {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "mcp_connect_invalid",
+            message: "MCP connect requires a non-empty name and command".to_string(),
+        });
+    }
+
+    let slug = mcp_provider_slug(&name);
+    let provider_id = CapabilityProviderId::new(format!("mcp:{slug}"));
+    let connection_id = format!("mcp-{slug}");
+    let user = gateway_capability_user_id();
+    let workspace = gateway_capability_workspace_id();
+    let config = McpStdioConfig {
+        command,
+        args: request.args,
+        env: request.env.into_iter().collect(),
+    };
+    let metadata = mcp_stdio_config_to_metadata(&config);
+
+    {
+        let registry = lock_capability_registry(state)?;
+        registry
+            .upsert_provider_config(&CapabilityProviderConfig::new(
+                provider_id.clone(),
+                CapabilityProviderKind::Mcp,
+                name.clone(),
+                true,
+            ))
+            .map_err(GatewayError::capability)?;
+        registry
+            .upsert_provider_grant(
+                &CapabilityProviderGrant::new(provider_id.clone(), user.clone(), workspace.clone())
+                    .with_privacy_domains(vec!["local".to_string()])
+                    .with_allowed_actions(vec![
+                        ActionClass::Read,
+                        ActionClass::WriteWithConfirmation,
+                    ])
+                    .with_max_autonomy_level(3),
+            )
+            .map_err(GatewayError::capability)?;
+        registry
+            .upsert_connection_config(
+                &CapabilityConnectionConfig::new(
+                    connection_id.as_str(),
+                    provider_id.clone(),
+                    user.clone(),
+                    workspace.clone(),
+                    name.clone(),
+                    format!("stdio:{slug}"),
+                )
+                .with_privacy_domains(vec!["local".to_string()])
+                .with_metadata(metadata),
+            )
+            .map_err(GatewayError::capability)?;
+    }
+
+    // Best-effort discovery: spawn the server, MCP-initialize, list tools, cache
+    // them. Any failure is reported (not swallowed) and leaves the registration.
+    let (tools_cached, discovery_error) =
+        match mcp_discover_and_cache_tools(state, &provider_id, config) {
+            Ok(count) => (count, None),
+            Err(message) => (0, Some(message)),
+        };
+
+    Ok(ConnectMcpResponse {
+        provider_id: provider_id.as_str().to_string(),
+        connection_id,
+        tools_cached,
+        discovery_error,
+    })
+}
+
+/// Spawns the MCP server, performs the `initialize` handshake (required by the
+/// MCP protocol before `tools/list`), enumerates its tools, and caches them so
+/// the Brain can plan with them. Returns the number cached, or an error string.
+fn mcp_discover_and_cache_tools(
+    state: &AppState,
+    provider_id: &CapabilityProviderId,
+    config: McpStdioConfig,
+) -> Result<usize, String> {
+    let transport = McpStdioTransport::spawn(config)
+        .map_err(|error| format!("avvio MCP fallito: {error}"))?;
+    let provider = McpCapabilityProvider::new(provider_id.clone(), true, transport, Vec::new());
+    // Handshake first; some servers reject tools/list before initialize.
+    provider
+        .initialize("2024-11-05")
+        .map_err(|error| format!("handshake MCP fallito: {error}"))?;
+    let tools = provider
+        .list_tools()
+        .map_err(|error| format!("tools/list fallito: {error}"))?;
+    let count = tools.len();
+    let registry = lock_capability_registry(state).map_err(|error| error.message.to_string())?;
+    for tool in tools {
+        registry
+            .upsert_cached_tool(&CachedCapabilityTool::new(
+                provider_id.clone(),
+                tool.name,
+                CapabilityProviderKind::Mcp,
+                tool.action,
+                tool.description,
+                tool.privacy_domains,
+                tool.sensitivity,
+                tool.input_schema,
+            ))
+            .map_err(|error| format!("cache tool fallita: {error}"))?;
+    }
+    Ok(count)
+}
+
+async fn connect_mcp(
+    State(state): State<AppState>,
+    Json(request): Json<ConnectMcpRequest>,
+) -> Result<Json<ConnectMcpResponse>, GatewayError> {
+    tokio::task::spawn_blocking(move || connect_mcp_blocking(&state, request))
+        .await
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "mcp_connect_join",
+            message: error.to_string(),
+        })?
+        .map(Json)
 }
 
 fn capability_call_completed_outcome(
@@ -9475,7 +9676,8 @@ mod tests {
         aggregate_session_state_from_counts, brain_budgets_for_context_window,
         browser_error_indicates_dead_sidecar, capability_call_completed_outcome, collect_member_counts,
         resolve_active_model, ActiveModelInputs, DEFAULT_LOCAL_MISTRALRS_MODEL,
-        mcp_stdio_config_from_metadata, sanitize_wiki_filename, task_queue_response, train_option_lines,
+        mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata, mcp_provider_slug,
+        sanitize_wiki_filename, task_queue_response, train_option_lines,
         train_search_draft_for_goal, train_station_suggestion_for_snapshot,
         train_success_criteria_met, trovatreno_search_url, wiki_title_from_text,
     };
@@ -10490,5 +10692,62 @@ mod tests {
         });
         assert_eq!(info.backend, "mlx");
         assert!(!info.capable);
+    }
+
+    #[test]
+    fn mcp_metadata_round_trips_between_connect_and_executor() {
+        // The contract: what mcp/connect writes (to_metadata) MUST be exactly
+        // what the executor reads (from_metadata). A mismatch here = a connected
+        // MCP server the executor can't launch.
+        let original = local_first_capabilities::McpStdioConfig {
+            command: "npx".to_string(),
+            args: vec![
+                "-y".to_string(),
+                "@modelcontextprotocol/server-filesystem".to_string(),
+                "/tmp".to_string(),
+            ],
+            env: vec![
+                ("API_TOKEN".to_string(), "abc123".to_string()),
+                ("MODE".to_string(), "ro".to_string()),
+            ],
+        };
+
+        let metadata = mcp_stdio_config_to_metadata(&original);
+        let restored =
+            mcp_stdio_config_from_metadata(&metadata).expect("metadata should parse back");
+
+        assert_eq!(restored.command, original.command);
+        assert_eq!(restored.args, original.args);
+        // env order is not significant (serde object → map); compare as sets.
+        let mut a = original.env.clone();
+        let mut b = restored.env.clone();
+        a.sort();
+        b.sort();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn mcp_metadata_round_trips_with_empty_args_and_env() {
+        let original = local_first_capabilities::McpStdioConfig {
+            command: "my-server".to_string(),
+            args: vec![],
+            env: vec![],
+        };
+        let restored = mcp_stdio_config_from_metadata(&mcp_stdio_config_to_metadata(&original))
+            .expect("empty config should parse back");
+        assert_eq!(restored.command, "my-server");
+        assert!(restored.args.is_empty());
+        assert!(restored.env.is_empty());
+    }
+
+    #[test]
+    fn mcp_provider_slug_sanitizes_names() {
+        assert_eq!(mcp_provider_slug("GitHub MCP"), "github-mcp");
+        assert_eq!(mcp_provider_slug("  Filesystem!! "), "filesystem");
+        assert_eq!(mcp_provider_slug("a/b\\c"), "a-b-c");
+        assert_eq!(mcp_provider_slug("Wiki (local)"), "wiki-local");
+        // Never empty, even for all-punctuation input.
+        assert_eq!(mcp_provider_slug("***"), "server");
+        assert_eq!(mcp_provider_slug(""), "server");
     }
 }
