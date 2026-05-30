@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChatView } from "./components/ChatView";
 import { ConnectionsView } from "./components/ConnectionsView";
+import { ContainedComputerView } from "./components/ContainedComputerView";
 import { LearningView } from "./components/LearningView";
 import { Shell } from "./components/Shell";
 import { ShallowView } from "./components/ShallowView";
@@ -1140,18 +1141,7 @@ export default function App() {
             ]}
           />
         )}
-        {activeView === "browser" && (
-          <ShallowView
-            title="Browser"
-            eyebrow="Runtime locale"
-            description="Sessioni Playwright/CDP, artifact redatti e manual blockers controllati dal task runtime."
-            stats={[
-              { label: "Sessione", value: "1" },
-              { label: "Artifact", value: "4" },
-              { label: "Approval", value: "1" },
-            ]}
-          />
-        )}
+        {activeView === "browser" && <ContainedComputerView />}
         {activeView === "brain" && (
           <ShallowView
             title="Brain Audit"

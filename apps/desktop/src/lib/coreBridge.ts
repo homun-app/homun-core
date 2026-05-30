@@ -369,6 +369,11 @@ export interface ComposioConnectResult {
   tools_cached: number;
 }
 
+export interface ContainedComputerLive {
+  enabled: boolean;
+  novnc_url: string | null;
+}
+
 export interface McpConnectResult {
   provider_id: string;
   connection_id: string;
@@ -434,6 +439,10 @@ async function electronRuntimeModel(): Promise<ActiveModelInfo> {
   return gatewayGetJson<ActiveModelInfo>("/api/runtime/model");
 }
 
+async function electronContainedComputerLive(): Promise<ContainedComputerLive> {
+  return gatewayGetJson<ContainedComputerLive>("/api/local-computer/live");
+}
+
 async function electronWorkspaces(): Promise<WorkspacesSnapshot> {
   return gatewayGetJson<WorkspacesSnapshot>("/api/workspaces");
 }
@@ -494,6 +503,7 @@ async function electronComposioConnections(): Promise<ComposioConnection[]> {
 export const coreBridge = {
   status: () => Promise.resolve(electronCoreStatus()),
   runtimeModel: () => electronRuntimeModel(),
+  containedComputerLive: () => electronContainedComputerLive(),
   workspaces: () => electronWorkspaces(),
   createWorkspace: (name: string) => electronCreateWorkspace(name),
   selectWorkspace: (id: string) => electronSelectWorkspace(id),
