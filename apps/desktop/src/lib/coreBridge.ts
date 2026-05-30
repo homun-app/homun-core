@@ -369,6 +369,13 @@ export interface ComposioConnectResult {
   tools_cached: number;
 }
 
+export interface McpConnectResult {
+  provider_id: string;
+  connection_id: string;
+  tools_cached: number;
+  discovery_error: string | null;
+}
+
 export interface ComposioToolkit {
   slug: string;
   name: string;
@@ -442,6 +449,20 @@ async function electronSelectWorkspace(id: string): Promise<WorkspacesSnapshot> 
   );
 }
 
+async function electronMcpConnect(input: {
+  name: string;
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+}): Promise<McpConnectResult> {
+  return gatewayPostJson<McpConnectResult>("/api/capabilities/mcp/connect", {
+    name: input.name,
+    command: input.command,
+    args: input.args ?? [],
+    env: input.env ?? {},
+  });
+}
+
 async function electronComposioConnect(apiKey: string): Promise<ComposioConnectResult> {
   return gatewayPostJson<ComposioConnectResult>(
     "/api/capabilities/composio/connect",
@@ -476,6 +497,12 @@ export const coreBridge = {
   workspaces: () => electronWorkspaces(),
   createWorkspace: (name: string) => electronCreateWorkspace(name),
   selectWorkspace: (id: string) => electronSelectWorkspace(id),
+  mcpConnect: (input: {
+    name: string;
+    command: string;
+    args?: string[];
+    env?: Record<string, string>;
+  }) => electronMcpConnect(input),
   composioConnect: (apiKey: string) => electronComposioConnect(apiKey),
   composioToolkits: () => electronComposioToolkits(),
   composioLink: (toolkitSlug: string) => electronComposioLink(toolkitSlug),
