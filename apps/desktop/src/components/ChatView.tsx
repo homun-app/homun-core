@@ -286,7 +286,7 @@ export function ChatView({
       requestId,
       phase: "accepted",
       title: "Prompt ricevuto",
-      detail: "Preparo la richiesta per Gemma locale.",
+      detail: "Preparo la richiesta per il modello locale.",
     });
     setOptimisticMessages(promptMessages);
     const streamingMessage: ChatMessage = {
@@ -294,7 +294,7 @@ export function ChatView({
       role: "assistant",
       text: "",
       timestamp: currentTimestampSeconds(),
-      metadata: "Gemma locale",
+      metadata: "Modello locale",
     };
     let streamedText = "";
     let streamChunks = 0;
@@ -398,7 +398,7 @@ export function ChatView({
           setStreamStatus({
             requestId,
             phase: "writing",
-            title: "Gemma sta scrivendo",
+            title: "L'assistente sta scrivendo",
             detail: "La risposta sta arrivando in streaming.",
           });
         }
@@ -411,7 +411,7 @@ export function ChatView({
       setStreamStatus({
         requestId,
         phase: "thinking",
-        title: "Gemma sta pensando",
+        title: "L'assistente sta pensando",
         detail: "Costruisco il contesto locale e avvio la generazione.",
       });
       const result = await coreBridge.submitChatPromptStream(
@@ -728,7 +728,7 @@ export function ChatView({
         setStreamStatus({
           requestId,
           phase: "writing",
-          title: "Gemma sta continuando",
+          title: "L'assistente sta continuando",
           detail: "Sto completando la risposta nello stesso messaggio.",
         });
       }
@@ -945,7 +945,7 @@ export function ChatView({
             <div className="floating-menu model-menu" role="menu">
               <button type="button">
                 <Sparkles size={15} />
-                Gemma 4 locale
+                Modello locale
                 <span>attivo</span>
               </button>
               <button type="button">
@@ -1015,7 +1015,7 @@ export function ChatView({
                     <Sparkles size={17} />
                   )}
                   <strong>{displayMessage.role === "system" ? "stato" : "assistant"}</strong>
-                  <span>{displayMessage.role === "system" ? "Sistema" : "Gemma"}</span>
+                  <span>{displayMessage.role === "system" ? "Sistema" : "Assistente"}</span>
                 </header>
               )}
               {isStreamingMessage ? (
@@ -1129,7 +1129,7 @@ export function ChatView({
               <header className="assistant-label">
                 <Sparkles size={17} />
                 <strong>assistant</strong>
-                <span>Gemma</span>
+                <span>Assistente</span>
               </header>
               <AssistantThinkingState status={streamStatus} />
             </article>
@@ -1219,7 +1219,7 @@ function AssistantThinkingState({ status }: { status: ChatStreamStatus | null })
         <span />
       </div>
       <div>
-        <strong>{status?.title ?? "Gemma sta rispondendo"}</strong>
+        <strong>{status?.title ?? "L'assistente sta rispondendo"}</strong>
         <span>
           {status?.detail ?? "Attendo il primo token dal runtime locale."}
         </span>
@@ -1239,7 +1239,7 @@ function describeBridgeError(error: unknown): string {
   }
 
   if (error.message.includes("Gateway")) {
-    return "Gateway locale non ancora disponibile: uso il runtime Gemma diretto quando possibile.";
+    return "Gateway locale non ancora disponibile: uso il runtime locale diretto quando possibile.";
   }
 
   return error.message;

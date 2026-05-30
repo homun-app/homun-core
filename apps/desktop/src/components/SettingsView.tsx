@@ -90,7 +90,7 @@ export function SettingsView({
               <div className="runtime-hero-title">
                 <RuntimeStatusIcon status={primaryHealth?.status} />
                 <div>
-                  <strong>{primaryHealth?.label ?? "Gemma 4 MLX"}</strong>
+                  <strong>{primaryHealth?.label ?? "Runtime locale"}</strong>
                   <small>{runtimeHeadline(primaryHealth, primaryRuntime)}</small>
                 </div>
               </div>
@@ -200,9 +200,9 @@ export function SettingsView({
                 </pre>
               ) : (
                 <div className="runtime-log-empty">
-                  I log sono disponibili quando Gemma viene avviato dal gateway
-                  gestito. Se il runtime e' esterno, mostriamo solo stato e
-                  risorse.
+                  I log sono disponibili quando il runtime locale viene avviato
+                  dal gateway gestito. Se il runtime e' esterno, mostriamo solo
+                  stato e risorse.
                 </div>
               )}
             </div>

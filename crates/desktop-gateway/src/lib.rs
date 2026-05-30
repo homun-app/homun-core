@@ -205,9 +205,9 @@ pub fn seeded_ready_message(thread_id: &str, timestamp: String) -> ChatMessage {
     ChatMessage {
         id: format!("{thread_id}_ready"),
         role: "assistant".to_string(),
-        text: "Sono pronto. Scrivimi pure: rispondo con Gemma locale.".to_string(),
+        text: "Sono pronto. Scrivimi pure: rispondo in locale.".to_string(),
         timestamp,
-        metadata: Some("Gemma locale".to_string()),
+        metadata: Some("Modello locale".to_string()),
         metrics: None,
         feedback: None,
         saved_memory_ref: None,

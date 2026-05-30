@@ -127,9 +127,9 @@ function starterMessages(thread: ChatThread): ChatMessage[] {
     {
       id: `${thread.threadId}_ready`,
       role: "assistant",
-      text: "Sono pronto. Scrivimi pure: rispondo con Gemma locale.",
+      text: "Sono pronto. Scrivimi pure: rispondo in locale.",
       timestamp: currentTimestampSeconds(),
-      metadata: "Gemma locale",
+      metadata: "Modello locale",
     },
   ];
 }
