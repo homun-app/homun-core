@@ -227,3 +227,32 @@ Open next (no blockers): MCP/skills connect UI (pairs with Composio); audit-log
 section; memory browser + dedicated browser-monitoring viewport (P4.4); dynamic
 model switching (needs the design decision above). A final live Composio *execute*
 needs the user to complete one OAuth from the new UI.
+
+## Session addendum (2026-05-30, part 2 — live UI test + headless hardening)
+
+Drove the running app via computer-use and verified the three UI slices live
+(workspace create→reload→auto-seed; Composio needs-key panel; Settings→General).
+The visual test surfaced real bugs that unit tests could not:
+
+6. **De-gemma chat labels (98014d4)**: the running backend is mistral-small
+   (capable) but the chat said "Gemma" everywhere (author label, typing
+   indicators, seeded message, dropdown). Made the assistant's voice
+   model-neutral so it is correct regardless of backend.
+7. **Active-model single source of truth (104215b)**: the reporter claimed the
+   mistralrs default was "mistral-small" while the router loads "Qwen/Qwen3-4B".
+   Extracted shared default-model constants (used by BOTH router and reporter) +
+   a pure, unit-tested `resolve_active_model`. 7 branch tests.
+8. **MCP server connect endpoint (3f68da8)**: `POST /api/capabilities/mcp/connect`
+   registers a local stdio MCP server (mirrors Composio connect); metadata via
+   `mcp_stdio_config_to_metadata` (round-trip tested against the executor's
+   reader); best-effort spawn→initialize→tools/list discovery with transparent
+   `discovery_error`. 3 tests; live-validated on an isolated gateway.
+
+Screen locked mid-session (user stepped away) → pivoted to backend-only,
+test-backed work (no unverifiable GUI changes). Test count: 75 bin / 24 lib.
+
+Still deferred until the screen is unlockable (need visual verification): the
+"Progetti" nav still lists MOCK projects separate from the real switcher; the
+chat-header "Gemma 4 MLX" health pill still names the MLX process (needs
+backend-aware runtime health); ConnectionsView MCP form; skill EXECUTION wiring
+(needs a manifest+WASM artifact to validate).
