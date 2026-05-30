@@ -675,6 +675,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/chat/generate_stream", post(generate_stream))
         .route("/api/chat/cancel_generation", post(cancel_generation))
         .route("/api/runtime/health", get(runtime_health))
+        .route("/api/runtime/model", get(runtime_model))
         .route("/api/runtime/logs", get(runtime_logs))
         .route("/api/runtime/warmup", post(runtime_warmup))
         .route("/api/runtime/shutdown", post(runtime_shutdown))
@@ -5845,6 +5846,113 @@ fn build_mlx_router(gemma_runtime_url: &str) -> ModelRouter {
     let provider =
         JsonRuntimeProvider::new(descriptor, RuntimeClient::new(gemma_runtime_url.to_string()));
     ModelRouter::new(PrivacyPolicy::local_only()).with_provider(Box::new(provider))
+}
+
+#[derive(Debug, Serialize)]
+struct ActiveModelResponse {
+    /// "anthropic" | "openai-compat" | "mistralrs" | "mlx"
+    backend: String,
+    model: String,
+    /// "cloud" | "local"
+    locality: String,
+    context_window: u32,
+    /// false only for the small local MLX/gemma fallback — the de-gemma thesis:
+    /// capable backends should not inherit gemma4-era constraints.
+    capable: bool,
+    /// True when the selected backend needs a cloud API key but none is present
+    /// — the UI can warn that chat will silently fall back to local.
+    missing_api_key: bool,
+}
+
+/// Reports which inference backend/model is actually active, mirroring the exact
+/// selection logic in [`build_browser_inference_router`]. Read-only — the
+/// recurring pain that started the de-gemma arc was "am I on cloud or gemma4?";
+/// this makes the answer visible in the UI instead of buried in env vars.
+fn active_inference_model_info() -> ActiveModelResponse {
+    let backend = env::var("LOCAL_FIRST_INFERENCE_BACKEND")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let has_api_key = resolve_inference_api_key().is_some();
+
+    if backend == "anthropic" {
+        let model = env::var("LOCAL_FIRST_INFERENCE_MODEL")
+            .unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
+        if has_api_key {
+            let context_window = env::var("LOCAL_FIRST_INFERENCE_CONTEXT_WINDOW")
+                .ok()
+                .and_then(|value| value.parse::<u32>().ok())
+                .unwrap_or(200_000);
+            return ActiveModelResponse {
+                backend: "anthropic".to_string(),
+                model,
+                locality: "cloud".to_string(),
+                context_window,
+                capable: true,
+                missing_api_key: false,
+            };
+        }
+        // Selected anthropic but no key → router falls back to local MLX.
+        return mlx_fallback_model_info(true);
+    }
+
+    if backend == "openai" {
+        let base_url = env::var("LOCAL_FIRST_INFERENCE_BASE_URL")
+            .ok()
+            .filter(|value| !value.is_empty());
+        if let Some(_base_url) = base_url {
+            let model = env::var("LOCAL_FIRST_INFERENCE_MODEL")
+                .unwrap_or_else(|_| "gpt-4o-mini".to_string());
+            let context_window = env::var("LOCAL_FIRST_INFERENCE_CONTEXT_WINDOW")
+                .ok()
+                .and_then(|value| value.parse::<u32>().ok())
+                .unwrap_or(32_768);
+            let is_cloud = env::var("LOCAL_FIRST_INFERENCE_CLOUD")
+                .map(|value| value == "1" || value.to_ascii_lowercase() == "true")
+                .unwrap_or(false);
+            return ActiveModelResponse {
+                backend: "openai-compat".to_string(),
+                model,
+                locality: if is_cloud { "cloud" } else { "local" }.to_string(),
+                context_window,
+                capable: true,
+                // An OpenAI-compatible endpoint may be keyless (local Ollama);
+                // only flag missing key when it is a cloud endpoint.
+                missing_api_key: is_cloud && !has_api_key,
+            };
+        }
+        return mlx_fallback_model_info(false);
+    }
+
+    #[cfg(feature = "local-mistralrs")]
+    if backend == "mistralrs" || backend.is_empty() {
+        let model = env::var("LOCAL_FIRST_INFERENCE_MODEL")
+            .unwrap_or_else(|_| "mistral-small".to_string());
+        return ActiveModelResponse {
+            backend: "mistralrs".to_string(),
+            model,
+            locality: "local".to_string(),
+            context_window: 32_768,
+            capable: true,
+            missing_api_key: false,
+        };
+    }
+
+    mlx_fallback_model_info(false)
+}
+
+fn mlx_fallback_model_info(missing_api_key: bool) -> ActiveModelResponse {
+    ActiveModelResponse {
+        backend: "mlx".to_string(),
+        model: "gemma4".to_string(),
+        locality: "local".to_string(),
+        context_window: 8_192,
+        capable: false,
+        missing_api_key,
+    }
+}
+
+async fn runtime_model() -> Json<ActiveModelResponse> {
+    Json(active_inference_model_info())
 }
 
 /// Default in-process model for the mistral.rs backbone. A text model, because

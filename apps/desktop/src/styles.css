@@ -2654,6 +2654,59 @@ small {
   background: var(--green-soft, rgba(26, 143, 76, 0.12));
 }
 
+.model-hero {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.model-locality {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius);
+}
+
+.model-locality.cloud {
+  color: var(--blue);
+  background: var(--blue-soft);
+}
+
+.model-locality.local {
+  color: var(--muted);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.model-badge {
+  font-size: 12px;
+  font-weight: 650;
+  padding: 5px 10px;
+  border-radius: var(--radius);
+  white-space: nowrap;
+}
+
+.model-badge.capable {
+  color: var(--green, #1a8f4c);
+  background: var(--green-soft, rgba(26, 143, 76, 0.12));
+}
+
+.model-badge.limited {
+  color: var(--muted);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.model-warning {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  color: var(--amber, #b7791f);
+}
+
 .task-columns {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
