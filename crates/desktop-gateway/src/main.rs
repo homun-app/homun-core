@@ -2910,7 +2910,12 @@ fn execute_capability_generic(
             facade.register_provider(ComposioCapabilityProvider::new(
                 ComposioProviderConfig {
                     provider_id: provider_id.clone(),
-                    user_id: gateway_capability_user_id(),
+                    // MUST match the Composio entity used at link time
+                    // (`composio_entity_id()` = active workspace), otherwise
+                    // Composio can't resolve the connected account for the tool
+                    // call. `gateway_capability_user_id()` ("local-user") is a
+                    // different namespace and would yield "no connected account".
+                    user_id: CapabilityUserId::new(composio_entity_id()),
                     workspace_id: gateway_capability_workspace_id(),
                     enabled: true,
                     privacy_domains: vec!["managed-cloud".to_string()],
@@ -5442,10 +5447,26 @@ impl ComposioTransport for GatewayComposioTransport {
         })?;
         let status = response.status();
         if !status.is_success() {
-            return Err(CapabilityError::ProviderUnavailable(format!(
-                "composio_status:{}",
-                status.as_u16()
-            )));
+            // Composio v3 errors carry a helpful envelope:
+            // {"error":{"message":"…","code":2401,"slug":"…"}}. Surface the
+            // message (not just the status code) so tool/auth failures are
+            // actionable instead of an opaque "composio_status:400".
+            let code = status.as_u16();
+            let detail = response
+                .text()
+                .ok()
+                .and_then(|body| serde_json::from_str::<serde_json::Value>(&body).ok())
+                .and_then(|value| {
+                    value
+                        .get("error")
+                        .and_then(|err| err.get("message"))
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string)
+                });
+            return Err(CapabilityError::ProviderUnavailable(match detail {
+                Some(message) => format!("composio_status:{code}:{message}"),
+                None => format!("composio_status:{code}"),
+            }));
         }
         response
             .json::<serde_json::Value>()
