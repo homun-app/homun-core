@@ -24,6 +24,7 @@ import {
   settingsSections,
 } from "../data/mockData";
 import type { ChatThread, SettingsSectionId, ViewId } from "../types";
+import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 
 interface NavigationRailProps {
   activeView: ViewId;
@@ -165,12 +166,14 @@ export function NavDrawer({
       <header className="drawer-header">
         <div>
           <strong>Assistant locale</strong>
-          <small>Gemma 4 · local-first</small>
+          <small>local-first · multi-modello</small>
         </div>
         <button className="icon-button" type="button" aria-label="Chiudi menu" onClick={onToggleDrawer}>
           <PanelLeftClose size={18} />
         </button>
       </header>
+
+      <WorkspaceSwitcher />
 
       <button
         className="drawer-primary-action"

@@ -345,6 +345,16 @@ export interface CorePromptPlanBatchRunResult {
   results: CorePromptPlanStepRunResult[];
 }
 
+export interface WorkspaceRecord {
+  id: string;
+  name: string;
+}
+
+export interface WorkspacesSnapshot {
+  active_workspace_id: string;
+  workspaces: WorkspaceRecord[];
+}
+
 export interface ComposioConnectResult {
   provider_id: string;
   tools_cached: number;
@@ -404,6 +414,21 @@ async function gatewayGetJson<T>(path: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function electronWorkspaces(): Promise<WorkspacesSnapshot> {
+  return gatewayGetJson<WorkspacesSnapshot>("/api/workspaces");
+}
+
+async function electronCreateWorkspace(name: string): Promise<WorkspacesSnapshot> {
+  return gatewayPostJson<WorkspacesSnapshot>("/api/workspaces", { name });
+}
+
+async function electronSelectWorkspace(id: string): Promise<WorkspacesSnapshot> {
+  return gatewayPostJson<WorkspacesSnapshot>(
+    `/api/workspaces/${encodeURIComponent(id)}/select`,
+    {},
+  );
+}
+
 async function electronComposioConnect(apiKey: string): Promise<ComposioConnectResult> {
   return gatewayPostJson<ComposioConnectResult>(
     "/api/capabilities/composio/connect",
@@ -434,6 +459,9 @@ async function electronComposioConnections(): Promise<ComposioConnection[]> {
 
 export const coreBridge = {
   status: () => Promise.resolve(electronCoreStatus()),
+  workspaces: () => electronWorkspaces(),
+  createWorkspace: (name: string) => electronCreateWorkspace(name),
+  selectWorkspace: (id: string) => electronSelectWorkspace(id),
   composioConnect: (apiKey: string) => electronComposioConnect(apiKey),
   composioToolkits: () => electronComposioToolkits(),
   composioLink: (toolkitSlug: string) => electronComposioLink(toolkitSlug),
