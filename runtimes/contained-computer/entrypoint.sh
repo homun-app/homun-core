@@ -33,19 +33,39 @@ log "starting noVNC/websockify on :${NOVNC_PORT}"
 websockify --web=/usr/share/novnc "${NOVNC_PORT}" "localhost:${VNC_PORT}" >/dev/null 2>&1 &
 
 # 4) The REAL, headed browser. No --headless. --no-sandbox is safe here because
-#    the container IS the sandbox (ADR 0010). CDP is bound to all interfaces so
-#    the host sidecar can attach via the published port.
-log "launching headed Chromium with CDP on :${CDP_PORT}"
-exec chromium \
+#    the container IS the sandbox (ADR 0010).
+#
+#    NOTE: modern Chromium IGNORES --remote-debugging-address and always binds
+#    CDP to 127.0.0.1 (loopback) for security. Docker's published port forwards
+#    to the container's eth0, NOT its loopback, so the host can't reach CDP
+#    directly. We therefore run Chromium's CDP on loopback and bridge it to the
+#    container's external IP with socat (step 5), which the published port hits.
+log "launching headed Chromium with CDP on 127.0.0.1:${CDP_PORT}"
+chromium \
   --no-sandbox \
   --no-first-run \
   --no-default-browser-check \
   --disable-gpu \
   --disable-dev-shm-usage \
   --user-data-dir="${PROFILE_DIR}" \
-  --remote-debugging-address=0.0.0.0 \
   --remote-debugging-port="${CDP_PORT}" \
   --window-position=0,0 \
   --window-size="${GEO/x/,}" \
   --start-maximized \
-  about:blank
+  about:blank &
+CHROMIUM_PID=$!
+
+# 5) Wait for Chromium's CDP to come up on loopback, then expose it on the
+#    container's external IP so the published port reaches it. Bind to the
+#    container IP (not 0.0.0.0) to avoid colliding with Chromium's 127.0.0.1.
+log "waiting for CDP on 127.0.0.1:${CDP_PORT}"
+for _ in $(seq 1 150); do
+  if (echo > "/dev/tcp/127.0.0.1/${CDP_PORT}") 2>/dev/null; then break; fi
+  sleep 0.2
+done
+CONTAINER_IP="$(hostname -I | awk '{print $1}')"
+log "bridging ${CONTAINER_IP}:${CDP_PORT} -> 127.0.0.1:${CDP_PORT} (socat)"
+socat "TCP-LISTEN:${CDP_PORT},fork,reuseaddr,bind=${CONTAINER_IP}" "TCP:127.0.0.1:${CDP_PORT}" &
+
+# Tie the container lifecycle to the browser: exit when Chromium exits.
+wait "${CHROMIUM_PID}"

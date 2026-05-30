@@ -87,8 +87,13 @@ Spike authored (NOT yet built — daemon down): `runtimes/contained-computer/`
 Chromium with CDP. `up.sh` validates CDP + noVNC reachability headlessly.
 
 ### Revised plan
-1. **Bring up + validate the contained computer** (`./up.sh` once Docker is
-   running): confirm CDP automation + noVNC stream. — pending daemon.
+1. **Bring up + validate the contained computer** — DONE & VALIDATED (2026-05-30,
+   Docker 29.4.3, arm64): `./up.sh` builds + runs; CDP reachable (real headed
+   Chrome/148 on X11), noVNC serveable. End-to-end probe via the sidecar's own
+   `connectOverCDP` attached, navigated example.com, and confirmed
+   `navigator.webdriver === false` (NOT flagged headless — the bot-detection win).
+   Fixed a CDP-binding gotcha with a socat bridge (Chromium ignores
+   `--remote-debugging-address`; binds loopback only).
 2. **Wire the gateway** to start the contained computer for a browser task and set
    `BROWSER_AUTOMATION_USER_CDP_ENDPOINT` to its CDP → reuse the existing attach
    path; verify the OpenClaw loop drives the in-VM browser (incl. the CDP host

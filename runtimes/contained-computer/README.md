@@ -44,12 +44,18 @@ needed for this check.
 
 ## Status / caveats
 
-- **Not yet built/run**: authored while the Docker daemon was down. Run `./up.sh`
-  to build + validate on a machine with Docker started.
-- **CDP host rewrite**: when attaching from the host via the published port,
-  Playwright reads `/json/version`; if the returned `webSocketDebuggerUrl` carries
-  the container's internal host, attach may need the host rewritten to
-  `127.0.0.1:9222`. Verify during `up.sh` integration testing.
+- **VALIDATED live (2026-05-30, macOS 26.5 arm64, Docker 29.4.3)**:
+  - `./up.sh` → CDP up (`Chrome/148`, real headed on X11) + noVNC up.
+  - End-to-end integration probe via `chromium.connectOverCDP("http://127.0.0.1:9222")`
+    (the exact sidecar API): attached, navigated https://example.com, and read
+    `navigator.webdriver === false` + no `Headless` UA marker — i.e. a REAL,
+    non-flagged browser. This is the bot-detection win the headless path lacked.
+- **CDP binding gotcha (fixed)**: modern Chromium IGNORES
+  `--remote-debugging-address` and binds CDP to 127.0.0.1 only. Docker's published
+  port forwards to the container's eth0, not loopback, so CDP was unreachable from
+  the host. Fixed by bridging with `socat` bound to the container IP
+  (`entrypoint.sh` step 5). The `webSocketDebuggerUrl` reports `127.0.0.1:9222`,
+  which works because we publish to the host's `127.0.0.1:9222` (no rewrite needed).
 - **Distribution**: Docker is the dev backend; shipping to end users may instead
   bundle a VM (Apple Virtualization.framework / Lima). The image contents here are
   portable across backends. Open decision in ADR 0010.
