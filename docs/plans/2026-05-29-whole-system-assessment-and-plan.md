@@ -132,3 +132,26 @@ real build-out.
   by SQLite, per design. Remaining: graph entities/relations from free text +
   automatic extraction (MemoryAgent) = Phase B/10; Composio/skill capability
   transports (P2 tail); P4 UI (memory browser shows wiki+graph).
+
+### P4.3 Composio — model + calibration (direct/BYO confirmed)
+
+Decision (ADR 0009 addendum): **direct / BYO key, no backend, no white labeling**
+(white labeling is inherently a backend/operator pattern — OAuth client secrets
+can't ship in a distributed client; confirmed via Composio docs). Local-first:
+each user pastes their own Composio key; consent shows "Composio" (managed auth).
+
+Live calibration (user key): v1/v2 endpoints are RETIRED (410 → v3). The ONLY
+live API is `https://backend.composio.dev/api/v3` with `x-api-key` — our
+transport/base/path/auth are CONFIRMED correct (the API parsed the request and
+validated the header). The user's current key (`ak_…`, 23 chars) is rejected as
+`Invalid API key (10401)` — almost certainly a legacy-platform key; needs
+regenerating on the current v3 dashboard.
+
+Remaining (grounded on v3, build can proceed; final live test needs a valid key):
+- Backend connect-per-service endpoints via the transport: `GET /toolkits`
+  (app list), `GET /auth_configs` + `POST /connected_accounts/link` {auth_config_id,
+  user_id} → connectUrl, `GET /connected_accounts?user_ids=` (poll ACTIVE).
+  Use link() (initiate() retired 2026-05-08), args-aware gate (list/connect free,
+  execute behind approval).
+- UI ConnectionsView: paste key once → toolkit list → "Connect" → open connectUrl
+  → poll → connected.
