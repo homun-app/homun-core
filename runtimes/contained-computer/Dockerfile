@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       fluxbox \
       novnc \
       websockify \
+      socat \
       dumb-init \
       ca-certificates \
       fonts-liberation \
