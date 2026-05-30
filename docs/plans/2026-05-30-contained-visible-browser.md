@@ -64,7 +64,42 @@ Manus-style "Computer" panel, on-device.
 
 ## Status
 
-- Phase 1.1 (headless default): DONE, `cargo 76 bin / 24 lib` green.
-- Phase 1.2 / 1.3 and Phase 2: staged; require a running browser and an unlocked
-  screen for visual verification (the live view and any loop change to the
-  signature browser feature must be observed, not changed blind).
+- Phase 1.1 (headless default): DONE as INTERIM, `cargo 76 bin / 24 lib` green.
+
+## UPDATE (2026-05-30): user chose the Manus model — VM promoted to primary
+
+User feedback: **headless gets blocked by bot-detection on many sites**, and a
+headed browser on the host is invasive. So neither on-host mode is acceptable —
+go with Manus: a **real headed browser inside a contained virtual computer**,
+streamed to the chat, which also runs scripts. This promotes "Phase 2" to the
+primary direction and revises ADR 0009 → see **ADR 0010**.
+
+Environment grounded: macOS 26.5 arm64; **Docker CLI present but daemon was down**
+(can't run the spike now); no Lima/Colima/Podman. Apple `Virtualization.framework`
+available for a future bundled VM.
+
+Key low-cost insight: our sidecar already attaches to an external browser via
+`connectOverCDP(BROWSER_AUTOMATION_USER_CDP_ENDPOINT)` (`session_manager.ts:482`),
+so the OpenClaw automation port drives an in-container Chromium **unchanged**.
+
+Spike authored (NOT yet built — daemon down): `runtimes/contained-computer/`
+(Dockerfile + entrypoint + `up.sh`): Xvfb → fluxbox → x11vnc → noVNC + real headed
+Chromium with CDP. `up.sh` validates CDP + noVNC reachability headlessly.
+
+### Revised plan
+1. **Bring up + validate the contained computer** (`./up.sh` once Docker is
+   running): confirm CDP automation + noVNC stream. — pending daemon.
+2. **Wire the gateway** to start the contained computer for a browser task and set
+   `BROWSER_AUTOMATION_USER_CDP_ENDPOINT` to its CDP → reuse the existing attach
+   path; verify the OpenClaw loop drives the in-VM browser (incl. the CDP host
+   rewrite caveat).
+3. **Embed the live view**: noVNC client in the chat computer panel + input
+   forwarding for takeover. (Needs unlocked screen for visual verification.)
+4. **Shell/Files surfaces** in the same container → `local-computer-session`
+   becomes a live multi-surface computer.
+5. **Distribution decision** (ADR 0010 open question): Docker vs bundled
+   Apple-vz/Lima VM for end users. Container contents are portable either way.
+
+Steps needing the screen / a running Docker daemon are blocked until the user is
+back; design + spike artifacts are done so the build is unblocked the moment they
+are available.
