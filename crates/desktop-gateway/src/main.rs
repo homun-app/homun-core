@@ -33,7 +33,7 @@ use local_first_inference::{
 };
 use local_first_capabilities::{
     ActionClass, CachedCapabilityTool, CachedToolProvider, CapabilityConnectionConfig,
-    CapabilityError, CapabilityFacade, CapabilityPolicy, CapabilityProvider, CapabilityProviderConfig,
+    CapabilityError, CapabilityFacade, CapabilityPolicy, CapabilityProviderConfig,
     CapabilityProviderGrant, CapabilityProviderKind, CapabilityRegistryStore, CapabilityResult,
     CapabilityTaskPayload, ComposioCapabilityProvider, ComposioProviderConfig, ComposioTransport,
     InMemoryCapabilityAudit, McpCapabilityProvider, McpStdioConfig, McpStdioTransport, McpToolPolicy,
@@ -3142,36 +3142,21 @@ fn connect_composio_blocking(
             .map_err(GatewayError::capability)?;
     }
 
-    let provider = ComposioCapabilityProvider::new(
-        ComposioProviderConfig {
-            provider_id: provider_id.clone(),
-            user_id: user,
-            workspace_id: workspace,
-            enabled: true,
-            privacy_domains: vec!["managed-cloud".to_string()],
-            tool_policies: Vec::new(),
-        },
-        GatewayComposioTransport::new(base_url, api_key),
-    );
-    let tools = provider.list_tools().map_err(GatewayError::capability)?;
-    let tools_cached = tools.len();
-    {
-        let registry = lock_capability_registry(state)?;
-        for tool in &tools {
-            registry
-                .upsert_cached_tool(&CachedCapabilityTool::new(
-                    provider_id.clone(),
-                    tool.name.clone(),
-                    CapabilityProviderKind::Managed,
-                    tool.action,
-                    tool.description.clone(),
-                    tool.privacy_domains.clone(),
-                    tool.sensitivity.clone(),
-                    tool.input_schema.clone(),
-                ))
-                .map_err(GatewayError::capability)?;
-        }
-    }
+    // Verify the key against the v3 API and count available toolkits (apps).
+    // We go transport-direct here: the crate's ComposioCapabilityProvider targets
+    // a pre-v3 shape (expects `{tools}`), but v3 returns `{items}`. We cache
+    // TOOLKITS (apps) for the connectors UI, not the 1000s of individual tools —
+    // those are fetched per toolkit when a service is actually connected/used.
+    let _ = (user, workspace);
+    let transport = GatewayComposioTransport::new(base_url, api_key);
+    let toolkits = transport
+        .request("GET", "/toolkits", None)
+        .map_err(GatewayError::capability)?;
+    let tools_cached = toolkits
+        .get("items")
+        .and_then(serde_json::Value::as_array)
+        .map(|items| items.len())
+        .unwrap_or(0);
     Ok(ConnectComposioResponse {
         provider_id: provider_id.as_str().to_string(),
         tools_cached,
