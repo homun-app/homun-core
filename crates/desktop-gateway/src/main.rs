@@ -763,7 +763,9 @@ async fn chat_threads(
     State(state): State<AppState>,
 ) -> Result<Json<ChatThreadSnapshot>, GatewayError> {
     Ok(Json(
-        lock_store(&state)?.threads().map_err(GatewayError::store)?,
+        lock_store(&state)?
+            .threads(&active_workspace_id())
+            .map_err(GatewayError::store)?,
     ))
 }
 
@@ -772,7 +774,7 @@ async fn create_chat_thread(
 ) -> Result<Json<ChatThread>, GatewayError> {
     Ok(Json(
         lock_store(&state)?
-            .create_thread()
+            .create_thread(&active_workspace_id())
             .map_err(GatewayError::store)?,
     ))
 }
@@ -9527,7 +9529,7 @@ mod tests {
         let user = UserId::new("local-user");
         let workspace = WorkspaceId::new("local-workspace");
         let chat = ChatStore::in_memory().unwrap();
-        let thread = chat.create_thread().unwrap();
+        let thread = chat.create_thread("default").unwrap();
         let tasks = TaskStore::open_in_memory().unwrap();
 
         // Three Brain-materialized member tasks for this thread.

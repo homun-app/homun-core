@@ -30,19 +30,30 @@ impl ChatStore {
         Ok(store)
     }
 
-    pub fn threads(&self) -> rusqlite::Result<ChatThreadSnapshot> {
-        let active_thread_id = match self.setting("active_thread_id")? {
+    pub fn threads(&self, workspace_id: &str) -> rusqlite::Result<ChatThreadSnapshot> {
+        // A project is never empty: switching to a brand-new project should land
+        // on a usable thread immediately, mirroring the initial 'default' seed.
+        let count: i64 = self.conn.query_row(
+            "select count(*) from chat_threads where workspace_id = ?1",
+            params![workspace_id],
+            |row| row.get(0),
+        )?;
+        if count == 0 {
+            self.seed_workspace(workspace_id)?;
+        }
+        let active_thread_id = match self.setting(&active_thread_setting_key(workspace_id))? {
             Some(thread_id) => thread_id,
-            None => self.first_thread_id()?.unwrap_or_default(),
+            None => self.first_thread_id(workspace_id)?.unwrap_or_default(),
         };
         let mut stmt = self.conn.prepare(
             "select thread_id, title, subtitle, status, pinned, computer_session_id, task_id,
                     updated_at, message_count
                from chat_threads
+              where workspace_id = ?1
               order by pinned desc, cast(updated_at as integer) desc, rowid desc",
         )?;
         let threads = stmt
-            .query_map([], thread_from_row)?
+            .query_map(params![workspace_id], thread_from_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(ChatThreadSnapshot {
             active_thread_id,
@@ -50,13 +61,13 @@ impl ChatStore {
         })
     }
 
-    pub fn create_thread(&self) -> rusqlite::Result<ChatThread> {
+    pub fn create_thread(&self, workspace_id: &str) -> rusqlite::Result<ChatThread> {
         let timestamp = current_timestamp_seconds();
         let thread_id = format!("thread_{}_{}", timestamp, monotonic_suffix());
         let thread = ChatThread {
             thread_id: thread_id.clone(),
             title: "Nuovo compito".to_string(),
-            subtitle: "Chat Gemma locale".to_string(),
+            subtitle: "Chat locale".to_string(),
             status: "active".to_string(),
             pinned: false,
             computer_session_id: format!("computer_{thread_id}"),
@@ -64,18 +75,19 @@ impl ChatStore {
             updated_at: timestamp.clone(),
             message_count: 1,
         };
-        self.insert_thread(&thread)?;
+        self.insert_thread(&thread, workspace_id)?;
         self.insert_message(
             &thread.thread_id,
             &seeded_ready_message(&thread.thread_id, timestamp),
         )?;
-        self.set_active_thread(&thread.thread_id)?;
+        self.set_active_thread(workspace_id, &thread.thread_id)?;
         Ok(thread)
     }
 
     pub fn select_thread(&self, thread_id: &str) -> rusqlite::Result<ChatThreadSnapshot> {
-        self.set_active_thread(thread_id)?;
-        self.threads()
+        let workspace_id = self.workspace_for_thread(thread_id)?;
+        self.set_active_thread(&workspace_id, thread_id)?;
+        self.threads(&workspace_id)
     }
 
     pub fn set_pinned(
@@ -87,7 +99,7 @@ impl ChatStore {
             "update chat_threads set pinned = ?1, updated_at = ?2 where thread_id = ?3",
             params![pinned as i64, current_timestamp_seconds(), thread_id],
         )?;
-        self.threads()
+        self.threads(&self.workspace_for_thread(thread_id)?)
     }
 
     pub fn set_status(
@@ -99,10 +111,12 @@ impl ChatStore {
             "update chat_threads set status = ?1, updated_at = ?2 where thread_id = ?3",
             params![status, current_timestamp_seconds(), thread_id],
         )?;
-        self.threads()
+        self.threads(&self.workspace_for_thread(thread_id)?)
     }
 
     pub fn delete_thread(&self, thread_id: &str) -> rusqlite::Result<ChatThreadSnapshot> {
+        // Capture the project before the row is gone so we re-scope correctly.
+        let workspace_id = self.workspace_for_thread(thread_id)?;
         self.conn.execute(
             "delete from chat_messages where thread_id = ?1",
             params![thread_id],
@@ -115,14 +129,17 @@ impl ChatStore {
             "delete from chat_threads where thread_id = ?1",
             params![thread_id],
         )?;
-        if self.setting("active_thread_id")?.as_deref() == Some(thread_id) {
-            if let Some(next_thread_id) = self.first_thread_id()? {
-                self.set_active_thread(&next_thread_id)?;
+        let active_key = active_thread_setting_key(&workspace_id);
+        if self.setting(&active_key)?.as_deref() == Some(thread_id) {
+            if let Some(next_thread_id) = self.first_thread_id(&workspace_id)? {
+                self.set_active_thread(&workspace_id, &next_thread_id)?;
             } else {
-                self.seed_if_empty()?;
+                // Last thread in this project deleted — reseed a default thread
+                // for it so the project is never empty.
+                self.seed_workspace(&workspace_id)?;
             }
         }
-        self.threads()
+        self.threads(&workspace_id)
     }
 
     pub fn messages(&self, thread_id: &str) -> rusqlite::Result<ChatMessagesSnapshot> {
@@ -312,7 +329,40 @@ impl ChatStore {
             create index if not exists idx_task_thread_links_thread
                 on task_thread_links(thread_id);
             ",
-        )
+        )?;
+
+        // P4.1: chat threads are scoped to a project (workspace). Older DBs
+        // predate the column — add it additively (existing rows fall into the
+        // 'default' project). `create table if not exists` never alters an
+        // existing table, so this explicit, guarded ALTER is required.
+        if !self.column_exists("chat_threads", "workspace_id")? {
+            self.conn.execute(
+                "alter table chat_threads add column workspace_id text not null default 'default'",
+                [],
+            )?;
+        }
+        self.conn.execute(
+            "create index if not exists idx_chat_threads_workspace
+                on chat_threads(workspace_id)",
+            [],
+        )?;
+        Ok(())
+    }
+
+    fn column_exists(&self, table: &str, column: &str) -> rusqlite::Result<bool> {
+        let mut stmt = self
+            .conn
+            .prepare(&format!("pragma table_info({table})"))?;
+        let mut found = false;
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            let name: String = row.get(1)?;
+            if name == column {
+                found = true;
+                break;
+            }
+        }
+        Ok(found)
     }
 
     /// Links an additional (non-primary) task to a thread so it resolves via
@@ -360,11 +410,12 @@ impl ChatStore {
             return Ok(());
         }
 
+        // First-ever seed keeps the legacy fixed ids in the 'default' project.
         let timestamp = current_timestamp_seconds();
         let thread = ChatThread {
             thread_id: "thread_active_prompt".to_string(),
             title: "Nuovo compito".to_string(),
-            subtitle: "Chat Gemma locale".to_string(),
+            subtitle: "Chat locale".to_string(),
             status: "active".to_string(),
             pinned: false,
             computer_session_id: "computer_active_prompt".to_string(),
@@ -372,20 +423,44 @@ impl ChatStore {
             updated_at: timestamp.clone(),
             message_count: 1,
         };
-        self.insert_thread(&thread)?;
+        self.insert_thread(&thread, "default")?;
         self.insert_message(
             &thread.thread_id,
             &seeded_ready_message(&thread.thread_id, timestamp),
         )?;
-        self.set_active_thread(&thread.thread_id)
+        self.set_active_thread("default", &thread.thread_id)
     }
 
-    fn insert_thread(&self, thread: &ChatThread) -> rusqlite::Result<()> {
+    /// Reseeds a fresh default thread for a specific project — used when its
+    /// last thread is deleted, so a project is never empty.
+    fn seed_workspace(&self, workspace_id: &str) -> rusqlite::Result<()> {
+        let timestamp = current_timestamp_seconds();
+        let thread_id = format!("thread_{}_{}", timestamp, monotonic_suffix());
+        let thread = ChatThread {
+            thread_id: thread_id.clone(),
+            title: "Nuovo compito".to_string(),
+            subtitle: "Chat locale".to_string(),
+            status: "active".to_string(),
+            pinned: false,
+            computer_session_id: format!("computer_{thread_id}"),
+            task_id: format!("task_{thread_id}"),
+            updated_at: timestamp.clone(),
+            message_count: 1,
+        };
+        self.insert_thread(&thread, workspace_id)?;
+        self.insert_message(
+            &thread.thread_id,
+            &seeded_ready_message(&thread.thread_id, timestamp),
+        )?;
+        self.set_active_thread(workspace_id, &thread.thread_id)
+    }
+
+    fn insert_thread(&self, thread: &ChatThread, workspace_id: &str) -> rusqlite::Result<()> {
         self.conn.execute(
             "insert or replace into chat_threads (
                 thread_id, title, subtitle, status, pinned, computer_session_id, task_id,
-                updated_at, message_count
-            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                updated_at, message_count, workspace_id
+            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 thread.thread_id,
                 thread.title,
@@ -396,9 +471,24 @@ impl ChatStore {
                 thread.task_id,
                 thread.updated_at,
                 thread.message_count,
+                workspace_id,
             ],
         )?;
         Ok(())
+    }
+
+    /// Resolves the project a thread belongs to, defaulting to 'default' for
+    /// threads that predate workspace scoping or are unknown.
+    fn workspace_for_thread(&self, thread_id: &str) -> rusqlite::Result<String> {
+        Ok(self
+            .conn
+            .query_row(
+                "select workspace_id from chat_threads where thread_id = ?1",
+                params![thread_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .unwrap_or_else(|| "default".to_string()))
     }
 
     fn insert_message(&self, thread_id: &str, message: &ChatMessage) -> rusqlite::Result<()> {
@@ -506,26 +596,34 @@ impl ChatStore {
             .optional()
     }
 
-    fn set_active_thread(&self, thread_id: &str) -> rusqlite::Result<()> {
+    fn set_active_thread(&self, workspace_id: &str, thread_id: &str) -> rusqlite::Result<()> {
         self.conn.execute(
-            "insert into settings(key, value) values('active_thread_id', ?1)
+            "insert into settings(key, value) values(?1, ?2)
              on conflict(key) do update set value = excluded.value",
-            params![thread_id],
+            params![active_thread_setting_key(workspace_id), thread_id],
         )?;
         Ok(())
     }
 
-    fn first_thread_id(&self) -> rusqlite::Result<Option<String>> {
+    fn first_thread_id(&self, workspace_id: &str) -> rusqlite::Result<Option<String>> {
         self.conn
             .query_row(
                 "select thread_id from chat_threads
+                  where workspace_id = ?1
                  order by pinned desc, cast(updated_at as integer) desc, rowid desc
                  limit 1",
-                [],
+                params![workspace_id],
                 |row| row.get(0),
             )
             .optional()
     }
+}
+
+/// Per-project settings key for the active thread pointer. Keeping it
+/// workspace-scoped means switching projects never points chat at a thread that
+/// lives in a different project.
+fn active_thread_setting_key(workspace_id: &str) -> String {
+    format!("active_thread_id::{workspace_id}")
 }
 
 fn thread_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatThread> {
@@ -596,7 +694,7 @@ mod tests {
     #[test]
     fn store_seeds_and_commits_chat_messages() {
         let store = ChatStore::in_memory().unwrap();
-        let thread = store.create_thread().unwrap();
+        let thread = store.create_thread("default").unwrap();
         let timestamp = current_timestamp_seconds();
         let user = ChatMessage {
             id: "user_1".to_string(),
@@ -629,10 +727,10 @@ mod tests {
             .commit_prompt_result(&thread.thread_id, &user, &assistant)
             .unwrap();
         assert_eq!(messages.messages.len(), 3);
-        assert_eq!(store.threads().unwrap().active_thread_id, thread.thread_id);
+        assert_eq!(store.threads("default").unwrap().active_thread_id, thread.thread_id);
         assert!(
             store
-                .threads()
+                .threads("default")
                 .unwrap()
                 .threads
                 .iter()
@@ -641,9 +739,41 @@ mod tests {
     }
 
     #[test]
+    fn threads_are_scoped_per_project_with_independent_active_pointer() {
+        let store = ChatStore::in_memory().unwrap();
+        // The in-memory store seeds one thread into 'default'.
+        let alpha = store.create_thread("project_alpha").unwrap();
+        let beta = store.create_thread("project_beta").unwrap();
+
+        let alpha_view = store.threads("project_alpha").unwrap();
+        let beta_view = store.threads("project_beta").unwrap();
+
+        // Each project sees only its own thread — no cross-project leakage.
+        assert!(alpha_view.threads.iter().all(|t| t.thread_id == alpha.thread_id));
+        assert!(beta_view.threads.iter().all(|t| t.thread_id == beta.thread_id));
+        assert!(!alpha_view.threads.iter().any(|t| t.thread_id == beta.thread_id));
+
+        // Active pointer is independent per project.
+        assert_eq!(alpha_view.active_thread_id, alpha.thread_id);
+        assert_eq!(beta_view.active_thread_id, beta.thread_id);
+
+        // The seeded 'default' project is isolated from both.
+        let default_view = store.threads("default").unwrap();
+        assert!(!default_view.threads.iter().any(|t| t.thread_id == alpha.thread_id
+            || t.thread_id == beta.thread_id));
+
+        // Deleting alpha's only thread reseeds alpha (never empty) without
+        // touching beta.
+        let after_delete = store.delete_thread(&alpha.thread_id).unwrap();
+        assert_eq!(after_delete.threads.len(), 1);
+        assert_ne!(after_delete.threads[0].thread_id, alpha.thread_id);
+        assert_eq!(store.threads("project_beta").unwrap().threads.len(), 1);
+    }
+
+    #[test]
     fn member_tasks_resolve_to_owning_thread_without_shadowing_primary() {
         let store = ChatStore::in_memory().unwrap();
-        let thread = store.create_thread().unwrap();
+        let thread = store.create_thread("default").unwrap();
 
         // Brain materializes N member tasks for the same prompt/thread.
         store
