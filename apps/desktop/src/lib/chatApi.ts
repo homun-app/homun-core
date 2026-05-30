@@ -42,7 +42,7 @@ let localThreads: CoreChatThread[] = [
   {
     thread_id: activeThreadId,
     title: "Nuovo compito",
-    subtitle: "Chat Gemma locale",
+    subtitle: "Chat locale",
     status: "active",
     pinned: false,
     computer_session_id: "computer_active_prompt",
@@ -58,9 +58,9 @@ const localMessages = new Map<string, CoreChatMessage[]>([
       {
         id: "electron_ready",
         role: "assistant",
-        text: "Sono pronto. Scrivimi pure: rispondo con Gemma locale.",
+        text: "Sono pronto. Scrivimi pure: rispondo in locale.",
         timestamp: currentTimestampSeconds(),
-        metadata: "Gemma locale",
+        metadata: "Modello locale",
         metrics: null,
         feedback: null,
         saved_memory_ref: null,
@@ -424,7 +424,7 @@ function createLocalChatThread() {
   const thread: CoreChatThread = {
     thread_id: threadId,
     title: "Nuovo compito",
-    subtitle: "Chat Gemma locale",
+    subtitle: "Chat locale",
     status: "active",
     pinned: false,
     computer_session_id: `computer_${threadId}`,
@@ -438,9 +438,9 @@ function createLocalChatThread() {
     {
       id: `${threadId}_ready`,
       role: "assistant",
-      text: "Sono pronto. Scrivimi pure: rispondo con Gemma locale.",
+      text: "Sono pronto. Scrivimi pure: rispondo in locale.",
       timestamp: currentTimestampSeconds(),
-      metadata: "Gemma locale",
+      metadata: "Modello locale",
       metrics: null,
       feedback: null,
       saved_memory_ref: null,
@@ -741,7 +741,7 @@ function updateThreadAfterMessages(
     return {
       ...thread,
       title,
-      subtitle: "Gemma locale",
+      subtitle: "Modello locale",
       updated_at: currentTimestampSeconds(),
       message_count: messageCount,
     };
