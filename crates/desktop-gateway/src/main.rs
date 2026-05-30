@@ -3857,22 +3857,12 @@ fn spawn_browser_sidecar_for_task(
             message: format!("Runtime browser non trovato: {}", browser_dir.display()),
         });
     }
-    let artifact_root = env::temp_dir().join("local-first-browser-artifacts");
     BrowserSidecarSession::spawn_with_options(
         "npm",
         &["run", "start", "--silent"],
         BrowserSidecarSpawnOptions {
             current_dir: Some(browser_dir),
-            env: vec![
-                (
-                    "BROWSER_AUTOMATION_HEADLESS".to_string(),
-                    browser_headless_env_value_for_task(state, task),
-                ),
-                (
-                    "BROWSER_AUTOMATION_ARTIFACT_ROOT".to_string(),
-                    artifact_root.display().to_string(),
-                ),
-            ],
+            env: browser_sidecar_env(state, task),
         },
     )
     .map_err(|error| LocalTaskExecutionError {
@@ -4048,22 +4038,12 @@ fn execute_browser_read_only_task(
         serde_json::json!({ "kind": "browser_runtime_starting" }),
     )
     .map_err(local_task_gateway_error)?;
-    let artifact_root = env::temp_dir().join("local-first-browser-artifacts");
     let session = BrowserSidecarSession::spawn_with_options(
         "npm",
         &["run", "start", "--silent"],
         BrowserSidecarSpawnOptions {
             current_dir: Some(browser_dir),
-            env: vec![
-                (
-                    "BROWSER_AUTOMATION_HEADLESS".to_string(),
-                    browser_headless_env_value_for_task(state, task),
-                ),
-                (
-                    "BROWSER_AUTOMATION_ARTIFACT_ROOT".to_string(),
-                    artifact_root.display().to_string(),
-                ),
-            ],
+            env: browser_sidecar_env(state, task),
         },
     )
     .map_err(|error| LocalTaskExecutionError {
@@ -7218,6 +7198,55 @@ fn browser_headless_env_value() -> String {
         .unwrap_or_else(|_| default_browser_headless_value().to_string())
 }
 
+/// Resolves the contained-computer CDP endpoint (ADR 0010) from config, pure for
+/// testability. An explicit `LOCAL_FIRST_CONTAINED_COMPUTER_CDP` wins; otherwise
+/// `LOCAL_FIRST_CONTAINED_COMPUTER=1|true` enables the default local endpoint.
+/// `None` means "use the on-host browser" (current default).
+fn resolve_contained_computer_cdp(
+    explicit: Option<&str>,
+    enabled_flag: Option<&str>,
+) -> Option<String> {
+    if let Some(endpoint) = explicit.map(str::trim).filter(|value| !value.is_empty()) {
+        return Some(endpoint.to_string());
+    }
+    let enabled = enabled_flag
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    enabled.then(|| "http://127.0.0.1:9222".to_string())
+}
+
+fn contained_computer_cdp_endpoint() -> Option<String> {
+    resolve_contained_computer_cdp(
+        env::var("LOCAL_FIRST_CONTAINED_COMPUTER_CDP").ok().as_deref(),
+        env::var("LOCAL_FIRST_CONTAINED_COMPUTER").ok().as_deref(),
+    )
+}
+
+/// Env for the browser sidecar, shared by every spawn site so contained-computer
+/// mode can never be wired into one path and missed in another. In contained
+/// mode we add the CDP endpoint of the in-container real browser; the sidecar
+/// then attaches via connectOverCDP instead of launching a host Chromium.
+fn browser_sidecar_env(state: &AppState, task: &TaskRecord) -> Vec<(String, String)> {
+    let artifact_root = env::temp_dir().join("local-first-browser-artifacts");
+    let mut env = vec![
+        (
+            "BROWSER_AUTOMATION_HEADLESS".to_string(),
+            browser_headless_env_value_for_task(state, task),
+        ),
+        (
+            "BROWSER_AUTOMATION_ARTIFACT_ROOT".to_string(),
+            artifact_root.display().to_string(),
+        ),
+    ];
+    if let Some(endpoint) = contained_computer_cdp_endpoint() {
+        env.push((
+            "BROWSER_AUTOMATION_USER_CDP_ENDPOINT".to_string(),
+            endpoint,
+        ));
+    }
+    env
+}
+
 fn browser_headless_env_value_for_task(state: &AppState, task: &TaskRecord) -> String {
     let fallback = browser_headless_env_value();
     browser_visibility_for_task(state, task).headless_env_value(&fallback)
@@ -9691,7 +9720,7 @@ mod tests {
         aggregate_session_state_from_counts, brain_budgets_for_context_window,
         browser_error_indicates_dead_sidecar, capability_call_completed_outcome, collect_member_counts,
         resolve_active_model, ActiveModelInputs, DEFAULT_LOCAL_MISTRALRS_MODEL,
-        default_browser_headless_value,
+        default_browser_headless_value, resolve_contained_computer_cdp,
         mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata, mcp_provider_slug,
         sanitize_wiki_filename, task_queue_response, train_option_lines,
         train_search_draft_for_goal, train_station_suggestion_for_snapshot,
@@ -10754,6 +10783,28 @@ mod tests {
         assert_eq!(restored.command, "my-server");
         assert!(restored.args.is_empty());
         assert!(restored.env.is_empty());
+    }
+
+    #[test]
+    fn contained_computer_cdp_resolves_from_config() {
+        // Off by default → use the on-host browser.
+        assert_eq!(resolve_contained_computer_cdp(None, None), None);
+        assert_eq!(resolve_contained_computer_cdp(None, Some("0")), None);
+        assert_eq!(resolve_contained_computer_cdp(Some("   "), Some("false")), None);
+        // Flag enables the default local endpoint.
+        assert_eq!(
+            resolve_contained_computer_cdp(None, Some("1")),
+            Some("http://127.0.0.1:9222".to_string())
+        );
+        assert_eq!(
+            resolve_contained_computer_cdp(None, Some("true")),
+            Some("http://127.0.0.1:9222".to_string())
+        );
+        // Explicit endpoint wins over the flag.
+        assert_eq!(
+            resolve_contained_computer_cdp(Some("http://10.0.0.5:9333"), Some("0")),
+            Some("http://10.0.0.5:9333".to_string())
+        );
     }
 
     #[test]

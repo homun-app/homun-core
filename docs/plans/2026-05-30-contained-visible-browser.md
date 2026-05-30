@@ -94,10 +94,14 @@ Chromium with CDP. `up.sh` validates CDP + noVNC reachability headlessly.
    `navigator.webdriver === false` (NOT flagged headless — the bot-detection win).
    Fixed a CDP-binding gotcha with a socat bridge (Chromium ignores
    `--remote-debugging-address`; binds loopback only).
-2. **Wire the gateway** to start the contained computer for a browser task and set
-   `BROWSER_AUTOMATION_USER_CDP_ENDPOINT` to its CDP → reuse the existing attach
-   path; verify the OpenClaw loop drives the in-VM browser (incl. the CDP host
-   rewrite caveat).
+2. **Wire the gateway** — DONE & VALIDATED. `LOCAL_FIRST_CONTAINED_COMPUTER=1`
+   (or `LOCAL_FIRST_CONTAINED_COMPUTER_CDP=<url>`) makes every browser-sidecar
+   spawn carry `BROWSER_AUTOMATION_USER_CDP_ENDPOINT`; the sidecar then attaches
+   via CDP by default (single switch). Shared `browser_sidecar_env` so no spawn
+   path is missed. End-to-end probe drove the sidecar (start→open→snapshot)
+   against the container: start picked profile "user", opened example.com, and
+   the OpenClaw snapshot observed the real page. Remaining: the full Brain→loop
+   run + observing it needs the app + a screen.
 3. **Embed the live view**: noVNC client in the chat computer panel + input
    forwarding for takeover. (Needs unlocked screen for visual verification.)
 4. **Shell/Files surfaces** in the same container → `local-computer-session`
