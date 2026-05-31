@@ -1189,7 +1189,10 @@ fn chat_context_budget_chars() -> usize {
 /// SSE deltas into the gateway's NDJSON `GenerateStreamEvent` format — identical
 /// to the MLX path, so the UI consumes both the same way.
 /// Max model↔tool round-trips before we stop and answer with what we have.
-const MAX_TOOL_ROUNDS: usize = 4;
+/// Kept low so the model doesn't re-run full browser searches over and over
+/// (each browse_web is a whole observe-act loop); 2 lets it do the search and,
+/// if needed, one follow-up.
+const MAX_TOOL_ROUNDS: usize = 2;
 
 /// The browser tool the chat model can invoke. No keyword gate: the MODEL reads
 /// this description and decides to call it when the request needs the live web.
@@ -1242,10 +1245,12 @@ hai accesso a internet; nell'obiettivo passato a browse_web includi sempre le \
 date concrete (con l'anno).\n\
 Viaggi: se l'utente NON chiede esplicitamente il ritorno, cerca SOLO ANDATA \
 (one-way). Un passeggero salvo diversa indicazione.\n\
-Quando riporti risultati (voli, treni, hotel, ...), sii ESAUSTIVO: per ogni \
-opzione indica orario di partenza e arrivo, durata, scali/cambi, \
-compagnia/operatore e prezzo se disponibile; elenca più opzioni, non solo una. \
-Rispondi in italiano, chiaro e ordinato (tabella quando aiuta).",
+Chiama browse_web UNA sola volta con un obiettivo completo (tratta, data, \
+solo andata, dettagli richiesti); NON ripetere la stessa ricerca più volte — usa \
+il risultato che ottieni. Quando riporti risultati (voli, treni, hotel, ...), sii \
+ESAUSTIVO: per ogni opzione indica orario di partenza e arrivo, durata, \
+scali/cambi, compagnia/operatore e prezzo se disponibile; elenca più opzioni, non \
+solo una. Rispondi in italiano, chiaro e ordinato (tabella quando aiuta).",
         today = today_iso()
     );
     let system = system.as_str();
@@ -6300,8 +6305,15 @@ fn build_browser_inference_router(gemma_runtime_url: &str) -> ModelRouter {
             .ok()
             .filter(|value| !value.is_empty())
     {
-        let model = env::var("LOCAL_FIRST_INFERENCE_MODEL")
-            .unwrap_or_else(|_| OPENAI_COMPAT_DEFAULT_MODEL.to_string());
+        // The observe-act loop wants a FAST model (many short structured
+        // decisions), not a slow reasoning model. Allow a dedicated planner
+        // model so chat can keep a strong reasoning model while the loop uses a
+        // quick one. Falls back to the chat model.
+        let model = env::var("LOCAL_FIRST_BROWSER_PLANNER_MODEL")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| env::var("LOCAL_FIRST_INFERENCE_MODEL").ok())
+            .unwrap_or_else(|| OPENAI_COMPAT_DEFAULT_MODEL.to_string());
         let api_key = resolve_inference_api_key();
         let context_window = env::var("LOCAL_FIRST_INFERENCE_CONTEXT_WINDOW")
             .ok()
