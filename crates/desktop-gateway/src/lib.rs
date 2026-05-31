@@ -453,6 +453,7 @@ mod tests {
         let payload = build_gemma_generate_stream_request(&ChatGenerateStreamRequest {
             request_id: "req_1".to_string(),
             prompt: "dimmene un'altra".to_string(),
+            thread_id: None,
             context: vec![ChatContextMessage {
                 role: ChatContextRole::Assistant,
                 text: "Perche' gli scienziati preferiscono gli occhielli?".to_string(),

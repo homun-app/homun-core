@@ -5408,8 +5408,6 @@ fn execute_browser_loop_read_only_task(
     )
     .map_err(local_task_gateway_error)?;
     let targets = browser_targets_for_goal(&effective_goal);
-    let draft = train_search_draft_for_goal(&effective_goal);
-    let is_train_task = draft.is_some();
     let mut source_snapshots = Vec::new();
     let mut source_summaries = Vec::new();
     let mut form_drafts = Vec::new();
@@ -5450,11 +5448,10 @@ fn execute_browser_loop_read_only_task(
         );
         let mut runner = BrowserLoopRunner::from_client(client, planner);
         let mut request = BrowserLoopRequest::new(
-            browser_loop_goal_for_source(&effective_goal, &target.label, draft.as_ref()),
+            format!("{effective_goal}\nFonte: {}", target.label),
             &target_id,
         )
-        .with_max_iterations(browser_loop_max_iterations())
-        .with_plan(browser_loop_plan_for_source(draft.as_ref()));
+        .with_max_iterations(browser_loop_max_iterations());
         // Tab reuse: when continuing a thread's warm session on the first source,
         // start from the EXISTING tab (snapshot the current page) instead of
         // navigating fresh — so a follow-up continues on the prior results/page
@@ -5504,23 +5501,7 @@ fn execute_browser_loop_read_only_task(
         match loop_result {
             Ok(output) => {
                 let excerpt = truncate_chars(&output.final_observation.snapshot, 1_800);
-                let has_verified_train_options = browser_loop_output_has_train_options(
-                    &output.output,
-                    &output.final_observation.snapshot,
-                );
-                let verified_output = if is_train_task {
-                    if output.completed && has_verified_train_options {
-                        Some(output.output.clone())
-                    } else if has_verified_train_options {
-                        Some(browser_loop_output_from_snapshot_options(
-                            &output.final_observation.snapshot,
-                            &target.label,
-                            &output.final_observation.url,
-                        ))
-                    } else {
-                        None
-                    }
-                } else if output.completed {
+                let verified_output = if output.completed {
                     Some(output.output.clone())
                 } else {
                     None
@@ -5558,14 +5539,7 @@ fn execute_browser_loop_read_only_task(
                         "blocked".to_string()
                     },
                     filled_fields: Vec::new(),
-                    reason: if is_train_task && output.completed && !has_verified_train_options {
-                        Some(
-                            "Il loop ha terminato la fonte senza opzioni treno verificate."
-                                .to_string(),
-                        )
-                    } else if is_train_task && !output.completed && has_verified_train_options {
-                        None
-                    } else if output.completed {
+                    reason: if output.completed {
                         None
                     } else {
                         output
@@ -5595,7 +5569,6 @@ fn execute_browser_loop_read_only_task(
                         "label": target.label,
                         "target_id": target_id,
                         "completed": output.completed,
-                        "verified_train_options": if is_train_task { Some(has_verified_train_options) } else { None },
                         "output": redact_json_for_task_output(output_for_payload),
                     }),
                 )
@@ -5689,8 +5662,7 @@ fn execute_browser_loop_read_only_task(
         }
     }
 
-    let browser_success = completed_output.is_some()
-        || (is_train_task && train_success_criteria_met(&source_summaries, &form_drafts));
+    let browser_success = completed_output.is_some();
     operational_plan.start_step("consolidate_options");
     if browser_success {
         operational_plan.complete_step("consolidate_options");
@@ -5720,8 +5692,6 @@ fn execute_browser_loop_read_only_task(
         });
     let blocked_reason = if browser_success {
         None
-    } else if is_train_task {
-        Some("Il loop browser non ha ancora estratto opzioni treno affidabili.".to_string())
     } else {
         Some("Il loop browser non ha completato il goal con dati verificabili.".to_string())
     };
@@ -6777,55 +6747,6 @@ fn try_build_mistralrs_router() -> Option<ModelRouter> {
     }
 }
 
-fn browser_loop_goal_for_source(
-    goal: &str,
-    source_label: &str,
-    draft: Option<&TrainSearchDraft>,
-) -> String {
-    let Some(draft) = draft else {
-        return format!("{goal}\nFonte: {source_label}");
-    };
-    format!(
-        "{goal}\nFonte: {source_label}\nDati estratti: partenza={}, arrivo={}, data={}, ora={}\nObiettivo: se lo snapshot contiene gia' righe risultato con treno/orari/durata/prezzo, completa subito con options strutturate; altrimenti compila la ricerca se necessario, raccogli opzioni reali visibili, fermati prima di selezione treno, login, passeggeri, pagamento o acquisto.",
-        draft.origin,
-        draft.destination,
-        draft.date.as_deref().unwrap_or("non specificata"),
-        draft.time.as_deref().unwrap_or("non specificata"),
-    )
-}
-
-/// Ordered, concrete sub-goal checklist handed to the browser loop planner.
-///
-/// Today this is derived from the extracted train-search draft so a small local
-/// model (Gemma 4 E4B) always sees an explicit, stateful plan instead of having
-/// to re-derive ordering from prose every turn. When the OrchestratorBrain
-/// generates an `OperationalPlan` with browser-level steps, this is where that
-/// plan should flow in instead of the heuristic below.
-fn browser_loop_plan_for_source(draft: Option<&TrainSearchDraft>) -> Vec<String> {
-    let Some(draft) = draft else {
-        return Vec::new();
-    };
-    let mut plan = vec![
-        "Dismiss any cookie/consent banner if present".to_string(),
-        format!("Set the departure station field to: {}", draft.origin),
-        "Click the correct departure suggestion from the autocomplete list".to_string(),
-        format!("Set the arrival station field to: {}", draft.destination),
-        "Click the correct arrival suggestion from the autocomplete list".to_string(),
-    ];
-    if let Some(date) = draft.date.as_deref() {
-        plan.push(format!("Open the date field and select the day: {date}"));
-    }
-    if let Some(time) = draft.time.as_deref() {
-        plan.push(format!("Set the departure time to about: {time}"));
-    }
-    plan.push("Click the search button (Cerca) to run the search".to_string());
-    plan.push(
-        "Read the result rows and complete with structured options (train, times, duration, price). Stop before train selection, login, passengers, payment or purchase."
-            .to_string(),
-    );
-    plan
-}
-
 fn loop_output_excerpt(output: &Value, fallback_excerpt: &str) -> String {
     let rendered = serde_json::to_string_pretty(output).unwrap_or_default();
     if rendered.trim().is_empty() || rendered == "{}" {
@@ -6909,34 +6830,6 @@ fn browser_option_scalar_text(value: &Value) -> Option<String> {
         Value::Bool(flag) => Some(flag.to_string()),
         _ => None,
     }
-}
-
-fn browser_loop_output_has_train_options(output: &Value, fallback_snapshot: &str) -> bool {
-    for key in ["options", "trains", "results", "journeys"] {
-        if output
-            .get(key)
-            .and_then(Value::as_array)
-            .is_some_and(|items| !items.is_empty())
-        {
-            return true;
-        }
-    }
-    if output
-        .get("summary")
-        .and_then(Value::as_str)
-        .is_some_and(|summary| !train_option_lines(summary).is_empty())
-    {
-        return true;
-    }
-    !train_option_lines(fallback_snapshot).is_empty()
-}
-
-fn browser_loop_output_from_snapshot_options(snapshot: &str, label: &str, url: &str) -> Value {
-    serde_json::json!({
-        "summary": format!("Ho estratto opzioni treno visibili da {label}."),
-        "options": train_option_lines(snapshot),
-        "sources": [url],
-    })
 }
 
 fn verified_train_option_lines(
@@ -8287,108 +8180,6 @@ fn train_search_draft_for_goal(_goal: &str) -> Option<TrainSearchDraft> {
     None
 }
 
-fn extract_italian_date(goal: &str) -> Option<String> {
-    for token in goal.split_whitespace() {
-        if let Some(date) = parse_numeric_date(token) {
-            return Some(date);
-        }
-    }
-
-    let normalized = normalize_for_match(goal);
-    let tokens = normalized.split_whitespace().collect::<Vec<_>>();
-    for window in tokens.windows(2) {
-        let Ok(day) = window[0].parse::<u8>() else {
-            continue;
-        };
-        if !(1..=31).contains(&day) {
-            continue;
-        }
-        let Some(month) = italian_month_number(window[1]) else {
-            continue;
-        };
-        return Some(format!(
-            "{day:02}/{month:02}/{}",
-            OffsetDateTime::now_utc().year()
-        ));
-    }
-    None
-}
-
-fn parse_numeric_date(token: &str) -> Option<String> {
-    let separator = if token.contains('/') {
-        '/'
-    } else if token.contains('-') {
-        '-'
-    } else {
-        return None;
-    };
-    let parts = token.split(separator).collect::<Vec<_>>();
-    if parts.len() < 2 {
-        return None;
-    }
-    let day = parts[0].parse::<u8>().ok()?;
-    let month = parts[1].parse::<u8>().ok()?;
-    if !(1..=31).contains(&day) || !(1..=12).contains(&month) {
-        return None;
-    }
-    let year = parts
-        .get(2)
-        .and_then(|value| value.parse::<i32>().ok())
-        .unwrap_or_else(|| OffsetDateTime::now_utc().year());
-    Some(format!("{day:02}/{month:02}/{year}"))
-}
-
-fn italian_month_number(value: &str) -> Option<u8> {
-    match value {
-        "gennaio" => Some(1),
-        "febbraio" => Some(2),
-        "marzo" => Some(3),
-        "aprile" => Some(4),
-        "maggio" => Some(5),
-        "giugno" => Some(6),
-        "luglio" => Some(7),
-        "agosto" => Some(8),
-        "settembre" => Some(9),
-        "ottobre" => Some(10),
-        "novembre" => Some(11),
-        "dicembre" => Some(12),
-        _ => None,
-    }
-}
-
-fn extract_time_label(goal: &str) -> Option<String> {
-    let normalized = normalize_for_match(goal);
-    let tokens = normalized.split_whitespace().collect::<Vec<_>>();
-    for (index, token) in tokens.iter().enumerate() {
-        if let Some((hour, minute)) = parse_time_token(token) {
-            let previous = index
-                .checked_sub(1)
-                .and_then(|prev| tokens.get(prev).copied());
-            let previous_two = index
-                .checked_sub(2)
-                .and_then(|prev| tokens.get(prev).copied());
-            if matches!(previous, Some("alle" | "ore" | "verso" | "h" | "le"))
-                || matches!(previous_two, Some("verso"))
-            {
-                return Some(format!("{hour:02}:{minute:02}"));
-            }
-        }
-    }
-    None
-}
-
-fn parse_time_token(token: &str) -> Option<(u8, u8)> {
-    if let Some((hour, minute)) = token.split_once(':') {
-        let hour = hour.parse::<u8>().ok()?;
-        let minute = minute.parse::<u8>().ok()?;
-        if hour <= 23 && minute <= 59 {
-            return Some((hour, minute));
-        }
-        return None;
-    }
-    let hour = token.parse::<u8>().ok()?;
-    if hour <= 23 { Some((hour, 0)) } else { None }
-}
 
 fn train_draft_redacted_payload(draft: &TrainSearchDraft) -> Value {
     serde_json::json!({
@@ -10271,7 +10062,7 @@ mod tests {
     use super::{
         BrowserFormDraftSummary, BrowserSourceSummary, browser_final_answer_for_task,
         browser_form_draft_result_labels, browser_form_fields_for_snapshot,
-        browser_loop_output_has_train_options, browser_method_for_capability_tool,
+        browser_method_for_capability_tool,
         browser_targets_for_goal, browser_url_for_goal, evaluate_simple_arithmetic,
         is_safe_train_search_button, normalize_for_match, operational_plan_for_goal,
         operational_plan_markdown, operational_task_acknowledgement, parse_loopback_http_host_port,
@@ -10917,29 +10708,6 @@ mod tests {
         }];
 
         assert!(train_success_criteria_met(&sources, &drafts));
-    }
-
-    #[test]
-    fn browser_loop_train_output_must_contain_verified_options() {
-        assert!(!browser_loop_output_has_train_options(
-            &serde_json::json!({
-                "summary": "Ho aperto Trenitalia e compilato alcuni campi."
-            }),
-            "Pagina ricerca senza orari leggibili",
-        ));
-        assert!(browser_loop_output_has_train_options(
-            &serde_json::json!({
-                "options": [
-                    {
-                        "operator": "Trenitalia",
-                        "departure": "09:10",
-                        "arrival": "13:45",
-                        "train": "Frecciarossa"
-                    }
-                ]
-            }),
-            "",
-        ));
     }
 
     #[test]
