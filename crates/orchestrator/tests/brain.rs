@@ -72,6 +72,33 @@ fn plan_only_returns_plan_without_materializing_tasks() {
 }
 
 #[test]
+fn planner_accepts_plan_without_steps_key() {
+    // Regression: reasoning models often omit the empty "steps" array on a
+    // direct_answer plan. That must NOT hard-fail (it did: "missing required
+    // keys: steps" → Brain fell back to the legacy keyword path). "steps" is
+    // optional and defaults to []; only "route" is required.
+    let runtime = StubRuntime::new(vec![serde_json::json!({
+        "route": "direct_answer",
+        "direct_answer": {
+            "answer": "Risposta diretta.",
+            "reason": "Nessun tool necessario.",
+            "confidence": 0.9
+        }
+        // NOTE: no "steps" key on purpose.
+    })]);
+    let mut brain = brain(runtime, vec![]);
+
+    let plan = brain.plan_only(&request("Che ore sono a Roma?")).unwrap();
+
+    assert_eq!(plan.route, OrchestratorRoute::DirectAnswer);
+    assert!(plan.steps.is_empty());
+    // The planner request must not mark "steps" as required.
+    let required = brain.runtime().requests()[0].required_keys.clone();
+    assert!(required.contains(&"route".to_string()));
+    assert!(!required.contains(&"steps".to_string()));
+}
+
+#[test]
 fn brain_uses_lazy_tool_details_when_tool_catalog_is_large() {
     let runtime = StubRuntime::new(vec![serde_json::json!({
         "route": "direct_answer",

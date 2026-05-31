@@ -117,7 +117,7 @@ fn context_budget_usage(label: &str, result: &CompressionResult) -> ContextBudge
 pub(crate) fn planner_schema() -> serde_json::Value {
     json!({
         "type": "object",
-        "required": ["route", "steps"],
+        "required": ["route"],
         "properties": {
             "route": {
                 "type": "string",
