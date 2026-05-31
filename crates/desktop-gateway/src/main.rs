@@ -2817,7 +2817,7 @@ fn execute_read_only_task(
     {
         GatewayTaskExecutorKind::CapabilityBrowser => execute_capability_browser_task(state, task),
         GatewayTaskExecutorKind::CapabilityGeneric => execute_capability_generic(state, task),
-        GatewayTaskExecutorKind::Subagent => execute_subagent_task(state, task),
+        GatewayTaskExecutorKind::Subagent => execute_subagent_task(task),
         GatewayTaskExecutorKind::LegacyShell => execute_shell_read_only_task(task),
         GatewayTaskExecutorKind::LegacyBrowser => execute_browser_read_only_task(state, task),
         GatewayTaskExecutorKind::LegacyLocal => execute_local_read_only_task(task),
@@ -3065,10 +3065,8 @@ fn browser_capability_redacted_checkpoint(
 /// (ADR 0008 pillar #3 / GAP 4: de-stub the registered executors). The runner
 /// only needs the local LLM runtime.
 fn execute_subagent_task(
-    state: &AppState,
     task: &TaskRecord,
 ) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
-    ensure_runtime_available_for_task(state)?;
     let mut executor =
         SubagentTaskExecutor::new(build_browser_inference_router());
     let executor_id = executor.executor_id().to_string();
@@ -4326,28 +4324,6 @@ fn execute_browser_loop_read_only_task(
     append_task_progress_checkpoint(
         state,
         task,
-        "planner_runtime_starting",
-        SurfaceKind::Logs,
-        "Gemma planner",
-        "Verifico e avvio il runtime Gemma locale prima del loop browser.",
-        serde_json::json!({ "kind": "planner_runtime_starting" }),
-    )
-    .map_err(local_task_gateway_error)?;
-    ensure_runtime_available_for_task(state)?;
-    append_task_progress_checkpoint(
-        state,
-        task,
-        "planner_runtime_ready",
-        SurfaceKind::Logs,
-        "Gemma planner pronto",
-        "Il controller locale puo' decidere le azioni browser.",
-        serde_json::json!({ "kind": "planner_runtime_ready" }),
-    )
-    .map_err(local_task_gateway_error)?;
-
-    append_task_progress_checkpoint(
-        state,
-        task,
         "browser_runtime_starting",
         SurfaceKind::Browser,
         "Browser locale",
@@ -4892,11 +4868,10 @@ fn brain_materialize_enabled() -> bool {
     match env::var("LOCAL_FIRST_BRAIN_MATERIALIZE") {
         // Explicit override always wins.
         Ok(value) => matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "on"),
-        // A1.6: default ON when a capable (cloud/router) backend is configured;
-        // OFF on the pure MLX/gemma path, where the keyword heuristics remain the
-        // small-local-model fallback. So we never hand a weak model the Brain by
-        // default, but a capable setup plans through the Brain without a flag.
-        Err(_) => !brain_planner_uses_local_mlx_runtime(),
+        // A1.6: default ON. The only backends are capable cloud/router providers
+        // (the weak local MLX/gemma path that this used to disable is gone), so
+        // every configured setup plans through the Brain without a flag.
+        Err(_) => true,
     }
 }
 
@@ -4907,29 +4882,6 @@ fn brain_materialize_enabled() -> bool {
 /// planning-only CachedToolProvider is safe) and enqueues every step as a
 /// durable task, executed by the worker's real executors (browser/subagent).
 /// Returns the materialized task ids, or an error so the caller can fall back.
-/// Whether the configured inference backend routes the planner LLM call through
-/// the local MLX runtime on `:8765` (so it must be up before planning). Mirrors
-/// the backend selection in [`build_browser_inference_router`]: cloud/in-process
-/// backends (anthropic, openai-with-base-url, mistralrs) do NOT need it; only
-/// the MLX path (explicit `mlx`, or the default fallback when mistral.rs is not
-/// compiled in / no other backend resolves) does.
-fn brain_planner_uses_local_mlx_runtime() -> bool {
-    let backend = env::var("LOCAL_FIRST_INFERENCE_BACKEND")
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    match backend.as_str() {
-        "anthropic" => resolve_inference_api_key().is_none(),
-        "openai" => env::var("LOCAL_FIRST_INFERENCE_BASE_URL")
-            .ok()
-            .filter(|value| !value.is_empty())
-            .is_none(),
-        "mistralrs" => !cfg!(feature = "local-mistralrs"),
-        "mlx" => true,
-        // Empty/default: mistral.rs in-process when compiled in, else MLX :8765.
-        _ => !cfg!(feature = "local-mistralrs"),
-    }
-}
-
 /// P3 (read): the Brain's memory context provider, backed by a second handle on
 /// the gateway's memory SQLite DB (same pattern as the shared task store). Holds
 /// an `Option` so a memory-DB hiccup degrades to "no memory context" rather than
@@ -5113,12 +5065,6 @@ fn brain_materialize_tasks(
     thread_id: &str,
     goal: &str,
 ) -> Result<Vec<String>, LocalTaskExecutionError> {
-    // Only the MLX-backed planner needs the local :8765 runtime; a cloud/router
-    // backend (e.g. Ollama/Anthropic) does its own HTTP call and must not be
-    // gated on (or auto-start) the MLX sidecar.
-    if brain_planner_uses_local_mlx_runtime() {
-        ensure_runtime_available_for_task(state)?;
-    }
     let user = gateway_capability_user_id();
     let workspace = gateway_capability_workspace_id();
 
@@ -5413,14 +5359,14 @@ fn build_browser_inference_router() -> ModelRouter {
 
 #[derive(Debug, Serialize)]
 struct ActiveModelResponse {
-    /// "anthropic" | "openai-compat" | "mistralrs" | "mlx"
+    /// "anthropic" | "openai-compat"
     backend: String,
     model: String,
     /// "cloud" | "local"
     locality: String,
     context_window: u32,
-    /// false only for the small local MLX/gemma fallback — the de-gemma thesis:
-    /// capable backends should not inherit gemma4-era constraints.
+    /// Always true: the only backends are capable cloud/router providers (the
+    /// small local MLX/Gemma fallback that this flag used to gate is gone).
     capable: bool,
     /// True when the selected backend needs a cloud API key but none is present
     /// — the UI can warn that chat will silently fall back to local.
@@ -5439,62 +5385,44 @@ const OPENAI_COMPAT_DEFAULT_MODEL: &str = "gpt-4o-mini";
 struct ActiveModelInputs {
     backend: String,
     model: Option<String>,
-    base_url: Option<String>,
     cloud_flag: bool,
     context_window: Option<u32>,
     has_api_key: bool,
-    mistralrs_compiled: bool,
 }
 
-/// Pure selection logic mirroring [`build_browser_inference_router`]. Kept
+/// Pure selection logic mirroring [`build_browser_inference_router`]: anthropic
+/// only when explicitly selected AND a key is present; otherwise the configured
+/// OpenAI-compatible provider (the local MLX/Gemma fallback is gone). Kept
 /// separate from env reading so it is deterministically testable.
 fn resolve_active_model(input: &ActiveModelInputs) -> ActiveModelResponse {
-    match input.backend.as_str() {
-        "anthropic" => {
-            if input.has_api_key {
-                ActiveModelResponse {
-                    backend: "anthropic".to_string(),
-                    model: input
-                        .model
-                        .clone()
-                        .unwrap_or_else(|| ANTHROPIC_DEFAULT_MODEL.to_string()),
-                    locality: "cloud".to_string(),
-                    context_window: input.context_window.unwrap_or(200_000),
-                    capable: true,
-                    missing_api_key: false,
-                }
-            } else {
-                // Selected anthropic but no key → router falls back to local MLX.
-                mlx_fallback_model_info(true)
-            }
-        }
-        "openai" if input.base_url.is_some() => ActiveModelResponse {
-            backend: "openai-compat".to_string(),
+    if input.backend == "anthropic" && input.has_api_key {
+        return ActiveModelResponse {
+            backend: "anthropic".to_string(),
             model: input
                 .model
                 .clone()
-                .unwrap_or_else(|| OPENAI_COMPAT_DEFAULT_MODEL.to_string()),
-            locality: if input.cloud_flag { "cloud" } else { "local" }.to_string(),
-            context_window: input.context_window.unwrap_or(32_768),
-            capable: true,
-            // An OpenAI-compatible endpoint may be keyless (local Ollama); only
-            // flag a missing key when it is a cloud endpoint.
-            missing_api_key: input.cloud_flag && !input.has_api_key,
-        },
-        // openai backend without a base URL → router falls back to MLX.
-        "openai" => mlx_fallback_model_info(false),
-        "mistralrs" | "" if input.mistralrs_compiled => ActiveModelResponse {
-            backend: "mistralrs".to_string(),
-            model: input
-                .model
-                .clone()
-                .unwrap_or_else(|| DEFAULT_LOCAL_MISTRALRS_MODEL.to_string()),
-            locality: "local".to_string(),
-            context_window: input.context_window.unwrap_or(32_768),
+                .unwrap_or_else(|| ANTHROPIC_DEFAULT_MODEL.to_string()),
+            locality: "cloud".to_string(),
+            context_window: input.context_window.unwrap_or(200_000),
             capable: true,
             missing_api_key: false,
-        },
-        _ => mlx_fallback_model_info(false),
+        };
+    }
+
+    // Default for every other case (incl. anthropic-without-key, which the
+    // router resolves to the OpenAI-compatible provider too).
+    ActiveModelResponse {
+        backend: "openai-compat".to_string(),
+        model: input
+            .model
+            .clone()
+            .unwrap_or_else(|| OPENAI_COMPAT_DEFAULT_MODEL.to_string()),
+        locality: if input.cloud_flag { "cloud" } else { "local" }.to_string(),
+        context_window: input.context_window.unwrap_or(32_768),
+        capable: true,
+        // An OpenAI-compatible endpoint may be keyless (local Ollama); only flag
+        // a missing key when it is a cloud endpoint.
+        missing_api_key: input.cloud_flag && !input.has_api_key,
     }
 }
 
@@ -5510,9 +5438,6 @@ fn active_inference_model_info() -> ActiveModelResponse {
         model: persisted_inference_model()
             .or_else(|| env::var("LOCAL_FIRST_INFERENCE_MODEL").ok())
             .filter(|value| !value.is_empty()),
-        base_url: env::var("LOCAL_FIRST_INFERENCE_BASE_URL")
-            .ok()
-            .filter(|value| !value.is_empty()),
         cloud_flag: env::var("LOCAL_FIRST_INFERENCE_CLOUD")
             .map(|value| value == "1" || value.to_ascii_lowercase() == "true")
             .unwrap_or(false),
@@ -5520,7 +5445,6 @@ fn active_inference_model_info() -> ActiveModelResponse {
             .ok()
             .and_then(|value| value.parse::<u32>().ok()),
         has_api_key: resolve_inference_api_key().is_some(),
-        mistralrs_compiled: cfg!(feature = "local-mistralrs"),
     })
 }
 
@@ -5655,27 +5579,9 @@ async fn set_runtime_provider(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
-fn mlx_fallback_model_info(missing_api_key: bool) -> ActiveModelResponse {
-    ActiveModelResponse {
-        backend: "mlx".to_string(),
-        model: "gemma4".to_string(),
-        locality: "local".to_string(),
-        context_window: 8_192,
-        capable: false,
-        missing_api_key,
-    }
-}
-
 async fn runtime_model() -> Json<ActiveModelResponse> {
     Json(active_inference_model_info())
 }
-
-/// Default in-process model for the mistral.rs backbone. A text model, because
-/// the provider currently serves text `generate_json` (the browser loop reads
-/// the textual aria snapshot). Override with `LOCAL_FIRST_INFERENCE_MODEL`.
-/// Not cfg-gated: the reporter ([`resolve_active_model`]) needs it regardless of
-/// the feature so it can name what the router *would* load.
-const DEFAULT_LOCAL_MISTRALRS_MODEL: &str = "Qwen/Qwen3-4B";
 
 fn loop_output_excerpt(output: &Value, fallback_excerpt: &str) -> String {
     let rendered = serde_json::to_string_pretty(output).unwrap_or_default();
@@ -5839,11 +5745,6 @@ async fn capability_snapshot(
         .map_err(GatewayError::capability)?;
     let snapshot = capability_snapshot_response(&registry, &user, &workspace, policy)?;
     Ok(Json(snapshot))
-}
-
-fn ensure_runtime_available_for_task(_state: &AppState) -> Result<(), LocalTaskExecutionError> {
-    // MLX/Gemma local runtime removed — nothing to start before the browser loop.
-    Ok(())
 }
 
 fn task_queue_response_for_state(state: &AppState) -> Result<TaskQueueResponse, GatewayError> {
@@ -7797,7 +7698,6 @@ mod tests {
         collect_member_counts,
         resolve_active_model,
         ActiveModelInputs,
-        DEFAULT_LOCAL_MISTRALRS_MODEL,
         default_browser_headless_value,
         resolve_contained_computer_cdp,
         resolve_contained_computer_novnc,
@@ -8251,11 +8151,9 @@ mod tests {
         ActiveModelInputs {
             backend: backend.to_string(),
             model: None,
-            base_url: None,
             cloud_flag: false,
             context_window: None,
             has_api_key: false,
-            mistralrs_compiled: true,
         }
     }
 
@@ -8274,18 +8172,17 @@ mod tests {
     }
 
     #[test]
-    fn active_model_anthropic_without_key_falls_back_to_mlx_and_flags_missing() {
+    fn active_model_anthropic_without_key_resolves_to_openai_compat() {
+        // No MLX fallback any more: anthropic-without-key resolves to the
+        // OpenAI-compatible provider, same as build_browser_inference_router.
         let info = resolve_active_model(&model_inputs("anthropic"));
-        // Router falls back to local MLX when the cloud key is absent.
-        assert_eq!(info.backend, "mlx");
-        assert!(!info.capable);
-        assert!(info.missing_api_key);
+        assert_eq!(info.backend, "openai-compat");
+        assert!(info.capable);
     }
 
     #[test]
     fn active_model_openai_cloud_without_key_is_capable_but_flags_missing() {
         let info = resolve_active_model(&ActiveModelInputs {
-            base_url: Some("https://api.example/v1".to_string()),
             cloud_flag: true,
             model: Some("minimax-m2.7".to_string()),
             ..model_inputs("openai")
@@ -8302,41 +8199,25 @@ mod tests {
     fn active_model_openai_local_keyless_is_not_flagged() {
         // A local OpenAI-compatible endpoint (e.g. Ollama) needs no key.
         let info = resolve_active_model(&ActiveModelInputs {
-            base_url: Some("http://localhost:11434/v1".to_string()),
             cloud_flag: false,
             ..model_inputs("openai")
         });
+        assert_eq!(info.backend, "openai-compat");
         assert_eq!(info.locality, "local");
         assert!(!info.missing_api_key);
     }
 
     #[test]
-    fn active_model_openai_without_base_url_falls_back_to_mlx() {
-        let info = resolve_active_model(&model_inputs("openai"));
-        assert_eq!(info.backend, "mlx");
-        assert!(!info.capable);
-    }
-
-    #[test]
-    fn active_model_default_backend_reports_the_mistralrs_model_the_router_loads() {
-        // Empty backend + mistralrs compiled → the in-process backbone. The
-        // reported model MUST equal what build_browser_inference_router loads
-        // (shared DEFAULT_LOCAL_MISTRALRS_MODEL), not a stale literal.
-        let info = resolve_active_model(&model_inputs(""));
-        assert_eq!(info.backend, "mistralrs");
-        assert_eq!(info.model, DEFAULT_LOCAL_MISTRALRS_MODEL);
-        assert!(info.capable);
-        assert_eq!(info.locality, "local");
-    }
-
-    #[test]
-    fn active_model_without_mistralrs_feature_falls_back_to_mlx() {
-        let info = resolve_active_model(&ActiveModelInputs {
-            mistralrs_compiled: false,
-            ..model_inputs("")
-        });
-        assert_eq!(info.backend, "mlx");
-        assert!(!info.capable);
+    fn active_model_default_and_unknown_backends_resolve_to_openai_compat() {
+        // Empty/unknown backend → the OpenAI-compatible provider (local unless
+        // flagged cloud). No mistralrs/MLX branch exists in the router.
+        for backend in ["", "mistralrs", "mlx", "something-else"] {
+            let info = resolve_active_model(&model_inputs(backend));
+            assert_eq!(info.backend, "openai-compat", "backend: {backend}");
+            assert!(info.capable, "backend: {backend}");
+            assert_eq!(info.locality, "local", "backend: {backend}");
+            assert_eq!(info.model, "gpt-4o-mini", "backend: {backend}");
+        }
     }
 
     #[test]
