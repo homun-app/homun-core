@@ -280,6 +280,23 @@ function GeneralPane() {
 
 /* ------------------------------------------------------------------- runtime */
 
+// Provider presets (OpenAI-compatible base URLs). Selecting one fills the base
+// URL; the user adds the key and picks a model. "Custom" leaves it blank.
+const PROVIDER_PRESETS: Array<{ id: string; label: string; baseUrl: string; hint?: string }> = [
+  { id: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1" },
+  { id: "anthropic", label: "Anthropic", baseUrl: "https://api.anthropic.com/v1" },
+  { id: "zai", label: "Z.ai (GLM)", baseUrl: "https://api.z.ai/api/paas/v4", hint: "GLM-5" },
+  { id: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1" },
+  { id: "groq", label: "Groq", baseUrl: "https://api.groq.com/openai/v1" },
+  { id: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1" },
+  { id: "together", label: "Together", baseUrl: "https://api.together.xyz/v1" },
+  { id: "xai", label: "xAI (Grok)", baseUrl: "https://api.x.ai/v1" },
+  { id: "moonshot", label: "Moonshot (Kimi)", baseUrl: "https://api.moonshot.ai/v1" },
+  { id: "mistral", label: "Mistral", baseUrl: "https://api.mistral.ai/v1" },
+  { id: "ollama", label: "Ollama (locale)", baseUrl: "http://127.0.0.1:11434/v1" },
+  { id: "custom", label: "Personalizzato", baseUrl: "" },
+];
+
 function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
   const [models, setModels] = useState<string[]>([]);
   const [active, setActive] = useState<string>("");
@@ -369,6 +386,24 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
 
       <div className="set-section-label">Provider</div>
       <div className="set-rows" style={{ padding: "var(--s4) var(--s5)" }}>
+        <div className="set-field-label">Provider</div>
+        <select
+          className="set-input"
+          value={
+            PROVIDER_PRESETS.find((preset) => preset.baseUrl === baseUrl.trim())?.id ?? "custom"
+          }
+          onChange={(event) => {
+            const preset = PROVIDER_PRESETS.find((item) => item.id === event.target.value);
+            if (preset && preset.id !== "custom") setBaseUrl(preset.baseUrl);
+          }}
+          style={{ marginBottom: "var(--s3)" }}
+        >
+          {PROVIDER_PRESETS.map((preset) => (
+            <option key={preset.id} value={preset.id}>
+              {preset.label}
+            </option>
+          ))}
+        </select>
         <div className="set-field-label">Endpoint OpenAI-compatibile (base URL)</div>
         <input
           className="set-input"
