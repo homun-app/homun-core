@@ -17,6 +17,7 @@ const manager = new BrowserSessionManager({
   artifactRoot: process.env.BROWSER_AUTOMATION_ARTIFACT_ROOT,
   uploadRoots: process.env.BROWSER_AUTOMATION_UPLOAD_ROOTS?.split(":").filter(Boolean),
   userCdpEndpoint: process.env.BROWSER_AUTOMATION_USER_CDP_ENDPOINT,
+  isolatedContext: process.env.BROWSER_AUTOMATION_ISOLATED_CONTEXT === "1",
 });
 
 export async function handleRequestLine(line: string): Promise<string> {
