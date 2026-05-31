@@ -18,6 +18,7 @@ import {
   type ComposioToolkit,
   type ContainedComputerLive,
   type CoreCapabilitySnapshot,
+  type CoreMemoryDashboard,
   type SystemStatus,
 } from "../lib/coreBridge";
 import { useSetting } from "../lib/settingsStore";
@@ -857,14 +858,69 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
 /* --------------------------------------------------------------------- audit */
 
 function AuditPane() {
+  const [memory, setMemory] = useState<CoreMemoryDashboard | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const value = await coreBridge.memoryDashboard();
+        if (!cancelled) setMemory(value);
+      } catch {
+        /* leave null */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const stats: Array<{ k: string; v: number | undefined }> = [
+    { k: "Memorie", v: memory?.total_memories },
+    { k: "Entità", v: memory?.total_entities },
+    { k: "Relazioni", v: memory?.total_relations },
+    { k: "Pagine wiki", v: memory?.total_wiki_pages },
+  ];
+
   return (
     <>
+      <div className="set-section-label" style={{ marginTop: 0 }}>
+        Memoria del progetto
+      </div>
+      <div className="set-card">
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr 1fr 1fr",
+            gap: "var(--s3)",
+          }}
+        >
+          {stats.map((stat) => (
+            <div key={stat.k}>
+              <div className="set-card-name" style={{ fontSize: 22 }}>
+                {stat.v ?? "—"}
+              </div>
+              <div className="rk">{stat.k}</div>
+            </div>
+          ))}
+        </div>
+        {memory && memory.by_sensitivity.length > 0 && (
+          <>
+            <div className="set-card-divider" />
+            <p className="set-meter-sub" style={{ marginBottom: 0 }}>
+              Per sensibilità:{" "}
+              {memory.by_sensitivity.map((item) => `${item.key} ${item.count}`).join(" · ")}
+            </p>
+          </>
+        )}
+      </div>
+
+      <div className="set-section-label">Audit</div>
       <div className="set-rows">
         <div className="set-row">
           <div>
-            <div className="rk">Audit locale</div>
+            <div className="rk">Azioni registrate</div>
             <div className="rv">
-              Ogni azione del modello e del browser è registrata sul dispositivo.
+              {memory ? `${memory.access_audit_count} accessi tracciati sul dispositivo` : "—"}
             </div>
           </div>
         </div>
