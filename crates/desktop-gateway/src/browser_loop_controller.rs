@@ -228,6 +228,8 @@ pub fn browser_loop_decision_prompt_with_profile(
     format!(
         r#"You drive a web browser to accomplish a goal. Each turn: read the snapshot, pick the SINGLE best next action, output one JSON decision. Keep going until the goal is met or you are genuinely blocked.
 
+Today is {today} — use it to fill date fields (resolve any relative date to a concrete future date with the correct year).
+
 Goal: {goal}
 
 How to work:
@@ -251,6 +253,7 @@ Recent actions:
 {iterations}
 
 Respond with one JSON decision."#,
+        today = time::OffsetDateTime::now_utc().date(),
         goal = request.goal,
         iterations = serde_json::to_string_pretty(&recent_iterations).unwrap_or_default(),
         action_frame = action_frame,

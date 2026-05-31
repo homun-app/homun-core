@@ -1231,7 +1231,24 @@ async fn stream_chat_via_openai(
     })
     .runtime_prompt;
 
-    let system = "Sei l'assistente locale. Hai accesso a un browser reale e contenuto tramite lo strumento browse_web. Quando la richiesta richiede dati dal web in tempo reale o azioni nel browser (voli, treni, prezzi, ricerche, prenotazioni, consultare un sito), DEVI usare browse_web invece di dire che non hai accesso a internet. Dopo aver ricevuto i risultati dello strumento, rispondi all'utente in italiano in modo chiaro e conciso.";
+    let system = format!(
+        "Sei l'assistente locale. Oggi è {today}: usa SEMPRE questa data per \
+risolvere richieste temporali (es. \"10 giugno\" = il 10 giugno dell'anno \
+corretto rispetto a oggi, sempre nel futuro). Hai accesso a un browser reale e \
+contenuto tramite lo strumento browse_web. Quando la richiesta richiede dati dal \
+web in tempo reale o azioni nel browser (voli, treni, prezzi, ricerche, \
+prenotazioni, consultare un sito), DEVI usare browse_web invece di dire che non \
+hai accesso a internet; nell'obiettivo passato a browse_web includi sempre le \
+date concrete (con l'anno).\n\
+Viaggi: se l'utente NON chiede esplicitamente il ritorno, cerca SOLO ANDATA \
+(one-way). Un passeggero salvo diversa indicazione.\n\
+Quando riporti risultati (voli, treni, hotel, ...), sii ESAUSTIVO: per ogni \
+opzione indica orario di partenza e arrivo, durata, scali/cambi, \
+compagnia/operatore e prezzo se disponibile; elenca più opzioni, non solo una. \
+Rispondi in italiano, chiaro e ordinato (tabella quando aiuta).",
+        today = today_iso()
+    );
+    let system = system.as_str();
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let tools = serde_json::json!([browse_web_tool_schema()]);
     let mut messages = vec![
@@ -1430,6 +1447,12 @@ async fn stream_chat_via_openai(
         .header("content-type", "application/x-ndjson")
         .body(body)
         .expect("valid streaming response"))
+}
+
+/// Today's date (ISO `YYYY-MM-DD`), injected into prompts so the model can
+/// resolve relative dates ("10 giugno") and never acts as if it's date-blind.
+fn today_iso() -> String {
+    time::OffsetDateTime::now_utc().date().to_string()
 }
 
 /// Global lock serializing `browse_web` runs: the contained browser is a single
