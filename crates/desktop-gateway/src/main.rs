@@ -1188,11 +1188,10 @@ fn chat_context_budget_chars() -> usize {
 /// Streams a chat completion from an OpenAI-compatible endpoint, translating its
 /// SSE deltas into the gateway's NDJSON `GenerateStreamEvent` format — identical
 /// to the MLX path, so the UI consumes both the same way.
-/// Max model↔tool round-trips before we stop and answer with what we have.
-/// Kept low so the model doesn't re-run full browser searches over and over
-/// (each browse_web is a whole observe-act loop); 2 lets it do the search and,
-/// if needed, one follow-up.
-const MAX_TOOL_ROUNDS: usize = 2;
+/// Max model↔tool round-trips. The LAST round forbids tools (tool_choice:none) so
+/// the model always synthesizes a final answer from what it gathered. With 3:
+/// up to 2 tool calls (search + optional follow-up), then a forced answer.
+const MAX_TOOL_ROUNDS: usize = 3;
 
 /// The browser tool the chat model can invoke. No keyword gate: the MODEL reads
 /// this description and decides to call it when the request needs the live web.
@@ -1269,7 +1268,11 @@ solo una. Rispondi in italiano, chiaro e ordinato (tabella quando aiuta).",
         let mut accumulated = String::new();
         let mut final_done = false;
 
-        for _round in 0..MAX_TOOL_ROUNDS {
+        for round in 0..MAX_TOOL_ROUNDS {
+            // On the LAST allowed round, forbid tools so the model MUST synthesize
+            // a final answer from what it already gathered — otherwise it can burn
+            // every round on tool calls and end with no answer ("limite di passi").
+            let tool_choice = if round + 1 >= MAX_TOOL_ROUNDS { "none" } else { "auto" };
             let mut builder = http.post(&endpoint);
             if let Some(key) = api_key.as_ref() {
                 builder = builder.bearer_auth(key);
@@ -1279,7 +1282,7 @@ solo una. Rispondi in italiano, chiaro e ordinato (tabella quando aiuta).",
                     "model": model,
                     "messages": messages,
                     "tools": tools,
-                    "tool_choice": "auto",
+                    "tool_choice": tool_choice,
                     "temperature": temperature,
                     "stream": false,
                 }))
