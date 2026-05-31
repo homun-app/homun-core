@@ -2791,6 +2791,78 @@ small {
   color: var(--text);
 }
 
+/* Live "Avanzamento attività" checklist. */
+.cc-plan {
+  padding: 8px 14px 10px;
+  border-top: 1px solid var(--line);
+}
+
+.cc-plan-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.cc-plan-count {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.cc-plan-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 168px;
+  overflow-y: auto;
+}
+
+.cc-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text);
+  line-height: 1.3;
+}
+
+.cc-step svg {
+  flex-shrink: 0;
+}
+
+.cc-step.done svg {
+  color: var(--green, #1a8f4c);
+}
+
+.cc-step.retry {
+  color: var(--muted);
+}
+
+.cc-step.retry svg {
+  color: var(--amber, #b7791f);
+}
+
+.cc-step.running {
+  color: var(--muted);
+}
+
+.cc-step span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Stage matches the contained display's 16:10 aspect ratio → no black bars.
    overflow:hidden + the frame's negative top offset clip noVNC's thin status
    bar ("Connected… CtrlAltDel") so the preview is clean. */
