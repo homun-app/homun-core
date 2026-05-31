@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronRight,
   FolderPlus,
+  Info,
   PanelLeftClose,
   PanelLeftOpen,
   Pin,
@@ -21,9 +22,11 @@ import type { MouseEvent } from "react";
 import {
   drawerProjects,
   navItems,
+  settingsGroupLabels,
   settingsSections,
 } from "../data/mockData";
 import type { ChatThread, SettingsSectionId, ViewId } from "../types";
+import { useSetting } from "../lib/settingsStore";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 
 interface NavigationRailProps {
@@ -420,36 +423,57 @@ export function SettingsDrawer({
   onBack,
   onSelect,
 }: SettingsDrawerProps) {
+  const [displayName] = useSetting("displayName", "Fabio Cantone");
+  const [workspaceName] = useSetting("workspaceName", "Personale");
+  const groups: Array<"account" | "capabilities"> = ["account", "capabilities"];
   return (
-    <aside className="nav-drawer settings-drawer" aria-label="Impostazioni">
-      <header className="drawer-header">
-        <div>
-          <strong>Impostazioni</strong>
-          <small>Privacy, runtime e connettori</small>
-        </div>
-      </header>
-
-      <button className="back-button" type="button" onClick={onBack}>
-        <ArrowLeft size={16} />
+    <aside className="nav-drawer settings-drawer set-nav" aria-label="Impostazioni">
+      <button className="set-nav-back" type="button" onClick={onBack}>
+        <ArrowLeft size={15} />
         <span>Torna all'app</span>
       </button>
 
+      <div className="set-nav-profile">
+        <span className="set-nav-avatar" aria-hidden />
+        <span className="set-nav-id">
+          <span className="n">{displayName || "Account"}</span>
+          <span className="w">{workspaceName || "Personale"}</span>
+        </span>
+      </div>
+
       <nav className="drawer-nav settings-nav">
-        {settingsSections.map((item) => {
-          const Icon = item.icon;
-          return (
-            <button
-              className={`drawer-nav-item ${activeSection === item.id ? "active" : ""}`}
-              key={item.id}
-              type="button"
-              onClick={() => onSelect(item.id)}
-            >
-              <Icon size={17} />
-              <span>{item.label}</span>
-            </button>
-          );
-        })}
+        {groups.map((group) => (
+          <div key={group}>
+            <div className="set-nav-group">{settingsGroupLabels[group]}</div>
+            {settingsSections
+              .filter((item) => item.group === group)
+              .map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    className={`set-nav-item ${activeSection === item.id ? "active" : ""}`}
+                    key={item.id}
+                    type="button"
+                    onClick={() => onSelect(item.id)}
+                  >
+                    <Icon size={16} />
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
+          </div>
+        ))}
       </nav>
+
+      <span className="set-nav-spacer" />
+      <button
+        className={`set-nav-item ${activeSection === "audit" ? "" : ""}`}
+        type="button"
+        onClick={onBack}
+      >
+        <Info size={16} />
+        <span>Informazioni</span>
+      </button>
     </aside>
   );
 }

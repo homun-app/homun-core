@@ -493,7 +493,7 @@ export default function App() {
   const [activeView, setActiveView] = useState<ViewId>("chat");
   const [previousView, setPreviousView] = useState<ViewId>("chat");
   const [settingsSection, setSettingsSection] =
-    useState<SettingsSectionId>("privacy");
+    useState<SettingsSectionId>("account");
   const [chatThreads, setChatThreads] = useState<ChatThread[]>([
     defaultChatThread,
   ]);
