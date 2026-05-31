@@ -6878,26 +6878,70 @@ fn browser_loop_option_line(option: &Value) -> String {
     if let Some(text) = option.as_str() {
         return text.to_string();
     }
-    let mut parts = Vec::new();
-    for key in [
+    let Some(map) = option.as_object() else {
+        return truncate_chars(&option.to_string(), 240);
+    };
+    // Render EVERY field the worker extracted — NO hardcoded key allowlist (the
+    // old one dropped airline/airport, leaving only duration+price). Show common
+    // keys first for readability, then any others, as "key: value" so the
+    // orchestrator has the full data to build a specific per-row table.
+    let preferred = [
+        "airline",
         "operator",
+        "carrier",
         "train",
+        "departure_airport",
+        "origin",
+        "from",
+        "arrival_airport",
+        "destination",
+        "to",
         "departure",
+        "departure_time",
+        "depart",
         "arrival",
+        "arrival_time",
+        "arrive",
         "duration",
-        "price",
+        "stops",
         "changes",
-    ] {
-        if let Some(value) = option.get(key).and_then(Value::as_str)
-            && !value.trim().is_empty()
-        {
-            parts.push(value.to_string());
+        "scali",
+        "price",
+        "prezzo",
+    ];
+    let mut parts: Vec<String> = Vec::new();
+    let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    for key in preferred {
+        if let Some(text) = map.get(key).and_then(browser_option_scalar_text) {
+            parts.push(format!("{key}: {text}"));
+            seen.insert(key);
+        }
+    }
+    for (key, value) in map {
+        if seen.contains(key.as_str()) {
+            continue;
+        }
+        if let Some(text) = browser_option_scalar_text(value) {
+            parts.push(format!("{key}: {text}"));
         }
     }
     if parts.is_empty() {
         truncate_chars(&option.to_string(), 240)
     } else {
-        parts.join(" - ")
+        parts.join(" · ")
+    }
+}
+
+/// A scalar option field as display text (skips empty strings and nested values).
+fn browser_option_scalar_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => {
+            let trimmed = text.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        }
+        Value::Number(number) => Some(number.to_string()),
+        Value::Bool(flag) => Some(flag.to_string()),
+        _ => None,
     }
 }
 
