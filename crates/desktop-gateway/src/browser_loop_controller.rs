@@ -215,6 +215,10 @@ fn browser_loop_debug_enabled() -> bool {
         .unwrap_or(false)
 }
 
+/// Test-only convenience wrapper that builds the decision prompt with the
+/// default `Compact` profile. Production always goes through
+/// [`browser_loop_decision_prompt_with_profile`] with an explicit profile.
+#[cfg(test)]
 pub fn browser_loop_decision_prompt(
     request: &BrowserLoopRequest,
     observation: &BrowserObservation,
