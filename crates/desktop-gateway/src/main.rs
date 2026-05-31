@@ -981,7 +981,7 @@ Impostazioni → Modello & Runtime."
 
 /// Chat streaming config when an OpenAI-compatible backend is selected
 /// (`LOCAL_FIRST_INFERENCE_BACKEND=openai` + base URL). Returns
-/// `(base_url, model, api_key)`, else `None` to keep the local MLX path.
+/// `(base_url, model, api_key)`, else `None` when no inference provider is configured.
 /// File holding the user-selected active inference model (overrides the env
 /// default). Plain text, not a secret. Lets Settings switch model at runtime.
 fn inference_model_override_path() -> Option<PathBuf> {
@@ -1082,7 +1082,7 @@ fn chat_openai_stream_config() -> Option<(String, String, Option<String>)> {
 /// Chat context-char budget for the capable backend, derived from the model's
 /// context window (`LOCAL_FIRST_INFERENCE_CONTEXT_WINDOW`, default 32k tokens).
 /// ~3 chars/token leaves headroom for the system prompt and the model's reply;
-/// it is vastly larger than the gemma4-era 3.6K default so chat history is not
+/// it is vastly larger than the earlier 3.6K small-model default so chat history is not
 /// clamped on a model that can read it.
 fn chat_context_budget_chars() -> usize {
     let window = env::var("LOCAL_FIRST_INFERENCE_CONTEXT_WINDOW")
@@ -1094,8 +1094,8 @@ fn chat_context_budget_chars() -> usize {
 }
 
 /// Streams a chat completion from an OpenAI-compatible endpoint, translating its
-/// SSE deltas into the gateway's NDJSON `GenerateStreamEvent` format — identical
-/// to the MLX path, so the UI consumes both the same way.
+/// SSE deltas into the gateway's NDJSON `GenerateStreamEvent` format the UI
+/// already consumes, so every backend looks the same to the UI.
 /// Max model↔tool round-trips. The LAST round forbids tools (tool_choice:none) so
 /// the model always synthesizes a final answer from what it gathered. With 3:
 /// up to 2 tool calls (search + optional follow-up), then a forced answer.
@@ -3261,7 +3261,7 @@ fn mcp_stdio_config_from_metadata(
 /// the connection metadata shape. Keeping the two as an explicit pair (and
 /// round-trip tested) guarantees what `mcp/connect` writes is exactly what the
 /// executor reads back — the same connect↔execute contract that, left implicit,
-/// produced the earlier model-default and gemma-label drifts.
+/// produced the earlier model-default and model-label drifts.
 fn mcp_stdio_config_to_metadata(config: &McpStdioConfig) -> Value {
     let env: serde_json::Map<String, Value> = config
         .env
@@ -4793,13 +4793,11 @@ fn browser_loop_max_iterations() -> u32 {
         .unwrap_or(28)
 }
 
-/// Builds the inference router that drives the browser loop planner.
-///
-/// Default backend is the local MLX runtime (current behavior, preserved). Set
-/// `LOCAL_FIRST_INFERENCE_BACKEND=openai` plus `LOCAL_FIRST_INFERENCE_BASE_URL`
-/// to route through an OpenAI-compatible endpoint (Ollama local/cloud, OpenAI,
-/// OpenRouter, ...). Cloud delegation is opt-in via `LOCAL_FIRST_INFERENCE_CLOUD`
-/// and gated by the router's privacy policy.
+/// The inference router (see `build_browser_inference_router`) uses the
+/// configured OpenAI-compatible endpoint by default (Ollama local/cloud, OpenAI,
+/// OpenRouter, ...), or Anthropic when `LOCAL_FIRST_INFERENCE_BACKEND=anthropic`
+/// with a key. Cloud delegation is opt-in via `LOCAL_FIRST_INFERENCE_CLOUD` and
+/// gated by the router's privacy policy.
 fn brain_planner_enabled() -> bool {
     env::var("LOCAL_FIRST_USE_BRAIN_PLANNER")
         .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "on"))
@@ -4919,7 +4917,7 @@ const CAPABLE_MODEL_CONTEXT_WINDOW: u32 = 32_000;
 ///
 /// promptjuice (context compression) was built to optimize tokens for cost/time,
 /// not to block: under budget it passes content through untouched, and a
-/// `max_chars` of 0 means "unlimited". The gemma4-era hard-coded defaults are
+/// `max_chars` of 0 means "unlimited". The earlier small-model hard-coded defaults are
 /// tiny (1.2–3.2K chars, 768 planner tokens), which makes the compressor clamp
 /// essential context away even when a capable model has room to spare. So scale
 /// by the window: a big-context model gets generous/unlimited budgets
@@ -5253,8 +5251,8 @@ fn set_session_progress_total(
 }
 
 /// Resolves the cloud inference API key, preferring a 0600 key file over the
-/// environment. A key file is not inherited by child processes (browser sidecar,
-/// MLX) and is not visible in `ps`/`/proc/<pid>/environ`, so it is the safer
+/// environment. A key file is not inherited by child processes (e.g. the browser
+/// sidecar) and is not visible in `ps`/`/proc/<pid>/environ`, so it is the safer
 /// source. Env remains supported for convenience but warns once.
 ///
 /// TODO(security): migrate to `local-first-secrets` (`secret_ref`) per ADR 0007

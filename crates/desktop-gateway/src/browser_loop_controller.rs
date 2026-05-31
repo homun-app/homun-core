@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 const MAX_ACTION_FRAME_CHARS_FOR_DECISION: usize = 6_500;
 // The Full profile is only chosen for capable, big-context models (see
 // `BrowserContextProfile::for_context_window`), so give them most of the page's
-// aria tree rather than the gemma4-era 12K (~3K-token) clip. Dense result pages
+// aria tree rather than the old small-model 12K (~3K-token) clip. Dense result pages
 // (e.g. 1900+ refs) then surface their option rows instead of being cut off.
 // Big-context models (minimax ≈ 196k) can read a whole heavy page; a real
 // results page (e.g. DuckDuckGo) runs ~95k chars, and at 40k the actual results
@@ -332,8 +332,8 @@ pub fn parse_browser_loop_decision(
     value: &Value,
     observation: &BrowserObservation,
 ) -> BrowserResult<BrowserLoopDecision> {
-    // Infer missing 'decision' field from context — small models (e.g. Gemma 4 E4B)
-    // frequently emit valid action JSON but omit the 'decision' wrapper.
+    // Infer missing 'decision' field from context — some models frequently emit
+    // valid action JSON but omit the 'decision' wrapper.
     let decision_str = match value.get("decision").and_then(Value::as_str) {
         Some(d) => d.to_string(),
         None => {
@@ -1212,7 +1212,7 @@ mod tests {
         assert!(prompt.contains("fill"));
         assert!(prompt.contains("purchase"));
         assert!(prompt.contains("untrusted"));
-        // The gemma4-era prescriptive rules are gone.
+        // The old small-model prescriptive rules are gone.
         assert!(!prompt.contains("Follow the PLAN top to bottom"));
         assert!(!prompt.contains("evaluate"));
     }
@@ -1319,7 +1319,7 @@ mod tests {
             BrowserContextProfile::for_context_window(Some(8_192)),
             BrowserContextProfile::Compact
         );
-        // Unknown window (e.g. MLX runtime without a descriptor) stays compact.
+        // Unknown window (e.g. a runtime without a descriptor) stays compact.
         assert_eq!(
             BrowserContextProfile::for_context_window(None),
             BrowserContextProfile::Compact

@@ -26,17 +26,17 @@ impl RuntimeDiscoveryProbe for FakeDiscovery {
 }
 
 #[test]
-fn runtime_control_detects_external_gemma_listener_without_managed_snapshot() {
+fn runtime_control_detects_external_listener_without_managed_snapshot() {
     let store = ProcessRegistryStore::open_in_memory().unwrap();
     let supervisor = FakeProcessSupervisor::default();
     let manager = ProcessManager::new(store, supervisor);
     manager
-        .register(gemma_spec())
-        .expect("register gemma runtime spec");
+        .register(runtime_spec())
+        .expect("register runtime spec");
     let discovery = FakeDiscovery {
         port_processes: vec![DiscoveredProcess {
             pid: 42,
-            command: "python runtimes/mlx-gemma4/server.py".to_string(),
+            command: "python runtimes/llm/server.py".to_string(),
             cwd: Some("/workspace".to_string()),
             port: Some(8765),
         }],
@@ -50,7 +50,7 @@ fn runtime_control_detects_external_gemma_listener_without_managed_snapshot() {
     };
 
     let snapshot = manager
-        .runtime_control_snapshot("llm-gemma4-mlx", &discovery)
+        .runtime_control_snapshot("llm-runtime", &discovery)
         .unwrap();
 
     assert_eq!(snapshot.status, RuntimeControlStatus::ExternalRunning);
@@ -61,11 +61,11 @@ fn runtime_control_detects_external_gemma_listener_without_managed_snapshot() {
 }
 
 #[test]
-fn runtime_control_marks_duplicate_conflict_when_multiple_gemma_processes_exist() {
+fn runtime_control_marks_duplicate_conflict_when_multiple_processes_exist() {
     let store = ProcessRegistryStore::open_in_memory().unwrap();
     let supervisor = FakeProcessSupervisor::default();
     let manager = ProcessManager::new(store, supervisor);
-    manager.register(gemma_spec()).unwrap();
+    manager.register(runtime_spec()).unwrap();
     let discovery = FakeDiscovery {
         port_processes: vec![process(10, Some(8765))],
         matching_processes: vec![process(10, Some(8765)), process(11, None)],
@@ -73,7 +73,7 @@ fn runtime_control_marks_duplicate_conflict_when_multiple_gemma_processes_exist(
     };
 
     let snapshot = manager
-        .runtime_control_snapshot("llm-gemma4-mlx", &discovery)
+        .runtime_control_snapshot("llm-runtime", &discovery)
         .unwrap();
 
     assert_eq!(snapshot.status, RuntimeControlStatus::DuplicateConflict);
@@ -86,11 +86,11 @@ fn runtime_restart_stops_and_starts_managed_process_with_new_snapshot() {
     let store = ProcessRegistryStore::open_in_memory().unwrap();
     let supervisor = FakeProcessSupervisor::default();
     let mut manager = ProcessManager::new(store, supervisor);
-    manager.register(gemma_spec()).unwrap();
+    manager.register(runtime_spec()).unwrap();
 
-    let first = manager.start("llm-gemma4-mlx").unwrap();
-    let restarted = manager.restart("llm-gemma4-mlx").unwrap();
-    let detail = manager.detail("llm-gemma4-mlx").unwrap().unwrap();
+    let first = manager.start("llm-runtime").unwrap();
+    let restarted = manager.restart("llm-runtime").unwrap();
+    let detail = manager.detail("llm-runtime").unwrap().unwrap();
 
     assert_eq!(first.pid, Some(10_001));
     assert_eq!(restarted.status, ProcessStatus::Running);
@@ -99,17 +99,17 @@ fn runtime_restart_stops_and_starts_managed_process_with_new_snapshot() {
 }
 
 #[test]
-fn ensure_runtime_started_starts_gemma_when_no_process_is_available() {
+fn ensure_runtime_started_starts_runtime_when_no_process_is_available() {
     let store = ProcessRegistryStore::open_in_memory().unwrap();
     let supervisor = FakeProcessSupervisor::default();
     let mut manager = ProcessManager::new(store, supervisor);
-    manager.register(gemma_spec()).unwrap();
+    manager.register(runtime_spec()).unwrap();
 
     let snapshot = manager
-        .ensure_runtime_started("llm-gemma4-mlx", &FakeDiscovery::default())
+        .ensure_runtime_started("llm-runtime", &FakeDiscovery::default())
         .unwrap();
     let control = manager
-        .runtime_control_snapshot("llm-gemma4-mlx", &FakeDiscovery::default())
+        .runtime_control_snapshot("llm-runtime", &FakeDiscovery::default())
         .unwrap();
 
     assert_eq!(snapshot.status, ProcessStatus::Running);
@@ -118,11 +118,11 @@ fn ensure_runtime_started_starts_gemma_when_no_process_is_available() {
 }
 
 #[test]
-fn ensure_runtime_started_reuses_external_gemma_listener_without_spawning_duplicate() {
+fn ensure_runtime_started_reuses_external_listener_without_spawning_duplicate() {
     let store = ProcessRegistryStore::open_in_memory().unwrap();
     let supervisor = FakeProcessSupervisor::default();
     let mut manager = ProcessManager::new(store, supervisor);
-    manager.register(gemma_spec()).unwrap();
+    manager.register(runtime_spec()).unwrap();
     let discovery = FakeDiscovery {
         port_processes: vec![process(42, Some(8765))],
         matching_processes: vec![process(42, Some(8765))],
@@ -130,9 +130,9 @@ fn ensure_runtime_started_reuses_external_gemma_listener_without_spawning_duplic
     };
 
     let snapshot = manager
-        .ensure_runtime_started("llm-gemma4-mlx", &discovery)
+        .ensure_runtime_started("llm-runtime", &discovery)
         .unwrap();
-    let detail = manager.detail("llm-gemma4-mlx").unwrap().unwrap();
+    let detail = manager.detail("llm-runtime").unwrap().unwrap();
 
     assert_eq!(snapshot.status, ProcessStatus::Configured);
     assert_eq!(snapshot.pid, None);
@@ -142,7 +142,7 @@ fn ensure_runtime_started_reuses_external_gemma_listener_without_spawning_duplic
 #[test]
 fn ensure_runtime_started_recovers_stale_running_snapshot_without_listener() {
     let store = ProcessRegistryStore::open_in_memory().unwrap();
-    let spec = gemma_spec();
+    let spec = runtime_spec();
     store.upsert_spec(&spec).unwrap();
     store
         .record_snapshot(
@@ -154,9 +154,9 @@ fn ensure_runtime_started_recovers_stale_running_snapshot_without_listener() {
     let mut manager = ProcessManager::new(store, supervisor);
 
     let snapshot = manager
-        .ensure_runtime_started("llm-gemma4-mlx", &FakeDiscovery::default())
+        .ensure_runtime_started("llm-runtime", &FakeDiscovery::default())
         .unwrap();
-    let detail = manager.detail("llm-gemma4-mlx").unwrap().unwrap();
+    let detail = manager.detail("llm-runtime").unwrap().unwrap();
 
     assert_eq!(snapshot.status, ProcessStatus::Running);
     assert_ne!(snapshot.pid, Some(42_424));
@@ -164,9 +164,9 @@ fn ensure_runtime_started_recovers_stale_running_snapshot_without_listener() {
     assert_eq!(detail.snapshot.pid, Some(10_001));
 }
 
-fn gemma_spec() -> ProcessSpec {
-    ProcessSpec::new("llm-gemma4-mlx", ProcessKind::LlmRuntime, "python")
-        .with_arg("runtimes/mlx-gemma4/server.py")
+fn runtime_spec() -> ProcessSpec {
+    ProcessSpec::new("llm-runtime", ProcessKind::LlmRuntime, "python")
+        .with_arg("runtimes/llm/server.py")
         .with_health_check(HealthCheck::HttpGet {
             url: "http://127.0.0.1:8765/health".to_string(),
             timeout_ms: 1_000,
@@ -176,7 +176,7 @@ fn gemma_spec() -> ProcessSpec {
 fn process(pid: u32, port: Option<u16>) -> DiscoveredProcess {
     DiscoveredProcess {
         pid,
-        command: "python runtimes/mlx-gemma4/server.py".to_string(),
+        command: "python runtimes/llm/server.py".to_string(),
         cwd: Some("/workspace".to_string()),
         port,
     }

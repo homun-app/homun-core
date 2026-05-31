@@ -63,7 +63,7 @@ fn subagent_result_serializes_metrics_and_audit() {
             elapsed_seconds: 1.2,
         },
         audit: AgentAudit {
-            model: "mlx-community/gemma-4-e4b-it-4bit".to_string(),
+            model: "local-model-v1".to_string(),
             contract: "RoutineInference".to_string(),
             started_at: "2026-05-22T20:00:00Z".to_string(),
             finished_at: "2026-05-22T20:00:02Z".to_string(),
