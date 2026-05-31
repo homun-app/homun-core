@@ -2707,52 +2707,92 @@ small {
   color: var(--amber, #b7791f);
 }
 
-.chat-computer-panel {
-  margin: 10px auto 2px;
-  width: calc(100% - 32px);
-  max-width: 760px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
+/* Collapsed pill — default resting state, floating bottom-right of the chat. */
+.cc-pill {
+  position: fixed;
+  right: 24px;
+  bottom: 96px;
+  z-index: 55;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
   background: var(--surface);
-  overflow: hidden;
-  flex-shrink: 0;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.06);
+  color: var(--text);
+  font-weight: 600;
+  font-size: 13px;
+  border: 1px solid var(--line);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
 }
 
-.chat-computer-head {
+.cc-pill:hover {
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.2);
+}
+
+.cc-pill-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green, #1a8f4c);
+  animation: thinking-status-pulse 1.4s ease-in-out infinite;
+}
+
+/* Floating expanded card, anchored bottom-right. */
+.cc-float {
+  position: fixed;
+  right: 24px;
+  bottom: 96px;
+  z-index: 56;
+  width: 440px;
+  max-width: calc(100vw - 48px);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.22);
+  display: flex;
+  flex-direction: column;
+}
+
+.cc-float.full {
+  inset: 4vh 4vw;
+  right: 4vw;
+  bottom: 4vh;
+  width: auto;
+  max-width: none;
+  z-index: 60;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.4);
+}
+
+.cc-float-head {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 10px 8px 8px;
+  padding: 8px 8px 8px 12px;
+  border-bottom: 1px solid var(--line);
 }
 
-.chat-computer-toggle {
+.cc-float-title {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 4px 6px;
-  border-radius: 8px;
-  background: transparent;
   color: var(--text);
   font-weight: 600;
 }
 
-.chat-computer-toggle:hover {
-  background: var(--blue-soft);
-}
-
-.chat-computer-live {
+.cc-live {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
   color: var(--green, #1a8f4c);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
-.chat-computer-dot {
+.cc-live-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
@@ -2760,43 +2800,46 @@ small {
   animation: thinking-status-pulse 1.4s ease-in-out infinite;
 }
 
-.chat-computer-activity {
+.cc-float-activity {
   flex: 1;
   min-width: 0;
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.chat-computer-action {
+.cc-icon-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   border-radius: 8px;
   color: var(--muted);
   background: transparent;
 }
 
-.chat-computer-action:hover {
+.cc-icon-btn:hover {
   background: var(--blue-soft);
   color: var(--text);
 }
 
-/* The stage matches the contained display's 1280x800 (16:10) aspect ratio, so
-   the scaled noVNC stream fills it with no black letterbox bars. */
-.chat-computer-stage {
+/* Stage matches the contained display's 16:10 aspect ratio → no black bars. */
+.cc-stage {
   position: relative;
   width: 100%;
   aspect-ratio: 1280 / 800;
   background: #0b0d12;
-  border-top: 1px solid var(--line);
 }
 
-.chat-computer-frame {
+.cc-float.full .cc-stage {
+  flex: 1;
+  aspect-ratio: auto;
+}
+
+.cc-frame {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -2805,25 +2848,7 @@ small {
   display: block;
 }
 
-/* Fullscreen overlay */
-.chat-computer-panel.fullscreen {
-  position: fixed;
-  inset: 4vh 4vw;
-  width: auto;
-  max-width: none;
-  margin: 0;
-  z-index: 60;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.4);
-}
-
-.chat-computer-panel.fullscreen .chat-computer-stage {
-  flex: 1;
-  aspect-ratio: auto;
-}
-
-.chat-computer-scrim {
+.cc-scrim {
   position: fixed;
   inset: 0;
   z-index: 59;
