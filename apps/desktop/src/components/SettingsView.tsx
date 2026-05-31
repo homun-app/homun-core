@@ -24,22 +24,12 @@ import {
 import { useSetting } from "../lib/settingsStore";
 import type {
   ConnectionItem,
-  RuntimeControl,
-  RuntimeHealth,
-  RuntimeLogs,
   SettingsSectionId,
 } from "../types";
 
 interface SettingsViewProps {
-  health: RuntimeHealth[];
-  runtimeControls: RuntimeControl[];
-  runtimeLogs: RuntimeLogs | null;
   connections: ConnectionItem[];
   section: SettingsSectionId;
-  onRuntimeAction: (
-    processId: string,
-    action: "start" | "stop" | "restart",
-  ) => void | Promise<void>;
 }
 
 const SECTION_TITLES: Record<SettingsSectionId, string> = {

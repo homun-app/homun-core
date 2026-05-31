@@ -85,55 +85,6 @@ export interface CoreChatMessagesSnapshot {
   messages: CoreChatMessage[];
 }
 
-export interface RuntimeProcessItem {
-  id: string;
-  kind: string;
-  status: string;
-  pid: number | null;
-  message: string | null;
-  health_check: unknown;
-  command_label: string;
-}
-
-export interface RuntimeControlItem {
-  process_id: string;
-  status: string;
-  port: number | null;
-  port_owner_pid: number | null;
-  duplicate_count: number;
-  total_memory_mb: number | null;
-  available_memory_mb: number | null;
-  process_memory_mb: number | null;
-  process_cpu_percent: number | null;
-  message: string;
-}
-
-export interface RuntimeHealthSnapshot {
-  processes: RuntimeProcessItem[];
-  controls: RuntimeControlItem[];
-}
-
-export interface RuntimeLogEntryItem {
-  stream: string;
-  line_redacted: string;
-}
-
-export interface RuntimeLogsSnapshot {
-  process_id: string;
-  source: string;
-  entries: RuntimeLogEntryItem[];
-  message: string;
-}
-
-export interface RuntimeWarmupResponse {
-  ok: boolean;
-  model: string;
-  loaded: boolean;
-  load_seconds: number | null;
-  elapsed_seconds: number;
-  local_first: boolean;
-}
-
 export interface CoreTaskItem {
   task_id: string;
   kind: string;
@@ -615,14 +566,6 @@ export const coreBridge = {
   unarchiveChatThread: (threadId: string) =>
     chatApi.unarchiveChatThread(threadId),
   deleteChatThread: (threadId: string) => chatApi.deleteChatThread(threadId),
-  runtimeHealth: () => electronRuntimeHealth(),
-  runtimeLogs: () => electronRuntimeLogs(),
-  warmupRuntime: (_processId: string) => warmupBrowserRuntime(),
-  checkProcessHealth: (processId: string) =>
-    Promise.resolve(electronRuntimeProcess(processId, "ready")),
-  startProcess: (processId: string) => startElectronRuntimeProcess(processId),
-  stopProcess: (processId: string) => stopElectronRuntimeProcess(processId),
-  restartProcess: (processId: string) => restartElectronRuntimeProcess(processId),
   taskQueue: () => electronTaskQueue(),
   taskExecutorStatus: () => electronTaskExecutorStatus(),
   taskDetail: (taskId: string) => electronTaskDetail(taskId),
@@ -706,14 +649,10 @@ export const coreBridge = {
 };
 
 async function cancelChatPromptStream(requestId: string) {
-  await Promise.allSettled([
-    fetch(`${DESKTOP_GATEWAY_URL}/api/chat/cancel_generation`, {
-      method: "POST",
-      headers: gatewayHeaders(),
-      body: JSON.stringify({ request_id: requestId }),
-    }),
-    chatApi.cancelChatPromptStream(requestId),
-  ]);
+  // Cancellation = stop reading the SSE stream client-side. There is no
+  // server-side "cancel" endpoint: the provider stream is aborted when the
+  // gateway connection closes.
+  await chatApi.cancelChatPromptStream(requestId);
 }
 
 function electronCoreStatus(): CoreBridgeStatus {
@@ -724,118 +663,7 @@ function electronCoreStatus(): CoreBridgeStatus {
     cloud_api_enabled: false,
     components: [
       { id: "desktop-shell", label: "Electron", status: "ready" },
-      { id: "llm-gemma4-mlx", label: "Gemma 4 MLX", status: "local" },
     ],
-  };
-}
-
-async function electronRuntimeHealth(): Promise<RuntimeHealthSnapshot> {
-  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/runtime/health`, {
-    headers: gatewayHeaders(),
-  });
-  if (!response.ok) {
-    throw new Error(`Desktop Gateway runtime health HTTP ${response.status}`);
-  }
-  return response.json() as Promise<RuntimeHealthSnapshot>;
-}
-
-async function electronRuntimeLogs(): Promise<RuntimeLogsSnapshot> {
-  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/runtime/logs`, {
-    headers: gatewayHeaders(),
-  });
-  if (!response.ok) {
-    throw new Error(`Desktop Gateway runtime logs HTTP ${response.status}`);
-  }
-  return response.json() as Promise<RuntimeLogsSnapshot>;
-}
-
-async function warmupBrowserRuntime(): Promise<RuntimeWarmupResponse> {
-  const startedAt = performance.now();
-  try {
-    const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/runtime/warmup`, {
-      method: "POST",
-      headers: gatewayHeaders(),
-    });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    const payload = (await response.json()) as Partial<RuntimeWarmupResponse>;
-    return {
-      ok: payload.ok ?? true,
-      model: payload.model ?? "mlx-community/gemma-4-e4b-it-4bit",
-      loaded: payload.loaded ?? true,
-      load_seconds: payload.load_seconds ?? null,
-      elapsed_seconds:
-        payload.elapsed_seconds ?? roundedSeconds((performance.now() - startedAt) / 1000),
-      local_first: true,
-    };
-  } catch {
-    return {
-      ok: false,
-      model: "mlx-community/gemma-4-e4b-it-4bit",
-      loaded: false,
-      load_seconds: null,
-      elapsed_seconds: roundedSeconds((performance.now() - startedAt) / 1000),
-      local_first: true,
-    };
-  }
-}
-
-async function shutdownBrowserRuntime(): Promise<unknown> {
-  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/runtime/shutdown`, {
-    method: "POST",
-    headers: gatewayHeaders(),
-  });
-  if (!response.ok) {
-    throw new Error(`Desktop Gateway runtime shutdown HTTP ${response.status}`);
-  }
-  return response.json();
-}
-
-async function startElectronRuntimeProcess(
-  processId: string,
-): Promise<RuntimeProcessItem> {
-  const result = await warmupBrowserRuntime();
-  return electronRuntimeProcess(
-    processId,
-    result.ok && result.loaded ? "ready" : "attention",
-    result.ok && result.loaded
-      ? "Runtime Gemma locale pronto"
-      : "Runtime Gemma locale non raggiungibile",
-  );
-}
-
-async function stopElectronRuntimeProcess(
-  processId: string,
-): Promise<RuntimeProcessItem> {
-  await shutdownBrowserRuntime();
-  return electronRuntimeProcess(processId, "stopped", "Runtime Gemma locale fermato");
-}
-
-async function restartElectronRuntimeProcess(
-  processId: string,
-): Promise<RuntimeProcessItem> {
-  try {
-    await shutdownBrowserRuntime();
-  } catch {
-    // Some runtime builds keep shutdown disabled; warmup is still the useful recovery path.
-  }
-  return startElectronRuntimeProcess(processId);
-}
-
-function electronRuntimeProcess(
-  processId: string,
-  status: string,
-  message = "Runtime locale gestito fuori dalla shell desktop",
-): RuntimeProcessItem {
-  return {
-    id: processId,
-    kind: "local_runtime",
-    status,
-    pid: null,
-    message,
-    health_check: null,
-    command_label: "Gemma 4 MLX",
   };
 }
 
@@ -1086,10 +914,10 @@ async function submitBrowserRuntimeChatPromptStream(
   );
   const response = stream.response;
   if (!response.ok) {
-    throw new Error(`Runtime Gemma non disponibile: HTTP ${response.status}`);
+    throw new Error(`Provider di inferenza non disponibile: HTTP ${response.status}`);
   }
   if (!response.body) {
-    throw new Error("Runtime Gemma non ha aperto lo stream locale.");
+    throw new Error("Il provider di inferenza non ha aperto lo stream.");
   }
 
   const reader = response.body.getReader();
@@ -1142,7 +970,7 @@ async function submitBrowserRuntimeChatPromptStream(
       role: "assistant",
       text: assistantText,
       timestamp,
-      metadata: "Gemma locale",
+      metadata: "Modello locale",
       metrics: {
         prompt_tokens: metrics.prompt_tokens ?? 0,
         generation_tokens: metrics.generation_tokens ?? 0,
@@ -1299,17 +1127,17 @@ function browserComputerSession(
         surface: "logs",
         label: "Chat locale",
         status: "running",
-        detail_redacted: "Fallback browser verso runtime Gemma locale",
+        detail_redacted: "Chat tramite provider di inferenza",
       },
     ],
-    activity_title: "Chat Gemma locale",
-    activity_subtitle: "Runtime locale tramite browser preview",
+    activity_title: "Chat locale",
+    activity_subtitle: "Inferenza tramite provider configurato",
     progress_current: 1,
     progress_total: 1,
     elapsed_seconds: elapsedSeconds,
     preview_frame_ref: null,
     current_url_redacted: null,
-    terminal_excerpt_redacted: ["Browser preview collegata al runtime Gemma locale."],
+    terminal_excerpt_redacted: ["Chat collegata al provider di inferenza."],
     artifact_refs: [],
     timeline: [],
     approval_state: "not_required",

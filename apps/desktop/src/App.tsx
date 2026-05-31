@@ -30,9 +30,6 @@ import {
   type CoreTaskDetail,
   type CoreTaskItem,
   type CoreTaskQueueSnapshot,
-  type RuntimeControlItem,
-  type RuntimeLogsSnapshot,
-  type RuntimeProcessItem,
 } from "./lib/coreBridge";
 import type {
   ApprovalItem,
@@ -41,9 +38,7 @@ import type {
   ConnectionItem,
   MemorySummary,
   Priority,
-  RuntimeControl,
   RuntimeHealth,
-  RuntimeLogs,
   SettingsSectionId,
   TaskDetailItem,
   TaskItem,
@@ -154,72 +149,6 @@ function updateThreadPreview(
 
 function currentTimestampSeconds() {
   return Math.floor(Date.now() / 1000).toString();
-}
-
-function mapRuntimeStatus(status: string): RuntimeHealth["status"] {
-  if (status === "healthy" || status === "ready") return "ready";
-  if (
-    status === "running" ||
-    status === "managed_running" ||
-    status === "external_running"
-  ) {
-    return "running";
-  }
-  return "attention";
-}
-
-function mapRuntimeProcess(process: RuntimeProcessItem): RuntimeHealth {
-  return {
-    label: process.id === "llm-gemma4-mlx" ? "Gemma 4 MLX" : process.id,
-    status: mapRuntimeStatus(process.status),
-    detail: process.message ?? `${process.command_label} · ${process.status}`,
-  };
-}
-
-function mapRuntimeControl(control: RuntimeControlItem): RuntimeControl {
-  return {
-    processId: control.process_id,
-    label:
-      control.process_id === "llm-gemma4-mlx"
-        ? "Gemma 4 MLX"
-        : control.process_id,
-    status: control.status,
-    port: control.port ?? undefined,
-    portOwnerPid: control.port_owner_pid ?? undefined,
-    duplicateCount: control.duplicate_count,
-    totalMemoryMb: control.total_memory_mb ?? undefined,
-    availableMemoryMb: control.available_memory_mb ?? undefined,
-    memoryMb: control.process_memory_mb ?? undefined,
-    cpuPercent: control.process_cpu_percent ?? undefined,
-    message: control.message,
-  };
-}
-
-function mapRuntimeLogs(snapshot: RuntimeLogsSnapshot): RuntimeLogs {
-  return {
-    processId: snapshot.process_id,
-    source: snapshot.source,
-    message: snapshot.message,
-    entries: snapshot.entries.map((entry) => ({
-      stream: entry.stream,
-      line: entry.line_redacted,
-    })),
-  };
-}
-
-function upsertGemmaRuntimeHealth(
-  items: RuntimeHealth[],
-  status: RuntimeHealth["status"],
-  detail: string,
-) {
-  const nextItem: RuntimeHealth = {
-    label: "Gemma 4 MLX",
-    status,
-    detail,
-  };
-  const hasGemma = items.some((item) => item.label === nextItem.label);
-  if (!hasGemma) return [nextItem, ...items];
-  return items.map((item) => (item.label === nextItem.label ? nextItem : item));
 }
 
 function mapCoreTaskStatus(status: string): TaskStatus {
@@ -507,11 +436,7 @@ export default function App() {
   });
   const [taskItems, setTaskItems] = useState<TaskItem[]>(tasks);
   const [approvalItems, setApprovalItems] = useState<ApprovalItem[]>(approvals);
-  const [runtimeItems, setRuntimeItems] =
-    useState<RuntimeHealth[]>(runtimeHealth);
-  const [runtimeWarmupStarted, setRuntimeWarmupStarted] = useState(false);
-  const [runtimeControls, setRuntimeControls] = useState<RuntimeControl[]>([]);
-  const [runtimeLogs, setRuntimeLogs] = useState<RuntimeLogs | null>(null);
+  const [runtimeItems] = useState<RuntimeHealth[]>(runtimeHealth);
   const [memoryDashboard, setMemoryDashboard] =
     useState<MemorySummary>(memorySummary);
   const [connectionItems, setConnectionItems] =
@@ -763,25 +688,6 @@ export default function App() {
     }
   }
 
-  async function loadRuntimeHealth() {
-    try {
-      const snapshot = await coreBridge.runtimeHealth();
-      setRuntimeItems(
-        snapshot.processes.length
-          ? snapshot.processes.map(mapRuntimeProcess)
-          : runtimeHealth,
-      );
-      setRuntimeControls(snapshot.controls.map(mapRuntimeControl));
-    } catch (error) {
-      console.warn("runtime_health_snapshot unavailable", error);
-    }
-    try {
-      setRuntimeLogs(mapRuntimeLogs(await coreBridge.runtimeLogs()));
-    } catch (error) {
-      console.warn("runtime_logs_snapshot unavailable", error);
-    }
-  }
-
   async function loadMemoryAndCapabilities() {
     try {
       setMemoryDashboard(
@@ -800,58 +706,7 @@ export default function App() {
     }
   }
 
-  async function warmupLocalRuntime() {
-    setRuntimeWarmupStarted(true);
-    setRuntimeItems((current) =>
-      upsertGemmaRuntimeHealth(
-        current,
-        "running",
-        "Caricamento modello locale in corso",
-      ),
-    );
-    try {
-      const result = await coreBridge.warmupRuntime("llm-gemma4-mlx");
-      const elapsed = result.elapsed_seconds.toFixed(1);
-      const loadedIn =
-        result.load_seconds === null
-          ? `${elapsed}s`
-          : `${result.load_seconds.toFixed(1)}s`;
-      setRuntimeItems((current) =>
-        upsertGemmaRuntimeHealth(
-          current,
-          "ready",
-          `Modello locale pronto, caricato in ${loadedIn}`,
-        ),
-      );
-      await loadRuntimeHealth();
-    } catch (error) {
-      setRuntimeItems((current) =>
-        upsertGemmaRuntimeHealth(
-          current,
-          "attention",
-          "Gemma non pronto: controlla il runtime locale",
-        ),
-      );
-      console.warn("runtime_warmup unavailable", error);
-    }
-  }
-
-  async function handleRuntimeAction(
-    processId: string,
-    action: "start" | "stop" | "restart",
-  ) {
-    try {
-      if (action === "start") await coreBridge.startProcess(processId);
-      if (action === "stop") await coreBridge.stopProcess(processId);
-      if (action === "restart") await coreBridge.restartProcess(processId);
-      await loadRuntimeHealth();
-    } catch (error) {
-      console.warn(`process_${action} unavailable`, error);
-    }
-  }
-
   async function refreshRuntimeReadModels(taskId = selectedTaskId) {
-    await loadRuntimeHealth();
     await loadTaskQueue();
     if (taskId) {
       try {
@@ -933,14 +788,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    void loadRuntimeHealth();
     void loadMemoryAndCapabilities();
-    if (!runtimeWarmupStarted) {
-      void warmupLocalRuntime();
-    }
     void loadTaskQueue();
     const interval = window.setInterval(() => {
-      void loadRuntimeHealth();
       void loadTaskQueue();
     }, 4_000);
     return () => window.clearInterval(interval);
@@ -1106,12 +956,8 @@ export default function App() {
         )}
         {activeView === "settings" && (
           <SettingsView
-            health={runtimeItems}
-            runtimeControls={runtimeControls}
-            runtimeLogs={runtimeLogs}
             connections={connectionItems}
             section={settingsSection}
-            onRuntimeAction={handleRuntimeAction}
           />
         )}
         {activeView === "memory" && (

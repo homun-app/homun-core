@@ -145,7 +145,7 @@ function repairNestedMarkdownFences(text: string) {
     }
 
     if (language) {
-      // Gemma can sometimes emit a second ```rust while already inside a Rust
+      // A model can sometimes emit a second ```rust while already inside a Rust
       // block. Treat that as a duplicated opener instead of closing the block.
       continue;
     }

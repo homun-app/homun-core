@@ -43,9 +43,9 @@ export const chatMessages: ChatMessage[] = [
   {
     id: "m1",
     role: "assistant",
-    text: "Sono pronto. Scrivimi pure: rispondo con Gemma locale.",
+    text: "Sono pronto. Scrivimi pure.",
     timestamp: "ora",
-    metadata: "Gemma locale",
+    metadata: "Modello locale",
   },
 ];
 
@@ -186,8 +186,8 @@ export const tasks: TaskItem[] = [
     updated: "8 min fa",
   },
   {
-    id: "task_gemma_health",
-    title: "Health check runtime locale Gemma 4",
+    id: "task_provider_health",
+    title: "Health check provider di inferenza",
     kind: "process.health",
     status: "completed",
     priority: "low",
@@ -210,10 +210,9 @@ export const approvals: ApprovalItem[] = [
 ];
 
 export const runtimeHealth: RuntimeHealth[] = [
-  { label: "Gemma 4 MLX", status: "ready", detail: "Pronto, 31 tok/s stimati" },
+  { label: "Modello", status: "ready", detail: "Provider di inferenza configurato" },
   { label: "Browser", status: "running", detail: "Profilo assistant attivo" },
   { label: "Task Runtime", status: "running", detail: "3 task in coda" },
-  { label: "Managed Cloud", status: "attention", detail: "Disabilitato per policy" },
 ];
 
 export const memorySummary: MemorySummary = {
@@ -267,8 +266,8 @@ export const learningInsights: LearningInsight[] = [
     confidence: 0.92,
     status: "confirmed",
     evidence: [
-      "Runtime locale Gemma 4 selezionato come default",
-      "Managed cloud marcato come disabilitato in health e settings",
+      "Provider di inferenza locale selezionato come default",
+      "Managed cloud marcato come disabilitato in settings",
       "Le azioni write richiedono conferma utente",
     ],
   },
