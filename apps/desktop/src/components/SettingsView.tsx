@@ -52,12 +52,7 @@ const SECTION_TITLES: Record<SettingsSectionId, string> = {
   audit: "Dati & Audit",
 };
 
-export function SettingsView({
-  health,
-  runtimeControls,
-  section,
-  onRuntimeAction,
-}: SettingsViewProps) {
+export function SettingsView({ section }: SettingsViewProps) {
   const [model, setModel] = useState<ActiveModelInfo | null>(null);
   const [computer, setComputer] = useState<ContainedComputerLive | null>(null);
 
@@ -90,14 +85,7 @@ export function SettingsView({
         </h2>
         {section === "account" && <AccountPane model={model} computer={computer} />}
         {section === "general" && <GeneralPane />}
-        {section === "runtime" && (
-          <RuntimePane
-            model={model}
-            health={health}
-            runtimeControls={runtimeControls}
-            onRuntimeAction={onRuntimeAction}
-          />
-        )}
+        {section === "runtime" && <RuntimePane model={model} />}
         {section === "privacy" && <PrivacyPane />}
         {section === "connections" && <ConnectorsPane />}
         {section === "computer" && <ComputerPane computer={computer} />}
@@ -292,39 +280,36 @@ function GeneralPane() {
 
 /* ------------------------------------------------------------------- runtime */
 
-function RuntimePane({
-  model,
-  health,
-  runtimeControls,
-  onRuntimeAction,
-}: {
-  model: ActiveModelInfo | null;
-  health: RuntimeHealth[];
-  runtimeControls: RuntimeControl[];
-  onRuntimeAction: SettingsViewProps["onRuntimeAction"];
-}) {
-  const primary = runtimeControls[0] ?? null;
-  const primaryHealth = health[0] ?? null;
+function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
   const [models, setModels] = useState<string[]>([]);
   const [active, setActive] = useState<string>("");
   const [saving, setSaving] = useState(false);
+  const [baseUrl, setBaseUrl] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [hasKey, setHasKey] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
 
+  const loadModels = async () => {
+    try {
+      const list = await coreBridge.runtimeModels();
+      setModels(list.available);
+      setActive(list.active ?? model?.model ?? "");
+    } catch {
+      /* leave empty → picker hidden */
+    }
+  };
   useEffect(() => {
-    let cancelled = false;
+    void loadModels();
     void (async () => {
       try {
-        const list = await coreBridge.runtimeModels();
-        if (!cancelled) {
-          setModels(list.available);
-          setActive(list.active ?? model?.model ?? "");
-        }
+        const provider = await coreBridge.runtimeProvider();
+        setBaseUrl(provider.base_url ?? "");
+        setHasKey(provider.has_key);
       } catch {
-        /* leave empty → picker hidden */
+        /* ignore */
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model]);
 
   return (
@@ -337,7 +322,7 @@ function RuntimePane({
           </span>
         </div>
         <div className="set-card-divider" />
-        {models.length > 0 && (
+        {models.length > 0 ? (
           <>
             <div className="set-field-label">Modello attivo</div>
             <select
@@ -351,7 +336,7 @@ function RuntimePane({
                 try {
                   await coreBridge.setRuntimeModel(next);
                 } catch {
-                  /* keep selection; backend will report on next chat */
+                  /* keep selection */
                 } finally {
                   setSaving(false);
                 }
@@ -369,69 +354,71 @@ function RuntimePane({
               La selezione si applica alla prossima chat (nessun riavvio).
             </p>
           </>
+        ) : (
+          <p className="set-meter-sub">
+            Nessun modello rilevato dal provider. Configura un endpoint qui sotto.
+          </p>
         )}
-        <div className="set-meter">
-          <span className="k">
-            <Globe size={15} /> Backend
-          </span>
-          <span className="v">{model?.backend ?? "n/d"}</span>
-        </div>
         <div className="set-meter">
           <span className="k">
             <Cpu size={15} /> Contesto
           </span>
           <span className="v">{model ? `~${formatK(model.context_window)} token` : "n/d"}</span>
         </div>
-        {model?.missing_api_key && (
-          <p className="set-meter-sub" style={{ color: "var(--amber)" }}>
-            Chiave API mancante per questo backend.
-          </p>
-        )}
       </div>
 
-      <div className="set-section-label">Runtime locale</div>
-      <div className="set-rows">
-        <div className="set-row">
-          <div>
-            <div className="rk">Stato</div>
-            <div className="rv">{primaryHealth?.label ?? primary?.status ?? "Inattivo"}</div>
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button
-              className="set-btn"
-              type="button"
-              title="Avvia"
-              onClick={() => primary && void onRuntimeAction(primary.processId, "start")}
-            >
-              <Play size={14} />
-            </button>
-            <button
-              className="set-btn"
-              type="button"
-              title="Riavvia"
-              onClick={() => primary && void onRuntimeAction(primary.processId, "restart")}
-            >
-              <RotateCcw size={14} />
-            </button>
-            <button
-              className="set-btn"
-              type="button"
-              title="Ferma"
-              onClick={() => primary && void onRuntimeAction(primary.processId, "stop")}
-            >
-              <Square size={14} />
-            </button>
-          </div>
+      <div className="set-section-label">Provider</div>
+      <div className="set-rows" style={{ padding: "var(--s4) var(--s5)" }}>
+        <div className="set-field-label">Endpoint OpenAI-compatibile (base URL)</div>
+        <input
+          className="set-input"
+          placeholder="https://api.openai.com/v1"
+          value={baseUrl}
+          onChange={(event) => setBaseUrl(event.target.value)}
+        />
+        <div className="set-field-label" style={{ marginTop: 12 }}>
+          API key {hasKey ? "· configurata" : ""}
         </div>
-        {primary?.port ? (
-          <div className="set-row">
-            <div>
-              <div className="rk">Porta</div>
-              <div className="rv">{primary.port}</div>
-            </div>
-          </div>
-        ) : null}
+        <input
+          className="set-input"
+          type="password"
+          placeholder={hasKey ? "•••• (lascia vuoto per non cambiare)" : "sk-…"}
+          value={apiKey}
+          onChange={(event) => setApiKey(event.target.value)}
+        />
+        <button
+          className="set-btn primary"
+          type="button"
+          style={{ marginTop: 12, alignSelf: "flex-start" }}
+          disabled={saving || !baseUrl.trim()}
+          onClick={async () => {
+            setSaving(true);
+            setNote(null);
+            try {
+              await coreBridge.setRuntimeProvider({
+                base_url: baseUrl.trim(),
+                ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
+              });
+              setApiKey("");
+              setNote("Provider salvato. Si applica alla prossima chat.");
+              const provider = await coreBridge.runtimeProvider();
+              setHasKey(provider.has_key);
+              await loadModels();
+            } catch (error) {
+              setNote(`Salvataggio non riuscito: ${(error as Error).message}`);
+            } finally {
+              setSaving(false);
+            }
+          }}
+        >
+          {saving ? "Salvataggio…" : "Salva provider"}
+        </button>
       </div>
+      <p className="set-hint">
+        Qualsiasi API OpenAI-compatibile: OpenAI, OpenRouter, Together, Groq, Ollama, … La chiave è
+        cifrata nel secret store locale, mai mostrata.
+      </p>
+      {note && <p className="set-hint">{note}</p>}
     </>
   );
 }

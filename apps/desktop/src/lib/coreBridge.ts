@@ -474,6 +474,24 @@ export interface RuntimeModelsList {
   available: string[];
 }
 
+export interface InferenceProvider {
+  base_url: string | null;
+  model: string | null;
+  has_key: boolean;
+}
+
+async function electronRuntimeProvider(): Promise<InferenceProvider> {
+  return gatewayGetJson<InferenceProvider>("/api/runtime/provider");
+}
+
+async function electronSetRuntimeProvider(input: {
+  base_url?: string;
+  model?: string;
+  api_key?: string;
+}): Promise<{ ok: boolean }> {
+  return gatewayPostJson<{ ok: boolean }>("/api/runtime/provider", input);
+}
+
 async function electronRuntimeModels(): Promise<RuntimeModelsList> {
   return gatewayGetJson<RuntimeModelsList>("/api/runtime/models");
 }
@@ -552,6 +570,9 @@ export const coreBridge = {
   runtimeModel: () => electronRuntimeModel(),
   runtimeModels: () => electronRuntimeModels(),
   setRuntimeModel: (model: string) => electronSetRuntimeModel(model),
+  runtimeProvider: () => electronRuntimeProvider(),
+  setRuntimeProvider: (input: { base_url?: string; model?: string; api_key?: string }) =>
+    electronSetRuntimeProvider(input),
   containedComputerLive: () => electronContainedComputerLive(),
   systemStatus: () => electronSystemStatus(),
   closeAllBrowsers: () => electronCloseAllBrowsers(),
