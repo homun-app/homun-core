@@ -1284,6 +1284,10 @@ solo una. Rispondi in italiano, chiaro e ordinato (tabella quando aiuta).",
                     "tools": tools,
                     "tool_choice": tool_choice,
                     "temperature": temperature,
+                    // Reasoning models need room for CoT + the final answer; without
+                    // a budget the synthesis came back empty (same starvation as the
+                    // planner). Generous so the final table isn't cut off.
+                    "max_tokens": 6000,
                     "stream": false,
                 }))
                 .send()
@@ -5742,14 +5746,14 @@ fn browser_loop_controller_enabled() -> bool {
 }
 
 fn browser_loop_max_iterations() -> u32 {
-    // Not an arbitrary "stop here" cap: the loop ends when the goal is done or
-    // blocked. This is only a high safety bound so a stuck loop can't run
-    // forever. The user can raise it further per install.
+    // The loop ends when the goal is done/blocked; this bounds it so a slow,
+    // wandering model still RETURNS in reasonable time (and the forced-answer
+    // round can run) instead of timing out. Raise per install if needed.
     env::var("LOCAL_FIRST_BROWSER_LOOP_MAX_ITERATIONS")
         .ok()
         .and_then(|value| value.parse::<u32>().ok())
         .map(|value| value.clamp(1, 200))
-        .unwrap_or(40)
+        .unwrap_or(16)
 }
 
 /// Builds the inference router that drives the browser loop planner.
