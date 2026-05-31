@@ -1495,8 +1495,20 @@ fn current_browser_activity() -> Option<BrowserActivityState> {
 }
 
 /// Human-readable label for a loop iteration, for the activity checklist.
+/// Prefers the model's own user-facing `step` description ("Inserisco
+/// l'aeroporto di partenza"); falls back to a mechanical summary only if the
+/// model didn't provide one.
 fn browser_step_label(iteration: &local_first_browser_automation::BrowserLoopIteration) -> String {
     let action = &iteration.action;
+    if let Some(step) = action
+        .get("step")
+        .or_else(|| action.get("summary"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return step.chars().take(90).collect();
+    }
     let kind = action
         .get("kind")
         .or_else(|| action.get("action"))
