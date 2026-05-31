@@ -2791,10 +2791,89 @@ small {
   color: var(--text);
 }
 
+/* Collapsed body: PiP thumbnail (left) + checklist (right). */
+.cc-body {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--line);
+}
+
+/* Manus-style PiP: a small LIVE preview of the contained browser. Reuses the
+   stage trick — fixed-height noVNC toolbar (~34px) clipped via the frame's
+   negative top offset, desktop scales with width → clean mini preview. */
+.cc-thumb {
+  position: relative;
+  width: 136px;
+  aspect-ratio: 1280 / 800;
+  flex-shrink: 0;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  overflow: hidden;
+  background: #0b0d12;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* Render the live frame at a "sane" size, correctly clipped like the stage,
+   then uniformly scale the whole thing down — a faithful 0.25x of the stage.
+   Far more robust than relying on noVNC's internal scaling at a tiny size
+   (which left the toolbar visible). 136 / 544 = 0.25. */
+.cc-thumb-scaler {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 544px;
+  height: 340px;
+  transform: scale(0.25);
+  transform-origin: top left;
+}
+
+.cc-thumb-frame {
+  position: absolute;
+  left: 0;
+  top: -34px;
+  width: 544px;
+  height: 374px;
+  border: 0;
+  display: block;
+  pointer-events: none;
+}
+
+.cc-thumb-expand {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.cc-thumb:hover .cc-thumb-expand {
+  opacity: 1;
+}
+
 /* Live "Avanzamento attività" checklist. */
 .cc-plan {
   padding: 8px 14px 10px;
   border-top: 1px solid var(--line);
+}
+
+/* Inside the collapsed body the checklist sits beside the thumbnail, so drop
+   its own padding/border (the body provides them) and let it flex. */
+.cc-body .cc-plan {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border-top: 0;
 }
 
 .cc-plan-head {

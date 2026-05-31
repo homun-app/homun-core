@@ -109,27 +109,53 @@ export function ChatComputerPanel() {
         </header>
 
         {!fullscreen && (
-          <div className="cc-plan">
-            <div className="cc-plan-head">
-              Avanzamento attività
-              {steps.length > 0 && <span className="cc-plan-count">{steps.length}</span>}
-            </div>
-            <ul className="cc-plan-steps">
-              {steps.map((step, index) => (
-                <li className={`cc-step ${step.status}`} key={index}>
-                  {step.status === "retry" ? (
-                    <RotateCcw size={13} />
-                  ) : (
-                    <Check size={13} />
-                  )}
-                  <span>{step.label}</span>
+          <div className="cc-body">
+            {view === "bar" && (
+              // Manus-style PiP: an always-visible small LIVE preview while the
+              // browser works. One iframe is mounted at a time (bar OR stage),
+              // so this never doubles the noVNC connection. Click to expand.
+              <button
+                className="cc-thumb"
+                type="button"
+                onClick={() => setView("expanded")}
+                title="Espandi il computer"
+                aria-label="Espandi il computer"
+              >
+                <span className="cc-thumb-scaler">
+                  <iframe
+                    className="cc-thumb-frame"
+                    title="Anteprima computer (live)"
+                    src={src}
+                    tabIndex={-1}
+                  />
+                </span>
+                <span className="cc-thumb-expand">
+                  <Maximize2 size={13} />
+                </span>
+              </button>
+            )}
+            <div className="cc-plan">
+              <div className="cc-plan-head">
+                Avanzamento attività
+                {steps.length > 0 && <span className="cc-plan-count">{steps.length}</span>}
+              </div>
+              <ul className="cc-plan-steps">
+                {steps.map((step, index) => (
+                  <li className={`cc-step ${step.status}`} key={index}>
+                    {step.status === "retry" ? (
+                      <RotateCcw size={13} />
+                    ) : (
+                      <Check size={13} />
+                    )}
+                    <span>{step.label}</span>
+                  </li>
+                ))}
+                <li className="cc-step running">
+                  <Loader2 size={13} className="spin" />
+                  <span>{steps.length === 0 ? "Avvio…" : "in corso…"}</span>
                 </li>
-              ))}
-              <li className="cc-step running">
-                <Loader2 size={13} className="spin" />
-                <span>{steps.length === 0 ? "Avvio…" : "in corso…"}</span>
-              </li>
-            </ul>
+              </ul>
+            </div>
           </div>
         )}
 
