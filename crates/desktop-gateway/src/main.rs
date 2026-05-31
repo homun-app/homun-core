@@ -49,7 +49,7 @@ use local_first_secrets::{
 };
 use local_first_desktop_gateway::{
     BuildPromptRequest, BuildPromptResponse, CancelGenerationRequest, ChatGenerateStreamRequest,
-    ChatMessage, ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot,
+    ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot,
     CommitContinuationResultRequest, CommitPromptResultRequest, SetThreadPinnedRequest,
     build_chat_runtime_prompt, compact_thread_title,
 };
@@ -80,8 +80,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     env, fs,
-    io::{Read, Write},
-    net::{SocketAddr, TcpStream},
+    net::SocketAddr,
     path::{Path as FsPath, PathBuf},
     process::Command,
     sync::{Arc, Mutex, MutexGuard},
@@ -95,7 +94,6 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 const TASK_EXECUTOR_WORKER_ID: &str = "desktop-gateway-background-worker";
 const TASK_EXECUTOR_MANUAL_WORKER_ID: &str = "desktop-gateway-manual-run";
 const TASK_EXECUTOR_POLL_INTERVAL_MS: u64 = 1_000;
-const RUNTIME_START_TIMEOUT_SECS: u64 = 120;
 
 #[derive(Clone)]
 struct AppState {
@@ -290,11 +288,6 @@ struct TaskExecutorStatusResponse {
     failure_count: u64,
 }
 
-#[derive(Debug, Deserialize)]
-struct SubmitOperationalPromptRequest {
-    user_message: ChatMessage,
-}
-
 struct TaskExecutionOutcome {
     completed: bool,
     blocked_reason: Option<String>,
@@ -332,7 +325,6 @@ struct BrowserSourceSummary {
     label: String,
     url: String,
     status: String,
-    excerpt: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -344,20 +336,6 @@ struct BrowserFormDraftSummary {
     reason: Option<String>,
     search_status: Option<String>,
     search_excerpt: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-struct BrowserSearchResult {
-    status: String,
-    excerpt: Option<String>,
-    snapshot: Option<Value>,
-}
-
-#[derive(Debug, Clone)]
-struct TrainStationSelectionResult {
-    filled_fields: Vec<String>,
-    failed_fields: Vec<String>,
-    latest_snapshot: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -446,14 +424,6 @@ fn operational_step(
         tool: tool.map(str::to_string),
         status: OperationalStepStatus::Pending,
     }
-}
-
-#[derive(Debug, Clone)]
-struct TrainSearchDraft {
-    origin: String,
-    destination: String,
-    date: Option<String>,
-    time: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -4737,7 +4707,6 @@ fn execute_browser_loop_read_only_task(
                     label: target.label.clone(),
                     url: output.final_observation.url.clone(),
                     status: status.to_string(),
-                    excerpt: Some(excerpt.clone()),
                 });
                 form_drafts.push(BrowserFormDraftSummary {
                     label: target.label.clone(),
@@ -4799,7 +4768,6 @@ fn execute_browser_loop_read_only_task(
                     label: target.label.clone(),
                     url: target.url.clone(),
                     status: "failed".to_string(),
-                    excerpt: None,
                 });
                 append_task_progress_checkpoint(
                     state,
@@ -5904,36 +5872,6 @@ async fn runtime_model() -> Json<ActiveModelResponse> {
 /// the feature so it can name what the router *would* load.
 const DEFAULT_LOCAL_MISTRALRS_MODEL: &str = "Qwen/Qwen3-4B";
 
-/// Loads the mistral.rs in-process model as a router, or returns `None` (with a
-/// logged reason) so the caller can fall back to MLX.
-#[cfg(feature = "local-mistralrs")]
-fn try_build_mistralrs_router() -> Option<ModelRouter> {
-    let model = env::var("LOCAL_FIRST_INFERENCE_MODEL")
-        .unwrap_or_else(|_| DEFAULT_LOCAL_MISTRALRS_MODEL.to_string());
-    let context_window = env::var("LOCAL_FIRST_INFERENCE_CONTEXT_WINDOW")
-        .ok()
-        .and_then(|value| value.parse::<u32>().ok())
-        .unwrap_or(32_768);
-    let descriptor = CapabilityDescriptor {
-        id: format!("mistralrs:{model}"),
-        locality: Locality::Local,
-        // Text-only for now; vision (analyze_image) is not wired through this provider yet.
-        supports_vision: false,
-        supports_tools: true,
-        context_window,
-        approx_tokens_per_second: None,
-    };
-    match local_first_inference::MistralRsProvider::load(descriptor, model) {
-        Ok(provider) => {
-            Some(ModelRouter::new(PrivacyPolicy::local_only()).with_provider(Box::new(provider)))
-        }
-        Err(error) => {
-            eprintln!("[inference] mistral.rs load failed ({error}); falling back to MLX backend");
-            None
-        }
-    }
-}
-
 fn loop_output_excerpt(output: &Value, fallback_excerpt: &str) -> String {
     let rendered = serde_json::to_string_pretty(output).unwrap_or_default();
     if rendered.trim().is_empty() || rendered == "{}" {
@@ -6199,52 +6137,6 @@ async fn ensure_runtime_available(_state: &AppState) -> Result<(), GatewayError>
 fn ensure_runtime_available_for_task(_state: &AppState) -> Result<(), LocalTaskExecutionError> {
     // MLX/Gemma local runtime removed — nothing to start before the browser loop.
     Ok(())
-}
-
-async fn runtime_health_ok(state: &AppState) -> bool {
-    state
-        .http
-        .get(format!("{}/health", state.gemma_runtime_url))
-        .send()
-        .await
-        .is_ok_and(|response| response.status().is_success())
-}
-
-fn runtime_health_ok_blocking(state: &AppState) -> bool {
-    runtime_health_ok_with_std_http(&state.gemma_runtime_url)
-}
-
-fn runtime_health_ok_with_std_http(runtime_url: &str) -> bool {
-    let Some((host, port)) = parse_loopback_http_host_port(runtime_url) else {
-        return false;
-    };
-    let Ok(mut stream) = TcpStream::connect((host.as_str(), port)) else {
-        return false;
-    };
-    let _ = stream.set_read_timeout(Some(StdDuration::from_secs(2)));
-    let _ = stream.set_write_timeout(Some(StdDuration::from_secs(2)));
-    let request =
-        format!("GET /health HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\n\r\n");
-    if stream.write_all(request.as_bytes()).is_err() {
-        return false;
-    }
-    let mut response = [0u8; 64];
-    let Ok(read) = stream.read(&mut response) else {
-        return false;
-    };
-    std::str::from_utf8(&response[..read])
-        .is_ok_and(|text| text.starts_with("HTTP/1.1 200") || text.starts_with("HTTP/1.0 200"))
-}
-
-fn parse_loopback_http_host_port(runtime_url: &str) -> Option<(String, u16)> {
-    let without_scheme = runtime_url
-        .trim()
-        .trim_end_matches('/')
-        .strip_prefix("http://")?;
-    let host_port = without_scheme.split('/').next().unwrap_or(without_scheme);
-    let (host, port) = host_port.rsplit_once(':')?;
-    let port = port.parse::<u16>().ok()?;
-    Some((host.to_string(), port))
 }
 
 fn runtime_control_snapshot(state: &AppState) -> Result<RuntimeControlSnapshot, GatewayError> {
@@ -7132,45 +7024,6 @@ fn browser_targets_for_goal(goal: &str) -> Vec<BrowserTarget> {
 }
 
 fn operational_plan_for_goal(goal: &str, task_kind: &str) -> OperationalPlan {
-    let is_train = train_search_draft_for_goal(goal).is_some();
-    if is_train {
-        return OperationalPlan {
-            objective: task_goal_summary(goal),
-            intent_type: OperationalIntentType::Transactional,
-            autonomy: OperationalAutonomy::AutomaticUntilGate,
-            tools: vec!["browser".to_string()],
-            steps: train_operational_plan_steps(goal),
-            constraints: vec![
-                "Non fare login.".to_string(),
-                "Non inserire dati passeggero o dati sensibili.".to_string(),
-                "Non selezionare una corsa finale senza scelta utente.".to_string(),
-                "Non acquistare e non pagare.".to_string(),
-            ],
-            success_criteria: vec![
-                "Almeno una opzione treno reale e leggibile e' stata estratta.".to_string(),
-                "La risposta include fonte, orario e prossimo gate utente.".to_string(),
-            ],
-            stop_conditions: vec![
-                "Login richiesto.".to_string(),
-                "Pagamento/acquisto richiesto.".to_string(),
-                "Captcha o blocco anti-bot non superabile in modo locale sicuro.".to_string(),
-            ],
-            approval_gates: vec![
-                "Uso browser e compilazione form read-only.".to_string(),
-                "Login, scelta corsa, dati passeggero, invio finale o pagamento richiedono nuova conferma."
-                    .to_string(),
-            ],
-            data_schema: vec![
-                "operator".to_string(),
-                "departure_time".to_string(),
-                "arrival_time_or_duration".to_string(),
-                "changes".to_string(),
-                "price".to_string(),
-                "source_url".to_string(),
-            ],
-        };
-    }
-
     let needs_browser = task_kind == "browser_task";
     OperationalPlan {
         objective: task_goal_summary(goal),
@@ -7215,74 +7068,6 @@ fn operational_plan_for_goal(goal: &str, task_kind: &str) -> OperationalPlan {
         approval_gates: Vec::new(),
         data_schema: Vec::new(),
     }
-}
-
-fn train_operational_plan_steps(goal: &str) -> Vec<OperationalPlanStep> {
-    let mut steps = vec![operational_step(
-        "understand_request",
-        "Comprendere richiesta",
-        "Estrarre tratta, data, orario indicativo e vincolo di non acquistare. Check: origin, destination, date e time sono disponibili prima di aprire il browser.",
-        None,
-    )];
-
-    for target in browser_targets_for_goal(goal) {
-        let open_id = source_step_id(&target.label, "open");
-        steps.push(operational_step(
-            open_id,
-            format!("Aprire {}", target.label),
-            format!(
-                "Aprire {} in browser locale e salvare URL finale/snapshot redatto. Fonte: {}",
-                target.label, target.url
-            ),
-            Some("browser"),
-        ));
-
-        if is_train_operator(&target.label) {
-            steps.push(operational_step(
-                source_step_id(&target.label, "fill"),
-                format!("Compilare {}", target.label),
-                "Inserire partenza, arrivo, data e ora nei campi riconoscibili. Check: i campi compilati devono essere riportati nel checkpoint.",
-                Some("browser"),
-            ));
-            steps.push(operational_step(
-                source_step_id(&target.label, "search"),
-                format!("Cercare risultati su {}", target.label),
-                "Avviare solo un controllo di ricerca sicuro. Vietato premere acquisto, login, pagamento o selezione definitiva.",
-                Some("browser"),
-            ));
-            steps.push(operational_step(
-                source_step_id(&target.label, "extract"),
-                format!("Estrarre opzioni da {}", target.label),
-                "Estrarre righe con operatore/treno, partenza, arrivo o durata e fonte. Se non ci sono righe affidabili, segnare lo step bloccato.",
-                Some("browser"),
-            ));
-        }
-    }
-
-    steps.push(operational_step(
-        "consolidate_options",
-        "Consolidare opzioni",
-        "Unire le opzioni affidabili, rimuovere duplicati e ordinare per vicinanza all'orario richiesto.",
-        None,
-    ));
-    steps.push(operational_step(
-        "answer_and_next_gate",
-        "Rispondere e chiedere scelta",
-        "Mostrare opzioni ordinate e chiedere quale procedere a prenotare. Prima di login, dati passeggero o pagamento serve nuova conferma.",
-        None,
-    ));
-    steps
-}
-
-fn source_step_id(label: &str, action: &str) -> String {
-    format!("source_{}_{}", slug_label(label), action)
-}
-
-fn slug_label(label: &str) -> String {
-    normalize_for_match(label)
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join("_")
 }
 
 fn operational_plan_payload(plan: &OperationalPlan) -> Value {
@@ -7391,17 +7176,6 @@ fn browser_url_for_goal(goal: &str) -> String {
     format!("https://duckduckgo.com/?q={}", url_encode(goal))
 }
 
-fn is_train_operator(label: &str) -> bool {
-    matches!(label, "TrovaTreno" | "Trenitalia" | "Italo")
-}
-
-/// Train specialization REMOVED (user directive): there is no train-specific
-/// path and no keyword activation. The model decides where to go from the goal;
-/// the generic observe-act loop handles every request. Always `None`, so all the
-/// downstream train-navigation branches stay dormant.
-fn train_search_draft_for_goal(_goal: &str) -> Option<TrainSearchDraft> {
-    None
-}
 
 
 fn browser_form_draft_payload(draft: &BrowserFormDraftSummary) -> Value {
@@ -7414,32 +7188,6 @@ fn browser_form_draft_payload(draft: &BrowserFormDraftSummary) -> Value {
         "search_status": draft.search_status,
         "search_excerpt": draft.search_excerpt,
     })
-}
-
-struct TrainStationAutocompleteTarget {
-    field_label: String,
-    input_ref: String,
-    query: String,
-    preferred_names: Vec<String>,
-}
-
-fn normalize_for_match(value: &str) -> String {
-    value
-        .to_lowercase()
-        .chars()
-        .map(|character| match character {
-            'à' | 'á' | 'â' | 'ä' => 'a',
-            'è' | 'é' | 'ê' | 'ë' => 'e',
-            'ì' | 'í' | 'î' | 'ï' => 'i',
-            'ò' | 'ó' | 'ô' | 'ö' => 'o',
-            'ù' | 'ú' | 'û' | 'ü' => 'u',
-            character if character.is_alphanumeric() => character,
-            _ => ' ',
-        })
-        .collect::<String>()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 fn url_encode(value: &str) -> String {
@@ -7514,15 +7262,6 @@ fn split_binary_expression(expression: &str) -> Option<(&str, char, &str)> {
         }
     }
     None
-}
-
-fn operational_task_acknowledgement(_prompt: &str) -> String {
-    // Generic ack (no keyword branches). What the task actually does is driven by
-    // the model/Brain plan, not by sniffing the prompt for "treno"/"browser"/etc.
-    "Ho capito. Avvio un task locale e procedo fino al prossimo punto che richiede \
-una conferma esplicita: mi fermo prima di login, dati personali, invii, acquisti o \
-pagamenti."
-        .to_string()
 }
 
 fn task_goal_summary(goal: &str) -> String {
@@ -8469,8 +8208,6 @@ mod tests {
         browser_targets_for_goal,
         browser_url_for_goal,
         evaluate_simple_arithmetic,
-        operational_task_acknowledgement,
-        parse_loopback_http_host_port,
         redact_sensitive_text,
         runtime_logs_unavailable_message,
         task_effective_goal,
@@ -8492,7 +8229,6 @@ mod tests {
         mcp_provider_slug,
         sanitize_wiki_filename,
         task_queue_response,
-        train_search_draft_for_goal,
         wiki_title_from_text,
     };
     use local_first_capabilities::{CapabilityCallResult, ProviderId as CapProviderId};
@@ -8872,7 +8608,6 @@ mod tests {
                 targets[0].url.starts_with("https://duckduckgo.com/?q="),
                 "goal: {goal}"
             );
-            assert!(train_search_draft_for_goal(goal).is_none(), "goal: {goal}");
         }
     }
 
@@ -8944,35 +8679,6 @@ mod tests {
         assert!(effective.contains("voli"));
         assert!(effective.contains("10 giugno"));
         assert!(effective.contains("non acquistare"));
-    }
-
-    #[test]
-    fn parses_loopback_runtime_health_url_without_reqwest_blocking_runtime() {
-        assert_eq!(
-            parse_loopback_http_host_port("http://127.0.0.1:8765"),
-            Some(("127.0.0.1".to_string(), 8765))
-        );
-        assert_eq!(
-            parse_loopback_http_host_port("http://localhost:8765/health"),
-            Some(("localhost".to_string(), 8765))
-        );
-        assert_eq!(
-            parse_loopback_http_host_port("https://127.0.0.1:8765"),
-            None
-        );
-    }
-
-    #[test]
-    fn operational_task_acknowledgement_is_generic_and_keyword_free() {
-        // De-gemma: the ack must be the SAME regardless of prompt keywords (no
-        // treno/browser branches) and keep the safety promise.
-        let a = operational_task_acknowledgement("Devo prenotare un treno Napoli Milano");
-        let b = operational_task_acknowledgement("apri il browser e cerca opzioni");
-        let c = operational_task_acknowledgement("qualunque altra cosa");
-        assert_eq!(a, b);
-        assert_eq!(b, c);
-        assert!(a.contains("conferma esplicita"));
-        assert!(a.contains("pagamenti"));
     }
 
     fn model_inputs(backend: &str) -> ActiveModelInputs {
