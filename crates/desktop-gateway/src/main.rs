@@ -1256,6 +1256,14 @@ e NON ripetere la stessa ricerca.\n\
 5. SINTETIZZA: appena ricevi il risultato del browser, scrivi la risposta finale \
 all'utente. Se una fonte è risultata bloccata/vuota, dillo con onestà.\n\
 \n\
+OBIETTIVO AUTO-CONTENUTO (fondamentale): il browser NON conosce i messaggi \
+precedenti. Ogni obiettivo di browse_web deve contenere TUTTI i parametri già \
+risolti nella conversazione. Anche nei follow-up brevi (es. l'utente dice \"cerca \
+anche su easyJet\" o \"e in treno?\"): NON passare \"cerca su easyJet\" da solo — \
+passa l'obiettivo completo, es. \"Cerca su easyJet i voli da Milano a Napoli del 10 \
+giugno 2026, solo andata; riporta orari, durata, scali, prezzo\". Ripeti sempre \
+tratta/luogo, data con anno e vincoli.\n\
+\n\
 Viaggi: se l'utente NON chiede esplicitamente il ritorno, cerca SOLO ANDATA \
 (one-way). Un passeggero salvo diversa indicazione.\n\
 Quando riporti risultati (voli, treni, hotel, ...), sii ESAUSTIVO: per ogni opzione \

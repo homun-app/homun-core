@@ -268,11 +268,11 @@ How to work:
 - Make progress one action at a time. Use "Recent actions" to see what already happened and what changed; build on it, and do not repeat an action that did not change the page — try a different element or approach instead.
 - Act only on refs present in the CURRENT snapshot. For an autocomplete/combobox field, use "type" with the full value — it confirms the suggestion by keyboard (do not "fill" it, and do not wait for a separate suggestion to click).
 - The goal may state SUCCESS CRITERIA (what data means "done": which fields and how many options) and an ordered list of candidate SOURCES. Treat the criteria as your definition of done, and work ONE source at a time in the given order.
-- When the page shows the data the criteria ask for (e.g. flight/train/hotel options with times or prices), you are DONE: read EVERY visible option and put them ALL into output.options — each with departure/arrival time, duration, stops/changes, operator and price if shown — then output "complete". Extract from the snapshot you already have.
+- When the page shows the data the criteria ask for (e.g. flight/train/hotel options with times or prices), you are DONE: read EVERY visible option and put them ALL into output.options. For each option ALWAYS capture the AIRLINE/operator name and the departure+arrival times (plus duration, stops/changes, price) — these are required, not optional. If the current results page does not show the airline/operator for each option, that source is INCOMPLETE: scroll/expand to find it, or fall back to a source that lists it. Then output "complete". Extract from the snapshot you already have.
 - Once you reach a results page for the CURRENT source, STAY there: do NOT click into a single result and do NOT drift to random sites. If results look partial/still loading, use "wait" (timeoutMs ~3000) or "scroll", then re-observe and extract.
-- You may go DIRECTLY to a source with the "navigate" action (navigate{{url}}) instead of clicking through search results — prefer this for the sources named in the goal.
+- You may go DIRECTLY to a source with the navigate action — kind exactly "navigate" with a "url" field, e.g. {{"kind":"navigate","url":"https://www.kayak.it/flights/MXP-NAP/2026-06-10","step":"Apro i risultati"}} — instead of clicking through search results; prefer this for the sources named in the goal. (The kind is the word "navigate", NOT "navigate{{url}}".)
 - STRONGLY prefer a DEEP-LINK results URL that already encodes the query (origin, destination, date) over a site's homepage — it lands straight on results in 1-2 steps, while a homepage needs many steps to fill a form and may exhaust your budget. E.g. a flights site results path like ".../flights/MXP-NAP/2026-06-10" is far better than the homepage. Build such a URL when you know the pattern; only fall back to filling a search form when you don't.
-- DELIBERATE FALLBACK (not wandering): if the CURRENT source is blocked (captcha/anti-bot) OR clearly has no data matching the criteria after a fair attempt, use navigate{{url}} to go straight to the NEXT source listed in the goal. Only switch sites for this reason, never to a random one.
+- DELIBERATE FALLBACK (not wandering): if the CURRENT source is blocked (captcha/anti-bot) OR clearly has no data matching the criteria after a fair attempt, use a navigate action to go straight to the NEXT source listed in the goal. Only switch sites for this reason, never to a random one.
 - If a source is a CAPTCHA / "verify you are human" / anti-bot challenge (very few refs, a challenge widget), do not fight it: treat it as blocked and fall back to the NEXT listed source. If ALL listed sources are exhausted without meeting the criteria, output "blocked" with a clear reason and report whatever results you already gathered earlier.
 - In every action include "step": a SHORT phrase IN ITALIAN describing what you are doing from the USER's point of view, not the mechanics. Good: "Inserisco l'aeroporto di partenza", "Seleziono la data", "Leggo i risultati". Bad: "clic su e456", "press Enter", "type".
 
@@ -283,7 +283,7 @@ Output exactly ONE JSON object, one of:
 - {{"decision":"complete","output":{{"summary":"...","options":[...]}}}}
 - {{"decision":"blocked","reason":"..."}}
 
-Action kinds: navigate{{url}} · click{{ref}} · type{{ref,text}} · fill{{fields:[{{ref,type,value}}]}} · press{{key}} · scroll{{direction,amount}} · hover{{ref}} · scrollIntoView{{ref}} · wait{{text,timeoutMs}}
+Action kinds (the "kind" is exactly the word before the parenthesis): navigate(url) · click(ref) · type(ref,text) · fill(fields:[{{ref,type,value}}]) · press(key) · scroll(direction,amount) · hover(ref) · scrollIntoView(ref) · wait(text,timeoutMs)
 
 {action_frame}
 
