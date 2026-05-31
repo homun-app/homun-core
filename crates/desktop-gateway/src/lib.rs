@@ -130,16 +130,6 @@ pub struct CommitContinuationResultRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct GemmaGenerateStreamRequest {
-    pub prompt: String,
-    pub max_tokens: u32,
-    pub temperature: f64,
-    pub wait_if_busy: bool,
-    pub request_timeout_seconds: Option<f64>,
-    pub request_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PromptCompressionSummary {
     pub input_messages: usize,
     pub input_chars: usize,
@@ -183,26 +173,6 @@ pub fn build_chat_runtime_prompt(request: &BuildPromptRequest) -> BuildPromptRes
             compression.redacted,
             &compression.metrics,
         ),
-    }
-}
-
-pub fn build_gemma_generate_stream_request(
-    request: &ChatGenerateStreamRequest,
-) -> GemmaGenerateStreamRequest {
-    let prompt = build_chat_runtime_prompt(&BuildPromptRequest {
-        prompt: request.prompt.clone(),
-        context: request.context.clone(),
-        max_context_chars: request.max_context_chars,
-    })
-    .runtime_prompt;
-
-    GemmaGenerateStreamRequest {
-        prompt,
-        max_tokens: request.max_tokens.clamp(1, 4_096),
-        temperature: request.temperature.clamp(0.0, 2.0),
-        wait_if_busy: request.wait_if_busy,
-        request_timeout_seconds: request.request_timeout_seconds,
-        request_id: request.request_id.clone(),
     }
 }
 
@@ -448,27 +418,4 @@ mod tests {
         assert!(response.compression.output_chars <= 500);
     }
 
-    #[test]
-    fn generate_stream_request_builds_runtime_payload_with_budgeted_context() {
-        let payload = build_gemma_generate_stream_request(&ChatGenerateStreamRequest {
-            request_id: "req_1".to_string(),
-            prompt: "dimmene un'altra".to_string(),
-            thread_id: None,
-            context: vec![ChatContextMessage {
-                role: ChatContextRole::Assistant,
-                text: "Perche' gli scienziati preferiscono gli occhielli?".to_string(),
-            }],
-            max_context_chars: Some(1_000),
-            max_tokens: 9_999,
-            temperature: 9.0,
-            wait_if_busy: true,
-            request_timeout_seconds: Some(120.0),
-        });
-
-        assert_eq!(payload.request_id, "req_1");
-        assert_eq!(payload.max_tokens, 4_096);
-        assert_eq!(payload.temperature, 2.0);
-        assert!(payload.prompt.contains("Contesto recente della chat"));
-        assert!(payload.prompt.contains("Utente: dimmene un'altra"));
-    }
 }
