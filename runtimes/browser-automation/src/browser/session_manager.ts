@@ -489,6 +489,15 @@ export class BrowserSessionManager {
     this.context =
       this.attachedBrowser.contexts()[0] ??
       (await this.attachedBrowser.newContext({ acceptDownloads: true }));
+    // The contained browser is PERSISTENT (it survives across tasks), so pages
+    // from previous runs pile up (we saw 200+). Start every task from a clean
+    // slate: close all existing pages so the agent isn't acting on, or showing,
+    // stale tabs from earlier requests. The loop opens its own "primary" page.
+    for (const context of this.attachedBrowser.contexts()) {
+      for (const page of context.pages()) {
+        await page.close().catch(() => undefined);
+      }
+    }
     this.activeProfile = "user";
     return { status: "started", profile: "user" };
   }
