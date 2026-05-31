@@ -1,10 +1,27 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronUp, Maximize2, Minimize2, Monitor } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+  Maximize2,
+  Minimize2,
+  Monitor,
+  RotateCcw,
+} from "lucide-react";
 import { coreBridge, type ContainedComputerLive } from "../lib/coreBridge";
 
+const IDLE: ContainedComputerLive = {
+  enabled: false,
+  novnc_url: null,
+  active: false,
+  activity: null,
+  steps: [],
+};
+
 // Manus-style: a short card DOCKED above the prompt (same width), shown ONLY
-// while the contained browser is actually working. Collapsed = a clean status
-// bar; expand to the live view; fullscreen for the overlay. Hidden when idle.
+// while the contained browser is working. Header + live "Avanzamento attività"
+// checklist; expand to the live view; fullscreen for the overlay. Hidden idle.
 export function ChatComputerPanel() {
   const [live, setLive] = useState<ContainedComputerLive | null>(null);
   // "bar" (collapsed, default) | "expanded" (live inline) | "full" (overlay)
@@ -18,11 +35,11 @@ export function ChatComputerPanel() {
         const value = await coreBridge.containedComputerLive();
         if (!cancelled) setLive(value);
       } catch {
-        if (!cancelled) setLive({ enabled: false, novnc_url: null, active: false, activity: null });
+        if (!cancelled) setLive(IDLE);
       }
     };
     void poll();
-    pollRef.current = setInterval(() => void poll(), 2000);
+    pollRef.current = setInterval(() => void poll(), 1500);
     return () => {
       cancelled = true;
       if (pollRef.current) clearInterval(pollRef.current);
@@ -45,6 +62,7 @@ export function ChatComputerPanel() {
   const activity = live.activity?.trim() || "sta lavorando…";
   const fullscreen = view === "full";
   const showStage = view === "expanded" || fullscreen;
+  const steps = live.steps ?? [];
 
   return (
     <>
@@ -89,6 +107,32 @@ export function ChatComputerPanel() {
             {view === "bar" ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
           </button>
         </header>
+
+        {!fullscreen && (
+          <div className="cc-plan">
+            <div className="cc-plan-head">
+              Avanzamento attività
+              {steps.length > 0 && <span className="cc-plan-count">{steps.length}</span>}
+            </div>
+            <ul className="cc-plan-steps">
+              {steps.map((step, index) => (
+                <li className={`cc-step ${step.status}`} key={index}>
+                  {step.status === "retry" ? (
+                    <RotateCcw size={13} />
+                  ) : (
+                    <Check size={13} />
+                  )}
+                  <span>{step.label}</span>
+                </li>
+              ))}
+              <li className="cc-step running">
+                <Loader2 size={13} className="spin" />
+                <span>{steps.length === 0 ? "Avvio…" : "in corso…"}</span>
+              </li>
+            </ul>
+          </div>
+        )}
+
         {showStage && (
           <div className="cc-stage">
             <iframe

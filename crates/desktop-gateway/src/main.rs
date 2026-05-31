@@ -1359,13 +1359,13 @@ async fn stream_chat_via_openai(
                         // sidecars onto the same browser and pile up tabs/state.
                         let _browse_guard = browse_web_lock().lock().await;
                         // Publish the live activity so the UI shows a truthful
-                        // "● LIVE · <goal>" + PiP only while the browser is working.
-                        set_browser_activity(Some(effective.clone()));
+                        // "● LIVE · <goal>" + step checklist only while working.
+                        begin_browser_activity(effective.clone());
                         let outcome = tokio::task::spawn_blocking(move || {
                             execute_browse_web_tool(&st, &effective)
                         })
                         .await;
-                        set_browser_activity(None);
+                        end_browser_activity();
                         match outcome {
                             Ok(Ok(text)) => text,
                             Ok(Err(error)) => {
@@ -1439,23 +1439,94 @@ fn browse_web_lock() -> &'static tokio::sync::Mutex<()> {
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
-/// Live browser activity: `Some(goal)` while a `browse_web` is actually running,
-/// `None` when idle. Drives a TRUTHFUL "● LIVE" + PiP in the UI (no fake "live"
-/// when nothing is happening).
-fn browser_activity_cell() -> &'static std::sync::RwLock<Option<String>> {
-    static CELL: std::sync::OnceLock<std::sync::RwLock<Option<String>>> =
+/// One step of the live activity checklist (Manus-style "Avanzamento attività").
+#[derive(Debug, Clone, Serialize)]
+struct BrowserStepView {
+    label: String,
+    status: String,
+}
+
+/// Live browser activity: the current goal + the steps executed so far. `Some`
+/// while a `browse_web` is actually running, `None` when idle. Drives a truthful
+/// "● LIVE" + the step checklist in the UI.
+#[derive(Debug, Clone, Default)]
+struct BrowserActivityState {
+    goal: String,
+    steps: Vec<BrowserStepView>,
+}
+
+fn browser_activity_cell() -> &'static std::sync::RwLock<Option<BrowserActivityState>> {
+    static CELL: std::sync::OnceLock<std::sync::RwLock<Option<BrowserActivityState>>> =
         std::sync::OnceLock::new();
     CELL.get_or_init(|| std::sync::RwLock::new(None))
 }
 
-fn set_browser_activity(value: Option<String>) {
+fn begin_browser_activity(goal: String) {
     if let Ok(mut guard) = browser_activity_cell().write() {
-        *guard = value;
+        *guard = Some(BrowserActivityState {
+            goal,
+            steps: Vec::new(),
+        });
     }
 }
 
-fn current_browser_activity() -> Option<String> {
+fn push_browser_step(label: String, status: &str) {
+    if let Ok(mut guard) = browser_activity_cell().write() {
+        if let Some(state) = guard.as_mut() {
+            // Cap the visible log so a long run can't grow unbounded.
+            if state.steps.len() < 60 {
+                state.steps.push(BrowserStepView {
+                    label,
+                    status: status.to_string(),
+                });
+            }
+        }
+    }
+}
+
+fn end_browser_activity() {
+    if let Ok(mut guard) = browser_activity_cell().write() {
+        *guard = None;
+    }
+}
+
+fn current_browser_activity() -> Option<BrowserActivityState> {
     browser_activity_cell().read().ok().and_then(|guard| guard.clone())
+}
+
+/// Human-readable label for a loop iteration, for the activity checklist.
+fn browser_step_label(iteration: &local_first_browser_automation::BrowserLoopIteration) -> String {
+    let action = &iteration.action;
+    let kind = action
+        .get("kind")
+        .or_else(|| action.get("action"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("azione");
+    let verb = match kind {
+        "navigate" | "open" | "goto" => "Navigo",
+        "click" => "Clic",
+        "type" | "fill" | "fill_form" => "Digito",
+        "scroll" | "scroll_into_view" => "Scorro",
+        "wait" => "Attendo",
+        "snapshot" => "Osservo",
+        "select" | "select_option" => "Seleziono",
+        "hover" => "Passo sopra",
+        "planner_validation_error" => "Riprovo",
+        other => other,
+    };
+    let detail = action
+        .get("ref")
+        .or_else(|| action.get("target"))
+        .or_else(|| action.get("text"))
+        .or_else(|| action.get("url"))
+        .and_then(|value| value.as_str())
+        .map(|value| value.chars().take(60).collect::<String>())
+        .unwrap_or_default();
+    if detail.is_empty() {
+        format!("Passo {}: {verb}", iteration.iteration)
+    } else {
+        format!("Passo {}: {verb} · {detail}", iteration.iteration)
+    }
 }
 
 /// Executes the `browse_web` tool: materializes a browser task for the goal and
@@ -5129,6 +5200,15 @@ fn execute_browser_loop_read_only_task(
         .with_max_iterations(browser_loop_max_iterations())
         .with_plan(browser_loop_plan_for_source(draft.as_ref()));
         let loop_result = runner.run_with_iteration_observer(&request, |iteration| {
+            // Live checklist for the Computer panel ("Avanzamento attività").
+            push_browser_step(
+                browser_step_label(iteration),
+                if iteration.status == "no_progress" || iteration.status == "stale_ref_rejected" {
+                    "retry"
+                } else {
+                    "done"
+                },
+            );
             append_task_progress_checkpoint(
                 state,
                 task,
@@ -7461,22 +7541,25 @@ struct ContainedComputerLiveResponse {
     active: bool,
     /// The current activity (goal) when active, for the panel subtitle.
     activity: Option<String>,
+    /// Steps executed so far — the live checklist ("Avanzamento attività").
+    steps: Vec<BrowserStepView>,
 }
 
 /// Reports whether the contained computer's live view is available, where to
-/// embed it, and whether the browser is working RIGHT NOW (so the UI shows a
-/// truthful LIVE + PiP only when active). Polled by the desktop panel.
+/// embed it, whether the browser is working RIGHT NOW, and the live step
+/// checklist. Polled by the desktop panel.
 async fn contained_computer_live() -> Json<ContainedComputerLiveResponse> {
     let novnc_url = resolve_contained_computer_novnc(
         contained_computer_cdp_endpoint().is_some(),
         env::var("LOCAL_FIRST_CONTAINED_COMPUTER_NOVNC").ok().as_deref(),
     );
-    let activity = current_browser_activity();
+    let activity_state = current_browser_activity();
     Json(ContainedComputerLiveResponse {
         enabled: novnc_url.is_some(),
         novnc_url,
-        active: activity.is_some(),
-        activity,
+        active: activity_state.is_some(),
+        activity: activity_state.as_ref().map(|state| state.goal.clone()),
+        steps: activity_state.map(|state| state.steps).unwrap_or_default(),
     })
 }
 

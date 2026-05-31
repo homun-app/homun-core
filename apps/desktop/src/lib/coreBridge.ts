@@ -369,6 +369,11 @@ export interface ComposioConnectResult {
   tools_cached: number;
 }
 
+export interface BrowserStep {
+  label: string;
+  status: string;
+}
+
 export interface ContainedComputerLive {
   enabled: boolean;
   novnc_url: string | null;
@@ -376,6 +381,8 @@ export interface ContainedComputerLive {
   active: boolean;
   /** Current activity (goal) when active. */
   activity: string | null;
+  /** Steps executed so far — the live "Avanzamento attività" checklist. */
+  steps: BrowserStep[];
 }
 
 export interface McpConnectResult {
