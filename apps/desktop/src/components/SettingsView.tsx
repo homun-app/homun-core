@@ -304,16 +304,71 @@ function RuntimePane({
 }) {
   const primary = runtimeControls[0] ?? null;
   const primaryHealth = health[0] ?? null;
+  const [models, setModels] = useState<string[]>([]);
+  const [active, setActive] = useState<string>("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const list = await coreBridge.runtimeModels();
+        if (!cancelled) {
+          setModels(list.available);
+          setActive(list.active ?? model?.model ?? "");
+        }
+      } catch {
+        /* leave empty → picker hidden */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [model]);
+
   return (
     <>
       <div className="set-card">
         <div className="set-card-top">
-          <span className="set-card-name">{model?.model ?? "Modello"}</span>
+          <span className="set-card-name">{active || model?.model || "Modello"}</span>
           <span className={`set-badge ${model?.capable ? "green" : "muted"}`}>
             {model?.capable ? "Capace" : "Locale"}
           </span>
         </div>
         <div className="set-card-divider" />
+        {models.length > 0 && (
+          <>
+            <div className="set-field-label">Modello attivo</div>
+            <select
+              className="set-input"
+              value={active}
+              disabled={saving}
+              onChange={async (event) => {
+                const next = event.target.value;
+                setActive(next);
+                setSaving(true);
+                try {
+                  await coreBridge.setRuntimeModel(next);
+                } catch {
+                  /* keep selection; backend will report on next chat */
+                } finally {
+                  setSaving(false);
+                }
+              }}
+              style={{ marginBottom: "var(--s3)" }}
+            >
+              {!models.includes(active) && active && <option value={active}>{active}</option>}
+              {models.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+            <p className="set-meter-sub">
+              La selezione si applica alla prossima chat (nessun riavvio).
+            </p>
+          </>
+        )}
         <div className="set-meter">
           <span className="k">
             <Globe size={15} /> Backend

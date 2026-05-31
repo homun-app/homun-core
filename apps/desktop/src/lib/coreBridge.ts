@@ -468,6 +468,20 @@ export interface CloseAllBrowsersResult {
   closed_tabs: number;
 }
 
+export interface RuntimeModelsList {
+  active: string | null;
+  backend: string;
+  available: string[];
+}
+
+async function electronRuntimeModels(): Promise<RuntimeModelsList> {
+  return gatewayGetJson<RuntimeModelsList>("/api/runtime/models");
+}
+
+async function electronSetRuntimeModel(model: string): Promise<{ active: string }> {
+  return gatewayPostJson<{ active: string }>("/api/runtime/model", { model });
+}
+
 async function electronSystemStatus(): Promise<SystemStatus> {
   return gatewayGetJson<SystemStatus>("/api/system/status");
 }
@@ -536,6 +550,8 @@ async function electronComposioConnections(): Promise<ComposioConnection[]> {
 export const coreBridge = {
   status: () => Promise.resolve(electronCoreStatus()),
   runtimeModel: () => electronRuntimeModel(),
+  runtimeModels: () => electronRuntimeModels(),
+  setRuntimeModel: (model: string) => electronSetRuntimeModel(model),
   containedComputerLive: () => electronContainedComputerLive(),
   systemStatus: () => electronSystemStatus(),
   closeAllBrowsers: () => electronCloseAllBrowsers(),
