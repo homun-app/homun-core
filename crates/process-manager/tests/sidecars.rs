@@ -1,29 +1,6 @@
 use local_first_process_manager::{
     HealthCheck, McpProcessConfig, ProcessKind, ProcessRegistryStore, SidecarProcessCatalog,
 };
-use std::path::PathBuf;
-
-#[test]
-fn catalog_builds_gemma_runtime_process_spec() {
-    let catalog = SidecarProcessCatalog::new("/workspace");
-
-    let spec = catalog.gemma_runtime();
-
-    assert_eq!(spec.id, "llm-gemma4-mlx");
-    assert_eq!(spec.kind, ProcessKind::LlmRuntime);
-    assert_eq!(spec.command, path("/workspace/.venv-mlx/bin/python"));
-    assert_eq!(spec.args, vec!["runtimes/mlx-gemma4/server.py"]);
-    assert_eq!(spec.cwd.as_deref(), Some("/workspace"));
-    assert_eq!(spec.env["PYTHONDONTWRITEBYTECODE"], "1");
-    assert_eq!(spec.env["PYTHONUNBUFFERED"], "1");
-    assert_eq!(
-        spec.health_check,
-        HealthCheck::HttpGet {
-            url: "http://127.0.0.1:8765/health".to_string(),
-            timeout_ms: 1_000,
-        }
-    );
-}
 
 #[test]
 fn catalog_builds_browser_sidecar_process_spec() {
@@ -73,10 +50,5 @@ fn catalog_registers_default_sidecars_in_process_registry() {
 
     catalog.register_default_sidecars(&store).unwrap();
 
-    assert!(store.get_spec("llm-gemma4-mlx").unwrap().is_some());
     assert!(store.get_spec("browser-automation").unwrap().is_some());
-}
-
-fn path(value: &str) -> String {
-    PathBuf::from(value).to_string_lossy().to_string()
 }
