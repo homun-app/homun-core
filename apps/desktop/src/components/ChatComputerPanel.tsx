@@ -1,11 +1,5 @@
 import { useEffect, useState } from "react";
-import {
-  ChevronDown,
-  ChevronRight,
-  Maximize2,
-  Minimize2,
-  Monitor,
-} from "lucide-react";
+import { Maximize2, Minimize2, Monitor, X } from "lucide-react";
 import { coreBridge, type ContainedComputerLive } from "../lib/coreBridge";
 
 interface ChatComputerPanelProps {
@@ -13,13 +7,14 @@ interface ChatComputerPanelProps {
   activity?: string | null;
 }
 
-// Manus-style inline "Computer": a polished, proportioned, collapsible live view
-// of the contained browser, pinned in the chat so the user SEES what the agent
-// is doing. Shown only when contained-computer mode is live.
+// Manus-style floating "Computer": a small fixed widget on the chat, COLLAPSED
+// by default to a pill, expandable to a floating card, and to fullscreen. Shows
+// the contained browser live without dominating the conversation. Rendered only
+// when contained-computer mode is live.
 export function ChatComputerPanel({ activity }: ChatComputerPanelProps) {
   const [live, setLive] = useState<ContainedComputerLive | null>(null);
-  const [open, setOpen] = useState(true);
-  const [fullscreen, setFullscreen] = useState(false);
+  // "pill" (default, collapsed) | "card" (floating) | "full" (overlay)
+  const [view, setView] = useState<"pill" | "card" | "full">("pill");
 
   useEffect(() => {
     let cancelled = false;
@@ -36,75 +31,88 @@ export function ChatComputerPanel({ activity }: ChatComputerPanelProps) {
     };
   }, []);
 
-  // Esc closes fullscreen.
   useEffect(() => {
-    if (!fullscreen) return;
+    if (view !== "full") return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setFullscreen(false);
+      if (e.key === "Escape") setView("card");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [fullscreen]);
+  }, [view]);
 
   if (!live?.enabled || !live.novnc_url) return null;
 
   const src = `${live.novnc_url}${live.novnc_url.includes("?") ? "&" : "?"}autoconnect=true&resize=scale&reconnect=true`;
-  const status = activity?.trim()
-    ? activity.trim()
-    : "Browser reale contenuto · pronto";
+  const status = activity?.trim() ? activity.trim() : "in attesa";
+
+  // Collapsed pill — the default resting state.
+  if (view === "pill") {
+    return (
+      <button
+        className="cc-pill"
+        type="button"
+        onClick={() => setView("card")}
+        title="Apri il Computer"
+      >
+        <Monitor size={15} />
+        <span>Computer</span>
+        <i className="cc-pill-dot" />
+      </button>
+    );
+  }
+
+  const fullscreen = view === "full";
 
   return (
-    <div
-      className={`chat-computer-panel${fullscreen ? " fullscreen" : ""}${open ? "" : " collapsed"}`}
-    >
-      <header className="chat-computer-head">
+    <>
+      {fullscreen && (
         <button
-          className="chat-computer-toggle"
+          className="cc-scrim"
           type="button"
-          onClick={() => setOpen((value) => !value)}
-          aria-expanded={open}
-          title={open ? "Comprimi" : "Espandi"}
-        >
-          {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-          <Monitor size={15} />
-          <strong>Computer</strong>
-          <span className="chat-computer-live">
-            <i className="chat-computer-dot" /> live
+          aria-label="Chiudi"
+          onClick={() => setView("card")}
+        />
+      )}
+      <div className={`cc-float${fullscreen ? " full" : ""}`}>
+        <header className="cc-float-head">
+          <span className="cc-float-title">
+            <Monitor size={15} />
+            <strong>Computer</strong>
+            <span className="cc-live">
+              <i className="cc-live-dot" /> live
+            </span>
           </span>
-        </button>
-        <span className="chat-computer-activity" title={status}>
-          {status}
-        </span>
-        <button
-          className="chat-computer-action"
-          type="button"
-          onClick={() => setFullscreen((value) => !value)}
-          title={fullscreen ? "Riduci" : "Schermo intero"}
-          aria-label={fullscreen ? "Riduci" : "Schermo intero"}
-        >
-          {fullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-        </button>
-      </header>
-
-      {(open || fullscreen) && (
-        <div className="chat-computer-stage">
+          <span className="cc-float-activity" title={status}>
+            {status}
+          </span>
+          <button
+            className="cc-icon-btn"
+            type="button"
+            onClick={() => setView(fullscreen ? "card" : "full")}
+            title={fullscreen ? "Riduci" : "Schermo intero"}
+            aria-label={fullscreen ? "Riduci" : "Schermo intero"}
+          >
+            {fullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+          </button>
+          <button
+            className="cc-icon-btn"
+            type="button"
+            onClick={() => setView("pill")}
+            title="Chiudi"
+            aria-label="Chiudi"
+          >
+            <X size={15} />
+          </button>
+        </header>
+        <div className="cc-stage">
           <iframe
-            className="chat-computer-frame"
+            className="cc-frame"
             title="Computer contenuto (live)"
             src={src}
             allow="clipboard-read; clipboard-write"
           />
         </div>
-      )}
-
-      {fullscreen && (
-        <button
-          className="chat-computer-scrim"
-          type="button"
-          aria-label="Chiudi schermo intero"
-          onClick={() => setFullscreen(false)}
-        />
-      )}
-    </div>
+      </div>
+    </>
   );
 }
