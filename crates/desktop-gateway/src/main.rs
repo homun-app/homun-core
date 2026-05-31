@@ -5518,6 +5518,14 @@ fn execute_browser_loop_read_only_task(
         .and_then(Value::as_u64)
         .unwrap_or_else(|| fs::metadata(&screenshot_path).map(|m| m.len()).unwrap_or(0));
 
+    // Gracefully close THIS worker's isolated browser context (and its tabs)
+    // before the sidecar is dropped/killed. The Drop impl only kills the child,
+    // so without this the context leaks in the contained Chromium and they pile
+    // up across tasks until the browser is overloaded (observed: 282 orphaned
+    // targets -> loop failures). With isolated contexts this close is surgical:
+    // it tears down exactly this worker's tabs, never another worker's.
+    let _ = client.call(BrowserMethod::Stop, serde_json::json!({}));
+
     let browser_success = completed_output.is_some()
         || (is_train_task && train_success_criteria_met(&source_summaries, &form_drafts));
     operational_plan.start_step("consolidate_options");
@@ -5811,7 +5819,11 @@ fn browser_loop_max_iterations() -> u32 {
         .ok()
         .and_then(|value| value.parse::<u32>().ok())
         .map(|value| value.clamp(1, 200))
-        .unwrap_or(16)
+        // 28: form-filling sources (Google Flights: consent wall + origin +
+        // dest + date + search) need ~8-12 steps just to reach results, so 16
+        // ran out before extracting. Deep-link sources finish in 1-2; this
+        // budget covers both while still bounding latency.
+        .unwrap_or(28)
 }
 
 /// Builds the inference router that drives the browser loop planner.
@@ -7696,6 +7708,17 @@ fn browser_sidecar_env(state: &AppState, task: &TaskRecord) -> Vec<(String, Stri
             "BROWSER_AUTOMATION_USER_CDP_ENDPOINT".to_string(),
             endpoint,
         ));
+        // Isolated context is OFF by default: measured that a fresh ("cold")
+        // context regresses reliability (no cookies -> consent/geo walls ->
+        // the worker wanders and burns iterations). The default warm shared
+        // context is far more reliable. Isolation is opt-in per worker (set via
+        // LOCAL_FIRST_BROWSER_PARALLEL when fanning out) — see parallel path.
+        if env::var("LOCAL_FIRST_BROWSER_ISOLATED_CONTEXT").as_deref() == Ok("1") {
+            env.push((
+                "BROWSER_AUTOMATION_ISOLATED_CONTEXT".to_string(),
+                "1".to_string(),
+            ));
+        }
     }
     env
 }

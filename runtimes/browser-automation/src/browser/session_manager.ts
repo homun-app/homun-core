@@ -23,6 +23,10 @@ export type BrowserSessionOptions = {
   artifactRoot?: string;
   uploadRoots?: string[];
   userCdpEndpoint?: string;
+  // When attaching over CDP, create a fresh isolated BrowserContext instead of
+  // reusing the shared default context. This is what lets multiple parallel
+  // workers drive the same contained Chromium without colliding on tabs/state.
+  isolatedContext?: boolean;
 };
 
 export type BrowserTab = {
@@ -92,7 +96,25 @@ export class BrowserSessionManager {
   }
 
   async stop(): Promise<void> {
-    await this.closeContext();
+    if (this.options.isolatedContext) {
+      // We own this context -> tear it down fully (closes our tabs + frees it).
+      await this.closeContext();
+    } else {
+      // Shared default context: close ONLY the tabs this session opened, so we
+      // don't leak them (tab accumulation), while preserving the warm context
+      // (cookies/consent) and any other session's tabs. Then disconnect our CDP
+      // link (does not kill the shared Chromium).
+      for (const [, state] of this.pages) {
+        if (!state.page.isClosed()) {
+          await state.page.close().catch(() => undefined);
+        }
+      }
+      this.pages.clear();
+      await this.attachedBrowser?.close().catch(() => undefined);
+      this.attachedBrowser = undefined;
+      this.context = undefined;
+      this.activeProfile = "assistant";
+    }
     // A full stop ends the session: forget how to recover targets too.
     this.targetMeta.clear();
   }
@@ -486,9 +508,13 @@ export class BrowserSessionManager {
       });
     }
     this.attachedBrowser = await chromium.connectOverCDP(this.options.userCdpEndpoint);
-    this.context =
-      this.attachedBrowser.contexts()[0] ??
-      (await this.attachedBrowser.newContext({ acceptDownloads: true }));
+    // Isolated mode: always create our OWN context so parallel workers don't
+    // share tabs/cookies with each other or the default window. We own it, so
+    // closeContext() tears down exactly our tabs (also fixes tab accumulation).
+    this.context = this.options.isolatedContext
+      ? await this.attachedBrowser.newContext({ acceptDownloads: true })
+      : (this.attachedBrowser.contexts()[0] ??
+        (await this.attachedBrowser.newContext({ acceptDownloads: true })));
     this.activeProfile = "user";
     return { status: "started", profile: "user" };
   }
