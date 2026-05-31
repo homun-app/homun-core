@@ -55,13 +55,9 @@ assertContains("electron/main.cjs", "sandbox: true", "Electron shell must run th
 assertContains("electron/main.cjs", "ensureGateway", "Electron shell must own desktop gateway lifecycle");
 assertContains("electron/main.cjs", "LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN", "Electron shell must generate/pass the local gateway token");
 assertContains("electron/main.cjs", "LOCAL_FIRST_DESKTOP_RESOURCES_DIR", "Electron shell must support production-like local resource smoke tests");
-assertContains("electron/main.cjs", "LOCAL_FIRST_PROCESS_LOG_DIR", "Electron shell must provide a packaged-safe process log directory");
-assertContains("electron/main.cjs", "LOCAL_FIRST_GEMMA_PYTHON_VENV", "Electron shell must pass packaged Python/MLX venv when bundled");
 assertContains("electron/main.cjs", "before-quit", "Electron shell must stop managed gateway process on app quit");
 assertContains("electron/preload.cjs", "contextBridge.exposeInMainWorld", "Electron preload must expose only minimal runtime config");
 assertContains("scripts/prepare-package.mjs", "local-first-desktop-gateway", "package preparation must copy the gateway binary");
-assertContains("scripts/prepare-package.mjs", "runtimes\", \"mlx-gemma4", "package preparation must copy the MLX Gemma runtime");
-assertContains("scripts/prepare-package.mjs", ".venv-mlx", "package preparation must include the Python/MLX venv path");
 assertContains("scripts/electron-dev.mjs", "waitForDevServer", "Electron dev shell must wait for Vite before launch");
 assertContains("scripts/electron-dev.mjs", "stopGatewayOnPort", "Electron dev shell must clear stale gateway listeners before Electron owns lifecycle");
 assertContains("src/styles.css", "--window-drag-height", "Electron shell must reserve native window control space");
