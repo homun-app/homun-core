@@ -1266,10 +1266,14 @@ tratta/luogo, data con anno e vincoli.\n\
 \n\
 Viaggi: se l'utente NON chiede esplicitamente il ritorno, cerca SOLO ANDATA \
 (one-way). Un passeggero salvo diversa indicazione.\n\
-Quando riporti risultati (voli, treni, hotel, ...), sii ESAUSTIVO: per ogni opzione \
-indica orario di partenza e arrivo, durata, scali/cambi, compagnia/operatore e \
-prezzo se disponibile; elenca più opzioni, non solo una. Rispondi in italiano, \
-chiaro e ordinato (tabella quando aiuta).",
+Quando riporti risultati (voli, treni, hotel, ...), sii ESAUSTIVO e SPECIFICO PER \
+RIGA: ogni opzione è una riga a sé, MAI fondere opzioni diverse in una riga \
+generica. Per i voli ogni riga DEVE indicare: compagnia aerea, aeroporto di \
+partenza specifico (es. Malpensa/Linate/Bergamo, non solo \"Milano\") e di arrivo, \
+orario di partenza e arrivo, durata, scali/cambi e prezzo. Se le opzioni sono di \
+compagnie o aeroporti diversi, le colonne Compagnia e Aeroporto sono OBBLIGATORIE \
+(non lasciare ambiguo a chi/da dove appartiene un prezzo). Usa una tabella e elenca \
+più opzioni, non solo una. Rispondi in italiano, chiaro e ordinato.",
         today = today_iso()
     );
     let system = system.as_str();
