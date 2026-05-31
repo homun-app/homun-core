@@ -352,37 +352,11 @@ export function ChatView({
     };
 
     try {
-      if (!visiblePrompt) {
-        setStreamStatus({
-          requestId,
-          phase: "thinking",
-          title: "Valuto il task locale",
-          detail: "Se la richiesta richiede azioni, passo direttamente all'executor.",
-        });
-        const operationalSnapshot = await coreBridge.submitOperationalPrompt(
-          thread.threadId,
-          {
-            id: userMessage.id,
-            role: "user",
-            text,
-            timestamp: userMessage.timestamp,
-            metadata: null,
-            attachments,
-          },
-        );
-        if (operationalSnapshot) {
-          setStreamStatus({
-            requestId,
-            phase: "thinking",
-            title: "Task locale creato",
-            detail: "Il Computer locale procedera' fino al prossimo punto di conferma.",
-          });
-          await refreshAfterChatSubmit();
-          setOptimisticMessages(null);
-          return;
-        }
-      }
-
+      // SOTA single agentic loop: every message goes through the model-driven
+      // streaming tool-calling chat. No keyword pre-route to a parallel
+      // operational/Brain path (that router was the de-gemma violation). The
+      // model decides — answer, call a tool (browse_web), and (next) delegate a
+      // durable multi-step task via a tool when it judges the work needs it.
       setOptimisticMessages([...promptMessages, streamingMessage]);
       resetStreamingState("");
       setStreamingAssistantId(streamingMessage.id);
