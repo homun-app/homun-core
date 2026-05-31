@@ -152,6 +152,17 @@ export function ChatView({
     [health],
   );
   const threadMessages = optimisticMessages ?? messages;
+  // What the agent is currently doing — the latest browse_web goal, surfaced in
+  // the Computer panel header so the user sees the activity, not just a screen.
+  const browserActivity = (() => {
+    for (let i = threadMessages.length - 1; i >= 0; i -= 1) {
+      const item = threadMessages[i];
+      if (item.role !== "assistant") continue;
+      const match = item.text?.match(/🔧 Uso il browser:\s*([^\n_]+)/);
+      if (match) return match[1].trim();
+    }
+    return null;
+  })();
   const activeApprovals = approvals.filter((approval) =>
     approval.requestedBy.includes(computerSessionId),
   );
@@ -986,7 +997,7 @@ export function ChatView({
         </div>
       </header>
 
-      <ChatComputerPanel />
+      <ChatComputerPanel activity={browserActivity} />
 
       <div className="thread-scroll" aria-label="Thread attivo" ref={conversationRef}>
         <div className="thread-content">
