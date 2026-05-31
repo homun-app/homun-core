@@ -51,6 +51,11 @@ pub struct BuildPromptResponse {
 pub struct ChatGenerateStreamRequest {
     pub request_id: String,
     pub prompt: String,
+    /// Chat thread this request belongs to. Lets browser work reuse a single
+    /// persistent browser session per thread (search → then book on the same
+    /// tab) instead of spawning a fresh one each call.
+    #[serde(default)]
+    pub thread_id: Option<String>,
     #[serde(default)]
     pub context: Vec<ChatContextMessage>,
     #[serde(default)]

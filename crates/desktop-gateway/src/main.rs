@@ -114,8 +114,19 @@ struct AppState {
     task_executor_status: Arc<Mutex<TaskExecutorStatus>>,
     task_executor_registry: TaskExecutorRegistry,
     browser_capability_client: Arc<Mutex<Option<BrowserAutomationClient<BrowserSidecarSession>>>>,
+    /// Persistent browser sessions keyed by chat thread_id, so a thread's
+    /// browse_web calls reuse one warm session (search → then book on the same
+    /// tab) instead of spawning a fresh sidecar each time. Reaped on idle and on
+    /// thread archive/close/delete.
+    browser_thread_sessions: Arc<Mutex<std::collections::HashMap<String, ThreadBrowserSession>>>,
     secret_store: Arc<EncryptedFileSecretStore<DevelopmentSecretKeyProvider>>,
     auth_token: Arc<str>,
+}
+
+/// A live, reusable browser session bound to a chat thread.
+struct ThreadBrowserSession {
+    client: BrowserAutomationClient<BrowserSidecarSession>,
+    last_used: std::time::Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -621,11 +632,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ))),
         task_executor_registry: TaskExecutorRegistry::with_defaults(),
         browser_capability_client: Arc::new(Mutex::new(None)),
+        browser_thread_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
         secret_store: Arc::new(open_gateway_secret_store()?),
         auth_token: resolve_gateway_auth_token()?.into(),
     };
     init_active_workspace_from_disk();
     start_task_executor_worker(state.clone());
+    spawn_thread_browser_session_reaper(state.clone());
     let chat_routes = Router::new()
         .route(
             "/api/chat/threads",
@@ -807,11 +820,14 @@ async fn archive_chat_thread(
     State(state): State<AppState>,
     Path(thread_id): Path<String>,
 ) -> Result<Json<ChatThreadSnapshot>, GatewayError> {
-    Ok(Json(
-        lock_store(&state)?
-            .set_status(&thread_id, "archived")
-            .map_err(GatewayError::store)?,
-    ))
+    let snapshot = lock_store(&state)?
+        .set_status(&thread_id, "archived")
+        .map_err(GatewayError::store)?;
+    // Archiving ends the thread → close its warm browser session.
+    let st = state.clone();
+    let tid = thread_id.clone();
+    let _ = tokio::task::spawn_blocking(move || close_thread_browser_session(&st, &tid)).await;
+    Ok(Json(snapshot))
 }
 
 async fn unarchive_chat_thread(
@@ -829,11 +845,14 @@ async fn delete_chat_thread(
     State(state): State<AppState>,
     Path(thread_id): Path<String>,
 ) -> Result<Json<ChatThreadSnapshot>, GatewayError> {
-    Ok(Json(
-        lock_store(&state)?
-            .delete_thread(&thread_id)
-            .map_err(GatewayError::store)?,
-    ))
+    let snapshot = lock_store(&state)?
+        .delete_thread(&thread_id)
+        .map_err(GatewayError::store)?;
+    // Deleting ends the thread → close its warm browser session.
+    let st = state.clone();
+    let tid = thread_id.clone();
+    let _ = tokio::task::spawn_blocking(move || close_thread_browser_session(&st, &tid)).await;
+    Ok(Json(snapshot))
 }
 
 async fn chat_messages(
@@ -1288,6 +1307,9 @@ più opzioni, non solo una. Rispondi in italiano, chiaro e ordinato.",
     let http = state.http.clone();
     let state_owned = state.clone();
     let temperature = request.temperature;
+    // Thread this chat belongs to: lets browser work reuse a persistent
+    // per-thread browser session (search → then book on the same tab).
+    let thread_id = request.thread_id.clone();
     tokio::spawn(async move {
         let mut accumulated = String::new();
         let mut final_done = false;
@@ -1410,6 +1432,7 @@ più opzioni, non solo una. Rispondi in italiano, chiaro e ordinato.",
                         .await;
                         let st = state_owned.clone();
                         let effective = if goal.is_empty() { prompt.clone() } else { goal.clone() };
+                        let thread_id_for_tool = thread_id.clone();
                         // Serialize browser work: the contained browser is a single
                         // shared instance, so only ONE browse_web may drive it at a
                         // time. Without this, concurrent chat requests spawn multiple
@@ -1419,7 +1442,7 @@ più opzioni, non solo una. Rispondi in italiano, chiaro e ordinato.",
                         // "● LIVE · <goal>" + step checklist only while working.
                         begin_browser_activity(effective.clone());
                         let outcome = tokio::task::spawn_blocking(move || {
-                            execute_browse_web_tool(&st, &effective)
+                            execute_browse_web_tool(&st, &effective, thread_id_for_tool.as_deref())
                         })
                         .await;
                         end_browser_activity();
@@ -1544,6 +1567,94 @@ fn browse_web_lock() -> &'static tokio::sync::Mutex<()> {
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
+/// How long a per-thread browser session may sit idle before it is reaped.
+const THREAD_BROWSER_SESSION_IDLE: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Take (remove) a thread's warm browser session for reuse. Returns `None` if
+/// absent or stale (a stale one is gracefully closed here so it doesn't leak).
+fn take_thread_browser_session(
+    state: &AppState,
+    thread_id: &str,
+) -> Option<BrowserAutomationClient<BrowserSidecarSession>> {
+    let session = {
+        let mut map = state.browser_thread_sessions.lock().ok()?;
+        map.remove(thread_id)?
+    };
+    if session.last_used.elapsed() > THREAD_BROWSER_SESSION_IDLE {
+        let _ = session.client.call(BrowserMethod::Stop, serde_json::json!({}));
+        return None;
+    }
+    Some(session.client)
+}
+
+/// Park a thread's browser session back in the registry, warm for the next call.
+fn store_thread_browser_session(
+    state: &AppState,
+    thread_id: &str,
+    client: BrowserAutomationClient<BrowserSidecarSession>,
+) {
+    if let Ok(mut map) = state.browser_thread_sessions.lock() {
+        map.insert(
+            thread_id.to_string(),
+            ThreadBrowserSession {
+                client,
+                last_used: std::time::Instant::now(),
+            },
+        );
+    } else {
+        // Poisoned lock: don't leak the sidecar — close it.
+        let _ = client.call(BrowserMethod::Stop, serde_json::json!({}));
+    }
+}
+
+/// Close and forget a thread's browser session (graceful browser.stop + drop).
+/// Called when a thread is archived/closed/deleted.
+fn close_thread_browser_session(state: &AppState, thread_id: &str) {
+    let session = state
+        .browser_thread_sessions
+        .lock()
+        .ok()
+        .and_then(|mut map| map.remove(thread_id));
+    if let Some(session) = session {
+        let _ = session.client.call(BrowserMethod::Stop, serde_json::json!({}));
+    }
+}
+
+/// Background reaper: every 60s, close per-thread browser sessions idle past the
+/// timeout so abandoned threads don't keep a sidecar (and its tab) alive forever.
+fn spawn_thread_browser_session_reaper(state: AppState) {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            let stale: Vec<ThreadBrowserSession> = {
+                let Ok(mut map) = state.browser_thread_sessions.lock() else {
+                    continue;
+                };
+                let expired: Vec<String> = map
+                    .iter()
+                    .filter(|(_, session)| session.last_used.elapsed() > THREAD_BROWSER_SESSION_IDLE)
+                    .map(|(thread, _)| thread.clone())
+                    .collect();
+                expired
+                    .into_iter()
+                    .filter_map(|thread| map.remove(&thread))
+                    .collect()
+            };
+            if stale.is_empty() {
+                continue;
+            }
+            // Closing talks to the sidecar over a blocking pipe — do it off the
+            // async runtime.
+            let _ = tokio::task::spawn_blocking(move || {
+                for session in stale {
+                    let _ = session.client.call(BrowserMethod::Stop, serde_json::json!({}));
+                }
+            })
+            .await;
+        }
+    });
+}
+
 /// One step of the live activity checklist (Manus-style "Avanzamento attività").
 #[derive(Debug, Clone, Serialize)]
 struct BrowserStepView {
@@ -1650,7 +1761,11 @@ fn browser_step_label(iteration: &local_first_browser_automation::BrowserLoopIte
 /// runs the observe-act loop synchronously (in contained-computer mode it drives
 /// the real browser in the container, visible via noVNC), returning the loop's
 /// human-facing result for the model to read.
-fn execute_browse_web_tool(state: &AppState, goal: &str) -> Result<String, String> {
+fn execute_browse_web_tool(
+    state: &AppState,
+    goal: &str,
+    thread_id: Option<&str>,
+) -> Result<String, String> {
     let task_id = format!("chat_browse_{}", uuid::Uuid::new_v4().simple());
     let mut task = TaskRecord::new(
         task_id,
@@ -1662,6 +1777,9 @@ fn execute_browse_web_tool(state: &AppState, goal: &str) -> Result<String, Strin
             "source": "chat_tool_browse_web",
             "prompt_redacted": redact_sensitive_text(goal),
             "raw_prompt_stored": false,
+            // Thread scope for per-thread browser session reuse (read back by
+            // execute_browser_read_only_task to attach/keep-alive the session).
+            "thread_id": thread_id,
         }),
     )
     .with_resource(ResourceRequirement::new(ResourceClass::ComputerSession, 1));
@@ -5254,19 +5372,41 @@ fn execute_browser_loop_read_only_task(
     )
     .map_err(local_task_gateway_error)?;
 
-    let session = spawn_browser_sidecar_for_task(state, task)?;
+    // Per-thread reuse: if this chat thread already has a warm browser session,
+    // attach to it (keeps cookies/login + the open tab) instead of spawning a
+    // fresh sidecar. Otherwise spawn one and register it after the loop.
+    let thread_id = task
+        .input_json
+        .get("thread_id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let reused_session = thread_id
+        .as_deref()
+        .and_then(|thread| take_thread_browser_session(state, thread));
+    let session_reused = reused_session.is_some();
+    let mut client = match reused_session {
+        Some(existing) => existing,
+        None => BrowserAutomationClient::new(spawn_browser_sidecar_for_task(state, task)?),
+    };
     append_task_progress_checkpoint(
         state,
         task,
         "browser_runtime_ready",
         SurfaceKind::Browser,
-        "Browser pronto",
-        "Runtime browser locale avviato.",
-        serde_json::json!({ "kind": "browser_runtime_ready" }),
+        if session_reused {
+            "Browser pronto (sessione del thread riusata)"
+        } else {
+            "Browser pronto"
+        },
+        if session_reused {
+            "Riuso la sessione browser già aperta per questo thread."
+        } else {
+            "Runtime browser locale avviato."
+        },
+        serde_json::json!({ "kind": "browser_runtime_ready", "reused": session_reused }),
     )
     .map_err(local_task_gateway_error)?;
-
-    let mut client = BrowserAutomationClient::new(session);
     let targets = browser_targets_for_goal(&effective_goal);
     let draft = train_search_draft_for_goal(&effective_goal);
     let is_train_task = draft.is_some();
@@ -5309,13 +5449,20 @@ fn execute_browser_loop_read_only_task(
             context_profile,
         );
         let mut runner = BrowserLoopRunner::from_client(client, planner);
-        let request = BrowserLoopRequest::new(
+        let mut request = BrowserLoopRequest::new(
             browser_loop_goal_for_source(&effective_goal, &target.label, draft.as_ref()),
             &target_id,
         )
-        .with_initial_url(target.url.clone())
         .with_max_iterations(browser_loop_max_iterations())
         .with_plan(browser_loop_plan_for_source(draft.as_ref()));
+        // Tab reuse: when continuing a thread's warm session on the first source,
+        // start from the EXISTING tab (snapshot the current page) instead of
+        // navigating fresh — so a follow-up continues on the prior results/page
+        // rather than redoing the search. The model still navigates if it needs
+        // a different page. For a fresh session (or later sources) open the URL.
+        if !(session_reused && index == 0) {
+            request = request.with_initial_url(target.url.clone());
+        }
         let loop_result = runner.run_with_iteration_observer(&request, |iteration| {
             // Live checklist for the Computer panel ("Avanzamento attività").
             push_browser_step(
@@ -5530,13 +5677,17 @@ fn execute_browser_loop_read_only_task(
         .and_then(Value::as_u64)
         .unwrap_or_else(|| fs::metadata(&screenshot_path).map(|m| m.len()).unwrap_or(0));
 
-    // Gracefully close THIS worker's isolated browser context (and its tabs)
-    // before the sidecar is dropped/killed. The Drop impl only kills the child,
-    // so without this the context leaks in the contained Chromium and they pile
-    // up across tasks until the browser is overloaded (observed: 282 orphaned
-    // targets -> loop failures). With isolated contexts this close is surgical:
-    // it tears down exactly this worker's tabs, never another worker's.
-    let _ = client.call(BrowserMethod::Stop, serde_json::json!({}));
+    // Lifecycle: a thread-scoped session is kept WARM for the next browse_web in
+    // the same thread (reaped on idle/thread-close), so a follow-up continues on
+    // the same tab. A one-off (no thread) session is closed now — the Drop impl
+    // only kills the child, so without this stop the context leaks in the
+    // contained Chromium and orphaned targets pile up (observed: 282 -> failures).
+    match thread_id.as_deref() {
+        Some(thread) => store_thread_browser_session(state, thread, client),
+        None => {
+            let _ = client.call(BrowserMethod::Stop, serde_json::json!({}));
+        }
+    }
 
     let browser_success = completed_output.is_some()
         || (is_train_task && train_success_criteria_met(&source_summaries, &form_drafts));

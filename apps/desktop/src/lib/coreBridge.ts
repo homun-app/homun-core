@@ -1018,6 +1018,7 @@ async function submitBrowserRuntimeChatPromptStream(
     prompt,
     maxTokens,
     rawContext,
+    threadId,
   );
   const promptBuildSeconds = roundedSeconds(
     (performance.now() - promptBuildStartedAt) / 1000,
@@ -1143,6 +1144,7 @@ async function openChatStreamWithGateway(
   prompt: string,
   maxTokens: number,
   rawContext: Array<{ role: "user" | "assistant"; text: string }>,
+  threadId?: string,
 ) {
   try {
     const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/chat/generate_stream`, {
@@ -1151,6 +1153,8 @@ async function openChatStreamWithGateway(
       body: JSON.stringify({
         request_id: requestId,
         prompt,
+        // Scope browser work to this chat thread (persistent per-thread session).
+        thread_id: threadId,
         context: rawContext,
         max_context_chars: 3_600,
         max_tokens: maxTokens,
