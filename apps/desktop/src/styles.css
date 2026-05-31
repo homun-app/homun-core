@@ -2707,11 +2707,13 @@ small {
   color: var(--amber, #b7791f);
 }
 
-/* Computer dock — a bar pinned just above the prompt composer. */
+/* Computer dock — a bar pinned just above the prompt composer, matching its
+   exact width and centering so the two read as an aligned pair. */
 .cc-dock {
-  margin: 0 16px 8px;
+  width: min(100%, 760px);
+  margin: 0 auto 8px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 16px;
   background: var(--surface);
   overflow: hidden;
   flex-shrink: 0;
