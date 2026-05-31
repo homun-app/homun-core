@@ -997,8 +997,6 @@ export function ChatView({
         </div>
       </header>
 
-      <ChatComputerPanel activity={browserActivity} />
-
       <div className="thread-scroll" aria-label="Thread attivo" ref={conversationRef}>
         <div className="thread-content">
           <div className="thread-message-list">
@@ -1209,6 +1207,8 @@ export function ChatView({
           session={computerSession}
         />
       )}
+
+      <ChatComputerPanel activity={browserActivity} />
 
       <Composer
         disabled={promptSubmitting}

@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import { Maximize2, Minimize2, Monitor, X } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  Maximize2,
+  Minimize2,
+  Monitor,
+} from "lucide-react";
 import { coreBridge, type ContainedComputerLive } from "../lib/coreBridge";
 
 interface ChatComputerPanelProps {
@@ -7,14 +13,14 @@ interface ChatComputerPanelProps {
   activity?: string | null;
 }
 
-// Manus-style floating "Computer": a small fixed widget on the chat, COLLAPSED
-// by default to a pill, expandable to a floating card, and to fullscreen. Shows
-// the contained browser live without dominating the conversation. Rendered only
-// when contained-computer mode is live.
+// Manus-style: a bar DOCKED above the prompt. When the contained computer is
+// live it shows a compact "Computer" bar (collapsed by default) that expands to
+// the live browser inline, and to fullscreen. Renders nothing when contained
+// mode is off, so the conversation's task surfaces show instead.
 export function ChatComputerPanel({ activity }: ChatComputerPanelProps) {
   const [live, setLive] = useState<ContainedComputerLive | null>(null);
-  // "pill" (default, collapsed) | "card" (floating) | "full" (overlay)
-  const [view, setView] = useState<"pill" | "card" | "full">("pill");
+  const [expanded, setExpanded] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -32,36 +38,22 @@ export function ChatComputerPanel({ activity }: ChatComputerPanelProps) {
   }, []);
 
   useEffect(() => {
-    if (view !== "full") return;
+    if (!fullscreen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setView("card");
+      if (e.key === "Escape") setFullscreen(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [view]);
+  }, [fullscreen]);
 
   if (!live?.enabled || !live.novnc_url) return null;
 
-  const src = `${live.novnc_url}${live.novnc_url.includes("?") ? "&" : "?"}autoconnect=true&resize=scale&reconnect=true`;
+  // vnc_lite.html has no noVNC toolbar, so the canvas fills the iframe — with a
+  // 16:10 stage that means no black letterbox bars.
+  const base = live.novnc_url.replace("/vnc.html", "/vnc_lite.html");
+  const src = `${base}${base.includes("?") ? "&" : "?"}autoconnect=true&resize=scale&reconnect=true`;
   const status = activity?.trim() ? activity.trim() : "in attesa";
-
-  // Collapsed pill — the default resting state.
-  if (view === "pill") {
-    return (
-      <button
-        className="cc-pill"
-        type="button"
-        onClick={() => setView("card")}
-        title="Apri il Computer"
-      >
-        <Monitor size={15} />
-        <span>Computer</span>
-        <i className="cc-pill-dot" />
-      </button>
-    );
-  }
-
-  const fullscreen = view === "full";
+  const showStage = expanded || fullscreen;
 
   return (
     <>
@@ -70,48 +62,61 @@ export function ChatComputerPanel({ activity }: ChatComputerPanelProps) {
           className="cc-scrim"
           type="button"
           aria-label="Chiudi"
-          onClick={() => setView("card")}
+          onClick={() => setFullscreen(false)}
         />
       )}
-      <div className={`cc-float${fullscreen ? " full" : ""}`}>
-        <header className="cc-float-head">
-          <span className="cc-float-title">
+      <div className={`cc-dock${fullscreen ? " full" : ""}`}>
+        <header className="cc-dock-bar">
+          <button
+            className="cc-dock-toggle"
+            type="button"
+            onClick={() => setExpanded((value) => !value)}
+            aria-expanded={expanded}
+            title={expanded ? "Comprimi" : "Mostra il computer"}
+          >
             <Monitor size={15} />
             <strong>Computer</strong>
             <span className="cc-live">
               <i className="cc-live-dot" /> live
             </span>
-          </span>
-          <span className="cc-float-activity" title={status}>
+          </button>
+          <span className="cc-dock-activity" title={status}>
             {status}
           </span>
+          {showStage && (
+            <button
+              className="cc-icon-btn"
+              type="button"
+              onClick={() => setFullscreen((value) => !value)}
+              title={fullscreen ? "Riduci" : "Schermo intero"}
+              aria-label={fullscreen ? "Riduci" : "Schermo intero"}
+            >
+              {fullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+            </button>
+          )}
           <button
             className="cc-icon-btn"
             type="button"
-            onClick={() => setView(fullscreen ? "card" : "full")}
-            title={fullscreen ? "Riduci" : "Schermo intero"}
-            aria-label={fullscreen ? "Riduci" : "Schermo intero"}
+            onClick={() => {
+              setFullscreen(false);
+              setExpanded((value) => !value);
+            }}
+            title={expanded ? "Comprimi" : "Espandi"}
+            aria-label={expanded ? "Comprimi" : "Espandi"}
           >
-            {fullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-          </button>
-          <button
-            className="cc-icon-btn"
-            type="button"
-            onClick={() => setView("pill")}
-            title="Chiudi"
-            aria-label="Chiudi"
-          >
-            <X size={15} />
+            {expanded ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
           </button>
         </header>
-        <div className="cc-stage">
-          <iframe
-            className="cc-frame"
-            title="Computer contenuto (live)"
-            src={src}
-            allow="clipboard-read; clipboard-write"
-          />
-        </div>
+        {showStage && (
+          <div className="cc-stage">
+            <iframe
+              className="cc-frame"
+              title="Computer contenuto (live)"
+              src={src}
+              allow="clipboard-read; clipboard-write"
+            />
+          </div>
+        )}
       </div>
     </>
   );
