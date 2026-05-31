@@ -7568,14 +7568,31 @@ struct BrowserTarget {
     url: String,
 }
 
+/// Whether the goal EXPLICITLY asks for trains. The single source of truth for
+/// the train-specialized path — keyed on transport intent ("treno", operators),
+/// NEVER on city names. A "voli Milano-Napoli" request must NOT be hijacked into
+/// a train search (the de-gemma fix: the model's intent decides the site, not a
+/// hardcoded city heuristic).
+fn goal_requests_train(normalized: &str) -> bool {
+    [
+        "treno",
+        "treni",
+        "trenitalia",
+        "italo",
+        "frecciarossa",
+        "frecciargento",
+        "frecciabianca",
+        "intercity",
+        "regionale",
+        "ferrovie",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
+}
+
 fn browser_targets_for_goal(goal: &str) -> Vec<BrowserTarget> {
     let normalized = goal.to_lowercase();
-    if normalized.contains("treno")
-        || normalized.contains("trenitalia")
-        || normalized.contains("italo")
-        || normalized.contains("milano")
-        || normalized.contains("napoli")
-    {
+    if goal_requests_train(&normalized) {
         let wants_trenitalia = normalized.contains("trenitalia");
         let wants_italo = normalized.contains("italotreno")
             || normalized.contains("italo treno")
@@ -7878,15 +7895,9 @@ fn browser_url_for_goal(goal: &str) -> String {
     if normalized.contains("trenitalia") {
         return "https://www.trenitalia.com/".to_string();
     }
-    let query = if normalized.contains("treno")
-        || normalized.contains("milano")
-        || normalized.contains("napoli")
-    {
-        format!("{goal} Trenitalia Italo orari")
-    } else {
-        goal.to_string()
-    };
-    format!("https://duckduckgo.com/?q={}", url_encode(&query))
+    // Search the goal verbatim — no city-name → train augmentation. The loop
+    // then navigates whatever the goal actually asks for (flights, hotels, …).
+    format!("https://duckduckgo.com/?q={}", url_encode(goal))
 }
 
 fn is_train_operator(label: &str) -> bool {
@@ -7895,12 +7906,9 @@ fn is_train_operator(label: &str) -> bool {
 
 fn train_search_draft_for_goal(goal: &str) -> Option<TrainSearchDraft> {
     let normalized = normalize_for_match(goal);
-    if !(normalized.contains("treno")
-        || normalized.contains("trenitalia")
-        || normalized.contains("italo")
-        || normalized.contains("milano")
-        || normalized.contains("napoli"))
-    {
+    // Build a train-search draft ONLY for explicit train intent — never just
+    // because two known city names appear (that hijacked "voli" into trains).
+    if !goal_requests_train(&normalized) {
         return None;
     }
 
@@ -9923,7 +9931,7 @@ mod tests {
         BrowserFormDraftSummary, BrowserSourceSummary, browser_final_answer_for_task,
         browser_form_draft_result_labels, browser_form_fields_for_snapshot,
         browser_loop_output_has_train_options, browser_method_for_capability_tool,
-        browser_targets_for_goal, browser_url_for_goal, evaluate_simple_arithmetic,
+        browser_targets_for_goal, browser_url_for_goal, evaluate_simple_arithmetic, goal_requests_train,
         is_safe_train_search_button, normalize_for_match, operational_plan_for_goal,
         operational_plan_markdown, operational_task_acknowledgement, parse_loopback_http_host_port,
         privacy_accept_button_for_snapshot, redact_sensitive_text, resources_for_prompt,
@@ -10317,11 +10325,28 @@ mod tests {
 
     #[test]
     fn browser_executor_uses_read_only_search_urls() {
+        // De-gemma: the web-search URL is the goal verbatim — no hardcoded
+        // "Trenitalia Italo" augmentation biasing every query toward trains.
         let url = browser_url_for_goal("Devo prenotare un treno Napoli Milano il 10 giugno");
-
         assert!(url.starts_with("https://duckduckgo.com/?q="));
-        assert!(url.contains("Trenitalia"));
-        assert!(url.contains("Italo"));
+        assert!(url.to_lowercase().contains("treno"));
+        assert!(!url.contains("Trenitalia+Italo+orari"));
+    }
+
+    #[test]
+    fn flight_goal_is_not_hijacked_into_trains() {
+        // The bug the user hit: "voli Milano-Napoli" returned TRAINS because the
+        // city names triggered the train path. Intent ("voli") must win.
+        let goal = "Cerca voli da Milano a Napoli per il 10 giugno";
+        assert!(!goal_requests_train(&goal.to_lowercase()));
+        assert!(train_search_draft_for_goal(goal).is_none());
+        let targets = browser_targets_for_goal(goal);
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].label, "Ricerca web");
+        assert!(targets[0].url.starts_with("https://duckduckgo.com/?q="));
+        // An explicit train request still uses the train path.
+        assert!(goal_requests_train("treno milano napoli"));
+        assert!(browser_targets_for_goal("treno Milano Napoli").len() > 1);
     }
 
     #[test]
