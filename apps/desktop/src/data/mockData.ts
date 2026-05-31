@@ -3,6 +3,7 @@ import {
   Brain,
   CalendarClock,
   CheckCircle2,
+  Cpu,
   Database,
   GalleryVerticalEnd,
   Globe2,
@@ -10,7 +11,10 @@ import {
   KeyRound,
   MessageSquare,
   Monitor,
+  MonitorPlay,
   Plug,
+  SlidersHorizontal,
+  User,
 } from "lucide-react";
 import type {
   ApprovalItem,
@@ -388,13 +392,21 @@ export const settingsSections: Array<{
   id: SettingsSectionId;
   label: string;
   icon: typeof Monitor;
+  group: "account" | "capabilities";
 }> = [
-  { id: "general", label: "Generali", icon: Monitor },
-  { id: "privacy", label: "Privacy e autonomia", icon: KeyRound },
-  { id: "runtime", label: "Runtime locale", icon: Bot },
-  { id: "connections", label: "Connettori", icon: Plug },
-  { id: "audit", label: "Audit e dati", icon: History },
+  { id: "account", label: "Account", icon: User, group: "account" },
+  { id: "general", label: "Generale", icon: SlidersHorizontal, group: "account" },
+  { id: "runtime", label: "Modello & Runtime", icon: Cpu, group: "account" },
+  { id: "privacy", label: "Privacy & Autonomia", icon: KeyRound, group: "account" },
+  { id: "connections", label: "Connettori", icon: Plug, group: "capabilities" },
+  { id: "computer", label: "Computer locale", icon: MonitorPlay, group: "capabilities" },
+  { id: "audit", label: "Dati & Audit", icon: History, group: "capabilities" },
 ];
+
+export const settingsGroupLabels: Record<"account" | "capabilities", string> = {
+  account: "Account",
+  capabilities: "Capacità",
+};
 
 export const drawerTasks = [
   { id: "task_prompt_session", label: "Prompt locale", active: true },

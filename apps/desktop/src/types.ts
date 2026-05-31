@@ -12,10 +12,12 @@ export type ViewId =
   | "settings";
 
 export type SettingsSectionId =
+  | "account"
   | "general"
-  | "privacy"
   | "runtime"
+  | "privacy"
   | "connections"
+  | "computer"
   | "audit";
 
 export type TaskStatus =

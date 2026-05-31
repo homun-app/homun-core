@@ -1,20 +1,23 @@
 import {
-  Activity,
-  AlertTriangle,
-  CheckCircle2,
-  ChevronRight,
-  CircleAlert,
-  CircleCheck,
-  Cloud,
+  Check,
   Copy,
   Cpu,
+  ExternalLink,
+  Globe,
+  MonitorPlay,
   Play,
+  Plus,
   RotateCcw,
+  ShieldCheck,
   Square,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { coreBridge, type ActiveModelInfo } from "../lib/coreBridge";
-import { settingsSections } from "../data/mockData";
+import { useEffect, useState } from "react";
+import {
+  coreBridge,
+  type ActiveModelInfo,
+  type ContainedComputerLive,
+} from "../lib/coreBridge";
+import { useSetting } from "../lib/settingsStore";
 import type {
   ConnectionItem,
   RuntimeControl,
@@ -35,447 +38,521 @@ interface SettingsViewProps {
   ) => void | Promise<void>;
 }
 
+const SECTION_TITLES: Record<SettingsSectionId, string> = {
+  account: "Account",
+  general: "Generale",
+  runtime: "Modello & Runtime",
+  privacy: "Privacy & Autonomia",
+  connections: "Connettori",
+  computer: "Computer locale",
+  audit: "Dati & Audit",
+};
+
 export function SettingsView({
   health,
   runtimeControls,
-  runtimeLogs,
   connections,
   section,
   onRuntimeAction,
 }: SettingsViewProps) {
-  const primaryRuntime = runtimeControls[0] ?? null;
-  const primaryHealth = health[0] ?? null;
-  const runtimeSummary = useMemo(
-    () => buildRuntimeDiagnosticText(health, runtimeControls, runtimeLogs),
-    [health, runtimeControls, runtimeLogs],
-  );
-  const [copiedDiagnostics, setCopiedDiagnostics] = useState(false);
+  const [model, setModel] = useState<ActiveModelInfo | null>(null);
+  const [computer, setComputer] = useState<ContainedComputerLive | null>(null);
 
-  async function copyDiagnostics() {
-    await navigator.clipboard.writeText(runtimeSummary);
-    setCopiedDiagnostics(true);
-    window.setTimeout(() => setCopiedDiagnostics(false), 1400);
-  }
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const value = await coreBridge.runtimeModel();
+        if (!cancelled) setModel(value);
+      } catch {
+        /* leave null → shown as "non disponibile" */
+      }
+      try {
+        const value = await coreBridge.containedComputerLive();
+        if (!cancelled) setComputer(value);
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [section]);
 
   return (
     <section className="settings-view" aria-labelledby="settings-title">
-      <div className="settings-content">
-        <header>
-          <h2 id="settings-title">{titleFor(section)}</h2>
-        </header>
-
-        {section === "privacy" && (
-          <div className="settings-section">
-            <SettingsRow
-              title="Local-first per default"
-              description="Memoria, task e audit restano sul dispositivo salvo opt-in esplicito."
-              enabled
-            />
-            <SettingsRow
-              title="Managed cloud"
-              description="Composio/Zapier/Pipedream restano disabilitati finche' non scegli un provider."
-              enabled={false}
-            />
-            <SettingsRow
-              title="Accesso completo"
-              description="Le azioni write e approved automation passano da approval gates."
-              enabled
-            />
-          </div>
-        )}
-
+      <div className="set-pane">
+        <h2 id="settings-title" className="set-title">
+          {SECTION_TITLES[section]}
+        </h2>
+        {section === "account" && <AccountPane model={model} computer={computer} />}
+        {section === "general" && <GeneralPane />}
         {section === "runtime" && (
-          <div className="runtime-diagnostics">
-            <div className="runtime-hero">
-              <div className="runtime-hero-title">
-                <RuntimeStatusIcon status={primaryHealth?.status} />
-                <div>
-                  <strong>{primaryHealth?.label ?? "Runtime locale"}</strong>
-                  <small>{runtimeHeadline(primaryHealth, primaryRuntime)}</small>
-                </div>
-              </div>
-              <button
-                className="runtime-copy-button"
-                type="button"
-                onClick={() => void copyDiagnostics()}
-              >
-                <Copy size={15} />
-                <span>{copiedDiagnostics ? "Copiato" : "Copia diagnostica"}</span>
-              </button>
-            </div>
-
-            {primaryRuntime && (
-              <div className="runtime-metric-strip" aria-label="Metriche runtime">
-                <RuntimeMetric label="Stato" value={statusLabel(primaryRuntime.status)} />
-                <RuntimeMetric
-                  label="Porta"
-                  value={primaryRuntime.port ? String(primaryRuntime.port) : "n/d"}
-                />
-                <RuntimeMetric
-                  label="PID"
-                  value={primaryRuntime.portOwnerPid ? String(primaryRuntime.portOwnerPid) : "n/d"}
-                />
-                <RuntimeMetric
-                  label="Memoria"
-                  value={formatMemoryPair(
-                    primaryRuntime.memoryMb,
-                    primaryRuntime.totalMemoryMb,
-                  )}
-                />
-                <RuntimeMetric
-                  label="CPU"
-                  value={
-                    primaryRuntime.cpuPercent != null
-                      ? `${primaryRuntime.cpuPercent.toFixed(1)}%`
-                      : "n/d"
-                  }
-                />
-                <RuntimeMetric
-                  label="Duplicati"
-                  value={String(primaryRuntime.duplicateCount)}
-                  attention={primaryRuntime.duplicateCount > 1}
-                />
-              </div>
-            )}
-
-            <div className="settings-section runtime-action-section">
-              {runtimeControls.map((control) => (
-                <div className="settings-row static runtime-control-row" key={control.processId}>
-                  <div>
-                    <strong>{control.label}</strong>
-                    <small>{runtimeControlDetail(control)}</small>
-                  </div>
-                  <div className="runtime-actions">
-                    <button
-                      type="button"
-                      title="Avvia runtime"
-                      onClick={() => void onRuntimeAction(control.processId, "start")}
-                    >
-                      <Play size={14} />
-                      <span>Avvia</span>
-                    </button>
-                    <button
-                      type="button"
-                      title="Riavvia runtime"
-                      onClick={() => void onRuntimeAction(control.processId, "restart")}
-                    >
-                      <RotateCcw size={14} />
-                      <span>Riavvia</span>
-                    </button>
-                    <button
-                      type="button"
-                      title="Ferma runtime"
-                      onClick={() => void onRuntimeAction(control.processId, "stop")}
-                    >
-                      <Square size={14} />
-                      <span>Ferma</span>
-                    </button>
-                  </div>
-                </div>
-              ))}
-              {health.map((item) => (
-                <div className="settings-row static runtime-health-row" key={item.label}>
-                  <div>
-                    <strong>{item.label}</strong>
-                    <small>{item.detail}</small>
-                  </div>
-                  <span className={`status-dot ${item.status}`} />
-                </div>
-              ))}
-            </div>
-
-            <div className="runtime-log-panel" aria-label="Log runtime redatti">
-              <div className="runtime-log-header">
-                <strong>Log runtime</strong>
-                <small>{runtimeLogs?.message ?? "Log non ancora caricati."}</small>
-              </div>
-              {runtimeLogs?.entries.length ? (
-                <pre>
-                  {runtimeLogs.entries.slice(-12).map((entry, index) => (
-                    <span key={`${entry.stream}-${index}`}>
-                      <b>{entry.stream}</b> {entry.line}
-                      {"\n"}
-                    </span>
-                  ))}
-                </pre>
-              ) : (
-                <div className="runtime-log-empty">
-                  I log sono disponibili quando il runtime locale viene avviato
-                  dal gateway gestito. Se il runtime e' esterno, mostriamo solo
-                  stato e risorse.
-                </div>
-              )}
-            </div>
-          </div>
+          <RuntimePane
+            model={model}
+            health={health}
+            runtimeControls={runtimeControls}
+            onRuntimeAction={onRuntimeAction}
+          />
         )}
-
-        {section === "connections" && (
-          <div className="settings-grid">
-            {connections.map((connection) => (
-              <article className="connection-tile" key={connection.id}>
-                <CheckCircle2 size={18} />
-                <div>
-                  <strong>{connection.name}</strong>
-                  <small>{connection.description}</small>
-                </div>
-                <span>{connection.status}</span>
-              </article>
-            ))}
-          </div>
-        )}
-
-        {section === "general" && <GeneralSection />}
-
-        {section !== "privacy" &&
-          section !== "runtime" &&
-          section !== "connections" &&
-          section !== "general" && (
-            <div className="settings-section">
-              <div className="settings-row static">
-                <div>
-                  <strong>Configurazione pronta</strong>
-                  <small>
-                    Questa sezione verra' cablata al relativo read model nel prossimo blocco.
-                  </small>
-                </div>
-                <ChevronRight size={18} />
-              </div>
-            </div>
-          )}
+        {section === "privacy" && <PrivacyPane />}
+        {section === "connections" && <ConnectorsPane connections={connections} />}
+        {section === "computer" && <ComputerPane computer={computer} />}
+        {section === "audit" && <AuditPane />}
       </div>
     </section>
   );
 }
 
-// Shows which inference backend/model is actually live. The arc that produced
-// the de-gemma sweep started from "am I on cloud or gemma4?" being invisible;
-// this surfaces the truth (read-only) so it is never a guess again.
-function GeneralSection() {
-  const [model, setModel] = useState<ActiveModelInfo | null>(null);
-  const [error, setError] = useState(false);
+/* ---------------------------------------------------------------- primitives */
 
-  useEffect(() => {
-    let cancelled = false;
-    coreBridge
-      .runtimeModel()
-      .then((info) => {
-        if (!cancelled) setModel(info);
-      })
-      .catch(() => {
-        if (!cancelled) setError(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (error) {
-    return (
-      <div className="settings-section">
-        <div className="settings-row static">
-          <div>
-            <strong>Modello non disponibile</strong>
-            <small>Il gateway non è raggiungibile.</small>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!model) {
-    return (
-      <div className="settings-section">
-        <div className="settings-row static">
-          <div>
-            <strong>Caricamento modello attivo…</strong>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  const isCloud = model.locality === "cloud";
+function CopyButton({ value, label = "Copia" }: { value: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
   return (
-    <div className="settings-section">
-      <div className="settings-row static model-hero">
-        <span className={`model-locality ${isCloud ? "cloud" : "local"}`}>
-          {isCloud ? <Cloud size={20} /> : <Cpu size={20} />}
-        </span>
-        <div>
-          <strong>{model.model}</strong>
-          <small>
-            Backend {model.backend} · {isCloud ? "cloud" : "locale"} ·{" "}
-            {model.context_window.toLocaleString()} token di contesto
-          </small>
-        </div>
-        <span className={`model-badge ${model.capable ? "capable" : "limited"}`}>
-          {model.capable ? "Capace" : "Locale leggero"}
-        </span>
-      </div>
-
-      {!model.capable && (
-        <div className="settings-row static model-warning">
-          <AlertTriangle size={18} />
-          <div>
-            <strong>Backend locale leggero (gemma4)</strong>
-            <small>
-              Per attività complesse (browser, tool) configura un backend capace
-              via LOCAL_FIRST_INFERENCE_BACKEND.
-            </small>
-          </div>
-        </div>
-      )}
-
-      {model.missing_api_key && (
-        <div className="settings-row static model-warning">
-          <AlertTriangle size={18} />
-          <div>
-            <strong>Chiave API mancante</strong>
-            <small>
-              Il backend selezionato richiede una chiave cloud: senza, la chat
-              ripiega sul modello locale.
-            </small>
-          </div>
-        </div>
-      )}
-    </div>
+    <button
+      className="set-btn"
+      type="button"
+      onClick={async () => {
+        await navigator.clipboard.writeText(value);
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1400);
+      }}
+    >
+      {copied ? <Check size={14} /> : <Copy size={14} />}
+      <span style={{ marginLeft: 6 }}>{copied ? "Copiato" : label}</span>
+    </button>
   );
 }
 
-function RuntimeStatusIcon({ status }: { status: RuntimeHealth["status"] | undefined }) {
-  if (status === "ready") return <CircleCheck size={22} className="runtime-icon ready" />;
-  if (status === "running") return <Activity size={22} className="runtime-icon running" />;
-  return <CircleAlert size={22} className="runtime-icon attention" />;
-}
-
-function RuntimeMetric({
-  label,
-  value,
-  attention = false,
-}: {
-  label: string;
-  value: string;
-  attention?: boolean;
-}) {
+function Toggle({ on, onChange }: { on: boolean; onChange: (next: boolean) => void }) {
   return (
-    <div className={`runtime-metric ${attention ? "attention" : ""}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
+    <button
+      className={`set-toggle ${on ? "on" : ""}`}
+      type="button"
+      role="switch"
+      aria-checked={on}
+      onClick={() => onChange(!on)}
+    />
   );
 }
 
-function runtimeHeadline(
-  health: RuntimeHealth | null,
-  control: RuntimeControl | null,
-) {
-  if (health?.status === "ready") {
-    return control?.portOwnerPid
-      ? `Pronto su porta ${control.port ?? 8765}, PID ${control.portOwnerPid}`
-      : "Pronto e raggiungibile dal gateway locale";
-  }
-  if (health?.status === "running") {
-    return "Processo rilevato, health in verifica";
-  }
-  return health?.detail ?? "Runtime non raggiungibile o da avviare";
-}
-
-function runtimeControlDetail(control: RuntimeControl) {
-  const details = [
-    control.message,
-    control.port ? `porta ${control.port}` : null,
-    control.portOwnerPid ? `pid ${control.portOwnerPid}` : null,
-    control.memoryMb ? `${control.memoryMb} MB processo` : null,
-    control.totalMemoryMb ? `${control.totalMemoryMb} MB sistema` : null,
-    control.cpuPercent != null ? `CPU ${control.cpuPercent.toFixed(1)}%` : null,
-    control.duplicateCount > 1 ? `duplicati ${control.duplicateCount}` : null,
-  ].filter(Boolean);
-  return details.join(" · ");
-}
-
-function buildRuntimeDiagnosticText(
-  health: RuntimeHealth[],
-  controls: RuntimeControl[],
-  logs: RuntimeLogs | null,
-) {
-  const lines = [
-    "Local First Assistant runtime diagnostics",
-    `generated_at=${new Date().toISOString()}`,
-    "",
-    "[health]",
-    ...health.map((item) => `${item.label}: ${item.status} - ${item.detail}`),
-    "",
-    "[controls]",
-    ...controls.map((control) =>
-      [
-        `process_id=${control.processId}`,
-        `status=${control.status}`,
-        `port=${control.port ?? "n/d"}`,
-        `pid=${control.portOwnerPid ?? "n/d"}`,
-        `duplicates=${control.duplicateCount}`,
-        `process_memory_mb=${control.memoryMb ?? "n/d"}`,
-        `total_memory_mb=${control.totalMemoryMb ?? "n/d"}`,
-        `available_memory_mb=${control.availableMemoryMb ?? "n/d"}`,
-        `cpu_percent=${control.cpuPercent ?? "n/d"}`,
-        `message=${control.message}`,
-      ].join(" "),
-    ),
-    "",
-    "[logs]",
-    logs
-      ? `source=${logs.source} message=${logs.message}`
-      : "source=unavailable message=Log non caricati",
-    ...(logs?.entries.slice(-20).map((entry) => `${entry.stream}: ${entry.line}`) ?? []),
-  ];
-  return lines.join("\n");
-}
-
-function formatMemoryPair(processMemoryMb: number | undefined, totalMemoryMb: number | undefined) {
-  if (processMemoryMb && totalMemoryMb) return `${processMemoryMb} / ${totalMemoryMb} MB`;
-  if (processMemoryMb) return `${processMemoryMb} MB`;
-  return "n/d";
-}
-
-function statusLabel(status: string) {
-  const labels: Record<string, string> = {
-    ready: "Pronto",
-    external_running: "Esterno",
-    managed_running: "Gestito",
-    configured: "Configurato",
-    stopped: "Fermo",
-    unhealthy: "Errore",
-    duplicate_conflict: "Duplicati",
-  };
-  return labels[status] ?? status;
-}
-
-function SettingsRow({
+function ToggleRow({
   title,
   description,
-  enabled,
+  settingKey,
+  fallback,
 }: {
   title: string;
   description: string;
-  enabled: boolean;
+  settingKey: Parameters<typeof useSetting>[0];
+  fallback: boolean;
 }) {
+  const [value, setValue] = useSetting<boolean>(settingKey, fallback);
   return (
-    <div className="settings-row">
+    <div className="set-trow">
       <div>
-        <strong>{title}</strong>
-        <small>{description}</small>
+        <div className="tt">{title}</div>
+        <div className="td">{description}</div>
       </div>
-      <button
-        type="button"
-        className={`switch ${enabled ? "enabled" : ""}`}
-        aria-pressed={enabled}
-        aria-label={title}
-      >
-        <span />
-      </button>
+      <Toggle on={value} onChange={setValue} />
     </div>
   );
 }
 
-function titleFor(section: string) {
-  return settingsSections.find((item) => item.id === section)?.label ?? "Generali";
+function formatK(value: number): string {
+  if (!value) return "n/d";
+  if (value >= 1000) return `${Math.round(value / 1000)}k`;
+  return String(value);
+}
+
+/* ------------------------------------------------------------------- account */
+
+function AccountPane({
+  model,
+  computer,
+}: {
+  model: ActiveModelInfo | null;
+  computer: ContainedComputerLive | null;
+}) {
+  const [name, setName] = useSetting("displayName", "Fabio Cantone");
+  const [accountEmail, setAccountEmail] = useSetting<string>("email", "");
+
+  return (
+    <>
+      <div className="set-profile">
+        <span className="set-profile-avatar" aria-hidden />
+        <label className="set-field">
+          <span className="set-field-label">Nome completo</span>
+          <input
+            className="set-input"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="Il tuo nome"
+          />
+        </label>
+      </div>
+
+      <div className="set-card">
+        <div className="set-card-top">
+          <span className="set-card-name">Local-first</span>
+          <span className="set-badge green">
+            <Check size={13} /> Tutto sul dispositivo
+          </span>
+        </div>
+        <div className="set-card-divider" />
+        <div className="set-meter">
+          <span className="k">
+            <Cpu size={15} /> Modello attivo
+          </span>
+          <span className="v">{model?.model ?? "non disponibile"}</span>
+        </div>
+        <p className="set-meter-sub">
+          {model
+            ? `${model.backend} · ${model.locality} · contesto ~${formatK(model.context_window)}`
+            : "Configura un backend nelle impostazioni Modello & Runtime."}
+        </p>
+        <div className="set-meter" style={{ marginTop: 8 }}>
+          <span className="k">
+            <MonitorPlay size={15} /> Computer locale
+          </span>
+          <span className="v">{computer?.enabled ? "Attivo" : "Spento"}</span>
+        </div>
+        <p className="set-meter-sub">
+          {computer?.enabled
+            ? "Browser reale contenuto · vista live noVNC"
+            : "Avvia il computer contenuto per browsing reale e non invasivo."}
+        </p>
+      </div>
+
+      <div className="set-section-label">Identità</div>
+      <div className="set-rows">
+        <div className="set-row">
+          <div style={{ flex: 1 }}>
+            <div className="rk">Email</div>
+            <input
+              className="set-input"
+              style={{ marginTop: 6, maxWidth: 320 }}
+              value={accountEmail}
+              onChange={(event) => setAccountEmail(event.target.value)}
+              placeholder="tu@esempio.com"
+            />
+          </div>
+        </div>
+        <div className="set-row">
+          <div>
+            <div className="rk">Workspace</div>
+            <div className="rv">Personale</div>
+          </div>
+          <CopyButton value="Personale" />
+        </div>
+      </div>
+
+      <div className="set-danger">
+        <div>
+          <div className="dt">Elimina dati locali</div>
+          <div className="dd">Rimuove memoria, task e audit dal dispositivo. Irreversibile.</div>
+        </div>
+        <button className="set-btn danger" type="button" disabled title="Disponibile a breve">
+          Elimina dati
+        </button>
+      </div>
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------- general */
+
+function GeneralPane() {
+  return (
+    <>
+      <div className="set-section-label">Conversazione</div>
+      <div className="set-rows">
+        <ToggleRow
+          title="Risposte in streaming"
+          description="Mostra la risposta token-per-token mentre il modello genera."
+          settingKey="general.streamResponses"
+          fallback={true}
+        />
+        <ToggleRow
+          title="Suono a fine attività"
+          description="Riproduci un breve suono quando un task del computer locale finisce."
+          settingKey="general.soundOnComplete"
+          fallback={false}
+        />
+      </div>
+      <p className="set-hint">
+        Aspetto e lingua seguono il sistema. Tema scuro e altre preferenze arriveranno qui.
+      </p>
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------- runtime */
+
+function RuntimePane({
+  model,
+  health,
+  runtimeControls,
+  onRuntimeAction,
+}: {
+  model: ActiveModelInfo | null;
+  health: RuntimeHealth[];
+  runtimeControls: RuntimeControl[];
+  onRuntimeAction: SettingsViewProps["onRuntimeAction"];
+}) {
+  const primary = runtimeControls[0] ?? null;
+  const primaryHealth = health[0] ?? null;
+  return (
+    <>
+      <div className="set-card">
+        <div className="set-card-top">
+          <span className="set-card-name">{model?.model ?? "Modello"}</span>
+          <span className={`set-badge ${model?.capable ? "green" : "muted"}`}>
+            {model?.capable ? "Capace" : "Locale"}
+          </span>
+        </div>
+        <div className="set-card-divider" />
+        <div className="set-meter">
+          <span className="k">
+            <Globe size={15} /> Backend
+          </span>
+          <span className="v">{model?.backend ?? "n/d"}</span>
+        </div>
+        <div className="set-meter">
+          <span className="k">
+            <Cpu size={15} /> Contesto
+          </span>
+          <span className="v">{model ? `~${formatK(model.context_window)} token` : "n/d"}</span>
+        </div>
+        {model?.missing_api_key && (
+          <p className="set-meter-sub" style={{ color: "var(--amber)" }}>
+            Chiave API mancante per questo backend.
+          </p>
+        )}
+      </div>
+
+      <div className="set-section-label">Runtime locale</div>
+      <div className="set-rows">
+        <div className="set-row">
+          <div>
+            <div className="rk">Stato</div>
+            <div className="rv">{primaryHealth?.label ?? primary?.status ?? "Inattivo"}</div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              className="set-btn"
+              type="button"
+              title="Avvia"
+              onClick={() => primary && void onRuntimeAction(primary.processId, "start")}
+            >
+              <Play size={14} />
+            </button>
+            <button
+              className="set-btn"
+              type="button"
+              title="Riavvia"
+              onClick={() => primary && void onRuntimeAction(primary.processId, "restart")}
+            >
+              <RotateCcw size={14} />
+            </button>
+            <button
+              className="set-btn"
+              type="button"
+              title="Ferma"
+              onClick={() => primary && void onRuntimeAction(primary.processId, "stop")}
+            >
+              <Square size={14} />
+            </button>
+          </div>
+        </div>
+        {primary?.port ? (
+          <div className="set-row">
+            <div>
+              <div className="rk">Porta</div>
+              <div className="rv">{primary.port}</div>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------- privacy */
+
+function PrivacyPane() {
+  return (
+    <>
+      <div className="set-rows">
+        <ToggleRow
+          title="Local-first per default"
+          description="Memoria, task e audit restano sul dispositivo salvo opt-in esplicito."
+          settingKey="privacy.localFirst"
+          fallback={true}
+        />
+        <ToggleRow
+          title="Managed cloud"
+          description="Connettori cloud (Composio/Zapier) restano disabilitati finché non scegli un provider."
+          settingKey="privacy.managedCloud"
+          fallback={false}
+        />
+        <ToggleRow
+          title="Gate di approvazione"
+          description="Le azioni write e approved-automation richiedono una conferma esplicita."
+          settingKey="privacy.approvalGate"
+          fallback={true}
+        />
+      </div>
+      <p className="set-hint">
+        <ShieldCheck size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+        Il browser si ferma comunque prima di login, dati personali, pagamenti o acquisti.
+      </p>
+    </>
+  );
+}
+
+/* ---------------------------------------------------------------- connectors */
+
+const CONNECTOR_TABS = [
+  { id: "app", label: "App" },
+  { id: "api", label: "API personalizzata" },
+  { id: "mcp", label: "MCP personalizzato" },
+] as const;
+
+function ConnectorsPane({ connections }: { connections: ConnectionItem[] }) {
+  const [tab, setTab] = useState<(typeof CONNECTOR_TABS)[number]["id"]>("app");
+  const [query, setQuery] = useState("");
+  const filtered = connections.filter((item) => {
+    if (tab === "mcp" && item.type !== "mcp") return false;
+    if (!query.trim()) return true;
+    const needle = query.toLowerCase();
+    return (
+      item.name.toLowerCase().includes(needle) ||
+      item.description.toLowerCase().includes(needle)
+    );
+  });
+  return (
+    <>
+      <div className="set-connectors-tabs">
+        {CONNECTOR_TABS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className={`set-tab ${tab === item.id ? "active" : ""}`}
+            onClick={() => setTab(item.id)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+      <input
+        className="set-search"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder="Cerca connettori"
+      />
+      {filtered.length === 0 ? (
+        <p className="set-hint">Nessun connettore per questo filtro.</p>
+      ) : (
+        <div className="set-grid">
+          {filtered.map((item) => {
+            const connected = item.status === "connected";
+            return (
+              <div key={item.id} className={`set-conn ${connected ? "connected" : ""}`}>
+                <span className="set-conn-icon">
+                  <Globe size={18} />
+                </span>
+                <div className="set-conn-body">
+                  <div className="set-conn-title">{item.name}</div>
+                  <div className="set-conn-desc">{item.description}</div>
+                </div>
+                <button
+                  className="set-conn-add"
+                  type="button"
+                  title={connected ? "Connesso" : "Aggiungi"}
+                  aria-label={connected ? "Connesso" : "Aggiungi"}
+                >
+                  {connected ? <Check size={15} /> : <Plus size={15} />}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ computer */
+
+function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) {
+  const enabled = Boolean(computer?.enabled);
+  return (
+    <>
+      <div className="set-card">
+        <div className="set-card-top">
+          <span className="set-card-name">Computer contenuto</span>
+          <span className={`set-badge ${enabled ? "green" : "muted"}`}>
+            {enabled ? "Disponibile" : "Spento"}
+          </span>
+        </div>
+        <div className="set-card-divider" />
+        <p className="set-meter-sub" style={{ marginBottom: 0 }}>
+          Un browser reale e contenuto (passa i controlli anti-bot) in un computer virtuale non
+          invasivo, visibile live nella chat. {computer?.active ? "In esecuzione ora." : ""}
+        </p>
+      </div>
+      {enabled && computer?.novnc_url && (
+        <div className="set-rows" style={{ marginTop: "var(--s4)" }}>
+          <div className="set-row">
+            <div>
+              <div className="rk">Vista live</div>
+              <div className="rv">noVNC</div>
+            </div>
+            <a className="set-btn" href={computer.novnc_url} target="_blank" rel="noreferrer">
+              <ExternalLink size={14} />
+              <span style={{ marginLeft: 6 }}>Apri</span>
+            </a>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+/* --------------------------------------------------------------------- audit */
+
+function AuditPane() {
+  return (
+    <>
+      <div className="set-rows">
+        <div className="set-row">
+          <div>
+            <div className="rk">Audit locale</div>
+            <div className="rv">
+              Ogni azione del modello e del browser è registrata sul dispositivo.
+            </div>
+          </div>
+        </div>
+        <div className="set-row">
+          <div>
+            <div className="rk">Esportazione</div>
+            <div className="rv">Scarica i tuoi dati locali (memoria, task, audit).</div>
+          </div>
+          <button className="set-btn" type="button" disabled title="Disponibile a breve">
+            Esporta
+          </button>
+        </div>
+      </div>
+      <div className="set-danger">
+        <div>
+          <div className="dt">Svuota audit</div>
+          <div className="dd">Rimuove lo storico delle azioni. Non tocca memoria e task.</div>
+        </div>
+        <button className="set-btn danger" type="button" disabled title="Disponibile a breve">
+          Svuota
+        </button>
+      </div>
+    </>
+  );
 }
