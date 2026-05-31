@@ -870,6 +870,10 @@ async fn commit_prompt_result(
     Path(thread_id): Path<String>,
     Json(request): Json<CommitPromptResultRequest>,
 ) -> Result<Json<ChatMessagesSnapshot>, GatewayError> {
+    // Just persist the streamed result. We no longer keyword-sniff the prompt to
+    // auto-spawn a durable operational task here: the streaming tool-calling chat
+    // has already done the model-driven work, so a keyword-matched task was
+    // redundant (and was pure keyword-activation, against de-gemma).
     let snapshot = lock_store(&state)?
         .commit_prompt_result(
             &thread_id,
@@ -877,20 +881,6 @@ async fn commit_prompt_result(
             &request.assistant_message,
         )
         .map_err(GatewayError::store)?;
-    if should_create_operational_task(&request.user_message.text) {
-        ensure_operational_task_for_thread(
-            &state,
-            &thread_id,
-            &request.assistant_message.id,
-            &request.user_message.text,
-            TaskCreationMode::AutoFromPrompt,
-        )?;
-        return Ok(Json(
-            lock_store(&state)?
-                .messages(&thread_id)
-                .map_err(GatewayError::store)?,
-        ));
-    }
     Ok(Json(snapshot))
 }
 
@@ -7287,19 +7277,13 @@ fn split_binary_expression(expression: &str) -> Option<(&str, char, &str)> {
     None
 }
 
-fn operational_task_acknowledgement(prompt: &str) -> String {
-    let normalized = prompt.to_lowercase();
-    if normalized.contains("treno")
-        || normalized.contains("trenitalia")
-        || normalized.contains("italo")
-    {
-        return "Ho capito. Avvio un task locale: apro i siti utili, compilo i form necessari, raccolgo le opzioni disponibili e poi ti chiedo quale vuoi prenotare. Non faro' login, invii, acquisti o pagamenti senza una conferma esplicita.".to_string();
-    }
-    if normalized.contains("browser") || normalized.contains("cerca") || normalized.contains("apri")
-    {
-        return "Ho capito. Avvio un task locale con browser controllato, raccolgo le informazioni e torno con una risposta sintetica. Mi fermo prima di qualunque invio, login, acquisto o pagamento.".to_string();
-    }
-    "Ho capito. Creo un task locale e procedo fino al prossimo punto che richiede una conferma esplicita.".to_string()
+fn operational_task_acknowledgement(_prompt: &str) -> String {
+    // Generic ack (no keyword branches). What the task actually does is driven by
+    // the model/Brain plan, not by sniffing the prompt for "treno"/"browser"/etc.
+    "Ho capito. Avvio un task locale e procedo fino al prossimo punto che richiede \
+una conferma esplicita: mi fermo prima di login, dati personali, invii, acquisti o \
+pagamenti."
+        .to_string()
 }
 
 fn should_create_operational_task(prompt: &str) -> bool {
