@@ -681,7 +681,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/chat/generate_stream", post(generate_stream))
         .route("/api/chat/cancel_generation", post(cancel_generation))
         .route("/api/runtime/health", get(runtime_health))
-        .route("/api/runtime/model", get(runtime_model))
+        .route("/api/runtime/model", get(runtime_model).post(set_runtime_model))
+        .route("/api/runtime/models", get(runtime_models))
         .route("/api/runtime/logs", get(runtime_logs))
         .route("/api/runtime/warmup", post(runtime_warmup))
         .route("/api/runtime/shutdown", post(runtime_shutdown))
@@ -1103,6 +1104,38 @@ async fn generate_stream(
 /// Chat streaming config when an OpenAI-compatible backend is selected
 /// (`LOCAL_FIRST_INFERENCE_BACKEND=openai` + base URL). Returns
 /// `(base_url, model, api_key)`, else `None` to keep the local MLX path.
+/// File holding the user-selected active inference model (overrides the env
+/// default). Plain text, not a secret. Lets Settings switch model at runtime.
+fn inference_model_override_path() -> Option<PathBuf> {
+    gateway_data_dir()
+        .ok()
+        .map(|dir| dir.join("active-inference-model"))
+}
+
+fn persisted_inference_model() -> Option<String> {
+    let path = inference_model_override_path()?;
+    fs::read_to_string(path)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn set_persisted_inference_model(model: &str) -> std::io::Result<()> {
+    let path = inference_model_override_path()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no data dir"))?;
+    fs::write(path, model.trim())
+}
+
+/// The active inference model: user-selected override (persisted) wins over the
+/// env default. Read fresh each call, so a Settings change applies to the next
+/// chat with no restart.
+fn active_inference_model() -> String {
+    persisted_inference_model()
+        .or_else(|| env::var("LOCAL_FIRST_INFERENCE_MODEL").ok())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "gpt-4o-mini".to_string())
+}
+
 fn chat_openai_stream_config() -> Option<(String, String, Option<String>)> {
     if env::var("LOCAL_FIRST_INFERENCE_BACKEND")
         .map(|value| value.trim().to_ascii_lowercase())
@@ -1115,8 +1148,7 @@ fn chat_openai_stream_config() -> Option<(String, String, Option<String>)> {
     let base_url = env::var("LOCAL_FIRST_INFERENCE_BASE_URL")
         .ok()
         .filter(|value| !value.is_empty())?;
-    let model = env::var("LOCAL_FIRST_INFERENCE_MODEL").unwrap_or_else(|_| "gpt-4o-mini".to_string());
-    Some((base_url, model, resolve_inference_api_key()))
+    Some((base_url, active_inference_model(), resolve_inference_api_key()))
 }
 
 /// Chat context-char budget for the capable backend, derived from the model's
@@ -5700,8 +5732,8 @@ fn active_inference_model_info() -> ActiveModelResponse {
         backend: env::var("LOCAL_FIRST_INFERENCE_BACKEND")
             .unwrap_or_default()
             .to_ascii_lowercase(),
-        model: env::var("LOCAL_FIRST_INFERENCE_MODEL")
-            .ok()
+        model: persisted_inference_model()
+            .or_else(|| env::var("LOCAL_FIRST_INFERENCE_MODEL").ok())
             .filter(|value| !value.is_empty()),
         base_url: env::var("LOCAL_FIRST_INFERENCE_BASE_URL")
             .ok()
@@ -5715,6 +5747,76 @@ fn active_inference_model_info() -> ActiveModelResponse {
         has_api_key: resolve_inference_api_key().is_some(),
         mistralrs_compiled: cfg!(feature = "local-mistralrs"),
     })
+}
+
+#[derive(Debug, Serialize)]
+struct RuntimeModelsResponse {
+    active: Option<String>,
+    backend: String,
+    available: Vec<String>,
+}
+
+/// Lists the models the configured backend exposes (OpenAI-compatible `/models`,
+/// which Ollama also serves) so Settings can offer a real picker.
+async fn runtime_models(State(state): State<AppState>) -> Json<RuntimeModelsResponse> {
+    let backend = env::var("LOCAL_FIRST_INFERENCE_BACKEND")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let active = persisted_inference_model().or_else(|| env::var("LOCAL_FIRST_INFERENCE_MODEL").ok());
+    let mut available = Vec::new();
+    if let Ok(base) = env::var("LOCAL_FIRST_INFERENCE_BASE_URL") {
+        if !base.is_empty() {
+            let url = format!("{}/models", base.trim_end_matches('/'));
+            let mut request = state.http.get(&url).timeout(std::time::Duration::from_secs(4));
+            if let Some(key) = resolve_inference_api_key() {
+                request = request.bearer_auth(key);
+            }
+            if let Ok(response) = request.send().await {
+                if let Ok(body) = response.json::<serde_json::Value>().await {
+                    if let Some(data) = body.get("data").and_then(Value::as_array) {
+                        for entry in data {
+                            if let Some(id) = entry.get("id").and_then(Value::as_str) {
+                                available.push(id.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    available.sort();
+    available.dedup();
+    Json(RuntimeModelsResponse {
+        active,
+        backend,
+        available,
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct SetRuntimeModelRequest {
+    model: String,
+}
+
+/// Persists the user-selected active model. Applies to the next chat (no
+/// restart): chat_openai_stream_config reads the override fresh each call.
+async fn set_runtime_model(
+    Json(request): Json<SetRuntimeModelRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let model = request.model.trim();
+    if model.is_empty() {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "model_required",
+            message: "model must not be empty".to_string(),
+        });
+    }
+    set_persisted_inference_model(model).map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "model_persist_failed",
+        message: error.to_string(),
+    })?;
+    Ok(Json(serde_json::json!({ "active": model })))
 }
 
 fn mlx_fallback_model_info(missing_api_key: bool) -> ActiveModelResponse {
