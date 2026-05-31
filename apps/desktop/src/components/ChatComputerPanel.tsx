@@ -1,15 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { Maximize2, Minimize2, Monitor } from "lucide-react";
+import { ChevronDown, ChevronUp, Maximize2, Minimize2, Monitor } from "lucide-react";
 import { coreBridge, type ContainedComputerLive } from "../lib/coreBridge";
 
-// Manus-style: a card DOCKED above the prompt, shown ONLY while the contained
-// browser is actually working. It keeps a small live PiP of the browser always
-// visible, expandable to a full view and to fullscreen. When the browser is idle
-// it renders nothing (no fake "LIVE"), leaving the conversation's task surfaces.
+// Manus-style: a short card DOCKED above the prompt (same width), shown ONLY
+// while the contained browser is actually working. Collapsed = a clean status
+// bar; expand to the live view; fullscreen for the overlay. Hidden when idle.
 export function ChatComputerPanel() {
   const [live, setLive] = useState<ContainedComputerLive | null>(null);
-  // "pip" (small preview, default) | "expanded" (full inline) | "full" (overlay)
-  const [view, setView] = useState<"pip" | "expanded" | "full">("pip");
+  // "bar" (collapsed, default) | "expanded" (live inline) | "full" (overlay)
+  const [view, setView] = useState<"bar" | "expanded" | "full">("bar");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -33,20 +32,19 @@ export function ChatComputerPanel() {
   useEffect(() => {
     if (view !== "full") return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setView("pip");
+      if (e.key === "Escape") setView("expanded");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [view]);
 
-  // Only present while the browser is actually working.
   if (!live?.enabled || !live.novnc_url || !live.active) return null;
 
-  // vnc_lite.html (no noVNC toolbar) → the canvas fills the frame, no black bars.
   const base = live.novnc_url.replace("/vnc.html", "/vnc_lite.html");
   const src = `${base}${base.includes("?") ? "&" : "?"}autoconnect=true&resize=scale&reconnect=true&view_only=true`;
   const activity = live.activity?.trim() || "sta lavorando…";
   const fullscreen = view === "full";
+  const showStage = view === "expanded" || fullscreen;
 
   return (
     <>
@@ -55,7 +53,7 @@ export function ChatComputerPanel() {
           className="cc-scrim"
           type="button"
           aria-label="Chiudi"
-          onClick={() => setView("pip")}
+          onClick={() => setView("expanded")}
         />
       )}
       <div className={`cc-dock ${view}`}>
@@ -70,40 +68,38 @@ export function ChatComputerPanel() {
           <span className="cc-dock-activity" title={activity}>
             {activity}
           </span>
+          {showStage && (
+            <button
+              className="cc-icon-btn"
+              type="button"
+              onClick={() => setView(fullscreen ? "expanded" : "full")}
+              title={fullscreen ? "Riduci" : "Schermo intero"}
+              aria-label={fullscreen ? "Riduci" : "Schermo intero"}
+            >
+              {fullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+            </button>
+          )}
           <button
             className="cc-icon-btn"
             type="button"
-            onClick={() => setView(fullscreen ? "expanded" : "full")}
-            title={fullscreen ? "Riduci" : "Schermo intero"}
-            aria-label={fullscreen ? "Riduci" : "Schermo intero"}
+            onClick={() => setView(view === "bar" ? "expanded" : "bar")}
+            title={view === "bar" ? "Mostra il browser" : "Comprimi"}
+            aria-label={view === "bar" ? "Mostra il browser" : "Comprimi"}
           >
-            {fullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+            {view === "bar" ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
           </button>
         </header>
-        {/* One iframe, resized via the view class — no remount, no reconnect.
-            Click the small PiP to expand. The iframe is pointer-events:none so
-            the click toggles size (it's a view-only live preview). */}
-        <div
-          className="cc-stage"
-          role="button"
-          tabIndex={0}
-          title={view === "pip" ? "Espandi" : "Riduci"}
-          onClick={() => setView(view === "pip" ? "expanded" : "pip")}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              setView(view === "pip" ? "expanded" : "pip");
-            }
-          }}
-        >
-          <iframe
-            className="cc-frame"
-            title="Computer contenuto (live)"
-            src={src}
-            allow="clipboard-read; clipboard-write"
-            tabIndex={-1}
-          />
-        </div>
+        {showStage && (
+          <div className="cc-stage">
+            <iframe
+              className="cc-frame"
+              title="Computer contenuto (live)"
+              src={src}
+              allow="clipboard-read; clipboard-write"
+              tabIndex={-1}
+            />
+          </div>
+        )}
       </div>
     </>
   );

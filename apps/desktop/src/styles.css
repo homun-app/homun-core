@@ -2745,19 +2745,6 @@ small {
   font-weight: 600;
 }
 
-/* PiP (default when active): a small thumbnail card, centered above the prompt. */
-.cc-dock.pip {
-  width: 300px;
-}
-
-/* Expanded: aligned to the prompt width. */
-.cc-dock.expanded {
-  width: min(100%, 760px);
-}
-
-.cc-dock.pip .cc-dock-activity {
-  display: none;
-}
 
 .cc-dock-activity {
   flex: 1;
@@ -2805,31 +2792,31 @@ small {
 }
 
 /* Stage matches the contained display's 16:10 aspect ratio → no black bars.
-   Clickable to expand/collapse; the iframe itself is non-interactive (view-only
-   preview) so clicks toggle the size. */
+   overflow:hidden + the frame's negative top offset clip noVNC's thin status
+   bar ("Connected… CtrlAltDel") so the preview is clean. */
 .cc-stage {
   position: relative;
   width: 100%;
   aspect-ratio: 1280 / 800;
   background: #0b0d12;
-  cursor: pointer;
   border-top: 1px solid var(--line);
+  overflow: hidden;
 }
 
 .cc-dock.full .cc-stage {
   flex: 1;
   aspect-ratio: auto;
-  cursor: default;
 }
 
 .cc-frame {
   position: absolute;
-  inset: 0;
+  left: 0;
+  right: 0;
+  top: -34px;
+  height: calc(100% + 34px);
   width: 100%;
-  height: 100%;
   border: 0;
   display: block;
-  pointer-events: none;
 }
 
 .cc-scrim {
