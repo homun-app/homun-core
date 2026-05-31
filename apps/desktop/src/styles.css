@@ -4328,6 +4328,7 @@ small {
   white-space: nowrap;
 }
 .set-btn:hover { background: var(--surface-hover); }
+.set-btn { text-decoration: none; display: inline-flex; align-items: center; }
 .set-btn.primary { background: var(--text); color: #fff; border-color: var(--text); }
 .set-btn.primary:hover { opacity: 0.9; }
 .set-btn.danger { border-color: #f1c4c6; color: var(--red); }

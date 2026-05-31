@@ -454,6 +454,28 @@ async function electronContainedComputerLive(): Promise<ContainedComputerLive> {
   return gatewayGetJson<ContainedComputerLive>("/api/local-computer/live");
 }
 
+export interface SystemStatus {
+  docker: { installed: boolean; running: boolean; container_up: boolean };
+  contained_enabled: boolean;
+  contained_cdp_ok: boolean;
+  gateway_memory_mb: number;
+  container_memory_mb: number | null;
+  browser_sessions: number;
+}
+
+export interface CloseAllBrowsersResult {
+  closed_sessions: number;
+  closed_tabs: number;
+}
+
+async function electronSystemStatus(): Promise<SystemStatus> {
+  return gatewayGetJson<SystemStatus>("/api/system/status");
+}
+
+async function electronCloseAllBrowsers(): Promise<CloseAllBrowsersResult> {
+  return gatewayPostJson<CloseAllBrowsersResult>("/api/system/browser/close-all", {});
+}
+
 async function electronWorkspaces(): Promise<WorkspacesSnapshot> {
   return gatewayGetJson<WorkspacesSnapshot>("/api/workspaces");
 }
@@ -515,6 +537,8 @@ export const coreBridge = {
   status: () => Promise.resolve(electronCoreStatus()),
   runtimeModel: () => electronRuntimeModel(),
   containedComputerLive: () => electronContainedComputerLive(),
+  systemStatus: () => electronSystemStatus(),
+  closeAllBrowsers: () => electronCloseAllBrowsers(),
   workspaces: () => electronWorkspaces(),
   createWorkspace: (name: string) => electronCreateWorkspace(name),
   selectWorkspace: (id: string) => electronSelectWorkspace(id),

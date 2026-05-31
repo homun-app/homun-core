@@ -16,6 +16,7 @@ import {
   coreBridge,
   type ActiveModelInfo,
   type ContainedComputerLive,
+  type SystemStatus,
 } from "../lib/coreBridge";
 import { useSetting } from "../lib/settingsStore";
 import type {
@@ -487,6 +488,35 @@ function ConnectorsPane({ connections }: { connections: ConnectionItem[] }) {
 
 function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) {
   const enabled = Boolean(computer?.enabled);
+  const [status, setStatus] = useState<SystemStatus | null>(null);
+  const [closing, setClosing] = useState(false);
+  const [closedNote, setClosedNote] = useState<string | null>(null);
+
+  const refresh = async () => {
+    try {
+      setStatus(await coreBridge.systemStatus());
+    } catch {
+      /* keep previous */
+    }
+  };
+  useEffect(() => {
+    void refresh();
+    const id = window.setInterval(() => void refresh(), 5000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const docker = status?.docker;
+  const dockerLabel = !docker
+    ? "Verifica…"
+    : !docker.installed
+      ? "Non installato"
+      : !docker.running
+        ? "Installato, non in esecuzione"
+        : docker.container_up
+          ? "Attivo · container su"
+          : "In esecuzione · container spento";
+  const dockerOk = Boolean(docker?.running && docker.container_up);
+
   return (
     <>
       <div className="set-card">
@@ -497,25 +527,74 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
           </span>
         </div>
         <div className="set-card-divider" />
-        <p className="set-meter-sub" style={{ marginBottom: 0 }}>
+        <p className="set-meter-sub">
           Un browser reale e contenuto (passa i controlli anti-bot) in un computer virtuale non
-          invasivo, visibile live nella chat. {computer?.active ? "In esecuzione ora." : ""}
+          invasivo, visibile live nella chat.
         </p>
-      </div>
-      {enabled && computer?.novnc_url && (
-        <div className="set-rows" style={{ marginTop: "var(--s4)" }}>
-          <div className="set-row">
-            <div>
-              <div className="rk">Vista live</div>
-              <div className="rv">noVNC</div>
-            </div>
+        {enabled && computer?.novnc_url && (
+          <div className="set-meter" style={{ marginTop: 8 }}>
+            <span className="k">Vista live</span>
             <a className="set-btn" href={computer.novnc_url} target="_blank" rel="noreferrer">
               <ExternalLink size={14} />
-              <span style={{ marginLeft: 6 }}>Apri</span>
+              <span style={{ marginLeft: 6 }}>Apri noVNC</span>
             </a>
           </div>
+        )}
+      </div>
+
+      <div className="set-section-label">Sistema</div>
+      <div className="set-rows">
+        <div className="set-row">
+          <div>
+            <div className="rk">Docker</div>
+            <div className="rv">{dockerLabel}</div>
+          </div>
+          <span className={`set-badge ${dockerOk ? "green" : "muted"}`}>
+            {dockerOk ? "OK" : "Attenzione"}
+          </span>
         </div>
-      )}
+        <div className="set-row">
+          <div>
+            <div className="rk">Memoria — assistente</div>
+            <div className="rv">{status ? `${status.gateway_memory_mb} MB` : "—"}</div>
+          </div>
+          {status?.container_memory_mb != null && (
+            <div style={{ textAlign: "right" }}>
+              <div className="rk">Container</div>
+              <div className="rv">{status.container_memory_mb} MB</div>
+            </div>
+          )}
+        </div>
+        <div className="set-row">
+          <div>
+            <div className="rk">Sessioni browser attive</div>
+            <div className="rv">{status ? status.browser_sessions : "—"}</div>
+          </div>
+          <button
+            className="set-btn"
+            type="button"
+            disabled={closing}
+            onClick={async () => {
+              setClosing(true);
+              setClosedNote(null);
+              try {
+                const result = await coreBridge.closeAllBrowsers();
+                setClosedNote(
+                  `Chiuse ${result.closed_sessions} sessioni e ${result.closed_tabs} schede.`,
+                );
+                await refresh();
+              } catch {
+                setClosedNote("Chiusura non riuscita.");
+              } finally {
+                setClosing(false);
+              }
+            }}
+          >
+            {closing ? "Chiusura…" : "Chiudi tutti i browser"}
+          </button>
+        </div>
+      </div>
+      {closedNote && <p className="set-hint">{closedNote}</p>}
     </>
   );
 }
