@@ -2737,19 +2737,26 @@ small {
   padding: 7px 8px 7px 12px;
 }
 
-.cc-dock-toggle {
+.cc-dock-title {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 4px 6px;
-  border-radius: 8px;
-  background: transparent;
   color: var(--text);
   font-weight: 600;
 }
 
-.cc-dock-toggle:hover {
-  background: var(--blue-soft);
+/* PiP (default when active): a small thumbnail card, centered above the prompt. */
+.cc-dock.pip {
+  width: 300px;
+}
+
+/* Expanded: aligned to the prompt width. */
+.cc-dock.expanded {
+  width: min(100%, 760px);
+}
+
+.cc-dock.pip .cc-dock-activity {
+  display: none;
 }
 
 .cc-dock-activity {
@@ -2797,17 +2804,22 @@ small {
   color: var(--text);
 }
 
-/* Stage matches the contained display's 16:10 aspect ratio → no black bars. */
+/* Stage matches the contained display's 16:10 aspect ratio → no black bars.
+   Clickable to expand/collapse; the iframe itself is non-interactive (view-only
+   preview) so clicks toggle the size. */
 .cc-stage {
   position: relative;
   width: 100%;
   aspect-ratio: 1280 / 800;
   background: #0b0d12;
+  cursor: pointer;
+  border-top: 1px solid var(--line);
 }
 
 .cc-dock.full .cc-stage {
   flex: 1;
   aspect-ratio: auto;
+  cursor: default;
 }
 
 .cc-frame {
@@ -2817,6 +2829,7 @@ small {
   height: 100%;
   border: 0;
   display: block;
+  pointer-events: none;
 }
 
 .cc-scrim {

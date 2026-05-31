@@ -372,6 +372,10 @@ export interface ComposioConnectResult {
 export interface ContainedComputerLive {
   enabled: boolean;
   novnc_url: string | null;
+  /** True only while a browse_web is actually running right now. */
+  active: boolean;
+  /** Current activity (goal) when active. */
+  activity: string | null;
 }
 
 export interface McpConnectResult {

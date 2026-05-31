@@ -1358,11 +1358,15 @@ async fn stream_chat_via_openai(
                         // time. Without this, concurrent chat requests spawn multiple
                         // sidecars onto the same browser and pile up tabs/state.
                         let _browse_guard = browse_web_lock().lock().await;
-                        match tokio::task::spawn_blocking(move || {
+                        // Publish the live activity so the UI shows a truthful
+                        // "● LIVE · <goal>" + PiP only while the browser is working.
+                        set_browser_activity(Some(effective.clone()));
+                        let outcome = tokio::task::spawn_blocking(move || {
                             execute_browse_web_tool(&st, &effective)
                         })
-                        .await
-                        {
+                        .await;
+                        set_browser_activity(None);
+                        match outcome {
                             Ok(Ok(text)) => text,
                             Ok(Err(error)) => {
                                 format!("Lo strumento browser ha riportato un errore: {error}")
@@ -1433,6 +1437,25 @@ async fn stream_chat_via_openai(
 fn browse_web_lock() -> &'static tokio::sync::Mutex<()> {
     static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+/// Live browser activity: `Some(goal)` while a `browse_web` is actually running,
+/// `None` when idle. Drives a TRUTHFUL "● LIVE" + PiP in the UI (no fake "live"
+/// when nothing is happening).
+fn browser_activity_cell() -> &'static std::sync::RwLock<Option<String>> {
+    static CELL: std::sync::OnceLock<std::sync::RwLock<Option<String>>> =
+        std::sync::OnceLock::new();
+    CELL.get_or_init(|| std::sync::RwLock::new(None))
+}
+
+fn set_browser_activity(value: Option<String>) {
+    if let Ok(mut guard) = browser_activity_cell().write() {
+        *guard = value;
+    }
+}
+
+fn current_browser_activity() -> Option<String> {
+    browser_activity_cell().read().ok().and_then(|guard| guard.clone())
 }
 
 /// Executes the `browse_web` tool: materializes a browser task for the goal and
@@ -7434,18 +7457,26 @@ fn resolve_contained_computer_novnc(enabled: bool, explicit: Option<&str>) -> Op
 struct ContainedComputerLiveResponse {
     enabled: bool,
     novnc_url: Option<String>,
+    /// True only while a browse_web is actually running right now.
+    active: bool,
+    /// The current activity (goal) when active, for the panel subtitle.
+    activity: Option<String>,
 }
 
-/// Reports whether the contained computer's live view is available and where to
-/// embed it. The desktop "Browser" panel renders the noVNC URL in an iframe.
+/// Reports whether the contained computer's live view is available, where to
+/// embed it, and whether the browser is working RIGHT NOW (so the UI shows a
+/// truthful LIVE + PiP only when active). Polled by the desktop panel.
 async fn contained_computer_live() -> Json<ContainedComputerLiveResponse> {
     let novnc_url = resolve_contained_computer_novnc(
         contained_computer_cdp_endpoint().is_some(),
         env::var("LOCAL_FIRST_CONTAINED_COMPUTER_NOVNC").ok().as_deref(),
     );
+    let activity = current_browser_activity();
     Json(ContainedComputerLiveResponse {
         enabled: novnc_url.is_some(),
         novnc_url,
+        active: activity.is_some(),
+        activity,
     })
 }
 
