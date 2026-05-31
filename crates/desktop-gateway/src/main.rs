@@ -1234,22 +1234,34 @@ async fn stream_chat_via_openai(
     .runtime_prompt;
 
     let system = format!(
-        "Sei l'assistente locale. Oggi è {today}: usa SEMPRE questa data per \
-risolvere richieste temporali (es. \"10 giugno\" = il 10 giugno dell'anno \
-corretto rispetto a oggi, sempre nel futuro). Hai accesso a un browser reale e \
-contenuto tramite lo strumento browse_web. Quando la richiesta richiede dati dal \
-web in tempo reale o azioni nel browser (voli, treni, prezzi, ricerche, \
-prenotazioni, consultare un sito), DEVI usare browse_web invece di dire che non \
-hai accesso a internet; nell'obiettivo passato a browse_web includi sempre le \
-date concrete (con l'anno).\n\
+        "Sei l'assistente locale e agisci come ORCHESTRATORE. Oggi è {today}: usa \
+SEMPRE questa data per risolvere richieste temporali (es. \"10 giugno\" = il 10 \
+giugno dell'anno corretto rispetto a oggi, sempre nel futuro). Hai accesso a un \
+browser reale e contenuto tramite lo strumento browse_web.\n\
+\n\
+METODO (vale per qualsiasi richiesta, non solo viaggi):\n\
+1. COMPRENDI: cosa vuole l'utente e qual è il RISULTATO concreto atteso.\n\
+2. CRITERI DI SUCCESSO: definisci esplicitamente cosa significa \"fatto\" (quali \
+dati/campi e quante opzioni servono). Includili SEMPRE nell'obiettivo di browse_web.\n\
+3. CHIARIMENTI: se manca un parametro davvero bloccante e ambiguo, fai UNA sola \
+domanda concisa PRIMA di cercare; altrimenti procedi con default sensati e \
+DICHIARALI (non bloccare l'utente per dettagli minori).\n\
+4. ESEGUI: quando servono dati dal web in tempo reale o azioni nel browser, DEVI \
+usare browse_web (non dire che non hai accesso a internet). Chiama browse_web UNA \
+SOLA VOLTA: nell'unico obiettivo includi il compito concreto con date esplicite \
+(anno incluso), i CRITERI DI SUCCESSO, e 2-3 FONTI candidate in ordine di \
+preferenza. È il browser stesso a provarle a turno (se una è bloccata/senza dati \
+passa alla successiva). NON chiamare browse_web più volte per provare fonti diverse \
+e NON ripetere la stessa ricerca.\n\
+5. SINTETIZZA: appena ricevi il risultato del browser, scrivi la risposta finale \
+all'utente. Se una fonte è risultata bloccata/vuota, dillo con onestà.\n\
+\n\
 Viaggi: se l'utente NON chiede esplicitamente il ritorno, cerca SOLO ANDATA \
 (one-way). Un passeggero salvo diversa indicazione.\n\
-Chiama browse_web UNA sola volta con un obiettivo completo (tratta, data, \
-solo andata, dettagli richiesti); NON ripetere la stessa ricerca più volte — usa \
-il risultato che ottieni. Quando riporti risultati (voli, treni, hotel, ...), sii \
-ESAUSTIVO: per ogni opzione indica orario di partenza e arrivo, durata, \
-scali/cambi, compagnia/operatore e prezzo se disponibile; elenca più opzioni, non \
-solo una. Rispondi in italiano, chiaro e ordinato (tabella quando aiuta).",
+Quando riporti risultati (voli, treni, hotel, ...), sii ESAUSTIVO: per ogni opzione \
+indica orario di partenza e arrivo, durata, scali/cambi, compagnia/operatore e \
+prezzo se disponibile; elenca più opzioni, non solo una. Rispondi in italiano, \
+chiaro e ordinato (tabella quando aiuta).",
         today = today_iso()
     );
     let system = system.as_str();
@@ -1272,26 +1284,30 @@ solo una. Rispondi in italiano, chiaro e ordinato (tabella quando aiuta).",
             // On the LAST allowed round, forbid tools so the model MUST synthesize
             // a final answer from what it already gathered — otherwise it can burn
             // every round on tool calls and end with no answer ("limite di passi").
-            let tool_choice = if round + 1 >= MAX_TOOL_ROUNDS { "none" } else { "auto" };
+            // On the LAST allowed round, OMIT tools entirely (do not rely on
+            // tool_choice:"none" — minimax-via-Ollama ignores it and keeps calling
+            // tools, so the loop never synthesizes and ends with "limite di passi").
+            // Omitting the tools field forces a text answer.
+            let is_final_round = round + 1 >= MAX_TOOL_ROUNDS;
+            let mut payload = serde_json::json!({
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                // Reasoning models need room for CoT + the final answer; without
+                // a budget the synthesis came back empty (same starvation as the
+                // planner). Generous so the final table isn't cut off.
+                "max_tokens": 6000,
+                "stream": false,
+            });
+            if !is_final_round {
+                payload["tools"] = tools.clone();
+                payload["tool_choice"] = serde_json::Value::String("auto".to_string());
+            }
             let mut builder = http.post(&endpoint);
             if let Some(key) = api_key.as_ref() {
                 builder = builder.bearer_auth(key);
             }
-            let resp = builder
-                .json(&serde_json::json!({
-                    "model": model,
-                    "messages": messages,
-                    "tools": tools,
-                    "tool_choice": tool_choice,
-                    "temperature": temperature,
-                    // Reasoning models need room for CoT + the final answer; without
-                    // a budget the synthesis came back empty (same starvation as the
-                    // planner). Generous so the final table isn't cut off.
-                    "max_tokens": 6000,
-                    "stream": false,
-                }))
-                .send()
-                .await;
+            let resp = builder.json(&payload).send().await;
             let resp = match resp {
                 Ok(value) => value,
                 Err(error) => {
@@ -1436,14 +1452,56 @@ solo una. Rispondi in italiano, chiaro e ordinato (tabella quando aiuta).",
         }
 
         if !final_done {
+            // Guaranteed synthesis: the model exhausted the tool rounds without a
+            // text answer (it kept calling tools). Force one final NO-TOOLS call so
+            // it synthesizes from the results already gathered, instead of dead-ending
+            // on "limite di passi".
+            messages.push(serde_json::json!({
+                "role": "user",
+                "content": "Non sono più disponibili strumenti. Scrivi ORA la risposta finale per \
+l'utente sintetizzando i risultati raccolti dai passi precedenti (sii esaustivo: orari, durata, \
+scali, compagnia, prezzo per ogni opzione). Se una fonte era bloccata o senza dati, dillo con onestà."
+            }));
+            let mut synth_text = String::new();
+            let mut builder = http.post(&endpoint);
+            if let Some(key) = api_key.as_ref() {
+                builder = builder.bearer_auth(key);
+            }
+            let synth = builder
+                .json(&serde_json::json!({
+                    "model": model,
+                    "messages": messages,
+                    "temperature": temperature,
+                    "max_tokens": 6000,
+                    "stream": false,
+                }))
+                .send()
+                .await;
+            if let Ok(resp) = synth {
+                if let Ok(body) = resp.json::<serde_json::Value>().await {
+                    synth_text = body
+                        .get("choices")
+                        .and_then(|c| c.get(0))
+                        .and_then(|c| c.get("message"))
+                        .and_then(|m| m.get("content"))
+                        .and_then(|c| c.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                }
+            }
+            let final_text = if !synth_text.trim().is_empty() {
+                synth_text
+            } else if !accumulated.trim().is_empty() {
+                accumulated
+            } else {
+                "Non sono riuscito a recuperare i risultati dalle fonti (alcune bloccate da \
+verifica anti-bot). Riprova o indica una fonte preferita.".to_string()
+            };
+            let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: final_text.clone() }).await;
             let _ = emit_stream_event(
                 &tx,
                 GenerateStreamEvent::Done {
-                    text: if accumulated.is_empty() {
-                        "Ho raggiunto il limite di passi senza una risposta finale.".to_string()
-                    } else {
-                        accumulated
-                    },
+                    text: final_text,
                     metrics: TokenMetrics::zero(),
                 },
             )
