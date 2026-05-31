@@ -5596,11 +5596,14 @@ fn browser_loop_controller_enabled() -> bool {
 }
 
 fn browser_loop_max_iterations() -> u32 {
+    // Not an arbitrary "stop here" cap: the loop ends when the goal is done or
+    // blocked. This is only a high safety bound so a stuck loop can't run
+    // forever. The user can raise it further per install.
     env::var("LOCAL_FIRST_BROWSER_LOOP_MAX_ITERATIONS")
         .ok()
         .and_then(|value| value.parse::<u32>().ok())
-        .map(|value| value.clamp(1, 24))
-        .unwrap_or(10)
+        .map(|value| value.clamp(1, 200))
+        .unwrap_or(40)
 }
 
 /// Builds the inference router that drives the browser loop planner.
