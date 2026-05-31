@@ -703,6 +703,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(local_computer_artifact_preview),
         )
         .route("/api/local-computer/live", get(contained_computer_live))
+        .route("/api/system/status", get(system_status))
+        .route("/api/system/browser/close-all", post(close_all_browsers))
         .route("/api/memory/dashboard", get(memory_dashboard))
         .route("/api/capabilities/snapshot", get(capability_snapshot))
         .route(
@@ -6678,6 +6680,186 @@ async fn contained_computer_live() -> Json<ContainedComputerLiveResponse> {
         activity: activity_state.as_ref().map(|state| state.goal.clone()),
         steps: activity_state.map(|state| state.steps).unwrap_or_default(),
     })
+}
+
+const CONTAINED_CONTAINER_NAME: &str = "lfpa-cc";
+
+#[derive(Debug, Serialize)]
+struct DockerStatus {
+    installed: bool,
+    running: bool,
+    container_up: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct SystemStatusResponse {
+    docker: DockerStatus,
+    contained_enabled: bool,
+    contained_cdp_ok: bool,
+    gateway_memory_mb: u64,
+    container_memory_mb: Option<u64>,
+    browser_sessions: usize,
+}
+
+/// Run a CLI command, returning trimmed stdout on success (None otherwise).
+fn run_cli(program: &str, args: &[&str]) -> Option<String> {
+    std::process::Command::new(program)
+        .args(args)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Resident memory of THIS gateway process, in MB (best-effort via `ps`).
+fn gateway_memory_mb() -> u64 {
+    let pid = std::process::id().to_string();
+    run_cli("ps", &["-o", "rss=", "-p", &pid])
+        .and_then(|stdout| stdout.split_whitespace().next().map(str::to_string))
+        .and_then(|kb| kb.parse::<u64>().ok())
+        .map(|kb| kb / 1024)
+        .unwrap_or(0)
+}
+
+/// Parse the first figure of a `docker stats` MemUsage cell (e.g. "123.4MiB / 512MiB").
+fn parse_docker_mem_mb(usage: &str) -> Option<u64> {
+    let first = usage.split('/').next()?.trim();
+    let digits: String = first
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
+    let value: f64 = digits.parse().ok()?;
+    let mb = if first.contains("GiB") || first.contains("GB") {
+        value * 1024.0
+    } else if first.contains("KiB") || first.contains("KB") {
+        value / 1024.0
+    } else {
+        value // MiB/MB
+    };
+    Some(mb.round() as u64)
+}
+
+/// System/Computer status for Settings: Docker (installed/running + the contained
+/// computer container), tool memory usage, live browser-session count.
+async fn system_status(State(state): State<AppState>) -> Json<SystemStatusResponse> {
+    let browser_sessions = state
+        .browser_thread_sessions
+        .lock()
+        .map(|map| map.len())
+        .unwrap_or(0);
+    let cdp = contained_computer_cdp_endpoint();
+    let contained_enabled = cdp.is_some();
+    let contained_cdp_ok = if let Some(endpoint) = cdp.as_ref() {
+        state
+            .http
+            .get(format!("{}/json/version", endpoint.trim_end_matches('/')))
+            .timeout(std::time::Duration::from_millis(800))
+            .send()
+            .await
+            .map(|response| response.status().is_success())
+            .unwrap_or(false)
+    } else {
+        false
+    };
+    let (docker, gateway_mb, container_mb) = tokio::task::spawn_blocking(|| {
+        let installed = run_cli("docker", &["--version"]).is_some();
+        let running =
+            installed && run_cli("docker", &["info", "--format", "{{.ServerVersion}}"]).is_some();
+        let filter = format!("name={CONTAINED_CONTAINER_NAME}");
+        let container_up = running
+            && run_cli("docker", &["ps", "--filter", &filter, "--format", "{{.Names}}"])
+                .map(|names| names.contains(CONTAINED_CONTAINER_NAME))
+                .unwrap_or(false);
+        let container_mb = if container_up {
+            run_cli(
+                "docker",
+                &["stats", "--no-stream", "--format", "{{.MemUsage}}", CONTAINED_CONTAINER_NAME],
+            )
+            .as_deref()
+            .and_then(parse_docker_mem_mb)
+        } else {
+            None
+        };
+        (
+            DockerStatus { installed, running, container_up },
+            gateway_memory_mb(),
+            container_mb,
+        )
+    })
+    .await
+    .unwrap_or((
+        DockerStatus { installed: false, running: false, container_up: false },
+        0,
+        None,
+    ));
+
+    Json(SystemStatusResponse {
+        docker,
+        contained_enabled,
+        contained_cdp_ok,
+        gateway_memory_mb: gateway_mb,
+        container_memory_mb: container_mb,
+        browser_sessions,
+    })
+}
+
+#[derive(Debug, Serialize)]
+struct CloseAllBrowsersResponse {
+    closed_sessions: usize,
+    closed_tabs: usize,
+}
+
+/// Close every per-thread browser session AND any lingering page in the contained
+/// browser. Exposed in Settings as "Chiudi tutti i browser".
+async fn close_all_browsers(State(state): State<AppState>) -> Json<CloseAllBrowsersResponse> {
+    let sessions: Vec<ThreadBrowserSession> = state
+        .browser_thread_sessions
+        .lock()
+        .map(|mut map| map.drain().map(|(_, session)| session).collect())
+        .unwrap_or_default();
+    let closed_sessions = sessions.len();
+    let _ = tokio::task::spawn_blocking(move || {
+        for session in sessions {
+            let _ = session.client.call(BrowserMethod::Stop, serde_json::json!({}));
+        }
+    })
+    .await;
+
+    let mut closed_tabs = 0usize;
+    if let Some(endpoint) = contained_computer_cdp_endpoint() {
+        let base = endpoint.trim_end_matches('/').to_string();
+        if let Ok(response) = state
+            .http
+            .get(format!("{base}/json"))
+            .timeout(std::time::Duration::from_secs(2))
+            .send()
+            .await
+        {
+            if let Ok(targets) = response.json::<Vec<serde_json::Value>>().await {
+                for target in targets {
+                    if target.get("type").and_then(Value::as_str) != Some("page") {
+                        continue;
+                    }
+                    let Some(id) = target.get("id").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    let closed = state
+                        .http
+                        .get(format!("{base}/json/close/{id}"))
+                        .timeout(std::time::Duration::from_secs(2))
+                        .send()
+                        .await
+                        .map(|response| response.status().is_success())
+                        .unwrap_or(false);
+                    if closed {
+                        closed_tabs += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    Json(CloseAllBrowsersResponse { closed_sessions, closed_tabs })
 }
 
 /// Env for the browser sidecar, shared by every spawn site so contained-computer
