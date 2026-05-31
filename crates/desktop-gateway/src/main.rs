@@ -7568,69 +7568,10 @@ struct BrowserTarget {
     url: String,
 }
 
-/// Whether the goal EXPLICITLY asks for trains. The single source of truth for
-/// the train-specialized path — keyed on transport intent ("treno", operators),
-/// NEVER on city names. A "voli Milano-Napoli" request must NOT be hijacked into
-/// a train search (the de-gemma fix: the model's intent decides the site, not a
-/// hardcoded city heuristic).
-fn goal_requests_train(normalized: &str) -> bool {
-    [
-        "treno",
-        "treni",
-        "trenitalia",
-        "italo",
-        "frecciarossa",
-        "frecciargento",
-        "frecciabianca",
-        "intercity",
-        "regionale",
-        "ferrovie",
-    ]
-    .iter()
-    .any(|marker| normalized.contains(marker))
-}
-
+/// ONE general entry for every goal: a web search of the goal. The model-driven
+/// observe-act loop navigates from there. No keyword/domain/transport routing —
+/// the model understands what the goal needs and decides where to go.
 fn browser_targets_for_goal(goal: &str) -> Vec<BrowserTarget> {
-    let normalized = goal.to_lowercase();
-    if goal_requests_train(&normalized) {
-        let wants_trenitalia = normalized.contains("trenitalia");
-        let wants_italo = normalized.contains("italotreno")
-            || normalized.contains("italo treno")
-            || normalized.contains("italo");
-        if wants_trenitalia && !wants_italo {
-            return vec![BrowserTarget {
-                label: "Trenitalia".to_string(),
-                url: "https://www.trenitalia.com/".to_string(),
-            }];
-        }
-        if wants_italo && !wants_trenitalia {
-            return vec![BrowserTarget {
-                label: "Italo".to_string(),
-                url: "https://www.italotreno.com/it".to_string(),
-            }];
-        }
-        let trovatreno_url = train_search_draft_for_goal(goal)
-            .map(|draft| trovatreno_search_url(&draft))
-            .unwrap_or_else(|| "https://www.trovatreno.it/cerca".to_string());
-        return vec![
-            BrowserTarget {
-                label: "TrovaTreno".to_string(),
-                url: trovatreno_url,
-            },
-            BrowserTarget {
-                label: "Trenitalia".to_string(),
-                url: "https://www.trenitalia.com/".to_string(),
-            },
-            BrowserTarget {
-                label: "Italo".to_string(),
-                url: "https://www.italotreno.com/".to_string(),
-            },
-            BrowserTarget {
-                label: "Ricerca web".to_string(),
-                url: browser_url_for_goal(goal),
-            },
-        ];
-    }
     vec![BrowserTarget {
         label: "Ricerca web".to_string(),
         url: browser_url_for_goal(goal),
@@ -7891,12 +7832,9 @@ fn approval_explanation_for_plan(plan: &OperationalPlan) -> String {
 }
 
 fn browser_url_for_goal(goal: &str) -> String {
-    let normalized = goal.to_lowercase();
-    if normalized.contains("trenitalia") {
-        return "https://www.trenitalia.com/".to_string();
-    }
-    // Search the goal verbatim — no city-name → train augmentation. The loop
-    // then navigates whatever the goal actually asks for (flights, hotels, …).
+    // Uniform entry for EVERY goal: a web search of the goal verbatim. No
+    // keyword/site special-casing — the observe-act loop navigates from the
+    // results to wherever the goal actually leads.
     format!("https://duckduckgo.com/?q={}", url_encode(goal))
 }
 
@@ -7904,46 +7842,12 @@ fn is_train_operator(label: &str) -> bool {
     matches!(label, "TrovaTreno" | "Trenitalia" | "Italo")
 }
 
-fn train_search_draft_for_goal(goal: &str) -> Option<TrainSearchDraft> {
-    let normalized = normalize_for_match(goal);
-    // Build a train-search draft ONLY for explicit train intent — never just
-    // because two known city names appear (that hijacked "voli" into trains).
-    if !goal_requests_train(&normalized) {
-        return None;
-    }
-
-    let cities = [
-        ("napoli", "Napoli"),
-        ("milano", "Milano"),
-        ("roma", "Roma"),
-        ("torino", "Torino"),
-        ("bologna", "Bologna"),
-        ("firenze", "Firenze"),
-        ("venezia", "Venezia"),
-        ("genova", "Genova"),
-        ("salerno", "Salerno"),
-        ("verona", "Verona"),
-    ];
-    let mut found = cities
-        .iter()
-        .filter_map(|(needle, label)| normalized.find(needle).map(|index| (index, *label)))
-        .collect::<Vec<_>>();
-    found.sort_by_key(|(index, _)| *index);
-    found.dedup_by(|left, right| left.1 == right.1);
-    let (origin, destination) = if found.len() >= 2 {
-        (found[0].1.to_string(), found[1].1.to_string())
-    } else if normalized.contains("napoli") && normalized.contains("milano") {
-        ("Napoli".to_string(), "Milano".to_string())
-    } else {
-        return None;
-    };
-
-    Some(TrainSearchDraft {
-        origin,
-        destination,
-        date: extract_italian_date(goal),
-        time: extract_time_label(goal),
-    })
+/// Train specialization REMOVED (user directive): there is no train-specific
+/// path and no keyword activation. The model decides where to go from the goal;
+/// the generic observe-act loop handles every request. Always `None`, so all the
+/// downstream train-navigation branches stay dormant.
+fn train_search_draft_for_goal(_goal: &str) -> Option<TrainSearchDraft> {
+    None
 }
 
 fn extract_italian_date(goal: &str) -> Option<String> {
@@ -9931,7 +9835,7 @@ mod tests {
         BrowserFormDraftSummary, BrowserSourceSummary, browser_final_answer_for_task,
         browser_form_draft_result_labels, browser_form_fields_for_snapshot,
         browser_loop_output_has_train_options, browser_method_for_capability_tool,
-        browser_targets_for_goal, browser_url_for_goal, evaluate_simple_arithmetic, goal_requests_train,
+        browser_targets_for_goal, browser_url_for_goal, evaluate_simple_arithmetic,
         is_safe_train_search_button, normalize_for_match, operational_plan_for_goal,
         operational_plan_markdown, operational_task_acknowledgement, parse_loopback_http_host_port,
         privacy_accept_button_for_snapshot, redact_sensitive_text, resources_for_prompt,
@@ -10334,41 +10238,26 @@ mod tests {
     }
 
     #[test]
-    fn flight_goal_is_not_hijacked_into_trains() {
-        // The bug the user hit: "voli Milano-Napoli" returned TRAINS because the
-        // city names triggered the train path. Intent ("voli") must win.
-        let goal = "Cerca voli da Milano a Napoli per il 10 giugno";
-        assert!(!goal_requests_train(&goal.to_lowercase()));
-        assert!(train_search_draft_for_goal(goal).is_none());
-        let targets = browser_targets_for_goal(goal);
-        assert_eq!(targets.len(), 1);
-        assert_eq!(targets[0].label, "Ricerca web");
-        assert!(targets[0].url.starts_with("https://duckduckgo.com/?q="));
-        // An explicit train request still uses the train path.
-        assert!(goal_requests_train("treno milano napoli"));
-        assert!(browser_targets_for_goal("treno Milano Napoli").len() > 1);
-    }
-
-    #[test]
-    fn browser_executor_uses_multiple_read_only_train_sources() {
-        let targets =
-            browser_targets_for_goal("Devo prenotare un treno Napoli Milano il 10 giugno");
-
-        assert_eq!(targets.len(), 4);
-        assert_eq!(targets[0].label, "TrovaTreno");
-        assert!(
-            targets[0]
-                .url
-                .starts_with("https://www.trovatreno.it/cerca?")
-        );
-        assert!(targets[0].url.contains("Napoli+Centrale"));
-        assert!(targets[0].url.contains("Milano+Centrale"));
-        assert_eq!(targets[1].label, "Trenitalia");
-        assert_eq!(targets[1].url, "https://www.trenitalia.com/");
-        assert_eq!(targets[2].label, "Italo");
-        assert_eq!(targets[2].url, "https://www.italotreno.com/");
-        assert_eq!(targets[3].label, "Ricerca web");
-        assert!(targets[3].url.starts_with("https://duckduckgo.com/?q="));
+    fn browser_path_is_general_with_no_train_specialization() {
+        // The train path is removed (user directive): EVERY goal — flights,
+        // trains, anything — gets ONE generic web-search target, and there is no
+        // train-search draft. The model decides where to go; no keyword/site
+        // routing hijacks the intent (this is the bug where "voli Milano-Napoli"
+        // returned trains).
+        for goal in [
+            "Cerca voli da Milano a Napoli per il 10 giugno",
+            "Devo prenotare un treno Napoli Milano il 10 giugno",
+            "trova un ristorante a Roma",
+        ] {
+            let targets = browser_targets_for_goal(goal);
+            assert_eq!(targets.len(), 1, "goal: {goal}");
+            assert_eq!(targets[0].label, "Ricerca web", "goal: {goal}");
+            assert!(
+                targets[0].url.starts_with("https://duckduckgo.com/?q="),
+                "goal: {goal}"
+            );
+            assert!(train_search_draft_for_goal(goal).is_none(), "goal: {goal}");
+        }
     }
 
     #[test]
@@ -10459,55 +10348,6 @@ mod tests {
     }
 
     #[test]
-    fn train_search_draft_extracts_route_date_and_time() {
-        let draft = train_search_draft_for_goal(
-            "Devo prenotare un treno Napoli Milano il 10 giugno verso le 9",
-        )
-        .unwrap();
-
-        assert_eq!(draft.origin, "Napoli");
-        assert_eq!(draft.destination, "Milano");
-        assert!(
-            draft
-                .date
-                .as_deref()
-                .is_some_and(|date| date.starts_with("10/06/"))
-        );
-        assert_eq!(draft.time.as_deref(), Some("09:00"));
-    }
-
-    #[test]
-    fn train_browser_targets_prioritize_direct_sources_before_web_search() {
-        let targets = browser_targets_for_goal(
-            "Devo prenotare un treno Napoli Milano il 10 giugno verso le 9",
-        );
-
-        assert_eq!(targets[0].label, "TrovaTreno");
-        assert!(targets[0].url.contains("Napoli+Centrale"));
-        assert!(targets[0].url.contains("Milano+Centrale"));
-        assert_eq!(targets[1].label, "Trenitalia");
-        assert_eq!(targets[2].label, "Italo");
-        assert_eq!(targets[3].label, "Ricerca web");
-    }
-
-    #[test]
-    fn explicit_train_operator_request_uses_only_that_source() {
-        let targets = browser_targets_for_goal(
-            "Guarda direttamente su Trenitalia treni Napoli Milano il 10 giugno verso le 9",
-        );
-        assert_eq!(targets.len(), 1);
-        assert_eq!(targets[0].label, "Trenitalia");
-        assert_eq!(targets[0].url, "https://www.trenitalia.com/");
-
-        let targets = browser_targets_for_goal(
-            "Guarda direttamente su ItaloTreno treni Napoli Milano il 10 giugno verso le 9",
-        );
-        assert_eq!(targets.len(), 1);
-        assert_eq!(targets[0].label, "Italo");
-        assert_eq!(targets[0].url, "https://www.italotreno.com/it");
-    }
-
-    #[test]
     fn task_effective_goal_uses_redacted_prompt_for_execution() {
         let task = TaskRecord::new(
             "task_1",
@@ -10516,85 +10356,15 @@ mod tests {
             "browser_task",
             "Devo prenotare un treno Napoli Milano il ...",
             serde_json::json!({
-                "prompt_redacted": "Devo prenotare un treno Napoli Milano il 10 giugno verso le 9, trova opzioni ma non acquistare nulla"
+                "prompt_redacted": "Cerca voli Napoli Milano il 10 giugno, trova opzioni ma non acquistare nulla"
             }),
         );
 
-        let draft = train_search_draft_for_goal(&task_effective_goal(&task)).unwrap();
-
-        assert_eq!(draft.origin, "Napoli");
-        assert_eq!(draft.destination, "Milano");
-        assert!(
-            draft
-                .date
-                .as_deref()
-                .is_some_and(|date| date.starts_with("10/06/"))
-        );
-        assert_eq!(draft.time.as_deref(), Some("09:00"));
-    }
-
-    #[test]
-    fn trovatreno_search_url_uses_query_params_for_results_page() {
-        let draft = train_search_draft_for_goal(
-            "Devo prenotare un treno Napoli Milano il 10 giugno verso le 9",
-        )
-        .unwrap();
-        let url = trovatreno_search_url(&draft);
-
-        assert!(url.starts_with("https://www.trovatreno.it/cerca?"));
-        assert!(url.contains("da=Napoli+Centrale"));
-        assert!(url.contains("a=Milano+Centrale"));
-        assert!(url.contains("data=2026-06-10"));
-        assert!(url.contains("ora=09%3A00"));
-    }
-
-    #[test]
-    fn browser_form_fields_map_semantic_refs_without_submit() {
-        let draft = train_search_draft_for_goal(
-            "Devo prenotare un treno Napoli Milano il 10 giugno verso le 9",
-        )
-        .unwrap();
-        let snapshot = serde_json::json!({
-            "refs": [
-                {"ref": "e1", "role": "textbox", "name": "Da"},
-                {"ref": "e2", "role": "textbox", "name": "A"},
-                {"ref": "e3", "role": "textbox", "name": "Data andata"},
-                {"ref": "e4", "role": "textbox", "name": "Ora"},
-                {"ref": "e5", "role": "button", "name": "Cerca"}
-            ]
-        });
-
-        let (fields, labels) = browser_form_fields_for_snapshot(&snapshot, &draft);
-
-        assert_eq!(fields.len(), 4);
-        assert_eq!(labels.len(), 4);
-        assert_eq!(fields[0]["ref"], "e1");
-        assert_eq!(fields[0]["value"], "Napoli");
-        assert_eq!(fields[1]["ref"], "e2");
-        assert_eq!(fields[1]["value"], "Milano");
-        assert_eq!(fields[2]["value"], "10/06/2026");
-        assert_eq!(fields[3]["value"], "09:00");
-    }
-
-    #[test]
-    fn browser_form_fields_use_iso_date_for_plain_date_inputs() {
-        let draft = train_search_draft_for_goal(
-            "Devo prenotare un treno Napoli Milano il 10 giugno verso le 9",
-        )
-        .unwrap();
-        let snapshot = serde_json::json!({
-            "refs": [
-                {"ref": "e1", "role": "textbox", "name": "da"},
-                {"ref": "e2", "role": "textbox", "name": "a"},
-                {"ref": "e3", "role": "textbox", "name": "data"},
-                {"ref": "e4", "role": "combobox", "name": "ora"}
-            ]
-        });
-
-        let (fields, _) = browser_form_fields_for_snapshot(&snapshot, &draft);
-
-        assert_eq!(fields[2]["value"], "2026-06-10");
-        assert_eq!(fields[3]["value"], "09:00");
+        // task_effective_goal prefers the redacted prompt over the truncated goal.
+        let effective = task_effective_goal(&task);
+        assert!(effective.contains("voli"));
+        assert!(effective.contains("10 giugno"));
+        assert!(effective.contains("non acquistare"));
     }
 
     #[test]
@@ -10664,46 +10434,6 @@ mod tests {
 
         assert_eq!(ref_id, "e2");
         assert_eq!(name, "ACCETTA");
-    }
-
-    #[test]
-    fn operational_train_plan_has_steps_gates_and_success_criteria() {
-        let plan = operational_plan_for_goal(
-            "Devo prenotare un treno Napoli Milano il 10 giugno verso le 9",
-            "browser_task",
-        );
-
-        assert!(matches!(
-            plan.intent_type,
-            super::OperationalIntentType::Transactional
-        ));
-        assert!(plan.tools.contains(&"browser".to_string()));
-        assert!(
-            plan.steps
-                .iter()
-                .any(|step| step.id == "source_trovatreno_fill"
-                    && step.tool.as_deref() == Some("browser"))
-        );
-        assert!(
-            plan.steps
-                .iter()
-                .any(|step| step.id == "source_italo_extract"
-                    && step.detail.contains("Se non ci sono righe affidabili"))
-        );
-        assert!(
-            plan.success_criteria
-                .iter()
-                .any(|criterion| criterion.contains("opzione treno reale"))
-        );
-        assert!(
-            plan.approval_gates
-                .iter()
-                .any(|gate| gate.contains("Login"))
-        );
-        let markdown = operational_plan_markdown(&plan);
-        assert!(markdown.contains("# Piano operativo"));
-        assert!(markdown.contains("source_trovatreno_search"));
-        assert!(markdown.contains("source_trenitalia_extract"));
     }
 
     #[test]
