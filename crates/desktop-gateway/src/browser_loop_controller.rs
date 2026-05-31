@@ -134,7 +134,31 @@ impl<R: JsonRuntime> BrowserLoopPlanner for RuntimeBrowserLoopPlanner<R> {
                 );
             }
             if response.valid {
-                return parse_browser_loop_decision(&response.json, observation);
+                let decision = parse_browser_loop_decision(&response.json, observation);
+                if browser_loop_debug_enabled() {
+                    eprintln!(
+                        "[loop] url={} snap_chars={} -> {:?}",
+                        observation.url,
+                        observation.snapshot.chars().count(),
+                        decision.as_ref().map(|d| match d {
+                            BrowserLoopDecision::Act { action, .. } => format!(
+                                "act:{}",
+                                action.get("kind").and_then(|k| k.as_str()).unwrap_or("?")
+                            ),
+                            BrowserLoopDecision::Complete { .. } => "complete".to_string(),
+                            BrowserLoopDecision::Blocked { reason } => format!("blocked:{reason}"),
+                        })
+                    );
+                }
+                return decision;
+            }
+            if browser_loop_debug_enabled() {
+                eprintln!(
+                    "[loop] url={} snap_chars={} INVALID response errors={:?}",
+                    observation.url,
+                    observation.snapshot.chars().count(),
+                    response.errors
+                );
             }
             last_errors = response.errors.clone();
         }
@@ -174,11 +198,15 @@ fn browser_loop_planner_attempts() -> u32 {
 /// it all and the `content` comes back empty ("EOF while parsing"). Non-reasoning
 /// models are fine at the default.
 fn browser_loop_planner_max_tokens() -> u32 {
+    // Reasoning models (e.g. minimax) emit a long chain-of-thought BEFORE the
+    // JSON decision; at 1000 the CoT ate the whole budget and the content came
+    // back empty ("EOF while parsing column 0"), stalling the loop. Give it room
+    // for the thinking PLUS the small JSON. Override per install/model.
     std::env::var("LOCAL_FIRST_BROWSER_PLANNER_MAX_TOKENS")
         .ok()
         .and_then(|value| value.parse::<u32>().ok())
         .filter(|tokens| *tokens > 0)
-        .unwrap_or(1000)
+        .unwrap_or(8000)
 }
 
 fn browser_loop_debug_enabled() -> bool {
