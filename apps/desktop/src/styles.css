@@ -2707,6 +2707,42 @@ small {
   color: var(--amber, #b7791f);
 }
 
+.chat-computer-panel {
+  margin: 8px 16px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.chat-computer-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: transparent;
+  color: var(--text);
+  font-weight: 600;
+  text-align: left;
+}
+
+.chat-computer-head small {
+  color: var(--muted);
+  font-weight: 400;
+  margin-left: auto;
+}
+
+.chat-computer-frame {
+  width: 100%;
+  height: 360px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  display: block;
+  background: #0b0d12;
+}
+
 .contained-computer-view {
   display: flex;
   flex-direction: column;

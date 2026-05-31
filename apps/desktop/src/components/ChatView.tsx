@@ -40,6 +40,7 @@ import {
   mapCoreComputerSession,
 } from "../lib/localComputerViewModel";
 import { RichMessage } from "./RichMessage";
+import { ChatComputerPanel } from "./ChatComputerPanel";
 import type {
   ChatMessage,
   ChatMessageMetrics,
@@ -984,6 +985,8 @@ export function ChatView({
           )}
         </div>
       </header>
+
+      <ChatComputerPanel />
 
       <div className="thread-scroll" aria-label="Thread attivo" ref={conversationRef}>
         <div className="thread-content">
