@@ -683,6 +683,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/runtime/health", get(runtime_health))
         .route("/api/runtime/model", get(runtime_model).post(set_runtime_model))
         .route("/api/runtime/models", get(runtime_models))
+        .route(
+            "/api/runtime/provider",
+            get(runtime_provider).post(set_runtime_provider),
+        )
         .route("/api/runtime/logs", get(runtime_logs))
         .route("/api/runtime/warmup", post(runtime_warmup))
         .route("/api/runtime/shutdown", post(runtime_shutdown))
@@ -1136,18 +1140,68 @@ fn active_inference_model() -> String {
         .unwrap_or_else(|| "gpt-4o-mini".to_string())
 }
 
+/// User-configured provider base URL (any OpenAI-compatible API: OpenAI,
+/// OpenRouter, Together, Ollama, …), persisted in the data dir.
+fn inference_base_url_override_path() -> Option<PathBuf> {
+    gateway_data_dir()
+        .ok()
+        .map(|dir| dir.join("active-inference-base-url"))
+}
+
+fn persisted_inference_base_url() -> Option<String> {
+    let path = inference_base_url_override_path()?;
+    fs::read_to_string(path)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn set_persisted_inference_base_url(url: &str) -> std::io::Result<()> {
+    let path = inference_base_url_override_path()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no data dir"))?;
+    fs::write(path, url.trim())
+}
+
+/// Secret reference for the user-configured inference provider API key.
+fn inference_secret_ref() -> Option<SecretRef> {
+    SecretRef::new(
+        gateway_user_id().as_str(),
+        gateway_workspace_id().as_str(),
+        "inference",
+        "default",
+    )
+    .ok()
+}
+
+/// API key for the configured provider, read from the encrypted secret store.
+fn persisted_inference_api_key() -> Option<String> {
+    let store = open_gateway_secret_store().ok()?;
+    let reference = inference_secret_ref()?;
+    let material = store.get(&reference).ok()??;
+    material.expose_utf8().ok().filter(|value| !value.is_empty())
+}
+
+fn set_persisted_inference_api_key(key: &str) -> Result<(), String> {
+    let store = open_gateway_secret_store().map_err(|error| error.to_string())?;
+    let reference = inference_secret_ref().ok_or_else(|| "invalid secret ref".to_string())?;
+    store
+        .put(reference, SecretMaterial::from_string(key))
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+/// The effective OpenAI-compatible base URL: user-configured provider wins over
+/// the env default. With the MLX/Gemma path removed, this (or env) is required.
+fn effective_inference_base_url() -> Option<String> {
+    persisted_inference_base_url().or_else(|| {
+        env::var("LOCAL_FIRST_INFERENCE_BASE_URL")
+            .ok()
+            .filter(|value| !value.is_empty())
+    })
+}
+
 fn chat_openai_stream_config() -> Option<(String, String, Option<String>)> {
-    if env::var("LOCAL_FIRST_INFERENCE_BACKEND")
-        .map(|value| value.trim().to_ascii_lowercase())
-        .ok()
-        .as_deref()
-        != Some("openai")
-    {
-        return None;
-    }
-    let base_url = env::var("LOCAL_FIRST_INFERENCE_BASE_URL")
-        .ok()
-        .filter(|value| !value.is_empty())?;
+    let base_url = effective_inference_base_url()?;
     Some((base_url, active_inference_model(), resolve_inference_api_key()))
 }
 
@@ -5511,6 +5565,10 @@ fn set_session_progress_total(
 /// for at-rest encryption / keychain — tracked as workstream S4-full in the
 /// system elevation plan.
 fn resolve_inference_api_key() -> Option<String> {
+    // User-configured key in the encrypted secret store wins (set via Settings).
+    if let Some(key) = persisted_inference_api_key() {
+        return Some(key);
+    }
     if let Ok(path) = env::var("LOCAL_FIRST_INFERENCE_API_KEY_FILE")
         && !path.trim().is_empty()
     {
@@ -5817,6 +5875,67 @@ async fn set_runtime_model(
         message: error.to_string(),
     })?;
     Ok(Json(serde_json::json!({ "active": model })))
+}
+
+#[derive(Debug, Serialize)]
+struct InferenceProviderResponse {
+    base_url: Option<String>,
+    model: Option<String>,
+    has_key: bool,
+}
+
+/// The configured inference provider (base URL + model + whether a key is set).
+/// Never returns the key itself.
+async fn runtime_provider() -> Json<InferenceProviderResponse> {
+    Json(InferenceProviderResponse {
+        base_url: effective_inference_base_url(),
+        model: persisted_inference_model().or_else(|| env::var("LOCAL_FIRST_INFERENCE_MODEL").ok()),
+        has_key: resolve_inference_api_key().is_some(),
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct SetInferenceProviderRequest {
+    base_url: Option<String>,
+    model: Option<String>,
+    api_key: Option<String>,
+}
+
+/// Configure an external OpenAI-compatible provider: base URL + model persisted
+/// in the data dir, API key stored in the encrypted secret store (never echoed).
+async fn set_runtime_provider(
+    Json(request): Json<SetInferenceProviderRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let persist_err = |message: String| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "provider_persist_failed",
+        message,
+    };
+    if let Some(base) = request
+        .base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        set_persisted_inference_base_url(base).map_err(|error| persist_err(error.to_string()))?;
+    }
+    if let Some(model) = request
+        .model
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        set_persisted_inference_model(model).map_err(|error| persist_err(error.to_string()))?;
+    }
+    if let Some(key) = request
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        set_persisted_inference_api_key(key).map_err(persist_err)?;
+    }
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 fn mlx_fallback_model_info(missing_api_key: bool) -> ActiveModelResponse {
