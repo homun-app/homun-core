@@ -270,7 +270,12 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
             wait_if_busy: true,
             request_timeout_seconds: Some(request.budgets.planner_timeout_seconds as f64),
             json_schema: Some(planner_schema()),
-            required_keys: vec!["route".to_string(), "steps".to_string()],
+            // Only "route" is mandatory. "steps" is optional (ExecutionPlan
+            // defaults it to []): a direct_answer/ask_clarification plan
+            // legitimately has no steps, and the model (esp. reasoning models)
+            // often omits the empty array — that must NOT hard-fail the planner
+            // (it did: "missing required keys: steps" → fell back to legacy).
+            required_keys: vec!["route".to_string()],
             repair: true,
         };
         let response = self
