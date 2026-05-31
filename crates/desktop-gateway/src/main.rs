@@ -1353,6 +1353,11 @@ async fn stream_chat_via_openai(
                         .await;
                         let st = state_owned.clone();
                         let effective = if goal.is_empty() { prompt.clone() } else { goal.clone() };
+                        // Serialize browser work: the contained browser is a single
+                        // shared instance, so only ONE browse_web may drive it at a
+                        // time. Without this, concurrent chat requests spawn multiple
+                        // sidecars onto the same browser and pile up tabs/state.
+                        let _browse_guard = browse_web_lock().lock().await;
                         match tokio::task::spawn_blocking(move || {
                             execute_browse_web_tool(&st, &effective)
                         })
@@ -1421,6 +1426,13 @@ async fn stream_chat_via_openai(
         .header("content-type", "application/x-ndjson")
         .body(body)
         .expect("valid streaming response"))
+}
+
+/// Global lock serializing `browse_web` runs: the contained browser is a single
+/// shared instance, so only one observe-act loop may drive it at a time.
+fn browse_web_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
 /// Executes the `browse_web` tool: materializes a browser task for the goal and
