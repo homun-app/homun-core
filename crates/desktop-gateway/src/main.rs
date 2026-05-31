@@ -666,10 +666,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             post(commit_prompt_result),
         )
         .route(
-            "/api/chat/threads/{thread_id}/messages/submit_operational_prompt",
-            post(submit_operational_prompt),
-        )
-        .route(
             "/api/chat/threads/{thread_id}/messages/{message_id}/commit_continuation_result",
             post(commit_continuation_result),
         )
@@ -884,95 +880,6 @@ async fn commit_prompt_result(
     Ok(Json(snapshot))
 }
 
-async fn submit_operational_prompt(
-    State(state): State<AppState>,
-    Path(thread_id): Path<String>,
-    Json(request): Json<SubmitOperationalPromptRequest>,
-) -> Result<Json<ChatMessagesSnapshot>, GatewayError> {
-    if !should_create_operational_task(&request.user_message.text) {
-        return Err(GatewayError {
-            status: StatusCode::CONFLICT,
-            code: "not_operational_prompt",
-            message: "prompt does not require an operational local task".to_string(),
-        });
-    }
-
-    // A1.1 (opt-in): when enabled, the OrchestratorBrain plans and materializes
-    // durable tasks into the shared store (run by the worker). Falls back to the
-    // legacy keyword task creation on any failure. Run on a blocking thread
-    // because the Brain planner makes a synchronous LLM call.
-    let brain_task_ids = if brain_materialize_enabled() {
-        let state_for_brain = state.clone();
-        let goal = request.user_message.text.clone();
-        let thread_for_brain = thread_id.clone();
-        let outcome = tokio::task::spawn_blocking(move || {
-            brain_materialize_tasks(&state_for_brain, &thread_for_brain, &goal)
-        })
-        .await;
-        match outcome {
-            Ok(Ok(ids)) if !ids.is_empty() => Some(ids),
-            Ok(Ok(_)) => {
-                eprintln!("brain_materialize: planner returned no tasks; using legacy path");
-                None
-            }
-            // Surface the failure instead of silently swallowing it — a silent
-            // fallback masked a real wiring bug (MLX gate firing under a cloud
-            // router backend) during live validation.
-            Ok(Err(error)) => {
-                eprintln!("brain_materialize: failed ({}); using legacy path", error.message);
-                None
-            }
-            Err(join_error) => {
-                eprintln!("brain_materialize: task join error ({join_error}); using legacy path");
-                None
-            }
-        }
-    } else {
-        None
-    };
-
-    let now = OffsetDateTime::now_utc();
-    let ack_text = match brain_task_ids.as_ref() {
-        Some(ids) => format!(
-            "Ho pianificato {} passi e li sto eseguendo (Brain). Trovi l'avanzamento nella coda task.",
-            ids.len()
-        ),
-        None => operational_task_acknowledgement(&request.user_message.text),
-    };
-    let assistant_message = ChatMessage {
-        id: format!(
-            "assistant_operational_{}_{}",
-            thread_id,
-            now.unix_timestamp_nanos()
-        ),
-        role: "assistant".to_string(),
-        text: ack_text,
-        timestamp: now.unix_timestamp().to_string(),
-        metadata: Some("Executor locale".to_string()),
-        metrics: None,
-        feedback: None,
-        saved_memory_ref: None,
-        linked_task_id: None,
-        linked_automation_ref: None,
-        attachments: Vec::new(),
-    };
-    let snapshot = lock_store(&state)?
-        .commit_prompt_result(&thread_id, &request.user_message, &assistant_message)
-        .map_err(GatewayError::store)?;
-    // Brain path already materialized tasks; otherwise use the legacy single-task
-    // creation (which also wires the Local Computer session — A1.2 unifies this).
-    if brain_task_ids.is_none() {
-        ensure_operational_task_for_thread(
-            &state,
-            &thread_id,
-            &assistant_message.id,
-            &request.user_message.text,
-            TaskCreationMode::AutoFromPrompt,
-        )?;
-    }
-    Ok(Json(snapshot))
-}
-
 async fn commit_continuation_result(
     State(state): State<AppState>,
     Path((thread_id, message_id)): Path<(String, String)>,
@@ -997,13 +904,44 @@ async fn create_task_from_chat_message(
             code: "chat_message_not_found",
             message: format!("chat message not found: {message_id}"),
         })?;
-    ensure_operational_task_for_thread(
-        &state,
-        &thread_id,
-        &message_id,
-        &message.text,
-        TaskCreationMode::ExplicitMessageAction,
-    )?;
+    // Model-driven (Brain) planning when a capable backend is configured: the
+    // OrchestratorBrain comprehends the message and materializes the right
+    // durable tasks. Falls back to a single browser_task (de-keyworded) only if
+    // the Brain is off or yields nothing. No keyword classification anywhere.
+    let brain_task_ids = if brain_materialize_enabled() {
+        let state_for_brain = state.clone();
+        let thread_for_brain = thread_id.clone();
+        let goal = message.text.clone();
+        match tokio::task::spawn_blocking(move || {
+            brain_materialize_tasks(&state_for_brain, &thread_for_brain, &goal)
+        })
+        .await
+        {
+            Ok(Ok(ids)) if !ids.is_empty() => Some(ids),
+            Ok(Ok(_)) => None,
+            Ok(Err(error)) => {
+                eprintln!("brain_materialize (create_task): {}; using fallback", error.message);
+                None
+            }
+            Err(join_error) => {
+                eprintln!(
+                    "brain_materialize (create_task) join error: {join_error}; using fallback"
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+    if brain_task_ids.is_none() {
+        ensure_operational_task_for_thread(
+            &state,
+            &thread_id,
+            &message_id,
+            &message.text,
+            TaskCreationMode::ExplicitMessageAction,
+        )?;
+    }
     Ok(Json(
         lock_store(&state)?
             .messages(&thread_id)
@@ -6347,11 +6285,17 @@ fn ensure_operational_task_for_thread(
     let task_id_ref = TaskId::new(task_id.clone());
     let goal_redacted = task_goal_summary(goal);
     let prompt_redacted = redact_sensitive_text(goal);
-    let task_kind = task_kind_for_prompt(goal);
-    let operational_plan = operational_plan_for_goal(goal, &task_kind);
-    let requires_approval = (requires_operational_approval(goal)
-        || mode == TaskCreationMode::AutoFromPrompt)
-        && !browser_plan_is_preapproved(state, &task_kind, goal);
+    // De-gemma: no keyword classification of the task. The browser loop is the
+    // general model-driven executor and figures out the goal itself, so a chat
+    // task is a browser_task. (Multi-step/durable planning is the Brain-as-tool
+    // follow-up; shell tasks get their own explicit entry, not keyword-sniffed.)
+    let task_kind = "browser_task";
+    let operational_plan = operational_plan_for_goal(goal, task_kind);
+    // Approval is conservative and keyword-free: auto-created tasks always
+    // require confirmation; the browser loop's own action gate still stops
+    // before login/payment/purchase regardless. Pre-approved plans skip it.
+    let requires_approval = (mode == TaskCreationMode::AutoFromPrompt)
+        && !browser_plan_is_preapproved(state, task_kind, goal);
 
     {
         let store = lock_task_store(state)?;
@@ -6384,10 +6328,9 @@ fn ensure_operational_task_for_thread(
             } else {
                 TaskPriority::Normal
             })
-            .with_resource(ResourceRequirement::new(ResourceClass::ComputerSession, 1));
-            for resource in resources_for_prompt(goal) {
-                task = task.with_resource(resource);
-            }
+            .with_resource(ResourceRequirement::new(ResourceClass::ComputerSession, 1))
+            .with_resource(ResourceRequirement::new(ResourceClass::BrowserSession, 1))
+            .with_resource(ResourceRequirement::new(ResourceClass::NetworkIo, 1));
             task.risk_level = if requires_approval {
                 "medium".to_string()
             } else {
@@ -7284,92 +7227,6 @@ fn operational_task_acknowledgement(_prompt: &str) -> String {
 una conferma esplicita: mi fermo prima di login, dati personali, invii, acquisti o \
 pagamenti."
         .to_string()
-}
-
-fn should_create_operational_task(prompt: &str) -> bool {
-    let normalized = prompt.to_lowercase();
-    [
-        "prenota",
-        "trova opzioni",
-        "cerca",
-        "compila",
-        "apri il browser",
-        "browser",
-        "terminal",
-        "terminale",
-        "shell",
-        "scarica",
-        "invia",
-        "crea un task",
-        "pianifica",
-        "automatizza",
-    ]
-    .iter()
-    .any(|marker| normalized.contains(marker))
-}
-
-fn requires_operational_approval(prompt: &str) -> bool {
-    let normalized = prompt.to_lowercase();
-    [
-        "prenota",
-        "acquista",
-        "compra",
-        "invia",
-        "pubblica",
-        "login",
-        "accedi",
-        "compila",
-        "browser",
-        "pagamento",
-    ]
-    .iter()
-    .any(|marker| normalized.contains(marker))
-}
-
-fn task_kind_for_prompt(prompt: &str) -> &'static str {
-    let normalized = prompt.to_lowercase();
-    if normalized.contains("terminal")
-        || normalized.contains("terminale")
-        || normalized.contains("shell")
-    {
-        "local_shell_task"
-    } else if normalized.contains("browser")
-        || normalized.contains("prenota")
-        || normalized.contains("compila")
-        || normalized.contains("cerca")
-        || normalized.contains("trova opzioni")
-        || normalized.contains("treno")
-        || normalized.contains("trenitalia")
-        || normalized.contains("italo")
-    {
-        "browser_task"
-    } else {
-        "local_task"
-    }
-}
-
-fn resources_for_prompt(prompt: &str) -> Vec<ResourceRequirement> {
-    let normalized = prompt.to_lowercase();
-    let mut resources = Vec::new();
-    if normalized.contains("terminal")
-        || normalized.contains("terminale")
-        || normalized.contains("shell")
-    {
-        resources.push(ResourceRequirement::new(ResourceClass::ShellProcess, 1));
-    }
-    if normalized.contains("browser")
-        || normalized.contains("prenota")
-        || normalized.contains("compila")
-        || normalized.contains("cerca")
-        || normalized.contains("trova opzioni")
-        || normalized.contains("treno")
-        || normalized.contains("trenitalia")
-        || normalized.contains("italo")
-    {
-        resources.push(ResourceRequirement::new(ResourceClass::BrowserSession, 1));
-        resources.push(ResourceRequirement::new(ResourceClass::NetworkIo, 1));
-    }
-    resources
 }
 
 fn task_goal_summary(goal: &str) -> String {
@@ -8319,13 +8176,10 @@ mod tests {
         operational_task_acknowledgement,
         parse_loopback_http_host_port,
         redact_sensitive_text,
-        resources_for_prompt,
         runtime_logs_unavailable_message,
-        should_create_operational_task,
         task_effective_goal,
         task_execution_outcome_from_executor_result,
         task_goal_summary,
-        task_kind_for_prompt,
         aggregate_session_state_from_counts,
         brain_budgets_for_context_window,
         browser_error_indicates_dead_sidecar,
@@ -8673,37 +8527,6 @@ mod tests {
     }
 
     #[test]
-    fn operational_prompt_prefilter_is_conservative_but_task_aware() {
-        assert!(!should_create_operational_task("quanto fa 6*3?"));
-        assert!(should_create_operational_task(
-            "Devo prenotare un treno Napoli Milano domani, trova opzioni"
-        ));
-        assert_eq!(
-            task_kind_for_prompt("usa il terminale per verificare un file"),
-            "local_shell_task"
-        );
-        assert_eq!(
-            task_kind_for_prompt("apri il browser e cerca opzioni"),
-            "browser_task"
-        );
-        assert_eq!(
-            task_kind_for_prompt("Guarda direttamente su Trenitalia treni Napoli Milano"),
-            "browser_task"
-        );
-        assert_eq!(resources_for_prompt("quanto fa 6*3?").len(), 0);
-        assert!(
-            resources_for_prompt("apri il browser e cerca opzioni")
-                .iter()
-                .any(|resource| resource.class == ResourceClass::BrowserSession)
-        );
-        assert!(
-            resources_for_prompt("Guarda direttamente su ItaloTreno treni Napoli Milano")
-                .iter()
-                .any(|resource| resource.class == ResourceClass::BrowserSession)
-        );
-    }
-
-    #[test]
     fn task_goal_summary_redacts_and_compacts_prompt() {
         let summary = task_goal_summary(
             "cerca documenti con token=super-secret e poi mostrami le opzioni principali disponibili",
@@ -8844,14 +8667,16 @@ mod tests {
     }
 
     #[test]
-    fn operational_task_acknowledgement_sets_autonomous_train_expectation() {
-        let text = operational_task_acknowledgement(
-            "Devo prenotare un treno Napoli Milano il 10 giugno verso le 9",
-        );
-
-        assert!(text.contains("raccolgo le opzioni disponibili"));
-        assert!(text.contains("quale vuoi prenotare"));
-        assert!(text.contains("Non faro' login"));
+    fn operational_task_acknowledgement_is_generic_and_keyword_free() {
+        // De-gemma: the ack must be the SAME regardless of prompt keywords (no
+        // treno/browser branches) and keep the safety promise.
+        let a = operational_task_acknowledgement("Devo prenotare un treno Napoli Milano");
+        let b = operational_task_acknowledgement("apri il browser e cerca opzioni");
+        let c = operational_task_acknowledgement("qualunque altra cosa");
+        assert_eq!(a, b);
+        assert_eq!(b, c);
+        assert!(a.contains("conferma esplicita"));
+        assert!(a.contains("pagamenti"));
     }
 
     fn model_inputs(backend: &str) -> ActiveModelInputs {
