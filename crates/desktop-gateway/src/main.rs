@@ -48,7 +48,7 @@ use local_first_secrets::{
     DevelopmentSecretKeyProvider, EncryptedFileSecretStore, SecretMaterial, SecretRef, SecretStore,
 };
 use local_first_desktop_gateway::{
-    BuildPromptRequest, BuildPromptResponse, CancelGenerationRequest, ChatGenerateStreamRequest,
+    BuildPromptRequest, BuildPromptResponse, ChatGenerateStreamRequest,
     ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot,
     CommitContinuationResultRequest, CommitPromptResultRequest, SetThreadPinnedRequest,
     build_chat_runtime_prompt, compact_thread_title,
@@ -63,10 +63,6 @@ use local_first_memory::{
     MemoryDashboard, MemoryFacade, MemoryLifecycleRequest, MemoryRef, MemoryRefKind,
     MemoryUiReadModel, MemoryWikiProjection, PrivacyDomain, SQLiteMemoryStore,
     UserId as MemoryUserId, WikiFileStore, WikiPage, WorkspaceId as MemoryWorkspaceId,
-};
-use local_first_process_manager::{
-    LocalProcessSupervisor, LocalRuntimeDiscovery, LogEntry, ProcessManager, ProcessRegistryStore,
-    RuntimeControlSnapshot, RuntimeControlStatus, SidecarProcessCatalog,
 };
 use bytes::Bytes;
 use local_first_subagents::{GenerateStreamEvent, SubagentTaskExecutor, TokenMetrics};
@@ -98,14 +94,12 @@ const TASK_EXECUTOR_POLL_INTERVAL_MS: u64 = 1_000;
 #[derive(Clone)]
 struct AppState {
     http: reqwest::Client,
-    gemma_runtime_url: Arc<str>,
     chat_store: Arc<Mutex<ChatStore>>,
     task_store: Arc<Mutex<TaskStore>>,
     computer_store: Arc<Mutex<LocalComputerSessionStore>>,
     browser_url_policies: Arc<Mutex<BrowserUrlPolicyStore>>,
     memory_facade: Arc<Mutex<MemoryFacade>>,
     capability_registry: Arc<Mutex<CapabilityRegistryStore>>,
-    process_manager: Arc<Mutex<ProcessManager<LocalProcessSupervisor>>>,
     task_executor_status: Arc<Mutex<TaskExecutorStatus>>,
     task_executor_registry: TaskExecutorRegistry,
     browser_capability_client: Arc<Mutex<Option<BrowserAutomationClient<BrowserSidecarSession>>>>,
@@ -162,53 +156,7 @@ struct HealthResponse {
     ok: bool,
     service: &'static str,
     local_first: bool,
-    gemma_runtime_url: String,
     auth_required: bool,
-}
-
-#[derive(Debug, Serialize)]
-struct RuntimeProcessResponse {
-    id: &'static str,
-    kind: &'static str,
-    status: &'static str,
-    pid: Option<u32>,
-    message: String,
-    health_check: serde_json::Value,
-    command_label: &'static str,
-}
-
-#[derive(Debug, Serialize)]
-struct RuntimeControlResponse {
-    process_id: &'static str,
-    status: &'static str,
-    port: u16,
-    port_owner_pid: Option<u32>,
-    duplicate_count: u32,
-    total_memory_mb: Option<u64>,
-    available_memory_mb: Option<u64>,
-    process_memory_mb: Option<u64>,
-    process_cpu_percent: Option<f64>,
-    message: String,
-}
-
-#[derive(Debug, Serialize)]
-struct RuntimeHealthResponse {
-    processes: Vec<RuntimeProcessResponse>,
-    controls: Vec<RuntimeControlResponse>,
-}
-
-#[derive(Debug, Serialize)]
-struct RuntimeLogsResponse {
-    process_id: &'static str,
-    source: &'static str,
-    entries: Vec<RuntimeLogEntryResponse>,
-    message: String,
-}
-
-#[derive(Debug, Serialize)]
-struct RuntimeLogEntryResponse {
-    stream: String,
-    line_redacted: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -564,19 +512,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|value| value.parse::<u16>().ok())
         .unwrap_or(18_765);
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    let gemma_runtime_url = env::var("LOCAL_FIRST_GEMMA_RUNTIME_URL")
-        .unwrap_or_else(|_| "http://127.0.0.1:8765".to_string())
-        .trim_end_matches('/')
-        .to_string();
-    let workspace_root = gateway_workspace_root()?;
-    let process_store = ProcessRegistryStore::open(gateway_process_database_path()?)?;
-    let process_catalog = SidecarProcessCatalog::new(&workspace_root)
-        .with_python_venv(gateway_python_venv(&workspace_root))
-        .with_gemma_port(gemma_runtime_port(&gemma_runtime_url));
-    process_catalog.register_default_sidecars(&process_store)?;
     let state = AppState {
         http: reqwest::Client::new(),
-        gemma_runtime_url: gemma_runtime_url.into(),
         chat_store: Arc::new(Mutex::new(ChatStore::open(gateway_database_path()?)?)),
         task_store: Arc::new(Mutex::new(TaskStore::open(gateway_task_database_path()?)?)),
         computer_store: Arc::new(Mutex::new(LocalComputerSessionStore::open(
@@ -590,10 +527,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map_err(std::io::Error::other)?,
         ))),
         capability_registry: Arc::new(Mutex::new(open_seeded_capability_registry()?)),
-        process_manager: Arc::new(Mutex::new(ProcessManager::new(
-            process_store,
-            LocalProcessSupervisor::new().with_log_dir(gateway_process_log_dir()?, 2_000),
-        ))),
         task_executor_status: Arc::new(Mutex::new(TaskExecutorStatus::new(
             task_executor_worker_enabled(),
         ))),
@@ -647,17 +580,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .route("/api/chat/build_prompt", post(build_prompt))
         .route("/api/chat/generate_stream", post(generate_stream))
-        .route("/api/chat/cancel_generation", post(cancel_generation))
-        .route("/api/runtime/health", get(runtime_health))
         .route("/api/runtime/model", get(runtime_model).post(set_runtime_model))
         .route("/api/runtime/models", get(runtime_models))
         .route(
             "/api/runtime/provider",
             get(runtime_provider).post(set_runtime_provider),
         )
-        .route("/api/runtime/logs", get(runtime_logs))
-        .route("/api/runtime/warmup", post(runtime_warmup))
-        .route("/api/runtime/shutdown", post(runtime_shutdown))
         .route("/api/tasks/queue", get(task_queue))
         .route("/api/tasks/executor", get(task_executor_status))
         .route("/api/tasks/run_next", post(run_next_task))
@@ -710,7 +638,6 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
         ok: true,
         service: "local-first-desktop-gateway",
         local_first: true,
-        gemma_runtime_url: state.gemma_runtime_url.to_string(),
         auth_required: !state.auth_token.is_empty(),
     })
 }
@@ -1778,128 +1705,6 @@ async fn emit_stream_event(
     tx.send(Ok(Bytes::from(format!("{line}\n"))))
         .await
         .map_err(|_| ())
-}
-
-async fn cancel_generation(
-    State(state): State<AppState>,
-    Json(request): Json<CancelGenerationRequest>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    let response = state
-        .http
-        .post(format!("{}/cancel_generation", state.gemma_runtime_url))
-        .json(&request)
-        .send()
-        .await
-        .map_err(|error| GatewayError::bad_gateway("runtime_cancel_failed", error))?;
-
-    let status = response.status();
-    if !status.is_success() {
-        let message = response.text().await.unwrap_or_else(|_| status.to_string());
-        return Err(GatewayError::from_status(
-            status,
-            "runtime_cancel_failed",
-            message,
-        ));
-    }
-
-    response
-        .json::<serde_json::Value>()
-        .await
-        .map(Json)
-        .map_err(|error| GatewayError::bad_gateway("runtime_cancel_decode_failed", error))
-}
-
-async fn runtime_health(State(state): State<AppState>) -> Json<RuntimeHealthResponse> {
-    let control = runtime_control_snapshot(&state).ok();
-    let health_url = format!("{}/health", state.gemma_runtime_url);
-    match state.http.get(&health_url).send().await {
-        Ok(response) if response.status().is_success() => {
-            let health = response
-                .json::<serde_json::Value>()
-                .await
-                .unwrap_or_else(|_| serde_json::json!({ "ok": true }));
-            Json(runtime_health_response(
-                "ready",
-                "Runtime Gemma locale pronto",
-                health,
-                control,
-            ))
-        }
-        Ok(response) => Json(runtime_health_response(
-            "attention",
-            format!("Runtime Gemma HTTP {}", response.status().as_u16()),
-            serde_json::json!({ "status": response.status().as_u16() }),
-            control,
-        )),
-        Err(error) => Json(runtime_health_response(
-            "attention",
-            format!("Runtime Gemma locale non raggiungibile: {error}"),
-            serde_json::json!({ "error": error.to_string() }),
-            control,
-        )),
-    }
-}
-
-async fn runtime_logs(State(state): State<AppState>) -> Json<RuntimeLogsResponse> {
-    match lock_process_manager(&state).and_then(|manager| {
-        manager
-            .logs("llm-gemma4-mlx", 80)
-            .map_err(GatewayError::process)
-    }) {
-        Ok(entries) if !entries.is_empty() => Json(RuntimeLogsResponse {
-            process_id: "llm-gemma4-mlx",
-            source: "managed_process",
-            message: format!("{} righe log runtime gestito", entries.len()),
-            entries: entries
-                .into_iter()
-                .map(redacted_runtime_log_entry)
-                .collect(),
-        }),
-        Ok(_) => Json(RuntimeLogsResponse {
-            process_id: "llm-gemma4-mlx",
-            source: "managed_process",
-            entries: Vec::new(),
-            message: "Nessun log disponibile per il processo gestito.".to_string(),
-        }),
-        Err(error) => Json(RuntimeLogsResponse {
-            process_id: "llm-gemma4-mlx",
-            source: "external_or_unavailable",
-            entries: Vec::new(),
-            message: runtime_logs_unavailable_message(&error.message),
-        }),
-    }
-}
-
-async fn runtime_warmup(
-    State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    ensure_runtime_available(&state).await?;
-    proxy_runtime_json(&state, "/warmup").await.map(Json)
-}
-
-async fn runtime_shutdown(
-    State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    let shutdown_result = proxy_runtime_json(&state, "/shutdown").await;
-    if shutdown_result.is_ok() {
-        return shutdown_result.map(Json);
-    }
-
-    let stopped = lock_process_manager(&state)?.stop("llm-gemma4-mlx");
-    match stopped {
-        Ok(snapshot) => Ok(Json(serde_json::json!({
-            "ok": true,
-            "local_first": true,
-            "status": "stopped",
-            "process_id": snapshot.process_id,
-            "pid": snapshot.pid
-        }))),
-        Err(error) => Err(GatewayError {
-            status: StatusCode::BAD_GATEWAY,
-            code: "runtime_shutdown_failed",
-            message: error.to_string(),
-        }),
-    }
 }
 
 async fn task_queue(
@@ -6036,130 +5841,9 @@ async fn capability_snapshot(
     Ok(Json(snapshot))
 }
 
-async fn proxy_runtime_json(
-    state: &AppState,
-    path: &str,
-) -> Result<serde_json::Value, GatewayError> {
-    let response = state
-        .http
-        .post(format!("{}{}", state.gemma_runtime_url, path))
-        .send()
-        .await
-        .map_err(|error| GatewayError::bad_gateway("runtime_request_failed", error))?;
-    let status = response.status();
-    if !status.is_success() {
-        let message = response.text().await.unwrap_or_else(|_| status.to_string());
-        return Err(GatewayError::from_status(
-            status,
-            "runtime_request_failed",
-            message,
-        ));
-    }
-    response
-        .json::<serde_json::Value>()
-        .await
-        .map_err(|error| GatewayError::bad_gateway("runtime_response_decode_failed", error))
-}
-
-fn runtime_health_response(
-    status: &'static str,
-    message: impl Into<String>,
-    health_check: serde_json::Value,
-    control: Option<RuntimeControlSnapshot>,
-) -> RuntimeHealthResponse {
-    let message = message.into();
-    let process_pid = control
-        .as_ref()
-        .and_then(|snapshot| snapshot.managed.pid)
-        .or_else(|| {
-            control
-                .as_ref()
-                .and_then(|snapshot| snapshot.port_owner.as_ref().map(|process| process.pid))
-        });
-    let control_status = control
-        .as_ref()
-        .map(|snapshot| runtime_control_status_label(&snapshot.status))
-        .unwrap_or(status);
-    RuntimeHealthResponse {
-        processes: vec![RuntimeProcessResponse {
-            id: "llm-gemma4-mlx",
-            kind: "local_runtime",
-            status: if matches!(control_status, "duplicate_conflict" | "unhealthy") {
-                "attention"
-            } else {
-                status
-            },
-            pid: process_pid,
-            message: message.clone(),
-            health_check,
-            command_label: "Gemma 4 MLX",
-        }],
-        controls: vec![RuntimeControlResponse {
-            process_id: "llm-gemma4-mlx",
-            status: control_status,
-            port: control
-                .as_ref()
-                .and_then(|snapshot| snapshot.port)
-                .unwrap_or(8765),
-            port_owner_pid: control
-                .as_ref()
-                .and_then(|snapshot| snapshot.port_owner.as_ref().map(|process| process.pid)),
-            duplicate_count: control
-                .as_ref()
-                .map(|snapshot| snapshot.duplicates.len() as u32)
-                .unwrap_or(0),
-            total_memory_mb: control
-                .as_ref()
-                .and_then(|snapshot| snapshot.resources.total_memory_mb),
-            available_memory_mb: control
-                .as_ref()
-                .and_then(|snapshot| snapshot.resources.available_memory_mb),
-            process_memory_mb: control
-                .as_ref()
-                .and_then(|snapshot| snapshot.resources.process_memory_mb),
-            process_cpu_percent: control
-                .as_ref()
-                .and_then(|snapshot| snapshot.resources.process_cpu_percent.map(f64::from)),
-            message: control
-                .as_ref()
-                .map(|snapshot| snapshot.message.clone())
-                .unwrap_or(message),
-        }],
-    }
-}
-
-async fn ensure_runtime_available(_state: &AppState) -> Result<(), GatewayError> {
-    // MLX/Gemma local runtime removed — there is nothing to start. Chat and the
-    // browser loop use the configured OpenAI-compatible provider.
-    Ok(())
-}
-
 fn ensure_runtime_available_for_task(_state: &AppState) -> Result<(), LocalTaskExecutionError> {
     // MLX/Gemma local runtime removed — nothing to start before the browser loop.
     Ok(())
-}
-
-fn runtime_control_snapshot(state: &AppState) -> Result<RuntimeControlSnapshot, GatewayError> {
-    let discovery = LocalRuntimeDiscovery;
-    lock_process_manager(state)?
-        .runtime_control_snapshot("llm-gemma4-mlx", &discovery)
-        .map_err(|error| GatewayError {
-            status: StatusCode::BAD_GATEWAY,
-            code: "runtime_control_failed",
-            message: error.to_string(),
-        })
-}
-
-fn runtime_control_status_label(status: &RuntimeControlStatus) -> &'static str {
-    match status {
-        RuntimeControlStatus::Configured => "configured",
-        RuntimeControlStatus::ManagedRunning => "managed_running",
-        RuntimeControlStatus::ExternalRunning => "external_running",
-        RuntimeControlStatus::Ready => "ready",
-        RuntimeControlStatus::Unhealthy => "unhealthy",
-        RuntimeControlStatus::DuplicateConflict => "duplicate_conflict",
-        RuntimeControlStatus::Stopped => "stopped",
-    }
 }
 
 fn task_queue_response_for_state(state: &AppState) -> Result<TaskQueueResponse, GatewayError> {
@@ -7468,24 +7152,6 @@ fn resource_class_label(resource: ResourceClass) -> &'static str {
     resource.as_str()
 }
 
-fn redacted_runtime_log_entry(entry: LogEntry) -> RuntimeLogEntryResponse {
-    RuntimeLogEntryResponse {
-        stream: format!("{:?}", entry.stream).to_lowercase(),
-        line_redacted: redact_sensitive_text(&entry.line),
-    }
-}
-
-fn runtime_logs_unavailable_message(error: &str) -> String {
-    if error.contains("process not found") {
-        return "Runtime esterno: i log gestiti sono disponibili solo quando Gemma e' avviato dal gateway.".to_string();
-    }
-
-    format!(
-        "Log runtime gestiti non disponibili: {}",
-        redact_sensitive_text(error)
-    )
-}
-
 fn redact_sensitive_text(input: &str) -> String {
     let mut output = strip_terminal_control_sequences(input);
     for marker in [
@@ -7537,34 +7203,10 @@ struct GatewayError {
 }
 
 impl GatewayError {
-    fn bad_gateway(code: &'static str, error: impl std::fmt::Display) -> Self {
-        Self {
-            status: StatusCode::BAD_GATEWAY,
-            code,
-            message: error.to_string(),
-        }
-    }
-
-    fn from_status(status: reqwest::StatusCode, code: &'static str, message: String) -> Self {
-        Self {
-            status: StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY),
-            code,
-            message,
-        }
-    }
-
     fn store(error: rusqlite::Error) -> Self {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             code: "chat_store_error",
-            message: error.to_string(),
-        }
-    }
-
-    fn process(error: local_first_process_manager::ProcessManagerError) -> Self {
-        Self {
-            status: StatusCode::BAD_GATEWAY,
-            code: "process_manager_error",
             message: error.to_string(),
         }
     }
@@ -7662,16 +7304,6 @@ fn lock_capability_registry(
         })
 }
 
-fn lock_process_manager(
-    state: &AppState,
-) -> Result<MutexGuard<'_, ProcessManager<LocalProcessSupervisor>>, GatewayError> {
-    state.process_manager.lock().map_err(|error| GatewayError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        code: "process_manager_lock_error",
-        message: error.to_string(),
-    })
-}
-
 fn lock_task_executor_status(
     state: &AppState,
 ) -> Result<MutexGuard<'_, TaskExecutorStatus>, GatewayError> {
@@ -7700,23 +7332,6 @@ fn gateway_database_path() -> Result<PathBuf, std::io::Error> {
         .join(".local-first-personal-assistant");
     fs::create_dir_all(&base)?;
     Ok(base.join("desktop-gateway.sqlite"))
-}
-
-fn gateway_process_database_path() -> Result<PathBuf, std::io::Error> {
-    if let Ok(path) = env::var("LOCAL_FIRST_PROCESS_REGISTRY_DB") {
-        let path = PathBuf::from(path);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        return Ok(path);
-    }
-
-    let base = env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| env::temp_dir())
-        .join(".local-first-personal-assistant");
-    fs::create_dir_all(&base)?;
-    Ok(base.join("process-registry.sqlite"))
 }
 
 fn gateway_task_database_path() -> Result<PathBuf, std::io::Error> {
@@ -7818,43 +7433,6 @@ fn gateway_capability_database_path() -> Result<PathBuf, std::io::Error> {
         .join(".local-first-personal-assistant");
     fs::create_dir_all(&base)?;
     Ok(base.join("capability-registry.sqlite"))
-}
-
-fn gateway_process_log_dir() -> Result<PathBuf, std::io::Error> {
-    if let Ok(path) = env::var("LOCAL_FIRST_PROCESS_LOG_DIR") {
-        let path = PathBuf::from(path);
-        fs::create_dir_all(&path)?;
-        return Ok(path);
-    }
-
-    let base = env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| env::temp_dir())
-        .join(".local-first-personal-assistant")
-        .join("logs")
-        .join("processes");
-    fs::create_dir_all(&base)?;
-    Ok(base)
-}
-
-fn gateway_workspace_root() -> Result<PathBuf, std::io::Error> {
-    if let Ok(path) = env::var("LOCAL_FIRST_WORKSPACE_ROOT") {
-        return Ok(PathBuf::from(path));
-    }
-    env::current_dir()
-}
-
-fn gateway_python_venv(workspace_root: &std::path::Path) -> PathBuf {
-    env::var("LOCAL_FIRST_GEMMA_PYTHON_VENV")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| workspace_root.join(".venv-mlx"))
-}
-
-fn gemma_runtime_port(url: &str) -> u16 {
-    url.rsplit_once(':')
-        .and_then(|(_, tail)| tail.split('/').next())
-        .and_then(|port| port.parse::<u16>().ok())
-        .unwrap_or(8765)
 }
 
 fn gateway_token() -> String {
@@ -8209,7 +7787,6 @@ mod tests {
         browser_url_for_goal,
         evaluate_simple_arithmetic,
         redact_sensitive_text,
-        runtime_logs_unavailable_message,
         task_effective_goal,
         task_execution_outcome_from_executor_result,
         task_goal_summary,
@@ -8490,17 +8067,6 @@ mod tests {
             ),
             (SessionStatus::Failed, 2)
         );
-    }
-
-    #[test]
-    fn runtime_logs_unavailable_hides_internal_process_not_found() {
-        let message = runtime_logs_unavailable_message("process not found: llm-gemma4-mlx");
-
-        assert_eq!(
-            message,
-            "Runtime esterno: i log gestiti sono disponibili solo quando Gemma e' avviato dal gateway."
-        );
-        assert!(!message.contains("process not found"));
     }
 
     #[test]

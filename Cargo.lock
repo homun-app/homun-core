@@ -3100,7 +3100,6 @@ dependencies = [
  "local-first-local-computer-session",
  "local-first-memory",
  "local-first-orchestrator",
- "local-first-process-manager",
  "local-first-secrets",
  "local-first-subagents",
  "local-first-task-runtime",
