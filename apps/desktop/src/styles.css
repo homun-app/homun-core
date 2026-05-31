@@ -4106,15 +4106,24 @@ small {
   background: linear-gradient(135deg, #cfe6ff, #bfe9cf);
   flex-shrink: 0;
 }
+.set-nav-id {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
 .set-nav-id .n {
   font-weight: 650;
   font-size: 13.5px;
-  line-height: 1.2;
+  line-height: 1.25;
   color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .set-nav-id .w {
   font-size: 11.5px;
   color: var(--muted);
+  line-height: 1.2;
 }
 .set-nav-back {
   display: flex;
