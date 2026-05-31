@@ -98,17 +98,11 @@ function spawnGateway() {
     ((app.isPackaged || process.env.LOCAL_FIRST_DESKTOP_RESOURCES_DIR)
       ? RESOURCES_ROOT
       : REPO_ROOT);
-  const packagedPythonVenv = path.join(RESOURCES_ROOT, ".venv-mlx");
-  const processLogDir = path.join(app.getPath("userData"), "logs", "processes");
   const env = {
     ...process.env,
     LOCAL_FIRST_DESKTOP_GATEWAY_PORT: GATEWAY_PORT,
     LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN: GATEWAY_TOKEN,
     LOCAL_FIRST_WORKSPACE_ROOT: workspaceRoot,
-    LOCAL_FIRST_PROCESS_LOG_DIR: processLogDir,
-    ...(app.isPackaged && fs.existsSync(packagedPythonVenv)
-      ? { LOCAL_FIRST_GEMMA_PYTHON_VENV: packagedPythonVenv }
-      : {}),
   };
 
   if (gatewayBin) {

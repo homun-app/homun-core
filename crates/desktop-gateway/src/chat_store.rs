@@ -577,7 +577,7 @@ impl ChatStore {
               where thread_id = ?5",
             params![
                 title,
-                "Gemma locale",
+                "Modello locale",
                 current_timestamp_seconds(),
                 message_count,
                 thread_id
@@ -714,7 +714,7 @@ mod tests {
             role: "assistant".to_string(),
             text: "Certo.".to_string(),
             timestamp,
-            metadata: Some("Gemma locale".to_string()),
+            metadata: Some("Modello locale".to_string()),
             metrics: Some(serde_json::json!({"generation_tokens": 2})),
             feedback: None,
             saved_memory_ref: None,
