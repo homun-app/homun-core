@@ -157,6 +157,13 @@ type BrowserActRequestInner =
       timeoutMs?: number;
     }
   | {
+      kind: "navigate";
+      targetId: string;
+      url: string;
+      loadState?: "load" | "domcontentloaded" | "networkidle";
+      timeoutMs?: number;
+    }
+  | {
       kind: "evaluate";
       targetId: string;
       fn: string;
@@ -348,6 +355,20 @@ async function executeActionUnchecked(
       } else {
         await page.waitForTimeout(waitDelay(action.timeMs ?? action.timeoutMs ?? 500));
       }
+      return { ok: true, url: page.url() };
+    }
+    case "navigate": {
+      // Direct navigation to a chosen source / deliberate per-source fallback.
+      // The observe-act loop otherwise can only click refs on the current page,
+      // which makes "move to the next source" impossible.
+      const timeout = action.timeoutMs ?? 30_000;
+      await page.goto(action.url, {
+        waitUntil: action.loadState ?? "domcontentloaded",
+        timeout,
+      });
+      // Best-effort settle so the next snapshot reflects loaded results, not a
+      // skeleton (heavy SPA sites may never go fully idle — cap it).
+      await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => undefined);
       return { ok: true, url: page.url() };
     }
     case "evaluate": {

@@ -521,6 +521,7 @@ function shouldSnapshotAfterAction(action: BrowserActRequest): boolean {
     "scroll_into_view",
     "scroll",
     "wait",
+    "navigate",
     "evaluate",
     "batch",
   ].includes(action.kind);
