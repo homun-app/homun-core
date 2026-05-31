@@ -70,7 +70,7 @@ fn generate_response_deserializes_plain_text_and_metrics() {
 fn runtime_warmup_response_deserializes_loaded_state() {
     let response: RuntimeWarmupResponse = serde_json::from_value(serde_json::json!({
         "ok": true,
-        "model": "mlx-community/gemma-4-e4b-it-4bit",
+        "model": "local-model-v1",
         "loaded": true,
         "load_seconds": 8.947,
         "elapsed_seconds": 0.001,

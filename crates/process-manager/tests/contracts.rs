@@ -7,9 +7,9 @@ fn process_spec_serializes_stable_contracts() {
     let spec = ProcessSpec::new(
         "llm-runtime",
         ProcessKind::LlmRuntime,
-        ".venv-mlx/bin/python",
+        ".venv/bin/python",
     )
-    .with_arg("runtimes/mlx-gemma4/server.py")
+    .with_arg("runtimes/llm/server.py")
     .with_env("PYTHONUNBUFFERED", "1")
     .with_cwd("/tmp/workspace")
     .with_health_check(HealthCheck::HttpGet {
@@ -25,10 +25,10 @@ fn process_spec_serializes_stable_contracts() {
 
     assert_eq!(json["id"], "llm-runtime");
     assert_eq!(json["kind"], "llm_runtime");
-    assert_eq!(json["command"], ".venv-mlx/bin/python");
+    assert_eq!(json["command"], ".venv/bin/python");
     assert_eq!(
         json["args"],
-        serde_json::json!(["runtimes/mlx-gemma4/server.py"])
+        serde_json::json!(["runtimes/llm/server.py"])
     );
     assert_eq!(json["env"]["PYTHONUNBUFFERED"], "1");
     assert_eq!(json["cwd"], "/tmp/workspace");

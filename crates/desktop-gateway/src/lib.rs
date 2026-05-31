@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 const DEFAULT_CONTEXT_BUDGET_CHARS: usize = 3_600;
 const MAX_SINGLE_CONTEXT_MESSAGE_CHARS: usize = 2_000;
 /// At/above this total budget the caller is a capable big-context model, so the
-/// per-message gemma4-era clamp is lifted (the total budget still bounds the sum).
+/// per-message small-model clamp is lifted (the total budget still bounds the sum).
 const CAPABLE_CHAT_CONTEXT_CHARS: usize = 32_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -148,7 +148,7 @@ pub fn build_chat_runtime_prompt(request: &BuildPromptRequest) -> BuildPromptRes
         .unwrap_or(DEFAULT_CONTEXT_BUDGET_CHARS)
         .max(800);
     // promptjuice is an optimization, not a gate: when a capable model gives a
-    // generous total budget, stop sub-clamping each message to the gemma4-era
+    // generous total budget, stop sub-clamping each message to the small-model
     // 2K cap (a long pasted block would otherwise be truncated even with room
     // to spare). Small/default budgets keep the cheap per-message cap.
     let max_message_chars = if max_context_chars >= CAPABLE_CHAT_CONTEXT_CHARS {
@@ -349,7 +349,7 @@ mod tests {
             text: long_message.clone(),
         }];
 
-        // Default/small budget: the per-message gemma4 clamp (2K) truncates.
+        // Default/small budget: the per-message small-model clamp (2K) truncates.
         let small = build_chat_runtime_prompt(&BuildPromptRequest {
             prompt: "continua".to_string(),
             context: context.clone(),
