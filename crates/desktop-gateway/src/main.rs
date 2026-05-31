@@ -28,8 +28,8 @@ use local_first_browser_automation::{
     browser_loop_event_payload,
 };
 use local_first_inference::{
-    AnthropicProvider, CapabilityDescriptor, JsonRuntimeProvider, Locality, ModelRouter,
-    OpenAiCompatProvider, PrivacyPolicy, Requirements,
+    AnthropicProvider, CapabilityDescriptor, Locality, ModelRouter, OpenAiCompatProvider,
+    PrivacyPolicy, Requirements,
 };
 use local_first_capabilities::{
     ActionClass, CachedCapabilityTool, CachedToolProvider, CapabilityConnectionConfig,
@@ -51,7 +51,7 @@ use local_first_desktop_gateway::{
     BuildPromptRequest, BuildPromptResponse, CancelGenerationRequest, ChatGenerateStreamRequest,
     ChatMessage, ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot,
     CommitContinuationResultRequest, CommitPromptResultRequest, SetThreadPinnedRequest,
-    build_chat_runtime_prompt, build_gemma_generate_stream_request, compact_thread_title,
+    build_chat_runtime_prompt, compact_thread_title,
 };
 use local_first_local_computer_session::{
     ApprovalState, ArtifactRecord, ComputerEventRecord, ComputerSessionRecord,
@@ -69,9 +69,7 @@ use local_first_process_manager::{
     RuntimeControlSnapshot, RuntimeControlStatus, SidecarProcessCatalog,
 };
 use bytes::Bytes;
-use local_first_subagents::{
-    GenerateStreamEvent, RuntimeClient, SubagentTaskExecutor, TokenMetrics,
-};
+use local_first_subagents::{GenerateStreamEvent, SubagentTaskExecutor, TokenMetrics};
 use local_first_task_runtime::{
     ApprovalGate, ApprovalRequest, ApprovalStatus, ExecutorResult, LeaseManager, ResourceClass,
     ResourceGovernor, ResourceLimits, ResourceRequirement, TaskExecutor, TaskId, TaskPriority,
@@ -1070,39 +1068,18 @@ async fn generate_stream(
     State(state): State<AppState>,
     Json(request): Json<ChatGenerateStreamRequest>,
 ) -> Result<Response, GatewayError> {
-    // A4: route chat through the inference layer when an OpenAI-compatible
-    // backend (Ollama local/cloud, OpenAI, ...) is configured, so chat can use a
-    // capable model. Default stays the local MLX proxy.
+    // Chat runs through the configured OpenAI-compatible provider. The local
+    // MLX/Gemma fallback was removed: a provider is required.
     if let Some((base_url, model, api_key)) = chat_openai_stream_config() {
         return stream_chat_via_openai(&state, request, base_url, model, api_key).await;
     }
-
-    ensure_runtime_available(&state).await?;
-
-    let runtime_request = build_gemma_generate_stream_request(&request);
-    let response = state
-        .http
-        .post(format!("{}/generate_stream", state.gemma_runtime_url))
-        .json(&runtime_request)
-        .send()
-        .await
-        .map_err(|error| GatewayError::bad_gateway("runtime_request_failed", error))?;
-
-    let status = response.status();
-    if !status.is_success() {
-        let message = response.text().await.unwrap_or_else(|_| status.to_string());
-        return Err(GatewayError::from_status(
-            status,
-            "runtime_stream_failed",
-            message,
-        ));
-    }
-
-    Ok(Response::builder()
-        .status(StatusCode::OK)
-        .header("content-type", "application/x-ndjson")
-        .body(Body::from_stream(response.bytes_stream()))
-        .expect("valid streaming response"))
+    Err(GatewayError {
+        status: StatusCode::SERVICE_UNAVAILABLE,
+        code: "no_inference_provider",
+        message: "Nessun provider configurato. Imposta un endpoint OpenAI-compatibile in \
+Impostazioni → Modello & Runtime."
+            .to_string(),
+    })
 }
 
 /// Chat streaming config when an OpenAI-compatible backend is selected
@@ -3318,7 +3295,7 @@ fn execute_subagent_task(
 ) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
     ensure_runtime_available_for_task(state)?;
     let mut executor =
-        SubagentTaskExecutor::new(build_browser_inference_router(&state.gemma_runtime_url));
+        SubagentTaskExecutor::new(build_browser_inference_router());
     let executor_id = executor.executor_id().to_string();
     let result = executor.execute_step(task, None).map_err(|error| LocalTaskExecutionError {
         message: format!("subagent executor failed: {error}"),
@@ -4649,7 +4626,7 @@ fn execute_browser_loop_read_only_task(
     // Load the local inference backend once per task and share it across every
     // source via Arc (a single mistral.rs model load, not one per target).
     let inference_router =
-        std::sync::Arc::new(build_browser_inference_router(&state.gemma_runtime_url));
+        std::sync::Arc::new(build_browser_inference_router());
     let context_profile = BrowserContextProfile::for_context_window(
         inference_router.active_context_window(&Requirements::default()),
     );
@@ -5115,7 +5092,7 @@ fn try_brain_operational_plan(state: &AppState, goal: &str) -> Option<Operationa
         facade.register_provider(CachedToolProvider::new(provider_id, kind, tools));
     }
 
-    let router = build_browser_inference_router(&state.gemma_runtime_url);
+    let router = build_browser_inference_router();
     let budgets = brain_budgets_for_context_window(
         router.active_context_window(&Requirements::default()),
     );
@@ -5415,7 +5392,7 @@ fn brain_materialize_tasks(
         message: format!("shared task store: {error}"),
     })?;
 
-    let router = build_browser_inference_router(&state.gemma_runtime_url);
+    let router = build_browser_inference_router();
     let budgets = brain_budgets_for_context_window(
         router.active_context_window(&Requirements::default()),
     );
@@ -5596,7 +5573,10 @@ fn resolve_inference_api_key() -> Option<String> {
     Some(from_env)
 }
 
-fn build_browser_inference_router(gemma_runtime_url: &str) -> ModelRouter {
+/// Inference router for the browser loop. Uses the configured provider (the
+/// persisted/external one wins), Anthropic when selected, OpenAI-compatible
+/// otherwise. No MLX/Gemma fallback — that local runtime was removed.
+fn build_browser_inference_router() -> ModelRouter {
     let backend = env::var("LOCAL_FIRST_INFERENCE_BACKEND")
         .unwrap_or_default()
         .to_ascii_lowercase();
@@ -5604,8 +5584,7 @@ fn build_browser_inference_router(gemma_runtime_url: &str) -> ModelRouter {
     if backend == "anthropic"
         && let Some(api_key) = resolve_inference_api_key()
     {
-        let model = env::var("LOCAL_FIRST_INFERENCE_MODEL")
-            .unwrap_or_else(|_| ANTHROPIC_DEFAULT_MODEL.to_string());
+        let model = active_inference_model();
         let context_window = env::var("LOCAL_FIRST_INFERENCE_CONTEXT_WINDOW")
             .ok()
             .and_then(|value| value.parse::<u32>().ok())
@@ -5622,76 +5601,41 @@ fn build_browser_inference_router(gemma_runtime_url: &str) -> ModelRouter {
         return ModelRouter::new(PrivacyPolicy::allowing_cloud()).with_provider(Box::new(provider));
     }
 
-    if backend == "openai"
-        && let Some(base_url) = env::var("LOCAL_FIRST_INFERENCE_BASE_URL")
-            .ok()
-            .filter(|value| !value.is_empty())
-    {
-        // The observe-act loop wants a FAST model (many short structured
-        // decisions), not a slow reasoning model. Allow a dedicated planner
-        // model so chat can keep a strong reasoning model while the loop uses a
-        // quick one. Falls back to the chat model.
-        let model = env::var("LOCAL_FIRST_BROWSER_PLANNER_MODEL")
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .or_else(|| env::var("LOCAL_FIRST_INFERENCE_MODEL").ok())
-            .unwrap_or_else(|| OPENAI_COMPAT_DEFAULT_MODEL.to_string());
-        let api_key = resolve_inference_api_key();
-        let context_window = env::var("LOCAL_FIRST_INFERENCE_CONTEXT_WINDOW")
-            .ok()
-            .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(32_768);
-        let is_cloud = env::var("LOCAL_FIRST_INFERENCE_CLOUD")
-            .map(|value| value == "1" || value.to_ascii_lowercase() == "true")
-            .unwrap_or(false);
-        let descriptor = CapabilityDescriptor {
-            id: format!("openai-compat:{model}"),
-            locality: if is_cloud {
-                Locality::Cloud
-            } else {
-                Locality::Local
-            },
-            supports_vision: true,
-            supports_tools: true,
-            context_window,
-            approx_tokens_per_second: None,
-        };
-        let provider = OpenAiCompatProvider::new(descriptor, base_url, model, api_key);
-        let policy = if is_cloud {
-            PrivacyPolicy::allowing_cloud()
-        } else {
-            PrivacyPolicy::local_only()
-        };
-        return ModelRouter::new(policy).with_provider(Box::new(provider));
-    }
-
-    // mistral.rs is the default cross-OS local backbone when compiled in
-    // (ADR 0007). On load failure we fall back to the MLX backend so the app
-    // keeps working.
-    #[cfg(feature = "local-mistralrs")]
-    if backend == "mistralrs" || backend.is_empty() {
-        if let Some(router) = try_build_mistralrs_router() {
-            return router;
-        }
-    }
-
-    build_mlx_router(gemma_runtime_url)
-}
-
-/// Wraps the local MLX runtime (`RuntimeClient`) as a provider. Conservative
-/// context window keeps the compact action frame for the small local model.
-fn build_mlx_router(gemma_runtime_url: &str) -> ModelRouter {
+    // Default: the configured OpenAI-compatible provider. The observe-act loop
+    // wants a fast model; allow a dedicated planner model, else the chat model.
+    let base_url =
+        effective_inference_base_url().unwrap_or_else(|| "http://127.0.0.1:11434/v1".to_string());
+    let model = env::var("LOCAL_FIRST_BROWSER_PLANNER_MODEL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(active_inference_model);
+    let api_key = resolve_inference_api_key();
+    let context_window = env::var("LOCAL_FIRST_INFERENCE_CONTEXT_WINDOW")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(32_768);
+    let is_cloud = env::var("LOCAL_FIRST_INFERENCE_CLOUD")
+        .map(|value| value == "1" || value.to_ascii_lowercase() == "true")
+        .unwrap_or(false);
     let descriptor = CapabilityDescriptor {
-        id: "mlx:gemma4".to_string(),
-        locality: Locality::Local,
+        id: format!("openai-compat:{model}"),
+        locality: if is_cloud {
+            Locality::Cloud
+        } else {
+            Locality::Local
+        },
         supports_vision: true,
         supports_tools: true,
-        context_window: 8_192,
+        context_window,
         approx_tokens_per_second: None,
     };
-    let provider =
-        JsonRuntimeProvider::new(descriptor, RuntimeClient::new(gemma_runtime_url.to_string()));
-    ModelRouter::new(PrivacyPolicy::local_only()).with_provider(Box::new(provider))
+    let provider = OpenAiCompatProvider::new(descriptor, base_url, model, api_key);
+    let policy = if is_cloud {
+        PrivacyPolicy::allowing_cloud()
+    } else {
+        PrivacyPolicy::local_only()
+    };
+    ModelRouter::new(policy).with_provider(Box::new(provider))
 }
 
 #[derive(Debug, Serialize)]
@@ -6246,66 +6190,15 @@ fn runtime_health_response(
     }
 }
 
-async fn ensure_runtime_available(state: &AppState) -> Result<(), GatewayError> {
-    if runtime_health_ok(state).await {
-        return Ok(());
-    }
-
-    let discovery = LocalRuntimeDiscovery;
-    lock_process_manager(state)?
-        .ensure_runtime_started("llm-gemma4-mlx", &discovery)
-        .map_err(|error| GatewayError {
-            status: StatusCode::BAD_GATEWAY,
-            code: "runtime_start_failed",
-            message: error.to_string(),
-        })?;
-
-    let deadline =
-        tokio::time::Instant::now() + std::time::Duration::from_secs(RUNTIME_START_TIMEOUT_SECS);
-    while tokio::time::Instant::now() < deadline {
-        if runtime_health_ok(state).await {
-            return Ok(());
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(350)).await;
-    }
-
-    Err(GatewayError {
-        status: StatusCode::BAD_GATEWAY,
-        code: "runtime_start_timeout",
-        message: format!(
-            "Runtime Gemma avviato ma health non pronto entro {RUNTIME_START_TIMEOUT_SECS}s"
-        ),
-    })
+async fn ensure_runtime_available(_state: &AppState) -> Result<(), GatewayError> {
+    // MLX/Gemma local runtime removed — there is nothing to start. Chat and the
+    // browser loop use the configured OpenAI-compatible provider.
+    Ok(())
 }
 
-fn ensure_runtime_available_for_task(state: &AppState) -> Result<(), LocalTaskExecutionError> {
-    if runtime_health_ok_blocking(state) {
-        return Ok(());
-    }
-
-    {
-        let discovery = LocalRuntimeDiscovery;
-        lock_process_manager(state)
-            .map_err(local_task_gateway_error)?
-            .ensure_runtime_started("llm-gemma4-mlx", &discovery)
-            .map_err(|error| LocalTaskExecutionError {
-                message: format!("Runtime Gemma non avviabile per il loop browser: {error}"),
-            })?;
-    }
-
-    let deadline = std::time::Instant::now() + StdDuration::from_secs(RUNTIME_START_TIMEOUT_SECS);
-    while std::time::Instant::now() < deadline {
-        if runtime_health_ok_blocking(state) {
-            return Ok(());
-        }
-        std::thread::sleep(StdDuration::from_millis(500));
-    }
-
-    Err(LocalTaskExecutionError {
-        message: format!(
-            "Runtime Gemma avviato ma non pronto entro {RUNTIME_START_TIMEOUT_SECS}s per il loop browser."
-        ),
-    })
+fn ensure_runtime_available_for_task(_state: &AppState) -> Result<(), LocalTaskExecutionError> {
+    // MLX/Gemma local runtime removed — nothing to start before the browser loop.
+    Ok(())
 }
 
 async fn runtime_health_ok(state: &AppState) -> bool {
