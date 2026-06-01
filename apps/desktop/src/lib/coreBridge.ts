@@ -755,6 +755,39 @@ async function electronSetSkillEnabled(
   );
 }
 
+export interface CatalogSkill {
+  slug: string;
+  name: string;
+  description: string;
+  downloads: number;
+  stars: number;
+  category: string;
+}
+
+export interface CatalogCategory {
+  name: string;
+  count: number;
+}
+
+export interface SkillCatalogResponse {
+  skills: CatalogSkill[];
+  categories: CatalogCategory[];
+  repo: string;
+  total: number;
+  fetched_at: number;
+}
+
+async function electronSkillCatalog(
+  query?: string,
+  category?: string,
+): Promise<SkillCatalogResponse> {
+  const params = new URLSearchParams();
+  if (query) params.set("q", query);
+  if (category) params.set("category", category);
+  const qs = params.toString();
+  return gatewayGetJson<SkillCatalogResponse>(`/api/skills/catalog${qs ? `?${qs}` : ""}`);
+}
+
 export interface RegistrySkill {
   id: string;
   path: string;
@@ -834,6 +867,7 @@ export const coreBridge = {
   skillRegistry: (repo?: string) => electronSkillRegistry(repo),
   installRegistrySkill: (repo: string, path: string) =>
     electronInstallRegistrySkill(repo, path),
+  skillCatalog: (query?: string, category?: string) => electronSkillCatalog(query, category),
   chatThreads: () => chatApi.chatThreads(),
   chatMessages: (threadId: string) => chatApi.chatMessages(threadId),
   setChatMessageFeedback: (
