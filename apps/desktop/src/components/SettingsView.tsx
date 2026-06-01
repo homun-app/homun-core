@@ -38,8 +38,8 @@ import {
   type CoreMemoryDashboard,
   type ProviderModelView,
   type ProviderView,
-  type RegistryResponse,
-  type RegistrySkill,
+  type CatalogSkill,
+  type SkillCatalogResponse,
   type RoleView,
   type RoutingDecision,
   type SkillDetail,
@@ -1931,61 +1931,51 @@ function MarketplaceView({
   installedIds: string[];
   onInstalled: (resp: SkillsResponse, installedId: string) => void;
 }) {
-  const [input, setInput] = useState("anthropics/skills");
-  const [data, setData] = useState<RegistryResponse | null>(null);
+  const [data, setData] = useState<SkillCatalogResponse | null>(null);
   const [query, setQuery] = useState("");
+  const [category, setCategory] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [busyPath, setBusyPath] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
-  const load = async (repo: string) => {
-    if (!repo.trim()) return;
+  const load = async (q: string, cat: string | null) => {
     setLoading(true);
     setNote(null);
     try {
-      const d = await coreBridge.skillRegistry(repo.trim());
-      setData(d);
-      setInput(d.repo);
+      setData(await coreBridge.skillCatalog(q || undefined, cat || undefined));
     } catch (e) {
-      setNote(`Ricerca non riuscita: ${(e as Error).message}`);
-      setData(null);
+      setNote(`Catalogo non disponibile: ${(e as Error).message}`);
     } finally {
       setLoading(false);
     }
   };
+  // Initial load + reload on category/query change (debounced for typing).
   useEffect(() => {
-    void load("anthropics/skills");
+    const handle = window.setTimeout(() => void load(query, category), query ? 350 : 0);
+    return () => window.clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [query, category]);
 
-  const repo = data?.repo ?? input;
   const installed = new Set(installedIds);
-  const q = query.trim().toLowerCase();
-  const list = (data?.skills ?? []).filter(
-    (s) =>
-      !q ||
-      s.name.toLowerCase().includes(q) ||
-      s.id.toLowerCase().includes(q) ||
-      s.description.toLowerCase().includes(q),
-  );
+  const repo = data?.repo ?? "openclaw/skills";
+  const skills = data?.skills ?? [];
 
-  const install = async (skill: RegistrySkill) => {
+  const install = async (skill: CatalogSkill) => {
     const ok = window.confirm(
-      `Installare la skill «${skill.name}» da ${repo}?\n\n` +
-        "Verrà scaricata in locale. Le skill sono codice: installa solo da fonti di cui ti fidi.",
+      `Installare la skill «${skill.name}»?\n\nVerrà scaricata da ${repo}. Le skill sono codice: ` +
+        "installa solo ciò di cui ti fidi.",
     );
     if (!ok) return;
-    setBusyPath(skill.path);
+    setBusy(skill.slug);
     setNote(null);
     try {
-      const r = await coreBridge.installRegistrySkill(repo, skill.path);
-      onInstalled(r, skill.id);
+      const r = await coreBridge.installRegistrySkill(repo, `skills/${skill.slug}`);
+      onInstalled(r, skill.slug);
       setNote(`Installata: ${skill.name}.`);
-      await load(repo);
     } catch (e) {
       setNote(`Installazione non riuscita: ${(e as Error).message}`);
     } finally {
-      setBusyPath(null);
+      setBusy(null);
     }
   };
 
@@ -1997,79 +1987,61 @@ function MarketplaceView({
             <Download size={18} />
           </span>
           <div className="conn-detail-titletext">
-            <h3 className="mdl-detail-title">Cerca skill su GitHub</h3>
+            <h3 className="mdl-detail-title">Catalogo skill (OpenClaw)</h3>
             <p className="mdl-detail-sub">
-              Installa skill (formato Agent Skills) da un repository. Sono codice: installa solo da
-              fonti di cui ti fidi.
+              {data ? `${data.total} skill nel registro.` : "Sfoglia e installa dal registro OpenClaw."}{" "}
+              Sono codice: installa solo ciò di cui ti fidi.
             </p>
           </div>
         </div>
       </div>
 
-      <div className="mdl-field">
-        <label className="mdl-field-label">Repository (owner/nome)</label>
-        <div className="skl-repo-row">
-          <input
-            className="set-input"
-            value={input}
-            placeholder="anthropics/skills"
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void load(input);
-            }}
-          />
-          <button
-            className="set-btn"
-            type="button"
-            disabled={loading || !input.trim()}
-            onClick={() => void load(input)}
-          >
-            {loading ? "…" : "Apri"}
-          </button>
-        </div>
-        {data && data.suggested.length > 0 && (
-          <div className="skl-suggested">
-            <span className="skl-suggest-label">Suggeriti:</span>
-            {data.suggested.map((r) => (
-              <button
-                key={r}
-                type="button"
-                className="skl-suggest"
-                onClick={() => void load(r)}
-              >
-                {r}
-              </button>
-            ))}
-          </div>
-        )}
+      <div className="conn-search">
+        <Search size={15} />
+        <input
+          className="conn-search-input"
+          placeholder="Cerca skill…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
       </div>
 
-      {data && data.skills.length > 0 && (
-        <div className="conn-search">
-          <Search size={15} />
-          <input
-            className="conn-search-input"
-            placeholder="Filtra skill…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
+      {data && data.categories.length > 0 && (
+        <div className="cmp-cats">
+          <button
+            type="button"
+            className={`cmp-cat ${!category ? "active" : ""}`}
+            onClick={() => setCategory(null)}
+          >
+            Tutte
+          </button>
+          {data.categories.map((c) => (
+            <button
+              key={c.name}
+              type="button"
+              className={`cmp-cat ${category === c.name ? "active" : ""}`}
+              onClick={() => setCategory(c.name)}
+            >
+              {c.name} · {c.count}
+            </button>
+          ))}
         </div>
       )}
 
       {loading ? (
-        <p className="set-hint">Carico da {input}…</p>
+        <p className="set-hint">Carico il catalogo…</p>
       ) : (
         <div className="conn-kit-grid">
-          {list.map((skill) => {
-            const already = skill.installed || installed.has(skill.id);
+          {skills.map((skill) => {
+            const already = installed.has(skill.slug);
             return (
-              <div key={skill.path || skill.id} className="conn-kit market">
+              <div key={skill.slug} className="conn-kit market">
                 <span className="conn-kit-logo">
                   <span className="conn-kit-fallback">{skill.name.slice(0, 1).toUpperCase()}</span>
                 </span>
                 <div className="conn-kit-body">
                   <div className="conn-kit-name">{skill.name}</div>
-                  <div className="conn-kit-meta market">{skill.description || skill.id}</div>
+                  <div className="conn-kit-meta market">{skill.description || skill.slug}</div>
                 </div>
                 {already ? (
                   <span className="mdl-tag skl-installed">installata</span>
@@ -2077,7 +2049,7 @@ function MarketplaceView({
                   <button
                     className="mdl-icon-btn"
                     type="button"
-                    disabled={busyPath === skill.path}
+                    disabled={busy === skill.slug}
                     title={`Installa ${skill.name}`}
                     aria-label={`Installa ${skill.name}`}
                     onClick={() => void install(skill)}
@@ -2088,7 +2060,9 @@ function MarketplaceView({
               </div>
             );
           })}
-          {data && list.length === 0 && <p className="set-hint">Nessuna skill trovata.</p>}
+          {!loading && skills.length === 0 && (
+            <p className="set-hint">Nessuna skill per questo filtro.</p>
+          )}
         </div>
       )}
       {note && <p className="set-hint">{note}</p>}
