@@ -4,6 +4,7 @@ import {
   Code2,
   Copy,
   Cpu,
+  Download,
   ExternalLink,
   Eye,
   EyeOff,
@@ -35,6 +36,8 @@ import {
   type CoreMemoryDashboard,
   type ProviderModelView,
   type ProviderView,
+  type RegistryResponse,
+  type RegistrySkill,
   type RoleView,
   type RoutingDecision,
   type SkillDetail,
@@ -1471,6 +1474,9 @@ function McpServerDetail({
 
 /* -------------------------------------------------------------------- skills */
 
+/** Sentinel rail selection for the GitHub marketplace view. */
+const MARKET = "__market__";
+
 function SkillsPane() {
   const [resp, setResp] = useState<SkillsResponse | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -1491,7 +1497,7 @@ function SkillsPane() {
   }, []);
 
   useEffect(() => {
-    if (!selected) {
+    if (!selected || selected === MARKET) {
       setDetail(null);
       return;
     }
@@ -1524,6 +1530,7 @@ function SkillsPane() {
   };
 
   const skills = resp?.skills ?? [];
+  const onMarket = selected === MARKET;
 
   return (
     <div className="mdl-layout">
@@ -1547,11 +1554,29 @@ function SkillsPane() {
           </button>
         ))}
         {skills.length === 0 && <p className="mdl-rail-empty">Nessuna skill</p>}
+        <button
+          type="button"
+          className={`mdl-rail-item add ${onMarket ? "active" : ""}`}
+          onClick={() => setSelected(MARKET)}
+        >
+          <span className="conn-avatar add">
+            <Download size={13} />
+          </span>
+          <span className="mdl-rail-name">Cerca su GitHub</span>
+        </button>
       </aside>
 
       <section className="mdl-detail">
-        {skills.length === 0 ? (
-          <SkillsEmpty dir={resp?.dir} />
+        {onMarket ? (
+          <MarketplaceView
+            installedIds={skills.map((s) => s.id)}
+            onInstalled={(r, id) => {
+              setResp(r);
+              setSelected(id);
+            }}
+          />
+        ) : skills.length === 0 ? (
+          <SkillsEmpty dir={resp?.dir} onBrowse={() => setSelected(MARKET)} />
         ) : detail ? (
           <SkillDetailView detail={detail} busy={busy} onToggle={toggle} />
         ) : (
@@ -1563,7 +1588,7 @@ function SkillsPane() {
   );
 }
 
-function SkillsEmpty({ dir }: { dir?: string }) {
+function SkillsEmpty({ dir, onBrowse }: { dir?: string; onBrowse: () => void }) {
   return (
     <div className="skl-empty">
       <span className="conn-avatar lg">
@@ -1576,10 +1601,183 @@ function SkillsEmpty({ dir }: { dir?: string }) {
         cartella e compariranno qui automaticamente:
       </p>
       {dir && <code className="skl-path">{dir}</code>}
-      <p className="mdl-detail-sub">
-        Presto potrai cercarle e installarle dal marketplace GitHub direttamente da qui.
-      </p>
+      <button className="set-btn primary" type="button" onClick={onBrowse} style={{ alignSelf: "flex-start" }}>
+        <Download size={14} />
+        <span style={{ marginLeft: 6 }}>Cerca skill su GitHub</span>
+      </button>
     </div>
+  );
+}
+
+function MarketplaceView({
+  installedIds,
+  onInstalled,
+}: {
+  installedIds: string[];
+  onInstalled: (resp: SkillsResponse, installedId: string) => void;
+}) {
+  const [input, setInput] = useState("anthropics/skills");
+  const [data, setData] = useState<RegistryResponse | null>(null);
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [busyPath, setBusyPath] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+
+  const load = async (repo: string) => {
+    if (!repo.trim()) return;
+    setLoading(true);
+    setNote(null);
+    try {
+      const d = await coreBridge.skillRegistry(repo.trim());
+      setData(d);
+      setInput(d.repo);
+    } catch (e) {
+      setNote(`Ricerca non riuscita: ${(e as Error).message}`);
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    void load("anthropics/skills");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const repo = data?.repo ?? input;
+  const installed = new Set(installedIds);
+  const q = query.trim().toLowerCase();
+  const list = (data?.skills ?? []).filter(
+    (s) =>
+      !q ||
+      s.name.toLowerCase().includes(q) ||
+      s.id.toLowerCase().includes(q) ||
+      s.description.toLowerCase().includes(q),
+  );
+
+  const install = async (skill: RegistrySkill) => {
+    const ok = window.confirm(
+      `Installare la skill «${skill.name}» da ${repo}?\n\n` +
+        "Verrà scaricata in locale. Le skill sono codice: installa solo da fonti di cui ti fidi.",
+    );
+    if (!ok) return;
+    setBusyPath(skill.path);
+    setNote(null);
+    try {
+      const r = await coreBridge.installRegistrySkill(repo, skill.path);
+      onInstalled(r, skill.id);
+      setNote(`Installata: ${skill.name}.`);
+      await load(repo);
+    } catch (e) {
+      setNote(`Installazione non riuscita: ${(e as Error).message}`);
+    } finally {
+      setBusyPath(null);
+    }
+  };
+
+  return (
+    <>
+      <div className="mdl-detail-head">
+        <div className="conn-detail-title">
+          <span className="conn-avatar lg">
+            <Download size={18} />
+          </span>
+          <div className="conn-detail-titletext">
+            <h3 className="mdl-detail-title">Cerca skill su GitHub</h3>
+            <p className="mdl-detail-sub">
+              Installa skill (formato Agent Skills) da un repository. Sono codice: installa solo da
+              fonti di cui ti fidi.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="mdl-field">
+        <label className="mdl-field-label">Repository (owner/nome)</label>
+        <div className="skl-repo-row">
+          <input
+            className="set-input"
+            value={input}
+            placeholder="anthropics/skills"
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void load(input);
+            }}
+          />
+          <button
+            className="set-btn"
+            type="button"
+            disabled={loading || !input.trim()}
+            onClick={() => void load(input)}
+          >
+            {loading ? "…" : "Apri"}
+          </button>
+        </div>
+        {data && data.suggested.length > 0 && (
+          <div className="skl-suggested">
+            <span className="skl-suggest-label">Suggeriti:</span>
+            {data.suggested.map((r) => (
+              <button
+                key={r}
+                type="button"
+                className="skl-suggest"
+                onClick={() => void load(r)}
+              >
+                {r}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {data && data.skills.length > 0 && (
+        <div className="conn-search">
+          <Search size={15} />
+          <input
+            className="conn-search-input"
+            placeholder="Filtra skill…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+      )}
+
+      {loading ? (
+        <p className="set-hint">Carico da {input}…</p>
+      ) : (
+        <div className="conn-kit-grid">
+          {list.map((skill) => {
+            const already = skill.installed || installed.has(skill.id);
+            return (
+              <div key={skill.path || skill.id} className="conn-kit market">
+                <span className="conn-kit-logo">
+                  <span className="conn-kit-fallback">{skill.name.slice(0, 1).toUpperCase()}</span>
+                </span>
+                <div className="conn-kit-body">
+                  <div className="conn-kit-name">{skill.name}</div>
+                  <div className="conn-kit-meta market">{skill.description || skill.id}</div>
+                </div>
+                {already ? (
+                  <span className="mdl-tag skl-installed">installata</span>
+                ) : (
+                  <button
+                    className="mdl-icon-btn"
+                    type="button"
+                    disabled={busyPath === skill.path}
+                    title={`Installa ${skill.name}`}
+                    aria-label={`Installa ${skill.name}`}
+                    onClick={() => void install(skill)}
+                  >
+                    <Download size={15} />
+                  </button>
+                )}
+              </div>
+            );
+          })}
+          {data && list.length === 0 && <p className="set-hint">Nessuna skill trovata.</p>}
+        </div>
+      )}
+      {note && <p className="set-hint">{note}</p>}
+    </>
   );
 }
 

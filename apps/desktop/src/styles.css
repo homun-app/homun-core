@@ -4739,3 +4739,30 @@ body.resizing-drawer {
 .skl-tree-row:hover { background: var(--surface-muted); }
 .skl-tree-row svg { color: var(--muted); flex-shrink: 0; }
 .skl-tree-name { font-family: var(--mono, ui-monospace, monospace); font-size: 12.5px; }
+
+/* Skills — GitHub marketplace */
+.skl-repo-row { display: flex; gap: var(--s2); }
+.skl-repo-row .set-input { flex: 1; }
+.skl-suggested { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.skl-suggest-label { font-size: 12px; color: var(--muted); }
+.skl-suggest {
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--text);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.skl-suggest:hover { background: var(--surface-muted); }
+.conn-kit.market { align-items: flex-start; }
+.conn-kit-meta.market {
+  white-space: normal;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.skl-installed { color: var(--green); background: var(--green-soft); white-space: nowrap; align-self: center; }
