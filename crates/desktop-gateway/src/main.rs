@@ -3805,6 +3805,12 @@ struct ComposioToolkit {
     name: String,
     managed_oauth: bool,
     no_auth: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    logo: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    categories: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -3900,7 +3906,33 @@ fn composio_toolkits_blocking(state: &AppState) -> Result<ComposioToolkitsRespon
                 })
                 .unwrap_or(false);
             let no_auth = item.get("no_auth").and_then(serde_json::Value::as_bool).unwrap_or(false);
-            Some(ComposioToolkit { slug, name, managed_oauth, no_auth })
+            // Composio v3 exposes display metadata under `meta`: logo URL, a short
+            // description, and category tags (objects with a `name`, or bare strings).
+            let meta = item.get("meta");
+            let logo = meta
+                .and_then(|m| m.get("logo"))
+                .and_then(serde_json::Value::as_str)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+            let description = meta
+                .and_then(|m| m.get("description"))
+                .and_then(serde_json::Value::as_str)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+            let categories = meta
+                .and_then(|m| m.get("categories"))
+                .and_then(serde_json::Value::as_array)
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|c| {
+                            c.as_str()
+                                .or_else(|| c.get("name").and_then(serde_json::Value::as_str))
+                                .map(str::to_string)
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            Some(ComposioToolkit { slug, name, managed_oauth, no_auth, logo, description, categories })
         })
         .collect::<Vec<_>>();
     Ok(ComposioToolkitsResponse { toolkits, total })

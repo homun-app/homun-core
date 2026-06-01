@@ -6,13 +6,13 @@ import {
   ExternalLink,
   Eye,
   EyeOff,
-  Globe,
   ListChecks,
   MonitorPlay,
   Play,
   Plus,
   RefreshCw,
   RotateCcw,
+  Search,
   Server,
   ShieldCheck,
   Sparkles,
@@ -81,7 +81,7 @@ export function SettingsView({ section }: SettingsViewProps) {
 
   return (
     <section
-      className={`settings-view ${section === "runtime" ? "settings-wide" : ""}`}
+      className={`settings-view ${section === "runtime" || section === "connections" ? "settings-wide" : ""}`}
       aria-labelledby="settings-title"
     >
       <div className="set-pane">
@@ -1025,15 +1025,10 @@ function PrivacyPane() {
 
 /* ---------------------------------------------------------------- connectors */
 
-const CONNECTOR_TABS = [
-  { id: "connessi", label: "Connessi" },
-  { id: "mcp", label: "MCP" },
-  { id: "composio", label: "Composio" },
-] as const;
-
 function ConnectorsPane() {
-  const [tab, setTab] = useState<(typeof CONNECTOR_TABS)[number]["id"]>("connessi");
   const [snap, setSnap] = useState<CoreCapabilitySnapshot | null>(null);
+  // Selected rail entry: "composio" | "add-mcp" | an MCP provider id.
+  const [selected, setSelected] = useState<string>("composio");
   const [note, setNote] = useState<string | null>(null);
 
   const refresh = async () => {
@@ -1047,249 +1042,414 @@ function ConnectorsPane() {
     void refresh();
   }, []);
 
-  const toolsByProvider = (providerId: string) =>
-    (snap?.tools ?? []).filter((tool) => tool.provider_id === providerId).length;
+  const composioConn = snap?.connections.find((c) => c.provider_id === "composio") ?? null;
+  const composioConnected = Boolean(
+    composioConn && composioConn.status.toLowerCase().includes("connect"),
+  );
+
+  // Group MCP tools by provider so each server shows as one rail entry + tool count.
+  const mcpProviders = new Map<string, { name: string; tools: number }>();
+  for (const tool of snap?.tools ?? []) {
+    if (tool.provider_kind !== "mcp") continue;
+    const entry = mcpProviders.get(tool.provider_id) ?? {
+      name: tool.provider_id.replace(/^mcp:/, ""),
+      tools: 0,
+    };
+    entry.tools += 1;
+    mcpProviders.set(tool.provider_id, entry);
+  }
+  const mcpList = [...mcpProviders.entries()];
+  const toolsByProvider = (id: string) =>
+    (snap?.tools ?? []).filter((tool) => tool.provider_id === id).length;
+
+  const pick = (id: string) => {
+    setSelected(id);
+    setNote(null);
+  };
 
   return (
-    <>
-      <div className="set-connectors-tabs">
-        {CONNECTOR_TABS.map((item) => (
+    <div className="mdl-layout">
+      <aside className="mdl-rail" aria-label="Connettori">
+        <div className="mdl-rail-group">Cloud</div>
+        <button
+          type="button"
+          className={`mdl-rail-item ${selected === "composio" ? "active" : ""}`}
+          onClick={() => pick("composio")}
+        >
+          <span className="conn-avatar composio">Co</span>
+          <span className="mdl-rail-name">Composio</span>
+          {composioConnected && <span className="mdl-rail-dot" title="Connesso" />}
+        </button>
+
+        <div className="mdl-rail-group">Server MCP</div>
+        {mcpList.map(([id, info]) => (
           <button
-            key={item.id}
+            key={id}
             type="button"
-            className={`set-tab ${tab === item.id ? "active" : ""}`}
-            onClick={() => setTab(item.id)}
+            className={`mdl-rail-item ${selected === id ? "active" : ""}`}
+            onClick={() => pick(id)}
           >
-            {item.label}
+            <span className="conn-avatar">
+              <Server size={14} />
+            </span>
+            <span className="mdl-rail-name">{info.name}</span>
+            <em className="mdl-rail-badge">{info.tools}</em>
           </button>
         ))}
-      </div>
-
-      {tab === "connessi" && (
-        <>
-          {!snap || snap.connections.length === 0 ? (
-            <p className="set-hint">
-              Nessun connettore attivo. Aggiungi un server MCP o collega Composio dalle altre tab.
-            </p>
-          ) : (
-            <div className="set-grid">
-              {snap.connections.map((connection) => {
-                const ok = connection.status.toLowerCase().includes("connect");
-                return (
-                  <div key={connection.id} className={`set-conn ${ok ? "connected" : ""}`}>
-                    <span className="set-conn-icon">
-                      <Globe size={18} />
-                    </span>
-                    <div className="set-conn-body">
-                      <div className="set-conn-title">{connection.display_name}</div>
-                      <div className="set-conn-desc">
-                        {connection.provider_id} · {toolsByProvider(connection.provider_id)} strumenti
-                      </div>
-                    </div>
-                    <span
-                      className={`set-badge ${ok ? "green" : "muted"}`}
-                      title={connection.status}
-                    >
-                      {ok ? "Connesso" : connection.status}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </>
-      )}
-
-      {tab === "mcp" && <McpTab snap={snap} onChanged={refresh} onNote={setNote} />}
-      {tab === "composio" && <ComposioTab onNote={setNote} onChanged={refresh} />}
-
-      {note && <p className="set-hint">{note}</p>}
-    </>
-  );
-}
-
-function McpTab({
-  snap,
-  onChanged,
-  onNote,
-}: {
-  snap: CoreCapabilitySnapshot | null;
-  onChanged: () => Promise<void>;
-  onNote: (note: string | null) => void;
-}) {
-  const [name, setName] = useState("");
-  const [command, setCommand] = useState("");
-  const [args, setArgs] = useState("");
-  const [busy, setBusy] = useState(false);
-  const mcpProviders = new Set(
-    (snap?.tools ?? []).filter((t) => t.provider_kind === "mcp").map((t) => t.provider_id),
-  );
-
-  return (
-    <>
-      <div className="set-section-label" style={{ marginTop: 0 }}>
-        Aggiungi un server MCP
-      </div>
-      <div className="set-rows" style={{ padding: "var(--s4) var(--s5)" }}>
-        <input
-          className="set-input"
-          placeholder="Nome (es. GitHub MCP)"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <input
-          className="set-input"
-          style={{ marginTop: 8 }}
-          placeholder="Comando (es. npx)"
-          value={command}
-          onChange={(e) => setCommand(e.target.value)}
-        />
-        <input
-          className="set-input"
-          style={{ marginTop: 8 }}
-          placeholder="Argomenti separati da spazio (es. -y @owner/mcp-server)"
-          value={args}
-          onChange={(e) => setArgs(e.target.value)}
-        />
+        {mcpList.length === 0 && <p className="mdl-rail-empty">Nessun server</p>}
         <button
-          className="set-btn primary"
           type="button"
-          style={{ marginTop: 12, alignSelf: "flex-start" }}
-          disabled={busy || !name.trim() || !command.trim()}
-          onClick={async () => {
-            setBusy(true);
-            onNote(null);
-            try {
-              const result = await coreBridge.mcpConnect({
-                name: name.trim(),
-                command: command.trim(),
-                args: args.trim() ? args.trim().split(/\s+/) : [],
-              });
-              onNote(
-                result.discovery_error
-                  ? `Connesso con avviso: ${result.discovery_error}`
-                  : `Connesso: ${result.tools_cached} strumenti da ${result.provider_id}.`,
-              );
-              setName("");
-              setCommand("");
-              setArgs("");
-              await onChanged();
-            } catch (error) {
-              onNote(`Connessione MCP non riuscita: ${(error as Error).message}`);
-            } finally {
-              setBusy(false);
-            }
-          }}
+          className={`mdl-rail-item add ${selected === "add-mcp" ? "active" : ""}`}
+          onClick={() => pick("add-mcp")}
         >
-          <Plus size={14} />
-          <span style={{ marginLeft: 6 }}>{busy ? "Connessione…" : "Aggiungi MCP"}</span>
+          <span className="conn-avatar add">
+            <Plus size={14} />
+          </span>
+          <span className="mdl-rail-name">Aggiungi MCP</span>
         </button>
-      </div>
-      {mcpProviders.size > 0 && (
-        <>
-          <div className="set-section-label">Server MCP attivi</div>
-          <div className="set-rows">
-            {[...mcpProviders].map((provider) => (
-              <div key={provider} className="set-row">
-                <div>
-                  <div className="rk">Provider</div>
-                  <div className="rv">{provider}</div>
-                </div>
-                <span className="set-badge green">Connesso</span>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-    </>
+      </aside>
+
+      <section className="mdl-detail">
+        {selected === "composio" && (
+          <ComposioDetail
+            connected={composioConnected}
+            toolCount={composioConn ? toolsByProvider("composio") : 0}
+            onChanged={refresh}
+            onNote={setNote}
+          />
+        )}
+        {selected === "add-mcp" && (
+          <McpAddDetail onChanged={refresh} onNote={setNote} onConnected={pick} />
+        )}
+        {mcpProviders.has(selected) && (
+          <McpServerDetail
+            providerId={selected}
+            info={mcpProviders.get(selected)!}
+            snap={snap}
+          />
+        )}
+        {note && (
+          <p className="set-hint" style={{ marginTop: "var(--s4)" }}>
+            {note}
+          </p>
+        )}
+      </section>
+    </div>
   );
 }
 
-function ComposioTab({
+function ComposioDetail({
+  connected,
+  toolCount,
   onChanged,
   onNote,
 }: {
+  connected: boolean;
+  toolCount: number;
   onChanged: () => Promise<void>;
   onNote: (note: string | null) => void;
 }) {
   const [apiKey, setApiKey] = useState("");
   const [toolkits, setToolkits] = useState<ComposioToolkit[]>([]);
+  const [query, setQuery] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [loadingKits, setLoadingKits] = useState(false);
+
+  const loadToolkits = async () => {
+    setLoadingKits(true);
+    try {
+      setToolkits(await coreBridge.composioToolkits());
+    } catch (error) {
+      onNote(`Toolkit non caricati: ${(error as Error).message}`);
+    } finally {
+      setLoadingKits(false);
+    }
+  };
+  useEffect(() => {
+    if (connected) void loadToolkits();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected]);
+
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? toolkits.filter(
+        (t) =>
+          t.name.toLowerCase().includes(q) ||
+          t.slug.toLowerCase().includes(q) ||
+          (t.categories ?? []).some((c) => c.toLowerCase().includes(q)),
+      )
+    : toolkits;
+
+  return (
+    <>
+      <div className="mdl-detail-head">
+        <div className="conn-detail-title">
+          <span className="conn-avatar lg composio">Co</span>
+          <div className="conn-detail-titletext">
+            <h3 className="mdl-detail-title">Composio</h3>
+            <p className="mdl-detail-sub">
+              {connected
+                ? `Connesso · ${toolCount} strumenti attivi`
+                : "Hub di toolkit cloud (Gmail, GitHub, Slack…) con OAuth gestito."}
+            </p>
+          </div>
+          <span className={`set-badge ${connected ? "green" : "muted"}`}>
+            {connected ? "Connesso" : "Non connesso"}
+          </span>
+        </div>
+      </div>
+
+      {!connected ? (
+        <div className="mdl-field">
+          <label className="mdl-field-label">Composio API key</label>
+          <input
+            className="set-input"
+            type="password"
+            placeholder="comp_…"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+          />
+          <button
+            className="set-btn primary"
+            type="button"
+            style={{ marginTop: 12, alignSelf: "flex-start" }}
+            disabled={busy || !apiKey.trim()}
+            onClick={async () => {
+              setBusy(true);
+              onNote(null);
+              try {
+                const result = await coreBridge.composioConnect(apiKey.trim());
+                onNote(`Composio collegato (${result.tools_cached} strumenti).`);
+                setApiKey("");
+                await onChanged();
+                await loadToolkits();
+              } catch (error) {
+                onNote(`Composio non collegato: ${(error as Error).message}`);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {busy ? "Collegamento…" : "Collega Composio"}
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="conn-search">
+            <Search size={15} />
+            <input
+              className="conn-search-input"
+              placeholder="Cerca toolkit per nome o categoria…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+          {loadingKits ? (
+            <p className="set-hint">Carico i toolkit…</p>
+          ) : (
+            <div className="conn-kit-grid">
+              {filtered.slice(0, 60).map((kit) => (
+                <ToolkitCard key={kit.slug} kit={kit} onChanged={onChanged} onNote={onNote} />
+              ))}
+              {filtered.length === 0 && (
+                <p className="set-hint">Nessun toolkit per «{query}».</p>
+              )}
+            </div>
+          )}
+          {filtered.length > 60 && (
+            <p className="set-hint">Mostrati 60 di {filtered.length} — affina la ricerca.</p>
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
+function ToolkitCard({
+  kit,
+  onChanged,
+  onNote,
+}: {
+  kit: ComposioToolkit;
+  onChanged: () => Promise<void>;
+  onNote: (note: string | null) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [imgOk, setImgOk] = useState(Boolean(kit.logo));
+  const auth = kit.no_auth
+    ? "Nessuna auth"
+    : kit.managed_oauth
+      ? "OAuth gestito"
+      : "Auth richiesta";
+  return (
+    <div className="conn-kit">
+      <span className="conn-kit-logo">
+        {imgOk && kit.logo ? (
+          <img src={kit.logo} alt="" loading="lazy" onError={() => setImgOk(false)} />
+        ) : (
+          <span className="conn-kit-fallback">{kit.name.slice(0, 1).toUpperCase()}</span>
+        )}
+      </span>
+      <div className="conn-kit-body">
+        <div className="conn-kit-name">{kit.name}</div>
+        <div className="conn-kit-meta">
+          {auth}
+          {kit.categories && kit.categories.length > 0 ? ` · ${kit.categories[0]}` : ""}
+        </div>
+      </div>
+      <button
+        className="mdl-icon-btn"
+        type="button"
+        disabled={busy}
+        title={`Collega ${kit.name}`}
+        aria-label={`Collega ${kit.name}`}
+        onClick={async () => {
+          setBusy(true);
+          onNote(null);
+          try {
+            await coreBridge.composioLink(kit.slug);
+            onNote(`Toolkit collegato: ${kit.name}.`);
+            await onChanged();
+          } catch (error) {
+            onNote(`Collegamento non riuscito: ${(error as Error).message}`);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <Plus size={15} />
+      </button>
+    </div>
+  );
+}
+
+function McpAddDetail({
+  onChanged,
+  onNote,
+  onConnected,
+}: {
+  onChanged: () => Promise<void>;
+  onNote: (note: string | null) => void;
+  onConnected: (providerId: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const [command, setCommand] = useState("");
+  const [args, setArgs] = useState("");
   const [busy, setBusy] = useState(false);
 
   return (
     <>
-      <div className="set-section-label" style={{ marginTop: 0 }}>
-        Collega Composio
+      <div className="mdl-detail-head">
+        <h3 className="mdl-detail-title">Aggiungi un server MCP</h3>
+        <p className="mdl-detail-sub">
+          Un server MCP (Model Context Protocol) espone strumenti via stdio. Indica comando e
+          argomenti per avviarlo.
+        </p>
       </div>
-      <div className="set-rows" style={{ padding: "var(--s4) var(--s5)" }}>
+      <div className="mdl-field">
+        <label className="mdl-field-label">Nome</label>
         <input
           className="set-input"
-          placeholder="Composio API key"
-          type="password"
-          value={apiKey}
-          onChange={(e) => setApiKey(e.target.value)}
+          placeholder="es. GitHub MCP"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
         />
-        <button
-          className="set-btn primary"
-          type="button"
-          style={{ marginTop: 12, alignSelf: "flex-start" }}
-          disabled={busy || !apiKey.trim()}
-          onClick={async () => {
-            setBusy(true);
-            onNote(null);
-            try {
-              const result = await coreBridge.composioConnect(apiKey.trim());
-              onNote(`Composio collegato (${result.tools_cached} strumenti). Scegli un toolkit.`);
-              setToolkits(await coreBridge.composioToolkits());
-              await onChanged();
-            } catch (error) {
-              onNote(`Composio non collegato: ${(error as Error).message}`);
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          {busy ? "Collegamento…" : "Collega"}
-        </button>
       </div>
-      {toolkits.length > 0 && (
-        <>
-          <div className="set-section-label">Toolkit disponibili</div>
-          <div className="set-grid">
-            {toolkits.slice(0, 40).map((toolkit) => (
-              <div key={toolkit.slug} className="set-conn">
-                <span className="set-conn-icon">
-                  <Globe size={18} />
-                </span>
-                <div className="set-conn-body">
-                  <div className="set-conn-title">{toolkit.name}</div>
-                  <div className="set-conn-desc">
-                    {toolkit.no_auth ? "Nessuna autenticazione" : "OAuth gestito"}
-                  </div>
-                </div>
-                <button
-                  className="set-conn-add"
-                  type="button"
-                  title="Collega"
-                  aria-label={`Collega ${toolkit.name}`}
-                  onClick={async () => {
-                    onNote(null);
-                    try {
-                      await coreBridge.composioLink(toolkit.slug);
-                      onNote(`Toolkit collegato: ${toolkit.name}.`);
-                      await onChanged();
-                    } catch (error) {
-                      onNote(`Collegamento non riuscito: ${(error as Error).message}`);
-                    }
-                  }}
-                >
-                  <Plus size={15} />
-                </button>
-              </div>
-            ))}
+      <div className="mdl-field">
+        <label className="mdl-field-label">Comando</label>
+        <input
+          className="set-input"
+          placeholder="es. npx"
+          value={command}
+          onChange={(e) => setCommand(e.target.value)}
+        />
+      </div>
+      <div className="mdl-field">
+        <label className="mdl-field-label">Argomenti</label>
+        <input
+          className="set-input"
+          placeholder="separati da spazio — es. -y @owner/mcp-server"
+          value={args}
+          onChange={(e) => setArgs(e.target.value)}
+        />
+      </div>
+      <button
+        className="set-btn primary"
+        type="button"
+        style={{ marginTop: 4, alignSelf: "flex-start" }}
+        disabled={busy || !name.trim() || !command.trim()}
+        onClick={async () => {
+          setBusy(true);
+          onNote(null);
+          try {
+            const result = await coreBridge.mcpConnect({
+              name: name.trim(),
+              command: command.trim(),
+              args: args.trim() ? args.trim().split(/\s+/) : [],
+            });
+            onNote(
+              result.discovery_error
+                ? `Connesso con avviso: ${result.discovery_error}`
+                : `Connesso: ${result.tools_cached} strumenti da ${result.provider_id}.`,
+            );
+            setName("");
+            setCommand("");
+            setArgs("");
+            await onChanged();
+            onConnected(result.provider_id);
+          } catch (error) {
+            onNote(`Connessione MCP non riuscita: ${(error as Error).message}`);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <Plus size={14} />
+        <span style={{ marginLeft: 6 }}>{busy ? "Connessione…" : "Aggiungi MCP"}</span>
+      </button>
+    </>
+  );
+}
+
+function McpServerDetail({
+  providerId,
+  info,
+  snap,
+}: {
+  providerId: string;
+  info: { name: string; tools: number };
+  snap: CoreCapabilitySnapshot | null;
+}) {
+  const tools = (snap?.tools ?? []).filter((tool) => tool.provider_id === providerId);
+  return (
+    <>
+      <div className="mdl-detail-head">
+        <div className="conn-detail-title">
+          <span className="conn-avatar lg">
+            <Server size={18} />
+          </span>
+          <div className="conn-detail-titletext">
+            <h3 className="mdl-detail-title">{info.name}</h3>
+            <p className="mdl-detail-sub">
+              {providerId} · {info.tools} strumenti
+            </p>
           </div>
-        </>
-      )}
+          <span className="set-badge green">Connesso</span>
+        </div>
+      </div>
+      <div className="mdl-detail-section-label">Strumenti</div>
+      <div className="conn-tool-list">
+        {tools.map((tool) => (
+          <div key={`${providerId}:${tool.name}`} className="conn-tool">
+            <div className="conn-tool-main">
+              <span className="conn-tool-name">{tool.name}</span>
+              {tool.description && <span className="conn-tool-desc">{tool.description}</span>}
+            </div>
+            <span className="mdl-tag">{tool.action}</span>
+          </div>
+        ))}
+        {tools.length === 0 && <p className="set-hint">Nessuno strumento esposto.</p>}
+      </div>
     </>
   );
 }
