@@ -1374,8 +1374,18 @@ function ToolkitCard({
           setBusy(true);
           onNote(null);
           try {
-            await coreBridge.composioLink(kit.slug);
-            onNote(`Toolkit collegato: ${kit.name}.`);
+            const result = await coreBridge.composioLink(kit.slug);
+            // Composio returns the OAuth authorization URL — the user must open it
+            // and grant access. The Electron shell routes window.open() to the
+            // system browser (setWindowOpenHandler → shell.openExternal).
+            if (result.redirect_url) {
+              window.open(result.redirect_url, "_blank", "noopener,noreferrer");
+              onNote(
+                `Autorizza ${kit.name} nel browser appena aperto, poi torna qui: la connessione diventerà attiva.`,
+              );
+            } else {
+              onNote(`Toolkit collegato: ${kit.name}.`);
+            }
             await onChanged();
           } catch (error) {
             onNote(`Collegamento non riuscito: ${(error as Error).message}`);
