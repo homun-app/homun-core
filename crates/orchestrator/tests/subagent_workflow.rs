@@ -23,6 +23,7 @@ fn brain_materializes_subagent_workflow_as_durable_tasks_with_dependencies() {
                 "kind": "subagent_task",
                 "depends_on": [],
                 "agent_id": "PlannerAgent",
+                "assigned_agent": "ricercatore",
                 "goal": "Break down the request into safe local steps",
                 "contract": "ExecutionPlan",
                 "arguments": {"focus": "local"},
@@ -100,6 +101,12 @@ fn brain_materializes_subagent_workflow_as_durable_tasks_with_dependencies() {
     assert_eq!(subagent_task.budgets.timeout_seconds, 45);
     assert_eq!(subagent_task.budgets.max_tokens, 700);
     assert!(subagent_task.input.get("orchestrator").is_some());
+    // Phase 3b: the planner's chosen user-agent flows into the task input so the
+    // gateway worker runs it on that agent's model + persona.
+    assert_eq!(
+        subagent_task.input.get("lfpa_agent_id").and_then(|v| v.as_str()),
+        Some("ricercatore")
+    );
 
     let read_model = OrchestratorUiReadModel::new(brain.audit_store().unwrap());
     let detail = read_model
@@ -134,6 +141,7 @@ fn request() -> OrchestratorRequest {
         conversation_summary: None,
         attachments: vec![],
         budgets: OrchestratorBudgets::default(),
+        available_agents: Vec::new(),
     }
 }
 

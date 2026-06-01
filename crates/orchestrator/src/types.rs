@@ -13,6 +13,19 @@ pub struct OrchestratorRequest {
     pub conversation_summary: Option<String>,
     pub attachments: Vec<serde_json::Value>,
     pub budgets: OrchestratorBudgets,
+    /// User-defined specialized agents the planner may delegate sub-tasks to
+    /// (Phase 3b). Empty = the planner uses only built-in worker archetypes.
+    #[serde(default)]
+    pub available_agents: Vec<AgentProfile>,
+}
+
+/// A specialized agent exposed to the planner so it can delegate a sub-task to it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentProfile {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -164,6 +177,10 @@ pub struct PlanStep {
     pub expected_duration_seconds: u64,
     #[serde(default)]
     pub agent_id: Option<AgentId>,
+    /// Optional user-defined agent (Phase 3b): when the planner picks one of the
+    /// `available_agents`, its id lands here and drives the worker's model+persona.
+    #[serde(default)]
+    pub assigned_agent: Option<String>,
     #[serde(default)]
     pub goal: Option<String>,
     #[serde(default)]
