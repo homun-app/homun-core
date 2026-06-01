@@ -202,6 +202,9 @@ pub struct ProviderRegistry {
     /// best model by capability".
     #[serde(default)]
     pub roles: std::collections::BTreeMap<String, RoleBinding>,
+    /// User-defined specialized agents (Phase 3).
+    #[serde(default)]
+    pub agents: Vec<AgentEntry>,
 }
 
 /// A per-role model binding. Both fields present = manual; otherwise "auto"
@@ -212,6 +215,40 @@ pub struct RoleBinding {
     pub provider_id: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
+}
+
+/// How a specialized agent selects its model: by role (inherits the role's
+/// resolution) or by an explicit provider+model pin. Empty = orchestrator role.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentModel {
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub provider_id: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+/// A user-defined specialized agent (Phase 3): a persona (system prompt) bound to
+/// a model, sitting on top of the orchestrator-worker execution.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentEntry {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub system_prompt: String,
+    #[serde(default)]
+    pub model: AgentModel,
+    #[serde(default)]
+    pub tools: Vec<String>,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Static catalog of the roles the app actually routes through a model.
@@ -386,6 +423,55 @@ impl ProviderRegistry {
             base_url: provider.base_url.clone(),
             auto: true,
         })
+    }
+
+    pub fn agent(&self, id: &str) -> Option<&AgentEntry> {
+        self.agents.iter().find(|a| a.id == id)
+    }
+
+    /// Inserts or replaces an agent (matched by id). Returns the stored id.
+    pub fn upsert_agent(&mut self, agent: AgentEntry) -> String {
+        let id = agent.id.clone();
+        if let Some(existing) = self.agents.iter_mut().find(|a| a.id == id) {
+            *existing = agent;
+        } else {
+            self.agents.push(agent);
+        }
+        id
+    }
+
+    pub fn remove_agent(&mut self, id: &str) -> bool {
+        let before = self.agents.len();
+        self.agents.retain(|a| a.id != id);
+        self.agents.len() != before
+    }
+
+    /// Resolves the model an agent should run on: an explicit provider+model pin
+    /// wins; otherwise the agent's role (default "orchestrator") is resolved.
+    pub fn resolve_agent(&self, id: &str) -> Option<ResolvedRole> {
+        let agent = self.agent(id)?;
+        if let (Some(pid), Some(model)) =
+            (agent.model.provider_id.as_deref(), agent.model.model.as_deref())
+            && !pid.is_empty()
+            && !model.is_empty()
+            && let Some(provider) = self.get(pid)
+        {
+            return Some(ResolvedRole {
+                role: format!("agent:{id}"),
+                provider_id: provider.id.clone(),
+                model: model.to_string(),
+                kind: provider.kind,
+                base_url: provider.base_url.clone(),
+                auto: false,
+            });
+        }
+        let role = agent
+            .model
+            .role
+            .as_deref()
+            .filter(|value| !value.is_empty())
+            .unwrap_or("orchestrator");
+        self.resolve_role(role)
     }
 }
 
@@ -579,6 +665,45 @@ mod tests {
         let resolved = reg.resolve_role("orchestrator").unwrap();
         assert!(resolved.auto);
         assert_eq!(resolved.model, "minimax-m2.7:cloud");
+    }
+
+    #[test]
+    fn agent_resolves_explicit_then_role() {
+        let mut reg = registry_with_two_models();
+        // Explicit pin.
+        reg.upsert_agent(AgentEntry {
+            id: "researcher".into(),
+            name: "Ricercatore".into(),
+            description: String::new(),
+            system_prompt: "Sei un ricercatore meticoloso.".into(),
+            model: AgentModel {
+                provider_id: Some("ollama".into()),
+                model: Some("llama3.1:8b".into()),
+                ..AgentModel::default()
+            },
+            tools: vec![],
+            enabled: true,
+        });
+        let resolved = reg.resolve_agent("researcher").unwrap();
+        assert_eq!(resolved.model, "llama3.1:8b");
+        assert!(!resolved.auto);
+
+        // Role-based agent inherits the role's auto resolution.
+        reg.upsert_agent(AgentEntry {
+            id: "planner".into(),
+            name: "Pianificatore".into(),
+            description: String::new(),
+            system_prompt: String::new(),
+            model: AgentModel { role: Some("orchestrator".into()), ..AgentModel::default() },
+            tools: vec![],
+            enabled: true,
+        });
+        let planner = reg.resolve_agent("planner").unwrap();
+        assert_eq!(planner.model, "minimax-m2.7:cloud");
+        assert!(planner.auto);
+
+        assert!(reg.remove_agent("planner"));
+        assert!(reg.agent("planner").is_none());
     }
 
     #[test]
