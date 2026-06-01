@@ -565,6 +565,24 @@ async function electronRoles(): Promise<RolesResponse> {
   return gatewayGetJson<RolesResponse>("/api/roles");
 }
 
+export interface RoutingDecision {
+  ts: number;
+  role: string;
+  goal: string;
+  candidates: string[];
+  chosen_provider: string;
+  chosen_model: string;
+  stage: string;
+}
+
+export interface RoutingDecisionsResponse {
+  decisions: RoutingDecision[];
+}
+
+async function electronRoutingDecisions(): Promise<RoutingDecisionsResponse> {
+  return gatewayGetJson<RoutingDecisionsResponse>("/api/routing-decisions");
+}
+
 async function electronSetRole(input: {
   role: string;
   provider_id?: string;
@@ -655,6 +673,7 @@ export const coreBridge = {
   setModelProfile: (input: { provider_id: string; model: string; tier: string; strengths?: string }) =>
     electronSetModelProfile(input),
   generateProviderProfiles: (id: string) => electronGenerateProviderProfiles(id),
+  routingDecisions: () => electronRoutingDecisions(),
   roles: () => electronRoles(),
   setRole: (input: { role: string; provider_id?: string; model?: string }) =>
     electronSetRole(input),

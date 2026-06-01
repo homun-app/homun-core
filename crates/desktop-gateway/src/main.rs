@@ -600,6 +600,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/providers/{id}/activate", post(activate_provider))
         .route("/api/model-profile", post(set_model_profile))
         .route("/api/roles", get(list_roles).post(set_role))
+        .route("/api/routing-decisions", get(list_routing_decisions))
         .route("/api/tasks/queue", get(task_queue))
         .route("/api/tasks/executor", get(task_executor_status))
         .route("/api/tasks/run_next", post(run_next_task))
@@ -5525,16 +5526,71 @@ fn semantic_router_enabled() -> bool {
         .unwrap_or(true)
 }
 
+/// One model-routing decision, logged for observability (why a model was picked).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RoutingDecision {
+    ts: u64,
+    role: String,
+    /// Truncated + redacted task goal.
+    goal: String,
+    /// Eligible model ids (the stage-1 gate result).
+    candidates: Vec<String>,
+    chosen_provider: String,
+    chosen_model: String,
+    /// "semantic" | "heuristic_fallback" | "single_candidate" | "heuristic_disabled".
+    stage: String,
+}
+
+const ROUTING_DECISIONS_CAP: usize = 50;
+
+fn routing_decisions_path() -> Option<PathBuf> {
+    gateway_data_dir()
+        .ok()
+        .map(|dir| dir.join("routing-decisions.json"))
+}
+
+fn load_routing_decisions() -> Vec<RoutingDecision> {
+    let Some(path) = routing_decisions_path() else {
+        return Vec::new();
+    };
+    let Ok(raw) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    serde_json::from_str(&raw).unwrap_or_default()
+}
+
+/// Appends a decision (capped ring of the most recent `ROUTING_DECISIONS_CAP`).
+/// Best-effort: a logging hiccup must never break routing.
+fn log_routing_decision(entry: RoutingDecision) {
+    let Some(path) = routing_decisions_path() else {
+        return;
+    };
+    let mut all = load_routing_decisions();
+    all.push(entry);
+    let len = all.len();
+    if len > ROUTING_DECISIONS_CAP {
+        all.drain(0..len - ROUTING_DECISIONS_CAP);
+    }
+    if let Ok(json) = serde_json::to_string_pretty(&all) {
+        let _ = fs::write(path, json);
+    }
+}
+
+fn now_epoch_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 /// STAGE 2 (semantic): among the models eligible for `role`, ask a fast model
 /// which one best fits `goal`, reading each model's profile ("in cosa eccelle").
 /// Falls back to the heuristic `resolve_role` on: disabled flag, <2 candidates,
 /// LLM error, or an unrecognized pick. Async task path only (adds one LLM hop).
+/// Every decision is logged for observability.
 fn resolve_role_for_task(goal: &str, role: &str) -> Option<ResolvedRole> {
     let registry = load_provider_registry();
     let heuristic = registry.resolve_role(role);
-    if !semantic_router_enabled() {
-        return heuristic;
-    }
     // Owned candidate tuples: (provider_id, model_id, tier, strengths, kind, base_url).
     let candidates: Vec<(String, String, String, String, ProviderKind, String)> = registry
         .eligible_models(role)
@@ -5555,59 +5611,82 @@ fn resolve_role_for_task(goal: &str, role: &str) -> Option<ResolvedRole> {
             )
         })
         .collect();
-    if candidates.len() < 2 {
-        return heuristic;
-    }
-    let list = candidates
-        .iter()
-        .enumerate()
-        .map(|(i, (pid, mid, tier, strengths, _, _))| {
-            let desc = if strengths.trim().is_empty() {
-                "(nessuna descrizione)"
-            } else {
-                strengths.as_str()
-            };
-            format!("{}. id=\"{mid}\" provider={pid} tier={tier} — {desc}", i + 1)
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    let prompt = format!(
-        "Sei un router di modelli. Scegli il modello che esegue MEGLIO questo compito, \
-         in base a in cosa ciascun modello eccelle.\n\nCompito:\n{goal}\n\nModelli candidati:\n{list}\n\n\
-         Rispondi SOLO con JSON: {{\"model_id\": \"<uno degli id elencati esattamente>\"}}."
-    );
-    let request = GenerateJsonRequest {
-        prompt,
-        max_tokens: 200,
-        temperature: 0.0,
-        wait_if_busy: true,
-        request_timeout_seconds: Some(30.0),
-        json_schema: None,
-        required_keys: vec!["model_id".to_string()],
-        repair: true,
-    };
-    // The role's heuristic model runs the (cheap) selection call.
-    let selector = router_for_role(role);
-    match selector.generate_json_with(&Requirements::default(), &request) {
-        Ok(response) if response.valid => {
-            let chosen = response.json.get("model_id").and_then(Value::as_str);
-            if let Some(chosen) = chosen
-                && let Some((pid, mid, _, _, kind, base_url)) =
-                    candidates.iter().find(|c| c.1 == chosen)
-            {
-                return Some(ResolvedRole {
-                    role: role.to_string(),
-                    provider_id: pid.clone(),
-                    model: mid.clone(),
-                    kind: *kind,
-                    base_url: base_url.clone(),
-                    auto: true,
-                });
+    let candidate_ids: Vec<String> = candidates.iter().map(|c| c.1.clone()).collect();
+
+    // Decide (and remember which stage produced the choice).
+    let (resolved, stage): (Option<ResolvedRole>, &'static str) = if !semantic_router_enabled() {
+        (heuristic.clone(), "heuristic_disabled")
+    } else if candidates.len() < 2 {
+        (heuristic.clone(), "single_candidate")
+    } else {
+        let list = candidates
+            .iter()
+            .enumerate()
+            .map(|(i, (pid, mid, tier, strengths, _, _))| {
+                let desc = if strengths.trim().is_empty() {
+                    "(nessuna descrizione)"
+                } else {
+                    strengths.as_str()
+                };
+                format!("{}. id=\"{mid}\" provider={pid} tier={tier} — {desc}", i + 1)
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let prompt = format!(
+            "Sei un router di modelli. Scegli il modello che esegue MEGLIO questo compito, \
+             in base a in cosa ciascun modello eccelle.\n\nCompito:\n{goal}\n\nModelli candidati:\n{list}\n\n\
+             Rispondi SOLO con JSON: {{\"model_id\": \"<uno degli id elencati esattamente>\"}}."
+        );
+        let request = GenerateJsonRequest {
+            prompt,
+            max_tokens: 200,
+            temperature: 0.0,
+            wait_if_busy: true,
+            request_timeout_seconds: Some(30.0),
+            json_schema: None,
+            required_keys: vec!["model_id".to_string()],
+            repair: true,
+        };
+        // The role's heuristic model runs the (cheap) selection call.
+        let selector = router_for_role(role);
+        match selector.generate_json_with(&Requirements::default(), &request) {
+            Ok(response) if response.valid => {
+                let chosen = response.json.get("model_id").and_then(Value::as_str);
+                if let Some(chosen) = chosen
+                    && let Some((pid, mid, _, _, kind, base_url)) =
+                        candidates.iter().find(|c| c.1 == chosen)
+                {
+                    (
+                        Some(ResolvedRole {
+                            role: role.to_string(),
+                            provider_id: pid.clone(),
+                            model: mid.clone(),
+                            kind: *kind,
+                            base_url: base_url.clone(),
+                            auto: true,
+                        }),
+                        "semantic",
+                    )
+                } else {
+                    (heuristic.clone(), "heuristic_fallback")
+                }
             }
-            heuristic
+            _ => (heuristic.clone(), "heuristic_fallback"),
         }
-        _ => heuristic,
+    };
+
+    if let Some(chosen) = &resolved {
+        log_routing_decision(RoutingDecision {
+            ts: now_epoch_secs(),
+            role: role.to_string(),
+            goal: truncate_chars(&redact_sensitive_text(goal), 140),
+            candidates: candidate_ids,
+            chosen_provider: chosen.provider_id.clone(),
+            chosen_model: chosen.model.clone(),
+            stage: stage.to_string(),
+        });
     }
+    resolved
 }
 
 /// Browser-loop router (Phase 2): the "browser" role.
@@ -6335,6 +6414,19 @@ fn roles_response(registry: &ProviderRegistry) -> RolesResponse {
 
 async fn list_roles() -> Json<RolesResponse> {
     Json(roles_response(&load_provider_registry()))
+}
+
+#[derive(Debug, Serialize)]
+struct RoutingDecisionsResponse {
+    decisions: Vec<RoutingDecision>,
+}
+
+/// The recent model-routing decisions (most recent first) — observability for the
+/// semantic router: which model was chosen for a task, among which candidates, why.
+async fn list_routing_decisions() -> Json<RoutingDecisionsResponse> {
+    let mut decisions = load_routing_decisions();
+    decisions.reverse();
+    Json(RoutingDecisionsResponse { decisions })
 }
 
 #[derive(Debug, Deserialize)]

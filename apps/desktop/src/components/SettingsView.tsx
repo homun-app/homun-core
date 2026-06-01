@@ -21,6 +21,7 @@ import {
   type CoreMemoryDashboard,
   type ProviderView,
   type RoleView,
+  type RoutingDecision,
   type SystemStatus,
 } from "../lib/coreBridge";
 import { useSetting } from "../lib/settingsStore";
@@ -299,6 +300,7 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
   const [providers, setProviders] = useState<ProviderView[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [roles, setRoles] = useState<RoleView[]>([]);
+  const [decisions, setDecisions] = useState<RoutingDecision[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [presetId, setPresetId] = useState("ollama");
@@ -327,6 +329,11 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
         /* leave empty */
       }
       await reloadRoles();
+      try {
+        setDecisions((await coreBridge.routingDecisions()).decisions);
+      } catch {
+        /* leave empty */
+      }
     })();
   }, []);
 
@@ -662,9 +669,42 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
         </span>
         <span className="v">{model ? `~${formatK(model.context_window)} token` : "n/d"}</span>
       </div>
+
+      {decisions.length > 0 && (
+        <>
+          <div className="set-section-label">Decisioni di routing (recenti)</div>
+          <div className="set-rows" style={{ padding: "var(--s3) var(--s5)", maxHeight: 260, overflowY: "auto" }}>
+            {decisions.map((d, i) => (
+              <div key={i} style={{ padding: "4px 0", borderBottom: "1px solid var(--line)" }}>
+                <div style={{ display: "flex", gap: "var(--s2)", alignItems: "baseline" }}>
+                  <strong style={{ fontSize: 13 }}>{d.chosen_model}</strong>
+                  <span className={`set-badge ${d.stage === "semantic" ? "green" : "muted"}`}>
+                    {d.stage === "semantic"
+                      ? "semantico"
+                      : d.stage === "single_candidate"
+                        ? "unico"
+                        : d.stage === "heuristic_disabled"
+                          ? "euristico"
+                          : "fallback"}
+                  </span>
+                  <span style={{ marginLeft: "auto", fontSize: 11, opacity: 0.6 }}>{d.role}</span>
+                </div>
+                <p className="set-meter-sub" style={{ margin: "2px 0" }}>
+                  «{d.goal}»
+                </p>
+                <p className="set-meter-sub" style={{ fontSize: 11, opacity: 0.6 }}>
+                  tra {d.candidates.length} candidati
+                </p>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
       <p className="set-hint">
         Più provider insieme: scegli quale è attivo e il suo modello. La chiave è cifrata nel secret
-        store locale, mai mostrata. (Prossima fase: un modello diverso per compito.)
+        store locale, mai mostrata. Il router sceglie automaticamente il modello migliore per ogni
+        task (vedi "Decisioni di routing").
       </p>
       {note && <p className="set-hint">{note}</p>}
     </>
