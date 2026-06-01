@@ -1079,8 +1079,6 @@ function ConnectorsPane() {
     mcpProviders.set(tool.provider_id, entry);
   }
   const mcpList = [...mcpProviders.entries()];
-  const toolsByProvider = (id: string) =>
-    (snap?.tools ?? []).filter((tool) => tool.provider_id === id).length;
 
   const pick = (id: string) => {
     setSelected(id);
@@ -1133,7 +1131,6 @@ function ConnectorsPane() {
         {selected === "composio" && (
           <ComposioDetail
             connected={composioConnected}
-            toolCount={composioConn ? toolsByProvider("composio") : 0}
             onChanged={refresh}
             onNote={setNote}
           />
@@ -1160,12 +1157,10 @@ function ConnectorsPane() {
 
 function ComposioDetail({
   connected,
-  toolCount,
   onChanged,
   onNote,
 }: {
   connected: boolean;
-  toolCount: number;
   onChanged: () => Promise<void>;
   onNote: (note: string | null) => void;
 }) {
@@ -1173,6 +1168,9 @@ function ComposioDetail({
   const [toolkits, setToolkits] = useState<ComposioToolkit[]>([]);
   const [busy, setBusy] = useState(false);
   const [loadingKits, setLoadingKits] = useState(false);
+  // Number of services with a live (ACTIVE) connected account — reported by the
+  // toolkit browser, which already polls connections.
+  const [connectedCount, setConnectedCount] = useState(0);
   // Set when the existing connection's key fails to list toolkits (invalid /
   // expired / revoked). We then fall back to the key form so the user can fix it.
   const [kitsError, setKitsError] = useState<string | null>(null);
@@ -1229,7 +1227,9 @@ function ComposioDetail({
             <h3 className="mdl-detail-title">Composio</h3>
             <p className="mdl-detail-sub">
               {connected
-                ? `Connesso · ${toolCount} strumenti attivi`
+                ? connectedCount > 0
+                  ? `Connesso · ${connectedCount} ${connectedCount === 1 ? "servizio collegato" : "servizi collegati"}`
+                  : "Connesso · nessun servizio ancora collegato"
                 : "Hub di toolkit cloud (Gmail, GitHub, Slack…) con OAuth gestito."}
             </p>
           </div>
@@ -1291,7 +1291,12 @@ function ComposioDetail({
           </div>
         </div>
       ) : (
-        <ComposioToolkitBrowser toolkits={toolkits} loading={loadingKits} onNote={onNote} />
+        <ComposioToolkitBrowser
+          toolkits={toolkits}
+          loading={loadingKits}
+          onNote={onNote}
+          onConnectedCount={setConnectedCount}
+        />
       )}
     </>
   );
@@ -1312,10 +1317,12 @@ function ComposioToolkitBrowser({
   toolkits,
   loading,
   onNote,
+  onConnectedCount,
 }: {
   toolkits: ComposioToolkit[];
   loading: boolean;
   onNote: (note: string | null) => void;
+  onConnectedCount: (n: number) => void;
 }) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
@@ -1347,6 +1354,12 @@ function ComposioToolkitBrowser({
   useEffect(() => {
     void refreshConnections();
   }, []);
+
+  // Report the live connected-service count up to the header.
+  useEffect(() => {
+    onConnectedCount(Object.values(connState).filter((s) => s === "connected").length);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connState]);
 
   // Composio exposes dozens of granular categories; show only the most populated
   // ones as quick filters (+ "Tutte") to keep the chip row clean — the rest stay
