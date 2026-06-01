@@ -26,4 +26,6 @@ time = { version = "0.3", features = ["serde"] }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
 uuid = { version = "1", features = ["v4"] }
 tower-http = { version = "0.6", features = ["cors"] }
+# Extracting ClawHub skill ZIP packages on install.
+zip = { version = "2", default-features = false, features = ["deflate"] }
 

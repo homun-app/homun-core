@@ -208,6 +208,93 @@ pub fn search(
     scored.into_iter().take(limit).map(|(_, e)| e.clone()).collect()
 }
 
+// ---- download + install (public ClawHub ZIP) -------------------------------
+
+const DOWNLOAD_BASE: &str = "https://clawhub.ai/api/v1/download";
+const MAX_ZIP_BYTES: usize = 16 * 1024 * 1024;
+const MAX_ENTRY_BYTES: u64 = 4 * 1024 * 1024;
+
+/// Downloads a skill's package ZIP from ClawHub's public download endpoint
+/// (`/api/v1/download?slug=`). No scraping, no auth — the same URL the website's
+/// "Download" button uses.
+pub async fn download_zip(http: &reqwest::Client, slug: &str) -> Result<Vec<u8>, String> {
+    let url = format!("{DOWNLOAD_BASE}?slug={}", urlencoding(slug));
+    let resp = http
+        .get(&url)
+        .header(reqwest::header::USER_AGENT, "local-first-personal-assistant")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("download {slug}: HTTP {}", resp.status()));
+    }
+    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+    if bytes.len() > MAX_ZIP_BYTES {
+        return Err("pacchetto troppo grande".to_string());
+    }
+    Ok(bytes.to_vec())
+}
+
+fn urlencoding(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+/// Returns the text files (relative path, content) inside a skill ZIP — for
+/// preview rendering + security preflight without installing.
+pub fn read_zip_text_files(zip_bytes: &[u8]) -> Result<Vec<(String, String)>, String> {
+    let mut archive =
+        zip::ZipArchive::new(std::io::Cursor::new(zip_bytes)).map_err(|e| e.to_string())?;
+    let mut files = Vec::new();
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
+        if !entry.is_file() || entry.size() > MAX_ENTRY_BYTES {
+            continue;
+        }
+        let name = entry.name().to_string();
+        let mut buf = String::new();
+        use std::io::Read;
+        if entry.read_to_string(&mut buf).is_ok() {
+            files.push((name, buf));
+        }
+    }
+    Ok(files)
+}
+
+/// Extracts a skill ZIP into `dest_dir`, guarding against path traversal and
+/// oversized entries. Creates `dest_dir`; caller ensures it doesn't already exist.
+pub fn extract_zip(zip_bytes: &[u8], dest_dir: &std::path::Path) -> Result<(), String> {
+    let mut archive =
+        zip::ZipArchive::new(std::io::Cursor::new(zip_bytes)).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(dest_dir).map_err(|e| e.to_string())?;
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
+        let Some(rel) = entry.enclosed_name() else {
+            continue; // skips entries with `..`/absolute paths
+        };
+        let out = dest_dir.join(&rel);
+        if entry.is_dir() {
+            std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+            continue;
+        }
+        if entry.size() > MAX_ENTRY_BYTES {
+            continue;
+        }
+        if let Some(parent) = out.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let mut file = std::fs::File::create(&out).map_err(|e| e.to_string())?;
+        std::io::copy(&mut entry, &mut file).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// Count of entries per category (for the filter chips).
 pub fn category_counts(cache: &CatalogCache) -> std::collections::BTreeMap<String, usize> {
     let mut counts = std::collections::BTreeMap::new();
