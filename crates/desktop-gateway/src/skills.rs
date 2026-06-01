@@ -10,7 +10,7 @@
 //! so the UI can list, preview and enable/disable them. Executing a skill is a
 //! separate concern (sandboxed runtime + explicit consent) and is not done here.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -264,7 +264,11 @@ fn non_empty(value: impl AsRef<str>) -> Option<String> {
 /// Scans the skills root and returns one summary per valid skill directory
 /// (one that contains a `SKILL.md`). Missing root → empty list. Results are
 /// sorted by display name (case-insensitive).
-pub fn scan_skills(root: &Path, disabled: &BTreeSet<String>) -> Vec<SkillSummary> {
+pub fn scan_skills(
+    root: &Path,
+    disabled: &BTreeSet<String>,
+    origins: &BTreeMap<String, String>,
+) -> Vec<SkillSummary> {
     let Ok(entries) = std::fs::read_dir(root) else {
         return Vec::new();
     };
@@ -280,19 +284,24 @@ pub fn scan_skills(root: &Path, disabled: &BTreeSet<String>) -> Vec<SkillSummary
             let manifest = dir.join("SKILL.md");
             let content = std::fs::read_to_string(&manifest).ok()?;
             let (fm, _) = split_frontmatter(&content);
-            Some(summary_from(&id, fm, disabled))
+            Some(summary_from(&id, fm, disabled, origins))
         })
         .collect();
     skills.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     skills
 }
 
-fn summary_from(id: &str, fm: Frontmatter, disabled: &BTreeSet<String>) -> SkillSummary {
+fn summary_from(
+    id: &str,
+    fm: Frontmatter,
+    disabled: &BTreeSet<String>,
+    origins: &BTreeMap<String, String>,
+) -> SkillSummary {
     SkillSummary {
         name: fm.name.unwrap_or_else(|| id.to_string()),
         description: fm.description.unwrap_or_default(),
         enabled: !disabled.contains(id),
-        source: "local".to_string(),
+        source: origins.get(id).cloned().unwrap_or_else(|| "local".to_string()),
         version: fm.version,
         license: fm.license,
         allowed_tools: fm.allowed_tools,
@@ -307,6 +316,7 @@ pub fn load_detail(
     root: &Path,
     id: &str,
     disabled: &BTreeSet<String>,
+    origins: &BTreeMap<String, String>,
 ) -> std::io::Result<Option<SkillDetail>> {
     if !is_safe_id(id) {
         return Ok(None);
@@ -318,13 +328,13 @@ pub fn load_detail(
     }
     let content = std::fs::read_to_string(&manifest)?;
     let (fm, body) = split_frontmatter(&content);
-    let summary = summary_from(id, fm, disabled);
+    let summary = summary_from(id, fm, disabled, origins);
     let files = build_file_tree(&dir, &dir, 0, &mut 0);
     Ok(Some(SkillDetail { summary, body, files }))
 }
 
 /// Rejects ids that are not a single safe path segment (no separators, no `..`).
-fn is_safe_id(id: &str) -> bool {
+pub fn is_safe_id(id: &str) -> bool {
     !id.is_empty()
         && id != "."
         && id != ".."

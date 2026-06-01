@@ -713,6 +713,35 @@ async function electronSetSkillEnabled(
   );
 }
 
+export interface RegistrySkill {
+  id: string;
+  path: string;
+  name: string;
+  description: string;
+  installed: boolean;
+}
+
+export interface RegistryResponse {
+  repo: string;
+  skills: RegistrySkill[];
+  suggested: string[];
+}
+
+async function electronSkillRegistry(repo?: string): Promise<RegistryResponse> {
+  const qs = repo ? `?repo=${encodeURIComponent(repo)}` : "";
+  return gatewayGetJson<RegistryResponse>(`/api/skills/registry${qs}`);
+}
+
+async function electronInstallRegistrySkill(
+  repo: string,
+  path: string,
+): Promise<SkillsResponse> {
+  return gatewayPostJson<SkillsResponse>("/api/skills/registry/install", {
+    repo,
+    path,
+  });
+}
+
 export const coreBridge = {
   status: () => Promise.resolve(electronCoreStatus()),
   runtimeModel: () => electronRuntimeModel(),
@@ -751,6 +780,9 @@ export const coreBridge = {
   skills: () => electronSkills(),
   skillDetail: (id: string) => electronSkillDetail(id),
   setSkillEnabled: (id: string, enabled: boolean) => electronSetSkillEnabled(id, enabled),
+  skillRegistry: (repo?: string) => electronSkillRegistry(repo),
+  installRegistrySkill: (repo: string, path: string) =>
+    electronInstallRegistrySkill(repo, path),
   chatThreads: () => chatApi.chatThreads(),
   chatMessages: (threadId: string) => chatApi.chatMessages(threadId),
   setChatMessageFeedback: (
