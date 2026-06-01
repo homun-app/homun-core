@@ -34,7 +34,6 @@ import type {
 export const navItems: NavItem[] = [
   { id: "chat", label: "Nuovo compito", icon: MessageSquare },
   { id: "learning", label: "Apprendimento", icon: Brain },
-  { id: "connections", label: "Plugin", icon: Plug },
   { id: "tasks", label: "Pianificato", icon: CalendarClock },
   { id: "memory", label: "Libreria", icon: Database },
 ];

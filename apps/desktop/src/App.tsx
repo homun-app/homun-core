@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChatView } from "./components/ChatView";
-import { ConnectionsView } from "./components/ConnectionsView";
 import { ContainedComputerView } from "./components/ContainedComputerView";
 import { LearningView } from "./components/LearningView";
 import { Shell } from "./components/Shell";
@@ -971,9 +970,6 @@ export default function App() {
               { label: "Domini", value: String(memoryDashboard.domains.length) },
             ]}
           />
-        )}
-        {activeView === "connections" && (
-          <ConnectionsView connections={connectionItems} />
         )}
         {activeView === "automations" && (
           <ShallowView
