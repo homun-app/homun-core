@@ -653,11 +653,14 @@ async function electronComposioToolkits(): Promise<ComposioToolkit[]> {
   return payload.toolkits ?? [];
 }
 
-async function electronComposioLink(toolkitSlug: string): Promise<ComposioLinkResult> {
-  return gatewayPostJson<ComposioLinkResult>(
-    "/api/capabilities/composio/link",
-    { toolkit_slug: toolkitSlug },
-  );
+async function electronComposioLink(
+  toolkitSlug: string,
+  apiKey?: string,
+): Promise<ComposioLinkResult> {
+  return gatewayPostJson<ComposioLinkResult>("/api/capabilities/composio/link", {
+    toolkit_slug: toolkitSlug,
+    ...(apiKey ? { api_key: apiKey } : {}),
+  });
 }
 
 async function electronComposioConnections(): Promise<ComposioConnection[]> {
@@ -775,7 +778,8 @@ export const coreBridge = {
   }) => electronMcpConnect(input),
   composioConnect: (apiKey: string) => electronComposioConnect(apiKey),
   composioToolkits: () => electronComposioToolkits(),
-  composioLink: (toolkitSlug: string) => electronComposioLink(toolkitSlug),
+  composioLink: (toolkitSlug: string, apiKey?: string) =>
+    electronComposioLink(toolkitSlug, apiKey),
   composioConnections: () => electronComposioConnections(),
   skills: () => electronSkills(),
   skillDetail: (id: string) => electronSkillDetail(id),
