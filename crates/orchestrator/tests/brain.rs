@@ -447,7 +447,6 @@ fn request(message: &str) -> OrchestratorRequest {
             max_loaded_tool_context_chars: 3_200,
             planner_timeout_seconds: 30,
         },
-        available_agents: Vec::new(),
     }
 }
 

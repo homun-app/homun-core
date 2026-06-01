@@ -13,19 +13,6 @@ pub struct OrchestratorRequest {
     pub conversation_summary: Option<String>,
     pub attachments: Vec<serde_json::Value>,
     pub budgets: OrchestratorBudgets,
-    /// User-defined specialized agents the planner may delegate sub-tasks to
-    /// (Phase 3b). Empty = the planner uses only built-in worker archetypes.
-    #[serde(default)]
-    pub available_agents: Vec<AgentProfile>,
-}
-
-/// A specialized agent exposed to the planner so it can delegate a sub-task to it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AgentProfile {
-    pub id: String,
-    pub name: String,
-    #[serde(default)]
-    pub description: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -178,10 +165,6 @@ pub struct PlanStep {
     pub expected_duration_seconds: u64,
     #[serde(default)]
     pub agent_id: Option<AgentId>,
-    /// Optional user-defined agent (Phase 3b): when the planner picks one of the
-    /// `available_agents`, its id lands here and drives the worker's model+persona.
-    #[serde(default)]
-    pub assigned_agent: Option<String>,
     #[serde(default)]
     pub goal: Option<String>,
     #[serde(default)]
@@ -203,12 +186,14 @@ pub struct PlanStep {
 #[serde(untagged)]
 enum AgentRef {
     Known(AgentId),
-    Custom(String),
+    // The string is only used to absorb an unknown agent_id during
+    // deserialization (then mapped to the generic worker); its value isn't read.
+    Custom(#[allow(dead_code)] String),
 }
 
 /// Wire form of `PlanStep` used only for deserialization, so an unknown
-/// `agent_id` (a custom specialized-agent id) does NOT crash the whole plan but
-/// is routed into `assigned_agent` with a generic worker archetype.
+/// `agent_id` (a typo or an archetype the model invented) does NOT crash the
+/// whole plan — it maps to the generic worker archetype instead.
 #[derive(Deserialize)]
 struct PlanStepWire {
     step_id: String,
@@ -226,8 +211,6 @@ struct PlanStepWire {
     expected_duration_seconds: u64,
     #[serde(default)]
     agent_id: Option<AgentRef>,
-    #[serde(default)]
-    assigned_agent: Option<String>,
     #[serde(default)]
     goal: Option<String>,
     #[serde(default)]
@@ -257,16 +240,12 @@ where
 
 impl From<PlanStepWire> for PlanStep {
     fn from(wire: PlanStepWire) -> Self {
-        let (agent_id, assigned_agent) = match wire.agent_id {
-            Some(AgentRef::Known(archetype)) => (Some(archetype), wire.assigned_agent),
-            // A custom id in agent_id is the model delegating to a specialized
-            // agent: keep a valid archetype for the subagent runner, and surface
-            // the custom id so the gateway runs it on that agent's model+persona.
-            Some(AgentRef::Custom(custom)) => (
-                Some(AgentId::Tool),
-                wire.assigned_agent.or(Some(custom)),
-            ),
-            None => (None, wire.assigned_agent),
+        let agent_id = match wire.agent_id {
+            Some(AgentRef::Known(archetype)) => Some(archetype),
+            // An unknown agent_id (a typo or an archetype the model invented)
+            // must NOT crash the whole plan: map it to the generic worker.
+            Some(AgentRef::Custom(_)) => Some(AgentId::Tool),
+            None => None,
         };
         PlanStep {
             step_id: wire.step_id,
@@ -279,7 +258,6 @@ impl From<PlanStepWire> for PlanStep {
             risk_level: wire.risk_level,
             expected_duration_seconds: wire.expected_duration_seconds,
             agent_id,
-            assigned_agent,
             goal: wire.goal,
             contract: wire.contract,
             allowed_actions: wire.allowed_actions,
@@ -371,23 +349,20 @@ mod plan_step_tests {
         }))
         .unwrap();
         assert_eq!(step.agent_id, Some(AgentId::Planner));
-        assert_eq!(step.assigned_agent, None);
     }
 
     #[test]
-    fn custom_agent_id_is_rerouted_to_assigned_agent() {
-        // The planner put a user-defined agent id in agent_id (the natural
-        // mistake): it must NOT crash the plan; the custom id is surfaced as
-        // assigned_agent with a generic worker archetype.
+    fn unknown_agent_id_maps_to_generic_worker_not_crash() {
+        // An agent_id the model invented (not one of the 7 archetypes) must NOT
+        // crash the plan: it maps to the generic ToolAgent.
         let step: PlanStep = serde_json::from_value(serde_json::json!({
             "step_id": "s1", "kind": "subagent_task", "depends_on": [],
             "execution_policy": "durable_task", "risk_level": "low",
             "expected_duration_seconds": 10,
-            "agent_id": "ricercatore", "goal": "g", "contract": "c"
+            "agent_id": "something-made-up", "goal": "g", "contract": "c"
         }))
         .unwrap();
         assert_eq!(step.agent_id, Some(AgentId::Tool));
-        assert_eq!(step.assigned_agent.as_deref(), Some("ricercatore"));
     }
 
     #[test]

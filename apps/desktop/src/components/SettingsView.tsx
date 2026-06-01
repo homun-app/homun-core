@@ -18,7 +18,6 @@ import {
   type ComposioToolkit,
   type ContainedComputerLive,
   type CoreCapabilitySnapshot,
-  type AgentView,
   type CoreMemoryDashboard,
   type ProviderView,
   type RoleView,
@@ -300,15 +299,12 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
   const [providers, setProviders] = useState<ProviderView[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [roles, setRoles] = useState<RoleView[]>([]);
-  const [agents, setAgents] = useState<AgentView[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [presetId, setPresetId] = useState("ollama");
   const [label, setLabel] = useState("");
   const [baseUrl, setBaseUrl] = useState("http://127.0.0.1:11434/v1");
   const [apiKey, setApiKey] = useState("");
-  const [agentName, setAgentName] = useState("");
-  const [agentPrompt, setAgentPrompt] = useState("");
 
   const apply = (snapshot: { providers: ProviderView[]; active_provider_id: string | null }) => {
     setProviders(snapshot.providers);
@@ -323,14 +319,6 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
     }
   };
 
-  const reloadAgents = async () => {
-    try {
-      setAgents((await coreBridge.agents()).agents);
-    } catch {
-      /* leave empty */
-    }
-  };
-
   useEffect(() => {
     void (async () => {
       try {
@@ -339,33 +327,8 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
         /* leave empty */
       }
       await reloadRoles();
-      await reloadAgents();
     })();
   }, []);
-
-  // Model-binding encoding shared by the role pickers and agent pickers:
-  // "role:<key>" inherits a role; "<provider>::<model>" pins explicitly.
-  const agentBindingValue = (agent: AgentView): string => {
-    if (agent.provider_id && agent.model) return `${agent.provider_id}::${agent.model}`;
-    return `role:${agent.role || "orchestrator"}`;
-  };
-  const bindingToInput = (value: string) => {
-    if (value.startsWith("role:")) return { role: value.slice(5) };
-    const [provider_id, ...rest] = value.split("::");
-    return { provider_id, model: rest.join("::") };
-  };
-
-  const saveAgent = async (key: string, input: Parameters<typeof coreBridge.upsertAgent>[0]) => {
-    setBusy(key);
-    setNote(null);
-    try {
-      setAgents((await coreBridge.upsertAgent(input)).agents);
-    } catch (error) {
-      setNote(`Operazione non riuscita: ${(error as Error).message}`);
-    } finally {
-      setBusy(null);
-    }
-  };
 
   const run = async (key: string, action: () => Promise<unknown>, ok?: string) => {
     setBusy(key);
@@ -673,144 +636,6 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
           }
         >
           {busy === "add" ? "Salvataggio…" : "Aggiungi provider"}
-        </button>
-      </div>
-      <div className="set-section-label">Agenti specializzati</div>
-      {agents.length === 0 && (
-        <p className="set-hint">
-          Nessun agente. Creane uno con un suo prompt e un suo modello (un task può poi
-          essere eseguito da quell'agente).
-        </p>
-      )}
-      {agents.map((agent) => {
-        const acting = busy === `agent:${agent.id}`;
-        return (
-          <div className="set-card" key={agent.id}>
-            <div className="set-card-top">
-              <span className="set-card-name">{agent.name}</span>
-              <span className={`set-badge ${agent.enabled ? "green" : "muted"}`}>
-                {agent.enabled ? "Attivo" : "Disattivo"}
-              </span>
-            </div>
-            {agent.description && <p className="set-meter-sub">{agent.description}</p>}
-            {agent.system_prompt && (
-              <p className="set-meter-sub" style={{ fontStyle: "italic", opacity: 0.8 }}>
-                “{agent.system_prompt}”
-              </p>
-            )}
-            <div className="set-card-divider" />
-            <div className="set-field-label">Modello</div>
-            <select
-              className="set-input"
-              value={agentBindingValue(agent)}
-              disabled={acting}
-              onChange={(event) =>
-                saveAgent(`agent:${agent.id}`, {
-                  id: agent.id,
-                  name: agent.name,
-                  description: agent.description,
-                  system_prompt: agent.system_prompt,
-                  tools: agent.tools,
-                  enabled: agent.enabled,
-                  ...bindingToInput(event.target.value),
-                })
-              }
-              style={{ marginBottom: "var(--s3)" }}
-            >
-              <optgroup label="Per ruolo">
-                <option value="role:orchestrator">Come gestione generale</option>
-                <option value="role:browser">Come browser</option>
-              </optgroup>
-              {providers.map((provider) => (
-                <optgroup key={provider.id} label={provider.label}>
-                  {provider.models.map((m) => (
-                    <option key={`${provider.id}::${m.id}`} value={`${provider.id}::${m.id}`}>
-                      {m.id}
-                      {m.tier ? ` · ${m.tier}` : ""}
-                      {m.vision ? " · vision" : ""}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-            <p className="set-meter-sub">
-              Esegue su: <strong>{agent.resolved_model ?? "n/d"}</strong>
-            </p>
-            <div className="set-card-actions" style={{ display: "flex", gap: "var(--s2)" }}>
-              <button
-                className="set-btn"
-                type="button"
-                disabled={acting}
-                onClick={() =>
-                  saveAgent(`agent:${agent.id}`, {
-                    id: agent.id,
-                    name: agent.name,
-                    description: agent.description,
-                    system_prompt: agent.system_prompt,
-                    tools: agent.tools,
-                    enabled: !agent.enabled,
-                    ...bindingToInput(agentBindingValue(agent)),
-                  })
-                }
-              >
-                {agent.enabled ? "Disattiva" : "Attiva"}
-              </button>
-              <button
-                className="set-btn danger"
-                type="button"
-                disabled={acting}
-                onClick={async () => {
-                  setBusy(`agent:${agent.id}`);
-                  try {
-                    setAgents((await coreBridge.removeAgent(agent.id)).agents);
-                  } catch (error) {
-                    setNote(`Operazione non riuscita: ${(error as Error).message}`);
-                  } finally {
-                    setBusy(null);
-                  }
-                }}
-              >
-                Rimuovi
-              </button>
-            </div>
-          </div>
-        );
-      })}
-
-      <div className="set-rows" style={{ padding: "var(--s4) var(--s5)" }}>
-        <div className="set-field-label">Nuovo agente — nome</div>
-        <input
-          className="set-input"
-          placeholder="es. Ricercatore"
-          value={agentName}
-          onChange={(event) => setAgentName(event.target.value)}
-        />
-        <div className="set-field-label" style={{ marginTop: 12 }}>
-          Istruzioni / persona (system prompt)
-        </div>
-        <textarea
-          className="set-input"
-          rows={3}
-          placeholder="Sei un ricercatore meticoloso: cerca fonti affidabili e sintetizza…"
-          value={agentPrompt}
-          onChange={(event) => setAgentPrompt(event.target.value)}
-        />
-        <button
-          className="set-btn primary"
-          type="button"
-          style={{ marginTop: 12, alignSelf: "flex-start" }}
-          disabled={busy === "agent:new" || !agentName.trim()}
-          onClick={async () => {
-            await saveAgent("agent:new", {
-              name: agentName.trim(),
-              system_prompt: agentPrompt.trim(),
-              role: "orchestrator",
-            });
-            setAgentName("");
-            setAgentPrompt("");
-          }}
-        >
-          {busy === "agent:new" ? "Creazione…" : "Crea agente"}
         </button>
       </div>
 
