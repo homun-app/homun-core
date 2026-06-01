@@ -1,0 +1,250 @@
+//! Skill catalog browser — ported/adapted from the Homun project
+//! (`src/skills/clawhub.rs` + `search.rs`).
+//!
+//! Fetches the OpenClaw/ClawHub skill registry, caches it locally for instant
+//! search, and derives a topical category per skill (ClawHub itself has no
+//! topical taxonomy — only per-source counts — so we classify by keywords into
+//! the same buckets officialskills.sh uses). Installing a catalog entry reuses
+//! the existing GitHub install path against `openclaw/skills`.
+
+use std::path::Path;
+
+use serde::{Deserialize, Serialize};
+
+const CLAWHUB_API_BASE: &str = "https://clawhub.ai/api/v1";
+const CACHE_MAX_AGE_SECS: u64 = 6 * 3600;
+/// Pages (×200) pulled on a refresh. ClawHub sorts by downloads, so the first
+/// pages are the most popular skills; bounded to keep cold-start latency sane.
+const MAX_PAGES: usize = 10;
+/// GitHub repo backing ClawHub skills — install pulls `skills/<slug>` from here.
+pub const CLAWHUB_REPO: &str = "openclaw/skills";
+
+/// One catalog entry (cached, searchable).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogEntry {
+    /// ClawHub slug (also the folder name under `skills/` in the repo).
+    pub slug: String,
+    pub name: String,
+    pub description: String,
+    #[serde(default)]
+    pub downloads: u64,
+    #[serde(default)]
+    pub stars: u64,
+    /// Derived topical category (see [`derive_category`]).
+    pub category: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CatalogCache {
+    pub fetched_at: u64,
+    pub entries: Vec<CatalogEntry>,
+}
+
+// ---- ClawHub API wire types -------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct ApiResponse {
+    #[serde(default)]
+    items: Vec<ApiSkill>,
+    #[serde(rename = "nextCursor", default)]
+    next_cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiSkill {
+    slug: String,
+    #[serde(rename = "displayName", default)]
+    display_name: String,
+    #[serde(default)]
+    summary: String,
+    #[serde(default)]
+    stats: ApiStats,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ApiStats {
+    #[serde(default)]
+    downloads: u64,
+    #[serde(default)]
+    stars: u64,
+}
+
+// ---- category classifier ----------------------------------------------------
+
+/// Classifies a skill into a topical category by keywords over name+description.
+/// Buckets mirror officialskills.sh (Development, Infrastructure, AI Tools, Data,
+/// Security, Workflows, Design, Docs, Testing).
+/// Falls back to "Workflows" (the broadest bucket) when nothing matches.
+pub fn derive_category(name: &str, description: &str) -> String {
+    let hay = format!("{name} {description}").to_lowercase();
+    let has = |needles: &[&str]| needles.iter().any(|n| hay.contains(n));
+    if has(&["unit test", "test suite", "e2e", "coverage", "pytest", "jest", "linter"]) {
+        "Testing"
+    } else if has(&["security", "secret", "vuln", "auth", "encrypt", "audit", "compliance", "owasp"]) {
+        "Security"
+    } else if has(&["deploy", "docker", "kubernetes", "k8s", "terraform", "infra", "ci/cd", "devops", "cloud", "aws", "gcp", "azure"]) {
+        "Infrastructure"
+    } else if has(&["data", "sql", "etl", "pandas", "dataframe", "analytics", "database", "warehouse", "csv", "scrap"]) {
+        "Data"
+    } else if has(&["design", "figma", "css", "tailwind", "brand", "layout", "icon", "image", "canvas", "frontend"]) {
+        "Design"
+    } else if has(&["doc", "readme", "markdown", "writing", "pdf", "docx", "report", "slide", "pptx"]) {
+        "Docs"
+    } else if has(&["llm", "agent", "prompt", "rag", "embedding", "model", "ai ", "ml ", "openai", "anthropic"]) {
+        "AI Tools"
+    } else if has(&["code", "refactor", "git", "review", "debug", "compile", "typescript", "rust", "python", "api", "sdk"]) {
+        "Development"
+    } else {
+        "Workflows"
+    }
+    .to_string()
+}
+
+// ---- cache I/O + fetch ------------------------------------------------------
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Loads the cache from disk if present (regardless of age).
+pub fn load_cache(path: &Path) -> Option<CatalogCache> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+pub fn cache_is_fresh(cache: &CatalogCache) -> bool {
+    now_secs().saturating_sub(cache.fetched_at) <= CACHE_MAX_AGE_SECS
+}
+
+/// Paginates the entire ClawHub registry and rewrites the local cache. Slow
+/// (~tens of seconds) but only runs on a cold/stale cache or explicit refresh.
+pub async fn refresh_cache(http: &reqwest::Client, path: &Path) -> Result<usize, String> {
+    let mut entries: Vec<CatalogEntry> = Vec::new();
+    let mut cursor: Option<String> = None;
+
+    for _ in 0..MAX_PAGES {
+        let mut url = format!("{CLAWHUB_API_BASE}/skills?sort=downloads&limit=200");
+        if let Some(c) = &cursor {
+            url.push_str(&format!("&cursor={c}"));
+        }
+        let resp = http
+            .get(&url)
+            .header(reqwest::header::USER_AGENT, "local-first-personal-assistant")
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            break;
+        }
+        let body: ApiResponse = resp.json().await.map_err(|e| e.to_string())?;
+        if body.items.is_empty() {
+            break;
+        }
+        for skill in &body.items {
+            let name = if skill.display_name.is_empty() {
+                skill.slug.clone()
+            } else {
+                skill.display_name.clone()
+            };
+            let category = derive_category(&name, &skill.summary);
+            entries.push(CatalogEntry {
+                slug: skill.slug.clone(),
+                name,
+                description: skill.summary.clone(),
+                downloads: skill.stats.downloads,
+                stars: skill.stats.stars,
+                category,
+            });
+        }
+        if body.next_cursor.is_none() {
+            break;
+        }
+        cursor = body.next_cursor;
+    }
+
+    let cache = CatalogCache { fetched_at: now_secs(), entries };
+    let count = cache.entries.len();
+    let json = serde_json::to_string(&cache).map_err(|e| e.to_string())?;
+    std::fs::write(path, json).map_err(|e| e.to_string())?;
+    Ok(count)
+}
+
+// ---- search -----------------------------------------------------------------
+
+/// Filters by optional category + query, ranks by a Homun-style score
+/// (substring match + popularity), returns up to `limit` entries.
+pub fn search(
+    cache: &CatalogCache,
+    query: &str,
+    category: Option<&str>,
+    limit: usize,
+) -> Vec<CatalogEntry> {
+    let q = query.trim().to_lowercase();
+    let terms: Vec<String> = q.split_whitespace().map(str::to_string).collect();
+
+    let mut scored: Vec<(i64, &CatalogEntry)> = cache
+        .entries
+        .iter()
+        .filter(|e| category.map_or(true, |c| e.category.eq_ignore_ascii_case(c)))
+        .filter_map(|e| {
+            let hay = format!("{} {} {}", e.slug, e.name, e.description).to_lowercase();
+            if !terms.is_empty() && !terms.iter().all(|t| hay.contains(t.as_str())) {
+                return None;
+            }
+            let mut score = 0i64;
+            if !q.is_empty() && hay.contains(&q) {
+                score += 80;
+            }
+            score += terms.iter().filter(|t| hay.contains(t.as_str())).count() as i64 * 18;
+            score += (e.stars.min(5000) / 50) as i64;
+            score += (e.downloads.min(500_000) / 5_000) as i64;
+            Some((score, e))
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    scored.into_iter().take(limit).map(|(_, e)| e.clone()).collect()
+}
+
+/// Count of entries per category (for the filter chips).
+pub fn category_counts(cache: &CatalogCache) -> std::collections::BTreeMap<String, usize> {
+    let mut counts = std::collections::BTreeMap::new();
+    for entry in &cache.entries {
+        *counts.entry(entry.category.clone()).or_insert(0) += 1;
+    }
+    counts
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn category_classifier_buckets() {
+        assert_eq!(derive_category("pdf-extractor", "Extract text from PDF documents"), "Docs");
+        assert_eq!(derive_category("k8s-deployer", "Deploy to kubernetes clusters"), "Infrastructure");
+        assert_eq!(derive_category("rag-helper", "Build a RAG pipeline with embeddings"), "AI Tools");
+        assert_eq!(derive_category("pentest", "Scan for security vulnerabilities"), "Security");
+        assert_eq!(derive_category("coverage-bot", "Generate a test suite with coverage"), "Testing");
+        assert_eq!(derive_category("mystery", "helps with miscellaneous chores"), "Workflows");
+    }
+
+    #[test]
+    fn search_filters_and_ranks() {
+        let cache = CatalogCache {
+            fetched_at: now_secs(),
+            entries: vec![
+                CatalogEntry { slug: "a".into(), name: "PDF Tools".into(), description: "read pdf".into(), downloads: 1000, stars: 10, category: "Docs".into() },
+                CatalogEntry { slug: "b".into(), name: "K8s".into(), description: "deploy".into(), downloads: 5, stars: 0, category: "Infrastructure".into() },
+            ],
+        };
+        let hits = search(&cache, "pdf", None, 10);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].slug, "a");
+        // category filter
+        assert_eq!(search(&cache, "", Some("Infrastructure"), 10).len(), 1);
+        assert_eq!(search(&cache, "", Some("Docs"), 10)[0].slug, "a");
+    }
+}

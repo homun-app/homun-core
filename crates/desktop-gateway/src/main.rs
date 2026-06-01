@@ -6,6 +6,8 @@ mod chat_store;
 mod model_registry;
 // Local scanner for Anthropic "Agent Skills" (SKILL.md folders).
 mod skills;
+// Skill catalog (ClawHub/OpenClaw) — cached + searchable, ported from Homun.
+mod skills_catalog;
 mod task_registry;
 
 use axum::{
@@ -606,6 +608,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/skills", get(list_skills))
         .route("/api/skills/registry", get(registry_skills))
         .route("/api/skills/registry/install", post(install_registry_skill))
+        .route("/api/skills/catalog", get(skill_catalog))
+        .route("/api/skills/catalog/refresh", post(skill_catalog_refresh))
         .route("/api/skills/{id}", get(skill_detail))
         .route("/api/skills/{id}/enabled", post(set_skill_enabled))
         .route("/api/tasks/queue", get(task_queue))
@@ -6371,6 +6375,107 @@ async fn set_skill_enabled(
         message,
     })?;
     Ok(Json(current_skills_response()))
+}
+
+// ------------------------------------------------------------- skills catalog
+
+fn skills_catalog_path() -> Option<PathBuf> {
+    gateway_data_dir().ok().map(|dir| dir.join("clawhub-catalog.json"))
+}
+
+#[derive(Debug, Deserialize)]
+struct CatalogQuery {
+    #[serde(default)]
+    q: Option<String>,
+    #[serde(default)]
+    category: Option<String>,
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+struct CategoryCount {
+    name: String,
+    count: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct CatalogResponse {
+    skills: Vec<skills_catalog::CatalogEntry>,
+    categories: Vec<CategoryCount>,
+    /// Repo to install from (slug → `skills/<slug>` under this repo).
+    repo: String,
+    total: usize,
+    fetched_at: u64,
+}
+
+fn catalog_response(cache: &skills_catalog::CatalogCache, query: &CatalogQuery) -> CatalogResponse {
+    let limit = query.limit.unwrap_or(60).min(200);
+    let skills = skills_catalog::search(
+        cache,
+        query.q.as_deref().unwrap_or(""),
+        query.category.as_deref(),
+        limit,
+    );
+    let mut categories: Vec<CategoryCount> = skills_catalog::category_counts(cache)
+        .into_iter()
+        .map(|(name, count)| CategoryCount { name, count })
+        .collect();
+    categories.sort_by(|a, b| b.count.cmp(&a.count));
+    CatalogResponse {
+        total: cache.entries.len(),
+        skills,
+        categories,
+        repo: skills_catalog::CLAWHUB_REPO.to_string(),
+        fetched_at: cache.fetched_at,
+    }
+}
+
+/// Browse/search the skill catalog. On a cold or stale cache it refreshes from
+/// ClawHub first (slow once, then cached ~6h).
+async fn skill_catalog(
+    State(state): State<AppState>,
+    Query(query): Query<CatalogQuery>,
+) -> Result<Json<CatalogResponse>, GatewayError> {
+    let path = skills_catalog_path().ok_or_else(|| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "data_dir_unavailable",
+        message: "data dir non disponibile".to_string(),
+    })?;
+    let fresh = skills_catalog::load_cache(&path).is_some_and(|c| skills_catalog::cache_is_fresh(&c));
+    if !fresh {
+        if let Err(error) = skills_catalog::refresh_cache(&state.http, &path).await {
+            eprintln!("skill catalog refresh failed: {error}");
+        }
+    }
+    let cache = skills_catalog::load_cache(&path).unwrap_or(skills_catalog::CatalogCache {
+        fetched_at: 0,
+        entries: Vec::new(),
+    });
+    Ok(Json(catalog_response(&cache, &query)))
+}
+
+/// Force a catalog refresh from ClawHub.
+async fn skill_catalog_refresh(
+    State(state): State<AppState>,
+) -> Result<Json<CatalogResponse>, GatewayError> {
+    let path = skills_catalog_path().ok_or_else(|| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "data_dir_unavailable",
+        message: "data dir non disponibile".to_string(),
+    })?;
+    skills_catalog::refresh_cache(&state.http, &path)
+        .await
+        .map_err(|message| GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "catalog_refresh_failed",
+            message,
+        })?;
+    let cache = skills_catalog::load_cache(&path).unwrap_or(skills_catalog::CatalogCache {
+        fetched_at: 0,
+        entries: Vec::new(),
+    });
+    Ok(Json(catalog_response(&cache, &CatalogQuery { q: None, category: None, limit: None })))
 }
 
 // ---------------------------------------------------------- skills marketplace
