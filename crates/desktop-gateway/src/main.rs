@@ -5260,8 +5260,11 @@ fn brain_materialize_tasks(
         }
         (policy, provider_tools)
     };
-    // Force durable-only: no executable tools -> no immediate call_tool.
-    policy_context.allowed_actions = Vec::new();
+    // Durable-first, but allow the NON-destructive action classes (Read/Draft)
+    // so the planner can delegate sub-tasks to subagents (whose envelope must be
+    // non-empty). Destructive classes (WriteWithConfirmation/ApprovedAutomation)
+    // stay out, so no send/pay/write executes without an explicit user gate.
+    policy_context.allowed_actions = vec![ActionClass::Read, ActionClass::Draft];
 
     let mut facade =
         CapabilityFacade::new(CapabilityPolicy::default(), InMemoryCapabilityAudit::default());

@@ -3,7 +3,7 @@ use local_first_capabilities::{
 };
 use local_first_subagents::{AgentId, AllowedAction, TokenMetrics};
 use local_first_task_runtime::TaskId;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OrchestratorRequest {
@@ -161,6 +161,7 @@ pub struct ToolSearchRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(from = "PlanStepWire")]
 pub struct PlanStep {
     pub step_id: String,
     pub kind: PlanStepKind,
@@ -193,6 +194,100 @@ pub struct PlanStep {
     pub timeout_seconds: Option<u64>,
     #[serde(default)]
     pub max_tokens: Option<u32>,
+}
+
+/// `agent_id` as the planner may emit it: a built-in archetype, or — when the
+/// model delegates to a user-defined specialized agent — that agent's free-form
+/// id. Untagged: try the known enum first, fall back to a custom string.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum AgentRef {
+    Known(AgentId),
+    Custom(String),
+}
+
+/// Wire form of `PlanStep` used only for deserialization, so an unknown
+/// `agent_id` (a custom specialized-agent id) does NOT crash the whole plan but
+/// is routed into `assigned_agent` with a generic worker archetype.
+#[derive(Deserialize)]
+struct PlanStepWire {
+    step_id: String,
+    kind: PlanStepKind,
+    #[serde(default)]
+    depends_on: Vec<String>,
+    #[serde(default)]
+    provider_id: Option<String>,
+    #[serde(default)]
+    tool_name: Option<String>,
+    #[serde(default)]
+    arguments: serde_json::Value,
+    execution_policy: StepExecutionPolicy,
+    risk_level: String,
+    expected_duration_seconds: u64,
+    #[serde(default)]
+    agent_id: Option<AgentRef>,
+    #[serde(default)]
+    assigned_agent: Option<String>,
+    #[serde(default)]
+    goal: Option<String>,
+    #[serde(default)]
+    contract: Option<String>,
+    #[serde(default, deserialize_with = "lenient_allowed_actions")]
+    allowed_actions: Vec<AllowedAction>,
+    #[serde(default)]
+    requires_user_approval: Option<bool>,
+    #[serde(default)]
+    timeout_seconds: Option<u64>,
+    #[serde(default)]
+    max_tokens: Option<u32>,
+}
+
+/// Parses `allowed_actions` tolerantly: unknown action strings emitted by the
+/// planner LLM (e.g. "analyze") are dropped instead of failing the whole plan.
+fn lenient_allowed_actions<'de, D>(deserializer: D) -> Result<Vec<AllowedAction>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw = Vec::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(raw
+        .into_iter()
+        .filter_map(|value| serde_json::from_value::<AllowedAction>(value).ok())
+        .collect())
+}
+
+impl From<PlanStepWire> for PlanStep {
+    fn from(wire: PlanStepWire) -> Self {
+        let (agent_id, assigned_agent) = match wire.agent_id {
+            Some(AgentRef::Known(archetype)) => (Some(archetype), wire.assigned_agent),
+            // A custom id in agent_id is the model delegating to a specialized
+            // agent: keep a valid archetype for the subagent runner, and surface
+            // the custom id so the gateway runs it on that agent's model+persona.
+            Some(AgentRef::Custom(custom)) => (
+                Some(AgentId::Tool),
+                wire.assigned_agent.or(Some(custom)),
+            ),
+            None => (None, wire.assigned_agent),
+        };
+        PlanStep {
+            step_id: wire.step_id,
+            kind: wire.kind,
+            depends_on: wire.depends_on,
+            provider_id: wire.provider_id,
+            tool_name: wire.tool_name,
+            arguments: wire.arguments,
+            execution_policy: wire.execution_policy,
+            risk_level: wire.risk_level,
+            expected_duration_seconds: wire.expected_duration_seconds,
+            agent_id,
+            assigned_agent,
+            goal: wire.goal,
+            contract: wire.contract,
+            allowed_actions: wire.allowed_actions,
+            requires_user_approval: wire.requires_user_approval,
+            timeout_seconds: wire.timeout_seconds,
+            max_tokens: wire.max_tokens,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -260,4 +355,51 @@ fn schema_hash(schema: &serde_json::Value) -> String {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     schema.to_string().hash(&mut hasher);
     format!("{:016x}", hasher.finish())
+}
+
+#[cfg(test)]
+mod plan_step_tests {
+    use super::*;
+
+    #[test]
+    fn known_archetype_agent_id_is_preserved() {
+        let step: PlanStep = serde_json::from_value(serde_json::json!({
+            "step_id": "s1", "kind": "subagent_task", "depends_on": [],
+            "execution_policy": "durable_task", "risk_level": "low",
+            "expected_duration_seconds": 10,
+            "agent_id": "PlannerAgent", "goal": "g", "contract": "c"
+        }))
+        .unwrap();
+        assert_eq!(step.agent_id, Some(AgentId::Planner));
+        assert_eq!(step.assigned_agent, None);
+    }
+
+    #[test]
+    fn custom_agent_id_is_rerouted_to_assigned_agent() {
+        // The planner put a user-defined agent id in agent_id (the natural
+        // mistake): it must NOT crash the plan; the custom id is surfaced as
+        // assigned_agent with a generic worker archetype.
+        let step: PlanStep = serde_json::from_value(serde_json::json!({
+            "step_id": "s1", "kind": "subagent_task", "depends_on": [],
+            "execution_policy": "durable_task", "risk_level": "low",
+            "expected_duration_seconds": 10,
+            "agent_id": "ricercatore", "goal": "g", "contract": "c"
+        }))
+        .unwrap();
+        assert_eq!(step.agent_id, Some(AgentId::Tool));
+        assert_eq!(step.assigned_agent.as_deref(), Some("ricercatore"));
+    }
+
+    #[test]
+    fn unknown_allowed_actions_are_dropped_not_fatal() {
+        let step: PlanStep = serde_json::from_value(serde_json::json!({
+            "step_id": "s1", "kind": "subagent_task", "depends_on": [],
+            "execution_policy": "durable_task", "risk_level": "low",
+            "expected_duration_seconds": 10, "agent_id": "ToolAgent",
+            "goal": "g", "contract": "c",
+            "allowed_actions": ["read", "analyze", "draft", "frobnicate"]
+        }))
+        .unwrap();
+        assert_eq!(step.allowed_actions, vec![AllowedAction::Read, AllowedAction::Draft]);
+    }
 }
