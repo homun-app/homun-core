@@ -19,6 +19,7 @@ import {
   type ContainedComputerLive,
   type CoreCapabilitySnapshot,
   type CoreMemoryDashboard,
+  type ProviderView,
   type SystemStatus,
 } from "../lib/coreBridge";
 import { useSetting } from "../lib/settingsStore";
@@ -272,129 +273,191 @@ function GeneralPane() {
 
 // Provider presets (OpenAI-compatible base URLs). Selecting one fills the base
 // URL; the user adds the key and picks a model. "Custom" leaves it blank.
-const PROVIDER_PRESETS: Array<{ id: string; label: string; baseUrl: string; hint?: string }> = [
-  { id: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1" },
-  { id: "anthropic", label: "Anthropic", baseUrl: "https://api.anthropic.com/v1" },
-  { id: "zai", label: "Z.ai (GLM)", baseUrl: "https://api.z.ai/api/paas/v4", hint: "GLM-5" },
-  { id: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1" },
-  { id: "groq", label: "Groq", baseUrl: "https://api.groq.com/openai/v1" },
-  { id: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1" },
-  { id: "together", label: "Together", baseUrl: "https://api.together.xyz/v1" },
-  { id: "xai", label: "xAI (Grok)", baseUrl: "https://api.x.ai/v1" },
-  { id: "moonshot", label: "Moonshot (Kimi)", baseUrl: "https://api.moonshot.ai/v1" },
-  { id: "mistral", label: "Mistral", baseUrl: "https://api.mistral.ai/v1" },
-  { id: "ollama", label: "Ollama (locale)", baseUrl: "http://127.0.0.1:11434/v1" },
-  { id: "custom", label: "Personalizzato", baseUrl: "" },
+const PROVIDER_PRESETS: Array<{
+  id: string;
+  label: string;
+  baseUrl: string;
+  kind: string;
+  hint?: string;
+}> = [
+  { id: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1", kind: "openai_compat" },
+  { id: "anthropic", label: "Anthropic", baseUrl: "https://api.anthropic.com", kind: "anthropic" },
+  { id: "zai", label: "Z.ai (GLM)", baseUrl: "https://api.z.ai/api/paas/v4", kind: "openai_compat", hint: "GLM-5" },
+  { id: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", kind: "openai_compat" },
+  { id: "groq", label: "Groq", baseUrl: "https://api.groq.com/openai/v1", kind: "openai_compat" },
+  { id: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", kind: "openai_compat" },
+  { id: "together", label: "Together", baseUrl: "https://api.together.xyz/v1", kind: "openai_compat" },
+  { id: "xai", label: "xAI (Grok)", baseUrl: "https://api.x.ai/v1", kind: "openai_compat" },
+  { id: "moonshot", label: "Moonshot (Kimi)", baseUrl: "https://api.moonshot.ai/v1", kind: "openai_compat" },
+  { id: "mistral", label: "Mistral", baseUrl: "https://api.mistral.ai/v1", kind: "openai_compat" },
+  { id: "ollama", label: "Ollama (locale)", baseUrl: "http://127.0.0.1:11434/v1", kind: "ollama" },
+  { id: "custom", label: "Personalizzato", baseUrl: "", kind: "openai_compat" },
 ];
 
 function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
-  const [models, setModels] = useState<string[]>([]);
-  const [active, setActive] = useState<string>("");
-  const [saving, setSaving] = useState(false);
-  const [baseUrl, setBaseUrl] = useState("");
-  const [apiKey, setApiKey] = useState("");
-  const [hasKey, setHasKey] = useState(false);
+  const [providers, setProviders] = useState<ProviderView[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [presetId, setPresetId] = useState("ollama");
+  const [label, setLabel] = useState("");
+  const [baseUrl, setBaseUrl] = useState("http://127.0.0.1:11434/v1");
+  const [apiKey, setApiKey] = useState("");
 
-  const loadModels = async () => {
-    try {
-      const list = await coreBridge.runtimeModels();
-      setModels(list.available);
-      setActive(list.active ?? model?.model ?? "");
-    } catch {
-      /* leave empty → picker hidden */
-    }
+  const apply = (snapshot: { providers: ProviderView[]; active_provider_id: string | null }) => {
+    setProviders(snapshot.providers);
+    setActiveId(snapshot.active_provider_id);
   };
+
   useEffect(() => {
-    void loadModels();
     void (async () => {
       try {
-        const provider = await coreBridge.runtimeProvider();
-        setBaseUrl(provider.base_url ?? "");
-        setHasKey(provider.has_key);
+        apply(await coreBridge.providers());
       } catch {
-        /* ignore */
+        /* leave empty */
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model]);
+  }, []);
+
+  const run = async (key: string, action: () => Promise<unknown>, ok?: string) => {
+    setBusy(key);
+    setNote(null);
+    try {
+      const result = (await action()) as { providers: ProviderView[]; active_provider_id: string | null };
+      if (result?.providers) apply(result);
+      if (ok) setNote(ok);
+    } catch (error) {
+      setNote(`Operazione non riuscita: ${(error as Error).message}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const preset = PROVIDER_PRESETS.find((p) => p.id === presetId) ?? PROVIDER_PRESETS[0];
 
   return (
     <>
-      <div className="set-card">
-        <div className="set-card-top">
-          <span className="set-card-name">{active || model?.model || "Modello"}</span>
-          <span className={`set-badge ${model?.capable ? "green" : "muted"}`}>
-            {model?.capable ? "Capace" : "Locale"}
-          </span>
-        </div>
-        <div className="set-card-divider" />
-        {models.length > 0 ? (
-          <>
-            <div className="set-field-label">Modello attivo</div>
+      <div className="set-section-label">Provider configurati</div>
+      {providers.length === 0 && (
+        <p className="set-hint">Nessun provider. Aggiungine uno qui sotto (es. Ollama locale).</p>
+      )}
+      {providers.map((provider) => {
+        const isActive = provider.id === activeId;
+        const acting = busy === provider.id;
+        return (
+          <div className="set-card" key={provider.id}>
+            <div className="set-card-top">
+              <span className="set-card-name">{provider.label}</span>
+              <span className={`set-badge ${isActive ? "green" : "muted"}`}>
+                {isActive ? "Attivo" : provider.kind}
+              </span>
+            </div>
+            <p className="set-meter-sub" style={{ wordBreak: "break-all" }}>
+              {provider.base_url}
+              {provider.has_key ? " · chiave configurata" : " · senza chiave"}
+            </p>
+            <div className="set-card-divider" />
+            <div className="set-field-label">Modello</div>
             <select
               className="set-input"
-              value={active}
-              disabled={saving}
-              onChange={async (event) => {
-                const next = event.target.value;
-                setActive(next);
-                setSaving(true);
-                try {
-                  await coreBridge.setRuntimeModel(next);
-                } catch {
-                  /* keep selection */
-                } finally {
-                  setSaving(false);
-                }
-              }}
+              value={provider.active_model ?? ""}
+              disabled={acting}
+              onChange={(event) =>
+                run(provider.id, () =>
+                  coreBridge.upsertProvider({
+                    id: provider.id,
+                    label: provider.label,
+                    kind: provider.kind,
+                    base_url: provider.base_url,
+                    active_model: event.target.value,
+                  }),
+                )
+              }
               style={{ marginBottom: "var(--s3)" }}
             >
-              {!models.includes(active) && active && <option value={active}>{active}</option>}
-              {models.map((name) => (
-                <option key={name} value={name}>
-                  {name}
+              {provider.models.length === 0 && <option value="">— nessun modello: aggiorna —</option>}
+              {provider.active_model &&
+                !provider.models.some((m) => m.id === provider.active_model) && (
+                  <option value={provider.active_model}>{provider.active_model}</option>
+                )}
+              {provider.models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.id}
+                  {m.modality !== "text" ? ` · ${m.modality}` : ""}
+                  {m.vision ? " · vision" : ""}
                 </option>
               ))}
             </select>
-            <p className="set-meter-sub">
-              La selezione si applica alla prossima chat (nessun riavvio).
-            </p>
-          </>
-        ) : (
-          <p className="set-meter-sub">
-            Nessun modello rilevato dal provider. Configura un endpoint qui sotto.
-          </p>
-        )}
-        <div className="set-meter">
-          <span className="k">
-            <Cpu size={15} /> Contesto
-          </span>
-          <span className="v">{model ? `~${formatK(model.context_window)} token` : "n/d"}</span>
-        </div>
-      </div>
+            <div className="set-card-actions" style={{ display: "flex", gap: "var(--s2)", flexWrap: "wrap" }}>
+              <button
+                className="set-btn"
+                type="button"
+                disabled={acting}
+                onClick={() =>
+                  run(
+                    provider.id,
+                    () => coreBridge.refreshProviderModels(provider.id),
+                    `Catalogo aggiornato per ${provider.label}.`,
+                  )
+                }
+              >
+                {acting ? "…" : "Aggiorna modelli"}
+              </button>
+              {!isActive && (
+                <button
+                  className="set-btn"
+                  type="button"
+                  disabled={acting}
+                  onClick={() => run(provider.id, () => coreBridge.activateProvider(provider.id))}
+                >
+                  Imposta attivo
+                </button>
+              )}
+              <button
+                className="set-btn danger"
+                type="button"
+                disabled={acting}
+                onClick={() => run(provider.id, () => coreBridge.removeProvider(provider.id))}
+              >
+                Rimuovi
+              </button>
+            </div>
+          </div>
+        );
+      })}
 
-      <div className="set-section-label">Provider</div>
+      <div className="set-section-label">Aggiungi provider</div>
       <div className="set-rows" style={{ padding: "var(--s4) var(--s5)" }}>
-        <div className="set-field-label">Provider</div>
+        <div className="set-field-label">Tipo</div>
         <select
           className="set-input"
-          value={
-            PROVIDER_PRESETS.find((preset) => preset.baseUrl === baseUrl.trim())?.id ?? "custom"
-          }
+          value={presetId}
           onChange={(event) => {
-            const preset = PROVIDER_PRESETS.find((item) => item.id === event.target.value);
-            if (preset && preset.id !== "custom") setBaseUrl(preset.baseUrl);
+            const next = PROVIDER_PRESETS.find((p) => p.id === event.target.value);
+            setPresetId(event.target.value);
+            if (next && next.id !== "custom") {
+              setBaseUrl(next.baseUrl);
+              if (!label) setLabel(next.label);
+            }
           }}
           style={{ marginBottom: "var(--s3)" }}
         >
-          {PROVIDER_PRESETS.map((preset) => (
-            <option key={preset.id} value={preset.id}>
-              {preset.label}
+          {PROVIDER_PRESETS.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.label}
             </option>
           ))}
         </select>
-        <div className="set-field-label">Endpoint OpenAI-compatibile (base URL)</div>
+        <div className="set-field-label">Nome</div>
+        <input
+          className="set-input"
+          placeholder={preset.label}
+          value={label}
+          onChange={(event) => setLabel(event.target.value)}
+        />
+        <div className="set-field-label" style={{ marginTop: 12 }}>
+          Endpoint (base URL)
+        </div>
         <input
           className="set-input"
           placeholder="https://api.openai.com/v1"
@@ -402,12 +465,12 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
           onChange={(event) => setBaseUrl(event.target.value)}
         />
         <div className="set-field-label" style={{ marginTop: 12 }}>
-          API key {hasKey ? "· configurata" : ""}
+          API key (opzionale per endpoint locali)
         </div>
         <input
           className="set-input"
           type="password"
-          placeholder={hasKey ? "•••• (lascia vuoto per non cambiare)" : "sk-…"}
+          placeholder="sk-…"
           value={apiKey}
           onChange={(event) => setApiKey(event.target.value)}
         />
@@ -415,33 +478,47 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
           className="set-btn primary"
           type="button"
           style={{ marginTop: 12, alignSelf: "flex-start" }}
-          disabled={saving || !baseUrl.trim()}
-          onClick={async () => {
-            setSaving(true);
-            setNote(null);
-            try {
-              await coreBridge.setRuntimeProvider({
-                base_url: baseUrl.trim(),
-                ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
-              });
-              setApiKey("");
-              setNote("Provider salvato. Si applica alla prossima chat.");
-              const provider = await coreBridge.runtimeProvider();
-              setHasKey(provider.has_key);
-              await loadModels();
-            } catch (error) {
-              setNote(`Salvataggio non riuscito: ${(error as Error).message}`);
-            } finally {
-              setSaving(false);
-            }
-          }}
+          disabled={busy === "add" || !baseUrl.trim()}
+          onClick={() =>
+            run(
+              "add",
+              async () => {
+                const result = await coreBridge.upsertProvider({
+                  label: (label || preset.label).trim(),
+                  kind: preset.kind,
+                  base_url: baseUrl.trim(),
+                  ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
+                });
+                setApiKey("");
+                // Best-effort: pull the new provider's model catalog immediately.
+                const added = result.providers.find(
+                  (p) => p.base_url === baseUrl.trim().replace(/\/$/, ""),
+                );
+                if (added) {
+                  try {
+                    return await coreBridge.refreshProviderModels(added.id);
+                  } catch {
+                    return result;
+                  }
+                }
+                return result;
+              },
+              "Provider aggiunto.",
+            )
+          }
         >
-          {saving ? "Salvataggio…" : "Salva provider"}
+          {busy === "add" ? "Salvataggio…" : "Aggiungi provider"}
         </button>
       </div>
+      <div className="set-meter" style={{ margin: "var(--s3) var(--s5)" }}>
+        <span className="k">
+          <Cpu size={15} /> Contesto modello attivo
+        </span>
+        <span className="v">{model ? `~${formatK(model.context_window)} token` : "n/d"}</span>
+      </div>
       <p className="set-hint">
-        Qualsiasi API OpenAI-compatibile: OpenAI, OpenRouter, Together, Groq, Ollama, … La chiave è
-        cifrata nel secret store locale, mai mostrata.
+        Più provider insieme: scegli quale è attivo e il suo modello. La chiave è cifrata nel secret
+        store locale, mai mostrata. (Prossima fase: un modello diverso per compito.)
       </p>
       {note && <p className="set-hint">{note}</p>}
     </>

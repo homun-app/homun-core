@@ -2,6 +2,8 @@ mod browser_loop_controller;
 // Brain -> OperationalPlan adapter (A1), wired via `try_brain_operational_plan`.
 mod brain_adapter;
 mod chat_store;
+// Multi-provider inference registry (Phase 1 of per-role model routing).
+mod model_registry;
 mod task_registry;
 
 use axum::{
@@ -586,6 +588,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/runtime/provider",
             get(runtime_provider).post(set_runtime_provider),
         )
+        .route("/api/providers", get(list_providers).post(upsert_provider))
+        .route("/api/providers/{id}", delete(remove_provider))
+        .route("/api/providers/{id}/models", post(refresh_provider_models))
+        .route("/api/providers/{id}/activate", post(activate_provider))
         .route("/api/tasks/queue", get(task_queue))
         .route("/api/tasks/executor", get(task_executor_status))
         .route("/api/tasks/run_next", post(run_next_task))
@@ -1004,14 +1010,17 @@ fn set_persisted_inference_model(model: &str) -> std::io::Result<()> {
     fs::write(path, model.trim())
 }
 
-/// The active inference model: user-selected override (persisted) wins over the
-/// env default. Read fresh each call, so a Settings change applies to the next
-/// chat with no restart.
+/// The active inference model: the registry's active provider model wins, then
+/// the legacy persisted/env default. Read fresh each call, so a Settings change
+/// applies to the next chat with no restart.
 fn active_inference_model() -> String {
-    persisted_inference_model()
-        .or_else(|| env::var("LOCAL_FIRST_INFERENCE_MODEL").ok())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "gpt-4o-mini".to_string())
+    if let Some(model) = load_provider_registry()
+        .active()
+        .and_then(|provider| provider.effective_model())
+    {
+        return model;
+    }
+    active_inference_model_legacy().unwrap_or_else(|| "gpt-4o-mini".to_string())
 }
 
 /// User-configured provider base URL (any OpenAI-compatible API: OpenAI,
@@ -1064,9 +1073,109 @@ fn set_persisted_inference_api_key(key: &str) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-/// The effective OpenAI-compatible base URL: user-configured provider wins over
-/// the env default. With the MLX/Gemma path removed, this (or env) is required.
+// ── Provider registry (Phase 1: multi-provider inference) ──────────────────
+
+use model_registry::{ProviderEntry, ProviderKind, ProviderRegistry};
+
+fn provider_registry_path() -> Option<PathBuf> {
+    gateway_data_dir().ok().map(|dir| dir.join("providers.json"))
+}
+
+/// Per-provider API-key reference in the encrypted secret store (keyed by id).
+fn provider_secret_ref(provider_id: &str) -> Option<SecretRef> {
+    SecretRef::new(
+        gateway_user_id().as_str(),
+        gateway_workspace_id().as_str(),
+        "inference",
+        provider_id,
+    )
+    .ok()
+}
+
+fn provider_api_key(provider_id: &str) -> Option<String> {
+    let store = open_gateway_secret_store().ok()?;
+    let reference = provider_secret_ref(provider_id)?;
+    let material = store.get(&reference).ok()??;
+    material.expose_utf8().ok().filter(|value| !value.is_empty())
+}
+
+fn set_provider_api_key(provider_id: &str, key: &str) -> Result<(), String> {
+    let store = open_gateway_secret_store().map_err(|error| error.to_string())?;
+    let reference = provider_secret_ref(provider_id).ok_or_else(|| "invalid secret ref".to_string())?;
+    store
+        .put(reference, SecretMaterial::from_string(key))
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+fn delete_provider_api_key(provider_id: &str) {
+    if let (Ok(store), Some(reference)) =
+        (open_gateway_secret_store(), provider_secret_ref(provider_id))
+    {
+        let _ = store.delete(&reference);
+    }
+}
+
+/// Loads the persisted registry, or seeds an in-memory one from the legacy
+/// single-provider config / env so a fresh install already shows e.g. Ollama.
+/// Seeding is NOT persisted until the user makes a change (a POST).
+fn load_provider_registry() -> ProviderRegistry {
+    if let Some(path) = provider_registry_path()
+        && let Ok(contents) = fs::read_to_string(&path)
+        && let Ok(registry) = serde_json::from_str::<ProviderRegistry>(&contents)
+        && !registry.providers.is_empty()
+    {
+        return registry;
+    }
+    seed_registry_from_legacy()
+}
+
+/// Builds a one-provider registry from the legacy persisted base URL / env, so
+/// the current setup appears as a managed provider with no migration step.
+fn seed_registry_from_legacy() -> ProviderRegistry {
+    let mut registry = ProviderRegistry::default();
+    let base_url = persisted_inference_base_url()
+        .or_else(|| env::var("LOCAL_FIRST_INFERENCE_BASE_URL").ok())
+        .filter(|value| !value.is_empty());
+    let Some(base_url) = base_url else {
+        return registry;
+    };
+    let backend = env::var("LOCAL_FIRST_INFERENCE_BACKEND")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let (id, label, kind) = if backend == "anthropic" {
+        ("anthropic", "Anthropic", ProviderKind::Anthropic)
+    } else if base_url.contains("11434") || backend == "ollama" {
+        ("ollama", "Ollama (locale)", ProviderKind::Ollama)
+    } else {
+        ("default", "Provider", ProviderKind::OpenaiCompat)
+    };
+    let mut entry = ProviderEntry::new(id.to_string(), label.to_string(), kind, base_url);
+    entry.active_model = active_inference_model_legacy();
+    registry.upsert(entry);
+    registry
+}
+
+fn save_provider_registry(registry: &ProviderRegistry) -> Result<(), String> {
+    let path = provider_registry_path().ok_or_else(|| "no data dir".to_string())?;
+    let json = serde_json::to_string_pretty(registry).map_err(|error| error.to_string())?;
+    fs::write(path, json).map_err(|error| error.to_string())
+}
+
+/// Legacy single-model resolver (persisted file / env), kept as the fallback for
+/// the registry-aware [`active_inference_model`].
+fn active_inference_model_legacy() -> Option<String> {
+    persisted_inference_model()
+        .or_else(|| env::var("LOCAL_FIRST_INFERENCE_MODEL").ok())
+        .filter(|value| !value.is_empty())
+}
+
+/// The effective OpenAI-compatible base URL: the registry's active provider wins,
+/// then the legacy persisted/env config. With MLX removed this (or env) is required.
 fn effective_inference_base_url() -> Option<String> {
+    if let Some(provider) = load_provider_registry().active() {
+        return Some(provider.base_url.clone());
+    }
     persisted_inference_base_url().or_else(|| {
         env::var("LOCAL_FIRST_INFERENCE_BASE_URL")
             .ok()
@@ -5259,7 +5368,13 @@ fn set_session_progress_total(
 /// for at-rest encryption / keychain — tracked as workstream S4-full in the
 /// system elevation plan.
 fn resolve_inference_api_key() -> Option<String> {
-    // User-configured key in the encrypted secret store wins (set via Settings).
+    // The active provider's own key wins (set via Settings → Modelli).
+    if let Some(provider) = load_provider_registry().active()
+        && let Some(key) = provider_api_key(&provider.id)
+    {
+        return Some(key);
+    }
+    // Legacy single-provider key in the encrypted secret store.
     if let Some(key) = persisted_inference_api_key() {
         return Some(key);
     }
@@ -5508,6 +5623,15 @@ async fn set_runtime_model(
             message: "model must not be empty".to_string(),
         });
     }
+    // Set the active provider's model in the registry when one exists; always
+    // keep the legacy file in sync so env-only setups still resolve.
+    let mut registry = load_provider_registry();
+    if let Some(active_id) = registry.active().map(|p| p.id.clone())
+        && let Some(provider) = registry.get_mut(&active_id)
+    {
+        provider.active_model = Some(model.to_string());
+        save_provider_registry(&registry).map_err(provider_registry_persist_error)?;
+    }
     set_persisted_inference_model(model).map_err(|error| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "model_persist_failed",
@@ -5575,6 +5699,245 @@ async fn set_runtime_provider(
         set_persisted_inference_api_key(key).map_err(persist_err)?;
     }
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+// ── Provider registry endpoints (Phase 1) ─────────────────────────────────
+
+#[derive(Debug, Serialize)]
+struct ProviderModelView {
+    id: String,
+    vision: bool,
+    tools: bool,
+    modality: String,
+    context_window: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+struct ProviderView {
+    id: String,
+    label: String,
+    kind: String,
+    base_url: String,
+    has_key: bool,
+    active_model: Option<String>,
+    models: Vec<ProviderModelView>,
+    models_fetched_at: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ProvidersResponse {
+    active_provider_id: Option<String>,
+    providers: Vec<ProviderView>,
+}
+
+fn provider_view(entry: &ProviderEntry) -> ProviderView {
+    ProviderView {
+        id: entry.id.clone(),
+        label: entry.label.clone(),
+        kind: entry.kind.as_str().to_string(),
+        base_url: entry.base_url.clone(),
+        has_key: provider_api_key(&entry.id).is_some(),
+        active_model: entry.effective_model(),
+        models: entry
+            .models
+            .iter()
+            .map(|m| ProviderModelView {
+                id: m.id.clone(),
+                vision: m.vision,
+                tools: m.tools,
+                modality: m.modality.clone(),
+                context_window: m.context_window,
+            })
+            .collect(),
+        models_fetched_at: entry.models_fetched_at.clone(),
+    }
+}
+
+fn providers_response(registry: &ProviderRegistry) -> ProvidersResponse {
+    ProvidersResponse {
+        active_provider_id: registry.active().map(|p| p.id.clone()),
+        providers: registry.providers.iter().map(provider_view).collect(),
+    }
+}
+
+async fn list_providers() -> Json<ProvidersResponse> {
+    Json(providers_response(&load_provider_registry()))
+}
+
+#[derive(Debug, Deserialize)]
+struct UpsertProviderRequest {
+    id: Option<String>,
+    label: Option<String>,
+    kind: Option<String>,
+    base_url: String,
+    api_key: Option<String>,
+    active_model: Option<String>,
+}
+
+/// Adds or updates a provider. The API key (if supplied) goes to the encrypted
+/// secret store under the provider id and is never echoed back.
+async fn upsert_provider(
+    Json(request): Json<UpsertProviderRequest>,
+) -> Result<Json<ProvidersResponse>, GatewayError> {
+    let bad = |message: &str| GatewayError {
+        status: StatusCode::BAD_REQUEST,
+        code: "provider_invalid",
+        message: message.to_string(),
+    };
+    let base_url = request.base_url.trim();
+    if base_url.is_empty() {
+        return Err(bad("base_url must not be empty"));
+    }
+    let kind = request
+        .kind
+        .as_deref()
+        .and_then(ProviderKind::parse)
+        .unwrap_or(ProviderKind::OpenaiCompat);
+    let label = request
+        .label
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| base_url.to_string());
+    let id = request
+        .id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(model_registry::slugify)
+        .unwrap_or_else(|| model_registry::slugify(&label));
+
+    let mut registry = load_provider_registry();
+    let mut entry = ProviderEntry::new(id.clone(), label, kind, base_url.to_string());
+    entry.active_model = request
+        .active_model
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    registry.upsert(entry);
+
+    if let Some(key) = request
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        set_provider_api_key(&id, key).map_err(|message| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "provider_key_persist_failed",
+            message,
+        })?;
+    }
+
+    save_provider_registry(&registry).map_err(provider_registry_persist_error)?;
+    Ok(Json(providers_response(&registry)))
+}
+
+async fn remove_provider(
+    Path(id): Path<String>,
+) -> Result<Json<ProvidersResponse>, GatewayError> {
+    let mut registry = load_provider_registry();
+    if !registry.remove(&id) {
+        return Err(GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "provider_not_found",
+            message: format!("provider {id} non configurato"),
+        });
+    }
+    delete_provider_api_key(&id);
+    save_provider_registry(&registry).map_err(provider_registry_persist_error)?;
+    Ok(Json(providers_response(&registry)))
+}
+
+async fn activate_provider(
+    Path(id): Path<String>,
+) -> Result<Json<ProvidersResponse>, GatewayError> {
+    let mut registry = load_provider_registry();
+    if registry.get(&id).is_none() {
+        return Err(GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "provider_not_found",
+            message: format!("provider {id} non configurato"),
+        });
+    }
+    registry.active_provider_id = Some(id);
+    save_provider_registry(&registry).map_err(provider_registry_persist_error)?;
+    Ok(Json(providers_response(&registry)))
+}
+
+/// Fetches the provider's live model catalog, infers capability flags, caches it
+/// in the registry, and returns the refreshed view.
+async fn refresh_provider_models(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<ProvidersResponse>, GatewayError> {
+    let mut registry = load_provider_registry();
+    let entry = registry.get(&id).cloned().ok_or_else(|| GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "provider_not_found",
+        message: format!("provider {id} non configurato"),
+    })?;
+
+    let url = entry.models_endpoint();
+    let mut request = state.http.get(&url).timeout(std::time::Duration::from_secs(6));
+    let key = provider_api_key(&id);
+    if let Some(key) = key.as_deref() {
+        match entry.kind {
+            ProviderKind::Anthropic => {
+                request = request
+                    .header("x-api-key", key)
+                    .header("anthropic-version", "2023-06-01");
+            }
+            _ if entry.kind.lists_with_bearer() => {
+                request = request.bearer_auth(key);
+            }
+            _ => {}
+        }
+    }
+    let response = request.send().await.map_err(|error| GatewayError {
+        status: StatusCode::BAD_GATEWAY,
+        code: "provider_models_unreachable",
+        message: format!("modelli non raggiungibili: {error}"),
+    })?;
+    if !response.status().is_success() {
+        return Err(GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "provider_models_http_error",
+            message: format!("HTTP {} dal provider", response.status().as_u16()),
+        });
+    }
+    let body = response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|error| GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "provider_models_decode_failed",
+            message: error.to_string(),
+        })?;
+    let ids = model_registry::parse_models_response(entry.kind, &body);
+
+    if let Some(stored) = registry.get_mut(&id) {
+        stored.models = ids
+            .iter()
+            .map(|model_id| model_registry::ModelEntry::inferred(model_id))
+            .collect();
+        stored.models_fetched_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .map(|d| d.as_secs().to_string());
+    }
+    save_provider_registry(&registry).map_err(provider_registry_persist_error)?;
+    Ok(Json(providers_response(&registry)))
+}
+
+fn provider_registry_persist_error(message: String) -> GatewayError {
+    GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "provider_registry_persist_failed",
+        message,
+    }
 }
 
 async fn runtime_model() -> Json<ActiveModelResponse> {
