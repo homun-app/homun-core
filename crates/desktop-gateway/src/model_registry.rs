@@ -100,6 +100,15 @@ impl ModelTier {
             ModelTier::Reasoning => "reasoning",
         }
     }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "fast" => Some(ModelTier::Fast),
+            "balanced" => Some(ModelTier::Balanced),
+            "reasoning" => Some(ModelTier::Reasoning),
+            _ => None,
+        }
+    }
 }
 
 /// A model's qualitative profile. `strengths` is free text ("excels at …") for a
@@ -580,6 +589,23 @@ impl ProviderRegistry {
             base_url: provider.base_url.clone(),
             auto: true,
         })
+    }
+
+    /// Overrides a model's profile (user-curated). Returns false if the
+    /// provider/model isn't in the registry.
+    pub fn set_model_profile(
+        &mut self,
+        provider_id: &str,
+        model_id: &str,
+        profile: ModelProfile,
+    ) -> bool {
+        if let Some(provider) = self.get_mut(provider_id)
+            && let Some(model) = provider.models.iter_mut().find(|m| m.id == model_id)
+        {
+            model.profile = Some(profile);
+            return true;
+        }
+        false
     }
 
     pub fn agent(&self, id: &str) -> Option<&AgentEntry> {
