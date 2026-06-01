@@ -1877,7 +1877,7 @@ function SkillsPane() {
           <span className="conn-avatar add">
             <Download size={13} />
           </span>
-          <span className="mdl-rail-name">Cerca su GitHub</span>
+          <span className="mdl-rail-name">Catalogo skill</span>
         </button>
       </aside>
 
@@ -1918,7 +1918,7 @@ function SkillsEmpty({ dir, onBrowse }: { dir?: string; onBrowse: () => void }) 
       {dir && <code className="skl-path">{dir}</code>}
       <button className="set-btn primary" type="button" onClick={onBrowse} style={{ alignSelf: "flex-start" }}>
         <Download size={14} />
-        <span style={{ marginLeft: 6 }}>Cerca skill su GitHub</span>
+        <span style={{ marginLeft: 6 }}>Sfoglia il catalogo</span>
       </button>
     </div>
   );
