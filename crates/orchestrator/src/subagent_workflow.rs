@@ -44,11 +44,7 @@ pub(crate) fn subagent_workflow_spec(
                     "user_message": request.user_message,
                     "attachments": request.attachments,
                     "arguments": step.arguments,
-                },
-                // Phase 3b: the user-defined agent the planner delegated this
-                // sub-task to (if any). The gateway worker reads this to run on
-                // the agent's model + persona.
-                "lfpa_agent_id": step.assigned_agent,
+                }
             }),
             contract,
             permission_envelope: PermissionEnvelope {

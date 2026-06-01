@@ -566,50 +566,6 @@ async function electronSetRole(input: {
   return gatewayPostJson<RolesResponse>("/api/roles", input);
 }
 
-// ── Specialized agents ────────────────────────────────────────────────────
-
-export interface AgentView {
-  id: string;
-  name: string;
-  description: string;
-  system_prompt: string;
-  role: string | null;
-  provider_id: string | null;
-  model: string | null;
-  tools: string[];
-  enabled: boolean;
-  resolved_provider_id: string | null;
-  resolved_model: string | null;
-  resolved_kind: string | null;
-}
-
-export interface AgentsResponse {
-  agents: AgentView[];
-}
-
-export interface UpsertAgentInput {
-  id?: string;
-  name: string;
-  description?: string;
-  system_prompt?: string;
-  role?: string;
-  provider_id?: string;
-  model?: string;
-  tools?: string[];
-  enabled?: boolean;
-}
-
-async function electronAgents(): Promise<AgentsResponse> {
-  return gatewayGetJson<AgentsResponse>("/api/agents");
-}
-
-async function electronUpsertAgent(input: UpsertAgentInput): Promise<AgentsResponse> {
-  return gatewayPostJson<AgentsResponse>("/api/agents", input);
-}
-
-async function electronRemoveAgent(id: string): Promise<AgentsResponse> {
-  return gatewayDeleteJson<AgentsResponse>(`/api/agents/${encodeURIComponent(id)}`);
-}
 
 async function electronSystemStatus(): Promise<SystemStatus> {
   return gatewayGetJson<SystemStatus>("/api/system/status");
@@ -694,9 +650,6 @@ export const coreBridge = {
   roles: () => electronRoles(),
   setRole: (input: { role: string; provider_id?: string; model?: string }) =>
     electronSetRole(input),
-  agents: () => electronAgents(),
-  upsertAgent: (input: UpsertAgentInput) => electronUpsertAgent(input),
-  removeAgent: (id: string) => electronRemoveAgent(id),
   containedComputerLive: () => electronContainedComputerLive(),
   systemStatus: () => electronSystemStatus(),
   closeAllBrowsers: () => electronCloseAllBrowsers(),

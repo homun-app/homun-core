@@ -191,7 +191,6 @@ mod tests {
             risk_level: risk.to_string(),
             expected_duration_seconds: 5,
             agent_id: None,
-            assigned_agent: None,
             goal: None,
             contract: None,
             allowed_actions: Vec::new(),
