@@ -1236,7 +1236,7 @@ fn chat_context_budget_chars() -> usize {
 const MAX_TOOL_ROUNDS: usize = 3;
 /// Cap on connected-service (Composio) tools surfaced to the chat model, to keep
 /// the prompt focused and cheap.
-const COMPOSIO_CHAT_TOOL_CAP: usize = 30;
+const COMPOSIO_CHAT_TOOL_CAP: usize = 50;
 /// Cap on a Composio tool result fed back to the model (email bodies can be huge).
 const COMPOSIO_RESULT_CHARS: usize = 6000;
 
@@ -4107,46 +4107,51 @@ fn composio_chat_tools(state: &AppState, cap: usize) -> ComposioChatTools {
     if slugs.is_empty() {
         return out;
     }
-    // Composio v3 /tools filters by `toolkits=` (comma-joined). NB: the param is
-    // `toolkits`, not `toolkit_slugs` — confirmed against OpenHuman's working
-    // direct-mode client. The wrong name is silently ignored (returns the whole
-    // catalogue), so getting it right is what scopes tools to connected apps.
-    let query = slugs.join(",");
-    let resp = match transport.request(
-        "GET",
-        &format!("/tools?toolkits={query}&limit={cap}"),
-        None,
-    ) {
-        Ok(resp) => resp,
-        Err(_) => return out,
-    };
-    let items = resp.get("items").and_then(serde_json::Value::as_array).cloned().unwrap_or_default();
-    for item in items.into_iter().take(cap) {
-        let Some(slug) = item.get("slug").and_then(serde_json::Value::as_str) else {
-            continue;
+    // Composio v3 /tools filters by the SINGULAR `toolkit_slug=` param, one
+    // toolkit per request — verified empirically: `toolkits=`/`toolkit_slugs=`
+    // are silently ignored (return the whole catalogue). So we query per
+    // connected toolkit and merge, capping the total to avoid prompt bloat.
+    let per_toolkit = cap.max(1);
+    'outer: for slug in &slugs {
+        let resp = match transport.request(
+            "GET",
+            &format!("/tools?toolkit_slug={slug}&limit={per_toolkit}"),
+            None,
+        ) {
+            Ok(resp) => resp,
+            Err(_) => continue,
         };
-        if item.get("is_deprecated").and_then(serde_json::Value::as_bool).unwrap_or(false) {
-            continue;
+        let items = resp.get("items").and_then(serde_json::Value::as_array).cloned().unwrap_or_default();
+        for item in items {
+            if out.schemas.len() >= cap {
+                break 'outer;
+            }
+            let Some(tool_slug) = item.get("slug").and_then(serde_json::Value::as_str) else {
+                continue;
+            };
+            if item.get("is_deprecated").and_then(serde_json::Value::as_bool).unwrap_or(false) {
+                continue;
+            }
+            let description = item
+                .get("description")
+                .or_else(|| item.get("human_description"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .chars()
+                .take(300)
+                .collect::<String>();
+            let parameters = item
+                .get("input_parameters")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({ "type": "object", "properties": {} }));
+            if !composio_tool_is_read(tool_slug) {
+                out.writes.insert(tool_slug.to_string());
+            }
+            out.schemas.push(serde_json::json!({
+                "type": "function",
+                "function": { "name": tool_slug, "description": description, "parameters": parameters },
+            }));
         }
-        let description = item
-            .get("description")
-            .or_else(|| item.get("human_description"))
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("")
-            .chars()
-            .take(300)
-            .collect::<String>();
-        let parameters = item
-            .get("input_parameters")
-            .cloned()
-            .unwrap_or_else(|| serde_json::json!({ "type": "object", "properties": {} }));
-        if !composio_tool_is_read(slug) {
-            out.writes.insert(slug.to_string());
-        }
-        out.schemas.push(serde_json::json!({
-            "type": "function",
-            "function": { "name": slug, "description": description, "parameters": parameters },
-        }));
     }
     out
 }
