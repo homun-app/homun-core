@@ -451,6 +451,78 @@ async function electronSetRuntimeModel(model: string): Promise<{ active: string 
   return gatewayPostJson<{ active: string }>("/api/runtime/model", { model });
 }
 
+// ── Provider registry (multi-provider inference) ──────────────────────────
+
+export interface ProviderModelView {
+  id: string;
+  vision: boolean;
+  tools: boolean;
+  modality: string;
+  context_window: number | null;
+}
+
+export interface ProviderView {
+  id: string;
+  label: string;
+  kind: string;
+  base_url: string;
+  has_key: boolean;
+  active_model: string | null;
+  models: ProviderModelView[];
+  models_fetched_at: string | null;
+}
+
+export interface ProvidersResponse {
+  active_provider_id: string | null;
+  providers: ProviderView[];
+}
+
+export interface UpsertProviderInput {
+  id?: string;
+  label?: string;
+  kind?: string;
+  base_url: string;
+  api_key?: string;
+  active_model?: string;
+}
+
+async function gatewayDeleteJson<T>(path: string): Promise<T> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}${path}`, {
+    method: "DELETE",
+    headers: gatewayHeaders(),
+  });
+  if (!response.ok) {
+    throw new Error(await gatewayErrorDetail(response));
+  }
+  return response.json() as Promise<T>;
+}
+
+async function electronProviders(): Promise<ProvidersResponse> {
+  return gatewayGetJson<ProvidersResponse>("/api/providers");
+}
+
+async function electronUpsertProvider(input: UpsertProviderInput): Promise<ProvidersResponse> {
+  return gatewayPostJson<ProvidersResponse>("/api/providers", input);
+}
+
+async function electronRemoveProvider(id: string): Promise<ProvidersResponse> {
+  return gatewayDeleteJson<ProvidersResponse>(`/api/providers/${encodeURIComponent(id)}`);
+}
+
+async function electronActivateProvider(id: string): Promise<ProvidersResponse> {
+  return gatewayPostJson<ProvidersResponse>(
+    `/api/providers/${encodeURIComponent(id)}/activate`,
+    {},
+  );
+}
+
+async function electronRefreshProviderModels(id: string): Promise<ProvidersResponse> {
+  return gatewayPostJson<ProvidersResponse>(
+    `/api/providers/${encodeURIComponent(id)}/models`,
+    {},
+  );
+}
+
 async function electronSystemStatus(): Promise<SystemStatus> {
   return gatewayGetJson<SystemStatus>("/api/system/status");
 }
@@ -524,6 +596,11 @@ export const coreBridge = {
   runtimeProvider: () => electronRuntimeProvider(),
   setRuntimeProvider: (input: { base_url?: string; model?: string; api_key?: string }) =>
     electronSetRuntimeProvider(input),
+  providers: () => electronProviders(),
+  upsertProvider: (input: UpsertProviderInput) => electronUpsertProvider(input),
+  removeProvider: (id: string) => electronRemoveProvider(id),
+  activateProvider: (id: string) => electronActivateProvider(id),
+  refreshProviderModels: (id: string) => electronRefreshProviderModels(id),
   containedComputerLive: () => electronContainedComputerLive(),
   systemStatus: () => electronSystemStatus(),
   closeAllBrowsers: () => electronCloseAllBrowsers(),
