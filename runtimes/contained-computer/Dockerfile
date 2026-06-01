@@ -29,6 +29,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
       fonts-liberation \
       procps \
+      # Skill execution toolchain (same contained computer doubles as the skill
+      # sandbox): a real shell needs curl/python/git/jq for SKILL.md scripts.
+      bash \
+      curl \
+      jq \
+      git \
+      python3 \
+      python3-pip \
+      python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
 # Non-root runtime user; the container boundary is the sandbox (ADR 0010).
