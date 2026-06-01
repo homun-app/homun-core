@@ -198,6 +198,70 @@ pub struct ProviderRegistry {
     pub providers: Vec<ProviderEntry>,
     #[serde(default)]
     pub active_provider_id: Option<String>,
+    /// Per-role model bindings (Phase 2). A missing/auto entry means "pick the
+    /// best model by capability".
+    #[serde(default)]
+    pub roles: std::collections::BTreeMap<String, RoleBinding>,
+}
+
+/// A per-role model binding. Both fields present = manual; otherwise "auto"
+/// (the capability matcher picks the best model).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleBinding {
+    #[serde(default)]
+    pub provider_id: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+/// Static catalog of the roles the app actually routes through a model.
+pub struct RoleInfo {
+    pub key: &'static str,
+    pub label: &'static str,
+    pub description: &'static str,
+}
+
+/// The roles wired today. Vision/embeddings/image-gen will be added here when
+/// their call sites exist (image generation is a separate, later phase).
+pub const ROLES: &[RoleInfo] = &[
+    RoleInfo {
+        key: "orchestrator",
+        label: "Gestione generale",
+        description: "Comprensione richieste, creazione e pianificazione dei task, sintesi.",
+    },
+    RoleInfo {
+        key: "browser",
+        label: "Browser",
+        description: "Pianificatore del loop osserva-agisci sul browser.",
+    },
+];
+
+/// Hard requirements a model must meet to serve a role (used by auto-matching).
+#[derive(Debug, Clone, Copy)]
+pub struct RoleReq {
+    pub needs_tools: bool,
+    pub needs_vision: bool,
+    pub modality: &'static str,
+}
+
+pub fn role_requirements(role: &str) -> RoleReq {
+    match role {
+        "vision" => RoleReq { needs_tools: false, needs_vision: true, modality: "text" },
+        "embeddings" => RoleReq { needs_tools: false, needs_vision: false, modality: "embedding" },
+        // orchestrator, browser, and any future tool-using text role.
+        _ => RoleReq { needs_tools: true, needs_vision: false, modality: "text" },
+    }
+}
+
+/// The provider+model chosen for a role, plus whether it came from auto-matching.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedRole {
+    pub role: String,
+    pub provider_id: String,
+    pub model: String,
+    pub kind: ProviderKind,
+    pub base_url: String,
+    pub auto: bool,
 }
 
 impl ProviderRegistry {
@@ -249,6 +313,79 @@ impl ProviderRegistry {
             self.active_provider_id = self.providers.first().map(|p| p.id.clone());
         }
         removed
+    }
+
+    /// Resolves the model for a role: an explicit (valid) manual binding wins,
+    /// otherwise the capability auto-matcher picks the best available model.
+    pub fn resolve_role(&self, role: &str) -> Option<ResolvedRole> {
+        if let Some(binding) = self.roles.get(role)
+            && let (Some(pid), Some(model)) =
+                (binding.provider_id.as_deref(), binding.model.as_deref())
+            && !pid.is_empty()
+            && !model.is_empty()
+            && let Some(provider) = self.get(pid)
+        {
+            return Some(ResolvedRole {
+                role: role.to_string(),
+                provider_id: provider.id.clone(),
+                model: model.to_string(),
+                kind: provider.kind,
+                base_url: provider.base_url.clone(),
+                auto: false,
+            });
+        }
+        self.auto_role(role)
+    }
+
+    /// Auto-match: best model meeting the role's requirements, ranked by context
+    /// window (desc), preferring the active provider, then registry order. Falls
+    /// back to the active provider's effective model when no catalog is loaded.
+    fn auto_role(&self, role: &str) -> Option<ResolvedRole> {
+        let req = role_requirements(role);
+        let active = self.active_provider_id.as_deref();
+        let mut candidates: Vec<(&ProviderEntry, &ModelEntry)> = Vec::new();
+        for provider in &self.providers {
+            for model in &provider.models {
+                if model.modality != req.modality {
+                    continue;
+                }
+                if req.needs_tools && !model.tools {
+                    continue;
+                }
+                if req.needs_vision && !model.vision {
+                    continue;
+                }
+                candidates.push((provider, model));
+            }
+        }
+        candidates.sort_by(|(pa, ma), (pb, mb)| {
+            let ctx = mb.context_window.unwrap_or(0).cmp(&ma.context_window.unwrap_or(0));
+            let active_pref = (active == Some(pb.id.as_str()))
+                .cmp(&(active == Some(pa.id.as_str())));
+            ctx.then(active_pref)
+        });
+        if let Some((provider, model)) = candidates.first() {
+            return Some(ResolvedRole {
+                role: role.to_string(),
+                provider_id: provider.id.clone(),
+                model: model.id.clone(),
+                kind: provider.kind,
+                base_url: provider.base_url.clone(),
+                auto: true,
+            });
+        }
+        // No catalog yet: use the active provider's current model so roles still
+        // resolve before "Aggiorna modelli" has run.
+        let provider = self.active()?;
+        let model = provider.effective_model()?;
+        Some(ResolvedRole {
+            role: role.to_string(),
+            provider_id: provider.id.clone(),
+            model,
+            kind: provider.kind,
+            base_url: provider.base_url.clone(),
+            auto: true,
+        })
     }
 }
 
@@ -385,6 +522,63 @@ mod tests {
             parse_models_response(ProviderKind::OpenaiCompat, &oai),
             vec!["gpt-4o", "gpt-4o-mini"]
         );
+    }
+
+    fn registry_with_two_models() -> ProviderRegistry {
+        let mut reg = ProviderRegistry::default();
+        let mut ollama = ProviderEntry::new(
+            "ollama".into(),
+            "Ollama".into(),
+            ProviderKind::Ollama,
+            "http://127.0.0.1:11434/v1".into(),
+        );
+        ollama.models = vec![
+            ModelEntry::inferred("llama3.1:8b"),       // tools, ctx None
+            ModelEntry::inferred("minimax-m2.7:cloud"), // tools, ctx 200k
+            ModelEntry::inferred("nomic-embed-text"),   // embedding
+        ];
+        reg.upsert(ollama);
+        reg
+    }
+
+    #[test]
+    fn auto_role_picks_largest_context_text_tool_model() {
+        let reg = registry_with_two_models();
+        let resolved = reg.resolve_role("orchestrator").unwrap();
+        assert!(resolved.auto);
+        assert_eq!(resolved.model, "minimax-m2.7:cloud");
+        assert_eq!(resolved.provider_id, "ollama");
+    }
+
+    #[test]
+    fn manual_binding_overrides_auto() {
+        let mut reg = registry_with_two_models();
+        reg.roles.insert(
+            "browser".into(),
+            RoleBinding {
+                provider_id: Some("ollama".into()),
+                model: Some("llama3.1:8b".into()),
+            },
+        );
+        let resolved = reg.resolve_role("browser").unwrap();
+        assert!(!resolved.auto);
+        assert_eq!(resolved.model, "llama3.1:8b");
+    }
+
+    #[test]
+    fn auto_role_falls_back_to_active_model_without_catalog() {
+        let mut reg = ProviderRegistry::default();
+        let mut p = ProviderEntry::new(
+            "ollama".into(),
+            "Ollama".into(),
+            ProviderKind::Ollama,
+            "http://127.0.0.1:11434/v1".into(),
+        );
+        p.active_model = Some("minimax-m2.7:cloud".into());
+        reg.upsert(p);
+        let resolved = reg.resolve_role("orchestrator").unwrap();
+        assert!(resolved.auto);
+        assert_eq!(resolved.model, "minimax-m2.7:cloud");
     }
 
     #[test]
