@@ -10,6 +10,8 @@ mod skills;
 mod skills_catalog;
 // Static security scan for installed skills, ported from Homun.
 mod skill_security;
+// Skill execution sandbox (reuses the browser's contained-computer container).
+mod sandbox;
 mod task_registry;
 
 use axum::{
@@ -1324,6 +1326,26 @@ fn use_skill_tool_schema() -> serde_json::Value {
     })
 }
 
+/// The skill-execution tool: runs a shell command from a skill's instructions
+/// inside the contained-computer sandbox.
+fn run_in_sandbox_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "run_in_sandbox",
+            "description": "Esegue un comando di shell nel computer contenuto (sandbox isolata con bash/curl/python). Usalo per eseguire i comandi indicati da una skill (es. 'curl -s wttr.in/Roma?format=3'). Restituisce l'output del comando.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": { "type": "string", "description": "Comando shell da eseguire, es. \"curl -s wttr.in/Roma?format=3\"" },
+                    "skill_id": { "type": "string", "description": "id della skill di contesto (opzionale; imposta la working dir)" }
+                },
+                "required": ["command"]
+            }
+        }
+    })
+}
+
 /// The discovery meta-tool: the model searches connected-service tools by intent
 /// instead of receiving all of them up front (progressive tool disclosure).
 fn find_connected_tools_schema() -> serde_json::Value {
@@ -1498,7 +1520,8 @@ non dà un totale affidabile, dichiara che è una stima."
         format!(
             "{system}\n\nSKILL INSTALLATE — quando la richiesta corrisponde alla descrizione di una \
 di queste, PREFERISCILA al browser: chiama `use_skill` con il suo id per ricevere le istruzioni \
-complete (SKILL.md) e seguile passo-passo con gli strumenti disponibili.\n{lines}"
+complete (SKILL.md). Poi ESEGUI i comandi che la skill indica (es. `curl …`, `python …`) con lo \
+strumento `run_in_sandbox`, che li lancia nel computer contenuto, e usa l'output per rispondere.\n{lines}"
         )
     };
     let system = system.as_str();
@@ -1509,6 +1532,7 @@ complete (SKILL.md) e seguile passo-passo con gli strumenti disponibili.\n{lines
     }
     if has_skills {
         base_tools.push(use_skill_tool_schema());
+        base_tools.push(run_in_sandbox_tool_schema());
     }
     let mut messages = vec![
         serde_json::json!({ "role": "system", "content": system }),
@@ -1692,6 +1716,68 @@ disponibili (per dati dal web usa browse_web sull'URL indicato):\n\n{}",
                                 body.chars().take(8000).collect::<String>()
                             ),
                             _ => format!("Skill «{id}» non trovata o non leggibile."),
+                        }
+                    } else if name == "run_in_sandbox" {
+                        // Execute a skill command in the contained computer (auto-start
+                        // Docker + container). Blocked if the command trips the security scan.
+                        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
+                            .unwrap_or_else(|_| serde_json::json!({}));
+                        let command = parsed
+                            .get("command")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let skill_id = parsed
+                            .get("skill_id")
+                            .and_then(|v| v.as_str())
+                            .map(String::from);
+                        if command.trim().is_empty() {
+                            "Comando vuoto.".to_string()
+                        } else {
+                            let scan = skill_security::scan_blobs(&[(
+                                "command".to_string(),
+                                command.clone(),
+                            )]);
+                            if scan.blocked {
+                                format!(
+                                    "Comando NON eseguito: bloccato dallo scan di sicurezza \
+(rischio {}/100). Riformula senza operazioni pericolose.",
+                                    scan.risk_score
+                                )
+                            } else {
+                                let _ = emit_stream_event(
+                                    &tx,
+                                    GenerateStreamEvent::Delta {
+                                        text: format!(
+                                            "\n\n_🖥️ Eseguo nel computer contenuto: `{}`_\n",
+                                            command.chars().take(120).collect::<String>()
+                                        ),
+                                    },
+                                )
+                                .await;
+                                let cmd = command.clone();
+                                let sid = skill_id.clone();
+                                let outcome = tokio::task::spawn_blocking(move || {
+                                    if let Some(id) = sid.as_deref() {
+                                        if let Ok(dir) = skills_dir() {
+                                            sandbox::sync_skill(&dir.join(id), id);
+                                        }
+                                    }
+                                    sandbox::run_command(&cmd, sid.as_deref())
+                                })
+                                .await;
+                                match outcome {
+                                    Ok(Ok(out)) => {
+                                        if out.trim().is_empty() {
+                                            "(nessun output)".to_string()
+                                        } else {
+                                            format!("Output del comando:\n{out}")
+                                        }
+                                    }
+                                    Ok(Err(error)) => format!("Sandbox non disponibile: {error}"),
+                                    Err(error) => format!("Errore di esecuzione: {error}"),
+                                }
+                            }
                         }
                     } else if name == "find_connected_tools" {
                         // Discovery: search the catalog, inject the matching tool
