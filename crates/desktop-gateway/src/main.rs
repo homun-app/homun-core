@@ -1646,7 +1646,7 @@ suoi argomenti):\n{}",
                             let marker = serde_json::json!({ "tool": name, "arguments": args_val })
                                 .to_string();
                             let card = format!(
-                                "\n\nServe la tua conferma per **{name}**.\n\
+                                "\n\nServe la tua conferma per l'azione qui sotto.\n\
 ‹‹COMPOSIO_CONFIRM››{marker}‹‹/COMPOSIO_CONFIRM››\n"
                             );
                             accumulated.push_str(&card);
