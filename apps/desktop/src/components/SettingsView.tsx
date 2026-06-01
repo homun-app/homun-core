@@ -79,7 +79,10 @@ export function SettingsView({ section }: SettingsViewProps) {
   }, [section]);
 
   return (
-    <section className="settings-view" aria-labelledby="settings-title">
+    <section
+      className={`settings-view ${section === "runtime" ? "settings-wide" : ""}`}
+      aria-labelledby="settings-title"
+    >
       <div className="set-pane">
         <h2 id="settings-title" className="set-title">
           {SECTION_TITLES[section]}

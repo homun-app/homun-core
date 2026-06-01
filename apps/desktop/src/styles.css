@@ -3328,6 +3328,14 @@ body.resizing-drawer {
   max-width: 860px;
 }
 
+/* Master-detail panes (Models) need more room than the 700px form panes. */
+.settings-view.settings-wide {
+  max-width: 1180px;
+}
+.settings-view.settings-wide .set-pane {
+  max-width: 100%;
+}
+
 .settings-content header {
   margin-bottom: 22px;
 }
@@ -4129,7 +4137,7 @@ body.resizing-drawer {
 
 /* Drawer / left nav */
 .settings-drawer.set-nav {
-  width: 264px;
+  width: 100%;
   padding: var(--s4) var(--s3);
   display: flex;
   flex-direction: column;
