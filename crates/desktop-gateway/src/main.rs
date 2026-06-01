@@ -67,7 +67,9 @@ use local_first_memory::{
     UserId as MemoryUserId, WikiFileStore, WikiPage, WorkspaceId as MemoryWorkspaceId,
 };
 use bytes::Bytes;
-use local_first_subagents::{GenerateStreamEvent, SubagentTaskExecutor, TokenMetrics};
+use local_first_subagents::{
+    GenerateJsonRequest, GenerateStreamEvent, SubagentTaskExecutor, TokenMetrics,
+};
 use local_first_task_runtime::{
     ApprovalGate, ApprovalRequest, ApprovalStatus, ExecutorResult, LeaseManager, ResourceClass,
     ResourceGovernor, ResourceLimits, ResourceRequirement, TaskExecutor, TaskId, TaskPriority,
@@ -1080,7 +1082,7 @@ fn set_persisted_inference_api_key(key: &str) -> Result<(), String> {
 // ── Provider registry (Phase 1: multi-provider inference) ──────────────────
 
 use model_registry::{
-    AgentEntry, AgentModel, ProviderEntry, ProviderKind, ProviderRegistry, RoleBinding,
+    AgentEntry, AgentModel, ProviderEntry, ProviderKind, ProviderRegistry, ResolvedRole, RoleBinding,
 };
 
 fn provider_registry_path() -> Option<PathBuf> {
@@ -3210,11 +3212,25 @@ fn execute_subagent_task(
         .as_deref()
         .and_then(|id| load_provider_registry().agent(id).cloned().filter(|a| a.enabled))
     {
+        // Explicit agent delegation: run on the agent's model + persona.
         Some(agent) => (
             router_for_agent(&agent.id),
             apply_agent_persona(task, &agent),
         ),
-        None => (router_for_role("orchestrator"), task.clone()),
+        // No agent → pick the model that best fits THIS task's goal (semantic
+        // stage-2 router, heuristic fallback).
+        None => {
+            let goal = task
+                .input_json
+                .get("goal")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let router = match resolve_role_for_task(goal, "orchestrator") {
+                Some(resolved) => build_router_for_resolved(&resolved),
+                None => router_for_role("orchestrator"),
+            };
+            (router, task.clone())
+        }
     };
 
     let mut executor = SubagentTaskExecutor::new(router);
@@ -5522,30 +5538,128 @@ fn build_router_from(
     ModelRouter::new(policy).with_provider(Box::new(provider))
 }
 
+/// Builds a `ModelRouter` from an already-resolved role/model (shared by role,
+/// agent, and semantic-router paths). Resolves the provider's key + context.
+fn build_router_for_resolved(resolved: &ResolvedRole) -> ModelRouter {
+    let api_key = provider_api_key(&resolved.provider_id).or_else(env_inference_api_key);
+    let context_window = env::var("LOCAL_FIRST_INFERENCE_CONTEXT_WINDOW")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(if matches!(resolved.kind, ProviderKind::Anthropic) {
+            200_000
+        } else {
+            32_768
+        });
+    build_router_from(
+        resolved.kind,
+        &resolved.base_url,
+        &resolved.model,
+        api_key,
+        context_window,
+    )
+}
+
 /// Builds the inference router for a named role (Phase 2). Resolves the role
 /// through the registry (manual binding or capability auto-match), falling back
 /// to the legacy env/active-provider behavior when no provider is configured.
 fn router_for_role(role: &str) -> ModelRouter {
-    let registry = load_provider_registry();
-    if let Some(resolved) = registry.resolve_role(role) {
-        let api_key = provider_api_key(&resolved.provider_id).or_else(env_inference_api_key);
-        let context_window = env::var("LOCAL_FIRST_INFERENCE_CONTEXT_WINDOW")
-            .ok()
-            .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(if matches!(resolved.kind, ProviderKind::Anthropic) {
-                200_000
-            } else {
-                32_768
-            });
-        return build_router_from(
-            resolved.kind,
-            &resolved.base_url,
-            &resolved.model,
-            api_key,
-            context_window,
-        );
+    match load_provider_registry().resolve_role(role) {
+        Some(resolved) => build_router_for_resolved(&resolved),
+        None => build_inference_router_from_env(),
     }
-    build_inference_router_from_env()
+}
+
+/// Whether the semantic (LLM) model router is enabled. Default ON; set
+/// `LOCAL_FIRST_SEMANTIC_ROUTER=0` to force the cheap heuristic.
+fn semantic_router_enabled() -> bool {
+    env::var("LOCAL_FIRST_SEMANTIC_ROUTER")
+        .map(|value| value != "0" && !value.eq_ignore_ascii_case("false"))
+        .unwrap_or(true)
+}
+
+/// STAGE 2 (semantic): among the models eligible for `role`, ask a fast model
+/// which one best fits `goal`, reading each model's profile ("in cosa eccelle").
+/// Falls back to the heuristic `resolve_role` on: disabled flag, <2 candidates,
+/// LLM error, or an unrecognized pick. Async task path only (adds one LLM hop).
+fn resolve_role_for_task(goal: &str, role: &str) -> Option<ResolvedRole> {
+    let registry = load_provider_registry();
+    let heuristic = registry.resolve_role(role);
+    if !semantic_router_enabled() {
+        return heuristic;
+    }
+    // Owned candidate tuples: (provider_id, model_id, tier, strengths, kind, base_url).
+    let candidates: Vec<(String, String, String, String, ProviderKind, String)> = registry
+        .eligible_models(role)
+        .iter()
+        .map(|(provider, model)| {
+            let (tier, strengths) = model
+                .profile
+                .as_ref()
+                .map(|p| (p.tier.as_str().to_string(), p.strengths.clone()))
+                .unwrap_or_default();
+            (
+                provider.id.clone(),
+                model.id.clone(),
+                tier,
+                strengths,
+                provider.kind,
+                provider.base_url.clone(),
+            )
+        })
+        .collect();
+    if candidates.len() < 2 {
+        return heuristic;
+    }
+    let list = candidates
+        .iter()
+        .enumerate()
+        .map(|(i, (pid, mid, tier, strengths, _, _))| {
+            let desc = if strengths.trim().is_empty() {
+                "(nessuna descrizione)"
+            } else {
+                strengths.as_str()
+            };
+            format!("{}. id=\"{mid}\" provider={pid} tier={tier} — {desc}", i + 1)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let prompt = format!(
+        "Sei un router di modelli. Scegli il modello che esegue MEGLIO questo compito, \
+         in base a in cosa ciascun modello eccelle.\n\nCompito:\n{goal}\n\nModelli candidati:\n{list}\n\n\
+         Rispondi SOLO con JSON: {{\"model_id\": \"<uno degli id elencati esattamente>\"}}."
+    );
+    let request = GenerateJsonRequest {
+        prompt,
+        max_tokens: 200,
+        temperature: 0.0,
+        wait_if_busy: true,
+        request_timeout_seconds: Some(30.0),
+        json_schema: None,
+        required_keys: vec!["model_id".to_string()],
+        repair: true,
+    };
+    // The role's heuristic model runs the (cheap) selection call.
+    let selector = router_for_role(role);
+    match selector.generate_json_with(&Requirements::default(), &request) {
+        Ok(response) if response.valid => {
+            let chosen = response.json.get("model_id").and_then(Value::as_str);
+            if let Some(chosen) = chosen
+                && let Some((pid, mid, _, _, kind, base_url)) =
+                    candidates.iter().find(|c| c.1 == chosen)
+            {
+                return Some(ResolvedRole {
+                    role: role.to_string(),
+                    provider_id: pid.clone(),
+                    model: mid.clone(),
+                    kind: *kind,
+                    base_url: base_url.clone(),
+                    auto: true,
+                });
+            }
+            heuristic
+        }
+        _ => heuristic,
+    }
 }
 
 /// Browser-loop router (Phase 2): the "browser" role.
