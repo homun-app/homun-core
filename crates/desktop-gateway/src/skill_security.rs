@@ -173,20 +173,27 @@ fn build_report(warnings: Vec<SecurityWarning>, scanned_files: usize) -> Securit
     }
 }
 
-/// Scans an installed skill directory (SKILL.md + text/script files).
-pub fn scan_dir(dir: &Path) -> SecurityReport {
+/// Scans a set of in-memory (relative-path, content) text files. Used both for
+/// installed dirs and for preflight on a downloaded (not-yet-installed) package.
+pub fn scan_blobs(files: &[(String, String)]) -> SecurityReport {
     let mut warnings = Vec::new();
-    let mut scanned = 0usize;
-    let mut count = 0usize;
-    scan_dir_inner(dir, dir, &mut warnings, &mut scanned, &mut count, 0);
-    build_report(warnings, scanned)
+    for (path, content) in files {
+        warnings.extend(scan_text(path, content));
+    }
+    build_report(warnings, files.len())
 }
 
-fn scan_dir_inner(
+/// Scans an installed skill directory (SKILL.md + text/script files).
+pub fn scan_dir(dir: &Path) -> SecurityReport {
+    let mut files = Vec::new();
+    collect_text_files(dir, dir, &mut files, &mut 0, 0);
+    scan_blobs(&files)
+}
+
+fn collect_text_files(
     root: &Path,
     dir: &Path,
-    warnings: &mut Vec<SecurityWarning>,
-    scanned: &mut usize,
+    out: &mut Vec<(String, String)>,
     count: &mut usize,
     depth: usize,
 ) {
@@ -206,7 +213,7 @@ fn scan_dir_inner(
             continue;
         }
         if path.is_dir() {
-            scan_dir_inner(root, &path, warnings, scanned, count, depth + 1);
+            collect_text_files(root, &path, out, count, depth + 1);
             continue;
         }
         *count += 1;
@@ -218,8 +225,7 @@ fn scan_dir_inner(
             continue;
         };
         let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
-        *scanned += 1;
-        warnings.extend(scan_text(&rel, &content));
+        out.push((rel, content));
     }
 }
 

@@ -612,6 +612,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/skills/registry/install", post(install_registry_skill))
         .route("/api/skills/catalog", get(skill_catalog))
         .route("/api/skills/catalog/refresh", post(skill_catalog_refresh))
+        .route("/api/skills/catalog/install", post(install_catalog_skill))
+        .route("/api/skills/catalog/preview", get(preview_catalog_skill))
         .route("/api/skills/{id}", get(skill_detail))
         .route("/api/skills/{id}/enabled", post(set_skill_enabled))
         .route("/api/tasks/queue", get(task_queue))
@@ -6489,6 +6491,120 @@ async fn skill_catalog_refresh(
         entries: Vec::new(),
     });
     Ok(Json(catalog_response(&cache, &CatalogQuery { q: None, category: None, limit: None })))
+}
+
+#[derive(Debug, Deserialize)]
+struct CatalogInstallRequest {
+    slug: String,
+}
+
+/// Installs a catalog skill: download its ClawHub ZIP, extract into the skills
+/// dir (the local scanner then picks it up), record origin. Returns the refreshed
+/// local skill list.
+async fn install_catalog_skill(
+    State(state): State<AppState>,
+    Json(request): Json<CatalogInstallRequest>,
+) -> Result<Json<SkillsResponse>, GatewayError> {
+    let slug = request.slug.trim().to_string();
+    if !skills::is_safe_id(&slug) {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "invalid_slug",
+            message: format!("slug non valido: «{slug}»"),
+        });
+    }
+    let root = skills_dir().map_err(|e| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "skills_dir_unavailable",
+        message: e.to_string(),
+    })?;
+    let dest = root.join(&slug);
+    if dest.exists() {
+        return Err(GatewayError {
+            status: StatusCode::CONFLICT,
+            code: "skill_exists",
+            message: format!("skill «{slug}» già installata"),
+        });
+    }
+    let zip = skills_catalog::download_zip(&state.http, &slug)
+        .await
+        .map_err(|message| GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "catalog_download_failed",
+            message,
+        })?;
+    let dest_for_extract = dest.clone();
+    tokio::task::spawn_blocking(move || skills_catalog::extract_zip(&zip, &dest_for_extract))
+        .await
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "catalog_extract_join",
+            message: e.to_string(),
+        })?
+        .map_err(|message| {
+            let _ = std::fs::remove_dir_all(&dest);
+            GatewayError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "catalog_extract_failed",
+                message,
+            }
+        })?;
+    let mut origins = load_skills_origins();
+    origins.insert(slug.clone(), format!("clawhub:{slug}"));
+    let _ = save_skills_origins(&origins);
+    Ok(Json(current_skills_response()))
+}
+
+#[derive(Debug, Deserialize)]
+struct CatalogPreviewQuery {
+    slug: String,
+}
+
+#[derive(Debug, Serialize)]
+struct CatalogPreview {
+    slug: String,
+    name: String,
+    description: String,
+    /// SKILL.md body (frontmatter stripped) for rendering.
+    body: String,
+    files: Vec<String>,
+    security: skill_security::SecurityReport,
+}
+
+/// Previews a catalog skill WITHOUT installing: downloads the ZIP, extracts the
+/// SKILL.md + file list in memory, and runs the security scan.
+async fn preview_catalog_skill(
+    State(state): State<AppState>,
+    Query(query): Query<CatalogPreviewQuery>,
+) -> Result<Json<CatalogPreview>, GatewayError> {
+    let slug = query.slug.trim().to_string();
+    let zip = skills_catalog::download_zip(&state.http, &slug)
+        .await
+        .map_err(|message| GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "catalog_download_failed",
+            message,
+        })?;
+    let files = skills_catalog::read_zip_text_files(&zip).map_err(|message| GatewayError {
+        status: StatusCode::BAD_GATEWAY,
+        code: "catalog_zip_invalid",
+        message,
+    })?;
+    let manifest = files
+        .iter()
+        .find(|(p, _)| p == "SKILL.md" || p.ends_with("/SKILL.md"))
+        .map(|(_, c)| c.clone())
+        .unwrap_or_default();
+    let (frontmatter, body) = skills::split_frontmatter(&manifest);
+    let security = skill_security::scan_blobs(&files);
+    Ok(Json(CatalogPreview {
+        name: frontmatter.name.unwrap_or_else(|| slug.clone()),
+        description: frontmatter.description.unwrap_or_default(),
+        body,
+        files: files.iter().map(|(p, _)| p.clone()).collect(),
+        security,
+        slug,
+    }))
 }
 
 // ---------------------------------------------------------- skills marketplace
