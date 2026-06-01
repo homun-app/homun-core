@@ -118,7 +118,11 @@ small {
 }
 
 .app-shell.drawer-open::before {
-  background: linear-gradient(to right, #f7f7f8 0 292px, var(--bg) 292px);
+  background: linear-gradient(
+    to right,
+    #f7f7f8 0 var(--drawer-width, 292px),
+    var(--bg) var(--drawer-width, 292px)
+  );
 }
 
 .app-shell button,
@@ -131,7 +135,41 @@ small {
 }
 
 .app-shell.drawer-open {
-  grid-template-columns: 292px minmax(0, 1fr);
+  grid-template-columns: var(--drawer-width, 292px) minmax(0, 1fr);
+}
+
+/* Draggable splitter sitting on the drawer↔content boundary. */
+.drawer-resizer {
+  position: absolute;
+  top: var(--window-drag-height);
+  left: var(--drawer-width, 292px);
+  width: 8px;
+  height: calc(100vh - var(--window-drag-height));
+  transform: translateX(-4px);
+  cursor: col-resize;
+  z-index: 90;
+  -webkit-app-region: no-drag;
+  touch-action: none;
+}
+
+.drawer-resizer::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 50%;
+  width: 1px;
+  transform: translateX(-0.5px);
+  background: transparent;
+  transition: background 0.12s ease;
+}
+
+.drawer-resizer:hover::after,
+body.resizing-drawer .drawer-resizer::after {
+  background: var(--accent, #4f46e5);
+}
+
+body.resizing-drawer {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .navigation-rail {
@@ -242,14 +280,18 @@ small {
   border-right: 1px solid var(--line);
   background: #f7f7f8;
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  /* header · workspace · new-task · quick-nav · scroll(flex) · footer.
+     The scroll region is the only flexible row so the quick-nav keeps its
+     intrinsic height instead of collapsing to 0 and overlapping the list. */
+  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
   gap: 12px;
   padding: 16px 12px;
   overflow: hidden;
 }
 
 .settings-drawer {
-  grid-template-rows: auto auto minmax(0, 1fr);
+  /* back · profile · nav · spacer(flex) · info-at-bottom */
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
 }
 
 .drawer-header,
