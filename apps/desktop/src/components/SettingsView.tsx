@@ -1319,8 +1319,10 @@ function ComposioToolkitBrowser({
 }) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
-  // toolkit slug → Composio connection status (e.g. "ACTIVE", "INITIATED").
-  const [connStatus, setConnStatus] = useState<Record<string, string>>({});
+  // toolkit slug → best connection state. A toolkit can have several connected
+  // accounts (e.g. a fresh ACTIVE one plus stale EXPIRED ones); we keep the best
+  // so a live connection is never masked by an old expired record.
+  const [connState, setConnState] = useState<Record<string, KitState>>({});
   // Slugs we are actively polling after kicking off an OAuth link.
   const [polling, setPolling] = useState<Set<string>>(new Set());
   const [modalKit, setModalKit] = useState<ComposioToolkit | null>(null);
@@ -1328,12 +1330,18 @@ function ComposioToolkitBrowser({
   const refreshConnections = async () => {
     try {
       const conns = await coreBridge.composioConnections();
-      const next: Record<string, string> = {};
-      for (const c of conns) if (c.toolkit_slug) next[c.toolkit_slug] = c.status;
-      setConnStatus(next);
+      const rank: Record<KitState, number> = { none: 0, connecting: 1, connected: 2 };
+      const next: Record<string, KitState> = {};
+      for (const c of conns) {
+        if (!c.toolkit_slug) continue;
+        const candidate = kitStateFromStatus(c.status);
+        const current = next[c.toolkit_slug] ?? "none";
+        if (rank[candidate] > rank[current]) next[c.toolkit_slug] = candidate;
+      }
+      setConnState(next);
       return next;
     } catch {
-      return {} as Record<string, string>;
+      return {} as Record<string, KitState>;
     }
   };
   useEffect(() => {
@@ -1353,8 +1361,12 @@ function ComposioToolkitBrowser({
       .map(([c]) => c);
   })();
 
-  const stateOf = (slug: string): KitState =>
-    polling.has(slug) ? "connecting" : kitStateFromStatus(connStatus[slug]);
+  // A confirmed live connection always wins; otherwise reflect the polling spinner.
+  const stateOf = (slug: string): KitState => {
+    const known = connState[slug] ?? "none";
+    if (known === "connected") return "connected";
+    return polling.has(slug) ? "connecting" : known;
+  };
 
   const q = query.trim().toLowerCase();
   const filtered = toolkits.filter((t) => {
@@ -1387,7 +1399,7 @@ function ComposioToolkitBrowser({
     while (Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 3000));
       const map = await refreshConnections();
-      if (kitStateFromStatus(map[kit.slug]) === "connected") {
+      if (map[kit.slug] === "connected") {
         onNote(`${kit.name} connesso.`);
         break;
       }
