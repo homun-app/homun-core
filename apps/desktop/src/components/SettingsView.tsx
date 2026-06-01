@@ -38,6 +38,7 @@ import {
   type CoreMemoryDashboard,
   type ProviderModelView,
   type ProviderView,
+  type CatalogPreview,
   type CatalogSkill,
   type SkillCatalogResponse,
   type RoleView,
@@ -1938,6 +1939,7 @@ function MarketplaceView({
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [previewSlug, setPreviewSlug] = useState<string | null>(null);
 
   const load = async (q: string, cat: string | null) => {
     setLoading(true);
@@ -1958,21 +1960,16 @@ function MarketplaceView({
   }, [query, category]);
 
   const installed = new Set(installedIds);
-  const repo = data?.repo ?? "openclaw/skills";
   const skills = data?.skills ?? [];
 
-  const install = async (skill: CatalogSkill) => {
-    const ok = window.confirm(
-      `Installare la skill «${skill.name}»?\n\nVerrà scaricata da ${repo}. Le skill sono codice: ` +
-        "installa solo ciò di cui ti fidi.",
-    );
-    if (!ok) return;
-    setBusy(skill.slug);
+  const install = async (slug: string, name: string) => {
+    setBusy(slug);
     setNote(null);
     try {
-      const r = await coreBridge.installRegistrySkill(repo, `skills/${skill.slug}`);
-      onInstalled(r, skill.slug);
-      setNote(`Installata: ${skill.name}.`);
+      const r = await coreBridge.catalogInstall(slug);
+      onInstalled(r, slug);
+      setPreviewSlug(null);
+      setNote(`Installata: ${name}.`);
     } catch (e) {
       setNote(`Installazione non riuscita: ${(e as Error).message}`);
     } finally {
@@ -2036,7 +2033,17 @@ function MarketplaceView({
           {skills.map((skill) => {
             const already = installed.has(skill.slug);
             return (
-              <div key={skill.slug} className="conn-kit market">
+              <div
+                key={skill.slug}
+                className="conn-kit market clickable"
+                role="button"
+                tabIndex={0}
+                title={`Dettaglio ${skill.name}`}
+                onClick={() => setPreviewSlug(skill.slug)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") setPreviewSlug(skill.slug);
+                }}
+              >
                 <span className="conn-kit-logo">
                   <span className="conn-kit-fallback">{skill.name.slice(0, 1).toUpperCase()}</span>
                 </span>
@@ -2053,7 +2060,10 @@ function MarketplaceView({
                     disabled={busy === skill.slug}
                     title={`Installa ${skill.name}`}
                     aria-label={`Installa ${skill.name}`}
-                    onClick={() => void install(skill)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void install(skill.slug, skill.name);
+                    }}
                   >
                     <Download size={15} />
                   </button>
@@ -2067,7 +2077,120 @@ function MarketplaceView({
         </div>
       )}
       {note && <p className="set-hint">{note}</p>}
+      {previewSlug && (
+        <CatalogPreviewModal
+          slug={previewSlug}
+          installed={installed.has(previewSlug)}
+          installing={busy === previewSlug}
+          onClose={() => setPreviewSlug(null)}
+          onInstall={(name) => void install(previewSlug, name)}
+        />
+      )}
     </>
+  );
+}
+
+/** Preview of a catalog skill BEFORE installing: SKILL.md rendered + file list +
+ *  security scan, with an Install action. */
+function CatalogPreviewModal({
+  slug,
+  installed,
+  installing,
+  onClose,
+  onInstall,
+}: {
+  slug: string;
+  installed: boolean;
+  installing: boolean;
+  onClose: () => void;
+  onInstall: (name: string) => void;
+}) {
+  const [preview, setPreview] = useState<CatalogPreview | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [raw, setRaw] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const p = await coreBridge.catalogPreview(slug);
+        if (!cancelled) setPreview(p);
+      } catch (e) {
+        if (!cancelled) setError((e as Error).message);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [slug]);
+
+  return (
+    <div className="cmp-modal-overlay" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="cmp-modal skl-preview" onClick={(e) => e.stopPropagation()}>
+        <div className="cmp-modal-head">
+          <span className="conn-avatar lg">
+            <Sparkles size={18} />
+          </span>
+          <div className="conn-detail-titletext">
+            <h3 className="mdl-detail-title">{preview?.name ?? slug}</h3>
+            <p className="mdl-detail-sub">
+              {preview ? `${preview.files.length} file` : "Carico l'anteprima…"}
+            </p>
+          </div>
+          <button className="mdl-icon-btn" type="button" aria-label="Chiudi" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+
+        {error && <p className="cmp-confirm-err">Anteprima non disponibile: {error}</p>}
+
+        {preview && (
+          <>
+            {preview.description && <p className="skl-desc">{preview.description}</p>}
+            <SkillSecuritySection report={preview.security} />
+            <div className="skl-md-head">
+              <span className="mdl-detail-section-label">SKILL.md</span>
+              <div className="skl-md-toggle">
+                <button
+                  type="button"
+                  className={`mdl-icon-btn ${!raw ? "active" : ""}`}
+                  onClick={() => setRaw(false)}
+                  aria-label="Anteprima"
+                >
+                  <Eye size={15} />
+                </button>
+                <button
+                  type="button"
+                  className={`mdl-icon-btn ${raw ? "active" : ""}`}
+                  onClick={() => setRaw(true)}
+                  aria-label="Sorgente"
+                >
+                  <Code2 size={15} />
+                </button>
+              </div>
+            </div>
+            {raw ? (
+              <pre className="skl-raw">{preview.body}</pre>
+            ) : (
+              <div className="skl-prose">
+                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+                  {preview.body}
+                </ReactMarkdown>
+              </div>
+            )}
+          </>
+        )}
+
+        <button
+          className="set-btn primary cmp-modal-btn"
+          type="button"
+          disabled={installed || installing || !preview}
+          onClick={() => preview && onInstall(preview.name)}
+        >
+          {installed ? "Già installata" : installing ? "Installo…" : "Installa"}
+        </button>
+      </div>
+    </div>
   );
 }
 

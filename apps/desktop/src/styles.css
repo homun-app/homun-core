@@ -4777,6 +4777,9 @@ body.resizing-drawer {
 }
 .skl-suggest:hover { background: var(--surface-muted); }
 .conn-kit.market { align-items: flex-start; }
+.conn-kit.clickable { cursor: pointer; text-align: left; }
+.conn-kit.clickable:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+.cmp-modal.skl-preview { max-width: 640px; max-height: 86vh; overflow: auto; }
 .conn-kit-meta.market {
   white-space: normal;
   line-height: 1.4;

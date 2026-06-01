@@ -804,6 +804,25 @@ async function electronSkillCatalog(
   return gatewayGetJson<SkillCatalogResponse>(`/api/skills/catalog${qs ? `?${qs}` : ""}`);
 }
 
+export interface CatalogPreview {
+  slug: string;
+  name: string;
+  description: string;
+  body: string;
+  files: string[];
+  security: SkillSecurityReport;
+}
+
+async function electronCatalogPreview(slug: string): Promise<CatalogPreview> {
+  return gatewayGetJson<CatalogPreview>(
+    `/api/skills/catalog/preview?slug=${encodeURIComponent(slug)}`,
+  );
+}
+
+async function electronCatalogInstall(slug: string): Promise<SkillsResponse> {
+  return gatewayPostJson<SkillsResponse>("/api/skills/catalog/install", { slug });
+}
+
 export interface RegistrySkill {
   id: string;
   path: string;
@@ -884,6 +903,8 @@ export const coreBridge = {
   installRegistrySkill: (repo: string, path: string) =>
     electronInstallRegistrySkill(repo, path),
   skillCatalog: (query?: string, category?: string) => electronSkillCatalog(query, category),
+  catalogPreview: (slug: string) => electronCatalogPreview(slug),
+  catalogInstall: (slug: string) => electronCatalogInstall(slug),
   chatThreads: () => chatApi.chatThreads(),
   chatMessages: (threadId: string) => chatApi.chatMessages(threadId),
   setChatMessageFeedback: (
