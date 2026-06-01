@@ -8,6 +8,8 @@ mod model_registry;
 mod skills;
 // Skill catalog (ClawHub/OpenClaw) — cached + searchable, ported from Homun.
 mod skills_catalog;
+// Static security scan for installed skills, ported from Homun.
+mod skill_security;
 mod task_registry;
 
 use axum::{
@@ -6335,9 +6337,17 @@ async fn list_skills() -> Json<SkillsResponse> {
     Json(current_skills_response())
 }
 
+/// Skill detail + a static security scan of its files.
+#[derive(Debug, Serialize)]
+struct SkillDetailResponse {
+    #[serde(flatten)]
+    detail: skills::SkillDetail,
+    security: skill_security::SecurityReport,
+}
+
 async fn skill_detail(
     Path(id): Path<String>,
-) -> Result<Json<skills::SkillDetail>, GatewayError> {
+) -> Result<Json<SkillDetailResponse>, GatewayError> {
     let dir = skills_dir().map_err(|e| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "skills_dir_unavailable",
@@ -6350,7 +6360,10 @@ async fn skill_detail(
         code: "skill_read_failed",
         message: e.to_string(),
     })? {
-        Some(detail) => Ok(Json(detail)),
+        Some(detail) => {
+            let security = skill_security::scan_dir(&dir.join(&id));
+            Ok(Json(SkillDetailResponse { detail, security }))
+        }
         None => Err(GatewayError {
             status: StatusCode::NOT_FOUND,
             code: "skill_not_found",

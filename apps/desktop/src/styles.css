@@ -4740,6 +4740,26 @@ body.resizing-drawer {
 .skl-tree-row svg { color: var(--muted); flex-shrink: 0; }
 .skl-tree-name { font-family: var(--mono, ui-monospace, monospace); font-size: 12.5px; }
 
+/* Skill — security scan */
+.skl-sec { border: 1px solid var(--line); border-radius: 12px; padding: var(--s3) var(--s4); display: flex; flex-direction: column; gap: var(--s2); }
+.skl-sec.clean { border-color: var(--green); background: var(--green-soft); }
+.skl-sec.warn { border-color: #e0a93b; background: #fdf6e8; }
+.skl-sec.high { border-color: #f0b4ad; background: #fdecea; }
+.skl-sec-head { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.skl-sec.clean .skl-sec-head svg { color: var(--green); }
+.skl-sec.warn .skl-sec-head svg { color: #b5851f; }
+.skl-sec.high .skl-sec-head svg { color: #b42318; }
+.skl-sec-badge { font-size: 12px; font-weight: 600; }
+.skl-sec-files { margin-left: auto; font-size: 11.5px; color: var(--muted); }
+.skl-sec-clean { margin: 0; font-size: 12.5px; color: var(--muted); }
+.skl-sec-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.skl-sec-warn { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; flex-wrap: wrap; }
+.skl-sec-sev { font-size: 10px; font-weight: 700; letter-spacing: 0.03em; border-radius: 5px; padding: 1px 6px; flex-shrink: 0; }
+.skl-sec-warn.critical .skl-sec-sev { color: #b42318; background: #fdecea; }
+.skl-sec-warn.warning .skl-sec-sev { color: #b5851f; background: #fdf6e8; }
+.skl-sec-desc { color: var(--text); }
+.skl-sec-warn code { font-family: var(--mono, ui-monospace, monospace); font-size: 11px; color: var(--muted); }
+
 /* Skills — GitHub marketplace */
 .skl-repo-row { display: flex; gap: var(--s2); }
 .skl-repo-row .set-input { flex: 1; }

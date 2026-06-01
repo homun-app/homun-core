@@ -44,6 +44,7 @@ import {
   type RoutingDecision,
   type SkillDetail,
   type SkillFileNode,
+  type SkillSecurityReport,
   type SkillsResponse,
   type SystemStatus,
 } from "../lib/coreBridge";
@@ -2118,6 +2119,8 @@ function SkillDetailView({
 
       {detail.description && <p className="skl-desc">{detail.description}</p>}
 
+      {detail.security && <SkillSecuritySection report={detail.security} />}
+
       <div className="skl-md-head">
         <span className="mdl-detail-section-label">SKILL.md</span>
         <div className="skl-md-toggle">
@@ -2178,6 +2181,47 @@ function SkillTree({ nodes, depth }: { nodes: SkillFileNode[]; depth: number }) 
         </li>
       ))}
     </ul>
+  );
+}
+
+function SkillSecuritySection({ report }: { report: SkillSecurityReport }) {
+  const level = report.blocked ? "high" : report.risk_score > 0 ? "warn" : "clean";
+  const label =
+    level === "high" ? "Rischio alto" : level === "warn" ? "Da rivedere" : "Pulita";
+  return (
+    <div className={`skl-sec ${level}`}>
+      <div className="skl-sec-head">
+        <ShieldCheck size={15} />
+        <strong>Sicurezza</strong>
+        <span className="skl-sec-badge">
+          {label} · {report.risk_score}/100
+        </span>
+        <span className="skl-sec-files">{report.scanned_files} file analizzati</span>
+      </div>
+      {report.warnings.length === 0 ? (
+        <p className="skl-sec-clean">Nessun pattern sospetto rilevato.</p>
+      ) : (
+        <ul className="skl-sec-list">
+          {report.warnings.slice(0, 20).map((w, i) => (
+            <li key={`${w.file}-${w.line}-${i}`} className={`skl-sec-warn ${w.severity}`}>
+              <span className="skl-sec-sev">
+                {w.severity === "critical" ? "CRITICO" : "ATTENZIONE"}
+              </span>
+              <span className="skl-sec-desc">{w.description}</span>
+              {w.file && (
+                <code>
+                  {w.file}
+                  {w.line ? `:${w.line}` : ""}
+                </code>
+              )}
+            </li>
+          ))}
+          {report.warnings.length > 20 && (
+            <li className="set-hint">+{report.warnings.length - 20} altri…</li>
+          )}
+        </ul>
+      )}
+    </div>
   );
 }
 

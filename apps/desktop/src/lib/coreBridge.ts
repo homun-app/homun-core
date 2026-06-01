@@ -732,9 +732,25 @@ export interface SkillFileNode {
   children?: SkillFileNode[];
 }
 
+export interface SkillSecurityWarning {
+  severity: "critical" | "warning";
+  category: string;
+  description: string;
+  file?: string;
+  line?: number;
+}
+
+export interface SkillSecurityReport {
+  risk_score: number;
+  blocked: boolean;
+  scanned_files: number;
+  warnings: SkillSecurityWarning[];
+}
+
 export interface SkillDetail extends SkillSummary {
   body: string;
   files: SkillFileNode[];
+  security?: SkillSecurityReport;
 }
 
 async function electronSkills(): Promise<SkillsResponse> {
