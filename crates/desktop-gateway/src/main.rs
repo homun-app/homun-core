@@ -593,6 +593,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/providers/{id}/models", post(refresh_provider_models))
         .route("/api/providers/{id}/activate", post(activate_provider))
         .route("/api/roles", get(list_roles).post(set_role))
+        .route("/api/agents", get(list_agents).post(upsert_agent_handler))
+        .route("/api/agents/{id}", delete(remove_agent_handler))
         .route("/api/tasks/queue", get(task_queue))
         .route("/api/tasks/executor", get(task_executor_status))
         .route("/api/tasks/run_next", post(run_next_task))
@@ -1076,7 +1078,9 @@ fn set_persisted_inference_api_key(key: &str) -> Result<(), String> {
 
 // ── Provider registry (Phase 1: multi-provider inference) ──────────────────
 
-use model_registry::{ProviderEntry, ProviderKind, ProviderRegistry, RoleBinding};
+use model_registry::{
+    AgentEntry, AgentModel, ProviderEntry, ProviderKind, ProviderRegistry, RoleBinding,
+};
 
 fn provider_registry_path() -> Option<PathBuf> {
     gateway_data_dir().ok().map(|dir| dir.join("providers.json"))
@@ -3184,15 +3188,59 @@ fn browser_capability_redacted_checkpoint(
 fn execute_subagent_task(
     task: &TaskRecord,
 ) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
-    // General task execution → the "orchestrator" role model.
-    let mut executor = SubagentTaskExecutor::new(router_for_role("orchestrator"));
+    // A task may be assigned to a specialized agent (Phase 3) via `lfpa_agent_id`
+    // in its input: it then runs on the agent's model and inherits the agent's
+    // persona (prepended to the contract). Otherwise → the "orchestrator" role.
+    let agent_id = task
+        .input_json
+        .get("lfpa_agent_id")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .filter(|id| !id.is_empty());
+
+    let (router, effective_task) = match agent_id
+        .as_deref()
+        .and_then(|id| load_provider_registry().agent(id).cloned().filter(|a| a.enabled))
+    {
+        Some(agent) => (
+            router_for_agent(&agent.id),
+            apply_agent_persona(task, &agent),
+        ),
+        None => (router_for_role("orchestrator"), task.clone()),
+    };
+
+    let mut executor = SubagentTaskExecutor::new(router);
     let executor_id = executor.executor_id().to_string();
-    let result = executor.execute_step(task, None).map_err(|error| LocalTaskExecutionError {
-        message: format!("subagent executor failed: {error}"),
-    })?;
+    let result = executor
+        .execute_step(&effective_task, None)
+        .map_err(|error| LocalTaskExecutionError {
+            message: format!("subagent executor failed: {error}"),
+        })?;
     // Reuse the existing ExecutorResult -> TaskExecutionOutcome bridge (the same
     // one the browser capability path uses).
     task_execution_outcome_from_executor_result(task, &executor_id, "subagent", result)
+}
+
+/// Returns a copy of the task with the agent's system prompt prepended to the
+/// subagent `contract`, so the worker model behaves per the agent's persona.
+fn apply_agent_persona(task: &TaskRecord, agent: &AgentEntry) -> TaskRecord {
+    let mut effective = task.clone();
+    if agent.system_prompt.trim().is_empty() {
+        return effective;
+    }
+    if let Some(object) = effective.input_json.as_object_mut() {
+        let existing = object
+            .get("contract")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let merged = if existing.trim().is_empty() {
+            agent.system_prompt.clone()
+        } else {
+            format!("{}\n\n{}", agent.system_prompt, existing)
+        };
+        object.insert("contract".to_string(), Value::String(merged));
+    }
+    effective
 }
 
 /// P2: executes a non-browser `capability.*` task by building a LIVE provider
@@ -5492,6 +5540,28 @@ fn build_browser_inference_router() -> ModelRouter {
     router_for_role("browser")
 }
 
+/// Router for a specialized agent (Phase 3): resolves the agent's model (explicit
+/// pin or its role), falling back to the orchestrator role if the agent is gone.
+fn router_for_agent(agent_id: &str) -> ModelRouter {
+    let registry = load_provider_registry();
+    if let Some(resolved) = registry.resolve_agent(agent_id) {
+        let api_key = provider_api_key(&resolved.provider_id).or_else(env_inference_api_key);
+        let context_window = if matches!(resolved.kind, ProviderKind::Anthropic) {
+            200_000
+        } else {
+            32_768
+        };
+        return build_router_from(
+            resolved.kind,
+            &resolved.base_url,
+            &resolved.model,
+            api_key,
+            context_window,
+        );
+    }
+    router_for_role("orchestrator")
+}
+
 /// Legacy env-only router, used when the registry has no providers yet.
 fn build_inference_router_from_env() -> ModelRouter {
     let backend = env::var("LOCAL_FIRST_INFERENCE_BACKEND")
@@ -6100,6 +6170,155 @@ async fn set_role(
     }
     save_provider_registry(&registry).map_err(provider_registry_persist_error)?;
     Ok(Json(roles_response(&registry)))
+}
+
+// ── Specialized agents endpoints (Phase 3) ────────────────────────────────
+
+#[derive(Debug, Serialize)]
+struct AgentView {
+    id: String,
+    name: String,
+    description: String,
+    system_prompt: String,
+    role: Option<String>,
+    provider_id: Option<String>,
+    model: Option<String>,
+    tools: Vec<String>,
+    enabled: bool,
+    /// What the agent currently resolves to.
+    resolved_provider_id: Option<String>,
+    resolved_model: Option<String>,
+    resolved_kind: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentsResponse {
+    agents: Vec<AgentView>,
+}
+
+fn agent_view(registry: &ProviderRegistry, agent: &AgentEntry) -> AgentView {
+    let resolved = registry.resolve_agent(&agent.id);
+    AgentView {
+        id: agent.id.clone(),
+        name: agent.name.clone(),
+        description: agent.description.clone(),
+        system_prompt: agent.system_prompt.clone(),
+        role: agent.model.role.clone(),
+        provider_id: agent.model.provider_id.clone(),
+        model: agent.model.model.clone(),
+        tools: agent.tools.clone(),
+        enabled: agent.enabled,
+        resolved_provider_id: resolved.as_ref().map(|r| r.provider_id.clone()),
+        resolved_model: resolved.as_ref().map(|r| r.model.clone()),
+        resolved_kind: resolved.as_ref().map(|r| r.kind.as_str().to_string()),
+    }
+}
+
+fn agents_response(registry: &ProviderRegistry) -> AgentsResponse {
+    AgentsResponse {
+        agents: registry
+            .agents
+            .iter()
+            .map(|agent| agent_view(registry, agent))
+            .collect(),
+    }
+}
+
+async fn list_agents() -> Json<AgentsResponse> {
+    Json(agents_response(&load_provider_registry()))
+}
+
+#[derive(Debug, Deserialize)]
+struct UpsertAgentRequest {
+    id: Option<String>,
+    name: String,
+    description: Option<String>,
+    system_prompt: Option<String>,
+    /// Model binding: a role name, or an explicit provider+model.
+    role: Option<String>,
+    provider_id: Option<String>,
+    model: Option<String>,
+    tools: Option<Vec<String>>,
+    enabled: Option<bool>,
+}
+
+async fn upsert_agent_handler(
+    Json(request): Json<UpsertAgentRequest>,
+) -> Result<Json<AgentsResponse>, GatewayError> {
+    let name = request.name.trim();
+    if name.is_empty() {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "agent_invalid",
+            message: "name must not be empty".to_string(),
+        });
+    }
+    let id = request
+        .id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(model_registry::slugify)
+        .unwrap_or_else(|| model_registry::slugify(name));
+
+    let mut registry = load_provider_registry();
+    let provider_id = request
+        .provider_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    if let Some(pid) = provider_id.as_deref()
+        && registry.get(pid).is_none()
+    {
+        return Err(GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "provider_not_found",
+            message: format!("provider {pid} non configurato"),
+        });
+    }
+
+    let agent = AgentEntry {
+        id,
+        name: name.to_string(),
+        description: request.description.unwrap_or_default(),
+        system_prompt: request.system_prompt.unwrap_or_default(),
+        model: AgentModel {
+            role: request
+                .role
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+            provider_id,
+            model: request
+                .model
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+        },
+        tools: request.tools.unwrap_or_default(),
+        enabled: request.enabled.unwrap_or(true),
+    };
+    registry.upsert_agent(agent);
+    save_provider_registry(&registry).map_err(provider_registry_persist_error)?;
+    Ok(Json(agents_response(&registry)))
+}
+
+async fn remove_agent_handler(
+    Path(id): Path<String>,
+) -> Result<Json<AgentsResponse>, GatewayError> {
+    let mut registry = load_provider_registry();
+    if !registry.remove_agent(&id) {
+        return Err(GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "agent_not_found",
+            message: format!("agente {id} inesistente"),
+        });
+    }
+    save_provider_registry(&registry).map_err(provider_registry_persist_error)?;
+    Ok(Json(agents_response(&registry)))
 }
 
 async fn runtime_model() -> Json<ActiveModelResponse> {
