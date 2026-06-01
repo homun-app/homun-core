@@ -20,6 +20,7 @@ import {
   type CoreCapabilitySnapshot,
   type CoreMemoryDashboard,
   type ProviderView,
+  type RoleView,
   type SystemStatus,
 } from "../lib/coreBridge";
 import { useSetting } from "../lib/settingsStore";
@@ -297,6 +298,7 @@ const PROVIDER_PRESETS: Array<{
 function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
   const [providers, setProviders] = useState<ProviderView[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [roles, setRoles] = useState<RoleView[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [presetId, setPresetId] = useState("ollama");
@@ -309,6 +311,14 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
     setActiveId(snapshot.active_provider_id);
   };
 
+  const reloadRoles = async () => {
+    try {
+      setRoles((await coreBridge.roles()).roles);
+    } catch {
+      /* leave empty */
+    }
+  };
+
   useEffect(() => {
     void (async () => {
       try {
@@ -316,6 +326,7 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
       } catch {
         /* leave empty */
       }
+      await reloadRoles();
     })();
   }, []);
 
@@ -325,7 +336,28 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
     try {
       const result = (await action()) as { providers: ProviderView[]; active_provider_id: string | null };
       if (result?.providers) apply(result);
+      // Provider/catalog changes can shift auto role resolution.
+      await reloadRoles();
       if (ok) setNote(ok);
+    } catch (error) {
+      setNote(`Operazione non riuscita: ${(error as Error).message}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const changeRole = async (role: string, value: string) => {
+    setBusy(`role:${role}`);
+    setNote(null);
+    try {
+      const input =
+        value === "auto"
+          ? { role }
+          : (() => {
+              const [provider_id, ...rest] = value.split("::");
+              return { role, provider_id, model: rest.join("::") };
+            })();
+      setRoles((await coreBridge.setRole(input)).roles);
     } catch (error) {
       setNote(`Operazione non riuscita: ${(error as Error).message}`);
     } finally {
@@ -337,6 +369,52 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
 
   return (
     <>
+      <div className="set-section-label">Modello per compito</div>
+      {roles.length === 0 ? (
+        <p className="set-hint">
+          Aggiungi un provider e aggiorna i suoi modelli per assegnare un modello a ogni compito.
+        </p>
+      ) : (
+        roles.map((role) => {
+          const value = role.auto
+            ? "auto"
+            : `${role.binding_provider_id}::${role.binding_model}`;
+          return (
+            <div className="set-card" key={role.key}>
+              <div className="set-card-top">
+                <span className="set-card-name">{role.label}</span>
+                <span className={`set-badge ${role.auto ? "muted" : "green"}`}>
+                  {role.auto ? "Auto" : "Manuale"}
+                </span>
+              </div>
+              <p className="set-meter-sub">{role.description}</p>
+              <select
+                className="set-input"
+                value={value}
+                disabled={busy === `role:${role.key}`}
+                onChange={(event) => changeRole(role.key, event.target.value)}
+                style={{ marginTop: "var(--s2)" }}
+              >
+                <option value="auto">
+                  Auto{role.resolved_model ? ` — ${role.resolved_model}` : ""}
+                </option>
+                {providers.map((provider) => (
+                  <optgroup key={provider.id} label={provider.label}>
+                    {provider.models.map((m) => (
+                      <option key={`${provider.id}::${m.id}`} value={`${provider.id}::${m.id}`}>
+                        {m.id}
+                        {m.vision ? " · vision" : ""}
+                        {m.modality !== "text" ? ` · ${m.modality}` : ""}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+          );
+        })
+      )}
+
       <div className="set-section-label">Provider configurati</div>
       {providers.length === 0 && (
         <p className="set-hint">Nessun provider. Aggiungine uno qui sotto (es. Ollama locale).</p>

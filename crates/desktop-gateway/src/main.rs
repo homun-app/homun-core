@@ -592,6 +592,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/providers/{id}", delete(remove_provider))
         .route("/api/providers/{id}/models", post(refresh_provider_models))
         .route("/api/providers/{id}/activate", post(activate_provider))
+        .route("/api/roles", get(list_roles).post(set_role))
         .route("/api/tasks/queue", get(task_queue))
         .route("/api/tasks/executor", get(task_executor_status))
         .route("/api/tasks/run_next", post(run_next_task))
@@ -1075,7 +1076,7 @@ fn set_persisted_inference_api_key(key: &str) -> Result<(), String> {
 
 // ── Provider registry (Phase 1: multi-provider inference) ──────────────────
 
-use model_registry::{ProviderEntry, ProviderKind, ProviderRegistry};
+use model_registry::{ProviderEntry, ProviderKind, ProviderRegistry, RoleBinding};
 
 fn provider_registry_path() -> Option<PathBuf> {
     gateway_data_dir().ok().map(|dir| dir.join("providers.json"))
@@ -1183,7 +1184,14 @@ fn effective_inference_base_url() -> Option<String> {
     })
 }
 
+/// Chat streaming config: the "orchestrator" role (general app management) wins,
+/// then the legacy active-provider/env config. Resolved fresh each call so a
+/// Settings change applies to the next chat with no restart.
 fn chat_openai_stream_config() -> Option<(String, String, Option<String>)> {
+    if let Some(resolved) = load_provider_registry().resolve_role("orchestrator") {
+        let api_key = provider_api_key(&resolved.provider_id).or_else(env_inference_api_key);
+        return Some((resolved.base_url, resolved.model, api_key));
+    }
     let base_url = effective_inference_base_url()?;
     Some((base_url, active_inference_model(), resolve_inference_api_key()))
 }
@@ -3176,8 +3184,8 @@ fn browser_capability_redacted_checkpoint(
 fn execute_subagent_task(
     task: &TaskRecord,
 ) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
-    let mut executor =
-        SubagentTaskExecutor::new(build_browser_inference_router());
+    // General task execution → the "orchestrator" role model.
+    let mut executor = SubagentTaskExecutor::new(router_for_role("orchestrator"));
     let executor_id = executor.executor_id().to_string();
     let result = executor.execute_step(task, None).map_err(|error| LocalTaskExecutionError {
         message: format!("subagent executor failed: {error}"),
@@ -5378,6 +5386,12 @@ fn resolve_inference_api_key() -> Option<String> {
     if let Some(key) = persisted_inference_api_key() {
         return Some(key);
     }
+    env_inference_api_key()
+}
+
+/// API key from the environment only (0600 key file preferred over the var).
+/// Used as the per-provider fallback for role routing.
+fn env_inference_api_key() -> Option<String> {
     if let Ok(path) = env::var("LOCAL_FIRST_INFERENCE_API_KEY_FILE")
         && !path.trim().is_empty()
     {
@@ -5393,7 +5407,6 @@ fn resolve_inference_api_key() -> Option<String> {
             }
         }
     }
-
     let from_env = env::var("LOCAL_FIRST_INFERENCE_API_KEY")
         .ok()
         .map(|value| value.trim().to_string())
@@ -5405,22 +5418,20 @@ fn resolve_inference_api_key() -> Option<String> {
     Some(from_env)
 }
 
-/// Inference router for the browser loop. Uses the configured provider (the
-/// persisted/external one wins), Anthropic when selected, OpenAI-compatible
-/// otherwise. No MLX/Gemma fallback — that local runtime was removed.
-fn build_browser_inference_router() -> ModelRouter {
-    let backend = env::var("LOCAL_FIRST_INFERENCE_BACKEND")
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-
-    if backend == "anthropic"
-        && let Some(api_key) = resolve_inference_api_key()
+/// Builds a single-provider `ModelRouter` for an explicit (kind, base_url, model).
+/// Locality is inferred from the endpoint (loopback → local) and kind (Anthropic
+/// is always cloud), which also picks the privacy policy.
+fn build_router_from(
+    kind: ProviderKind,
+    base_url: &str,
+    model: &str,
+    api_key: Option<String>,
+    context_window: u32,
+) -> ModelRouter {
+    let is_local = base_url.contains("127.0.0.1") || base_url.contains("localhost");
+    if matches!(kind, ProviderKind::Anthropic)
+        && let Some(api_key) = api_key.clone()
     {
-        let model = active_inference_model();
-        let context_window = env::var("LOCAL_FIRST_INFERENCE_CONTEXT_WINDOW")
-            .ok()
-            .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(200_000);
         let descriptor = CapabilityDescriptor {
             id: format!("anthropic:{model}"),
             locality: Locality::Cloud,
@@ -5429,45 +5440,91 @@ fn build_browser_inference_router() -> ModelRouter {
             context_window,
             approx_tokens_per_second: None,
         };
-        let provider = AnthropicProvider::new(descriptor, model, api_key);
+        let provider = AnthropicProvider::new(descriptor, model.to_string(), api_key);
         return ModelRouter::new(PrivacyPolicy::allowing_cloud()).with_provider(Box::new(provider));
     }
+    let locality = if is_local { Locality::Local } else { Locality::Cloud };
+    let descriptor = CapabilityDescriptor {
+        id: format!("openai-compat:{model}"),
+        locality,
+        supports_vision: true,
+        supports_tools: true,
+        context_window,
+        approx_tokens_per_second: None,
+    };
+    let provider = OpenAiCompatProvider::new(descriptor, base_url.to_string(), model.to_string(), api_key);
+    let policy = if is_local {
+        PrivacyPolicy::local_only()
+    } else {
+        PrivacyPolicy::allowing_cloud()
+    };
+    ModelRouter::new(policy).with_provider(Box::new(provider))
+}
 
-    // Default: the configured OpenAI-compatible provider. The observe-act loop
-    // wants a fast model; allow a dedicated planner model, else the chat model.
+/// Builds the inference router for a named role (Phase 2). Resolves the role
+/// through the registry (manual binding or capability auto-match), falling back
+/// to the legacy env/active-provider behavior when no provider is configured.
+fn router_for_role(role: &str) -> ModelRouter {
+    let registry = load_provider_registry();
+    if let Some(resolved) = registry.resolve_role(role) {
+        let api_key = provider_api_key(&resolved.provider_id).or_else(env_inference_api_key);
+        let context_window = env::var("LOCAL_FIRST_INFERENCE_CONTEXT_WINDOW")
+            .ok()
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(if matches!(resolved.kind, ProviderKind::Anthropic) {
+                200_000
+            } else {
+                32_768
+            });
+        return build_router_from(
+            resolved.kind,
+            &resolved.base_url,
+            &resolved.model,
+            api_key,
+            context_window,
+        );
+    }
+    build_inference_router_from_env()
+}
+
+/// Browser-loop router (Phase 2): the "browser" role.
+fn build_browser_inference_router() -> ModelRouter {
+    router_for_role("browser")
+}
+
+/// Legacy env-only router, used when the registry has no providers yet.
+fn build_inference_router_from_env() -> ModelRouter {
+    let backend = env::var("LOCAL_FIRST_INFERENCE_BACKEND")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let context_window = env::var("LOCAL_FIRST_INFERENCE_CONTEXT_WINDOW")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok());
+    if backend == "anthropic"
+        && let Some(api_key) = resolve_inference_api_key()
+    {
+        let model = active_inference_model();
+        return build_router_from(
+            ProviderKind::Anthropic,
+            "https://api.anthropic.com",
+            &model,
+            Some(api_key),
+            context_window.unwrap_or(200_000),
+        );
+    }
     let base_url =
         effective_inference_base_url().unwrap_or_else(|| "http://127.0.0.1:11434/v1".to_string());
     let model = env::var("LOCAL_FIRST_BROWSER_PLANNER_MODEL")
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(active_inference_model);
-    let api_key = resolve_inference_api_key();
-    let context_window = env::var("LOCAL_FIRST_INFERENCE_CONTEXT_WINDOW")
-        .ok()
-        .and_then(|value| value.parse::<u32>().ok())
-        .unwrap_or(32_768);
-    let is_cloud = env::var("LOCAL_FIRST_INFERENCE_CLOUD")
-        .map(|value| value == "1" || value.to_ascii_lowercase() == "true")
-        .unwrap_or(false);
-    let descriptor = CapabilityDescriptor {
-        id: format!("openai-compat:{model}"),
-        locality: if is_cloud {
-            Locality::Cloud
-        } else {
-            Locality::Local
-        },
-        supports_vision: true,
-        supports_tools: true,
-        context_window,
-        approx_tokens_per_second: None,
-    };
-    let provider = OpenAiCompatProvider::new(descriptor, base_url, model, api_key);
-    let policy = if is_cloud {
-        PrivacyPolicy::allowing_cloud()
-    } else {
-        PrivacyPolicy::local_only()
-    };
-    ModelRouter::new(policy).with_provider(Box::new(provider))
+    build_router_from(
+        ProviderKind::OpenaiCompat,
+        &base_url,
+        &model,
+        resolve_inference_api_key(),
+        context_window.unwrap_or(32_768),
+    )
 }
 
 #[derive(Debug, Serialize)]
@@ -5938,6 +5995,111 @@ fn provider_registry_persist_error(message: String) -> GatewayError {
         code: "provider_registry_persist_failed",
         message,
     }
+}
+
+// ── Role → model endpoints (Phase 2) ──────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+struct RoleView {
+    key: &'static str,
+    label: &'static str,
+    description: &'static str,
+    /// True when the role resolves via capability auto-match (no manual pin).
+    auto: bool,
+    /// The user's explicit pin, if any.
+    binding_provider_id: Option<String>,
+    binding_model: Option<String>,
+    /// What the role actually resolves to right now.
+    resolved_provider_id: Option<String>,
+    resolved_model: Option<String>,
+    resolved_kind: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct RolesResponse {
+    roles: Vec<RoleView>,
+}
+
+fn roles_response(registry: &ProviderRegistry) -> RolesResponse {
+    let roles = model_registry::ROLES
+        .iter()
+        .map(|info| {
+            let binding = registry.roles.get(info.key);
+            let resolved = registry.resolve_role(info.key);
+            RoleView {
+                key: info.key,
+                label: info.label,
+                description: info.description,
+                auto: resolved.as_ref().map(|r| r.auto).unwrap_or(true),
+                binding_provider_id: binding.and_then(|b| b.provider_id.clone()),
+                binding_model: binding.and_then(|b| b.model.clone()),
+                resolved_provider_id: resolved.as_ref().map(|r| r.provider_id.clone()),
+                resolved_model: resolved.as_ref().map(|r| r.model.clone()),
+                resolved_kind: resolved.as_ref().map(|r| r.kind.as_str().to_string()),
+            }
+        })
+        .collect();
+    RolesResponse { roles }
+}
+
+async fn list_roles() -> Json<RolesResponse> {
+    Json(roles_response(&load_provider_registry()))
+}
+
+#[derive(Debug, Deserialize)]
+struct SetRoleRequest {
+    role: String,
+    /// Both present → manual pin; either missing/empty → auto.
+    provider_id: Option<String>,
+    model: Option<String>,
+}
+
+async fn set_role(
+    Json(request): Json<SetRoleRequest>,
+) -> Result<Json<RolesResponse>, GatewayError> {
+    if !model_registry::ROLES.iter().any(|r| r.key == request.role) {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "role_unknown",
+            message: format!("ruolo sconosciuto: {}", request.role),
+        });
+    }
+    let provider_id = request
+        .provider_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let model = request
+        .model
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    let mut registry = load_provider_registry();
+    match (provider_id, model) {
+        (Some(pid), Some(model)) => {
+            if registry.get(pid).is_none() {
+                return Err(GatewayError {
+                    status: StatusCode::NOT_FOUND,
+                    code: "provider_not_found",
+                    message: format!("provider {pid} non configurato"),
+                });
+            }
+            registry.roles.insert(
+                request.role.clone(),
+                RoleBinding {
+                    provider_id: Some(pid.to_string()),
+                    model: Some(model.to_string()),
+                },
+            );
+        }
+        // Anything else clears the pin → auto.
+        _ => {
+            registry.roles.remove(&request.role);
+        }
+    }
+    save_provider_registry(&registry).map_err(provider_registry_persist_error)?;
+    Ok(Json(roles_response(&registry)))
 }
 
 async fn runtime_model() -> Json<ActiveModelResponse> {

@@ -523,6 +523,36 @@ async function electronRefreshProviderModels(id: string): Promise<ProvidersRespo
   );
 }
 
+// ── Role → model bindings (per-task model) ────────────────────────────────
+
+export interface RoleView {
+  key: string;
+  label: string;
+  description: string;
+  auto: boolean;
+  binding_provider_id: string | null;
+  binding_model: string | null;
+  resolved_provider_id: string | null;
+  resolved_model: string | null;
+  resolved_kind: string | null;
+}
+
+export interface RolesResponse {
+  roles: RoleView[];
+}
+
+async function electronRoles(): Promise<RolesResponse> {
+  return gatewayGetJson<RolesResponse>("/api/roles");
+}
+
+async function electronSetRole(input: {
+  role: string;
+  provider_id?: string;
+  model?: string;
+}): Promise<RolesResponse> {
+  return gatewayPostJson<RolesResponse>("/api/roles", input);
+}
+
 async function electronSystemStatus(): Promise<SystemStatus> {
   return gatewayGetJson<SystemStatus>("/api/system/status");
 }
@@ -601,6 +631,9 @@ export const coreBridge = {
   removeProvider: (id: string) => electronRemoveProvider(id),
   activateProvider: (id: string) => electronActivateProvider(id),
   refreshProviderModels: (id: string) => electronRefreshProviderModels(id),
+  roles: () => electronRoles(),
+  setRole: (input: { role: string; provider_id?: string; model?: string }) =>
+    electronSetRole(input),
   containedComputerLive: () => electronContainedComputerLive(),
   systemStatus: () => electronSystemStatus(),
   closeAllBrowsers: () => electronCloseAllBrowsers(),
