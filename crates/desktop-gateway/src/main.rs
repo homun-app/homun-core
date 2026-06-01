@@ -6187,9 +6187,27 @@ async fn refresh_provider_models(
     let ids = model_registry::parse_models_response(entry.kind, &body);
 
     if let Some(stored) = registry.get_mut(&id) {
+        // Preserve the user's manual profile edits across a catalog refresh;
+        // re-infer everything else (so heuristic fixes apply).
+        let user_profiles: std::collections::HashMap<String, model_registry::ModelProfile> = stored
+            .models
+            .iter()
+            .filter_map(|m| {
+                m.profile
+                    .as_ref()
+                    .filter(|p| p.source == "user")
+                    .map(|p| (m.id.clone(), p.clone()))
+            })
+            .collect();
         stored.models = ids
             .iter()
-            .map(|model_id| model_registry::ModelEntry::inferred(model_id))
+            .map(|model_id| {
+                let mut entry = model_registry::ModelEntry::inferred(model_id);
+                if let Some(profile) = user_profiles.get(model_id) {
+                    entry.profile = Some(profile.clone());
+                }
+                entry
+            })
             .collect();
         stored.models_fetched_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
