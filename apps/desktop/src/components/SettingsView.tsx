@@ -31,6 +31,7 @@ import rehypeSanitize from "rehype-sanitize";
 import {
   coreBridge,
   type ActiveModelInfo,
+  type AllowedTool,
   type ComposioToolkit,
   type ContainedComputerLive,
   type CoreCapabilitySnapshot,
@@ -1291,14 +1292,72 @@ function ComposioDetail({
           </div>
         </div>
       ) : (
-        <ComposioToolkitBrowser
-          toolkits={toolkits}
-          loading={loadingKits}
-          onNote={onNote}
-          onConnectedCount={setConnectedCount}
-        />
+        <>
+          <AllowedToolsSection />
+          <ComposioToolkitBrowser
+            toolkits={toolkits}
+            loading={loadingKits}
+            onNote={onNote}
+            onConnectedCount={setConnectedCount}
+          />
+        </>
       )}
     </>
+  );
+}
+
+/** Tools the user marked "always allow": run without per-call confirmation.
+ *  Listed here so the user can revoke them. */
+function AllowedToolsSection() {
+  const [tools, setTools] = useState<AllowedTool[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        setTools(await coreBridge.composioAllowedTools());
+      } catch {
+        /* leave empty */
+      }
+    })();
+  }, []);
+
+  if (tools.length === 0) return null;
+
+  const revoke = async (slug: string) => {
+    setBusy(slug);
+    try {
+      setTools(await coreBridge.composioRevokeTool(slug));
+    } catch {
+      /* keep previous */
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="cmp-allowed">
+      <div className="mdl-detail-section-label">Sempre consentiti (eseguiti senza conferma)</div>
+      <div className="cmp-allowed-list">
+        {tools.map((tool) => (
+          <div key={tool.slug} className="cmp-allowed-row">
+            <ShieldCheck size={14} />
+            <span className="cmp-allowed-name">{tool.name}</span>
+            <code className="cmp-allowed-slug">{tool.slug}</code>
+            <button
+              className="mdl-icon-btn"
+              type="button"
+              disabled={busy === tool.slug}
+              title={`Revoca: ${tool.name} chiederà di nuovo conferma`}
+              aria-label={`Revoca ${tool.name}`}
+              onClick={() => void revoke(tool.slug)}
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
