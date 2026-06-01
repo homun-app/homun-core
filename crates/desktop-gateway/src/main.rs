@@ -1410,10 +1410,13 @@ più opzioni, non solo una. Rispondi in italiano, chiaro e ordinato.",
     } else {
         format!(
             "{system}\n\nSTRUMENTI SERVIZI COLLEGATI: l'utente ha collegato dei servizi (es. Gmail, \
-Google Calendar). Per accedervi NON dire che non puoi: chiama lo strumento `find_connected_tools` \
-con una query sull'intento (es. \"unread emails\", \"calendar events today\") per scoprire lo \
-strumento adatto, poi CHIAMA lo strumento trovato. Le azioni di SCRITTURA (inviare, eliminare, \
-modificare) richiedono una conferma esplicita dell'utente."
+Google Calendar). Per accedervi NON dire che non puoi: chiama `find_connected_tools` con una query \
+sull'intento (es. \"unread emails\", \"send email\", \"calendar events today\") per scoprire lo \
+strumento adatto, poi CHIAMA lo strumento trovato con gli argomenti completi.\n\
+AZIONI DI SCRITTURA (inviare/eliminare/modificare): CHIAMA comunque lo strumento con gli argomenti \
+completi — il sistema mostrerà AUTOMATICAMENTE all'utente una card di conferma prima di eseguire. \
+NON rifiutare, NON dire che non puoi inviare e NON chiedere all'utente di farlo manualmente: il tuo \
+compito è chiamare lo strumento giusto, alla conferma pensa l'interfaccia."
         )
     };
     let system = system.as_str();
