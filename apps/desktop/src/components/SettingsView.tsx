@@ -1,15 +1,23 @@
 import {
+  Boxes,
   Check,
   Copy,
   Cpu,
   ExternalLink,
+  Eye,
+  EyeOff,
   Globe,
+  ListChecks,
   MonitorPlay,
   Play,
   Plus,
+  RefreshCw,
   RotateCcw,
+  Server,
   ShieldCheck,
+  Sparkles,
   Square,
+  Trash2,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
@@ -303,10 +311,17 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
   const [decisions, setDecisions] = useState<RoutingDecision[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  // Selected left-rail entry: "roles" | "decisions" | "add" | a provider id.
+  const [selected, setSelected] = useState<string>("roles");
+  // Add-provider form.
   const [presetId, setPresetId] = useState("ollama");
   const [label, setLabel] = useState("");
   const [baseUrl, setBaseUrl] = useState("http://127.0.0.1:11434/v1");
   const [apiKey, setApiKey] = useState("");
+  // Per-provider detail edits.
+  const [editBaseUrl, setEditBaseUrl] = useState("");
+  const [editKey, setEditKey] = useState("");
+  const [showKey, setShowKey] = useState(false);
 
   const apply = (snapshot: { providers: ProviderView[]; active_provider_id: string | null }) => {
     setProviders(snapshot.providers);
@@ -324,7 +339,14 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
   useEffect(() => {
     void (async () => {
       try {
-        apply(await coreBridge.providers());
+        const snapshot = await coreBridge.providers();
+        apply(snapshot);
+        if (snapshot.providers.length > 0) {
+          const initialId = snapshot.active_provider_id ?? snapshot.providers[0].id;
+          setSelected(initialId);
+          const initial = snapshot.providers.find((p) => p.id === initialId);
+          if (initial) setEditBaseUrl(initial.base_url);
+        }
       } catch {
         /* leave empty */
       }
@@ -343,7 +365,6 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
     try {
       const result = (await action()) as { providers: ProviderView[]; active_provider_id: string | null };
       if (result?.providers) apply(result);
-      // Provider/catalog changes can shift auto role resolution.
       await reloadRoles();
       if (ok) setNote(ok);
     } catch (error) {
@@ -372,341 +393,468 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
     }
   };
 
+  const selectProvider = (provider: ProviderView) => {
+    setSelected(provider.id);
+    setEditBaseUrl(provider.base_url);
+    setEditKey("");
+    setShowKey(false);
+    setNote(null);
+  };
+
   const preset = PROVIDER_PRESETS.find((p) => p.id === presetId) ?? PROVIDER_PRESETS[0];
+  const selectedProvider = providers.find((p) => p.id === selected);
+
+  // Options for a model picker: "Auto" + per-provider optgroups (used by roles).
+  const modelOptions = (
+    <>
+      {providers.map((provider) => (
+        <optgroup key={provider.id} label={provider.label}>
+          {provider.models.map((m) => (
+            <option key={`${provider.id}::${m.id}`} value={`${provider.id}::${m.id}`}>
+              {m.id}
+              {m.tier ? ` · ${m.tier}` : ""}
+              {m.vision ? " · vision" : ""}
+            </option>
+          ))}
+        </optgroup>
+      ))}
+    </>
+  );
 
   return (
-    <>
-      <div className="set-section-label">Modello per compito</div>
-      {roles.length === 0 ? (
-        <p className="set-hint">
-          Aggiungi un provider e aggiorna i suoi modelli per assegnare un modello a ogni compito.
-        </p>
-      ) : (
-        roles.map((role) => {
-          const value = role.auto
-            ? "auto"
-            : `${role.binding_provider_id}::${role.binding_model}`;
-          return (
-            <div className="set-card" key={role.key}>
-              <div className="set-card-top">
-                <span className="set-card-name">{role.label}</span>
-                <span className={`set-badge ${role.auto ? "muted" : "green"}`}>
-                  {role.auto ? "Auto" : "Manuale"}
-                </span>
-              </div>
-              <p className="set-meter-sub">{role.description}</p>
+    <div className="mdl-layout">
+      <aside className="mdl-rail" aria-label="Sezioni modelli">
+        <div className="mdl-rail-group">Routing</div>
+        <button
+          className={`mdl-rail-item ${selected === "roles" ? "active" : ""}`}
+          type="button"
+          onClick={() => setSelected("roles")}
+        >
+          <ListChecks size={16} />
+          <span className="mdl-rail-name">Modello per compito</span>
+        </button>
+        <button
+          className={`mdl-rail-item ${selected === "decisions" ? "active" : ""}`}
+          type="button"
+          onClick={() => setSelected("decisions")}
+        >
+          <Sparkles size={16} />
+          <span className="mdl-rail-name">Decisioni di routing</span>
+          {decisions.length > 0 && <em className="mdl-rail-badge">{decisions.length}</em>}
+        </button>
+
+        <div className="mdl-rail-group">Provider</div>
+        {providers.map((provider) => (
+          <button
+            key={provider.id}
+            className={`mdl-rail-item ${selected === provider.id ? "active" : ""}`}
+            type="button"
+            onClick={() => selectProvider(provider)}
+          >
+            <span className="mdl-rail-avatar">{provider.label.slice(0, 1).toUpperCase()}</span>
+            <span className="mdl-rail-name">{provider.label}</span>
+            {provider.id === activeId && <span className="mdl-rail-dot" title="Attivo" />}
+          </button>
+        ))}
+        {providers.length === 0 && <p className="mdl-rail-empty">Nessun provider</p>}
+        <button
+          className={`mdl-rail-item add ${selected === "add" ? "active" : ""}`}
+          type="button"
+          onClick={() => setSelected("add")}
+        >
+          <Plus size={16} />
+          <span className="mdl-rail-name">Aggiungi provider</span>
+        </button>
+      </aside>
+
+      <section className="mdl-detail">
+        {/* ── Roles ───────────────────────────────────────────────── */}
+        {selected === "roles" && (
+          <>
+            <div className="mdl-detail-head">
+              <h3>Modello per compito</h3>
+              <p className="mdl-detail-sub">
+                Il router sceglie automaticamente il modello migliore tra quelli idonei; puoi
+                forzarne uno.
+              </p>
+            </div>
+            {roles.length === 0 ? (
+              <p className="set-hint">Aggiungi un provider e aggiorna i suoi modelli.</p>
+            ) : (
+              roles.map((role) => {
+                const value = role.auto ? "auto" : `${role.binding_provider_id}::${role.binding_model}`;
+                return (
+                  <div className="mdl-row" key={role.key}>
+                    <div className="mdl-row-main">
+                      <div className="mdl-row-top">
+                        <strong>{role.label}</strong>
+                        <span className={`set-badge ${role.auto ? "muted" : "green"}`}>
+                          {role.auto ? "Auto" : "Manuale"}
+                        </span>
+                      </div>
+                      <p className="mdl-detail-sub">{role.description}</p>
+                    </div>
+                    <select
+                      className="set-input mdl-row-select"
+                      value={value}
+                      disabled={busy === `role:${role.key}`}
+                      onChange={(event) => changeRole(role.key, event.target.value)}
+                    >
+                      <option value="auto">
+                        Auto{role.resolved_model ? ` — ${role.resolved_model}` : ""}
+                      </option>
+                      {modelOptions}
+                    </select>
+                  </div>
+                );
+              })
+            )}
+          </>
+        )}
+
+        {/* ── Decisions ───────────────────────────────────────────── */}
+        {selected === "decisions" && (
+          <>
+            <div className="mdl-detail-head">
+              <h3>Decisioni di routing</h3>
+              <p className="mdl-detail-sub">
+                Perché il router ha scelto un modello per ogni task (ultime {decisions.length}).
+              </p>
+            </div>
+            {decisions.length === 0 ? (
+              <p className="set-hint">Nessuna decisione ancora. Esegui un task per popolarle.</p>
+            ) : (
+              decisions.map((d, i) => (
+                <div className="mdl-row" key={i}>
+                  <div className="mdl-row-main">
+                    <div className="mdl-row-top">
+                      <strong>{d.chosen_model}</strong>
+                      <span className={`set-badge ${d.stage === "semantic" ? "green" : "muted"}`}>
+                        {d.stage === "semantic"
+                          ? "semantico"
+                          : d.stage === "single_candidate"
+                            ? "unico"
+                            : d.stage === "heuristic_disabled"
+                              ? "euristico"
+                              : "fallback"}
+                      </span>
+                      <span className="mdl-row-meta">{d.role} · {d.candidates.length} candidati</span>
+                    </div>
+                    <p className="mdl-detail-sub">«{d.goal}»</p>
+                  </div>
+                </div>
+              ))
+            )}
+          </>
+        )}
+
+        {/* ── Add provider ────────────────────────────────────────── */}
+        {selected === "add" && (
+          <>
+            <div className="mdl-detail-head">
+              <h3>Aggiungi provider</h3>
+              <p className="mdl-detail-sub">
+                Qualsiasi endpoint OpenAI-compatibile, Anthropic o Ollama locale. La chiave è cifrata
+                nel secret store, mai mostrata.
+              </p>
+            </div>
+            <div className="mdl-field">
+              <label>Tipo</label>
               <select
                 className="set-input"
-                value={value}
-                disabled={busy === `role:${role.key}`}
-                onChange={(event) => changeRole(role.key, event.target.value)}
-                style={{ marginTop: "var(--s2)" }}
+                value={presetId}
+                onChange={(event) => {
+                  const next = PROVIDER_PRESETS.find((p) => p.id === event.target.value);
+                  setPresetId(event.target.value);
+                  if (next && next.id !== "custom") {
+                    setBaseUrl(next.baseUrl);
+                    if (!label) setLabel(next.label);
+                  }
+                }}
               >
-                <option value="auto">
-                  Auto{role.resolved_model ? ` — ${role.resolved_model}` : ""}
-                </option>
-                {providers.map((provider) => (
-                  <optgroup key={provider.id} label={provider.label}>
-                    {provider.models.map((m) => (
-                      <option key={`${provider.id}::${m.id}`} value={`${provider.id}::${m.id}`}>
-                        {m.id}
-                        {m.tier ? ` · ${m.tier}` : ""}
-                        {m.vision ? " · vision" : ""}
-                        {m.modality !== "text" ? ` · ${m.modality}` : ""}
-                      </option>
-                    ))}
-                  </optgroup>
+                {PROVIDER_PRESETS.map((p) => (
+                  <option key={p.id} value={p.id}>{p.label}</option>
                 ))}
               </select>
             </div>
-          );
-        })
-      )}
-
-      <div className="set-section-label">Provider configurati</div>
-      {providers.length === 0 && (
-        <p className="set-hint">Nessun provider. Aggiungine uno qui sotto (es. Ollama locale).</p>
-      )}
-      {providers.map((provider) => {
-        const isActive = provider.id === activeId;
-        const acting = busy === provider.id;
-        return (
-          <div className="set-card" key={provider.id}>
-            <div className="set-card-top">
-              <span className="set-card-name">{provider.label}</span>
-              <span className={`set-badge ${isActive ? "green" : "muted"}`}>
-                {isActive ? "Attivo" : provider.kind}
-              </span>
+            <div className="mdl-field">
+              <label>Nome</label>
+              <input className="set-input" placeholder={preset.label} value={label} onChange={(e) => setLabel(e.target.value)} />
             </div>
-            <p className="set-meter-sub" style={{ wordBreak: "break-all" }}>
-              {provider.base_url}
-              {provider.has_key ? " · chiave configurata" : " · senza chiave"}
-            </p>
-            <div className="set-card-divider" />
-            <div className="set-field-label">Modello</div>
-            <select
-              className="set-input"
-              value={provider.active_model ?? ""}
-              disabled={acting}
-              onChange={(event) =>
-                run(provider.id, () =>
-                  coreBridge.upsertProvider({
-                    id: provider.id,
-                    label: provider.label,
-                    kind: provider.kind,
-                    base_url: provider.base_url,
-                    active_model: event.target.value,
-                  }),
+            <div className="mdl-field">
+              <label>Endpoint (base URL)</label>
+              <input className="set-input" placeholder="https://api.openai.com/v1" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
+            </div>
+            <div className="mdl-field">
+              <label>API key (opzionale per endpoint locali)</label>
+              <input className="set-input" type="password" placeholder="sk-…" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+            </div>
+            <button
+              className="set-btn primary"
+              type="button"
+              style={{ alignSelf: "flex-start" }}
+              disabled={busy === "add" || !baseUrl.trim()}
+              onClick={() =>
+                run(
+                  "add",
+                  async () => {
+                    const result = await coreBridge.upsertProvider({
+                      label: (label || preset.label).trim(),
+                      kind: preset.kind,
+                      base_url: baseUrl.trim(),
+                      ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
+                    });
+                    setApiKey("");
+                    const added = result.providers.find((p) => p.base_url === baseUrl.trim().replace(/\/$/, ""));
+                    if (added) {
+                      setSelected(added.id);
+                      try {
+                        return await coreBridge.refreshProviderModels(added.id);
+                      } catch {
+                        return result;
+                      }
+                    }
+                    return result;
+                  },
+                  "Provider aggiunto.",
                 )
               }
-              style={{ marginBottom: "var(--s3)" }}
             >
-              {provider.models.length === 0 && <option value="">— nessun modello: aggiorna —</option>}
-              {provider.active_model &&
-                !provider.models.some((m) => m.id === provider.active_model) && (
-                  <option value={provider.active_model}>{provider.active_model}</option>
-                )}
-              {provider.models.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.id}
-                  {m.tier ? ` · ${m.tier}` : ""}
-                  {m.modality !== "text" ? ` · ${m.modality}` : ""}
-                  {m.vision ? " · vision" : ""}
-                </option>
-              ))}
-            </select>
-            <div className="set-card-actions" style={{ display: "flex", gap: "var(--s2)", flexWrap: "wrap" }}>
-              <button
-                className="set-btn"
-                type="button"
-                disabled={acting}
-                onClick={() =>
-                  run(
-                    provider.id,
-                    () => coreBridge.refreshProviderModels(provider.id),
-                    `Catalogo aggiornato per ${provider.label}.`,
-                  )
-                }
-              >
-                {acting ? "…" : "Aggiorna modelli"}
-              </button>
-              {provider.models.some((m) => m.profile_source === "inferred" || !m.profile_source) && (
-                <button
-                  className="set-btn"
-                  type="button"
-                  disabled={acting}
-                  title="Un modello descrive i modelli senza profilo (in cosa eccellono)"
-                  onClick={() =>
-                    run(
-                      provider.id,
-                      () => coreBridge.generateProviderProfiles(provider.id),
-                      `Profili generati per ${provider.label}.`,
-                    )
-                  }
-                >
-                  {acting ? "…" : "Genera profili"}
-                </button>
-              )}
-              {!isActive && (
-                <button
-                  className="set-btn"
-                  type="button"
-                  disabled={acting}
-                  onClick={() => run(provider.id, () => coreBridge.activateProvider(provider.id))}
-                >
-                  Imposta attivo
-                </button>
-              )}
-              <button
-                className="set-btn danger"
-                type="button"
-                disabled={acting}
-                onClick={() => run(provider.id, () => coreBridge.removeProvider(provider.id))}
-              >
-                Rimuovi
-              </button>
-            </div>
-            {provider.models.length > 0 && (
-              <details style={{ marginTop: "var(--s3)" }}>
-                <summary className="set-field-label" style={{ cursor: "pointer" }}>
-                  Profili modello — in cosa eccelle ({provider.models.length})
-                </summary>
-                <div style={{ maxHeight: 240, overflowY: "auto", marginTop: "var(--s2)" }}>
-                  {provider.models.map((m) => (
-                    <div
-                      key={m.id}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "var(--s2)",
-                        padding: "2px 0",
-                      }}
-                    >
-                      <span style={{ flex: 1, fontSize: 12, wordBreak: "break-all" }}>
-                        {m.id}
-                        {m.profile_source && m.profile_source !== "user" ? (
-                          <em style={{ opacity: 0.5 }}> · {m.profile_source}</em>
-                        ) : m.profile_source === "user" ? (
-                          <em style={{ opacity: 0.6 }}> · tuo</em>
-                        ) : null}
-                      </span>
-                      <select
-                        className="set-input"
-                        style={{ width: 130, fontSize: 12 }}
-                        value={m.tier ?? "balanced"}
-                        disabled={acting}
-                        onChange={(event) =>
-                          run(provider.id, () =>
-                            coreBridge.setModelProfile({
-                              provider_id: provider.id,
-                              model: m.id,
-                              tier: event.target.value,
-                            }),
-                          )
-                        }
-                      >
-                        <option value="fast">fast</option>
-                        <option value="balanced">balanced</option>
-                        <option value="reasoning">reasoning</option>
-                      </select>
-                    </div>
-                  ))}
-                </div>
-              </details>
-            )}
-          </div>
-        );
-      })}
+              {busy === "add" ? "Salvataggio…" : "Aggiungi provider"}
+            </button>
+          </>
+        )}
 
-      <div className="set-section-label">Aggiungi provider</div>
-      <div className="set-rows" style={{ padding: "var(--s4) var(--s5)" }}>
-        <div className="set-field-label">Tipo</div>
+        {/* ── Provider detail ─────────────────────────────────────── */}
+        {selectedProvider && (
+          <ProviderDetailView
+            key={selectedProvider.id}
+            provider={selectedProvider}
+            isActive={selectedProvider.id === activeId}
+            busy={busy}
+            editBaseUrl={editBaseUrl}
+            setEditBaseUrl={setEditBaseUrl}
+            editKey={editKey}
+            setEditKey={setEditKey}
+            showKey={showKey}
+            setShowKey={setShowKey}
+            contextWindow={model?.context_window ?? null}
+            onActivate={() => run(selectedProvider.id, () => coreBridge.activateProvider(selectedProvider.id))}
+            onRemove={() => {
+              const id = selectedProvider.id;
+              setSelected("roles");
+              void run(id, () => coreBridge.removeProvider(id));
+            }}
+            onRefreshModels={() =>
+              run(selectedProvider.id, () => coreBridge.refreshProviderModels(selectedProvider.id), "Catalogo aggiornato.")
+            }
+            onGenerateProfiles={() =>
+              run(selectedProvider.id, () => coreBridge.generateProviderProfiles(selectedProvider.id), "Profili generati.")
+            }
+            onSaveConnection={() =>
+              run(
+                selectedProvider.id,
+                () =>
+                  coreBridge.upsertProvider({
+                    id: selectedProvider.id,
+                    label: selectedProvider.label,
+                    kind: selectedProvider.kind,
+                    base_url: (editBaseUrl || selectedProvider.base_url).trim(),
+                    ...(editKey.trim() ? { api_key: editKey.trim() } : {}),
+                  }),
+                "Provider salvato.",
+              )
+            }
+            onSetModel={(modelId) =>
+              run(selectedProvider.id, () =>
+                coreBridge.upsertProvider({
+                  id: selectedProvider.id,
+                  label: selectedProvider.label,
+                  kind: selectedProvider.kind,
+                  base_url: selectedProvider.base_url,
+                  active_model: modelId,
+                }),
+              )
+            }
+            onSetTier={(modelId, tier) =>
+              run(selectedProvider.id, () =>
+                coreBridge.setModelProfile({ provider_id: selectedProvider.id, model: modelId, tier }),
+              )
+            }
+          />
+        )}
+
+        {note && <p className="set-hint" style={{ marginTop: "var(--s3)" }}>{note}</p>}
+      </section>
+    </div>
+  );
+}
+
+function ProviderDetailView({
+  provider,
+  isActive,
+  busy,
+  editBaseUrl,
+  setEditBaseUrl,
+  editKey,
+  setEditKey,
+  showKey,
+  setShowKey,
+  contextWindow,
+  onActivate,
+  onRemove,
+  onRefreshModels,
+  onGenerateProfiles,
+  onSaveConnection,
+  onSetModel,
+  onSetTier,
+}: {
+  provider: ProviderView;
+  isActive: boolean;
+  busy: string | null;
+  editBaseUrl: string;
+  setEditBaseUrl: (value: string) => void;
+  editKey: string;
+  setEditKey: (value: string) => void;
+  showKey: boolean;
+  setShowKey: (value: boolean) => void;
+  contextWindow: number | null;
+  onActivate: () => void;
+  onRemove: () => void;
+  onRefreshModels: () => void;
+  onGenerateProfiles: () => void;
+  onSaveConnection: () => void;
+  onSetModel: (modelId: string) => void;
+  onSetTier: (modelId: string, tier: string) => void;
+}) {
+  const acting = busy === provider.id;
+  const hasInferred = provider.models.some((m) => m.profile_source === "inferred" || !m.profile_source);
+  return (
+    <>
+      <div className="mdl-detail-head">
+        <h3>{provider.label}</h3>
+        <div className="mdl-detail-actions">
+          {isActive ? (
+            <span className="set-badge green">Attivo</span>
+          ) : (
+            <button className="set-btn" type="button" disabled={acting} onClick={onActivate}>
+              Imposta attivo
+            </button>
+          )}
+          <button className="set-btn danger" type="button" disabled={acting} onClick={onRemove}>
+            <Trash2 size={14} /> Rimuovi
+          </button>
+        </div>
+      </div>
+      <p className="mdl-detail-sub">{provider.kind} · {provider.has_key ? "chiave configurata" : "senza chiave"}</p>
+
+      <div className="mdl-field">
+        <label>API address</label>
+        <input
+          className="set-input"
+          value={editBaseUrl}
+          onChange={(event) => setEditBaseUrl(event.target.value)}
+        />
+      </div>
+      <div className="mdl-field">
+        <label>API key</label>
+        <div className="mdl-key">
+          <input
+            className="set-input"
+            type={showKey ? "text" : "password"}
+            placeholder={provider.has_key ? "•••• (lascia vuoto per non cambiare)" : "sk-…"}
+            value={editKey}
+            onChange={(event) => setEditKey(event.target.value)}
+          />
+          <button className="mdl-icon-btn" type="button" aria-label="Mostra/nascondi" onClick={() => setShowKey(!showKey)}>
+            {showKey ? <EyeOff size={15} /> : <Eye size={15} />}
+          </button>
+        </div>
+      </div>
+      <button
+        className="set-btn"
+        type="button"
+        style={{ alignSelf: "flex-start" }}
+        disabled={acting}
+        onClick={onSaveConnection}
+      >
+        Salva endpoint/chiave
+      </button>
+
+      <div className="mdl-field" style={{ marginTop: "var(--s4)" }}>
+        <label>Modello attivo del provider</label>
         <select
           className="set-input"
-          value={presetId}
-          onChange={(event) => {
-            const next = PROVIDER_PRESETS.find((p) => p.id === event.target.value);
-            setPresetId(event.target.value);
-            if (next && next.id !== "custom") {
-              setBaseUrl(next.baseUrl);
-              if (!label) setLabel(next.label);
-            }
-          }}
-          style={{ marginBottom: "var(--s3)" }}
+          value={provider.active_model ?? ""}
+          disabled={acting}
+          onChange={(event) => onSetModel(event.target.value)}
         >
-          {PROVIDER_PRESETS.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.label}
+          {provider.models.length === 0 && <option value="">— nessun modello: aggiorna —</option>}
+          {provider.active_model && !provider.models.some((m) => m.id === provider.active_model) && (
+            <option value={provider.active_model}>{provider.active_model}</option>
+          )}
+          {provider.models.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.id}
+              {m.tier ? ` · ${m.tier}` : ""}
             </option>
           ))}
         </select>
-        <div className="set-field-label">Nome</div>
-        <input
-          className="set-input"
-          placeholder={preset.label}
-          value={label}
-          onChange={(event) => setLabel(event.target.value)}
-        />
-        <div className="set-field-label" style={{ marginTop: 12 }}>
-          Endpoint (base URL)
-        </div>
-        <input
-          className="set-input"
-          placeholder="https://api.openai.com/v1"
-          value={baseUrl}
-          onChange={(event) => setBaseUrl(event.target.value)}
-        />
-        <div className="set-field-label" style={{ marginTop: 12 }}>
-          API key (opzionale per endpoint locali)
-        </div>
-        <input
-          className="set-input"
-          type="password"
-          placeholder="sk-…"
-          value={apiKey}
-          onChange={(event) => setApiKey(event.target.value)}
-        />
-        <button
-          className="set-btn primary"
-          type="button"
-          style={{ marginTop: 12, alignSelf: "flex-start" }}
-          disabled={busy === "add" || !baseUrl.trim()}
-          onClick={() =>
-            run(
-              "add",
-              async () => {
-                const result = await coreBridge.upsertProvider({
-                  label: (label || preset.label).trim(),
-                  kind: preset.kind,
-                  base_url: baseUrl.trim(),
-                  ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
-                });
-                setApiKey("");
-                // Best-effort: pull the new provider's model catalog immediately.
-                const added = result.providers.find(
-                  (p) => p.base_url === baseUrl.trim().replace(/\/$/, ""),
-                );
-                if (added) {
-                  try {
-                    return await coreBridge.refreshProviderModels(added.id);
-                  } catch {
-                    return result;
-                  }
-                }
-                return result;
-              },
-              "Provider aggiunto.",
-            )
-          }
-        >
-          {busy === "add" ? "Salvataggio…" : "Aggiungi provider"}
-        </button>
       </div>
 
-      <div className="set-meter" style={{ margin: "var(--s3) var(--s5)" }}>
-        <span className="k">
-          <Cpu size={15} /> Contesto modello attivo
-        </span>
-        <span className="v">{model ? `~${formatK(model.context_window)} token` : "n/d"}</span>
+      <div className="mdl-models-head">
+        <span>Modelli ({provider.models.length})</span>
+        <div className="mdl-detail-actions">
+          <button className="set-btn" type="button" disabled={acting} onClick={onRefreshModels}>
+            <RefreshCw size={14} /> Aggiorna
+          </button>
+          {hasInferred && (
+            <button
+              className="set-btn"
+              type="button"
+              disabled={acting}
+              title="Un modello descrive i modelli senza profilo"
+              onClick={onGenerateProfiles}
+            >
+              <Sparkles size={14} /> Genera profili
+            </button>
+          )}
+        </div>
       </div>
-
-      {decisions.length > 0 && (
-        <>
-          <div className="set-section-label">Decisioni di routing (recenti)</div>
-          <div className="set-rows" style={{ padding: "var(--s3) var(--s5)", maxHeight: 260, overflowY: "auto" }}>
-            {decisions.map((d, i) => (
-              <div key={i} style={{ padding: "4px 0", borderBottom: "1px solid var(--line)" }}>
-                <div style={{ display: "flex", gap: "var(--s2)", alignItems: "baseline" }}>
-                  <strong style={{ fontSize: 13 }}>{d.chosen_model}</strong>
-                  <span className={`set-badge ${d.stage === "semantic" ? "green" : "muted"}`}>
-                    {d.stage === "semantic"
-                      ? "semantico"
-                      : d.stage === "single_candidate"
-                        ? "unico"
-                        : d.stage === "heuristic_disabled"
-                          ? "euristico"
-                          : "fallback"}
-                  </span>
-                  <span style={{ marginLeft: "auto", fontSize: 11, opacity: 0.6 }}>{d.role}</span>
-                </div>
-                <p className="set-meter-sub" style={{ margin: "2px 0" }}>
-                  «{d.goal}»
-                </p>
-                <p className="set-meter-sub" style={{ fontSize: 11, opacity: 0.6 }}>
-                  tra {d.candidates.length} candidati
-                </p>
-              </div>
-            ))}
+      <div className="mdl-models">
+        {provider.models.length === 0 && (
+          <p className="set-hint">Nessun modello. Premi "Aggiorna" per leggere il catalogo.</p>
+        )}
+        {provider.models.map((m) => (
+          <div className="mdl-model-row" key={m.id}>
+            <div className="mdl-model-info">
+              <span className="mdl-model-id">{m.id}</span>
+              {m.strengths ? (
+                <span className="mdl-model-str" title={m.strengths}>{m.strengths}</span>
+              ) : null}
+            </div>
+            <div className="mdl-model-tags">
+              {m.vision && <span className="mdl-tag">vision</span>}
+              {m.modality !== "text" && <span className="mdl-tag">{m.modality}</span>}
+              {m.profile_source === "user" && <span className="mdl-tag user">tuo</span>}
+            </div>
+            <select
+              className="set-input mdl-tier"
+              value={m.tier ?? "balanced"}
+              disabled={acting}
+              onChange={(event) => onSetTier(m.id, event.target.value)}
+            >
+              <option value="fast">fast</option>
+              <option value="balanced">balanced</option>
+              <option value="reasoning">reasoning</option>
+            </select>
           </div>
-        </>
-      )}
-
-      <p className="set-hint">
-        Più provider insieme: scegli quale è attivo e il suo modello. La chiave è cifrata nel secret
-        store locale, mai mostrata. Il router sceglie automaticamente il modello migliore per ogni
-        task (vedi "Decisioni di routing").
-      </p>
-      {note && <p className="set-hint">{note}</p>}
+        ))}
+      </div>
+      <div className="set-meter" style={{ marginTop: "var(--s3)" }}>
+        <span className="k"><Cpu size={15} /> Contesto modello attivo</span>
+        <span className="v">{contextWindow ? `~${formatK(contextWindow)} token` : "n/d"}</span>
+      </div>
     </>
   );
 }
