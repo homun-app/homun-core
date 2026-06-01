@@ -22,6 +22,7 @@ import {
   Sparkles,
   Square,
   Trash2,
+  X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -1170,7 +1171,6 @@ function ComposioDetail({
 }) {
   const [apiKey, setApiKey] = useState("");
   const [toolkits, setToolkits] = useState<ComposioToolkit[]>([]);
-  const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [loadingKits, setLoadingKits] = useState(false);
   // Set when the existing connection's key fails to list toolkits (invalid /
@@ -1219,16 +1219,6 @@ function ComposioDetail({
   // Show the key form when there is no live connection, when the stored key is
   // not working, or when the user explicitly chose to change it.
   const showForm = !connected || editingKey || kitsError !== null;
-
-  const q = query.trim().toLowerCase();
-  const filtered = q
-    ? toolkits.filter(
-        (t) =>
-          t.name.toLowerCase().includes(q) ||
-          t.slug.toLowerCase().includes(q) ||
-          (t.categories ?? []).some((c) => c.toLowerCase().includes(q)),
-      )
-    : toolkits;
 
   return (
     <>
@@ -1301,101 +1291,246 @@ function ComposioDetail({
           </div>
         </div>
       ) : (
-        <>
-          <div className="conn-search">
-            <Search size={15} />
-            <input
-              className="conn-search-input"
-              placeholder="Cerca toolkit per nome o categoria…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </div>
-          {loadingKits ? (
-            <p className="set-hint">Carico i toolkit…</p>
-          ) : (
-            <div className="conn-kit-grid">
-              {filtered.slice(0, 60).map((kit) => (
-                <ToolkitCard key={kit.slug} kit={kit} onChanged={onChanged} onNote={onNote} />
-              ))}
-              {filtered.length === 0 && (
-                <p className="set-hint">Nessun toolkit per «{query}».</p>
-              )}
-            </div>
-          )}
-          {filtered.length > 60 && (
-            <p className="set-hint">Mostrati 60 di {filtered.length} — affina la ricerca.</p>
-          )}
-        </>
+        <ComposioToolkitBrowser toolkits={toolkits} loading={loadingKits} onNote={onNote} />
       )}
     </>
   );
 }
 
-function ToolkitCard({
-  kit,
-  onChanged,
+/** Connection status of a toolkit, derived from Composio connected-account state. */
+type KitState = "connected" | "connecting" | "none";
+
+function kitStateFromStatus(status: string | undefined): KitState {
+  if (!status) return "none";
+  const s = status.toUpperCase();
+  if (s === "ACTIVE") return "connected";
+  if (s === "INITIATED" || s === "INITIALIZING" || s === "PENDING") return "connecting";
+  return "none";
+}
+
+function ComposioToolkitBrowser({
+  toolkits,
+  loading,
   onNote,
 }: {
-  kit: ComposioToolkit;
-  onChanged: () => Promise<void>;
+  toolkits: ComposioToolkit[];
+  loading: boolean;
   onNote: (note: string | null) => void;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [imgOk, setImgOk] = useState(Boolean(kit.logo));
-  const auth = kit.no_auth
-    ? "Nessuna auth"
-    : kit.managed_oauth
-      ? "OAuth gestito"
-      : "Auth richiesta";
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("all");
+  // toolkit slug → Composio connection status (e.g. "ACTIVE", "INITIATED").
+  const [connStatus, setConnStatus] = useState<Record<string, string>>({});
+  // Slugs we are actively polling after kicking off an OAuth link.
+  const [polling, setPolling] = useState<Set<string>>(new Set());
+  const [modalKit, setModalKit] = useState<ComposioToolkit | null>(null);
+
+  const refreshConnections = async () => {
+    try {
+      const conns = await coreBridge.composioConnections();
+      const next: Record<string, string> = {};
+      for (const c of conns) if (c.toolkit_slug) next[c.toolkit_slug] = c.status;
+      setConnStatus(next);
+      return next;
+    } catch {
+      return {} as Record<string, string>;
+    }
+  };
+  useEffect(() => {
+    void refreshConnections();
+  }, []);
+
+  // Composio exposes dozens of granular categories; show only the most populated
+  // ones as quick filters (+ "Tutte") to keep the chip row clean — the rest stay
+  // reachable via search.
+  const categories = (() => {
+    const counts = new Map<string, number>();
+    for (const t of toolkits)
+      for (const c of t.categories ?? []) counts.set(c, (counts.get(c) ?? 0) + 1);
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([c]) => c);
+  })();
+
+  const stateOf = (slug: string): KitState =>
+    polling.has(slug) ? "connecting" : kitStateFromStatus(connStatus[slug]);
+
+  const q = query.trim().toLowerCase();
+  const filtered = toolkits.filter((t) => {
+    if (category !== "all" && !(t.categories ?? []).includes(category)) return false;
+    if (!q) return true;
+    return (
+      t.name.toLowerCase().includes(q) ||
+      t.slug.toLowerCase().includes(q) ||
+      (t.categories ?? []).some((c) => c.toLowerCase().includes(q))
+    );
+  });
+
+  // Kick off the OAuth link for a toolkit, then poll until Composio reports the
+  // connected account as ACTIVE (or we time out) — the "detect automatically" bit.
+  const connect = async (kit: ComposioToolkit) => {
+    onNote(null);
+    setModalKit(null);
+    try {
+      const result = await coreBridge.composioLink(kit.slug);
+      if (result.redirect_url) {
+        window.open(result.redirect_url, "_blank", "noopener,noreferrer");
+        onNote(`Autorizza ${kit.name} nel browser, poi torna qui.`);
+      }
+    } catch (error) {
+      onNote(`Collegamento non riuscito: ${(error as Error).message}`);
+      return;
+    }
+    setPolling((prev) => new Set(prev).add(kit.slug));
+    const deadline = Date.now() + 150_000;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 3000));
+      const map = await refreshConnections();
+      if (kitStateFromStatus(map[kit.slug]) === "connected") {
+        onNote(`${kit.name} connesso.`);
+        break;
+      }
+    }
+    setPolling((prev) => {
+      const next = new Set(prev);
+      next.delete(kit.slug);
+      return next;
+    });
+  };
+
   return (
-    <div className="conn-kit">
-      <span className="conn-kit-logo">
+    <>
+      <div className="conn-search">
+        <Search size={15} />
+        <input
+          className="conn-search-input"
+          placeholder="Cerca toolkit…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </div>
+
+      {categories.length > 0 && (
+        <div className="cmp-cats">
+          <button
+            type="button"
+            className={`cmp-cat ${category === "all" ? "active" : ""}`}
+            onClick={() => setCategory("all")}
+          >
+            Tutte
+          </button>
+          {categories.map((c) => (
+            <button
+              key={c}
+              type="button"
+              className={`cmp-cat ${category === c ? "active" : ""}`}
+              onClick={() => setCategory(c)}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {loading ? (
+        <p className="set-hint">Carico i toolkit…</p>
+      ) : (
+        <div className="cmp-grid">
+          {filtered.slice(0, 120).map((kit) => (
+            <ComposioCard
+              key={kit.slug}
+              kit={kit}
+              state={stateOf(kit.slug)}
+              onClick={() => setModalKit(kit)}
+            />
+          ))}
+          {filtered.length === 0 && <p className="set-hint">Nessun toolkit trovato.</p>}
+        </div>
+      )}
+      {filtered.length > 120 && (
+        <p className="set-hint">Mostrati 120 di {filtered.length} — affina la ricerca.</p>
+      )}
+
+      {modalKit && (
+        <ConnectModal
+          kit={modalKit}
+          state={stateOf(modalKit.slug)}
+          onClose={() => setModalKit(null)}
+          onConnect={() => void connect(modalKit)}
+        />
+      )}
+    </>
+  );
+}
+
+function ComposioCard({
+  kit,
+  state,
+  onClick,
+}: {
+  kit: ComposioToolkit;
+  state: KitState;
+  onClick: () => void;
+}) {
+  const [imgOk, setImgOk] = useState(Boolean(kit.logo));
+  return (
+    <button type="button" className={`cmp-card ${state}`} onClick={onClick}>
+      <span className="cmp-card-logo">
         {imgOk && kit.logo ? (
           <img src={kit.logo} alt="" loading="lazy" onError={() => setImgOk(false)} />
         ) : (
           <span className="conn-kit-fallback">{kit.name.slice(0, 1).toUpperCase()}</span>
         )}
       </span>
-      <div className="conn-kit-body">
-        <div className="conn-kit-name">{kit.name}</div>
-        <div className="conn-kit-meta">
-          {auth}
-          {kit.categories && kit.categories.length > 0 ? ` · ${kit.categories[0]}` : ""}
+      <span className="cmp-card-name">{kit.name}</span>
+      {state === "connected" && <span className="cmp-status connected">Connesso</span>}
+      {state === "connecting" && <span className="cmp-status connecting">In corso…</span>}
+    </button>
+  );
+}
+
+function ConnectModal({
+  kit,
+  state,
+  onClose,
+  onConnect,
+}: {
+  kit: ComposioToolkit;
+  state: KitState;
+  onClose: () => void;
+  onConnect: () => void;
+}) {
+  const [imgOk, setImgOk] = useState(Boolean(kit.logo));
+  return (
+    <div className="cmp-modal-overlay" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="cmp-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="cmp-modal-head">
+          <span className="cmp-card-logo sm">
+            {imgOk && kit.logo ? (
+              <img src={kit.logo} alt="" onError={() => setImgOk(false)} />
+            ) : (
+              <span className="conn-kit-fallback">{kit.name.slice(0, 1).toUpperCase()}</span>
+            )}
+          </span>
+          <div className="conn-detail-titletext">
+            <h3 className="mdl-detail-title">Collega {kit.name}</h3>
+            <p className="mdl-detail-sub">
+              {state === "connected" ? `${kit.name} è già connesso.` : `Collega il tuo account ${kit.name}.`}
+            </p>
+          </div>
+          <button className="mdl-icon-btn" type="button" aria-label="Chiudi" onClick={onClose}>
+            <X size={16} />
+          </button>
         </div>
+        <div className="cmp-modal-note">
+          Apriremo una finestra del browser: autorizzi l'accesso lì e l'app rileva la connessione
+          automaticamente. I permessi degli agenti restano governati dai gate di approvazione.
+        </div>
+        <button className="set-btn primary cmp-modal-btn" type="button" onClick={onConnect}>
+          {state === "connected" ? `Riconnetti ${kit.name}` : `Collega ${kit.name}`}
+        </button>
       </div>
-      <button
-        className="mdl-icon-btn"
-        type="button"
-        disabled={busy}
-        title={`Collega ${kit.name}`}
-        aria-label={`Collega ${kit.name}`}
-        onClick={async () => {
-          setBusy(true);
-          onNote(null);
-          try {
-            const result = await coreBridge.composioLink(kit.slug);
-            // Composio returns the OAuth authorization URL — the user must open it
-            // and grant access. The Electron shell routes window.open() to the
-            // system browser (setWindowOpenHandler → shell.openExternal).
-            if (result.redirect_url) {
-              window.open(result.redirect_url, "_blank", "noopener,noreferrer");
-              onNote(
-                `Autorizza ${kit.name} nel browser appena aperto, poi torna qui: la connessione diventerà attiva.`,
-              );
-            } else {
-              onNote(`Toolkit collegato: ${kit.name}.`);
-            }
-            await onChanged();
-          } catch (error) {
-            onNote(`Collegamento non riuscito: ${(error as Error).message}`);
-          } finally {
-            setBusy(false);
-          }
-        }}
-      >
-        <Plus size={15} />
-      </button>
     </div>
   );
 }
