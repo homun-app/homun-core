@@ -1898,25 +1898,67 @@ function AssistantMessageBody({ text, streaming }: { text: string; streaming?: b
   );
 }
 
+const COMPOSIO_FIELD_LABELS: Record<string, string> = {
+  recipient_email: "Destinatario",
+  recipientemail: "Destinatario",
+  to: "Destinatario",
+  cc: "Cc",
+  bcc: "Ccn",
+  subject: "Oggetto",
+  body: "Testo",
+  message: "Testo",
+  is_html: "HTML",
+  attachment: "Allegato",
+};
+
+/** "GMAIL_SEND_EMAIL" → "Send email · Gmail". */
+function humanizeToolName(slug: string): string {
+  const parts = slug.split("_").filter(Boolean);
+  if (parts.length === 0) return slug;
+  const toolkit = parts[0].charAt(0) + parts[0].slice(1).toLowerCase();
+  const action = parts.slice(1).map((w) => w.toLowerCase()).join(" ");
+  if (!action) return toolkit;
+  return `${action.charAt(0).toUpperCase()}${action.slice(1)} · ${toolkit}`;
+}
+
+function humanizeFieldKey(key: string): string {
+  return (
+    COMPOSIO_FIELD_LABELS[key.toLowerCase()] ??
+    key.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+  );
+}
+
 function ComposioConfirmCard({ action }: { action: ComposioPendingAction }) {
   const [status, setStatus] = useState<"idle" | "running" | "done" | "error">("idle");
   const [note, setNote] = useState<string | null>(null);
+  // Editable copy of the proposed arguments.
+  const initial =
+    action.arguments && typeof action.arguments === "object" && !Array.isArray(action.arguments)
+      ? (action.arguments as Record<string, unknown>)
+      : {};
+  const [args, setArgs] = useState<Record<string, unknown>>(() => ({ ...initial }));
+  const title = humanizeToolName(action.tool);
+
+  const setField = (key: string, value: unknown) =>
+    setArgs((prev) => ({ ...prev, [key]: value }));
+
   const run = async (scope: "once" | "always") => {
     setStatus("running");
     setNote(null);
     try {
-      await coreBridge.composioExecute(action.tool, action.arguments, scope);
+      await coreBridge.composioExecute(action.tool, args, scope);
       setStatus("done");
       setNote(
         scope === "always"
-          ? `Eseguito. D'ora in poi ${action.tool} verrà eseguito senza chiedere.`
-          : "Eseguito.",
+          ? `Fatto. D'ora in poi «${title}» verrà eseguito senza chiedere.`
+          : "Fatto.",
       );
     } catch (error) {
       setStatus("error");
       setNote((error as Error).message);
     }
   };
+
   if (status === "done") {
     return (
       <div className="cmp-confirm done">
@@ -1925,18 +1967,69 @@ function ComposioConfirmCard({ action }: { action: ComposioPendingAction }) {
       </div>
     );
   }
-  const args =
-    action.arguments && typeof action.arguments === "object"
-      ? JSON.stringify(action.arguments, null, 2)
-      : String(action.arguments ?? "");
+
+  const keys = Object.keys(args);
   return (
     <div className="cmp-confirm">
       <div className="cmp-confirm-head">
         <ShieldCheck size={15} />
         <strong>Conferma azione</strong>
-        <code>{action.tool}</code>
+        <span className="cmp-confirm-name">{title}</span>
       </div>
-      {args && args !== "{}" && <pre className="cmp-confirm-args">{args}</pre>}
+      <div className="cmp-confirm-fields">
+        {keys.length === 0 && <p className="cmp-confirm-empty">Nessun parametro.</p>}
+        {keys.map((key) => {
+          const value = args[key];
+          const label = humanizeFieldKey(key);
+          if (typeof value === "boolean") {
+            return (
+              <label key={key} className="cmp-field-check">
+                <input
+                  type="checkbox"
+                  checked={value}
+                  disabled={status === "running"}
+                  onChange={(e) => setField(key, e.target.checked)}
+                />
+                <span>{label}</span>
+              </label>
+            );
+          }
+          const isObject = value !== null && typeof value === "object";
+          const str = isObject ? JSON.stringify(value, null, 2) : String(value ?? "");
+          const multiline = isObject || str.length > 60 || /body|message|text/i.test(key);
+          return (
+            <div key={key} className="cmp-field">
+              <label>{label}</label>
+              {multiline ? (
+                <textarea
+                  className="set-input"
+                  rows={isObject ? 4 : 5}
+                  value={str}
+                  disabled={status === "running"}
+                  onChange={(e) => {
+                    if (isObject) {
+                      try {
+                        setField(key, JSON.parse(e.target.value));
+                      } catch {
+                        setField(key, e.target.value);
+                      }
+                    } else {
+                      setField(key, e.target.value);
+                    }
+                  }}
+                />
+              ) : (
+                <input
+                  className="set-input"
+                  value={str}
+                  disabled={status === "running"}
+                  onChange={(e) => setField(key, e.target.value)}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
       {status === "error" && <p className="cmp-confirm-err">Non riuscito: {note}</p>}
       <div className="cmp-confirm-actions">
         <button
@@ -1952,7 +2045,7 @@ function ComposioConfirmCard({ action }: { action: ComposioPendingAction }) {
           type="button"
           disabled={status === "running"}
           onClick={() => void run("always")}
-          title={`Non chiedere più per ${action.tool}`}
+          title={`Non chiedere più per ${title}`}
         >
           Esegui sempre
         </button>

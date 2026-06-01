@@ -4872,20 +4872,15 @@ body.resizing-drawer {
   border-radius: 5px;
   padding: 1px 6px;
 }
-.cmp-confirm-args {
-  margin: 0;
-  font-family: var(--mono, ui-monospace, monospace);
-  font-size: 12px;
-  line-height: 1.5;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: var(--s3);
-  max-height: 220px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
+.cmp-confirm-name { font-size: 12.5px; color: var(--muted); }
+.cmp-confirm-fields { display: flex; flex-direction: column; gap: var(--s3); }
+.cmp-field { display: flex; flex-direction: column; gap: 4px; }
+.cmp-field > label { font-size: 12px; font-weight: 600; color: var(--muted); }
+.cmp-field .set-input { background: var(--surface); font-size: 13px; }
+.cmp-field textarea.set-input { resize: vertical; line-height: 1.5; }
+.cmp-field-check { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.cmp-field-check input { width: 15px; height: 15px; }
+.cmp-confirm-empty { font-size: 12.5px; color: var(--muted); margin: 0; }
 .cmp-confirm-err { font-size: 12.5px; color: #b42318; margin: 0; }
 .cmp-confirm-actions { display: flex; gap: var(--s2); }
 .cmp-confirm.done {
