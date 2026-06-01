@@ -348,6 +348,9 @@ export interface ComposioToolkit {
   name: string;
   managed_oauth: boolean;
   no_auth: boolean;
+  logo?: string;
+  description?: string;
+  categories?: string[];
 }
 
 export interface ComposioLinkResult {
