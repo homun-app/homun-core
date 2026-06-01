@@ -5967,6 +5967,7 @@ struct ProviderModelView {
     id: String,
     vision: bool,
     tools: bool,
+    reasoning: bool,
     modality: String,
     context_window: Option<u32>,
     /// Qualitative profile used for ranking ("in cosa eccelle").
@@ -6009,6 +6010,7 @@ fn provider_view(entry: &ProviderEntry) -> ProviderView {
                 id: m.id.clone(),
                 vision: m.vision,
                 tools: m.tools,
+                reasoning: m.reasoning,
                 modality: m.modality.clone(),
                 context_window: m.context_window,
                 tier: m.profile.as_ref().map(|p| p.tier.as_str().to_string()),
@@ -6235,6 +6237,7 @@ struct SetModelProfileRequest {
     /// Optional capability overrides (the gate fields). Absent = leave as-is.
     vision: Option<bool>,
     tools: Option<bool>,
+    reasoning: Option<bool>,
     context_window: Option<u32>,
 }
 
@@ -6273,6 +6276,9 @@ async fn set_model_profile(
         }
         if let Some(tools) = request.tools {
             model.tools = tools;
+        }
+        if let Some(reasoning) = request.reasoning {
+            model.reasoning = reasoning;
         }
         if let Some(context_window) = request.context_window {
             model.context_window = Some(context_window);

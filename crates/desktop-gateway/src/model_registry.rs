@@ -59,6 +59,9 @@ pub struct ModelEntry {
     pub vision: bool,
     #[serde(default)]
     pub tools: bool,
+    /// Extended-reasoning ("thinking") model.
+    #[serde(default)]
+    pub reasoning: bool,
     /// Modality: "text" | "embedding" | "image" — text is the default.
     #[serde(default = "default_modality")]
     pub modality: String,
@@ -154,8 +157,7 @@ fn infer_profile(lower: &str, modality: &str) -> ModelProfile {
             "Veloce ed economico: estrazione, classificazione, task brevi.",
         );
     }
-    let reasoning_markers = ["opus", "o1", "o3", "o4", "-r1", "deepseek-r", "reasoner", "thinking"];
-    if reasoning_markers.iter().any(|m| lower.contains(m)) {
+    if is_reasoning_model(lower) {
         return curated(
             ModelTier::Reasoning,
             "Ragionamento profondo: problemi complessi, pianificazione, coding agentico.",
@@ -214,16 +216,25 @@ impl ModelEntry {
                 || lower.contains("pixtral"));
         // Text/chat models support tool calls; embedding/image models do not.
         let tools = modality == "text";
+        let reasoning = modality == "text" && is_reasoning_model(&lower);
         let context_window = infer_context_window(&lower);
         ModelEntry {
             id: id.to_string(),
             vision,
             tools,
+            reasoning,
             modality: modality.to_string(),
             context_window,
             profile: Some(infer_profile(&lower, modality)),
         }
     }
+}
+
+/// Heuristic: an extended-reasoning ("thinking") model.
+fn is_reasoning_model(lower: &str) -> bool {
+    ["opus", "o1", "o3", "o4", "-r1", "deepseek-r", "reasoner", "thinking"]
+        .iter()
+        .any(|m| lower.contains(m))
 }
 
 /// True if the model id carries a SMALL parameter-size token (≤ 13B), e.g.
