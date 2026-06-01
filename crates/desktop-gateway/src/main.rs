@@ -640,6 +640,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/capabilities/composio/toolkits", get(composio_toolkits))
         .route("/api/capabilities/composio/link", post(composio_link))
         .route("/api/capabilities/composio/connections", get(composio_connections))
+        .route("/api/capabilities/composio/execute", post(composio_execute))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             require_gateway_token,
@@ -1529,6 +1530,9 @@ modificare) richiedono una conferma esplicita dell'utente."
                     "content": message.get("content").cloned().unwrap_or(serde_json::Value::Null),
                     "tool_calls": calls,
                 }));
+                // Set when a write tool needs confirmation: we stop the loop and let
+                // the user run it from the card instead of looping/hallucinating.
+                let mut pending_confirm = false;
                 for call in &calls {
                     let name = call
                         .get("function")
@@ -1626,14 +1630,29 @@ suoi argomenti):\n{}",
                             )
                         }
                     } else if !name.is_empty() {
-                        // A connected-service (Composio) tool.
-                        if composio_writes.contains(name) {
-                            // Stage 2 adds the in-chat confirmation card + execution.
-                            format!(
-                                "AZIONE DI SCRITTURA «{name}» NON eseguita: richiede una conferma \
-esplicita dell'utente (in arrivo). Spiega in modo chiaro cosa faresti (destinatario, oggetto, \
-contenuto…) e chiedi all'utente di confermare."
-                            )
+                        // A connected-service (Composio) tool. Writes need explicit
+                        // confirmation unless the user marked this tool "always allow".
+                        let needs_confirm =
+                            composio_writes.contains(name) && !composio_tool_allowed(name);
+                        if needs_confirm {
+                            // Do NOT execute. Emit a confirmation card carrying the exact
+                            // action; the user runs it (once/always) via the card. The model
+                            // must never claim it's done — the real outcome comes from the card.
+                            let args_val: serde_json::Value = serde_json::from_str(args_raw)
+                                .unwrap_or_else(|_| serde_json::json!({}));
+                            let marker = serde_json::json!({ "tool": name, "arguments": args_val })
+                                .to_string();
+                            let card = format!(
+                                "\n\nServe la tua conferma per **{name}**.\n\
+‹‹COMPOSIO_CONFIRM››{marker}‹‹/COMPOSIO_CONFIRM››\n"
+                            );
+                            accumulated.push_str(&card);
+                            let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: card })
+                                .await;
+                            pending_confirm = true;
+                            "IN ATTESA DI CONFERMA UTENTE: l'azione è stata proposta tramite una \
+card di conferma nell'interfaccia. NON dire che è stata eseguita."
+                                .to_string()
                         } else {
                             let _ = emit_stream_event(
                                 &tx,
@@ -1667,6 +1686,20 @@ contenuto…) e chiedi all'utente di confermare."
                         "tool_call_id": call_id,
                         "content": result,
                     }));
+                }
+                if pending_confirm {
+                    // A write is awaiting the user's confirmation card — end the turn
+                    // here (no synthesis, no further tool rounds).
+                    let _ = emit_stream_event(
+                        &tx,
+                        GenerateStreamEvent::Done {
+                            text: accumulated.clone(),
+                            metrics: TokenMetrics::zero(),
+                        },
+                    )
+                    .await;
+                    final_done = true;
+                    break;
                 }
                 continue;
             }
@@ -4307,6 +4340,89 @@ fn composio_execute_tool(
             })),
         )
         .map_err(GatewayError::capability)
+}
+
+// ---- write-tool approval allow-list ("conferma sempre per questo tool") -------
+
+fn composio_tool_allow_path() -> Option<PathBuf> {
+    gateway_data_dir().ok().map(|dir| dir.join("composio-tool-allow.json"))
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct ComposioToolAllow {
+    /// Tool slugs the user approved to run WITHOUT per-call confirmation.
+    #[serde(default)]
+    always: Vec<String>,
+}
+
+/// Tool slugs the user has chosen to always allow (skip the confirmation card).
+fn load_composio_tool_allow() -> std::collections::BTreeSet<String> {
+    let Some(path) = composio_tool_allow_path() else {
+        return std::collections::BTreeSet::new();
+    };
+    let Ok(raw) = fs::read_to_string(path) else {
+        return std::collections::BTreeSet::new();
+    };
+    serde_json::from_str::<ComposioToolAllow>(&raw)
+        .map(|a| a.always.into_iter().collect())
+        .unwrap_or_default()
+}
+
+fn composio_tool_allowed(slug: &str) -> bool {
+    load_composio_tool_allow().contains(slug)
+}
+
+fn add_composio_tool_allow(slug: &str) -> Result<(), String> {
+    let mut set = load_composio_tool_allow();
+    set.insert(slug.to_string());
+    let path = composio_tool_allow_path().ok_or_else(|| "data dir non disponibile".to_string())?;
+    let value = ComposioToolAllow { always: set.into_iter().collect() };
+    let json = serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?;
+    fs::write(path, json).map_err(|e| e.to_string())
+}
+
+#[derive(Debug, Deserialize)]
+struct ComposioExecuteRequest {
+    tool: String,
+    #[serde(default)]
+    arguments: serde_json::Value,
+    /// "always" persists an allow-rule for this tool before executing.
+    #[serde(default)]
+    scope: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ComposioExecuteResponse {
+    ok: bool,
+    /// Compact, human-readable outcome (the source of truth — not the model's word).
+    summary: String,
+}
+
+/// Executes a Composio tool on explicit user confirmation (the chat
+/// confirmation card calls this). `scope: "always"` also records an allow-rule
+/// so future calls to this tool skip confirmation.
+async fn composio_execute(
+    State(state): State<AppState>,
+    Json(request): Json<ComposioExecuteRequest>,
+) -> Result<Json<ComposioExecuteResponse>, GatewayError> {
+    if request.scope.as_deref() == Some("always") {
+        let _ = add_composio_tool_allow(&request.tool);
+    }
+    let tool = request.tool.clone();
+    let args = if request.arguments.is_null() {
+        serde_json::json!({})
+    } else {
+        request.arguments.clone()
+    };
+    let output = tokio::task::spawn_blocking(move || composio_execute_tool(&state, &tool, &args))
+        .await
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "composio_execute_join",
+            message: e.to_string(),
+        })??;
+    let summary = output.to_string().chars().take(2000).collect::<String>();
+    Ok(Json(ComposioExecuteResponse { ok: true, summary }))
 }
 
 /// Resolves a Composio-managed auth_config id for a toolkit, reusing an existing

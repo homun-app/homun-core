@@ -663,6 +663,23 @@ async function electronComposioLink(
   });
 }
 
+export interface ComposioExecuteResult {
+  ok: boolean;
+  summary: string;
+}
+
+async function electronComposioExecute(
+  tool: string,
+  args: unknown,
+  scope: "once" | "always",
+): Promise<ComposioExecuteResult> {
+  return gatewayPostJson<ComposioExecuteResult>("/api/capabilities/composio/execute", {
+    tool,
+    arguments: args ?? {},
+    scope,
+  });
+}
+
 async function electronComposioConnections(): Promise<ComposioConnection[]> {
   const payload = await gatewayGetJson<{ connections: ComposioConnection[] }>(
     "/api/capabilities/composio/connections",
@@ -781,6 +798,8 @@ export const coreBridge = {
   composioLink: (toolkitSlug: string, apiKey?: string) =>
     electronComposioLink(toolkitSlug, apiKey),
   composioConnections: () => electronComposioConnections(),
+  composioExecute: (tool: string, args: unknown, scope: "once" | "always") =>
+    electronComposioExecute(tool, args, scope),
   skills: () => electronSkills(),
   skillDetail: (id: string) => electronSkillDetail(id),
   setSkillEnabled: (id: string, enabled: boolean) => electronSetSkillEnabled(id, enabled),

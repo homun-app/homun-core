@@ -1003,7 +1003,7 @@ export function ChatView({
                   )}
                 </>
               ) : displayMessage.text ? (
-                <RichMessage text={displayMessage.text} />
+                <AssistantMessageBody text={displayMessage.text} />
               ) : (
                 <AssistantThinkingState
                   status={
@@ -1856,6 +1856,107 @@ function InlineTimeline({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/** A pending write action the model proposed, carried in the message text. */
+interface ComposioPendingAction {
+  tool: string;
+  arguments: unknown;
+}
+
+const COMPOSIO_CONFIRM_RE = /‹‹COMPOSIO_CONFIRM››([\s\S]*?)‹‹\/COMPOSIO_CONFIRM››/;
+
+/** Splits an assistant message into its visible text and an optional pending
+ *  Composio write action encoded by the gateway. */
+function parseComposioConfirm(text: string): {
+  visible: string;
+  action: ComposioPendingAction | null;
+} {
+  const match = text.match(COMPOSIO_CONFIRM_RE);
+  if (!match) return { visible: text, action: null };
+  let action: ComposioPendingAction | null = null;
+  try {
+    const parsed = JSON.parse(match[1]) as ComposioPendingAction;
+    if (parsed && typeof parsed.tool === "string") action = parsed;
+  } catch {
+    /* malformed marker → just hide it */
+  }
+  return { visible: text.replace(COMPOSIO_CONFIRM_RE, "").trim(), action };
+}
+
+/** Renders an assistant message body, surfacing a write-confirmation card when
+ *  the model proposed a write action that needs approval (once / always). */
+function AssistantMessageBody({ text, streaming }: { text: string; streaming?: boolean }) {
+  const { visible, action } = useMemo(() => parseComposioConfirm(text), [text]);
+  return (
+    <>
+      {visible && <RichMessage text={visible} streaming={streaming} />}
+      {action && !streaming && <ComposioConfirmCard action={action} />}
+    </>
+  );
+}
+
+function ComposioConfirmCard({ action }: { action: ComposioPendingAction }) {
+  const [status, setStatus] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [note, setNote] = useState<string | null>(null);
+  const run = async (scope: "once" | "always") => {
+    setStatus("running");
+    setNote(null);
+    try {
+      await coreBridge.composioExecute(action.tool, action.arguments, scope);
+      setStatus("done");
+      setNote(
+        scope === "always"
+          ? `Eseguito. D'ora in poi ${action.tool} verrà eseguito senza chiedere.`
+          : "Eseguito.",
+      );
+    } catch (error) {
+      setStatus("error");
+      setNote((error as Error).message);
+    }
+  };
+  if (status === "done") {
+    return (
+      <div className="cmp-confirm done">
+        <ShieldCheck size={15} />
+        <span>{note}</span>
+      </div>
+    );
+  }
+  const args =
+    action.arguments && typeof action.arguments === "object"
+      ? JSON.stringify(action.arguments, null, 2)
+      : String(action.arguments ?? "");
+  return (
+    <div className="cmp-confirm">
+      <div className="cmp-confirm-head">
+        <ShieldCheck size={15} />
+        <strong>Conferma azione</strong>
+        <code>{action.tool}</code>
+      </div>
+      {args && args !== "{}" && <pre className="cmp-confirm-args">{args}</pre>}
+      {status === "error" && <p className="cmp-confirm-err">Non riuscito: {note}</p>}
+      <div className="cmp-confirm-actions">
+        <button
+          className="set-btn primary"
+          type="button"
+          disabled={status === "running"}
+          onClick={() => void run("once")}
+        >
+          {status === "running" ? "Eseguo…" : "Esegui una volta"}
+        </button>
+        <button
+          className="set-btn"
+          type="button"
+          disabled={status === "running"}
+          onClick={() => void run("always")}
+          title={`Non chiedere più per ${action.tool}`}
+        >
+          Esegui sempre
+        </button>
+      </div>
     </div>
   );
 }
