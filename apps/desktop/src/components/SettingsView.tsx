@@ -440,6 +440,7 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
                     {provider.models.map((m) => (
                       <option key={`${provider.id}::${m.id}`} value={`${provider.id}::${m.id}`}>
                         {m.id}
+                        {m.tier ? ` · ${m.tier}` : ""}
                         {m.vision ? " · vision" : ""}
                         {m.modality !== "text" ? ` · ${m.modality}` : ""}
                       </option>
@@ -498,6 +499,7 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
               {provider.models.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.id}
+                  {m.tier ? ` · ${m.tier}` : ""}
                   {m.modality !== "text" ? ` · ${m.modality}` : ""}
                   {m.vision ? " · vision" : ""}
                 </option>
@@ -676,6 +678,7 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
                   {provider.models.map((m) => (
                     <option key={`${provider.id}::${m.id}`} value={`${provider.id}::${m.id}`}>
                       {m.id}
+                      {m.tier ? ` · ${m.tier}` : ""}
                       {m.vision ? " · vision" : ""}
                     </option>
                   ))}

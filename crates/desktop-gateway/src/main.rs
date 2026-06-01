@@ -5864,6 +5864,11 @@ struct ProviderModelView {
     tools: bool,
     modality: String,
     context_window: Option<u32>,
+    /// Qualitative profile used for ranking ("in cosa eccelle").
+    tier: Option<String>,
+    strengths: Option<String>,
+    profile_source: Option<String>,
+    profile_confidence: Option<u8>,
 }
 
 #[derive(Debug, Serialize)]
@@ -5901,6 +5906,10 @@ fn provider_view(entry: &ProviderEntry) -> ProviderView {
                 tools: m.tools,
                 modality: m.modality.clone(),
                 context_window: m.context_window,
+                tier: m.profile.as_ref().map(|p| p.tier.as_str().to_string()),
+                strengths: m.profile.as_ref().map(|p| p.strengths.clone()),
+                profile_source: m.profile.as_ref().map(|p| p.source.clone()),
+                profile_confidence: m.profile.as_ref().map(|p| p.confidence),
             })
             .collect(),
         models_fetched_at: entry.models_fetched_at.clone(),
