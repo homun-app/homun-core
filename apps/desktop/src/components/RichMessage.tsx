@@ -7,18 +7,26 @@ interface RichMessageProps {
 
 const RichMessageRenderer = lazy(() => import("./RichMessageRenderer"));
 
+// Internal control marker the gateway uses to carry a pending write-confirmation
+// action; it is rendered as a card elsewhere and must never be shown as raw text.
+const CONFIRM_MARKER_RE = /‹‹COMPOSIO_CONFIRM››[\s\S]*?‹‹\/COMPOSIO_CONFIRM››/g;
+
 export function RichMessage({ text, streaming = false }: RichMessageProps) {
+  const clean = text.includes("‹‹COMPOSIO_CONFIRM››")
+    ? text.replace(CONFIRM_MARKER_RE, "").trimEnd()
+    : text;
+
   if (streaming) {
-    return <StreamingTextMessage text={text} />;
+    return <StreamingTextMessage text={clean} />;
   }
 
-  if (!needsRichRendering(text)) {
-    return <PlainTextMessage text={text} />;
+  if (!needsRichRendering(clean)) {
+    return <PlainTextMessage text={clean} />;
   }
 
   return (
-    <Suspense fallback={<PlainTextMessage text={text} />}>
-      <RichMessageRenderer text={text} streaming={streaming} />
+    <Suspense fallback={<PlainTextMessage text={clean} />}>
+      <RichMessageRenderer text={clean} streaming={streaming} />
     </Suspense>
   );
 }

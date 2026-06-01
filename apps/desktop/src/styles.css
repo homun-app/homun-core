@@ -4851,3 +4851,50 @@ body.resizing-drawer {
   padding: var(--s3) var(--s4);
 }
 .cmp-modal-btn { justify-content: center; width: 100%; }
+
+/* Composio write-confirmation card (inline in chat) */
+.cmp-confirm {
+  border: 1px solid #e0a93b;
+  background: #fdf6e8;
+  border-radius: 12px;
+  padding: var(--s4);
+  margin-top: var(--s3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+.cmp-confirm-head { display: flex; align-items: center; gap: 8px; font-size: 13.5px; }
+.cmp-confirm-head svg { color: #b5851f; }
+.cmp-confirm-head code {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+  background: rgba(0,0,0,0.06);
+  border-radius: 5px;
+  padding: 1px 6px;
+}
+.cmp-confirm-args {
+  margin: 0;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: var(--s3);
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.cmp-confirm-err { font-size: 12.5px; color: #b42318; margin: 0; }
+.cmp-confirm-actions { display: flex; gap: var(--s2); }
+.cmp-confirm.done {
+  border-color: var(--green);
+  background: var(--green-soft);
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+}
+.cmp-confirm.done svg { color: var(--green); }
