@@ -36,6 +36,7 @@ pub(crate) fn planner_prompt(
         loaded_tools,
         request.budgets.max_loaded_tool_context_chars,
     )?;
+    let available_agents = render_available_agents(&request.available_agents);
     let prompt = format!(
         "You are the local-first assistant orchestrator brain.\n\
          Decide whether to answer directly, use memory, call capability tools, create subagent workflow tasks, enqueue durable tasks, or ask for clarification.\n\
@@ -43,7 +44,7 @@ pub(crate) fn planner_prompt(
          \n\
          OUTPUT FORMAT — return ONLY one JSON object with EXACTLY these top-level keys:\n\
          - \"route\": one of [direct_answer, memory_lookup, capability_call, subagent_workflow, mixed_workflow, ask_clarification, refuse, needs_more_tools]\n\
-         - \"steps\": array of step objects (use [] for direct_answer/ask_clarification/refuse). Each step object MUST have: \"step_id\" (string), \"kind\" (capability_call|memory_lookup|subagent_task|direct_answer), \"depends_on\" (array of step_id), \"execution_policy\" (immediate|durable_task|ask_approval), \"risk_level\" (string), \"expected_duration_seconds\" (integer). A capability_call step adds \"provider_id\",\"tool_name\",\"arguments\". A subagent_task step adds \"agent_id\",\"goal\",\"contract\",\"allowed_actions\",\"requires_user_approval\",\"timeout_seconds\",\"max_tokens\".\n\
+         - \"steps\": array of step objects (use [] for direct_answer/ask_clarification/refuse). Each step object MUST have: \"step_id\" (string), \"kind\" (capability_call|memory_lookup|subagent_task|direct_answer), \"depends_on\" (array of step_id), \"execution_policy\" (immediate|durable_task|ask_approval), \"risk_level\" (string), \"expected_duration_seconds\" (integer). A capability_call step adds \"provider_id\",\"tool_name\",\"arguments\". A subagent_task step adds \"agent_id\",\"goal\",\"contract\",\"allowed_actions\",\"requires_user_approval\",\"timeout_seconds\",\"max_tokens\", and MAY add \"assigned_agent\" set to the id of one of the Available specialized agents below when one fits the sub-task (omit it otherwise).\n\
          - optional \"direct_answer\": {{\"answer\",\"reason\",\"confidence\"}} only when route=direct_answer.\n\
          - optional \"needs_more_tools\": {{\"query\"}} only when you need tools not yet loaded.\n\
          Do NOT put step fields at the top level; steps always go inside the \"steps\" array.\n\
@@ -51,11 +52,13 @@ pub(crate) fn planner_prompt(
          \n\
          User message: {}\n\
          Conversation summary: {}\n\
+         Available specialized agents: {}\n\
          Memory context: {}\n\
          Tool catalog compact cards: {}\n\
          Loaded tool details: {}",
         request.user_message,
         conversation_summary.0,
+        available_agents,
         memory_context.0,
         tool_cards.0,
         loaded_tool_details.0
@@ -69,6 +72,25 @@ pub(crate) fn planner_prompt(
             loaded_tool_details.1,
         ],
     })
+}
+
+/// Renders the user-defined agent catalog for the planner prompt. Empty → a clear
+/// "none" so the model knows not to set `assigned_agent`.
+fn render_available_agents(agents: &[crate::AgentProfile]) -> String {
+    if agents.is_empty() {
+        return "(none — use only built-in worker archetypes)".to_string();
+    }
+    agents
+        .iter()
+        .map(|agent| {
+            if agent.description.trim().is_empty() {
+                format!("{} ({})", agent.id, agent.name)
+            } else {
+                format!("{} ({}): {}", agent.id, agent.name, agent.description)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 fn compress_json_context<T: serde::Serialize + ?Sized>(

@@ -43,7 +43,7 @@ use local_first_capabilities::{
     WorkspaceId as CapabilityWorkspaceId,
 };
 use local_first_orchestrator::{
-    ExecutionPlan, MemoryContextProvider, MemoryContextSnippet, OrchestratorBrain,
+    AgentProfile, ExecutionPlan, MemoryContextProvider, MemoryContextSnippet, OrchestratorBrain,
     OrchestratorBudgets, OrchestratorRequest, OrchestratorResult, ToolSearchIndexStore,
 };
 use local_first_secrets::{
@@ -3188,13 +3188,20 @@ fn browser_capability_redacted_checkpoint(
 fn execute_subagent_task(
     task: &TaskRecord,
 ) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
-    // A task may be assigned to a specialized agent (Phase 3) via `lfpa_agent_id`
-    // in its input: it then runs on the agent's model and inherits the agent's
-    // persona (prepended to the contract). Otherwise → the "orchestrator" role.
+    // A task may be assigned to a specialized agent: explicitly via a top-level
+    // `lfpa_agent_id`, or by the orchestrator (Phase 3b) which puts the chosen
+    // agent under `input.lfpa_agent_id`. It then runs on that agent's model and
+    // inherits its persona (prepended to the contract). Otherwise → orchestrator.
     let agent_id = task
         .input_json
         .get("lfpa_agent_id")
         .and_then(Value::as_str)
+        .or_else(|| {
+            task.input_json
+                .get("input")
+                .and_then(|input| input.get("lfpa_agent_id"))
+                .and_then(Value::as_str)
+        })
         .map(str::to_string)
         .filter(|id| !id.is_empty());
 
@@ -5022,6 +5029,7 @@ fn try_brain_operational_plan(state: &AppState, goal: &str) -> Option<Operationa
         conversation_summary: None,
         attachments: Vec::new(),
         budgets,
+        available_agents: available_agent_profiles(),
     };
     let plan = brain.plan_only(&request).ok()?;
     Some(brain_adapter::execution_plan_to_operational_plan(&plan, goal))
@@ -5294,6 +5302,7 @@ fn brain_materialize_tasks(
         conversation_summary: None,
         attachments: Vec::new(),
         budgets,
+        available_agents: available_agent_profiles(),
     };
     let plan = brain.plan_only(&request).map_err(|error| LocalTaskExecutionError {
         message: format!("brain plan: {error}"),
@@ -5538,6 +5547,21 @@ fn router_for_role(role: &str) -> ModelRouter {
 /// Browser-loop router (Phase 2): the "browser" role.
 fn build_browser_inference_router() -> ModelRouter {
     router_for_role("browser")
+}
+
+/// The enabled agents exposed to the planner so it can delegate sub-tasks
+/// (Phase 3b). Disabled agents are hidden from the orchestrator.
+fn available_agent_profiles() -> Vec<AgentProfile> {
+    load_provider_registry()
+        .agents
+        .iter()
+        .filter(|agent| agent.enabled)
+        .map(|agent| AgentProfile {
+            id: agent.id.clone(),
+            name: agent.name.clone(),
+            description: agent.description.clone(),
+        })
+        .collect()
 }
 
 /// Router for a specialized agent (Phase 3): resolves the agent's model (explicit

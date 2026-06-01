@@ -211,6 +211,7 @@ fn request(message: &str) -> OrchestratorRequest {
         conversation_summary: None,
         attachments: vec![],
         budgets: OrchestratorBudgets::default(),
+        available_agents: Vec::new(),
     }
 }
 
