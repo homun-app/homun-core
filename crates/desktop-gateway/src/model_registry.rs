@@ -64,10 +64,110 @@ pub struct ModelEntry {
     pub modality: String,
     #[serde(default)]
     pub context_window: Option<u32>,
+    /// Qualitative profile ("in cosa eccelle") used to RANK among capability-eligible
+    /// models. Optional so old catalogs still load.
+    #[serde(default)]
+    pub profile: Option<ModelProfile>,
 }
 
 fn default_modality() -> String {
     "text".to_string()
+}
+
+/// Coarse capability/cost tier used by the ranker. Fast = cheap/quick, Balanced
+/// = strong general use, Reasoning = deep/complex work.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelTier {
+    Fast,
+    Balanced,
+    Reasoning,
+}
+
+impl ModelTier {
+    fn rank(self) -> i32 {
+        match self {
+            ModelTier::Fast => 0,
+            ModelTier::Balanced => 1,
+            ModelTier::Reasoning => 2,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ModelTier::Fast => "fast",
+            ModelTier::Balanced => "balanced",
+            ModelTier::Reasoning => "reasoning",
+        }
+    }
+}
+
+/// A model's qualitative profile. `strengths` is free text ("excels at …") for a
+/// future LLM-router / UI; `tier` drives today's heuristic ranking. `source`
+/// records provenance (curated | inferred | generated | user) and `confidence`
+/// (0..100) lets the UI flag low-confidence auto profiles.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelProfile {
+    pub tier: ModelTier,
+    #[serde(default)]
+    pub strengths: String,
+    #[serde(default = "default_profile_source")]
+    pub source: String,
+    #[serde(default)]
+    pub confidence: u8,
+}
+
+fn default_profile_source() -> String {
+    "inferred".to_string()
+}
+
+/// Curated/inferred profile from a model id. Known families get a curated tier +
+/// strengths (high confidence); unknown text models default to Balanced with low
+/// confidence (a later increment can replace these with model-generated drafts).
+fn infer_profile(lower: &str, modality: &str) -> ModelProfile {
+    let curated = |tier: ModelTier, strengths: &str| ModelProfile {
+        tier,
+        strengths: strengths.to_string(),
+        source: "curated".to_string(),
+        confidence: 80,
+    };
+    if modality == "embedding" {
+        return curated(ModelTier::Fast, "Embedding per memoria/RAG.");
+    }
+    if modality == "image" {
+        return curated(ModelTier::Balanced, "Generazione di immagini.");
+    }
+    // Small/fast tiers FIRST (so "gpt-4o-mini" → fast, not balanced).
+    let fast_markers = ["mini", "haiku", "flash", "small", "ministral", "gemma", ":8b", "-8b", "1b", "3b", "4b"];
+    if fast_markers.iter().any(|m| lower.contains(m)) {
+        return curated(
+            ModelTier::Fast,
+            "Veloce ed economico: estrazione, classificazione, task brevi.",
+        );
+    }
+    let reasoning_markers = ["opus", "o1", "o3", "o4", "-r1", "deepseek-r", "reasoner", "thinking"];
+    if reasoning_markers.iter().any(|m| lower.contains(m)) {
+        return curated(
+            ModelTier::Reasoning,
+            "Ragionamento profondo: problemi complessi, pianificazione, coding agentico.",
+        );
+    }
+    let balanced_families = [
+        "sonnet", "gpt-4o", "gpt-4.1", "gpt-5", "minimax", "glm", "qwen", "gemini", "mistral",
+        "kimi", "deepseek", "llama", "command",
+    ];
+    if balanced_families.iter().any(|m| lower.contains(m)) {
+        return curated(
+            ModelTier::Balanced,
+            "Uso generale forte: comprensione, tool-use, contesto ampio.",
+        );
+    }
+    ModelProfile {
+        tier: ModelTier::Balanced,
+        strengths: String::new(),
+        source: "inferred".to_string(),
+        confidence: 30,
+    }
 }
 
 impl ModelEntry {
@@ -112,6 +212,7 @@ impl ModelEntry {
             tools,
             modality: modality.to_string(),
             context_window,
+            profile: Some(infer_profile(&lower, modality)),
         }
     }
 }
@@ -273,20 +374,50 @@ pub const ROLES: &[RoleInfo] = &[
     },
 ];
 
-/// Hard requirements a model must meet to serve a role (used by auto-matching).
+/// Hard requirements a model must meet to serve a role (the gate), plus a soft
+/// `preferred_tier` used to RANK among the eligible models.
 #[derive(Debug, Clone, Copy)]
 pub struct RoleReq {
     pub needs_tools: bool,
     pub needs_vision: bool,
     pub modality: &'static str,
+    pub preferred_tier: Option<ModelTier>,
 }
 
 pub fn role_requirements(role: &str) -> RoleReq {
     match role {
-        "vision" => RoleReq { needs_tools: false, needs_vision: true, modality: "text" },
-        "embeddings" => RoleReq { needs_tools: false, needs_vision: false, modality: "embedding" },
-        // orchestrator, browser, and any future tool-using text role.
-        _ => RoleReq { needs_tools: true, needs_vision: false, modality: "text" },
+        "vision" => RoleReq {
+            needs_tools: false,
+            needs_vision: true,
+            modality: "text",
+            preferred_tier: Some(ModelTier::Balanced),
+        },
+        "embeddings" => RoleReq {
+            needs_tools: false,
+            needs_vision: false,
+            modality: "embedding",
+            preferred_tier: None,
+        },
+        // The orchestrator does comprehension/planning → prefer the reasoning tier.
+        "orchestrator" => RoleReq {
+            needs_tools: true,
+            needs_vision: false,
+            modality: "text",
+            preferred_tier: Some(ModelTier::Reasoning),
+        },
+        // Browser/observe-act wants a fast-but-capable tool model.
+        "browser" => RoleReq {
+            needs_tools: true,
+            needs_vision: false,
+            modality: "text",
+            preferred_tier: Some(ModelTier::Balanced),
+        },
+        _ => RoleReq {
+            needs_tools: true,
+            needs_vision: false,
+            modality: "text",
+            preferred_tier: None,
+        },
     }
 }
 
@@ -374,9 +505,11 @@ impl ProviderRegistry {
         self.auto_role(role)
     }
 
-    /// Auto-match: best model meeting the role's requirements, ranked by context
-    /// window (desc), preferring the active provider, then registry order. Falls
-    /// back to the active provider's effective model when no catalog is loaded.
+    /// Auto-match (two-stage): STAGE 1 filters by the role's hard requirements
+    /// (modality/tools/vision — correctness gate); STAGE 2 RANKS the eligible
+    /// models by fit to the role's preferred tier, then context window, then the
+    /// active provider, then registry order. Falls back to the active provider's
+    /// effective model when no catalog is loaded.
     fn auto_role(&self, role: &str) -> Option<ResolvedRole> {
         let req = role_requirements(role);
         let active = self.active_provider_id.as_deref();
@@ -395,11 +528,35 @@ impl ProviderRegistry {
                 candidates.push((provider, model));
             }
         }
+        // Distance from a model's tier to the role's preferred tier (0 = exact).
+        // Unprofiled models are treated as Balanced. No preference → distance 0.
+        let tier_distance = |model: &ModelEntry| -> i32 {
+            match req.preferred_tier {
+                None => 0,
+                Some(pref) => {
+                    let tier = model
+                        .profile
+                        .as_ref()
+                        .map(|p| p.tier)
+                        .unwrap_or(ModelTier::Balanced);
+                    (tier.rank() - pref.rank()).abs()
+                }
+            }
+        };
         candidates.sort_by(|(pa, ma), (pb, mb)| {
-            let ctx = mb.context_window.unwrap_or(0).cmp(&ma.context_window.unwrap_or(0));
-            let active_pref = (active == Some(pb.id.as_str()))
-                .cmp(&(active == Some(pa.id.as_str())));
-            ctx.then(active_pref)
+            // 1) closest tier wins (ascending distance)
+            tier_distance(ma)
+                .cmp(&tier_distance(mb))
+                // 2) larger context window
+                .then(
+                    mb.context_window
+                        .unwrap_or(0)
+                        .cmp(&ma.context_window.unwrap_or(0)),
+                )
+                // 3) prefer the active provider
+                .then(
+                    (active == Some(pb.id.as_str())).cmp(&(active == Some(pa.id.as_str()))),
+                )
         });
         if let Some((provider, model)) = candidates.first() {
             return Some(ResolvedRole {
@@ -634,6 +791,28 @@ mod tests {
         assert!(resolved.auto);
         assert_eq!(resolved.model, "minimax-m2.7:cloud");
         assert_eq!(resolved.provider_id, "ollama");
+    }
+
+    #[test]
+    fn orchestrator_prefers_reasoning_tier_over_balanced() {
+        let mut reg = ProviderRegistry::default();
+        let mut p = ProviderEntry::new(
+            "ollama".into(),
+            "Ollama".into(),
+            ProviderKind::Ollama,
+            "http://127.0.0.1:11434/v1".into(),
+        );
+        // Both text+tools+200k; differ only by tier.
+        let opus = ModelEntry::inferred("claude-opus-4"); // reasoning
+        let sonnet = ModelEntry::inferred("claude-sonnet-4"); // balanced
+        assert_eq!(opus.profile.as_ref().unwrap().tier, ModelTier::Reasoning);
+        assert_eq!(sonnet.profile.as_ref().unwrap().tier, ModelTier::Balanced);
+        p.models = vec![sonnet, opus];
+        reg.upsert(p);
+
+        // orchestrator prefers Reasoning → opus; browser prefers Balanced → sonnet.
+        assert_eq!(reg.resolve_role("orchestrator").unwrap().model, "claude-opus-4");
+        assert_eq!(reg.resolve_role("browser").unwrap().model, "claude-sonnet-4");
     }
 
     #[test]

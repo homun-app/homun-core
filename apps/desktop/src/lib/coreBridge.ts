@@ -459,6 +459,10 @@ export interface ProviderModelView {
   tools: boolean;
   modality: string;
   context_window: number | null;
+  tier: string | null;
+  strengths: string | null;
+  profile_source: string | null;
+  profile_confidence: number | null;
 }
 
 export interface ProviderView {
