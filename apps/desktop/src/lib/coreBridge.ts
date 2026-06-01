@@ -527,6 +527,15 @@ async function electronRefreshProviderModels(id: string): Promise<ProvidersRespo
   );
 }
 
+async function electronSetModelProfile(input: {
+  provider_id: string;
+  model: string;
+  tier: string;
+  strengths?: string;
+}): Promise<ProvidersResponse> {
+  return gatewayPostJson<ProvidersResponse>("/api/model-profile", input);
+}
+
 // ── Role → model bindings (per-task model) ────────────────────────────────
 
 export interface RoleView {
@@ -680,6 +689,8 @@ export const coreBridge = {
   removeProvider: (id: string) => electronRemoveProvider(id),
   activateProvider: (id: string) => electronActivateProvider(id),
   refreshProviderModels: (id: string) => electronRefreshProviderModels(id),
+  setModelProfile: (input: { provider_id: string; model: string; tier: string; strengths?: string }) =>
+    electronSetModelProfile(input),
   roles: () => electronRoles(),
   setRole: (input: { role: string; provider_id?: string; model?: string }) =>
     electronSetRole(input),

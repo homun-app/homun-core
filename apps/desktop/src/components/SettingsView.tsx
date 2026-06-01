@@ -539,6 +539,54 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
                 Rimuovi
               </button>
             </div>
+            {provider.models.length > 0 && (
+              <details style={{ marginTop: "var(--s3)" }}>
+                <summary className="set-field-label" style={{ cursor: "pointer" }}>
+                  Profili modello — in cosa eccelle ({provider.models.length})
+                </summary>
+                <div style={{ maxHeight: 240, overflowY: "auto", marginTop: "var(--s2)" }}>
+                  {provider.models.map((m) => (
+                    <div
+                      key={m.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "var(--s2)",
+                        padding: "2px 0",
+                      }}
+                    >
+                      <span style={{ flex: 1, fontSize: 12, wordBreak: "break-all" }}>
+                        {m.id}
+                        {m.profile_source && m.profile_source !== "user" ? (
+                          <em style={{ opacity: 0.5 }}> · {m.profile_source}</em>
+                        ) : m.profile_source === "user" ? (
+                          <em style={{ opacity: 0.6 }}> · tuo</em>
+                        ) : null}
+                      </span>
+                      <select
+                        className="set-input"
+                        style={{ width: 130, fontSize: 12 }}
+                        value={m.tier ?? "balanced"}
+                        disabled={acting}
+                        onChange={(event) =>
+                          run(provider.id, () =>
+                            coreBridge.setModelProfile({
+                              provider_id: provider.id,
+                              model: m.id,
+                              tier: event.target.value,
+                            }),
+                          )
+                        }
+                      >
+                        <option value="fast">fast</option>
+                        <option value="balanced">balanced</option>
+                        <option value="reasoning">reasoning</option>
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
           </div>
         );
       })}

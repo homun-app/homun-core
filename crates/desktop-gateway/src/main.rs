@@ -592,6 +592,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/providers/{id}", delete(remove_provider))
         .route("/api/providers/{id}/models", post(refresh_provider_models))
         .route("/api/providers/{id}/activate", post(activate_provider))
+        .route("/api/model-profile", post(set_model_profile))
         .route("/api/roles", get(list_roles).post(set_role))
         .route("/api/agents", get(list_agents).post(upsert_agent_handler))
         .route("/api/agents/{id}", delete(remove_agent_handler))
@@ -6101,6 +6102,52 @@ fn provider_registry_persist_error(message: String) -> GatewayError {
         code: "provider_registry_persist_failed",
         message,
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct SetModelProfileRequest {
+    provider_id: String,
+    model: String,
+    tier: String,
+    strengths: Option<String>,
+}
+
+/// User-curates a model's profile (tier + optional strengths). Source becomes
+/// "user" / confidence 100, so it wins over curated/inferred and drives ranking.
+async fn set_model_profile(
+    Json(request): Json<SetModelProfileRequest>,
+) -> Result<Json<ProvidersResponse>, GatewayError> {
+    let tier = model_registry::ModelTier::parse(&request.tier).ok_or_else(|| GatewayError {
+        status: StatusCode::BAD_REQUEST,
+        code: "tier_invalid",
+        message: "tier must be fast|balanced|reasoning".to_string(),
+    })?;
+    let mut registry = load_provider_registry();
+    // Keep the existing strengths text when the caller doesn't supply one.
+    let strengths = request
+        .strengths
+        .or_else(|| {
+            registry
+                .get(&request.provider_id)
+                .and_then(|p| p.models.iter().find(|m| m.id == request.model))
+                .and_then(|m| m.profile.as_ref().map(|pr| pr.strengths.clone()))
+        })
+        .unwrap_or_default();
+    let profile = model_registry::ModelProfile {
+        tier,
+        strengths,
+        source: "user".to_string(),
+        confidence: 100,
+    };
+    if !registry.set_model_profile(&request.provider_id, &request.model, profile) {
+        return Err(GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "model_not_found",
+            message: format!("modello {} non trovato in {}", request.model, request.provider_id),
+        });
+    }
+    save_provider_registry(&registry).map_err(provider_registry_persist_error)?;
+    Ok(Json(providers_response(&registry)))
 }
 
 // ── Role → model endpoints (Phase 2) ──────────────────────────────────────
