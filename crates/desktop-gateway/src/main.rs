@@ -4107,10 +4107,14 @@ fn composio_chat_tools(state: &AppState, cap: usize) -> ComposioChatTools {
     if slugs.is_empty() {
         return out;
     }
+    // Composio v3 /tools filters by `toolkits=` (comma-joined). NB: the param is
+    // `toolkits`, not `toolkit_slugs` — confirmed against OpenHuman's working
+    // direct-mode client. The wrong name is silently ignored (returns the whole
+    // catalogue), so getting it right is what scopes tools to connected apps.
     let query = slugs.join(",");
     let resp = match transport.request(
         "GET",
-        &format!("/tools?toolkit_slugs={query}&limit={cap}"),
+        &format!("/tools?toolkits={query}&limit={cap}"),
         None,
     ) {
         Ok(resp) => resp,
