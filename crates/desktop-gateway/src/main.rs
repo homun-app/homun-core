@@ -1234,6 +1234,11 @@ fn chat_context_budget_chars() -> usize {
 /// the model always synthesizes a final answer from what it gathered. With 3:
 /// up to 2 tool calls (search + optional follow-up), then a forced answer.
 const MAX_TOOL_ROUNDS: usize = 3;
+/// Cap on connected-service (Composio) tools surfaced to the chat model, to keep
+/// the prompt focused and cheap.
+const COMPOSIO_CHAT_TOOL_CAP: usize = 30;
+/// Cap on a Composio tool result fed back to the model (email bodies can be huge).
+const COMPOSIO_RESULT_CHARS: usize = 6000;
 
 /// The browser tool the chat model can invoke. No keyword gate: the MODEL reads
 /// this description and decides to call it when the request needs the live web.
@@ -1318,9 +1323,30 @@ compagnie o aeroporti diversi, le colonne Compagnia e Aeroporto sono OBBLIGATORI
 più opzioni, non solo una. Rispondi in italiano, chiaro e ordinato.",
         today = today_iso()
     );
+    // Surface the user's connected-service (Composio) tools next to the browser
+    // tool. Read tools auto-run; write tools are deferred to confirmation.
+    let composio_tools = {
+        let st = state.clone();
+        tokio::task::spawn_blocking(move || composio_chat_tools(&st, COMPOSIO_CHAT_TOOL_CAP))
+            .await
+            .unwrap_or_default()
+    };
+    let composio_writes = composio_tools.writes.clone();
+    let system = if composio_tools.schemas.is_empty() {
+        system
+    } else {
+        format!(
+            "{system}\n\nSTRUMENTI SERVIZI COLLEGATI: hai accesso agli strumenti dei servizi \
+collegati dell'utente (es. Gmail, Google Calendar). Usali per LEGGERE dati reali (email, eventi, \
+file…) quando la richiesta lo richiede, invece di dire che non hai accesso. Le azioni di \
+SCRITTURA (inviare, eliminare, modificare) richiedono una conferma esplicita dell'utente."
+        )
+    };
     let system = system.as_str();
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-    let tools = serde_json::json!([browse_web_tool_schema()]);
+    let mut tools_list = vec![browse_web_tool_schema()];
+    tools_list.extend(composio_tools.schemas.iter().cloned());
+    let tools = serde_json::Value::Array(tools_list);
     let mut messages = vec![
         serde_json::json!({ "role": "system", "content": system }),
         serde_json::json!({ "role": "user", "content": prompt }),
@@ -1475,6 +1501,39 @@ più opzioni, non solo una. Rispondi in italiano, chiaro e ordinato.",
                                 format!("Lo strumento browser ha riportato un errore: {error}")
                             }
                             Err(error) => format!("Errore di esecuzione dello strumento: {error}"),
+                        }
+                    } else if !name.is_empty() {
+                        // A connected-service (Composio) tool.
+                        if composio_writes.contains(name) {
+                            // Stage 2 adds the in-chat confirmation card + execution.
+                            format!(
+                                "AZIONE DI SCRITTURA «{name}» NON eseguita: richiede una conferma \
+esplicita dell'utente (in arrivo). Spiega in modo chiaro cosa faresti (destinatario, oggetto, \
+contenuto…) e chiedi all'utente di confermare."
+                            )
+                        } else {
+                            let _ = emit_stream_event(
+                                &tx,
+                                GenerateStreamEvent::Delta { text: format!("\n\n_🔧 Uso {name}…_\n") },
+                            )
+                            .await;
+                            let st = state_owned.clone();
+                            let tool = name.to_string();
+                            let args: serde_json::Value =
+                                serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                            let outcome = tokio::task::spawn_blocking(move || {
+                                composio_execute_tool(&st, &tool, &args)
+                            })
+                            .await;
+                            match outcome {
+                                Ok(Ok(value)) => {
+                                    value.to_string().chars().take(COMPOSIO_RESULT_CHARS).collect()
+                                }
+                                Ok(Err(error)) => {
+                                    format!("Errore dello strumento {name}: {}", error.message)
+                                }
+                                Err(error) => format!("Errore di esecuzione dello strumento: {error}"),
+                            }
                         }
                     } else {
                         format!("Strumento non disponibile: {name}")
@@ -3978,6 +4037,133 @@ struct ComposioConnectionsResponse {
 /// active workspace so a project's connected accounts are isolated per project.
 fn composio_entity_id() -> String {
     active_workspace_id()
+}
+
+/// Composio function tools to expose to the chat model, plus the subset that are
+/// writes (need confirmation before running).
+#[derive(Debug, Default)]
+struct ComposioChatTools {
+    /// OpenAI-style function tool schemas (name = tool slug).
+    schemas: Vec<serde_json::Value>,
+    /// Slugs classified as write/destructive actions.
+    writes: std::collections::BTreeSet<String>,
+}
+
+/// Read-vs-write classification from the tool slug's action verb. Conservative:
+/// only well-known read verbs count as read; everything else is a write that
+/// must be confirmed before running. (e.g. GMAIL_FETCH_EMAILS = read,
+/// GMAIL_SEND_EMAIL = write.)
+fn composio_tool_is_read(slug: &str) -> bool {
+    const READ_VERBS: &[&str] = &[
+        "FETCH", "GET", "LIST", "SEARCH", "READ", "FIND", "RETRIEVE", "VIEW", "DOWNLOAD",
+        "CHECK", "COUNT", "QUERY", "LOOKUP", "DESCRIBE", "EXPORT",
+    ];
+    let upper = slug.to_ascii_uppercase();
+    let action = upper.splitn(2, '_').nth(1).unwrap_or(&upper);
+    READ_VERBS.iter().any(|v| action.starts_with(v))
+}
+
+/// ACTIVE connected toolkit slugs for the current entity.
+fn composio_active_toolkit_slugs(transport: &GatewayComposioTransport) -> Vec<String> {
+    let resp = transport
+        .request(
+            "GET",
+            &format!("/connected_accounts?user_ids={}", composio_entity_id()),
+            None,
+        )
+        .ok();
+    let mut slugs = std::collections::BTreeSet::new();
+    if let Some(items) = resp.as_ref().and_then(|r| r.get("items")).and_then(|v| v.as_array()) {
+        for item in items {
+            let active = item
+                .get("status")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|s| s.eq_ignore_ascii_case("ACTIVE"));
+            if !active {
+                continue;
+            }
+            if let Some(slug) = item
+                .get("toolkit")
+                .and_then(|t| t.get("slug"))
+                .or_else(|| item.get("toolkit_slug"))
+                .and_then(serde_json::Value::as_str)
+            {
+                slugs.insert(slug.to_string());
+            }
+        }
+    }
+    slugs.into_iter().collect()
+}
+
+/// Fetches the executable tools (with input schemas) for the connected toolkits
+/// and turns them into OpenAI function schemas, capped to avoid prompt bloat.
+/// Best-effort: any failure yields an empty set so chat still works.
+fn composio_chat_tools(state: &AppState, cap: usize) -> ComposioChatTools {
+    let mut out = ComposioChatTools::default();
+    let Ok(transport) = composio_transport_for(state) else {
+        return out;
+    };
+    let slugs = composio_active_toolkit_slugs(&transport);
+    if slugs.is_empty() {
+        return out;
+    }
+    let query = slugs.join(",");
+    let resp = match transport.request(
+        "GET",
+        &format!("/tools?toolkit_slugs={query}&limit={cap}"),
+        None,
+    ) {
+        Ok(resp) => resp,
+        Err(_) => return out,
+    };
+    let items = resp.get("items").and_then(serde_json::Value::as_array).cloned().unwrap_or_default();
+    for item in items.into_iter().take(cap) {
+        let Some(slug) = item.get("slug").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        if item.get("is_deprecated").and_then(serde_json::Value::as_bool).unwrap_or(false) {
+            continue;
+        }
+        let description = item
+            .get("description")
+            .or_else(|| item.get("human_description"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .chars()
+            .take(300)
+            .collect::<String>();
+        let parameters = item
+            .get("input_parameters")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({ "type": "object", "properties": {} }));
+        if !composio_tool_is_read(slug) {
+            out.writes.insert(slug.to_string());
+        }
+        out.schemas.push(serde_json::json!({
+            "type": "function",
+            "function": { "name": slug, "description": description, "parameters": parameters },
+        }));
+    }
+    out
+}
+
+/// Executes a Composio tool for the current entity and returns its raw output.
+fn composio_execute_tool(
+    state: &AppState,
+    tool: &str,
+    arguments: &serde_json::Value,
+) -> Result<serde_json::Value, GatewayError> {
+    let transport = composio_transport_for(state)?;
+    transport
+        .request(
+            "POST",
+            &format!("/tools/execute/{tool}"),
+            Some(serde_json::json!({
+                "user_id": composio_entity_id(),
+                "arguments": arguments,
+            })),
+        )
+        .map_err(GatewayError::capability)
 }
 
 /// Resolves a Composio-managed auth_config id for a toolkit, reusing an existing
