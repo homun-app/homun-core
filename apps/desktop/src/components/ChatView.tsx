@@ -1886,13 +1886,21 @@ function parseComposioConfirm(text: string): {
   return { visible: text.replace(COMPOSIO_CONFIRM_RE, "").trim(), action };
 }
 
+/** Replaces raw tool slugs (GMAIL_SEND_EMAIL) anywhere in assistant text with a
+ *  human-readable name. Targets SCREAMING_SNAKE_CASE tokens, which in chat are
+ *  practically always tool slugs. */
+function humanizeToolSlugs(text: string): string {
+  return text.replace(/\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g, (slug) => humanizeToolName(slug));
+}
+
 /** Renders an assistant message body, surfacing a write-confirmation card when
  *  the model proposed a write action that needs approval (once / always). */
 function AssistantMessageBody({ text, streaming }: { text: string; streaming?: boolean }) {
   const { visible, action } = useMemo(() => parseComposioConfirm(text), [text]);
+  const readable = useMemo(() => humanizeToolSlugs(visible), [visible]);
   return (
     <>
-      {visible && <RichMessage text={visible} streaming={streaming} />}
+      {readable && <RichMessage text={readable} streaming={streaming} />}
       {action && !streaming && <ComposioConfirmCard action={action} />}
     </>
   );
