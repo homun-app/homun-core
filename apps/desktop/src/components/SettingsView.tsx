@@ -738,7 +738,14 @@ function ProviderDetailView({
   onSetModel: (modelId: string) => void;
   onSaveModel: (
     modelId: string,
-    patch: { tier: string; strengths?: string; vision?: boolean; tools?: boolean; context_window?: number },
+    patch: {
+      tier: string;
+      strengths?: string;
+      vision?: boolean;
+      tools?: boolean;
+      reasoning?: boolean;
+      context_window?: number;
+    },
   ) => void;
 }) {
   const acting = busy === provider.id;
@@ -750,8 +757,9 @@ function ProviderDetailView({
     strengths: string;
     vision: boolean;
     tools: boolean;
+    reasoning: boolean;
     contextWindow: string;
-  }>({ tier: "balanced", strengths: "", vision: false, tools: true, contextWindow: "" });
+  }>({ tier: "balanced", strengths: "", vision: false, tools: true, reasoning: false, contextWindow: "" });
 
   const openEditor = (m: ProviderModelView) => {
     setEditingId(m.id);
@@ -760,6 +768,7 @@ function ProviderDetailView({
       strengths: m.strengths ?? "",
       vision: m.vision,
       tools: m.tools,
+      reasoning: m.reasoning,
       contextWindow: m.context_window ? String(m.context_window) : "",
     });
   };
@@ -864,16 +873,18 @@ function ProviderDetailView({
             <div className="mdl-model-row">
               <div className="mdl-model-info">
                 <span className="mdl-model-id">{m.id}</span>
+                <div className="mdl-model-tags">
+                  {m.modality !== "text" && <span className="mdl-tag">{m.modality}</span>}
+                  {m.vision && <span className="mdl-tag">vision</span>}
+                  {m.tools && <span className="mdl-tag">tools</span>}
+                  {m.reasoning && <span className="mdl-tag think">reasoning</span>}
+                  {m.context_window ? <span className="mdl-tag">{formatK(m.context_window)} ctx</span> : null}
+                  {m.tier && <span className="mdl-tag tier">{m.tier}</span>}
+                  {m.profile_source === "user" && <span className="mdl-tag user">tuo</span>}
+                </div>
                 {m.strengths ? (
                   <span className="mdl-model-str" title={m.strengths}>{m.strengths}</span>
                 ) : null}
-              </div>
-              <div className="mdl-model-tags">
-                {m.vision && <span className="mdl-tag">vision</span>}
-                {m.tools && <span className="mdl-tag">tools</span>}
-                {m.tier && <span className="mdl-tag">{m.tier}</span>}
-                {m.modality !== "text" && <span className="mdl-tag">{m.modality}</span>}
-                {m.profile_source === "user" && <span className="mdl-tag user">tuo</span>}
               </div>
               <button
                 className="set-btn"
@@ -937,6 +948,14 @@ function ProviderDetailView({
                     />
                     tools
                   </label>
+                  <label className="mdl-check">
+                    <input
+                      type="checkbox"
+                      checked={draft.reasoning}
+                      onChange={(e) => setDraft({ ...draft, reasoning: e.target.checked })}
+                    />
+                    reasoning (thinking)
+                  </label>
                 </div>
                 <button
                   className="set-btn primary"
@@ -950,6 +969,7 @@ function ProviderDetailView({
                       strengths: draft.strengths,
                       vision: draft.vision,
                       tools: draft.tools,
+                      reasoning: draft.reasoning,
                       ...(Number.isFinite(ctx) && ctx > 0 ? { context_window: ctx } : {}),
                     });
                     setEditingId(null);

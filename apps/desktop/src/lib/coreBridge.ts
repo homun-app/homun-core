@@ -457,6 +457,7 @@ export interface ProviderModelView {
   id: string;
   vision: boolean;
   tools: boolean;
+  reasoning: boolean;
   modality: string;
   context_window: number | null;
   tier: string | null;
@@ -534,6 +535,7 @@ export interface SetModelProfileInput {
   strengths?: string;
   vision?: boolean;
   tools?: boolean;
+  reasoning?: boolean;
   context_window?: number;
 }
 
