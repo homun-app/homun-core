@@ -483,6 +483,23 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
               >
                 {acting ? "…" : "Aggiorna modelli"}
               </button>
+              {provider.models.some((m) => m.profile_source === "inferred" || !m.profile_source) && (
+                <button
+                  className="set-btn"
+                  type="button"
+                  disabled={acting}
+                  title="Un modello descrive i modelli senza profilo (in cosa eccellono)"
+                  onClick={() =>
+                    run(
+                      provider.id,
+                      () => coreBridge.generateProviderProfiles(provider.id),
+                      `Profili generati per ${provider.label}.`,
+                    )
+                  }
+                >
+                  {acting ? "…" : "Genera profili"}
+                </button>
+              )}
               {!isActive && (
                 <button
                   className="set-btn"

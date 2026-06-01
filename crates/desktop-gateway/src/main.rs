@@ -593,6 +593,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/providers", get(list_providers).post(upsert_provider))
         .route("/api/providers/{id}", delete(remove_provider))
         .route("/api/providers/{id}/models", post(refresh_provider_models))
+        .route(
+            "/api/providers/{id}/generate-profiles",
+            post(generate_provider_profiles),
+        )
         .route("/api/providers/{id}/activate", post(activate_provider))
         .route("/api/model-profile", post(set_model_profile))
         .route("/api/roles", get(list_roles).post(set_role))
@@ -6166,6 +6170,119 @@ async fn set_model_profile(
             code: "model_not_found",
             message: format!("modello {} non trovato in {}", request.model, request.provider_id),
         });
+    }
+    save_provider_registry(&registry).map_err(provider_registry_persist_error)?;
+    Ok(Json(providers_response(&registry)))
+}
+
+/// Generates `strengths` + `tier` drafts for the provider's models that only have
+/// an inferred placeholder profile (the "generated where not curated" half of the
+/// hybrid). Asks a capable model to describe each model id; results are marked
+/// source="generated" (medium confidence) and remain user-editable. Curated and
+/// user profiles are left untouched.
+async fn generate_provider_profiles(
+    Path(id): Path<String>,
+) -> Result<Json<ProvidersResponse>, GatewayError> {
+    let registry = load_provider_registry();
+    let provider = registry.get(&id).ok_or_else(|| GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "provider_not_found",
+        message: format!("provider {id} non configurato"),
+    })?;
+    // Only fill the inferred placeholders (no profile, or source == "inferred").
+    let to_describe: Vec<String> = provider
+        .models
+        .iter()
+        .filter(|m| {
+            m.profile
+                .as_ref()
+                .map(|p| p.source == "inferred")
+                .unwrap_or(true)
+        })
+        .map(|m| m.id.clone())
+        .collect();
+    if to_describe.is_empty() {
+        return Ok(Json(providers_response(&registry)));
+    }
+
+    let list = to_describe
+        .iter()
+        .map(|mid| format!("- {mid}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let prompt = format!(
+        "Per ciascun id-modello elencato, indica in cosa eccelle e il tier.\n\
+         tier ∈ {{fast, balanced, reasoning}} (fast=veloce/economico, balanced=uso \
+         generale forte, reasoning=ragionamento profondo). strengths = UNA frase \
+         concisa. Se non conosci il modello, usa tier \"balanced\" e strengths \"\".\n\n\
+         Modelli:\n{list}\n\n\
+         Rispondi SOLO con JSON: {{\"profiles\": [{{\"id\":\"<id esatto>\",\"tier\":\"...\",\"strengths\":\"...\"}}]}}."
+    );
+    let request = GenerateJsonRequest {
+        prompt,
+        max_tokens: 1_200,
+        temperature: 0.0,
+        wait_if_busy: true,
+        request_timeout_seconds: Some(60.0),
+        json_schema: None,
+        required_keys: vec!["profiles".to_string()],
+        repair: true,
+    };
+    // The provider's HTTP call is blocking; run it off the async runtime.
+    let response = tokio::task::spawn_blocking(move || {
+        router_for_role("orchestrator").generate_json_with(&Requirements::default(), &request)
+    })
+    .await
+    .map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "profile_generation_join_failed",
+        message: error.to_string(),
+    })?
+    .map_err(|error| GatewayError {
+        status: StatusCode::BAD_GATEWAY,
+        code: "profile_generation_failed",
+        message: format!("generazione profili fallita: {error:?}"),
+    })?;
+    if !response.valid {
+        return Err(GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "profile_generation_invalid",
+            message: response.errors.join("; "),
+        });
+    }
+
+    // Re-load and apply (the LLM call is async; keep the write atomic-ish).
+    let mut registry = load_provider_registry();
+    let valid_ids: std::collections::HashSet<&str> =
+        to_describe.iter().map(String::as_str).collect();
+    if let Some(profiles) = response.json.get("profiles").and_then(Value::as_array) {
+        for entry in profiles {
+            let model_id = entry.get("id").and_then(Value::as_str).unwrap_or_default();
+            if model_id.is_empty() || !valid_ids.contains(model_id) {
+                continue;
+            }
+            let tier = entry
+                .get("tier")
+                .and_then(Value::as_str)
+                .and_then(model_registry::ModelTier::parse)
+                .unwrap_or(model_registry::ModelTier::Balanced);
+            let strengths = entry
+                .get("strengths")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            registry.set_model_profile(
+                &id,
+                model_id,
+                model_registry::ModelProfile {
+                    tier,
+                    strengths,
+                    source: "generated".to_string(),
+                    confidence: 50,
+                },
+            );
+        }
     }
     save_provider_registry(&registry).map_err(provider_registry_persist_error)?;
     Ok(Json(providers_response(&registry)))
