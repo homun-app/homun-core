@@ -1659,7 +1659,9 @@ card di conferma nell'interfaccia. NON dire che è stata eseguita."
                         } else {
                             let _ = emit_stream_event(
                                 &tx,
-                                GenerateStreamEvent::Delta { text: format!("\n\n_🔧 Uso {name}…_\n") },
+                                GenerateStreamEvent::Delta {
+                                    text: format!("\n\n_🔧 Uso {}…_\n", humanize_composio_tool(name)),
+                                },
                             )
                             .await;
                             let st = state_owned.clone();
@@ -4231,6 +4233,28 @@ fn composio_tool_is_read(slug: &str) -> bool {
     let has_write = tokens.iter().any(|t| WRITE_VERBS.contains(t));
     let has_read = tokens.iter().any(|t| READ_VERBS.contains(t));
     has_read && !has_write
+}
+
+/// Human-readable tool name from a Composio slug, e.g. GMAIL_SEND_EMAIL →
+/// "Send email · Gmail". Used wherever a tool is shown to the user.
+fn humanize_composio_tool(slug: &str) -> String {
+    let parts: Vec<&str> = slug.split('_').filter(|s| !s.is_empty()).collect();
+    let Some((toolkit_raw, action_parts)) = parts.split_first() else {
+        return slug.to_string();
+    };
+    let capitalize = |w: &str| {
+        let mut chars = w.chars();
+        match chars.next() {
+            Some(first) => first.to_uppercase().collect::<String>() + &chars.as_str().to_lowercase(),
+            None => String::new(),
+        }
+    };
+    let toolkit = capitalize(toolkit_raw);
+    if action_parts.is_empty() {
+        return toolkit;
+    }
+    let action = capitalize(&action_parts.iter().map(|w| w.to_lowercase()).collect::<Vec<_>>().join(" "));
+    format!("{action} · {toolkit}")
 }
 
 /// ACTIVE connected toolkit slugs for the current entity.
