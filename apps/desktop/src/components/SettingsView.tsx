@@ -1061,9 +1061,10 @@ function ConnectorsPane() {
   }, []);
 
   const composioConn = snap?.connections.find((c) => c.provider_id === "composio") ?? null;
-  const composioConnected = Boolean(
-    composioConn && composioConn.status.toLowerCase().includes("connect"),
-  );
+  // The backend ConnectionStatus serializes as snake_case ("active" | "expired" |
+  // "failed" | "disabled"). A stored composio connection in "active" means the key
+  // verified and toolkits are cached → treat it as connected.
+  const composioConnected = composioConn?.status.toLowerCase() === "active";
 
   // Group MCP tools by provider so each server shows as one rail entry + tool count.
   const mcpProviders = new Map<string, { name: string; tools: number }>();
@@ -1172,21 +1173,52 @@ function ComposioDetail({
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [loadingKits, setLoadingKits] = useState(false);
+  // Set when the existing connection's key fails to list toolkits (invalid /
+  // expired / revoked). We then fall back to the key form so the user can fix it.
+  const [kitsError, setKitsError] = useState<string | null>(null);
+  const [editingKey, setEditingKey] = useState(false);
 
   const loadToolkits = async () => {
     setLoadingKits(true);
+    setKitsError(null);
     try {
       setToolkits(await coreBridge.composioToolkits());
     } catch (error) {
-      onNote(`Toolkit non caricati: ${(error as Error).message}`);
+      setKitsError((error as Error).message);
     } finally {
       setLoadingKits(false);
     }
   };
   useEffect(() => {
-    if (connected) void loadToolkits();
+    if (connected) {
+      void loadToolkits();
+    } else {
+      setToolkits([]);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected]);
+
+  const submitKey = async () => {
+    setBusy(true);
+    onNote(null);
+    try {
+      const result = await coreBridge.composioConnect(apiKey.trim());
+      onNote(`Composio collegato (${result.tools_cached} strumenti).`);
+      setApiKey("");
+      setEditingKey(false);
+      setKitsError(null);
+      await onChanged();
+      await loadToolkits();
+    } catch (error) {
+      onNote(`Composio non collegato: ${(error as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Show the key form when there is no live connection, when the stored key is
+  // not working, or when the user explicitly chose to change it.
+  const showForm = !connected || editingKey || kitsError !== null;
 
   const q = query.trim().toLowerCase();
   const filtered = q
@@ -1211,14 +1243,28 @@ function ComposioDetail({
                 : "Hub di toolkit cloud (Gmail, GitHub, Slack…) con OAuth gestito."}
             </p>
           </div>
+          {connected && !showForm && (
+            <button
+              className="set-btn"
+              type="button"
+              onClick={() => setEditingKey(true)}
+            >
+              Cambia chiave
+            </button>
+          )}
           <span className={`set-badge ${connected ? "green" : "muted"}`}>
             {connected ? "Connesso" : "Non connesso"}
           </span>
         </div>
       </div>
 
-      {!connected ? (
+      {showForm ? (
         <div className="mdl-field">
+          {kitsError && (
+            <p className="set-hint">
+              La connessione esistente non risponde ({kitsError}). Reinserisci una API key valida.
+            </p>
+          )}
           <label className="mdl-field-label">Composio API key</label>
           <input
             className="set-input"
@@ -1226,30 +1272,33 @@ function ComposioDetail({
             placeholder="comp_…"
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
-          />
-          <button
-            className="set-btn primary"
-            type="button"
-            style={{ marginTop: 12, alignSelf: "flex-start" }}
-            disabled={busy || !apiKey.trim()}
-            onClick={async () => {
-              setBusy(true);
-              onNote(null);
-              try {
-                const result = await coreBridge.composioConnect(apiKey.trim());
-                onNote(`Composio collegato (${result.tools_cached} strumenti).`);
-                setApiKey("");
-                await onChanged();
-                await loadToolkits();
-              } catch (error) {
-                onNote(`Composio non collegato: ${(error as Error).message}`);
-              } finally {
-                setBusy(false);
-              }
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && apiKey.trim() && !busy) void submitKey();
             }}
-          >
-            {busy ? "Collegamento…" : "Collega Composio"}
-          </button>
+          />
+          <div style={{ display: "flex", gap: "var(--s2)", marginTop: 12 }}>
+            <button
+              className="set-btn primary"
+              type="button"
+              disabled={busy || !apiKey.trim()}
+              onClick={() => void submitKey()}
+            >
+              {busy ? "Collegamento…" : connected ? "Aggiorna chiave" : "Collega Composio"}
+            </button>
+            {connected && editingKey && !kitsError && (
+              <button
+                className="set-btn"
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  setEditingKey(false);
+                  setApiKey("");
+                }}
+              >
+                Annulla
+              </button>
+            )}
+          </div>
         </div>
       ) : (
         <>
