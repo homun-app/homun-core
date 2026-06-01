@@ -3951,6 +3951,9 @@ fn composio_toolkits_blocking(state: &AppState) -> Result<ComposioToolkitsRespon
 #[derive(Debug, Deserialize)]
 struct ComposioLinkRequest {
     toolkit_slug: String,
+    /// When present, run the custom API-key flow instead of managed OAuth.
+    #[serde(default)]
+    api_key: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -3979,39 +3982,58 @@ fn composio_entity_id() -> String {
 
 /// Resolves a Composio-managed auth_config id for a toolkit, reusing an existing
 /// one or creating a managed OAuth2 config. (Grounded on the real v3 shapes.)
-fn composio_managed_auth_config_id(
+/// Resolves (reusing, else creating) an auth config for `toolkit_slug`. With
+/// `api_key=true` we want a CUSTOM API-key config (the user brings their own
+/// credentials); otherwise a Composio-managed OAuth config. We never reuse a
+/// config of the wrong kind — that's exactly what produced the
+/// "Default auth config not found / no managed credentials" 400 for API-key-only
+/// toolkits like openweather.
+fn composio_auth_config_id(
     transport: &GatewayComposioTransport,
     toolkit_slug: &str,
+    api_key: bool,
 ) -> Result<String, GatewayError> {
+    let extract_id = |item: &serde_json::Value| {
+        item.get("id")
+            .or_else(|| item.get("auth_config").and_then(|ac| ac.get("id")))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+    };
+    let is_api_key_scheme = |item: &serde_json::Value| {
+        let scheme = item
+            .get("auth_scheme")
+            .or_else(|| item.get("authScheme"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .to_ascii_uppercase();
+        scheme == "API_KEY" || scheme == "BEARER_TOKEN"
+    };
+
     let existing = transport
-        .request(
-            "GET",
-            &format!("/auth_configs?toolkit_slug={toolkit_slug}"),
-            None,
-        )
+        .request("GET", &format!("/auth_configs?toolkit_slug={toolkit_slug}"), None)
         .map_err(GatewayError::capability)?;
-    let found = existing
+    let reusable = existing
         .get("items")
         .and_then(serde_json::Value::as_array)
-        .and_then(|items| items.first())
-        .and_then(|item| {
-            item.get("id")
-                .or_else(|| item.get("auth_config").and_then(|ac| ac.get("id")))
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string)
-        });
-    if let Some(id) = found {
+        .and_then(|items| items.iter().find(|item| is_api_key_scheme(item) == api_key))
+        .and_then(extract_id);
+    if let Some(id) = reusable {
         return Ok(id);
     }
+
+    let body = if api_key {
+        serde_json::json!({
+            "toolkit": { "slug": toolkit_slug },
+            "auth_config": { "type": "use_custom_auth", "auth_scheme": "API_KEY", "credentials": {} }
+        })
+    } else {
+        serde_json::json!({
+            "toolkit": { "slug": toolkit_slug },
+            "auth_config": { "type": "use_composio_managed_auth" }
+        })
+    };
     let created = transport
-        .request(
-            "POST",
-            "/auth_configs",
-            Some(serde_json::json!({
-                "toolkit": { "slug": toolkit_slug },
-                "auth_config": { "type": "use_composio_managed_auth" }
-            })),
-        )
+        .request("POST", "/auth_configs", Some(body))
         .map_err(GatewayError::capability)?;
     created
         .get("auth_config")
@@ -4026,33 +4048,42 @@ fn composio_managed_auth_config_id(
         })
 }
 
+/// Links a toolkit. With an `api_key` we run Composio's custom API-key flow
+/// (create a `use_custom_auth` config, then initiate with the key in
+/// `config.val`) — the connection is active immediately, no redirect. Without a
+/// key we run the managed-OAuth flow, which returns a `redirect_url` to open.
 fn composio_link_blocking(
     state: &AppState,
     toolkit_slug: &str,
+    api_key: Option<String>,
 ) -> Result<ComposioLinkResponse, GatewayError> {
     let transport = composio_transport_for(state)?;
-    let auth_config_id = composio_managed_auth_config_id(&transport, toolkit_slug)?;
+    let use_api_key = api_key.as_ref().is_some_and(|k| !k.trim().is_empty());
+    let auth_config_id = composio_auth_config_id(&transport, toolkit_slug, use_api_key)?;
+
+    let mut body = serde_json::json!({
+        "auth_config_id": auth_config_id,
+        "user_id": composio_entity_id(),
+    });
+    if let Some(key) = api_key.filter(|k| !k.trim().is_empty()) {
+        body["config"] = serde_json::json!({
+            "auth_scheme": "API_KEY",
+            "val": { "api_key": key.trim() },
+        });
+    }
+
     let link = transport
-        .request(
-            "POST",
-            "/connected_accounts/link",
-            Some(serde_json::json!({
-                "auth_config_id": auth_config_id,
-                "user_id": composio_entity_id(),
-            })),
-        )
+        .request("POST", "/connected_accounts/link", Some(body))
         .map_err(GatewayError::capability)?;
+    // Managed OAuth returns a redirect_url; API-key connections do not.
     let redirect_url = link
         .get("redirect_url")
         .and_then(serde_json::Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| GatewayError {
-            status: StatusCode::BAD_GATEWAY,
-            code: "composio_link_failed",
-            message: "Composio link response missing redirect_url".to_string(),
-        })?;
+        .unwrap_or_default()
+        .to_string();
     let connected_account_id = link
         .get("connected_account_id")
+        .or_else(|| link.get("id"))
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default()
         .to_string();
@@ -4066,7 +4097,9 @@ async fn composio_link(
     State(state): State<AppState>,
     Json(request): Json<ComposioLinkRequest>,
 ) -> Result<Json<ComposioLinkResponse>, GatewayError> {
-    tokio::task::spawn_blocking(move || composio_link_blocking(&state, &request.toolkit_slug))
+    tokio::task::spawn_blocking(move || {
+        composio_link_blocking(&state, &request.toolkit_slug, request.api_key)
+    })
         .await
         .map_err(|error| GatewayError {
             status: StatusCode::INTERNAL_SERVER_ERROR,

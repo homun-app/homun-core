@@ -1379,25 +1379,33 @@ function ComposioToolkitBrowser({
     );
   });
 
-  // Kick off the OAuth link for a toolkit, then poll until Composio reports the
-  // connected account as ACTIVE (or we time out) — the "detect automatically" bit.
-  const connect = async (kit: ComposioToolkit) => {
+  // Link a toolkit. With an apiKey we run Composio's custom API-key flow (active
+  // immediately, no browser); otherwise managed OAuth → open the redirect and
+  // poll until Composio reports the account ACTIVE ("detect automatically").
+  const connect = async (kit: ComposioToolkit, apiKey?: string) => {
     onNote(null);
     setModalKit(null);
+    let redirect = "";
     try {
-      const result = await coreBridge.composioLink(kit.slug);
-      if (result.redirect_url) {
-        window.open(result.redirect_url, "_blank", "noopener,noreferrer");
-        onNote(`Autorizza ${kit.name} nel browser, poi torna qui.`);
-      }
+      const result = await coreBridge.composioLink(kit.slug, apiKey);
+      redirect = result.redirect_url || "";
     } catch (error) {
       onNote(`Collegamento non riuscito: ${(error as Error).message}`);
       return;
     }
+    if (redirect) {
+      window.open(redirect, "_blank", "noopener,noreferrer");
+      onNote(`Autorizza ${kit.name} nel browser, poi torna qui.`);
+    } else {
+      onNote(`Collego ${kit.name}…`);
+    }
     setPolling((prev) => new Set(prev).add(kit.slug));
-    const deadline = Date.now() + 150_000;
+    // OAuth needs the user to authorize in the browser (slow); an API-key
+    // connection is active right away (fast, short poll).
+    const deadline = Date.now() + (redirect ? 150_000 : 20_000);
+    const step = redirect ? 3000 : 1500;
     while (Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 3000));
+      await new Promise((r) => setTimeout(r, step));
       const map = await refreshConnections();
       if (map[kit.slug] === "connected") {
         onNote(`${kit.name} connesso.`);
@@ -1469,7 +1477,7 @@ function ComposioToolkitBrowser({
           kit={modalKit}
           state={stateOf(modalKit.slug)}
           onClose={() => setModalKit(null)}
-          onConnect={() => void connect(modalKit)}
+          onConnect={(apiKey) => void connect(modalKit, apiKey)}
         />
       )}
     </>
@@ -1511,9 +1519,14 @@ function ConnectModal({
   kit: ComposioToolkit;
   state: KitState;
   onClose: () => void;
-  onConnect: () => void;
+  onConnect: (apiKey?: string) => void;
 }) {
   const [imgOk, setImgOk] = useState(Boolean(kit.logo));
+  const [apiKey, setApiKey] = useState("");
+  // Toolkits that are neither managed-OAuth nor no-auth need the user's own
+  // credentials (e.g. openweather): collect the API key here.
+  const needsKey = !kit.no_auth && !kit.managed_oauth;
+  const canSubmit = !needsKey || apiKey.trim().length > 0;
   return (
     <div className="cmp-modal-overlay" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="cmp-modal" onClick={(e) => e.stopPropagation()}>
@@ -1528,7 +1541,9 @@ function ConnectModal({
           <div className="conn-detail-titletext">
             <h3 className="mdl-detail-title">Collega {kit.name}</h3>
             <p className="mdl-detail-sub">
-              {state === "connected" ? `${kit.name} è già connesso.` : `Collega il tuo account ${kit.name}.`}
+              {state === "connected"
+                ? `${kit.name} è già connesso.`
+                : `Collega il tuo account ${kit.name}.`}
             </p>
           </div>
           <button className="mdl-icon-btn" type="button" aria-label="Chiudi" onClick={onClose}>
@@ -1536,11 +1551,33 @@ function ConnectModal({
           </button>
         </div>
         <div className="cmp-modal-note">
-          Apriremo una finestra del browser: autorizzi l'accesso lì e l'app rileva la connessione
-          automaticamente. I permessi degli agenti restano governati dai gate di approvazione.
+          {needsKey
+            ? `${kit.name} usa una tua API key. Inseriscila qui: viene salvata cifrata sul dispositivo e usata solo verso Composio. La connessione diventa attiva subito, senza browser.`
+            : "Apriremo una finestra del browser: autorizzi l'accesso lì e l'app rileva la connessione automaticamente. I permessi degli agenti restano governati dai gate di approvazione."}
         </div>
-        <button className="set-btn primary cmp-modal-btn" type="button" onClick={onConnect}>
-          {state === "connected" ? `Riconnetti ${kit.name}` : `Collega ${kit.name}`}
+        {needsKey && (
+          <input
+            className="set-input"
+            type="password"
+            placeholder="API key"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && canSubmit) onConnect(apiKey.trim());
+            }}
+          />
+        )}
+        <button
+          className="set-btn primary cmp-modal-btn"
+          type="button"
+          disabled={!canSubmit}
+          onClick={() => onConnect(needsKey ? apiKey.trim() : undefined)}
+        >
+          {needsKey
+            ? `Collega con API key`
+            : state === "connected"
+              ? `Riconnetti ${kit.name}`
+              : `Collega ${kit.name}`}
         </button>
       </div>
     </div>
