@@ -667,6 +667,52 @@ async function electronComposioConnections(): Promise<ComposioConnection[]> {
   return payload.connections ?? [];
 }
 
+export interface SkillSummary {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  source: string;
+  version?: string;
+  license?: string;
+  allowed_tools?: string[];
+}
+
+export interface SkillsResponse {
+  skills: SkillSummary[];
+  dir: string;
+}
+
+export interface SkillFileNode {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  children?: SkillFileNode[];
+}
+
+export interface SkillDetail extends SkillSummary {
+  body: string;
+  files: SkillFileNode[];
+}
+
+async function electronSkills(): Promise<SkillsResponse> {
+  return gatewayGetJson<SkillsResponse>("/api/skills");
+}
+
+async function electronSkillDetail(id: string): Promise<SkillDetail> {
+  return gatewayGetJson<SkillDetail>(`/api/skills/${encodeURIComponent(id)}`);
+}
+
+async function electronSetSkillEnabled(
+  id: string,
+  enabled: boolean,
+): Promise<SkillsResponse> {
+  return gatewayPostJson<SkillsResponse>(
+    `/api/skills/${encodeURIComponent(id)}/enabled`,
+    { enabled },
+  );
+}
+
 export const coreBridge = {
   status: () => Promise.resolve(electronCoreStatus()),
   runtimeModel: () => electronRuntimeModel(),
@@ -702,6 +748,9 @@ export const coreBridge = {
   composioToolkits: () => electronComposioToolkits(),
   composioLink: (toolkitSlug: string) => electronComposioLink(toolkitSlug),
   composioConnections: () => electronComposioConnections(),
+  skills: () => electronSkills(),
+  skillDetail: (id: string) => electronSkillDetail(id),
+  setSkillEnabled: (id: string, enabled: boolean) => electronSetSkillEnabled(id, enabled),
   chatThreads: () => chatApi.chatThreads(),
   chatMessages: (threadId: string) => chatApi.chatMessages(threadId),
   setChatMessageFeedback: (

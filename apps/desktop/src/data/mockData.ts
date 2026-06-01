@@ -14,6 +14,7 @@ import {
   MonitorPlay,
   Plug,
   SlidersHorizontal,
+  Sparkles,
   User,
 } from "lucide-react";
 import type {
@@ -397,6 +398,7 @@ export const settingsSections: Array<{
   { id: "runtime", label: "Modello & Runtime", icon: Cpu, group: "account" },
   { id: "privacy", label: "Privacy & Autonomia", icon: KeyRound, group: "account" },
   { id: "connections", label: "Connettori", icon: Plug, group: "capabilities" },
+  { id: "skills", label: "Skill", icon: Sparkles, group: "capabilities" },
   { id: "computer", label: "Computer locale", icon: MonitorPlay, group: "capabilities" },
   { id: "audit", label: "Dati & Audit", icon: History, group: "capabilities" },
 ];

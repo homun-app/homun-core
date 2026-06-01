@@ -1,11 +1,14 @@
 import {
   Boxes,
   Check,
+  Code2,
   Copy,
   Cpu,
   ExternalLink,
   Eye,
   EyeOff,
+  FileText,
+  Folder,
   ListChecks,
   MonitorPlay,
   Play,
@@ -20,6 +23,9 @@ import {
   Trash2,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeSanitize from "rehype-sanitize";
 import {
   coreBridge,
   type ActiveModelInfo,
@@ -31,6 +37,9 @@ import {
   type ProviderView,
   type RoleView,
   type RoutingDecision,
+  type SkillDetail,
+  type SkillFileNode,
+  type SkillsResponse,
   type SystemStatus,
 } from "../lib/coreBridge";
 import { useSetting } from "../lib/settingsStore";
@@ -50,6 +59,7 @@ const SECTION_TITLES: Record<SettingsSectionId, string> = {
   runtime: "Modello & Runtime",
   privacy: "Privacy & Autonomia",
   connections: "Connettori",
+  skills: "Skill",
   computer: "Computer locale",
   audit: "Dati & Audit",
 };
@@ -81,7 +91,11 @@ export function SettingsView({ section }: SettingsViewProps) {
 
   return (
     <section
-      className={`settings-view ${section === "runtime" || section === "connections" ? "settings-wide" : ""}`}
+      className={`settings-view ${
+        section === "runtime" || section === "connections" || section === "skills"
+          ? "settings-wide"
+          : ""
+      }`}
       aria-labelledby="settings-title"
     >
       <div className="set-pane">
@@ -93,6 +107,7 @@ export function SettingsView({ section }: SettingsViewProps) {
         {section === "runtime" && <RuntimePane model={model} />}
         {section === "privacy" && <PrivacyPane />}
         {section === "connections" && <ConnectorsPane />}
+        {section === "skills" && <SkillsPane />}
         {section === "computer" && <ComputerPane computer={computer} />}
         {section === "audit" && <AuditPane />}
       </div>
@@ -1451,6 +1466,231 @@ function McpServerDetail({
         {tools.length === 0 && <p className="set-hint">Nessuno strumento esposto.</p>}
       </div>
     </>
+  );
+}
+
+/* -------------------------------------------------------------------- skills */
+
+function SkillsPane() {
+  const [resp, setResp] = useState<SkillsResponse | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [detail, setDetail] = useState<SkillDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const r = await coreBridge.skills();
+        setResp(r);
+        setSelected((cur) => cur ?? r.skills[0]?.id ?? null);
+      } catch (e) {
+        setError(`Impossibile leggere le skill: ${(e as Error).message}`);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!selected) {
+      setDetail(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const d = await coreBridge.skillDetail(selected);
+        if (!cancelled) setDetail(d);
+      } catch {
+        if (!cancelled) setDetail(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selected]);
+
+  const toggle = async (id: string, enabled: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await coreBridge.setSkillEnabled(id, enabled);
+      setResp(r);
+      setDetail((d) => (d && d.id === id ? { ...d, enabled } : d));
+    } catch (e) {
+      setError(`Aggiornamento non riuscito: ${(e as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const skills = resp?.skills ?? [];
+
+  return (
+    <div className="mdl-layout">
+      <aside className="mdl-rail" aria-label="Skill">
+        <div className="mdl-rail-group">Skill personali</div>
+        {skills.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            className={`mdl-rail-item ${selected === s.id ? "active" : ""}`}
+            onClick={() => setSelected(s.id)}
+          >
+            <span className="conn-avatar">
+              <Sparkles size={13} />
+            </span>
+            <span className="mdl-rail-name">{s.name}</span>
+            <span
+              className={`skl-state ${s.enabled ? "on" : "off"}`}
+              title={s.enabled ? "Attiva" : "Disattivata"}
+            />
+          </button>
+        ))}
+        {skills.length === 0 && <p className="mdl-rail-empty">Nessuna skill</p>}
+      </aside>
+
+      <section className="mdl-detail">
+        {skills.length === 0 ? (
+          <SkillsEmpty dir={resp?.dir} />
+        ) : detail ? (
+          <SkillDetailView detail={detail} busy={busy} onToggle={toggle} />
+        ) : (
+          <p className="set-hint">Carico…</p>
+        )}
+        {error && <p className="set-hint">{error}</p>}
+      </section>
+    </div>
+  );
+}
+
+function SkillsEmpty({ dir }: { dir?: string }) {
+  return (
+    <div className="skl-empty">
+      <span className="conn-avatar lg">
+        <Sparkles size={20} />
+      </span>
+      <h3 className="mdl-detail-title">Nessuna skill installata</h3>
+      <p className="mdl-detail-sub">
+        Una skill è una cartella in formato Agent Skills: un <code>SKILL.md</code> con nome e
+        descrizione (ciò che il modello legge per decidere quando usarla). Mettile in questa
+        cartella e compariranno qui automaticamente:
+      </p>
+      {dir && <code className="skl-path">{dir}</code>}
+      <p className="mdl-detail-sub">
+        Presto potrai cercarle e installarle dal marketplace GitHub direttamente da qui.
+      </p>
+    </div>
+  );
+}
+
+function SkillDetailView({
+  detail,
+  busy,
+  onToggle,
+}: {
+  detail: SkillDetail;
+  busy: boolean;
+  onToggle: (id: string, enabled: boolean) => Promise<void>;
+}) {
+  const [raw, setRaw] = useState(false);
+  return (
+    <>
+      <div className="mdl-detail-head">
+        <div className="conn-detail-title">
+          <span className="conn-avatar lg">
+            <Sparkles size={18} />
+          </span>
+          <div className="conn-detail-titletext">
+            <h3 className="mdl-detail-title">{detail.name}</h3>
+            <p className="mdl-detail-sub">
+              {detail.id}
+              {detail.version ? ` · v${detail.version}` : ""}
+            </p>
+          </div>
+          <label className="skl-toggle" title="Attiva o disattiva la skill">
+            <input
+              type="checkbox"
+              checked={detail.enabled}
+              disabled={busy}
+              onChange={(e) => void onToggle(detail.id, e.target.checked)}
+            />
+            <span>{detail.enabled ? "Attiva" : "Disattivata"}</span>
+          </label>
+        </div>
+      </div>
+
+      <div className="skl-pills">
+        <span className="mdl-tag">origine: {detail.source}</span>
+        {detail.license && <span className="mdl-tag">licenza: {detail.license}</span>}
+        {(detail.allowed_tools ?? []).map((t) => (
+          <span key={t} className="mdl-tag tier">
+            {t}
+          </span>
+        ))}
+      </div>
+
+      {detail.description && <p className="skl-desc">{detail.description}</p>}
+
+      <div className="skl-md-head">
+        <span className="mdl-detail-section-label">SKILL.md</span>
+        <div className="skl-md-toggle">
+          <button
+            type="button"
+            className={`mdl-icon-btn ${!raw ? "active" : ""}`}
+            onClick={() => setRaw(false)}
+            title="Anteprima"
+            aria-label="Anteprima"
+          >
+            <Eye size={15} />
+          </button>
+          <button
+            type="button"
+            className={`mdl-icon-btn ${raw ? "active" : ""}`}
+            onClick={() => setRaw(true)}
+            title="Sorgente"
+            aria-label="Sorgente"
+          >
+            <Code2 size={15} />
+          </button>
+        </div>
+      </div>
+      {raw ? (
+        <pre className="skl-raw">{detail.body}</pre>
+      ) : (
+        <div className="skl-prose">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+            {detail.body}
+          </ReactMarkdown>
+        </div>
+      )}
+
+      {detail.files.length > 0 && (
+        <>
+          <div className="mdl-detail-section-label">File</div>
+          <div className="skl-tree">
+            <SkillTree nodes={detail.files} depth={0} />
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+function SkillTree({ nodes, depth }: { nodes: SkillFileNode[]; depth: number }) {
+  return (
+    <ul className="skl-tree-list">
+      {nodes.map((node) => (
+        <li key={node.path}>
+          <span className="skl-tree-row" style={{ paddingLeft: 10 + depth * 16 }}>
+            {node.is_dir ? <Folder size={14} /> : <FileText size={14} />}
+            <span className="skl-tree-name">{node.name}</span>
+          </span>
+          {node.is_dir && node.children && node.children.length > 0 && (
+            <SkillTree nodes={node.children} depth={depth + 1} />
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }
 
