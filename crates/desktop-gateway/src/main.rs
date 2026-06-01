@@ -6232,10 +6232,15 @@ struct SetModelProfileRequest {
     model: String,
     tier: String,
     strengths: Option<String>,
+    /// Optional capability overrides (the gate fields). Absent = leave as-is.
+    vision: Option<bool>,
+    tools: Option<bool>,
+    context_window: Option<u32>,
 }
 
-/// User-curates a model's profile (tier + optional strengths). Source becomes
-/// "user" / confidence 100, so it wins over curated/inferred and drives ranking.
+/// User-curates a model's profile (tier + strengths) and, optionally, its
+/// capability flags (vision/tools/context window). Source becomes "user" /
+/// confidence 100, so it wins over curated/inferred and drives ranking + gating.
 async fn set_model_profile(
     Json(request): Json<SetModelProfileRequest>,
 ) -> Result<Json<ProvidersResponse>, GatewayError> {
@@ -6261,7 +6266,19 @@ async fn set_model_profile(
         source: "user".to_string(),
         confidence: 100,
     };
-    if !registry.set_model_profile(&request.provider_id, &request.model, profile) {
+    let updated = registry.update_model(&request.provider_id, &request.model, |model| {
+        model.profile = Some(profile);
+        if let Some(vision) = request.vision {
+            model.vision = vision;
+        }
+        if let Some(tools) = request.tools {
+            model.tools = tools;
+        }
+        if let Some(context_window) = request.context_window {
+            model.context_window = Some(context_window);
+        }
+    });
+    if !updated {
         return Err(GatewayError {
             status: StatusCode::NOT_FOUND,
             code: "model_not_found",

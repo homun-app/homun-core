@@ -27,6 +27,7 @@ import {
   type ContainedComputerLive,
   type CoreCapabilitySnapshot,
   type CoreMemoryDashboard,
+  type ProviderModelView,
   type ProviderView,
   type RoleView,
   type RoutingDecision,
@@ -679,9 +680,16 @@ function RuntimePane({ model }: { model: ActiveModelInfo | null }) {
                 }),
               )
             }
-            onSetTier={(modelId, tier) =>
-              run(selectedProvider.id, () =>
-                coreBridge.setModelProfile({ provider_id: selectedProvider.id, model: modelId, tier }),
+            onSaveModel={(modelId, patch) =>
+              run(
+                selectedProvider.id,
+                () =>
+                  coreBridge.setModelProfile({
+                    provider_id: selectedProvider.id,
+                    model: modelId,
+                    ...patch,
+                  }),
+                "Modello aggiornato.",
               )
             }
           />
@@ -710,7 +718,7 @@ function ProviderDetailView({
   onGenerateProfiles,
   onSaveConnection,
   onSetModel,
-  onSetTier,
+  onSaveModel,
 }: {
   provider: ProviderView;
   isActive: boolean;
@@ -728,10 +736,33 @@ function ProviderDetailView({
   onGenerateProfiles: () => void;
   onSaveConnection: () => void;
   onSetModel: (modelId: string) => void;
-  onSetTier: (modelId: string, tier: string) => void;
+  onSaveModel: (
+    modelId: string,
+    patch: { tier: string; strengths?: string; vision?: boolean; tools?: boolean; context_window?: number },
+  ) => void;
 }) {
   const acting = busy === provider.id;
   const hasInferred = provider.models.some((m) => m.profile_source === "inferred" || !m.profile_source);
+  // Which model row is open in the editor, plus its draft.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<{
+    tier: string;
+    strengths: string;
+    vision: boolean;
+    tools: boolean;
+    contextWindow: string;
+  }>({ tier: "balanced", strengths: "", vision: false, tools: true, contextWindow: "" });
+
+  const openEditor = (m: ProviderModelView) => {
+    setEditingId(m.id);
+    setDraft({
+      tier: m.tier ?? "balanced",
+      strengths: m.strengths ?? "",
+      vision: m.vision,
+      tools: m.tools,
+      contextWindow: m.context_window ? String(m.context_window) : "",
+    });
+  };
   return (
     <>
       <div className="mdl-detail-head">
@@ -829,28 +860,105 @@ function ProviderDetailView({
           <p className="set-hint">Nessun modello. Premi "Aggiorna" per leggere il catalogo.</p>
         )}
         {provider.models.map((m) => (
-          <div className="mdl-model-row" key={m.id}>
-            <div className="mdl-model-info">
-              <span className="mdl-model-id">{m.id}</span>
-              {m.strengths ? (
-                <span className="mdl-model-str" title={m.strengths}>{m.strengths}</span>
-              ) : null}
+          <div className="mdl-model-cell" key={m.id}>
+            <div className="mdl-model-row">
+              <div className="mdl-model-info">
+                <span className="mdl-model-id">{m.id}</span>
+                {m.strengths ? (
+                  <span className="mdl-model-str" title={m.strengths}>{m.strengths}</span>
+                ) : null}
+              </div>
+              <div className="mdl-model-tags">
+                {m.vision && <span className="mdl-tag">vision</span>}
+                {m.tools && <span className="mdl-tag">tools</span>}
+                {m.tier && <span className="mdl-tag">{m.tier}</span>}
+                {m.modality !== "text" && <span className="mdl-tag">{m.modality}</span>}
+                {m.profile_source === "user" && <span className="mdl-tag user">tuo</span>}
+              </div>
+              <button
+                className="set-btn"
+                type="button"
+                disabled={acting}
+                onClick={() => (editingId === m.id ? setEditingId(null) : openEditor(m))}
+              >
+                {editingId === m.id ? "Chiudi" : "Modifica"}
+              </button>
             </div>
-            <div className="mdl-model-tags">
-              {m.vision && <span className="mdl-tag">vision</span>}
-              {m.modality !== "text" && <span className="mdl-tag">{m.modality}</span>}
-              {m.profile_source === "user" && <span className="mdl-tag user">tuo</span>}
-            </div>
-            <select
-              className="set-input mdl-tier"
-              value={m.tier ?? "balanced"}
-              disabled={acting}
-              onChange={(event) => onSetTier(m.id, event.target.value)}
-            >
-              <option value="fast">fast</option>
-              <option value="balanced">balanced</option>
-              <option value="reasoning">reasoning</option>
-            </select>
+            {editingId === m.id && (
+              <div className="mdl-model-editor">
+                <div className="mdl-field">
+                  <label>Descrizione (in cosa eccelle)</label>
+                  <textarea
+                    className="set-input"
+                    rows={2}
+                    placeholder="es. Coding & agentic frontier. 1M context. Multimodale."
+                    value={draft.strengths}
+                    onChange={(e) => setDraft({ ...draft, strengths: e.target.value })}
+                  />
+                </div>
+                <div className="mdl-editor-grid">
+                  <div className="mdl-field">
+                    <label>Tier</label>
+                    <select
+                      className="set-input"
+                      value={draft.tier}
+                      onChange={(e) => setDraft({ ...draft, tier: e.target.value })}
+                    >
+                      <option value="fast">fast</option>
+                      <option value="balanced">balanced</option>
+                      <option value="reasoning">reasoning (thinking)</option>
+                    </select>
+                  </div>
+                  <div className="mdl-field">
+                    <label>Context window (token)</label>
+                    <input
+                      className="set-input"
+                      type="number"
+                      placeholder="es. 1000000"
+                      value={draft.contextWindow}
+                      onChange={(e) => setDraft({ ...draft, contextWindow: e.target.value })}
+                    />
+                  </div>
+                </div>
+                <div className="mdl-editor-checks">
+                  <label className="mdl-check">
+                    <input
+                      type="checkbox"
+                      checked={draft.vision}
+                      onChange={(e) => setDraft({ ...draft, vision: e.target.checked })}
+                    />
+                    vision
+                  </label>
+                  <label className="mdl-check">
+                    <input
+                      type="checkbox"
+                      checked={draft.tools}
+                      onChange={(e) => setDraft({ ...draft, tools: e.target.checked })}
+                    />
+                    tools
+                  </label>
+                </div>
+                <button
+                  className="set-btn primary"
+                  type="button"
+                  style={{ alignSelf: "flex-start" }}
+                  disabled={acting}
+                  onClick={() => {
+                    const ctx = parseInt(draft.contextWindow, 10);
+                    onSaveModel(m.id, {
+                      tier: draft.tier,
+                      strengths: draft.strengths,
+                      vision: draft.vision,
+                      tools: draft.tools,
+                      ...(Number.isFinite(ctx) && ctx > 0 ? { context_window: ctx } : {}),
+                    });
+                    setEditingId(null);
+                  }}
+                >
+                  Salva modello
+                </button>
+              </div>
+            )}
           </div>
         ))}
       </div>

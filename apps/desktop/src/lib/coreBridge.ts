@@ -527,12 +527,17 @@ async function electronRefreshProviderModels(id: string): Promise<ProvidersRespo
   );
 }
 
-async function electronSetModelProfile(input: {
+export interface SetModelProfileInput {
   provider_id: string;
   model: string;
   tier: string;
   strengths?: string;
-}): Promise<ProvidersResponse> {
+  vision?: boolean;
+  tools?: boolean;
+  context_window?: number;
+}
+
+async function electronSetModelProfile(input: SetModelProfileInput): Promise<ProvidersResponse> {
   return gatewayPostJson<ProvidersResponse>("/api/model-profile", input);
 }
 
@@ -670,8 +675,7 @@ export const coreBridge = {
   removeProvider: (id: string) => electronRemoveProvider(id),
   activateProvider: (id: string) => electronActivateProvider(id),
   refreshProviderModels: (id: string) => electronRefreshProviderModels(id),
-  setModelProfile: (input: { provider_id: string; model: string; tier: string; strengths?: string }) =>
-    electronSetModelProfile(input),
+  setModelProfile: (input: SetModelProfileInput) => electronSetModelProfile(input),
   generateProviderProfiles: (id: string) => electronGenerateProviderProfiles(id),
   routingDecisions: () => electronRoutingDecisions(),
   roles: () => electronRoles(),

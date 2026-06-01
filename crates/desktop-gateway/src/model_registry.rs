@@ -599,10 +599,21 @@ impl ProviderRegistry {
         model_id: &str,
         profile: ModelProfile,
     ) -> bool {
+        self.update_model(provider_id, model_id, |model| model.profile = Some(profile))
+    }
+
+    /// Mutates a model in place (profile + capability flags). Returns false if the
+    /// provider/model isn't in the registry.
+    pub fn update_model<F: FnOnce(&mut ModelEntry)>(
+        &mut self,
+        provider_id: &str,
+        model_id: &str,
+        edit: F,
+    ) -> bool {
         if let Some(provider) = self.get_mut(provider_id)
             && let Some(model) = provider.models.iter_mut().find(|m| m.id == model_id)
         {
-            model.profile = Some(profile);
+            edit(model);
             return true;
         }
         false
