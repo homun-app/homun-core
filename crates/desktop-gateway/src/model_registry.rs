@@ -519,10 +519,11 @@ impl ProviderRegistry {
     /// models by fit to the role's preferred tier, then context window, then the
     /// active provider, then registry order. Falls back to the active provider's
     /// effective model when no catalog is loaded.
-    fn auto_role(&self, role: &str) -> Option<ResolvedRole> {
+    /// STAGE 1 (gate): models passing a role's hard capability requirements.
+    /// Shared by the heuristic ranker and the semantic (LLM) router.
+    pub fn eligible_models(&self, role: &str) -> Vec<(&ProviderEntry, &ModelEntry)> {
         let req = role_requirements(role);
-        let active = self.active_provider_id.as_deref();
-        let mut candidates: Vec<(&ProviderEntry, &ModelEntry)> = Vec::new();
+        let mut out = Vec::new();
         for provider in &self.providers {
             for model in &provider.models {
                 if model.modality != req.modality {
@@ -534,9 +535,16 @@ impl ProviderRegistry {
                 if req.needs_vision && !model.vision {
                     continue;
                 }
-                candidates.push((provider, model));
+                out.push((provider, model));
             }
         }
+        out
+    }
+
+    fn auto_role(&self, role: &str) -> Option<ResolvedRole> {
+        let req = role_requirements(role);
+        let active = self.active_provider_id.as_deref();
+        let mut candidates = self.eligible_models(role);
         // Distance from a model's tier to the role's preferred tier (0 = exact).
         // Unprofiled models are treated as Balanced. No preference → distance 0.
         let tier_distance = |model: &ModelEntry| -> i32 {
@@ -839,6 +847,27 @@ mod tests {
         // orchestrator prefers Reasoning → opus; browser prefers Balanced → sonnet.
         assert_eq!(reg.resolve_role("orchestrator").unwrap().model, "claude-opus-4");
         assert_eq!(reg.resolve_role("browser").unwrap().model, "claude-sonnet-4");
+    }
+
+    #[test]
+    fn eligible_models_apply_the_capability_gate() {
+        let reg = registry_with_two_models(); // llama3.1:8b, minimax (text+tools), nomic-embed
+        // orchestrator (text+tools) → the two chat models, not the embedder.
+        let orch: Vec<_> = reg
+            .eligible_models("orchestrator")
+            .iter()
+            .map(|(_, m)| m.id.clone())
+            .collect();
+        assert!(orch.contains(&"minimax-m2.7:cloud".to_string()));
+        assert!(orch.contains(&"llama3.1:8b".to_string()));
+        assert!(!orch.contains(&"nomic-embed-text".to_string()));
+        // embeddings role → only the embedder.
+        let emb: Vec<_> = reg
+            .eligible_models("embeddings")
+            .iter()
+            .map(|(_, m)| m.id.clone())
+            .collect();
+        assert_eq!(emb, vec!["nomic-embed-text".to_string()]);
     }
 
     #[test]
