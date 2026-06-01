@@ -1233,10 +1233,14 @@ fn chat_context_budget_chars() -> usize {
 /// Max model↔tool round-trips. The LAST round forbids tools (tool_choice:none) so
 /// the model always synthesizes a final answer from what it gathered. With 3:
 /// up to 2 tool calls (search + optional follow-up), then a forced answer.
-const MAX_TOOL_ROUNDS: usize = 3;
-/// Cap on connected-service (Composio) tools surfaced to the chat model, to keep
-/// the prompt focused and cheap.
-const COMPOSIO_CHAT_TOOL_CAP: usize = 50;
+/// Max model↔tool rounds. Allows discovery (find_connected_tools) → execute →
+/// synthesize without starving the final answer.
+const MAX_TOOL_ROUNDS: usize = 5;
+/// How many connected-service tools to pull into the searchable catalog (NOT
+/// sent to the model — only searched by `find_connected_tools`).
+const COMPOSIO_CATALOG_CAP: usize = 200;
+/// How many tools `find_connected_tools` returns (and injects) per search.
+const COMPOSIO_DISCOVERY_RESULTS: usize = 8;
 /// Cap on a Composio tool result fed back to the model (email bodies can be huge).
 const COMPOSIO_RESULT_CHARS: usize = 6000;
 
@@ -1260,6 +1264,58 @@ fn browse_web_tool_schema() -> serde_json::Value {
             }
         }
     })
+}
+
+/// The discovery meta-tool: the model searches connected-service tools by intent
+/// instead of receiving all of them up front (progressive tool disclosure).
+fn find_connected_tools_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "find_connected_tools",
+            "description": "Cerca tra gli strumenti dei servizi collegati dall'utente (Gmail, Google Calendar, …) quelli adatti all'intento. Restituisce gli strumenti rilevanti, che diventano poi richiamabili. Chiamalo PRIMA di dire che non hai accesso a un servizio.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Intento o parole chiave, es. 'unread emails', 'calendar events today', 'send email'."
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    })
+}
+
+/// Keyword search over the connected-tool catalog. Scores each tool by how many
+/// query tokens appear in its "slug + description" haystack; returns the top `k`
+/// as (slug, schema). An empty query returns the first `k` (a sensible browse).
+fn search_composio_catalog(
+    index: &[(String, String, serde_json::Value)],
+    query: &str,
+    k: usize,
+) -> Vec<(String, serde_json::Value)> {
+    let tokens: Vec<String> = query
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|t| t.len() >= 3)
+        .map(str::to_string)
+        .collect();
+    let mut scored: Vec<(usize, &(String, String, serde_json::Value))> = index
+        .iter()
+        .map(|entry| {
+            let score = if tokens.is_empty() {
+                1
+            } else {
+                tokens.iter().filter(|t| entry.1.contains(t.as_str())).count()
+            };
+            (score, entry)
+        })
+        .filter(|(score, _)| *score > 0)
+        .collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    scored.into_iter().take(k).map(|(_, e)| (e.0.clone(), e.2.clone())).collect()
 }
 
 /// Capable (OpenAI-compatible) chat path with NATIVE TOOL-CALLING. The model is
@@ -1323,30 +1379,48 @@ compagnie o aeroporti diversi, le colonne Compagnia e Aeroporto sono OBBLIGATORI
 più opzioni, non solo una. Rispondi in italiano, chiaro e ordinato.",
         today = today_iso()
     );
-    // Surface the user's connected-service (Composio) tools next to the browser
-    // tool. Read tools auto-run; write tools are deferred to confirmation.
-    let composio_tools = {
+    // Connected-service (Composio) tools are reached via a DISCOVERY meta-tool
+    // (`find_connected_tools`), not dumped into the prompt: the model searches by
+    // intent, we return the few relevant tools and inject their schemas for the
+    // next round. Keeps the prompt small and scales to hundreds of tools — the
+    // pattern Composio/Claude use.
+    let catalog = {
         let st = state.clone();
-        tokio::task::spawn_blocking(move || composio_chat_tools(&st, COMPOSIO_CHAT_TOOL_CAP))
+        tokio::task::spawn_blocking(move || composio_chat_tools(&st, COMPOSIO_CATALOG_CAP))
             .await
             .unwrap_or_default()
     };
-    let composio_writes = composio_tools.writes.clone();
-    let system = if composio_tools.schemas.is_empty() {
+    let composio_writes = catalog.writes.clone();
+    // (slug, lowercased "slug + description" haystack, schema) for keyword search.
+    let catalog_index: Vec<(String, String, serde_json::Value)> = catalog
+        .schemas
+        .iter()
+        .filter_map(|s| {
+            let f = s.get("function")?;
+            let name = f.get("name")?.as_str()?.to_string();
+            let desc = f.get("description").and_then(|d| d.as_str()).unwrap_or("");
+            let haystack = format!("{name} {desc}").to_lowercase();
+            Some((name, haystack, s.clone()))
+        })
+        .collect();
+    let has_composio = !catalog_index.is_empty();
+    let system = if !has_composio {
         system
     } else {
         format!(
-            "{system}\n\nSTRUMENTI SERVIZI COLLEGATI: hai accesso agli strumenti dei servizi \
-collegati dell'utente (es. Gmail, Google Calendar). Usali per LEGGERE dati reali (email, eventi, \
-file…) quando la richiesta lo richiede, invece di dire che non hai accesso. Le azioni di \
-SCRITTURA (inviare, eliminare, modificare) richiedono una conferma esplicita dell'utente."
+            "{system}\n\nSTRUMENTI SERVIZI COLLEGATI: l'utente ha collegato dei servizi (es. Gmail, \
+Google Calendar). Per accedervi NON dire che non puoi: chiama lo strumento `find_connected_tools` \
+con una query sull'intento (es. \"unread emails\", \"calendar events today\") per scoprire lo \
+strumento adatto, poi CHIAMA lo strumento trovato. Le azioni di SCRITTURA (inviare, eliminare, \
+modificare) richiedono una conferma esplicita dell'utente."
         )
     };
     let system = system.as_str();
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-    let mut tools_list = vec![browse_web_tool_schema()];
-    tools_list.extend(composio_tools.schemas.iter().cloned());
-    let tools = serde_json::Value::Array(tools_list);
+    let mut base_tools = vec![browse_web_tool_schema()];
+    if has_composio {
+        base_tools.push(find_connected_tools_schema());
+    }
     let mut messages = vec![
         serde_json::json!({ "role": "system", "content": system }),
         serde_json::json!({ "role": "user", "content": prompt }),
@@ -1362,6 +1436,10 @@ SCRITTURA (inviare, eliminare, modificare) richiedono una conferma esplicita del
     tokio::spawn(async move {
         let mut accumulated = String::new();
         let mut final_done = false;
+        // Tools offered to the model this run: the base set, plus any tools the
+        // model discovers via `find_connected_tools` (injected on demand).
+        let mut tool_schemas = base_tools;
+        let mut loaded_tools: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
 
         for round in 0..MAX_TOOL_ROUNDS {
             // On the LAST allowed round, forbid tools so the model MUST synthesize
@@ -1383,7 +1461,7 @@ SCRITTURA (inviare, eliminare, modificare) richiedono una conferma esplicita del
                 "stream": false,
             });
             if !is_final_round {
-                payload["tools"] = tools.clone();
+                payload["tools"] = serde_json::Value::Array(tool_schemas.clone());
                 payload["tool_choice"] = serde_json::Value::String("auto".to_string());
             }
             let mut builder = http.post(&endpoint);
@@ -1501,6 +1579,51 @@ SCRITTURA (inviare, eliminare, modificare) richiedono una conferma esplicita del
                                 format!("Lo strumento browser ha riportato un errore: {error}")
                             }
                             Err(error) => format!("Errore di esecuzione dello strumento: {error}"),
+                        }
+                    } else if name == "find_connected_tools" {
+                        // Discovery: search the catalog, inject the matching tool
+                        // schemas so the model can call them next round.
+                        let query = serde_json::from_str::<serde_json::Value>(args_raw)
+                            .ok()
+                            .and_then(|a| a.get("query").and_then(|q| q.as_str()).map(String::from))
+                            .unwrap_or_default();
+                        let _ = emit_stream_event(
+                            &tx,
+                            GenerateStreamEvent::Delta {
+                                text: format!(
+                                    "\n\n_🔎 Cerco strumenti: {}_\n",
+                                    if query.is_empty() { "(intento)" } else { query.as_str() }
+                                ),
+                            },
+                        )
+                        .await;
+                        let matches =
+                            search_composio_catalog(&catalog_index, &query, COMPOSIO_DISCOVERY_RESULTS);
+                        if matches.is_empty() {
+                            "Nessuno strumento corrisponde. Riformula con parole chiave del \
+servizio (es. \"email\", \"calendar\", \"drive\")."
+                                .to_string()
+                        } else {
+                            let mut lines = Vec::new();
+                            for (slug, schema) in &matches {
+                                if loaded_tools.insert(slug.clone()) {
+                                    tool_schemas.push(schema.clone());
+                                }
+                                let desc = schema
+                                    .get("function")
+                                    .and_then(|f| f.get("description"))
+                                    .and_then(|d| d.as_str())
+                                    .unwrap_or("")
+                                    .chars()
+                                    .take(140)
+                                    .collect::<String>();
+                                lines.push(format!("- {slug}: {desc}"));
+                            }
+                            format!(
+                                "Strumenti trovati (ora richiamabili — chiama quello giusto con i \
+suoi argomenti):\n{}",
+                                lines.join("\n")
+                            )
                         }
                     } else if !name.is_empty() {
                         // A connected-service (Composio) tool.
@@ -4049,18 +4172,29 @@ struct ComposioChatTools {
     writes: std::collections::BTreeSet<String>,
 }
 
-/// Read-vs-write classification from the tool slug's action verb. Conservative:
-/// only well-known read verbs count as read; everything else is a write that
-/// must be confirmed before running. (e.g. GMAIL_FETCH_EMAILS = read,
-/// GMAIL_SEND_EMAIL = write.)
+/// Read-vs-write classification from the tool slug. Composio puts the verb
+/// anywhere in the action (e.g. GMAIL_FETCH_EMAILS but also
+/// GOOGLECALENDAR_EVENTS_LIST), so we tokenize and call it read only when a read
+/// verb is present AND no write verb is — conservative: anything ambiguous is a
+/// write that must be confirmed.
 fn composio_tool_is_read(slug: &str) -> bool {
     const READ_VERBS: &[&str] = &[
         "FETCH", "GET", "LIST", "SEARCH", "READ", "FIND", "RETRIEVE", "VIEW", "DOWNLOAD",
         "CHECK", "COUNT", "QUERY", "LOOKUP", "DESCRIBE", "EXPORT",
     ];
+    const WRITE_VERBS: &[&str] = &[
+        "SEND", "CREATE", "DELETE", "UPDATE", "REMOVE", "ADD", "INSERT", "MODIFY", "EDIT",
+        "ARCHIVE", "MOVE", "PATCH", "PUT", "POST", "REPLY", "FORWARD", "DRAFT", "TRASH",
+        "MARK", "SET", "CLEAR", "WRITE", "UPLOAD", "IMPORT", "ENABLE", "DISABLE", "REVOKE",
+        "GRANT", "CANCEL", "DUPLICATE", "RENAME", "PUBLISH",
+    ];
     let upper = slug.to_ascii_uppercase();
+    // Drop the toolkit prefix (first token), classify the action tokens.
     let action = upper.splitn(2, '_').nth(1).unwrap_or(&upper);
-    READ_VERBS.iter().any(|v| action.starts_with(v))
+    let tokens: Vec<&str> = action.split('_').collect();
+    let has_write = tokens.iter().any(|t| WRITE_VERBS.contains(t));
+    let has_read = tokens.iter().any(|t| READ_VERBS.contains(t));
+    has_read && !has_write
 }
 
 /// ACTIVE connected toolkit slugs for the current entity.
@@ -9419,7 +9553,9 @@ mod tests {
         browser_error_indicates_dead_sidecar,
         capability_call_completed_outcome,
         collect_member_counts,
+        composio_tool_is_read,
         resolve_active_model,
+        search_composio_catalog,
         ActiveModelInputs,
         default_browser_headless_value,
         resolve_contained_computer_cdp,
@@ -10045,5 +10181,41 @@ mod tests {
         // Never empty, even for all-punctuation input.
         assert_eq!(mcp_provider_slug("***"), "server");
         assert_eq!(mcp_provider_slug(""), "server");
+    }
+
+    fn catalog_entry(slug: &str, desc: &str) -> (String, String, serde_json::Value) {
+        (
+            slug.to_string(),
+            format!("{slug} {desc}").to_lowercase(),
+            serde_json::json!({ "type": "function", "function": { "name": slug, "description": desc } }),
+        )
+    }
+
+    #[test]
+    fn discovery_search_ranks_relevant_tools_first() {
+        let index = vec![
+            catalog_entry("GMAIL_FETCH_EMAILS", "Fetch a list of email messages from Gmail"),
+            catalog_entry("GMAIL_SEND_EMAIL", "Send an email message via Gmail"),
+            catalog_entry("GOOGLECALENDAR_EVENTS_LIST", "List calendar events in a time range"),
+        ];
+        let hits = search_composio_catalog(&index, "unread emails", 5);
+        assert_eq!(hits.first().map(|(s, _)| s.as_str()), Some("GMAIL_FETCH_EMAILS"));
+        // Calendar tool has no overlap with "email" tokens → excluded.
+        assert!(hits.iter().all(|(s, _)| s.starts_with("GMAIL")));
+
+        let cal = search_composio_catalog(&index, "calendar events", 5);
+        assert_eq!(cal.first().map(|(s, _)| s.as_str()), Some("GOOGLECALENDAR_EVENTS_LIST"));
+
+        // Empty query is a harmless browse (returns up to k), never panics.
+        assert!(!search_composio_catalog(&index, "", 2).is_empty());
+    }
+
+    #[test]
+    fn composio_tool_read_write_classification() {
+        assert!(composio_tool_is_read("GMAIL_FETCH_EMAILS"));
+        assert!(composio_tool_is_read("GOOGLECALENDAR_EVENTS_LIST"));
+        assert!(!composio_tool_is_read("GMAIL_SEND_EMAIL"));
+        assert!(!composio_tool_is_read("GMAIL_DELETE_MESSAGE"));
+        assert!(!composio_tool_is_read("GOOGLECALENDAR_CREATE_EVENT"));
     }
 }
