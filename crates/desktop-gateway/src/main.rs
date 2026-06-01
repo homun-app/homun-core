@@ -1280,6 +1280,50 @@ fn browse_web_tool_schema() -> serde_json::Value {
     })
 }
 
+/// Enabled installed skills as (id, name, description) for prompt discovery (L1).
+fn enabled_skills_summary() -> Vec<(String, String, String)> {
+    let Ok(dir) = skills_dir() else {
+        return Vec::new();
+    };
+    let disabled = load_skills_disabled();
+    let origins = load_skills_origins();
+    skills::scan_skills(&dir, &disabled, &origins)
+        .into_iter()
+        .filter(|s| s.enabled)
+        .map(|s| (s.id, s.name, s.description))
+        .collect()
+}
+
+/// Loads an installed skill's SKILL.md body (instructions) by id.
+fn load_skill_body(id: &str) -> Option<String> {
+    let dir = skills_dir().ok()?;
+    let disabled = load_skills_disabled();
+    let origins = load_skills_origins();
+    skills::load_detail(&dir, id, &disabled, &origins)
+        .ok()
+        .flatten()
+        .map(|detail| detail.body)
+}
+
+/// The skill-activation tool: loads a skill's full SKILL.md instructions on demand
+/// (progressive disclosure L2).
+fn use_skill_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "use_skill",
+            "description": "Carica le istruzioni complete (SKILL.md) di una skill installata, dato il suo id. Chiamalo quando la richiesta corrisponde a una skill elencata in SKILL INSTALLATE, poi segui le istruzioni ricevute.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "id della skill, es. 'weather'" }
+                },
+                "required": ["id"]
+            }
+        }
+    })
+}
+
 /// The discovery meta-tool: the model searches connected-service tools by intent
 /// instead of receiving all of them up front (progressive tool disclosure).
 fn find_connected_tools_schema() -> serde_json::Value {
@@ -1436,11 +1480,35 @@ assente), NON il numero di messaggi della singola pagina restituita; se il risul
 non dà un totale affidabile, dichiara che è una stima."
         )
     };
+    // Installed skills (Anthropic Agent Skills, progressive disclosure L1): pre-load
+    // name+description; the model calls `use_skill(<id>)` to pull the full SKILL.md
+    // when a request matches, then follows it.
+    let enabled_skills = tokio::task::spawn_blocking(enabled_skills_summary)
+        .await
+        .unwrap_or_default();
+    let has_skills = !enabled_skills.is_empty();
+    let system = if !has_skills {
+        system
+    } else {
+        let lines = enabled_skills
+            .iter()
+            .map(|(id, name, desc)| format!("- {id}: {name} — {desc}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!(
+            "{system}\n\nSKILL INSTALLATE — quando la richiesta corrisponde alla descrizione di una \
+di queste, PREFERISCILA al browser: chiama `use_skill` con il suo id per ricevere le istruzioni \
+complete (SKILL.md) e seguile passo-passo con gli strumenti disponibili.\n{lines}"
+        )
+    };
     let system = system.as_str();
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let mut base_tools = vec![browse_web_tool_schema()];
     if has_composio {
         base_tools.push(find_connected_tools_schema());
+    }
+    if has_skills {
+        base_tools.push(use_skill_tool_schema());
     }
     let mut messages = vec![
         serde_json::json!({ "role": "system", "content": system }),
@@ -1603,6 +1671,27 @@ non dà un totale affidabile, dichiara che è una stima."
                                 format!("Lo strumento browser ha riportato un errore: {error}")
                             }
                             Err(error) => format!("Errore di esecuzione dello strumento: {error}"),
+                        }
+                    } else if name == "use_skill" {
+                        // Progressive disclosure L2: load the full SKILL.md so the
+                        // model can follow the skill's instructions.
+                        let id = serde_json::from_str::<serde_json::Value>(args_raw)
+                            .ok()
+                            .and_then(|a| a.get("id").and_then(|v| v.as_str()).map(String::from))
+                            .unwrap_or_default();
+                        let _ = emit_stream_event(
+                            &tx,
+                            GenerateStreamEvent::Delta { text: format!("\n\n_📖 Apro la skill {id}…_\n") },
+                        )
+                        .await;
+                        let id_for_load = id.clone();
+                        match tokio::task::spawn_blocking(move || load_skill_body(&id_for_load)).await {
+                            Ok(Some(body)) => format!(
+                                "Istruzioni della skill «{id}» (SKILL.md) — SEGUILE con gli strumenti \
+disponibili (per dati dal web usa browse_web sull'URL indicato):\n\n{}",
+                                body.chars().take(8000).collect::<String>()
+                            ),
+                            _ => format!("Skill «{id}» non trovata o non leggibile."),
                         }
                     } else if name == "find_connected_tools" {
                         // Discovery: search the catalog, inject the matching tool
