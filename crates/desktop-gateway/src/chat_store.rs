@@ -266,6 +266,21 @@ impl ChatStore {
         Ok(())
     }
 
+    /// Overwrites a message's text in place (used to mark a pending action as
+    /// executed so the confirmation card never reopens on reload).
+    pub fn set_message_text(
+        &self,
+        thread_id: &str,
+        message_id: &str,
+        text: &str,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "update chat_messages set text = ?1 where thread_id = ?2 and id = ?3",
+            params![text, thread_id, message_id],
+        )?;
+        Ok(())
+    }
+
     pub fn append_assistant_message(
         &self,
         thread_id: &str,

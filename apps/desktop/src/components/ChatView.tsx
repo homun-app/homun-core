@@ -1003,7 +1003,11 @@ export function ChatView({
                   )}
                 </>
               ) : displayMessage.text ? (
-                <AssistantMessageBody text={displayMessage.text} />
+                <AssistantMessageBody
+                  text={displayMessage.text}
+                  messageId={displayMessage.id}
+                  threadId={thread.threadId}
+                />
               ) : (
                 <AssistantThinkingState
                   status={
@@ -1867,23 +1871,31 @@ interface ComposioPendingAction {
 }
 
 const COMPOSIO_CONFIRM_RE = /‹‹COMPOSIO_CONFIRM››([\s\S]*?)‹‹\/COMPOSIO_CONFIRM››/;
+const COMPOSIO_DONE_RE = /‹‹COMPOSIO_DONE››([\s\S]*?)‹‹\/COMPOSIO_DONE››/;
+const COMPOSIO_MARKERS_RE = /‹‹COMPOSIO_(?:CONFIRM|DONE)››[\s\S]*?‹‹\/COMPOSIO_(?:CONFIRM|DONE)››/g;
 
-/** Splits an assistant message into its visible text and an optional pending
- *  Composio write action encoded by the gateway. */
+/** Splits an assistant message into visible text + an optional pending write
+ *  action (editable card) OR an already-executed marker (static "done" note). */
 function parseComposioConfirm(text: string): {
   visible: string;
   action: ComposioPendingAction | null;
+  doneTool: string | null;
 } {
-  const match = text.match(COMPOSIO_CONFIRM_RE);
-  if (!match) return { visible: text, action: null };
   let action: ComposioPendingAction | null = null;
-  try {
-    const parsed = JSON.parse(match[1]) as ComposioPendingAction;
-    if (parsed && typeof parsed.tool === "string") action = parsed;
-  } catch {
-    /* malformed marker → just hide it */
+  const confirm = text.match(COMPOSIO_CONFIRM_RE);
+  if (confirm) {
+    try {
+      const parsed = JSON.parse(confirm[1]) as ComposioPendingAction;
+      if (parsed && typeof parsed.tool === "string") action = parsed;
+    } catch {
+      /* malformed → just hide it */
+    }
   }
-  return { visible: text.replace(COMPOSIO_CONFIRM_RE, "").trim(), action };
+  const done = text.match(COMPOSIO_DONE_RE);
+  const doneTool = done ? done[1].trim() : null;
+  const visible = text.replace(COMPOSIO_MARKERS_RE, "").trim();
+  // A persisted "done" marker wins: never reopen the editable card.
+  return { visible, action: doneTool ? null : action, doneTool };
 }
 
 /** Replaces raw tool slugs (GMAIL_SEND_EMAIL) anywhere in assistant text with a
@@ -1894,14 +1906,33 @@ function humanizeToolSlugs(text: string): string {
 }
 
 /** Renders an assistant message body, surfacing a write-confirmation card when
- *  the model proposed a write action that needs approval (once / always). */
-function AssistantMessageBody({ text, streaming }: { text: string; streaming?: boolean }) {
-  const { visible, action } = useMemo(() => parseComposioConfirm(text), [text]);
+ *  the model proposed a write action that needs approval (once / always), or a
+ *  static "done" note once it has been executed. */
+function AssistantMessageBody({
+  text,
+  streaming,
+  messageId,
+  threadId,
+}: {
+  text: string;
+  streaming?: boolean;
+  messageId?: string;
+  threadId?: string;
+}) {
+  const { visible, action, doneTool } = useMemo(() => parseComposioConfirm(text), [text]);
   const readable = useMemo(() => humanizeToolSlugs(visible), [visible]);
   return (
     <>
       {readable && <RichMessage text={readable} streaming={streaming} />}
-      {action && !streaming && <ComposioConfirmCard action={action} />}
+      {doneTool && !streaming && (
+        <div className="cmp-confirm done">
+          <ShieldCheck size={15} />
+          <span>Azione eseguita: {humanizeToolName(doneTool)}</span>
+        </div>
+      )}
+      {action && !streaming && (
+        <ComposioConfirmCard action={action} messageId={messageId} threadId={threadId} />
+      )}
     </>
   );
 }
@@ -1936,7 +1967,15 @@ function humanizeFieldKey(key: string): string {
   );
 }
 
-function ComposioConfirmCard({ action }: { action: ComposioPendingAction }) {
+function ComposioConfirmCard({
+  action,
+  messageId,
+  threadId,
+}: {
+  action: ComposioPendingAction;
+  messageId?: string;
+  threadId?: string;
+}) {
   const [status, setStatus] = useState<"idle" | "running" | "done" | "error">("idle");
   const [note, setNote] = useState<string | null>(null);
   // Editable copy of the proposed arguments.
@@ -1954,7 +1993,7 @@ function ComposioConfirmCard({ action }: { action: ComposioPendingAction }) {
     setStatus("running");
     setNote(null);
     try {
-      await coreBridge.composioExecute(action.tool, args, scope);
+      await coreBridge.composioExecute(action.tool, args, scope, { threadId, messageId });
       setStatus("done");
       setNote(
         scope === "always"
