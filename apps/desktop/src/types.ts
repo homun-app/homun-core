@@ -17,6 +17,7 @@ export type SettingsSectionId =
   | "runtime"
   | "privacy"
   | "connections"
+  | "skills"
   | "computer"
   | "audit";
 

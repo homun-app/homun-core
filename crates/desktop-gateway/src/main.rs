@@ -4,6 +4,8 @@ mod brain_adapter;
 mod chat_store;
 // Multi-provider inference registry (Phase 1 of per-role model routing).
 mod model_registry;
+// Local scanner for Anthropic "Agent Skills" (SKILL.md folders).
+mod skills;
 mod task_registry;
 
 use axum::{
@@ -601,6 +603,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/model-profile", post(set_model_profile))
         .route("/api/roles", get(list_roles).post(set_role))
         .route("/api/routing-decisions", get(list_routing_decisions))
+        .route("/api/skills", get(list_skills))
+        .route("/api/skills/{id}", get(skill_detail))
+        .route("/api/skills/{id}/enabled", post(set_skill_enabled))
         .route("/api/tasks/queue", get(task_queue))
         .route("/api/tasks/executor", get(task_executor_status))
         .route("/api/tasks/run_next", post(run_next_task))
@@ -5613,6 +5618,116 @@ fn now_epoch_secs() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+// ----------------------------------------------------------------- skills API
+
+/// Resolves the skills directory, creating it on demand so a fresh install has
+/// a place for the user (or the future marketplace) to drop skill folders.
+fn skills_dir() -> Result<PathBuf, std::io::Error> {
+    let dir = skills::skills_root(&gateway_data_dir()?);
+    fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+fn skills_state_path() -> Option<PathBuf> {
+    gateway_data_dir().ok().map(|dir| dir.join("skills-state.json"))
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct SkillsState {
+    #[serde(default)]
+    disabled: Vec<String>,
+}
+
+/// Loads the set of disabled skill ids (default: empty → everything enabled).
+fn load_skills_disabled() -> std::collections::BTreeSet<String> {
+    let Some(path) = skills_state_path() else {
+        return std::collections::BTreeSet::new();
+    };
+    let Ok(raw) = fs::read_to_string(path) else {
+        return std::collections::BTreeSet::new();
+    };
+    serde_json::from_str::<SkillsState>(&raw)
+        .map(|s| s.disabled.into_iter().collect())
+        .unwrap_or_default()
+}
+
+fn save_skills_disabled(disabled: &std::collections::BTreeSet<String>) -> Result<(), String> {
+    let path = skills_state_path().ok_or_else(|| "data dir non disponibile".to_string())?;
+    let state = SkillsState { disabled: disabled.iter().cloned().collect() };
+    let json = serde_json::to_string_pretty(&state).map_err(|e| e.to_string())?;
+    fs::write(path, json).map_err(|e| e.to_string())
+}
+
+#[derive(Debug, Serialize)]
+struct SkillsResponse {
+    skills: Vec<skills::SkillSummary>,
+    /// Absolute path of the skills directory (shown in the UI empty state).
+    dir: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SetSkillEnabledRequest {
+    enabled: bool,
+}
+
+fn current_skills_response() -> SkillsResponse {
+    let dir = skills_dir().ok();
+    let disabled = load_skills_disabled();
+    let skills = dir
+        .as_deref()
+        .map(|d| skills::scan_skills(d, &disabled))
+        .unwrap_or_default();
+    SkillsResponse {
+        skills,
+        dir: dir.map(|d| d.to_string_lossy().to_string()).unwrap_or_default(),
+    }
+}
+
+async fn list_skills() -> Json<SkillsResponse> {
+    Json(current_skills_response())
+}
+
+async fn skill_detail(
+    Path(id): Path<String>,
+) -> Result<Json<skills::SkillDetail>, GatewayError> {
+    let dir = skills_dir().map_err(|e| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "skills_dir_unavailable",
+        message: e.to_string(),
+    })?;
+    let disabled = load_skills_disabled();
+    match skills::load_detail(&dir, &id, &disabled).map_err(|e| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "skill_read_failed",
+        message: e.to_string(),
+    })? {
+        Some(detail) => Ok(Json(detail)),
+        None => Err(GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "skill_not_found",
+            message: format!("skill {id} non trovata"),
+        }),
+    }
+}
+
+async fn set_skill_enabled(
+    Path(id): Path<String>,
+    Json(request): Json<SetSkillEnabledRequest>,
+) -> Result<Json<SkillsResponse>, GatewayError> {
+    let mut disabled = load_skills_disabled();
+    if request.enabled {
+        disabled.remove(&id);
+    } else {
+        disabled.insert(id);
+    }
+    save_skills_disabled(&disabled).map_err(|message| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "skills_state_write_failed",
+        message,
+    })?;
+    Ok(Json(current_skills_response()))
 }
 
 /// STAGE 2 (semantic): among the models eligible for `role`, ask a fast model
