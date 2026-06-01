@@ -3729,6 +3729,24 @@ fn connect_composio_blocking(
     let workspace = gateway_capability_workspace_id();
     let provider_id = CapabilityProviderId::new("composio");
 
+    // Verify the key against the v3 API FIRST and count available toolkits (apps),
+    // before persisting anything. A bad key must not leave a phantom "active"
+    // connection behind. We go transport-direct here: the crate's
+    // ComposioCapabilityProvider targets a pre-v3 shape (expects `{tools}`), but
+    // v3 returns `{items}`. We cache TOOLKITS (apps) for the connectors UI, not
+    // the 1000s of individual tools — those are fetched per toolkit on demand.
+    let transport = GatewayComposioTransport::new(base_url.clone(), api_key.clone());
+    let toolkits = transport
+        .request("GET", "/toolkits", None)
+        .map_err(GatewayError::capability)?;
+    let tools_cached = toolkits
+        .get("items")
+        .and_then(serde_json::Value::as_array)
+        .map(|items| items.len())
+        .unwrap_or(0);
+
+    // Key verified — now persist the secret (only the ref lands in the registry)
+    // and the provider/grant/connection config.
     let secret_ref = SecretRef::new(user.as_str(), workspace.as_str(), "composio", "default")
         .map_err(|error| GatewayError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
@@ -3739,7 +3757,7 @@ fn connect_composio_blocking(
         .secret_store
         .put(
             secret_ref.clone(),
-            SecretMaterial::from_string(api_key.clone()),
+            SecretMaterial::from_string(api_key),
         )
         .map_err(|error| GatewayError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
@@ -3785,21 +3803,6 @@ fn connect_composio_blocking(
             .map_err(GatewayError::capability)?;
     }
 
-    // Verify the key against the v3 API and count available toolkits (apps).
-    // We go transport-direct here: the crate's ComposioCapabilityProvider targets
-    // a pre-v3 shape (expects `{tools}`), but v3 returns `{items}`. We cache
-    // TOOLKITS (apps) for the connectors UI, not the 1000s of individual tools —
-    // those are fetched per toolkit when a service is actually connected/used.
-    let _ = (user, workspace);
-    let transport = GatewayComposioTransport::new(base_url, api_key);
-    let toolkits = transport
-        .request("GET", "/toolkits", None)
-        .map_err(GatewayError::capability)?;
-    let tools_cached = toolkits
-        .get("items")
-        .and_then(serde_json::Value::as_array)
-        .map(|items| items.len())
-        .unwrap_or(0);
     Ok(ConnectComposioResponse {
         provider_id: provider_id.as_str().to_string(),
         tools_cached,
