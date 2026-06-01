@@ -147,8 +147,8 @@ fn infer_profile(lower: &str, modality: &str) -> ModelProfile {
         return curated(ModelTier::Balanced, "Generazione di immagini.");
     }
     // Small/fast tiers FIRST (so "gpt-4o-mini" → fast, not balanced).
-    let fast_markers = ["mini", "haiku", "flash", "small", "ministral", "gemma", ":8b", "-8b", "1b", "3b", "4b"];
-    if fast_markers.iter().any(|m| lower.contains(m)) {
+    let fast_name_markers = ["mini", "haiku", "flash", "small", "ministral", "gemma", "lite", "nano", "tiny"];
+    if fast_name_markers.iter().any(|m| lower.contains(m)) || has_small_param_size(lower) {
         return curated(
             ModelTier::Fast,
             "Veloce ed economico: estrazione, classificazione, task brevi.",
@@ -224,6 +224,35 @@ impl ModelEntry {
             profile: Some(infer_profile(&lower, modality)),
         }
     }
+}
+
+/// True if the model id carries a SMALL parameter-size token (≤ 13B), e.g.
+/// `llama3.1:8b`, `qwen2.5:3b`. Parses a digit-run immediately followed by `b`
+/// as the size, so it does NOT mis-match large sizes like `671b`/`480b` (the old
+/// substring check treated "671b" as containing "1b").
+fn has_small_param_size(lower: &str) -> bool {
+    let bytes = lower.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i].is_ascii_digit() {
+            let start = i;
+            while i < bytes.len() && bytes[i].is_ascii_digit() {
+                i += 1;
+            }
+            // A parameter size is "<digits>b" (e.g. 8b, 70b) — the digit run must
+            // be immediately followed by 'b'.
+            if i < bytes.len() && (bytes[i] == b'b' || bytes[i] == b'B') {
+                if let Ok(size) = lower[start..i].parse::<u32>() {
+                    if size >= 1 && size <= 13 {
+                        return true;
+                    }
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
+    false
 }
 
 fn infer_context_window(lower: &str) -> Option<u32> {
@@ -660,6 +689,23 @@ mod tests {
         let chat = ModelEntry::inferred("minimax-m2.7:cloud");
         assert!(chat.tools && !chat.vision);
         assert_eq!(chat.context_window, Some(200_000));
+    }
+
+    #[test]
+    fn tier_does_not_mistake_large_param_sizes_for_fast() {
+        // The old substring check made "671b" match "1b" → wrongly "fast".
+        let big = ModelEntry::inferred("deepseek-v3.1:671b-cloud");
+        assert_eq!(big.profile.as_ref().unwrap().tier, ModelTier::Balanced);
+        let big2 = ModelEntry::inferred("qwen3-coder:480b-cloud");
+        assert_eq!(big2.profile.as_ref().unwrap().tier, ModelTier::Balanced);
+        // Genuinely small models stay fast.
+        let small = ModelEntry::inferred("llama3.1:8b");
+        assert_eq!(small.profile.as_ref().unwrap().tier, ModelTier::Fast);
+        let small2 = ModelEntry::inferred("qwen2.5:3b");
+        assert_eq!(small2.profile.as_ref().unwrap().tier, ModelTier::Fast);
+        // Name-based fast marker still works.
+        let mini = ModelEntry::inferred("gpt-4o-mini");
+        assert_eq!(mini.profile.as_ref().unwrap().tier, ModelTier::Fast);
     }
 
     #[test]
