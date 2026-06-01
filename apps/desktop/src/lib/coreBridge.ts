@@ -680,6 +680,25 @@ async function electronComposioExecute(
   });
 }
 
+export interface AllowedTool {
+  slug: string;
+  name: string;
+}
+
+async function electronComposioAllowedTools(): Promise<AllowedTool[]> {
+  const payload = await gatewayGetJson<{ tools: AllowedTool[] }>(
+    "/api/capabilities/composio/allowed-tools",
+  );
+  return payload.tools ?? [];
+}
+
+async function electronComposioRevokeTool(slug: string): Promise<AllowedTool[]> {
+  const payload = await gatewayDeleteJson<{ tools: AllowedTool[] }>(
+    `/api/capabilities/composio/allowed-tools/${encodeURIComponent(slug)}`,
+  );
+  return payload.tools ?? [];
+}
+
 async function electronComposioConnections(): Promise<ComposioConnection[]> {
   const payload = await gatewayGetJson<{ connections: ComposioConnection[] }>(
     "/api/capabilities/composio/connections",
@@ -800,6 +819,8 @@ export const coreBridge = {
   composioConnections: () => electronComposioConnections(),
   composioExecute: (tool: string, args: unknown, scope: "once" | "always") =>
     electronComposioExecute(tool, args, scope),
+  composioAllowedTools: () => electronComposioAllowedTools(),
+  composioRevokeTool: (slug: string) => electronComposioRevokeTool(slug),
   skills: () => electronSkills(),
   skillDetail: (id: string) => electronSkillDetail(id),
   setSkillEnabled: (id: string, enabled: boolean) => electronSetSkillEnabled(id, enabled),

@@ -641,6 +641,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/capabilities/composio/link", post(composio_link))
         .route("/api/capabilities/composio/connections", get(composio_connections))
         .route("/api/capabilities/composio/execute", post(composio_execute))
+        .route("/api/capabilities/composio/allowed-tools", get(composio_allowed_tools))
+        .route(
+            "/api/capabilities/composio/allowed-tools/{slug}",
+            delete(composio_revoke_allowed_tool),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             require_gateway_token,
@@ -4399,13 +4404,60 @@ fn composio_tool_allowed(slug: &str) -> bool {
     load_composio_tool_allow().contains(slug)
 }
 
-fn add_composio_tool_allow(slug: &str) -> Result<(), String> {
-    let mut set = load_composio_tool_allow();
-    set.insert(slug.to_string());
+fn write_composio_tool_allow(set: std::collections::BTreeSet<String>) -> Result<(), String> {
     let path = composio_tool_allow_path().ok_or_else(|| "data dir non disponibile".to_string())?;
     let value = ComposioToolAllow { always: set.into_iter().collect() };
     let json = serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?;
     fs::write(path, json).map_err(|e| e.to_string())
+}
+
+fn add_composio_tool_allow(slug: &str) -> Result<(), String> {
+    let mut set = load_composio_tool_allow();
+    set.insert(slug.to_string());
+    write_composio_tool_allow(set)
+}
+
+fn remove_composio_tool_allow(slug: &str) -> Result<(), String> {
+    let mut set = load_composio_tool_allow();
+    set.remove(slug);
+    write_composio_tool_allow(set)
+}
+
+#[derive(Debug, Serialize)]
+struct AllowedToolView {
+    slug: String,
+    /// Human-readable name (GMAIL_SEND_EMAIL → "Send email · Gmail").
+    name: String,
+}
+
+#[derive(Debug, Serialize)]
+struct AllowedToolsResponse {
+    tools: Vec<AllowedToolView>,
+}
+
+fn current_allowed_tools() -> AllowedToolsResponse {
+    let tools = load_composio_tool_allow()
+        .into_iter()
+        .map(|slug| AllowedToolView { name: humanize_composio_tool(&slug), slug })
+        .collect();
+    AllowedToolsResponse { tools }
+}
+
+/// Lists the write tools the user marked "always allow" (skip confirmation).
+async fn composio_allowed_tools() -> Json<AllowedToolsResponse> {
+    Json(current_allowed_tools())
+}
+
+/// Revokes a tool's always-allow rule → it will ask for confirmation again.
+async fn composio_revoke_allowed_tool(
+    Path(slug): Path<String>,
+) -> Result<Json<AllowedToolsResponse>, GatewayError> {
+    remove_composio_tool_allow(&slug).map_err(|message| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "composio_allow_write_failed",
+        message,
+    })?;
+    Ok(Json(current_allowed_tools()))
 }
 
 #[derive(Debug, Deserialize)]
