@@ -672,11 +672,14 @@ async function electronComposioExecute(
   tool: string,
   args: unknown,
   scope: "once" | "always",
+  ctx?: { threadId?: string; messageId?: string },
 ): Promise<ComposioExecuteResult> {
   return gatewayPostJson<ComposioExecuteResult>("/api/capabilities/composio/execute", {
     tool,
     arguments: args ?? {},
     scope,
+    ...(ctx?.threadId ? { thread_id: ctx.threadId } : {}),
+    ...(ctx?.messageId ? { message_id: ctx.messageId } : {}),
   });
 }
 
@@ -817,8 +820,12 @@ export const coreBridge = {
   composioLink: (toolkitSlug: string, apiKey?: string) =>
     electronComposioLink(toolkitSlug, apiKey),
   composioConnections: () => electronComposioConnections(),
-  composioExecute: (tool: string, args: unknown, scope: "once" | "always") =>
-    electronComposioExecute(tool, args, scope),
+  composioExecute: (
+    tool: string,
+    args: unknown,
+    scope: "once" | "always",
+    ctx?: { threadId?: string; messageId?: string },
+  ) => electronComposioExecute(tool, args, scope, ctx),
   composioAllowedTools: () => electronComposioAllowedTools(),
   composioRevokeTool: (slug: string) => electronComposioRevokeTool(slug),
   skills: () => electronSkills(),

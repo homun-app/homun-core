@@ -1421,7 +1421,11 @@ strumento adatto, poi CHIAMA lo strumento trovato con gli argomenti completi.\n\
 AZIONI DI SCRITTURA (inviare/eliminare/modificare): CHIAMA comunque lo strumento con gli argomenti \
 completi — il sistema mostrerà AUTOMATICAMENTE all'utente una card di conferma prima di eseguire. \
 NON rifiutare, NON dire che non puoi inviare e NON chiedere all'utente di farlo manualmente: il tuo \
-compito è chiamare lo strumento giusto, alla conferma pensa l'interfaccia."
+compito è chiamare lo strumento giusto, alla conferma pensa l'interfaccia.\n\
+CONTEGGI (es. \"quante email non lette\"): usa il filtro corretto (per Gmail query \"is:unread\") e \
+riporta il TOTALE indicato dal risultato (campo tipo resultSizeEstimate / total / nextPageToken \
+assente), NON il numero di messaggi della singola pagina restituita; se il risultato è paginato e \
+non dà un totale affidabile, dichiara che è una stima."
         )
     };
     let system = system.as_str();
@@ -4468,6 +4472,42 @@ struct ComposioExecuteRequest {
     /// "always" persists an allow-rule for this tool before executing.
     #[serde(default)]
     scope: Option<String>,
+    /// When present, the originating chat message is rewritten on success so the
+    /// confirmation card never reopens on reload (no risk of double-execution).
+    #[serde(default)]
+    thread_id: Option<String>,
+    #[serde(default)]
+    message_id: Option<String>,
+}
+
+const COMPOSIO_CONFIRM_OPEN: &str = "‹‹COMPOSIO_CONFIRM››";
+const COMPOSIO_CONFIRM_CLOSE: &str = "‹‹/COMPOSIO_CONFIRM››";
+
+/// Rewrites a message that carries a pending-confirmation marker into a
+/// "done" marker, dropping the "Serve la tua conferma…" prompt line. Idempotent
+/// if no confirm marker is present.
+fn rewrite_confirm_to_done(text: &str, tool: &str) -> String {
+    let Some(open) = text.find(COMPOSIO_CONFIRM_OPEN) else {
+        return text.to_string();
+    };
+    let Some(close_rel) = text[open..].find(COMPOSIO_CONFIRM_CLOSE) else {
+        return text.to_string();
+    };
+    let close = open + close_rel + COMPOSIO_CONFIRM_CLOSE.len();
+    let head_end = text[..open].rfind("Serve la tua conferma").unwrap_or(open);
+    let mut out = text[..head_end].trim_end().to_string();
+    let tail = text[close..].trim();
+    if !tail.is_empty() {
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str(tail);
+    }
+    if !out.is_empty() {
+        out.push_str("\n\n");
+    }
+    out.push_str(&format!("‹‹COMPOSIO_DONE››{tool}‹‹/COMPOSIO_DONE››"));
+    out
 }
 
 #[derive(Debug, Serialize)]
@@ -4493,13 +4533,28 @@ async fn composio_execute(
     } else {
         request.arguments.clone()
     };
-    let output = tokio::task::spawn_blocking(move || composio_execute_tool(&state, &tool, &args))
-        .await
-        .map_err(|e| GatewayError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "composio_execute_join",
-            message: e.to_string(),
-        })??;
+    let output = tokio::task::spawn_blocking({
+        let state = state.clone();
+        move || composio_execute_tool(&state, &tool, &args)
+    })
+    .await
+    .map_err(|e| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "composio_execute_join",
+        message: e.to_string(),
+    })??;
+
+    // Persist the executed state into the transcript so reopening the chat shows
+    // a "done" note, not the editable card (prevents accidental re-execution).
+    if let (Some(thread_id), Some(message_id)) = (&request.thread_id, &request.message_id) {
+        if let Ok(store) = lock_store(&state) {
+            if let Ok(Some(message)) = store.message(thread_id, message_id) {
+                let rewritten = rewrite_confirm_to_done(&message.text, &request.tool);
+                let _ = store.set_message_text(thread_id, message_id, &rewritten);
+            }
+        }
+    }
+
     let summary = output.to_string().chars().take(2000).collect::<String>();
     Ok(Json(ComposioExecuteResponse { ok: true, summary }))
 }
@@ -9750,6 +9805,7 @@ mod tests {
         collect_member_counts,
         composio_tool_is_read,
         resolve_active_model,
+        rewrite_confirm_to_done,
         search_composio_catalog,
         ActiveModelInputs,
         default_browser_headless_value,
@@ -10403,6 +10459,18 @@ mod tests {
 
         // Empty query is a harmless browse (returns up to k), never panics.
         assert!(!search_composio_catalog(&index, "", 2).is_empty());
+    }
+
+    #[test]
+    fn rewrite_confirm_marker_to_done() {
+        let original = "Ok.\n\nServe la tua conferma per l'azione qui sotto.\n‹‹COMPOSIO_CONFIRM››{\"tool\":\"GMAIL_SEND_EMAIL\",\"arguments\":{}}‹‹/COMPOSIO_CONFIRM››\n";
+        let done = rewrite_confirm_to_done(original, "GMAIL_SEND_EMAIL");
+        assert!(done.contains("‹‹COMPOSIO_DONE››GMAIL_SEND_EMAIL‹‹/COMPOSIO_DONE››"));
+        assert!(!done.contains("COMPOSIO_CONFIRM"));
+        assert!(!done.contains("Serve la tua conferma"));
+        assert!(done.starts_with("Ok."));
+        // Idempotent when there is no confirm marker.
+        assert_eq!(rewrite_confirm_to_done("plain", "X"), "plain");
     }
 
     #[test]

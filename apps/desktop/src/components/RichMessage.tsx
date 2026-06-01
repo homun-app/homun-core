@@ -7,13 +7,14 @@ interface RichMessageProps {
 
 const RichMessageRenderer = lazy(() => import("./RichMessageRenderer"));
 
-// Internal control marker the gateway uses to carry a pending write-confirmation
-// action; it is rendered as a card elsewhere and must never be shown as raw text.
-const CONFIRM_MARKER_RE = /‹‹COMPOSIO_CONFIRM››[\s\S]*?‹‹\/COMPOSIO_CONFIRM››/g;
+// Internal control markers the gateway uses to carry a pending write-confirmation
+// action (or its executed state); rendered as a card/note elsewhere and never
+// shown as raw text.
+const CONTROL_MARKER_RE = /‹‹COMPOSIO_(?:CONFIRM|DONE)››[\s\S]*?‹‹\/COMPOSIO_(?:CONFIRM|DONE)››/g;
 
 export function RichMessage({ text, streaming = false }: RichMessageProps) {
-  const clean = text.includes("‹‹COMPOSIO_CONFIRM››")
-    ? text.replace(CONFIRM_MARKER_RE, "").trimEnd()
+  const clean = text.includes("‹‹COMPOSIO_")
+    ? text.replace(CONTROL_MARKER_RE, "").trimEnd()
     : text;
 
   if (streaming) {
