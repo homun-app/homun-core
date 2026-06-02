@@ -67,6 +67,7 @@ const SECTION_TITLES: Record<SettingsSectionId, string> = {
   general: "Generale",
   runtime: "Modello & Runtime",
   privacy: "Privacy & Autonomia",
+  memory: "Memoria",
   connections: "Connettori",
   skills: "Skill",
   computer: "Computer locale",
@@ -115,6 +116,7 @@ export function SettingsView({ section }: SettingsViewProps) {
         {section === "general" && <GeneralPane />}
         {section === "runtime" && <RuntimePane model={model} />}
         {section === "privacy" && <PrivacyPane />}
+        {section === "memory" && <MemoryPane />}
         {section === "connections" && <ConnectorsPane />}
         {section === "skills" && <SkillsPane />}
         {section === "computer" && <ComputerPane computer={computer} />}
@@ -2715,8 +2717,6 @@ function AuditPane() {
         )}
       </div>
 
-      <MemoryItemsList />
-
       <div className="set-section-label">Audit</div>
       <div className="set-rows">
         <div className="set-row">
@@ -2746,6 +2746,23 @@ function AuditPane() {
           Svuota
         </button>
       </div>
+    </>
+  );
+}
+
+/* --------------------------------------------------------------- memory */
+
+function MemoryPane() {
+  return (
+    <>
+      <p className="set-hint" style={{ marginTop: 0 }}>
+        Qui vedi e gestisci ciò che l'assistente ha imparato su di te. La memoria
+        <strong> personale</strong> vale in tutti i progetti; quella di
+        <strong> progetto</strong> solo in quello attivo. I dati sensibili (es. dati
+        personali o documenti) restano <em>da confermare</em> e non vengono usati
+        finché non li approvi.
+      </p>
+      <MemoryItemsList />
     </>
   );
 }
