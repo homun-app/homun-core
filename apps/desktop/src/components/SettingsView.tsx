@@ -32,6 +32,7 @@ import {
   coreBridge,
   type ActiveModelInfo,
   type AllowedTool,
+  type ArtifactDestination,
   type ArtifactsUsage,
   type ComposioToolkit,
   type ContainedComputerLive,
@@ -2462,6 +2463,95 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
       {closedNote && <p className="set-hint">{closedNote}</p>}
 
       <ArtifactsCard />
+      <DestinationsCard />
+    </>
+  );
+}
+
+function DestinationsCard() {
+  const [destinations, setDestinations] = useState<ArtifactDestination[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = async () => {
+    try {
+      setDestinations(await coreBridge.artifactDestinations());
+    } catch {
+      /* keep previous */
+    }
+  };
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  async function add() {
+    setBusy(true);
+    try {
+      const path = await coreBridge.pickFolder();
+      if (path) {
+        const label = path.replace(/\/+$/, "").split("/").pop() || path;
+        setDestinations(await coreBridge.addArtifactDestination(label, path));
+      }
+    } catch {
+      /* cancelled / unavailable */
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(path: string) {
+    setBusy(true);
+    try {
+      setDestinations(await coreBridge.removeArtifactDestination(path));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="set-section-label">Cartelle di destinazione</div>
+      <div className="set-card">
+        <div className="set-card-top">
+          <span className="set-card-name">Dove l'assistente può salvare i file</span>
+          <button className="set-btn" type="button" disabled={busy} onClick={() => void add()}>
+            <Plus size={14} />
+            <span style={{ marginLeft: 6 }}>Aggiungi</span>
+          </button>
+        </div>
+        <div className="set-card-divider" />
+        <p className="set-meter-sub">
+          Cartelle autorizzate in cui l'assistente può copiare i file generati (es. ~/Reports), su
+          richiesta o in automazione. Può scrivere SOLO qui.
+        </p>
+        {destinations.length ? (
+          <div className="set-rows" style={{ marginTop: 8 }}>
+            {destinations.map((destination) => (
+              <div className="set-row" key={destination.path}>
+                <div style={{ minWidth: 0 }}>
+                  <div className="rk">{destination.label}</div>
+                  <div
+                    className="rv"
+                    style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                  >
+                    {destination.path}
+                  </div>
+                </div>
+                <button
+                  className="set-btn"
+                  type="button"
+                  disabled={busy}
+                  aria-label={`Rimuovi ${destination.label}`}
+                  onClick={() => void remove(destination.path)}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="set-hint">Nessuna cartella autorizzata. Aggiungine una per consentire i salvataggi.</p>
+        )}
+      </div>
     </>
   );
 }
