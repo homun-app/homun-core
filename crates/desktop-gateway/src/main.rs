@@ -597,6 +597,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/chat/transcribe", post(transcribe_audio))
         .route("/api/artifacts/file", get(download_artifact).delete(delete_artifact_file))
         .route("/api/artifacts/path", get(artifact_folder_path))
+        .route("/api/artifacts/versions", get(artifact_versions))
+        .route("/api/artifacts/content", post(save_artifact_content))
         .route("/api/artifacts/usage", get(artifacts_usage))
         .route("/api/artifacts/thread", delete(delete_artifact_thread))
         .route("/api/artifacts/clear", post(clear_artifacts))
@@ -2892,6 +2894,59 @@ fn browser_step_label(iteration: &local_first_browser_automation::BrowserLoopIte
 struct ArtifactRef {
     thread: String,
     name: String,
+    /// Optional archived version index; absent → the current (latest) file.
+    #[serde(default)]
+    version: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+struct ArtifactVersionsResponse {
+    /// Number of ARCHIVED previous versions; the current file is the latest on top.
+    versions: usize,
+}
+
+#[derive(Debug, Deserialize)]
+struct SaveArtifactContentRequest {
+    thread: String,
+    name: String,
+    content: String,
+}
+
+/// Saves edited artifact content (in-app editor): writes a NEW version via the
+/// same path as create_artifact (archives the previous, mirrors to project).
+async fn save_artifact_content(
+    Json(request): Json<SaveArtifactContentRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    if request.thread.contains('/') || request.thread.contains("..") {
+        return Err(GatewayError {
+            status: StatusCode::FORBIDDEN,
+            code: "bad_artifact_path",
+            message: "Percorso non valido.".to_string(),
+        });
+    }
+    match write_text_artifact(&request.thread, &request.name, &request.content) {
+        Ok(_) => Ok(ok_json()),
+        Err(error) => Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "artifact_write",
+            message: error,
+        }),
+    }
+}
+
+/// Reports how many archived versions an artifact has (for the panel switcher).
+async fn artifact_versions(Query(reference): Query<ArtifactRef>) -> Json<ArtifactVersionsResponse> {
+    if reference.name.contains('/') || reference.name.contains("..") || reference.thread.contains('/') {
+        return Json(ArtifactVersionsResponse { versions: 0 });
+    }
+    let versions_dir = sandbox::artifacts_dir()
+        .join(&reference.thread)
+        .join(".versions")
+        .join(&reference.name);
+    let count = std::fs::read_dir(&versions_dir)
+        .map(|dir| dir.flatten().filter(|e| e.path().is_file()).count())
+        .unwrap_or(0);
+    Json(ArtifactVersionsResponse { versions: count })
 }
 
 fn artifact_mime(name: &str) -> &'static str {
@@ -2929,7 +2984,10 @@ async fn download_artifact(Query(reference): Query<ArtifactRef>) -> Result<Respo
         });
     }
     let dir = sandbox::artifacts_dir().join(&reference.thread);
-    let path = dir.join(&reference.name);
+    let path = match reference.version {
+        Some(version) => dir.join(".versions").join(&reference.name).join(version.to_string()),
+        None => dir.join(&reference.name),
+    };
     if !path_within(&dir, &path) {
         return Err(GatewayError {
             status: StatusCode::FORBIDDEN,
@@ -3200,6 +3258,16 @@ fn write_text_artifact(thread_slug: &str, name: &str, content: &str) -> Result<u
         return Err(format!("Impossibile creare la cartella artifact: {error}"));
     }
     let managed_path = managed_dir.join(name);
+    // Versioning: archive the previous content before overwriting, so the panel
+    // can navigate ‹ n/m › through the artifact's history.
+    if managed_path.exists() {
+        let versions_dir = managed_dir.join(".versions").join(name);
+        let _ = fs::create_dir_all(&versions_dir);
+        let index = fs::read_dir(&versions_dir)
+            .map(|dir| dir.flatten().filter(|e| e.path().is_file()).count())
+            .unwrap_or(0);
+        let _ = fs::copy(&managed_path, versions_dir.join(index.to_string()));
+    }
     if let Err(error) = fs::write(&managed_path, content) {
         return Err(format!("Scrittura artifact non riuscita: {error}"));
     }
