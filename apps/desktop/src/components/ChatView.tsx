@@ -2456,47 +2456,95 @@ function MessageArtifacts({
   return (
     <div className="msg-artifacts" aria-label="File generati">
       {artifacts.map((artifact) => (
-        <div className="artifact-card-wrap" key={artifact.name}>
-          <div className="artifact-card">
-            <button
-              type="button"
-              className="artifact-expand"
-              aria-label={expanded === artifact.name ? "Comprimi anteprima" : "Espandi anteprima"}
-              onClick={() =>
-                setExpanded((current) => (current === artifact.name ? null : artifact.name))
-              }
-            >
-              <ChevronDown
-                size={15}
-                className={expanded === artifact.name ? "artifact-chevron open" : "artifact-chevron"}
-              />
-            </button>
-            <FileText size={18} className="artifact-icon" />
-            <button
-              type="button"
-              className="artifact-name"
-              onClick={() => onOpen(artifact)}
-              title="Apri nel pannello"
-            >
-              <strong>{artifact.name}</strong>
-              <small>
-                {artifact.updated && <span className="artifact-updated">Modificato</span>}
-                {formatFileSize(artifact.size)}
-              </small>
-            </button>
-            <button
-              type="button"
-              className="artifact-quick"
-              onClick={() => void triggerArtifactDownload(artifact)}
-              aria-label="Scarica"
-              title="Scarica"
-            >
-              <Download size={15} />
-            </button>
-          </div>
-          {expanded === artifact.name && <InlineArtifactPreview artifact={artifact} />}
-        </div>
+        <ArtifactCardRow
+          key={artifact.name}
+          artifact={artifact}
+          expanded={expanded === artifact.name}
+          onToggle={() =>
+            setExpanded((current) => (current === artifact.name ? null : artifact.name))
+          }
+          onOpen={() => onOpen(artifact)}
+        />
       ))}
+    </div>
+  );
+}
+
+/** One artifact card row. For an updated file it loads the "+N −M" diff counts
+ *  and shows them on the row (Claude Code's "Modificato file +N −M"). */
+function ArtifactCardRow({
+  artifact,
+  expanded,
+  onToggle,
+  onOpen,
+}: {
+  artifact: ParsedArtifact;
+  expanded: boolean;
+  onToggle: () => void;
+  onOpen: () => void;
+}) {
+  const [counts, setCounts] = useState<{ added: number; removed: number } | null>(null);
+
+  useEffect(() => {
+    if (!artifact.updated) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const versions = await coreBridge.artifactVersions(artifact.thread, artifact.name);
+        if (versions <= 0 || cancelled) return;
+        const newBlob = await coreBridge.downloadArtifact(artifact.thread, artifact.name);
+        const oldBlob = await coreBridge.downloadArtifact(
+          artifact.thread,
+          artifact.name,
+          versions - 1,
+        );
+        const [newText, oldText] = await Promise.all([newBlob.text(), oldBlob.text()]);
+        if (!cancelled) setCounts(diffStats(oldText, newText));
+      } catch {
+        /* counts unavailable */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [artifact]);
+
+  return (
+    <div className="artifact-card-wrap">
+      <div className="artifact-card">
+        <button
+          type="button"
+          className="artifact-expand"
+          aria-label={expanded ? "Comprimi anteprima" : "Espandi anteprima"}
+          onClick={onToggle}
+        >
+          <ChevronDown size={15} className={expanded ? "artifact-chevron open" : "artifact-chevron"} />
+        </button>
+        <FileText size={18} className="artifact-icon" />
+        <button type="button" className="artifact-name" onClick={onOpen} title="Apri nel pannello">
+          <strong>{artifact.name}</strong>
+          <small>
+            {artifact.updated && <span className="artifact-updated">Modificato</span>}
+            {counts && (
+              <span className="diff-counts">
+                <span className="add">+{counts.added}</span>{" "}
+                <span className="del">−{counts.removed}</span>
+              </span>
+            )}
+            {formatFileSize(artifact.size)}
+          </small>
+        </button>
+        <button
+          type="button"
+          className="artifact-quick"
+          onClick={() => void triggerArtifactDownload(artifact)}
+          aria-label="Scarica"
+          title="Scarica"
+        >
+          <Download size={15} />
+        </button>
+      </div>
+      {expanded && <InlineArtifactPreview artifact={artifact} />}
     </div>
   );
 }
