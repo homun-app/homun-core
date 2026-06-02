@@ -8,14 +8,17 @@ interface RichMessageProps {
 const RichMessageRenderer = lazy(() => import("./RichMessageRenderer"));
 
 // Internal control markers the gateway uses to carry a pending write-confirmation
-// action (or its executed state); rendered as a card/note elsewhere and never
-// shown as raw text.
+// action (or its executed state), and the tool-activity trace; both are rendered
+// out-of-band (confirmation card / collapsible activity panel) and never shown as
+// raw text inside the answer body.
 const CONTROL_MARKER_RE = /‹‹COMPOSIO_(?:CONFIRM|DONE)››[\s\S]*?‹‹\/COMPOSIO_(?:CONFIRM|DONE)››/g;
+const ACTIVITY_MARKER_RE = /‹‹ACT››[\s\S]*?‹‹\/ACT››/g;
 
 export function RichMessage({ text, streaming = false }: RichMessageProps) {
-  const clean = text.includes("‹‹COMPOSIO_")
-    ? text.replace(CONTROL_MARKER_RE, "").trimEnd()
-    : text;
+  const clean =
+    text.includes("‹‹COMPOSIO_") || text.includes("‹‹ACT››")
+      ? text.replace(CONTROL_MARKER_RE, "").replace(ACTIVITY_MARKER_RE, "").trim()
+      : text;
 
   if (streaming) {
     return <StreamingTextMessage text={clean} />;

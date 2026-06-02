@@ -592,6 +592,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .route("/api/chat/build_prompt", post(build_prompt))
         .route("/api/chat/generate_stream", post(generate_stream))
+        .route("/api/chat/improve_prompt", post(improve_prompt))
+        .route("/api/chat/transcribe", post(transcribe_audio))
+        .route("/api/chat/suggestions", post(chat_suggestions))
+        .route("/api/chat/threads/{thread_id}/autotitle", post(autotitle_chat_thread))
+        .route(
+            "/api/chat/threads/{thread_id}/folder",
+            get(get_thread_folder).post(set_thread_folder),
+        )
+        .route("/api/chat/threads/{thread_id}/files", get(search_thread_files))
+        .route("/api/chat/threads/{thread_id}/file", get(read_thread_file))
         .route("/api/runtime/model", get(runtime_model).post(set_runtime_model))
         .route("/api/runtime/models", get(runtime_models))
         .route(
@@ -1005,7 +1015,12 @@ async fn generate_stream(
 ) -> Result<Response, GatewayError> {
     // Chat runs through the configured OpenAI-compatible provider. The local
     // MLX/Gemma fallback was removed: a provider is required.
-    if let Some((base_url, model, api_key)) = chat_openai_stream_config() {
+    if let Some((base_url, mut model, api_key)) = chat_openai_stream_config() {
+        // Per-message model override (inline composer selector): use the chosen
+        // model for THIS request only, keeping the same provider/base_url/api_key.
+        if let Some(override_model) = request.model.as_ref().map(|m| m.trim()).filter(|m| !m.is_empty()) {
+            model = override_model.to_string();
+        }
         return stream_chat_via_openai(&state, request, base_url, model, api_key).await;
     }
     Err(GatewayError {
@@ -1015,6 +1030,328 @@ async fn generate_stream(
 Impostazioni → Modello & Runtime."
             .to_string(),
     })
+}
+
+#[derive(Debug, Deserialize)]
+struct ImprovePromptRequest {
+    prompt: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ImprovePromptResponse {
+    improved: String,
+}
+
+/// Rewrites a draft prompt into a clearer, more complete instruction (the ✨
+/// "improve prompt" composer action). A single non-streaming LLM call: returns
+/// ONLY the rewritten prompt, same language, no preamble. The provider config is
+/// the same one chat uses.
+async fn improve_prompt(
+    State(state): State<AppState>,
+    Json(request): Json<ImprovePromptRequest>,
+) -> Result<Json<ImprovePromptResponse>, GatewayError> {
+    let draft = request.prompt.trim();
+    if draft.is_empty() {
+        return Ok(Json(ImprovePromptResponse { improved: String::new() }));
+    }
+    let (base_url, model, api_key) = chat_openai_stream_config().ok_or_else(|| GatewayError {
+        status: StatusCode::SERVICE_UNAVAILABLE,
+        code: "no_inference_provider",
+        message: "Nessun provider configurato.".to_string(),
+    })?;
+    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let system = "Sei un assistente che RISCRIVE i prompt per renderli più chiari, specifici e \
+completi, SENZA eseguirli e senza rispondere alla richiesta. Mantieni la STESSA lingua e \
+l'intento dell'utente; esplicita criteri, vincoli e formato atteso solo se impliciti. \
+Restituisci SOLO il prompt riscritto, in testo semplice, senza preamboli, virgolette o spiegazioni.";
+    let payload = serde_json::json!({
+        "model": model,
+        "temperature": 0.3,
+        "max_tokens": 600,
+        "messages": [
+            { "role": "system", "content": system },
+            { "role": "user", "content": format!("Riscrivi questo prompt:\n\n{draft}") },
+        ],
+    });
+    let mut builder = state.http.post(&endpoint).timeout(std::time::Duration::from_secs(30));
+    if let Some(key) = api_key.as_ref() {
+        builder = builder.bearer_auth(key);
+    }
+    let resp = builder.json(&payload).send().await.map_err(|error| GatewayError {
+        status: StatusCode::BAD_GATEWAY,
+        code: "improve_prompt_failed",
+        message: format!("Provider non raggiungibile: {error}"),
+    })?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        return Err(GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "improve_prompt_failed",
+            message: format!("Provider ha risposto {status}"),
+        });
+    }
+    let body: serde_json::Value = resp.json().await.map_err(|error| GatewayError {
+        status: StatusCode::BAD_GATEWAY,
+        code: "improve_prompt_failed",
+        message: format!("Risposta non valida: {error}"),
+    })?;
+    let improved = body
+        .get("choices")
+        .and_then(|c| c.get(0))
+        .and_then(|c| c.get("message"))
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_str())
+        .unwrap_or("")
+        .trim()
+        .trim_matches('"')
+        .to_string();
+    let improved = if improved.is_empty() { draft.to_string() } else { improved };
+    Ok(Json(ImprovePromptResponse { improved }))
+}
+
+#[derive(Debug, Deserialize)]
+struct SuggestionsRequest {
+    prompt: String,
+    answer: String,
+}
+
+#[derive(Debug, Serialize)]
+struct SuggestionsResponse {
+    suggestions: Vec<String>,
+}
+
+/// Proposes a few short follow-up prompts the user might ask next, given the last
+/// exchange (the ✦ dynamic suggestions under the latest answer). One cheap
+/// non-streaming LLM call; best-effort (empty list on any failure).
+async fn chat_suggestions(
+    State(state): State<AppState>,
+    Json(request): Json<SuggestionsRequest>,
+) -> Json<SuggestionsResponse> {
+    let empty = Json(SuggestionsResponse { suggestions: Vec::new() });
+    let Some((base_url, model, api_key)) = chat_openai_stream_config() else {
+        return empty;
+    };
+    if request.answer.trim().is_empty() {
+        return empty;
+    }
+    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let system = "Proponi 3 BREVI domande di follow-up che l'utente potrebbe porre DOPO questa \
+risposta. Regole: una per riga, massimo ~7 parole, nella STESSA lingua dell'utente, formulate \
+come se le scrivesse l'utente, senza numerazione, trattini o virgolette. Restituisci SOLO le 3 righe.";
+    let user = format!(
+        "Richiesta utente:\n{}\n\nRisposta assistente:\n{}",
+        request.prompt.chars().take(2000).collect::<String>(),
+        request.answer.chars().take(4000).collect::<String>()
+    );
+    let payload = serde_json::json!({
+        "model": model,
+        "temperature": 0.5,
+        "max_tokens": 160,
+        "messages": [
+            { "role": "system", "content": system },
+            { "role": "user", "content": user },
+        ],
+    });
+    let mut builder = state.http.post(&endpoint).timeout(std::time::Duration::from_secs(25));
+    if let Some(key) = api_key.as_ref() {
+        builder = builder.bearer_auth(key);
+    }
+    let Ok(resp) = builder.json(&payload).send().await else {
+        return empty;
+    };
+    if !resp.status().is_success() {
+        return empty;
+    }
+    let Ok(body) = resp.json::<serde_json::Value>().await else {
+        return empty;
+    };
+    let content = body
+        .get("choices")
+        .and_then(|c| c.get(0))
+        .and_then(|c| c.get("message"))
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_str())
+        .unwrap_or("");
+    let suggestions = content
+        .lines()
+        .map(|line| {
+            line.trim()
+                .trim_start_matches(|c: char| {
+                    c == '-' || c == '*' || c == '•' || c.is_ascii_digit() || c == '.' || c == ')'
+                })
+                .trim()
+                .trim_matches('"')
+                .trim()
+                .to_string()
+        })
+        .filter(|line| !line.is_empty())
+        .take(3)
+        .collect();
+    Json(SuggestionsResponse { suggestions })
+}
+
+#[derive(Debug, Deserialize)]
+struct AutoTitleRequest {
+    prompt: String,
+    #[serde(default)]
+    answer: String,
+}
+
+/// Generates a concise thread title from the first exchange (LLM), with a plain
+/// fallback. Returns a short single line.
+async fn generate_thread_title(state: &AppState, prompt: &str, answer: &str) -> String {
+    let fallback = || {
+        let base = prompt.trim();
+        if base.is_empty() {
+            "Nuova chat".to_string()
+        } else {
+            base.chars().take(48).collect::<String>()
+        }
+    };
+    let Some((base_url, model, api_key)) = chat_openai_stream_config() else {
+        return fallback();
+    };
+    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let system = "Genera un TITOLO brevissimo (max 5 parole) per questa conversazione, nella \
+stessa lingua dell'utente. Solo il titolo, senza virgolette, punteggiatura finale o prefissi.";
+    let user = format!(
+        "Primo messaggio:\n{}\n\nRisposta:\n{}",
+        prompt.chars().take(1500).collect::<String>(),
+        answer.chars().take(1500).collect::<String>()
+    );
+    let payload = serde_json::json!({
+        "model": model,
+        "temperature": 0.3,
+        "max_tokens": 24,
+        "messages": [
+            { "role": "system", "content": system },
+            { "role": "user", "content": user },
+        ],
+    });
+    let mut builder = state.http.post(&endpoint).timeout(std::time::Duration::from_secs(20));
+    if let Some(key) = api_key.as_ref() {
+        builder = builder.bearer_auth(key);
+    }
+    let title = match builder.json(&payload).send().await {
+        Ok(resp) if resp.status().is_success() => resp
+            .json::<serde_json::Value>()
+            .await
+            .ok()
+            .and_then(|b| {
+                b.get("choices")
+                    .and_then(|c| c.get(0))
+                    .and_then(|c| c.get("message"))
+                    .and_then(|m| m.get("content"))
+                    .and_then(|c| c.as_str())
+                    .map(|s| s.trim().trim_matches('"').lines().next().unwrap_or("").trim().to_string())
+            })
+            .unwrap_or_default(),
+        _ => String::new(),
+    };
+    if title.is_empty() {
+        fallback()
+    } else {
+        title.chars().take(60).collect()
+    }
+}
+
+/// Auto-titles a thread from its first exchange (LLM), persisting the result.
+async fn autotitle_chat_thread(
+    State(state): State<AppState>,
+    Path(thread_id): Path<String>,
+    Json(request): Json<AutoTitleRequest>,
+) -> Result<Json<ChatThreadSnapshot>, GatewayError> {
+    let title = generate_thread_title(&state, &request.prompt, &request.answer).await;
+    Ok(Json(
+        lock_store(&state)?
+            .rename_thread(&thread_id, &title)
+            .map_err(GatewayError::store)?,
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+struct TranscribeRequest {
+    /// Base64-encoded audio (any ffmpeg-decodable container, e.g. webm/opus).
+    audio_base64: String,
+    /// Optional language hint; omitted → Whisper auto-detects (multilingual).
+    #[serde(default)]
+    language: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct TranscribeResponse {
+    text: String,
+    language: Option<String>,
+}
+
+/// On-device speech-to-text (dictation 🎤). Decodes the audio and forwards it to
+/// the warm faster-whisper server inside the contained computer (CPU, private,
+/// multilingual). Brings the container up first if needed.
+async fn transcribe_audio(
+    State(state): State<AppState>,
+    Json(request): Json<TranscribeRequest>,
+) -> Result<Json<TranscribeResponse>, GatewayError> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(request.audio_base64.as_bytes())
+        .map_err(|e| GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "bad_audio",
+            message: format!("Audio non valido: {e}"),
+        })?;
+    if bytes.is_empty() {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "bad_audio",
+            message: "Audio vuoto.".to_string(),
+        });
+    }
+    // Ensure the contained computer (and its Whisper server) is running.
+    tokio::task::spawn_blocking(sandbox::ensure_contained_computer)
+        .await
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "sandbox",
+            message: e.to_string(),
+        })?
+        .map_err(|e| GatewayError {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            code: "sandbox",
+            message: e,
+        })?;
+    let url = format!("{}/transcribe", sandbox::whisper_base_url());
+    let mut builder = state
+        .http
+        .post(&url)
+        // Generous: the FIRST call downloads the model (~1.5GB) + loads it.
+        .timeout(std::time::Duration::from_secs(300))
+        .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+        .body(bytes);
+    if let Some(lang) = request.language.as_ref().map(|l| l.trim()).filter(|l| !l.is_empty()) {
+        builder = builder.header("X-Language", lang);
+    }
+    let resp = builder.send().await.map_err(|e| GatewayError {
+        status: StatusCode::BAD_GATEWAY,
+        code: "transcribe_failed",
+        message: format!("Server STT non raggiungibile: {e}"),
+    })?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "transcribe_failed",
+            message: format!("STT ha risposto {status}: {}", body.chars().take(200).collect::<String>()),
+        });
+    }
+    let body: serde_json::Value = resp.json().await.map_err(|e| GatewayError {
+        status: StatusCode::BAD_GATEWAY,
+        code: "transcribe_failed",
+        message: format!("Risposta STT non valida: {e}"),
+    })?;
+    Ok(Json(TranscribeResponse {
+        text: body.get("text").and_then(|t| t.as_str()).unwrap_or("").trim().to_string(),
+        language: body.get("language").and_then(|l| l.as_str()).map(String::from),
+    }))
 }
 
 /// Chat streaming config when an OpenAI-compatible backend is selected
@@ -1304,7 +1641,38 @@ fn load_skill_body(id: &str) -> Option<String> {
     skills::load_detail(&dir, id, &disabled, &origins)
         .ok()
         .flatten()
-        .map(|detail| detail.body)
+        .map(|detail| adapt_skill_body(&detail.body, id))
+}
+
+/// Extracts a skill id from a sandbox command that references the container skill
+/// path `/home/agent/skills/<id>/…`, so we can sync that skill's files even when
+/// the model omitted the `skill_id` argument.
+fn skill_id_from_command(command: &str) -> Option<String> {
+    let marker = "/home/agent/skills/";
+    let start = command.find(marker)? + marker.len();
+    let rest = &command[start..];
+    let id: String = rest
+        .chars()
+        .take_while(|c| *c != '/' && *c != ' ' && *c != '"' && *c != '\'')
+        .collect();
+    if id.is_empty() {
+        None
+    } else {
+        Some(id)
+    }
+}
+
+/// Adapts a skill's SKILL.md for execution in the contained computer: substitutes
+/// the `{baseDir}` template variable (and common aliases) with the skill's real
+/// path inside the container, so commands like `python3 {baseDir}/scripts/x.py`
+/// resolve. This is the runtime "skill adaptation" step.
+fn adapt_skill_body(body: &str, id: &str) -> String {
+    let base = sandbox::container_skill_dir(id);
+    body.replace("{baseDir}", &base)
+        .replace("${baseDir}", &base)
+        .replace("{base_dir}", &base)
+        .replace("{BASE_DIR}", &base)
+        .replace("$BASEDIR", &base)
 }
 
 /// The skill-activation tool: loads a skill's full SKILL.md instructions on demand
@@ -1456,7 +1824,14 @@ partenza specifico (es. Malpensa/Linate/Bergamo, non solo \"Milano\") e di arriv
 orario di partenza e arrivo, durata, scali/cambi e prezzo. Se le opzioni sono di \
 compagnie o aeroporti diversi, le colonne Compagnia e Aeroporto sono OBBLIGATORIE \
 (non lasciare ambiguo a chi/da dove appartiene un prezzo). Usa una tabella e elenca \
-più opzioni, non solo una. Rispondi in italiano, chiaro e ordinato.",
+più opzioni, non solo una.\n\
+\n\
+FORMATTAZIONE DELLA RISPOSTA (markdown, sempre): scrivi risposte leggibili e ariose, \
+mai un muro di testo. Usa SEMPRE markdown: ogni elemento di un elenco va su una RIGA \
+A SÉ con `- ` (trattino) — non incollare più voci sulla stessa riga. Per elenchi \
+giorno/voce con etichetta usa `**Etichetta**: valore` con una riga vuota tra le voci, \
+o una tabella se i campi sono ≥3. Metti una riga vuota tra i paragrafi. Usa `### ` per \
+i titoli di sezione quando la risposta è lunga. Rispondi in italiano, chiaro e ordinato.",
         today = today_iso()
     );
     // Connected-service (Composio) tools are reached via a DISCOVERY meta-tool
@@ -1534,9 +1909,24 @@ strumento `run_in_sandbox`, che li lancia nel computer contenuto, e usa l'output
         base_tools.push(use_skill_tool_schema());
         base_tools.push(run_in_sandbox_tool_schema());
     }
+    // Vision: when the request carries images, the user message becomes
+    // multimodal content (text + image_url parts) per the OpenAI-compatible
+    // schema; otherwise it stays a plain string.
+    let user_content = if request.images.is_empty() {
+        serde_json::Value::String(prompt.clone())
+    } else {
+        let mut parts = vec![serde_json::json!({ "type": "text", "text": prompt })];
+        for url in &request.images {
+            parts.push(serde_json::json!({
+                "type": "image_url",
+                "image_url": { "url": url }
+            }));
+        }
+        serde_json::Value::Array(parts)
+    };
     let mut messages = vec![
         serde_json::json!({ "role": "system", "content": system }),
-        serde_json::json!({ "role": "user", "content": prompt }),
+        serde_json::json!({ "role": "user", "content": user_content }),
     ];
 
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(32);
@@ -1549,10 +1939,15 @@ strumento `run_in_sandbox`, che li lancia nel computer contenuto, e usa l'output
     tokio::spawn(async move {
         let mut accumulated = String::new();
         let mut final_done = false;
+        // Source URLs visited via browse_web this request, for the "Fonti" footer.
+        let mut browse_sources: Vec<String> = Vec::new();
         // Tools offered to the model this run: the base set, plus any tools the
         // model discovers via `find_connected_tools` (injected on demand).
         let mut tool_schemas = base_tools;
         let mut loaded_tools: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        // Fresh terminal buffer for this request; the computer panel shows the
+        // CLI commands + output run during THIS response.
+        sandbox_clear();
 
         for round in 0..MAX_TOOL_ROUNDS {
             // On the LAST allowed round, forbid tools so the model MUST synthesize
@@ -1667,7 +2062,7 @@ strumento `run_in_sandbox`, che li lancia nel computer contenuto, e usa l'output
                             &tx,
                             GenerateStreamEvent::Delta {
                                 text: format!(
-                                    "\n\n_🔧 Uso il browser: {}_\n",
+                                    "‹‹ACT››🌐 Navigo sul web: {}‹‹/ACT››",
                                     if goal.is_empty() { "(obiettivo dal contesto)" } else { goal.as_str() }
                                 ),
                             },
@@ -1705,7 +2100,7 @@ strumento `run_in_sandbox`, che li lancia nel computer contenuto, e usa l'output
                             .unwrap_or_default();
                         let _ = emit_stream_event(
                             &tx,
-                            GenerateStreamEvent::Delta { text: format!("\n\n_📖 Apro la skill {id}…_\n") },
+                            GenerateStreamEvent::Delta { text: format!("‹‹ACT››📖 Apro la skill {id}‹‹/ACT››") },
                         )
                         .await;
                         let id_for_load = id.clone();
@@ -1749,14 +2144,19 @@ disponibili (per dati dal web usa browse_web sull'URL indicato):\n\n{}",
                                     &tx,
                                     GenerateStreamEvent::Delta {
                                         text: format!(
-                                            "\n\n_🖥️ Eseguo nel computer contenuto: `{}`_\n",
-                                            command.chars().take(120).collect::<String>()
+                                            "‹‹ACT››🖥️ Eseguo: {}‹‹/ACT››",
+                                            command.chars().take(160).collect::<String>()
                                         ),
                                     },
                                 )
                                 .await;
+                                // Publish the command to the computer terminal panel.
+                                sandbox_begin(command.clone());
                                 let cmd = command.clone();
-                                let sid = skill_id.clone();
+                                // The model may omit skill_id; derive it from the
+                                // command's `/home/agent/skills/<id>/…` path so the
+                                // skill's files are always synced before running.
+                                let sid = skill_id.clone().or_else(|| skill_id_from_command(&command));
                                 let outcome = tokio::task::spawn_blocking(move || {
                                     if let Some(id) = sid.as_deref() {
                                         if let Ok(dir) = skills_dir() {
@@ -1766,17 +2166,25 @@ disponibili (per dati dal web usa browse_web sull'URL indicato):\n\n{}",
                                     sandbox::run_command(&cmd, sid.as_deref())
                                 })
                                 .await;
-                                match outcome {
+                                let (panel_output, model_output) = match outcome {
                                     Ok(Ok(out)) => {
                                         if out.trim().is_empty() {
-                                            "(nessun output)".to_string()
+                                            ("(nessun output)".to_string(), "(nessun output)".to_string())
                                         } else {
-                                            format!("Output del comando:\n{out}")
+                                            (out.clone(), format!("Output del comando:\n{out}"))
                                         }
                                     }
-                                    Ok(Err(error)) => format!("Sandbox non disponibile: {error}"),
-                                    Err(error) => format!("Errore di esecuzione: {error}"),
-                                }
+                                    Ok(Err(error)) => {
+                                        let msg = format!("Sandbox non disponibile: {error}");
+                                        (msg.clone(), msg)
+                                    }
+                                    Err(error) => {
+                                        let msg = format!("Errore di esecuzione: {error}");
+                                        (msg.clone(), msg)
+                                    }
+                                };
+                                sandbox_end(panel_output);
+                                model_output
                             }
                         }
                     } else if name == "find_connected_tools" {
@@ -1790,7 +2198,7 @@ disponibili (per dati dal web usa browse_web sull'URL indicato):\n\n{}",
                             &tx,
                             GenerateStreamEvent::Delta {
                                 text: format!(
-                                    "\n\n_🔎 Cerco strumenti: {}_\n",
+                                    "‹‹ACT››🔎 Cerco strumenti: {}‹‹/ACT››",
                                     if query.is_empty() { "(intento)" } else { query.as_str() }
                                 ),
                             },
@@ -1852,7 +2260,7 @@ card di conferma nell'interfaccia. NON dire che è stata eseguita."
                             let _ = emit_stream_event(
                                 &tx,
                                 GenerateStreamEvent::Delta {
-                                    text: format!("\n\n_🔧 Uso {}…_\n", humanize_composio_tool(name)),
+                                    text: format!("‹‹ACT››🔧 Uso {}‹‹/ACT››", humanize_composio_tool(name)),
                                 },
                             )
                             .await;
@@ -1878,6 +2286,15 @@ card di conferma nell'interfaccia. NON dire che è stata eseguita."
                         format!("Strumento non disponibile: {name}")
                     };
 
+                    // Collect source URLs from browser results so the final
+                    // answer can carry a deterministic "Fonti" section.
+                    if name == "browse_web" {
+                        for url in extract_source_urls(&result) {
+                            if !browse_sources.contains(&url) {
+                                browse_sources.push(url);
+                            }
+                        }
+                    }
                     messages.push(serde_json::json!({
                         "role": "tool",
                         "tool_call_id": call_id,
@@ -1909,6 +2326,10 @@ card di conferma nell'interfaccia. NON dire che è stata eseguita."
                 .to_string();
             accumulated.push_str(&content);
             let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: content }).await;
+            if let Some(fonti) = fonti_section(&browse_sources, &accumulated) {
+                accumulated.push_str(&fonti);
+                let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: fonti }).await;
+            }
             let _ = emit_stream_event(
                 &tx,
                 GenerateStreamEvent::Done {
@@ -1959,7 +2380,7 @@ scali, compagnia, prezzo per ogni opzione). Se una fonte era bloccata o senza da
                         .to_string();
                 }
             }
-            let final_text = if !synth_text.trim().is_empty() {
+            let mut final_text = if !synth_text.trim().is_empty() {
                 synth_text
             } else if !accumulated.trim().is_empty() {
                 accumulated
@@ -1967,6 +2388,9 @@ scali, compagnia, prezzo per ogni opzione). Se una fonte era bloccata o senza da
                 "Non sono riuscito a recuperare i risultati dalle fonti (alcune bloccate da \
 verifica anti-bot). Riprova o indica una fonte preferita.".to_string()
             };
+            if let Some(fonti) = fonti_section(&browse_sources, &final_text) {
+                final_text.push_str(&fonti);
+            }
             let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: final_text.clone() }).await;
             let _ = emit_stream_event(
                 &tx,
@@ -2145,6 +2569,54 @@ fn current_browser_activity() -> Option<BrowserActivityState> {
     browser_activity_cell().read().ok().and_then(|guard| guard.clone())
 }
 
+/// One executed terminal command + its output, for the "computer terminal" panel
+/// (the Manus-style view of CLI skill execution in the contained computer).
+#[derive(Debug, Clone, Serialize)]
+struct TerminalEntryView {
+    command: String,
+    output: String,
+    running: bool,
+}
+
+fn sandbox_activity_cell() -> &'static std::sync::RwLock<Vec<TerminalEntryView>> {
+    static CELL: std::sync::OnceLock<std::sync::RwLock<Vec<TerminalEntryView>>> =
+        std::sync::OnceLock::new();
+    CELL.get_or_init(|| std::sync::RwLock::new(Vec::new()))
+}
+
+/// Resets the terminal buffer — called when a new chat request starts so the
+/// panel shows the CURRENT request's commands, then stays visible (with output)
+/// until the next request replaces it.
+fn sandbox_clear() {
+    if let Ok(mut guard) = sandbox_activity_cell().write() {
+        guard.clear();
+    }
+}
+
+/// Records a command about to run (output filled in by `sandbox_end`).
+fn sandbox_begin(command: String) {
+    if let Ok(mut guard) = sandbox_activity_cell().write() {
+        if guard.len() >= 20 {
+            guard.remove(0);
+        }
+        guard.push(TerminalEntryView { command, output: String::new(), running: true });
+    }
+}
+
+/// Attaches the output to the most recent running command and marks it done.
+fn sandbox_end(output: String) {
+    if let Ok(mut guard) = sandbox_activity_cell().write() {
+        if let Some(entry) = guard.iter_mut().rev().find(|entry| entry.running) {
+            entry.output = output.chars().take(4000).collect();
+            entry.running = false;
+        }
+    }
+}
+
+fn current_sandbox_activity() -> Vec<TerminalEntryView> {
+    sandbox_activity_cell().read().ok().map(|guard| guard.clone()).unwrap_or_default()
+}
+
 /// Human-readable label for a loop iteration, for the activity checklist.
 /// Prefers the model's own user-facing `step` description ("Inserisco
 /// l'aeroporto di partenza"); falls back to a mechanical summary only if the
@@ -2196,6 +2668,53 @@ fn browser_step_label(iteration: &local_first_browser_automation::BrowserLoopIte
 /// runs the observe-act loop synchronously (in contained-computer mode it drives
 /// the real browser in the container, visible via noVNC), returning the loop's
 /// human-facing result for the model to read.
+/// Extracts http(s) URLs from a browser tool result (manual scan, no regex dep),
+/// trimming trailing punctuation. Used to build the deterministic "Fonti" footer.
+fn extract_source_urls(text: &str) -> Vec<String> {
+    let mut urls: Vec<String> = Vec::new();
+    let mut rest = text;
+    while let Some(pos) = rest.find("http") {
+        let candidate = &rest[pos..];
+        if candidate.starts_with("http://") || candidate.starts_with("https://") {
+            let end = candidate
+                .find(|c: char| {
+                    c.is_whitespace() || matches!(c, ')' | ']' | '"' | '<' | '>' | '`' | '|' | '\\')
+                })
+                .unwrap_or(candidate.len());
+            let mut url = candidate[..end].to_string();
+            while url.ends_with(['.', ',', ';', ':', '*', '!', '?']) {
+                url.pop();
+            }
+            if url.len() > 12 && !urls.contains(&url) {
+                urls.push(url);
+            }
+            rest = &candidate[end..];
+        } else {
+            rest = &candidate[4..];
+        }
+    }
+    urls
+}
+
+/// Builds a "Fonti" markdown footer from collected source URLs, unless the answer
+/// already cites sources. Capped to keep it tidy.
+fn fonti_section(sources: &[String], answer: &str) -> Option<String> {
+    if sources.is_empty() {
+        return None;
+    }
+    let lower = answer.to_lowercase();
+    if lower.contains("**fonti") || lower.contains("fonti controllate") {
+        return None;
+    }
+    let list = sources
+        .iter()
+        .take(6)
+        .map(|url| format!("- {url}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    Some(format!("\n\n**Fonti**\n{list}"))
+}
+
 fn execute_browse_web_tool(
     state: &AppState,
     goal: &str,
@@ -4608,6 +5127,219 @@ fn remove_composio_tool_allow(slug: &str) -> Result<(), String> {
     let mut set = load_composio_tool_allow();
     set.remove(slug);
     write_composio_tool_allow(set)
+}
+
+// ---- per-conversation linked folder ("@ file" context) -----------------------
+
+fn thread_folders_path() -> Option<PathBuf> {
+    gateway_data_dir().ok().map(|dir| dir.join("thread-folders.json"))
+}
+
+fn load_thread_folders() -> std::collections::BTreeMap<String, String> {
+    thread_folders_path()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn write_thread_folders(map: &std::collections::BTreeMap<String, String>) -> Result<(), String> {
+    let path = thread_folders_path().ok_or_else(|| "data dir non disponibile".to_string())?;
+    let json = serde_json::to_string_pretty(map).map_err(|e| e.to_string())?;
+    fs::write(path, json).map_err(|e| e.to_string())
+}
+
+fn thread_folder(thread_id: &str) -> Option<String> {
+    load_thread_folders().get(thread_id).cloned()
+}
+
+/// True if a candidate path stays inside `root` after canonicalization (anti
+/// path-traversal): the user-linked folder is the only readable scope.
+fn path_within(root: &std::path::Path, candidate: &std::path::Path) -> bool {
+    match (root.canonicalize(), candidate.canonicalize()) {
+        (Ok(r), Ok(c)) => c.starts_with(&r),
+        _ => false,
+    }
+}
+
+/// Skips noise/heavy dirs and obviously-binary files when walking a linked folder.
+fn is_ignored_dir(name: &str) -> bool {
+    matches!(
+        name,
+        ".git" | "node_modules" | ".venv" | "venv" | "__pycache__" | ".next" | "dist" | "build"
+            | "target" | ".cache" | ".idea" | ".DS_Store"
+    )
+}
+
+fn looks_texty(name: &str) -> bool {
+    let binary = [
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf", ".zip", ".gz", ".tar", ".mp4",
+        ".mov", ".mp3", ".wav", ".woff", ".woff2", ".ttf", ".otf", ".so", ".dylib", ".dll",
+        ".exe", ".bin", ".class", ".o", ".a", ".lock",
+    ];
+    let lower = name.to_lowercase();
+    !binary.iter().any(|ext| lower.ends_with(ext))
+}
+
+/// Walks `root` (bounded) and returns up to `limit` relative file paths whose name
+/// matches `query` (case-insensitive substring; empty query = first files found).
+fn search_folder_files(root: &std::path::Path, query: &str, limit: usize) -> Vec<String> {
+    let q = query.trim().to_lowercase();
+    let mut out: Vec<String> = Vec::new();
+    let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
+    let mut walked = 0usize;
+    while let Some(dir) = stack.pop() {
+        if out.len() >= limit || walked > 20_000 {
+            break;
+        }
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            walked += 1;
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') && name != "." {
+                continue;
+            }
+            if path.is_dir() {
+                if !is_ignored_dir(&name) {
+                    stack.push(path);
+                }
+                continue;
+            }
+            if !looks_texty(&name) {
+                continue;
+            }
+            let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().to_string();
+            if q.is_empty() || rel.to_lowercase().contains(&q) {
+                out.push(rel);
+                if out.len() >= limit {
+                    break;
+                }
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+#[derive(Debug, Serialize)]
+struct ThreadFolderResponse {
+    path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SetThreadFolderRequest {
+    /// Absolute folder path to link; null/empty unlinks.
+    path: Option<String>,
+}
+
+async fn get_thread_folder(Path(thread_id): Path<String>) -> Json<ThreadFolderResponse> {
+    Json(ThreadFolderResponse { path: thread_folder(&thread_id) })
+}
+
+async fn set_thread_folder(
+    Path(thread_id): Path<String>,
+    Json(request): Json<SetThreadFolderRequest>,
+) -> Result<Json<ThreadFolderResponse>, GatewayError> {
+    let mut map = load_thread_folders();
+    let cleaned = request.path.as_ref().map(|p| p.trim()).filter(|p| !p.is_empty());
+    match cleaned {
+        Some(path) => {
+            let dir = PathBuf::from(path);
+            if !dir.is_dir() {
+                return Err(GatewayError {
+                    status: StatusCode::BAD_REQUEST,
+                    code: "folder_not_found",
+                    message: "La cartella indicata non esiste.".to_string(),
+                });
+            }
+            map.insert(thread_id.clone(), path.to_string());
+        }
+        None => {
+            map.remove(&thread_id);
+        }
+    }
+    write_thread_folders(&map).map_err(|e| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "folder_store",
+        message: e,
+    })?;
+    Ok(Json(ThreadFolderResponse { path: thread_folder(&thread_id) }))
+}
+
+#[derive(Debug, Deserialize)]
+struct ThreadFilesQuery {
+    #[serde(default)]
+    q: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ThreadFilesResponse {
+    files: Vec<String>,
+}
+
+async fn search_thread_files(
+    Path(thread_id): Path<String>,
+    Query(query): Query<ThreadFilesQuery>,
+) -> Result<Json<ThreadFilesResponse>, GatewayError> {
+    let Some(folder) = thread_folder(&thread_id) else {
+        return Ok(Json(ThreadFilesResponse { files: Vec::new() }));
+    };
+    let root = PathBuf::from(folder);
+    let files = tokio::task::spawn_blocking(move || search_folder_files(&root, &query.q, 40))
+        .await
+        .unwrap_or_default();
+    Ok(Json(ThreadFilesResponse { files }))
+}
+
+#[derive(Debug, Deserialize)]
+struct ThreadFileQuery {
+    path: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ThreadFileResponse {
+    path: String,
+    content: String,
+    truncated: bool,
+}
+
+const MAX_CONTEXT_FILE_BYTES: usize = 80_000;
+
+async fn read_thread_file(
+    Path(thread_id): Path<String>,
+    Query(query): Query<ThreadFileQuery>,
+) -> Result<Json<ThreadFileResponse>, GatewayError> {
+    let folder = thread_folder(&thread_id).ok_or_else(|| GatewayError {
+        status: StatusCode::BAD_REQUEST,
+        code: "no_folder",
+        message: "Nessuna cartella collegata.".to_string(),
+    })?;
+    let root = PathBuf::from(folder);
+    let candidate = root.join(&query.path);
+    if !path_within(&root, &candidate) {
+        return Err(GatewayError {
+            status: StatusCode::FORBIDDEN,
+            code: "path_outside_folder",
+            message: "Percorso fuori dalla cartella collegata.".to_string(),
+        });
+    }
+    let rel = query.path.clone();
+    let result = tokio::task::spawn_blocking(move || fs::read(&candidate))
+        .await
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "file_read",
+            message: e.to_string(),
+        })?;
+    let bytes = result.map_err(|e| GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "file_read",
+        message: e.to_string(),
+    })?;
+    let truncated = bytes.len() > MAX_CONTEXT_FILE_BYTES;
+    let slice = &bytes[..bytes.len().min(MAX_CONTEXT_FILE_BYTES)];
+    let content = String::from_utf8_lossy(slice).to_string();
+    Ok(Json(ThreadFileResponse { path: rel, content, truncated }))
 }
 
 #[derive(Debug, Serialize)]
@@ -8769,6 +9501,10 @@ struct ContainedComputerLiveResponse {
     activity: Option<String>,
     /// Steps executed so far — the live checklist ("Avanzamento attività").
     steps: Vec<BrowserStepView>,
+    /// True while a CLI skill command is running in the contained computer.
+    terminal_active: bool,
+    /// Terminal commands + output for the current chat response (CLI skills).
+    terminal: Vec<TerminalEntryView>,
 }
 
 /// Reports whether the contained computer's live view is available, where to
@@ -8780,12 +9516,18 @@ async fn contained_computer_live() -> Json<ContainedComputerLiveResponse> {
         env::var("LOCAL_FIRST_CONTAINED_COMPUTER_NOVNC").ok().as_deref(),
     );
     let activity_state = current_browser_activity();
+    let terminal = current_sandbox_activity();
+    let terminal_active = terminal.iter().any(|entry| entry.running);
     Json(ContainedComputerLiveResponse {
-        enabled: novnc_url.is_some(),
+        // The panel is useful for terminal activity even when the noVNC view is
+        // not available, so report enabled when either surface has something.
+        enabled: novnc_url.is_some() || !terminal.is_empty(),
         novnc_url,
         active: activity_state.is_some(),
         activity: activity_state.as_ref().map(|state| state.goal.clone()),
         steps: activity_state.map(|state| state.steps).unwrap_or_default(),
+        terminal_active,
+        terminal,
     })
 }
 
@@ -10199,6 +10941,10 @@ impl IntoResponse for GatewayError {
 #[cfg(test)]
 mod tests {
     use super::{
+        adapt_skill_body,
+        extract_source_urls,
+        fonti_section,
+        skill_id_from_command,
         browser_method_for_capability_tool,
         browser_targets_for_goal,
         browser_url_for_goal,
@@ -10237,6 +10983,41 @@ mod tests {
         TaskRecord, TaskStatus, TaskStore, TaskUiItem, UserId, WorkspaceId,
     };
     use std::collections::HashMap;
+
+    #[test]
+    fn adapt_skill_body_substitutes_base_dir() {
+        let body = "Run `python3 {baseDir}/scripts/x.py` and ${baseDir}/a";
+        let out = adapt_skill_body(body, "weather");
+        assert!(out.contains("/home/agent/skills/weather/scripts/x.py"));
+        assert!(!out.contains("{baseDir}"));
+        assert!(!out.contains("${baseDir}"));
+    }
+
+    #[test]
+    fn extract_source_urls_finds_and_trims() {
+        let text = "Vedi https://example.com/a, e (https://kayak.it/flights). Fine.";
+        let urls = extract_source_urls(text);
+        assert!(urls.contains(&"https://example.com/a".to_string()));
+        assert!(urls.contains(&"https://kayak.it/flights".to_string()));
+    }
+
+    #[test]
+    fn fonti_section_skips_when_already_cited() {
+        let sources = vec!["https://example.com".to_string()];
+        assert!(fonti_section(&sources, "Risposta\n\n**Fonti**\n- x").is_none());
+        assert!(fonti_section(&[], "Risposta").is_none());
+        assert!(fonti_section(&sources, "Risposta").is_some());
+    }
+
+    #[test]
+    fn skill_id_from_command_extracts_id() {
+        assert_eq!(
+            skill_id_from_command("python3 /home/agent/skills/polymarket-trade/scripts/p.py search btc"),
+            Some("polymarket-trade".to_string())
+        );
+        assert_eq!(skill_id_from_command("ls -la"), None);
+        assert_eq!(skill_id_from_command("cat /home/agent/skills/"), None);
+    }
 
     #[test]
     fn aggregate_session_state_reflects_member_progress() {

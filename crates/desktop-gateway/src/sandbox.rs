@@ -14,6 +14,19 @@ use std::time::Duration;
 pub const CONTAINER: &str = "lfpa-cc";
 /// Where skills are copied inside the container.
 const CONTAINER_SKILLS_DIR: &str = "/home/agent/skills";
+
+/// Base URL of the on-device Whisper STT server (published from the contained
+/// computer). Overridable via `LFPA_WHISPER_URL` for tests/alternate setups.
+pub fn whisper_base_url() -> String {
+    std::env::var("LFPA_WHISPER_URL").unwrap_or_else(|_| "http://127.0.0.1:9100".to_string())
+}
+
+/// Absolute path of a skill's directory INSIDE the container. Used both to set
+/// the working dir and to substitute the skill's `{baseDir}` template variable so
+/// its scripts resolve (e.g. `python3 {baseDir}/scripts/x.py`).
+pub fn container_skill_dir(skill_id: &str) -> String {
+    format!("{CONTAINER_SKILLS_DIR}/{skill_id}")
+}
 const TIMEOUT_SECS: u64 = 60;
 const MAX_OUTPUT_CHARS: usize = 8000;
 

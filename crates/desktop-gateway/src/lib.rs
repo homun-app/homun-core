@@ -60,6 +60,15 @@ pub struct ChatGenerateStreamRequest {
     pub context: Vec<ChatContextMessage>,
     #[serde(default)]
     pub max_context_chars: Option<usize>,
+    /// Optional per-message model override (inline composer selector). When set
+    /// and non-empty, it replaces the role-resolved model for THIS request only;
+    /// the persistent default profile is untouched.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Optional images (base64 `data:` URLs) for vision models. When present, the
+    /// user message is sent as multimodal content (text + image_url parts).
+    #[serde(default)]
+    pub images: Vec<String>,
     pub max_tokens: u32,
     pub temperature: f64,
     pub wait_if_busy: bool,

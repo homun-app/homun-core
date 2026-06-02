@@ -102,6 +102,18 @@ impl ChatStore {
         self.threads(&self.workspace_for_thread(thread_id)?)
     }
 
+    pub fn rename_thread(
+        &self,
+        thread_id: &str,
+        title: &str,
+    ) -> rusqlite::Result<ChatThreadSnapshot> {
+        self.conn.execute(
+            "update chat_threads set title = ?1, updated_at = ?2 where thread_id = ?3",
+            params![title, current_timestamp_seconds(), thread_id],
+        )?;
+        self.threads(&self.workspace_for_thread(thread_id)?)
+    }
+
     pub fn set_status(
         &self,
         thread_id: &str,

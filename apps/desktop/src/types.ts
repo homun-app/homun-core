@@ -73,6 +73,8 @@ export interface ChatAttachment {
   sizeBytes: number;
   previewAvailable: boolean;
   privacyDomain: string;
+  /** Inline data-URL preview for images pasted/dropped into the composer. */
+  previewUrl?: string;
 }
 
 export interface ChatThread {

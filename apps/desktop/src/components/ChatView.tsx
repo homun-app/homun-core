@@ -1,22 +1,29 @@
 import {
   ArrowUp,
   AlertCircle,
+  AtSign,
   BookMarked,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   Clock3,
   FileText,
   Globe2,
   HardDrive,
   ListTodo,
+  Loader2,
   Mic,
   MoreHorizontal,
   Paperclip,
   Pause,
+  Pencil,
   Play,
+  Puzzle,
   Reply,
   RotateCcw,
+  Search,
   Share2,
   ShieldCheck,
   Sparkles,
@@ -27,12 +34,13 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, FormEvent, KeyboardEvent } from "react";
+import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, KeyboardEvent } from "react";
 import {
   coreBridge,
   type ChatAttachmentInput,
   type CoreComputerSessionSnapshot,
   type CorePromptSubmissionResult,
+  type SkillSummary,
 } from "../lib/coreBridge";
 import {
   createLoadingComputerSession,
@@ -134,6 +142,11 @@ export function ChatView({
   const [streamStatus, setStreamStatus] = useState<ChatStreamStatus | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [replyContext, setReplyContext] = useState<ReplyContext | null>(null);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState("");
+  const [variants, setVariants] = useState<
+    Record<string, { texts: string[]; index: number }>
+  >({});
   const [shareOpen, setShareOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [timelineCollapsed, setTimelineCollapsed] = useState(true);
@@ -141,6 +154,10 @@ export function ChatView({
   const [optimisticMessages, setOptimisticMessages] = useState<ChatMessage[] | null>(null);
   const [streamHasVisibleText, setStreamHasVisibleText] = useState(false);
   const [autoContinueMessageId, setAutoContinueMessageId] = useState<string | null>(null);
+  const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+  const [followUps, setFollowUps] = useState<string[]>([]);
+  const [followUpsFor, setFollowUpsFor] = useState<string | null>(null);
+  const titledThreadsRef = useRef<Set<string>>(new Set());
   const conversationRef = useRef<HTMLDivElement>(null);
   const shouldStickToBottomRef = useRef(true);
   const streamingUserPinnedRef = useRef(false);
@@ -265,23 +282,39 @@ export function ChatView({
     attachments: ChatAttachmentInput[],
     visibleAttachments?: ChatAttachment[],
     visibleText?: string,
+    model?: string,
+    images?: string[],
+    baseMessages?: ChatMessage[],
   ) {
     const text = prompt.trim();
     if (!text) return;
+    const conversationBase = baseMessages ?? threadMessages;
     const userVisibleText = (visibleText ?? text).trim();
     if (!userVisibleText) return;
     const visiblePrompt = userVisibleText === text ? undefined : userVisibleText;
 
     setPromptSubmitting(true);
     setPromptError(null);
+    const imageAttachments: ChatAttachment[] = (images ?? []).map((dataUrl, index) => ({
+      artifactId: `img_${Date.now()}_${index}`,
+      title: `Immagine ${index + 1}`,
+      kind: "image",
+      sizeBytes: 0,
+      previewAvailable: true,
+      privacyDomain: "local_files",
+      previewUrl: dataUrl,
+    }));
     const userMessage: ChatMessage = {
       id: `local_user_${Date.now()}`,
       role: "user",
       text: userVisibleText,
       timestamp: currentTimestampSeconds(),
-      attachments: visibleAttachments ?? attachments.map(toMessageAttachment),
+      attachments: [
+        ...imageAttachments,
+        ...(visibleAttachments ?? attachments.map(toMessageAttachment)),
+      ],
     };
-    const promptMessages = [...threadMessages, userMessage];
+    const promptMessages = [...conversationBase, userMessage];
     const requestId = `chat_stream_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     setStreamStatus({
       requestId,
@@ -396,6 +429,8 @@ export function ChatView({
         text,
         attachments,
         visiblePrompt,
+        model,
+        images,
       );
       if (cancelledStreamIdsRef.current.has(requestId)) {
         return;
@@ -482,16 +517,50 @@ export function ChatView({
     }
   }
 
-  function submitComposerPrompt(prompt: string, attachments: ChatAttachmentInput[]) {
+  function submitComposerPrompt(
+    prompt: string,
+    attachments: ChatAttachmentInput[],
+    options?: {
+      model?: string;
+      forcedSkillId?: string;
+      contextText?: string;
+      images?: string[];
+    },
+  ) {
     const activeReplyContext = replyContext;
     setReplyContext(null);
+    const images = options?.images;
+
+    // Forcing a skill (🧩 picker) augments the MODEL-facing prompt while the
+    // user still sees their clean text. The gateway honors "usa la skill X".
+    const skillPrefix = options?.forcedSkillId
+      ? `Usa la skill \`${options.forcedSkillId}\` per soddisfare questa richiesta.\n\n`
+      : "";
+    // @ file context: the selected files' content is prepended to the hidden
+    // prompt; the user keeps seeing their clean message.
+    const contextPrefix = options?.contextText ? `${options.contextText}\n\n` : "";
+    const model = options?.model;
+    const augmented = Boolean(skillPrefix || contextPrefix);
 
     if (!activeReplyContext) {
-      void submitPrompt(prompt, attachments);
+      if (augmented) {
+        void submitPrompt(
+          `${skillPrefix}${contextPrefix}${prompt}`,
+          attachments,
+          undefined,
+          prompt,
+          model,
+          images,
+        );
+      } else {
+        void submitPrompt(prompt, attachments, undefined, undefined, model, images);
+      }
       return;
     }
 
     const promptWithReplyContext = [
+      skillPrefix,
+      contextPrefix,
       "Rispondi al messaggio citato mantenendo il contesto.",
       `Messaggio citato (${messageRoleLabel(activeReplyContext.role)}):`,
       activeReplyContext.preview,
@@ -499,7 +568,7 @@ export function ChatView({
       "Richiesta dell'utente:",
       prompt,
     ].join("\n");
-    void submitPrompt(promptWithReplyContext, attachments, undefined, prompt);
+    void submitPrompt(promptWithReplyContext, attachments, undefined, prompt, model, images);
   }
 
   async function copyMessageText(message: ChatMessage) {
@@ -509,14 +578,122 @@ export function ChatView({
     window.setTimeout(() => setCopiedMessageId(null), 1_400);
   }
 
-  function regenerateAssistantResponse(messageId: string) {
-    if (promptSubmitting) return;
-    const previousUserMessage = findPreviousUserMessage(threadMessages, messageId);
-    if (!previousUserMessage) {
+  // Switch which generated variant of an assistant message is shown (‹ n/m ›).
+  function switchVariant(messageId: string, direction: number) {
+    const variant = variants[messageId];
+    if (!variant) return;
+    const index = Math.max(0, Math.min(variant.texts.length - 1, variant.index + direction));
+    if (index === variant.index) return;
+    setVariants((prev) => ({ ...prev, [messageId]: { ...prev[messageId], index } }));
+    setOptimisticMessages((current) =>
+      (current ?? messages).map((message) =>
+        message.id === messageId ? { ...message, text: variant.texts[index] } : message,
+      ),
+    );
+  }
+
+  // Regenerate an assistant answer as an ALTERNATIVE variant (kept alongside the
+  // previous one with a ‹ n/m › picker), streamed into the same message.
+  function regenerateAsVariant(messageId: string) {
+    if (promptSubmitting || streamingAssistantId) return;
+    const assistant = threadMessages.find((message) => message.id === messageId);
+    const previousUser = findPreviousUserMessage(threadMessages, messageId);
+    if (!assistant || !previousUser) {
       setPromptError("Non trovo il prompt precedente da rigenerare.");
       return;
     }
-    void submitPrompt(previousUserMessage.text, [], previousUserMessage.attachments ?? []);
+    void streamVariantIntoMessage(assistant, previousUser, threadMessages);
+  }
+
+  async function streamVariantIntoMessage(
+    message: ChatMessage,
+    userMessage: ChatMessage,
+    baseMessages: ChatMessage[],
+  ) {
+    const requestId = `chat_stream_variant_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const originalText = message.text;
+    let streamedText = "";
+    let unlistenStream: (() => void) | undefined;
+    const flushStreamingMessage = () => {
+      streamingFrameRef.current = null;
+      setOptimisticMessages(
+        baseMessages.map((item) =>
+          item.id === message.id ? { ...item, text: streamedText } : item,
+        ),
+      );
+      afterStreamingFramePaint();
+    };
+    const scheduleStreamingMessage = () => {
+      if (streamingFrameRef.current !== null) return;
+      streamingFrameRef.current = window.requestAnimationFrame(flushStreamingMessage);
+    };
+    const cancelStreamingRequest = () => {
+      cancelledStreamIdsRef.current.add(requestId);
+      void coreBridge.cancelChatPromptStream(requestId).catch(() => undefined);
+      unlistenStream?.();
+      cancelScheduledStreamingFrame();
+    };
+
+    setPromptSubmitting(true);
+    setStreamingAssistantId(message.id);
+    resetStreamingState("");
+    streamingUserPinnedRef.current = conversationBottomDistance() < 220;
+    window.setTimeout(() => scrollConversationToBottomIfPinned("auto"), 0);
+    setStreamStatus({
+      requestId,
+      phase: "thinking",
+      title: "Rigenero la risposta",
+      detail: "Genero una variante alternativa.",
+    });
+    cancelStreamingRequestRef.current = cancelStreamingRequest;
+    unlistenStream = await coreBridge.listenChatStreamDelta((payload) => {
+      if (payload.request_id !== requestId) return;
+      if (cancelledStreamIdsRef.current.has(requestId)) return;
+      streamedText += payload.delta;
+      setStreamHasVisibleText(true);
+      scheduleStreamingMessage();
+    });
+
+    try {
+      const result = await coreBridge.submitChatPromptStream(
+        requestId,
+        thread.threadId,
+        computerSessionId,
+        userMessage.text,
+        [],
+        undefined,
+      );
+      if (cancelledStreamIdsRef.current.has(requestId)) return;
+      const finalText = result.assistant_message.text || streamedText;
+      cancelScheduledStreamingFrame();
+      const nextMessages = baseMessages.map((item) =>
+        item.id === message.id ? { ...item, text: finalText } : item,
+      );
+      setComputerSession(mapCoreComputerSession(result.computer_session));
+      setComputerCardCollapsed(true);
+      setTimelineCollapsed(!result.plan);
+      setOptimisticMessages(nextMessages);
+      onMessagesChange(nextMessages);
+      setVariants((prev) => {
+        const existing = prev[message.id] ?? { texts: [originalText], index: 0 };
+        const texts = [...existing.texts, finalText];
+        return { ...prev, [message.id]: { texts, index: texts.length - 1 } };
+      });
+    } catch (error) {
+      setPromptError(`Rigenerazione non riuscita: ${describeBridgeError(error)}`);
+    } finally {
+      cancelScheduledStreamingFrame();
+      unlistenStream?.();
+      streamingUserPinnedRef.current = false;
+      setStreamingAssistantId(null);
+      resetStreamingState("");
+      setPromptSubmitting(false);
+      setStreamStatus((current) => (current?.requestId === requestId ? null : current));
+      if (cancelStreamingRequestRef.current === cancelStreamingRequest) {
+        cancelStreamingRequestRef.current = null;
+      }
+      cancelledStreamIdsRef.current.delete(requestId);
+    }
   }
 
   function replyToMessage(message: ChatMessage) {
@@ -526,6 +703,45 @@ export function ChatView({
       role: message.role,
       preview: createReplyPreview(message.text),
     });
+  }
+
+  function startEditMessage(message: ChatMessage) {
+    if (promptSubmitting) return;
+    setEditingMessageId(message.id);
+    setEditingText(message.text);
+  }
+
+  function cancelEditMessage() {
+    setEditingMessageId(null);
+    setEditingText("");
+  }
+
+  // Edit a user message: truncate the thread at that point and re-run from the
+  // edited text (a fresh branch of the conversation).
+  function saveEditedMessage() {
+    const id = editingMessageId;
+    const text = editingText.trim();
+    if (!id || !text || promptSubmitting) return;
+    const index = threadMessages.findIndex((message) => message.id === id);
+    if (index < 0) {
+      cancelEditMessage();
+      return;
+    }
+    const base = threadMessages.slice(0, index);
+    const original = threadMessages[index];
+    setEditingMessageId(null);
+    setEditingText("");
+    setOptimisticMessages(base);
+    onMessagesChange(base);
+    void submitPrompt(
+      text,
+      [],
+      original.attachments ?? [],
+      undefined,
+      undefined,
+      undefined,
+      base,
+    );
   }
 
   async function setMessageFeedback(
@@ -873,12 +1089,60 @@ export function ChatView({
       if (streamingUserPinnedRef.current && bottomDistance > 160) {
         streamingUserPinnedRef.current = false;
       }
+      // Show a "jump to latest" affordance once the user scrolls well away.
+      setShowJumpToBottom(bottomDistance > 260);
     }
 
     updateStickToBottom();
     scrollNode.addEventListener("scroll", updateStickToBottom, { passive: true });
     return () => scrollNode.removeEventListener("scroll", updateStickToBottom);
   }, []);
+
+  // Dynamic follow-up suggestions: once the latest assistant answer is complete,
+  // ask the model for a few short next-questions (once per message).
+  useEffect(() => {
+    if (streamingAssistantId) return undefined;
+    const latest = [...threadMessages]
+      .reverse()
+      .find((message) => message.role === "assistant" && Boolean(message.text?.trim()));
+    if (!latest || latest.id === followUpsFor) return undefined;
+    const previousUser = findPreviousUserMessage(threadMessages, latest.id);
+    let cancelled = false;
+    setFollowUps([]);
+    setFollowUpsFor(latest.id);
+    void coreBridge
+      .chatSuggestions(previousUser?.text ?? "", latest.text)
+      .then((items) => {
+        if (!cancelled) setFollowUps(items);
+      })
+      .catch(() => {
+        if (!cancelled) setFollowUps([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [threadMessages, streamingAssistantId, followUpsFor]);
+
+  // Auto-title a thread (LLM) once its first exchange is complete; persisted by
+  // the gateway, then the thread list refreshes. Once per thread.
+  useEffect(() => {
+    if (streamingAssistantId) return;
+    if (titledThreadsRef.current.has(thread.threadId)) return;
+    const firstUser = threadMessages.find(
+      (message) => message.role === "user" && Boolean(message.text?.trim()),
+    );
+    const latestAssistant = [...threadMessages]
+      .reverse()
+      .find((message) => message.role === "assistant" && Boolean(message.text?.trim()));
+    if (!firstUser || !latestAssistant) return;
+    titledThreadsRef.current.add(thread.threadId);
+    void coreBridge
+      .autoTitleThread(thread.threadId, firstUser.text, latestAssistant.text)
+      .then(() => onRuntimeChanged())
+      .catch(() => {
+        /* keep existing title on failure */
+      });
+  }, [threadMessages, streamingAssistantId, thread.threadId, onRuntimeChanged]);
 
   useEffect(() => {
     const handleResize = () => scrollConversationToBottomIfPinned("auto");
@@ -998,10 +1262,40 @@ export function ChatView({
                   {!streamHasVisibleText && (
                     <AssistantThinkingState status={streamStatus} />
                   )}
+                  <MessageActivity text={displayMessage.text} live />
                   {displayMessage.text && (
                     <RichMessage text={displayMessage.text} streaming />
                   )}
                 </>
+              ) : editingMessageId === displayMessage.id ? (
+                <div className="message-edit">
+                  <textarea
+                    autoFocus
+                    value={editingText}
+                    onChange={(event) => setEditingText(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                        event.preventDefault();
+                        saveEditedMessage();
+                      } else if (event.key === "Escape") {
+                        cancelEditMessage();
+                      }
+                    }}
+                  />
+                  <div className="message-edit-actions">
+                    <button type="button" onClick={cancelEditMessage}>
+                      Annulla
+                    </button>
+                    <button
+                      type="button"
+                      className="primary"
+                      disabled={!editingText.trim()}
+                      onClick={saveEditedMessage}
+                    >
+                      Salva e invia
+                    </button>
+                  </div>
+                </div>
               ) : displayMessage.text ? (
                 <AssistantMessageBody
                   text={displayMessage.text}
@@ -1039,6 +1333,7 @@ export function ChatView({
                     Boolean(findPreviousUserMessage(threadMessages, displayMessage.id))
                   }
                   canReply={displayMessage.role !== "system" && Boolean(displayMessage.text)}
+                  canEdit={displayMessage.role === "user" && Boolean(displayMessage.text)}
                   canCreateAutomation={assistantTextMessage}
                   canCreateTask={assistantTextMessage}
                   canExpand={assistantTextMessage}
@@ -1076,7 +1371,8 @@ export function ChatView({
                     )
                   }
                   onReply={() => replyToMessage(displayMessage)}
-                  onRegenerate={() => regenerateAssistantResponse(displayMessage.id)}
+                  onEdit={() => startEditMessage(displayMessage)}
+                  onRegenerate={() => regenerateAsVariant(displayMessage.id)}
                   onReviseDiagram={() =>
                     askAboutAssistantResponse(
                       displayMessage.id,
@@ -1088,6 +1384,53 @@ export function ChatView({
                 />
                 </>
               )}
+              {!isStreamingMessage &&
+                variants[displayMessage.id] &&
+                variants[displayMessage.id].texts.length > 1 && (
+                  <div className="branch-picker" aria-label="Varianti risposta">
+                    <button
+                      type="button"
+                      aria-label="Variante precedente"
+                      disabled={variants[displayMessage.id].index === 0}
+                      onClick={() => switchVariant(displayMessage.id, -1)}
+                    >
+                      <ChevronLeft size={14} />
+                    </button>
+                    <span>
+                      {variants[displayMessage.id].index + 1} /{" "}
+                      {variants[displayMessage.id].texts.length}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label="Variante successiva"
+                      disabled={
+                        variants[displayMessage.id].index ===
+                        variants[displayMessage.id].texts.length - 1
+                      }
+                      onClick={() => switchVariant(displayMessage.id, 1)}
+                    >
+                      <ChevronRight size={14} />
+                    </button>
+                  </div>
+                )}
+              {!isStreamingMessage &&
+                followUpsFor === displayMessage.id &&
+                followUps.length > 0 && (
+                  <div className="chat-followups" aria-label="Domande di follow-up">
+                    {followUps.map((suggestion) => (
+                      <button
+                        key={suggestion}
+                        type="button"
+                        onClick={() => {
+                          setFollowUps([]);
+                          void submitPrompt(suggestion, []);
+                        }}
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
+                )}
               {displayMessage.attachments && displayMessage.attachments.length > 0 && (
                 <MessageAttachmentList attachments={displayMessage.attachments} />
               )}
@@ -1175,6 +1518,21 @@ export function ChatView({
         />
       )}
 
+      {showJumpToBottom && (
+        <button
+          className="chat-jump-bottom"
+          type="button"
+          aria-label="Vai all'ultimo messaggio"
+          title="Vai in fondo"
+          onClick={() => {
+            shouldStickToBottomRef.current = true;
+            scrollConversationToBottom("smooth");
+          }}
+        >
+          <ChevronDown size={18} />
+        </button>
+      )}
+
       <ChatComputerPanel />
 
       <Composer
@@ -1182,6 +1540,7 @@ export function ChatView({
         error={promptError}
         replyContext={replyContext}
         streaming={promptSubmitting}
+        threadId={thread.threadId}
         onCancelStreaming={cancelActiveStreaming}
         onClearReply={() => setReplyContext(null)}
         onSubmit={submitComposerPrompt}
@@ -1193,23 +1552,12 @@ export function ChatView({
 function AssistantThinkingState({ status }: { status: ChatStreamStatus | null }) {
   return (
     <div className="assistant-thinking-state" aria-live="polite">
-      <div
-        className={`thinking-status-dot ${status?.phase ?? "accepted"}`}
-        aria-hidden="true"
-      >
-        <span />
-      </div>
-      <div>
-        <strong>{status?.title ?? "L'assistente sta rispondendo"}</strong>
-        <span>
-          {status?.detail ?? "Attendo il primo token dal runtime locale."}
-        </span>
-      </div>
       <span className="typing-dots" aria-hidden="true">
         <i />
         <i />
         <i />
       </span>
+      <span className="thinking-label">{status?.title ?? "Sto pensando…"}</span>
     </div>
   );
 }
@@ -1368,6 +1716,7 @@ function MessageActionBar({
   canExpand,
   canRegenerate,
   canReply,
+  canEdit,
   canSaveToMemory,
   contentKind,
   copied,
@@ -1377,6 +1726,7 @@ function MessageActionBar({
   metrics,
   savedToMemory,
   onCopy,
+  onEdit,
   onContinue,
   onCreateAutomation,
   onCreateTask,
@@ -1396,6 +1746,7 @@ function MessageActionBar({
   canExpand: boolean;
   canRegenerate: boolean;
   canReply: boolean;
+  canEdit: boolean;
   canSaveToMemory: boolean;
   contentKind: MessageContentKind;
   copied: boolean;
@@ -1405,6 +1756,7 @@ function MessageActionBar({
   metrics?: ChatMessageMetrics;
   savedToMemory: boolean;
   onCopy: () => void;
+  onEdit: () => void;
   onContinue: () => void;
   onCreateAutomation: () => void;
   onCreateTask: () => void;
@@ -1459,13 +1811,24 @@ function MessageActionBar({
 
   return (
     <div className="message-action-bar" aria-label="Azioni messaggio">
+      {canEdit && (
+        <button type="button" onClick={onEdit} aria-label="Modifica messaggio" title="Modifica">
+          <Pencil size={14} />
+          <span>Modifica</span>
+        </button>
+      )}
       {canReply && (
-        <button type="button" onClick={onReply} aria-label="Rispondi al messaggio">
+        <button type="button" onClick={onReply} aria-label="Rispondi al messaggio" title="Rispondi">
           <Reply size={14} />
           <span>Rispondi</span>
         </button>
       )}
-      <button type="button" onClick={onCopy} aria-label="Copia messaggio">
+      <button
+        type="button"
+        onClick={onCopy}
+        aria-label="Copia messaggio"
+        title={copied ? "Copiato" : "Copia"}
+      >
         {copied ? <Check size={14} /> : <Copy size={14} />}
         <span>{copied ? "Copiato" : "Copia"}</span>
       </button>
@@ -1670,15 +2033,24 @@ function isLatestAssistantMessage(messages: ChatMessage[], messageId: string) {
 function MessageAttachmentList({ attachments }: { attachments: ChatAttachment[] }) {
   return (
     <div className="message-attachment-list" aria-label="Allegati del messaggio">
-      {attachments.map((attachment) => (
-        <span className="message-attachment-chip" key={attachment.artifactId}>
-          <Paperclip size={13} />
-          <span>{attachment.title}</span>
-          <small>
-            {attachment.kind} · {formatFileSize(attachment.sizeBytes)}
-          </small>
-        </span>
-      ))}
+      {attachments.map((attachment) =>
+        attachment.kind === "image" && attachment.previewUrl ? (
+          <img
+            className="message-image-attachment"
+            key={attachment.artifactId}
+            src={attachment.previewUrl}
+            alt={attachment.title}
+          />
+        ) : (
+          <span className="message-attachment-chip" key={attachment.artifactId}>
+            <Paperclip size={13} />
+            <span>{attachment.title}</span>
+            <small>
+              {attachment.kind} · {formatFileSize(attachment.sizeBytes)}
+            </small>
+          </span>
+        ),
+      )}
     </div>
   );
 }
@@ -1874,6 +2246,55 @@ const COMPOSIO_CONFIRM_RE = /‹‹COMPOSIO_CONFIRM››([\s\S]*?)‹‹\/COMPO
 const COMPOSIO_DONE_RE = /‹‹COMPOSIO_DONE››([\s\S]*?)‹‹\/COMPOSIO_DONE››/;
 const COMPOSIO_MARKERS_RE = /‹‹COMPOSIO_(?:CONFIRM|DONE)››[\s\S]*?‹‹\/COMPOSIO_(?:CONFIRM|DONE)››/g;
 
+// Tool-activity trace markers (browser / skill / sandbox / connected-tool steps).
+// They are extracted into a compact collapsible panel so the answer body stays
+// clean — the pattern Claude/assistant-ui use for "tool activity".
+const ACTIVITY_RE = /‹‹ACT››([\s\S]*?)‹‹\/ACT››/g;
+
+function parseActivitySteps(text: string): string[] {
+  if (!text.includes("‹‹ACT››")) return [];
+  return Array.from(text.matchAll(ACTIVITY_RE), (match) => match[1].trim()).filter(
+    (step) => step.length > 0,
+  );
+}
+
+/** Compact, collapsible trace of the tool steps the assistant ran (browse, skill,
+ *  sandbox, connected tools). Always collapsed by default: while streaming, the
+ *  collapsed line reflects the latest action in progress; once done it shows the
+ *  step count. Expanding reveals every step. Keeps the answer in focus. */
+function MessageActivity({ text, live = false }: { text: string; live?: boolean }) {
+  const steps = useMemo(() => parseActivitySteps(text), [text]);
+  const [open, setOpen] = useState(false);
+  if (steps.length === 0) return null;
+  const countLabel = `Attività · ${steps.length} ${steps.length === 1 ? "passo" : "passi"}`;
+  const collapsedLabel = live ? steps[steps.length - 1] : countLabel;
+  return (
+    <div className={`msg-activity${open ? " open" : ""}${live ? " live" : ""}`}>
+      <button
+        type="button"
+        className="msg-activity-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        {live && !open ? (
+          <span className="msg-activity-dot" aria-hidden="true" />
+        ) : (
+          <SquareTerminal size={13} className="msg-activity-icon" />
+        )}
+        <span className="msg-activity-label">{open ? countLabel : collapsedLabel}</span>
+        <ChevronDown size={13} className="msg-activity-caret" />
+      </button>
+      {open && (
+        <ol className="msg-activity-steps">
+          {steps.map((step, index) => (
+            <li key={`${index}-${step.slice(0, 24)}`}>{step}</li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
 /** Splits an assistant message into visible text + an optional pending write
  *  action (editable card) OR an already-executed marker (static "done" note). */
 function parseComposioConfirm(text: string): {
@@ -1923,6 +2344,7 @@ function AssistantMessageBody({
   const readable = useMemo(() => humanizeToolSlugs(visible), [visible]);
   return (
     <>
+      <MessageActivity text={text} />
       {readable && <RichMessage text={readable} streaming={streaming} />}
       {doneTool && !streaming && (
         <div className="cmp-confirm done">
@@ -2587,6 +3009,7 @@ function Composer({
   error,
   replyContext,
   streaming,
+  threadId,
   onCancelStreaming,
   onClearReply,
   onSubmit,
@@ -2595,15 +3018,55 @@ function Composer({
   error: string | null;
   replyContext: ReplyContext | null;
   streaming: boolean;
+  threadId: string;
   onCancelStreaming: () => void;
   onClearReply: () => void;
-  onSubmit: (prompt: string, attachments: ChatAttachmentInput[]) => void;
+  onSubmit: (
+    prompt: string,
+    attachments: ChatAttachmentInput[],
+    options?: {
+      model?: string;
+      forcedSkillId?: string;
+      contextText?: string;
+      images?: string[];
+    },
+  ) => void;
 }) {
   const [value, setValue] = useState("");
+  const [linkedFolder, setLinkedFolder] = useState<string | null>(null);
+  const [folderBusy, setFolderBusy] = useState(false);
+  const [fileMenuOpen, setFileMenuOpen] = useState(false);
+  const [fileQuery, setFileQuery] = useState("");
+  const [fileResults, setFileResults] = useState<string[]>([]);
+  const [folderPathInput, setFolderPathInput] = useState("");
+  const [folderError, setFolderError] = useState<string | null>(null);
+  const [contextFiles, setContextFiles] = useState<
+    Array<{ path: string; content: string; truncated: boolean }>
+  >([]);
+  const [models, setModels] = useState<string[]>([]);
+  const [activeModel, setActiveModel] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [skills, setSkills] = useState<SkillSummary[]>([]);
+  const [forcedSkill, setForcedSkill] = useState<SkillSummary | null>(null);
+  const [skillMenuOpen, setSkillMenuOpen] = useState(false);
+  const [skillQuery, setSkillQuery] = useState("");
+  const [improving, setImproving] = useState(false);
+  const [improveError, setImproveError] = useState<string | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const [dictationError, setDictationError] = useState<string | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
   const [composerAttachmentError, setComposerAttachmentError] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<
     Array<{ id: string; name: string; size: number; type: string; localPath: string }>
   >([]);
+  const [composerImages, setComposerImages] = useState<
+    Array<{ id: string; name: string; dataUrl: string }>
+  >([]);
+  const [dragOver, setDragOver] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const suggestions = [
@@ -2619,6 +3082,223 @@ function Composer({
     }
   }, [replyContext]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const list = await coreBridge.runtimeModels();
+        if (cancelled) return;
+        setModels(list.available ?? []);
+        setActiveModel(list.active);
+        setSelectedModel(list.active);
+      } catch {
+        /* models unavailable → selector hidden */
+      }
+      try {
+        const response = await coreBridge.skills();
+        if (cancelled) return;
+        setSkills((response.skills ?? []).filter((skill) => skill.enabled));
+      } catch {
+        /* skills unavailable → picker hidden */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function startDictation() {
+    setDictationError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+      audioChunksRef.current = [];
+      const recorder = new MediaRecorder(stream);
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
+      };
+      recorder.onstop = () => void finishDictation();
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setRecording(true);
+    } catch {
+      setDictationError("Microfono non disponibile o permesso negato.");
+    }
+  }
+
+  function stopDictation() {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+    setRecording(false);
+  }
+
+  async function finishDictation() {
+    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    mediaStreamRef.current = null;
+    const blob = new Blob(audioChunksRef.current, {
+      type: mediaRecorderRef.current?.mimeType || "audio/webm",
+    });
+    audioChunksRef.current = [];
+    if (blob.size === 0) return;
+    setTranscribing(true);
+    try {
+      const base64 = await blobToBase64(blob);
+      const text = await coreBridge.transcribe(base64);
+      if (text) {
+        setValue((current) => (current.trim() ? `${current.trim()} ${text}` : text));
+        requestAnimationFrame(() => {
+          adjustComposerHeight();
+          textareaRef.current?.focus();
+        });
+      }
+    } catch (error) {
+      setDictationError(describeBridgeError(error));
+    } finally {
+      setTranscribing(false);
+    }
+  }
+
+  // Load the conversation's linked folder; reset @ state when the thread changes.
+  useEffect(() => {
+    let cancelled = false;
+    setContextFiles([]);
+    setFileMenuOpen(false);
+    setFileQuery("");
+    void (async () => {
+      try {
+        const { path } = await coreBridge.threadFolder(threadId);
+        if (!cancelled) setLinkedFolder(path);
+      } catch {
+        if (!cancelled) setLinkedFolder(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [threadId]);
+
+  // Search files in the linked folder as the query changes (while the @ menu is open).
+  useEffect(() => {
+    if (!fileMenuOpen || !linkedFolder) return;
+    let cancelled = false;
+    const handle = setTimeout(() => {
+      void (async () => {
+        try {
+          const files = await coreBridge.searchThreadFiles(threadId, fileQuery);
+          if (!cancelled) setFileResults(files);
+        } catch {
+          if (!cancelled) setFileResults([]);
+        }
+      })();
+    }, 140);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [fileMenuOpen, fileQuery, linkedFolder, threadId]);
+
+  async function linkFolderPath(path: string) {
+    const trimmed = path.trim();
+    if (!trimmed) return;
+    setFolderBusy(true);
+    setFolderError(null);
+    try {
+      const result = await coreBridge.setThreadFolder(threadId, trimmed);
+      setLinkedFolder(result.path);
+      setFolderPathInput("");
+    } catch (error) {
+      setFolderError(describeBridgeError(error));
+    } finally {
+      setFolderBusy(false);
+    }
+  }
+
+  async function browseFolder() {
+    if (folderBusy) return;
+    setFolderBusy(true);
+    setFolderError(null);
+    try {
+      const path = await coreBridge.pickFolder();
+      if (path) {
+        const result = await coreBridge.setThreadFolder(threadId, path);
+        setLinkedFolder(result.path);
+      } else {
+        setFolderError("Selettore non disponibile: incolla il percorso della cartella qui sotto.");
+      }
+    } catch (error) {
+      setFolderError(describeBridgeError(error));
+    } finally {
+      setFolderBusy(false);
+    }
+  }
+
+  function unlinkFolder() {
+    void coreBridge.setThreadFolder(threadId, null).catch(() => undefined);
+    setLinkedFolder(null);
+    setFileMenuOpen(false);
+    setContextFiles([]);
+  }
+
+  async function addContextFile(path: string) {
+    if (contextFiles.some((file) => file.path === path)) {
+      setFileMenuOpen(false);
+      return;
+    }
+    try {
+      const file = await coreBridge.readThreadFile(threadId, path);
+      setContextFiles((current) => [...current, file]);
+    } catch {
+      /* unreadable file → ignore */
+    }
+    setFileMenuOpen(false);
+    setFileQuery("");
+    textareaRef.current?.focus();
+  }
+
+  function buildContextText(): string | undefined {
+    if (contextFiles.length === 0) return undefined;
+    const blocks = contextFiles.map((file) => {
+      const note = file.truncated ? " (troncato)" : "";
+      return `### File: ${file.path}${note}\n\`\`\`\n${file.content}\n\`\`\``;
+    });
+    return `Contesto dai file allegati dalla cartella collegata:\n\n${blocks.join("\n\n")}`;
+  }
+
+  const folderName = linkedFolder
+    ? linkedFolder.replace(/\/+$/, "").split("/").pop() || linkedFolder
+    : null;
+
+  const filteredSkills = skills.filter((skill) => {
+    const q = skillQuery.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      skill.name.toLowerCase().includes(q) ||
+      skill.id.toLowerCase().includes(q) ||
+      skill.description.toLowerCase().includes(q)
+    );
+  });
+
+  async function handleImprovePrompt() {
+    const draft = value.trim();
+    if (!draft || improving || disabled) return;
+    setImproving(true);
+    setImproveError(null);
+    try {
+      const improved = await coreBridge.improvePrompt(draft);
+      if (improved && improved !== draft) {
+        setValue(improved);
+        requestAnimationFrame(() => {
+          adjustComposerHeight();
+          textareaRef.current?.focus();
+        });
+      }
+    } catch (error) {
+      setImproveError(describeBridgeError(error));
+    } finally {
+      setImproving(false);
+    }
+  }
+
   function adjustComposerHeight() {
     const node = textareaRef.current;
     if (!node) return;
@@ -2628,7 +3308,8 @@ function Composer({
 
   function submitCurrentValue() {
     const prompt = value.trim();
-    if (!prompt || disabled) return;
+    // Allow images-only messages (vision); supply a sensible default prompt.
+    if ((!prompt && composerImages.length === 0) || disabled) return;
     if (attachments.some((attachment) => !attachment.localPath)) {
       setComposerAttachmentError("Path locale non disponibile in questa shell.");
       return;
@@ -2639,11 +3320,24 @@ function Composer({
       mimeType: attachment.type,
       sizeBytes: attachment.size,
     }));
+    const images = composerImages.map((image) => image.dataUrl);
+    const effectivePrompt = prompt || "Descrivi questa immagine.";
+    const modelOverride =
+      selectedModel && selectedModel !== activeModel ? selectedModel : undefined;
+    const forcedSkillId = forcedSkill?.id;
+    const contextText = buildContextText();
     setValue("");
     setAttachments([]);
+    setComposerImages([]);
+    setContextFiles([]);
     setComposerAttachmentError(null);
     requestAnimationFrame(adjustComposerHeight);
-    onSubmit(prompt, attachmentInputs);
+    onSubmit(effectivePrompt, attachmentInputs, {
+      model: modelOverride,
+      forcedSkillId,
+      contextText,
+      images: images.length > 0 ? images : undefined,
+    });
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -2683,6 +3377,45 @@ function Composer({
     setAttachments((current) => current.filter((item) => item.id !== id));
   }
 
+  // Reads image files (paste/drop) into base64 data URLs for vision models.
+  function addImageFiles(files: File[]) {
+    const images = files.filter((file) => file.type.startsWith("image/"));
+    images.forEach((file) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const dataUrl = String(reader.result);
+        if (!dataUrl.startsWith("data:image/")) return;
+        setComposerImages((current) => [
+          ...current,
+          { id: `${file.name}_${file.size}_${file.lastModified}_${current.length}`, name: file.name, dataUrl },
+        ]);
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function removeComposerImage(id: string) {
+    setComposerImages((current) => current.filter((item) => item.id !== id));
+  }
+
+  function handleComposerPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const files = Array.from(event.clipboardData?.files ?? []);
+    const images = files.filter((file) => file.type.startsWith("image/"));
+    if (images.length > 0) {
+      event.preventDefault();
+      addImageFiles(images);
+    }
+  }
+
+  function handleComposerDrop(event: DragEvent<HTMLFormElement>) {
+    const files = Array.from(event.dataTransfer?.files ?? []);
+    if (files.some((file) => file.type.startsWith("image/"))) {
+      event.preventDefault();
+      addImageFiles(files);
+    }
+    setDragOver(false);
+  }
+
   function applySuggestion(suggestion: string) {
     setValue((current) => {
       if (!current.trim()) return suggestion;
@@ -2695,7 +3428,21 @@ function Composer({
   }
 
   return (
-    <form className="composer-surface" aria-label="Prompt operativo" onSubmit={handleSubmit}>
+    <form
+      className={`composer-surface${dragOver ? " drag-over" : ""}`}
+      aria-label="Prompt operativo"
+      onSubmit={handleSubmit}
+      onDrop={handleComposerDrop}
+      onDragOver={(event) => {
+        if (Array.from(event.dataTransfer?.items ?? []).some((item) => item.kind === "file")) {
+          event.preventDefault();
+          setDragOver(true);
+        }
+      }}
+      onDragLeave={(event) => {
+        if (event.currentTarget === event.target) setDragOver(false);
+      }}
+    >
       {replyContext && (
         <div className="reply-context-card" aria-label="Messaggio citato">
           <Reply size={14} />
@@ -2713,10 +3460,27 @@ function Composer({
         disabled={disabled}
         onChange={handleValueChange}
         onKeyDown={handleKeyDown}
+        onPaste={handleComposerPaste}
         placeholder="Invia un messaggio o aggiungi istruzioni al task"
         ref={textareaRef}
         value={value}
       />
+      {composerImages.length > 0 && (
+        <div className="composer-image-tray" aria-label="Immagini allegate">
+          {composerImages.map((image) => (
+            <span className="composer-image-thumb" key={image.id}>
+              <img src={image.dataUrl} alt={image.name} />
+              <button
+                type="button"
+                aria-label={`Rimuovi ${image.name}`}
+                onClick={() => removeComposerImage(image.id)}
+              >
+                <X size={12} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
       {attachments.length > 0 && (
         <div className="composer-attachment-tray" aria-label="Allegati selezionati">
           {attachments.map((attachment) => (
@@ -2750,6 +3514,35 @@ function Composer({
           ))}
         </div>
       )}
+      {forcedSkill && (
+        <div className="composer-forced-skill" aria-label="Skill forzata per il prossimo messaggio">
+          <Puzzle size={13} />
+          <span>{forcedSkill.name}</span>
+          <button type="button" aria-label="Rimuovi skill" onClick={() => setForcedSkill(null)}>
+            <X size={12} />
+          </button>
+        </div>
+      )}
+      {contextFiles.length > 0 && (
+        <div className="composer-context-files" aria-label="File allegati come contesto">
+          {contextFiles.map((file) => (
+            <span className="composer-file-chip" key={file.path} title={file.path}>
+              <AtSign size={12} />
+              <span>{file.path.split("/").pop()}</span>
+              <button
+                type="button"
+                aria-label={`Rimuovi ${file.path}`}
+                onClick={() =>
+                  setContextFiles((current) => current.filter((item) => item.path !== file.path))
+                }
+              >
+                <X size={11} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      {improveError && <span className="composer-error">{improveError}</span>}
       <div className="composer-toolbar">
         <div className="composer-actions">
           <input
@@ -2764,19 +3557,238 @@ function Composer({
             disabled={disabled}
             type="button"
             aria-label="Aggiungi allegato"
+            title="Allega file"
             onClick={() => fileInputRef.current?.click()}
           >
             <Paperclip size={17} />
           </button>
+          <div className="composer-pop-wrap">
+            <button
+              className={`icon-button${contextFiles.length > 0 || linkedFolder ? " active" : ""}`}
+              type="button"
+              aria-label={linkedFolder ? "Menziona un file della cartella" : "Collega una cartella"}
+              aria-expanded={fileMenuOpen}
+              title={
+                linkedFolder
+                  ? `Menziona un file · ${folderName}`
+                  : "Collega una cartella alla conversazione"
+              }
+              onClick={() => {
+                setFileMenuOpen((open) => !open);
+                setSkillMenuOpen(false);
+                setModelMenuOpen(false);
+              }}
+            >
+              <AtSign size={17} />
+            </button>
+            {fileMenuOpen && !linkedFolder && (
+              <div className="composer-pop composer-skill-pop" role="menu">
+                <div className="composer-pop-link">
+                  <p className="composer-pop-link-title">
+                    Collega una cartella a questa conversazione
+                  </p>
+                  <p className="composer-pop-link-hint">
+                    Poi potrai menzionare i suoi file con <strong>@</strong>.
+                  </p>
+                  <button
+                    type="button"
+                    className="composer-link-browse"
+                    disabled={folderBusy}
+                    onClick={() => void browseFolder()}
+                  >
+                    {folderBusy ? <Loader2 size={14} className="composer-spin" /> : <Search size={14} />}
+                    Sfoglia…
+                  </button>
+                  <div className="composer-pop-search">
+                    <input
+                      type="text"
+                      placeholder="…oppure incolla il percorso"
+                      value={folderPathInput}
+                      onChange={(event) => setFolderPathInput(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          void linkFolderPath(folderPathInput);
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="composer-link-confirm"
+                      disabled={folderBusy || !folderPathInput.trim()}
+                      onClick={() => void linkFolderPath(folderPathInput)}
+                    >
+                      Collega
+                    </button>
+                  </div>
+                  {folderError && <p className="composer-pop-error">{folderError}</p>}
+                </div>
+              </div>
+            )}
+            {fileMenuOpen && linkedFolder && (
+              <div className="composer-pop composer-skill-pop" role="menu">
+                <div className="composer-pop-folder">
+                  <span title={linkedFolder}>📁 {folderName}</span>
+                  <button type="button" onClick={unlinkFolder} title="Scollega cartella">
+                    Scollega
+                  </button>
+                </div>
+                <div className="composer-pop-search">
+                  <Search size={14} />
+                  <input
+                    autoFocus
+                    type="text"
+                    placeholder="Cerca file…"
+                    value={fileQuery}
+                    onChange={(event) => setFileQuery(event.target.value)}
+                  />
+                </div>
+                <div className="composer-pop-list">
+                  {fileResults.length === 0 ? (
+                    <p className="composer-pop-empty">Nessun file</p>
+                  ) : (
+                    fileResults.map((file) => (
+                      <button
+                        key={file}
+                        type="button"
+                        role="menuitem"
+                        onClick={() => void addContextFile(file)}
+                      >
+                        <strong>{file.split("/").pop()}</strong>
+                        <small>{file}</small>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+          {skills.length > 0 && (
+            <div className="composer-pop-wrap">
+              <button
+                className={`icon-button${forcedSkill ? " active" : ""}`}
+                type="button"
+                aria-label="Scegli una skill"
+                aria-expanded={skillMenuOpen}
+                title="Usa una skill"
+                onClick={() => {
+                  setSkillMenuOpen((open) => !open);
+                  setModelMenuOpen(false);
+                }}
+              >
+                <Puzzle size={17} />
+              </button>
+              {skillMenuOpen && (
+                <div className="composer-pop composer-skill-pop" role="menu">
+                  <div className="composer-pop-search">
+                    <Search size={14} />
+                    <input
+                      autoFocus
+                      type="text"
+                      placeholder="Cerca skill"
+                      value={skillQuery}
+                      onChange={(event) => setSkillQuery(event.target.value)}
+                    />
+                  </div>
+                  <div className="composer-pop-list">
+                    {filteredSkills.length === 0 ? (
+                      <p className="composer-pop-empty">Nessuna skill</p>
+                    ) : (
+                      filteredSkills.map((skill) => (
+                        <button
+                          key={skill.id}
+                          type="button"
+                          role="menuitem"
+                          className={forcedSkill?.id === skill.id ? "active" : ""}
+                          onClick={() => {
+                            setForcedSkill(skill);
+                            setSkillMenuOpen(false);
+                            setSkillQuery("");
+                            textareaRef.current?.focus();
+                          }}
+                        >
+                          <strong>{skill.name}</strong>
+                          <small>{skill.description}</small>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="Migliora il prompt"
+            title="Migliora il prompt"
+            disabled={disabled || improving || !value.trim()}
+            onClick={() => void handleImprovePrompt()}
+          >
+            {improving ? <Loader2 size={17} className="composer-spin" /> : <WandSparkles size={17} />}
+          </button>
         </div>
         <div className="composer-actions">
-          <button className="icon-button" type="button" aria-label="Dettatura">
-            <Mic size={17} />
+          <button
+            className={`icon-button${recording ? " recording" : ""}`}
+            type="button"
+            aria-label={recording ? "Ferma dettatura" : "Dettatura vocale"}
+            title={recording ? "Ferma e trascrivi" : "Dettatura vocale (multilingua)"}
+            disabled={transcribing}
+            onClick={() => (recording ? stopDictation() : void startDictation())}
+          >
+            {transcribing ? (
+              <Loader2 size={17} className="composer-spin" />
+            ) : recording ? (
+              <span className="composer-stop-square" aria-hidden="true" />
+            ) : (
+              <Mic size={17} />
+            )}
           </button>
+          {models.length > 0 && (
+            <div className="composer-pop-wrap">
+              <button
+                className="composer-model-button"
+                type="button"
+                aria-label="Scegli il modello"
+                aria-expanded={modelMenuOpen}
+                onClick={() => {
+                  setModelMenuOpen((open) => !open);
+                  setSkillMenuOpen(false);
+                }}
+              >
+                <span>{shortModelName(selectedModel ?? activeModel ?? "modello")}</span>
+                <ChevronDown size={14} />
+              </button>
+              {modelMenuOpen && (
+                <div className="composer-pop composer-model-pop" role="menu">
+                  <div className="composer-pop-list">
+                    {models.map((modelId) => (
+                      <button
+                        key={modelId}
+                        type="button"
+                        role="menuitem"
+                        className={selectedModel === modelId ? "active" : ""}
+                        onClick={() => {
+                          setSelectedModel(modelId);
+                          setModelMenuOpen(false);
+                        }}
+                      >
+                        {selectedModel === modelId ? <Check size={14} /> : <span className="composer-model-dot" />}
+                        <span>{modelId}</span>
+                        {modelId === activeModel && <small>default</small>}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           {error && <span className="composer-error">{error}</span>}
           {composerAttachmentError && (
             <span className="composer-error">{composerAttachmentError}</span>
           )}
+          {dictationError && <span className="composer-error">{dictationError}</span>}
           {streaming ? (
             <button
               className="composer-stop-button"
@@ -2795,6 +3807,25 @@ function Composer({
       </div>
     </form>
   );
+}
+
+/** Reads a Blob as a base64 string (without the `data:...;base64,` prefix). */
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = String(reader.result);
+      resolve(result.slice(result.indexOf(",") + 1));
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+/** Trims a long model id (e.g. provider prefixes) for the inline selector. */
+function shortModelName(model: string): string {
+  const tail = model.includes("/") ? model.slice(model.lastIndexOf("/") + 1) : model;
+  return tail.length > 22 ? `${tail.slice(0, 21)}…` : tail;
 }
 
 function formatFileSize(size: number) {

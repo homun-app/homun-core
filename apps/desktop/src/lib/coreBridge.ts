@@ -1,5 +1,5 @@
 import { chatApi } from "./chatApi";
-import { DESKTOP_GATEWAY_URL, gatewayHeaders } from "./gatewayConfig";
+import { DESKTOP_GATEWAY_URL, gatewayHeaders, pickWorkspaceFolder } from "./gatewayConfig";
 
 const BROWSER_CHAT_DEFAULT_MAX_TOKENS = 768;
 const BROWSER_CHAT_EXTENDED_MAX_TOKENS = 1_536;
@@ -334,6 +334,16 @@ export interface ContainedComputerLive {
   activity: string | null;
   /** Steps executed so far — the live "Avanzamento attività" checklist. */
   steps: BrowserStep[];
+  /** True while a CLI skill command is running in the contained computer. */
+  terminal_active: boolean;
+  /** Terminal commands + output for the current response (CLI skills). */
+  terminal: TerminalEntry[];
+}
+
+export interface TerminalEntry {
+  command: string;
+  output: string;
+  running: boolean;
 }
 
 export interface McpConnectResult {
@@ -452,6 +462,88 @@ async function electronRuntimeModels(): Promise<RuntimeModelsList> {
 
 async function electronSetRuntimeModel(model: string): Promise<{ active: string }> {
   return gatewayPostJson<{ active: string }>("/api/runtime/model", { model });
+}
+
+async function electronImprovePrompt(prompt: string): Promise<string> {
+  const { improved } = await gatewayPostJson<{ improved: string }>(
+    "/api/chat/improve_prompt",
+    { prompt },
+  );
+  return improved;
+}
+
+async function electronAutoTitleThread(
+  threadId: string,
+  prompt: string,
+  answer: string,
+): Promise<void> {
+  await gatewayPostJson(`/api/chat/threads/${encodeURIComponent(threadId)}/autotitle`, {
+    prompt,
+    answer,
+  });
+}
+
+async function electronChatSuggestions(prompt: string, answer: string): Promise<string[]> {
+  const { suggestions } = await gatewayPostJson<{ suggestions: string[] }>(
+    "/api/chat/suggestions",
+    { prompt, answer },
+  );
+  return suggestions;
+}
+
+async function electronTranscribe(audioBase64: string, language?: string): Promise<string> {
+  const { text } = await gatewayPostJson<{ text: string }>("/api/chat/transcribe", {
+    audio_base64: audioBase64,
+    ...(language ? { language } : {}),
+  });
+  return text;
+}
+
+// ── Per-conversation linked folder ("@ file" context) ─────────────────────
+
+export interface ThreadFolder {
+  path: string | null;
+}
+
+export interface ThreadFileContent {
+  path: string;
+  content: string;
+  truncated: boolean;
+}
+
+async function electronThreadFolder(threadId: string): Promise<ThreadFolder> {
+  return gatewayGetJson<ThreadFolder>(
+    `/api/chat/threads/${encodeURIComponent(threadId)}/folder`,
+  );
+}
+
+async function electronSetThreadFolder(
+  threadId: string,
+  path: string | null,
+): Promise<ThreadFolder> {
+  return gatewayPostJson<ThreadFolder>(
+    `/api/chat/threads/${encodeURIComponent(threadId)}/folder`,
+    { path },
+  );
+}
+
+async function electronSearchThreadFiles(
+  threadId: string,
+  query: string,
+): Promise<string[]> {
+  const { files } = await gatewayGetJson<{ files: string[] }>(
+    `/api/chat/threads/${encodeURIComponent(threadId)}/files?q=${encodeURIComponent(query)}`,
+  );
+  return files;
+}
+
+async function electronReadThreadFile(
+  threadId: string,
+  path: string,
+): Promise<ThreadFileContent> {
+  return gatewayGetJson<ThreadFileContent>(
+    `/api/chat/threads/${encodeURIComponent(threadId)}/file?path=${encodeURIComponent(path)}`,
+  );
 }
 
 // ── Provider registry (multi-provider inference) ──────────────────────────
@@ -959,6 +1051,8 @@ export const coreBridge = {
     prompt: string,
     attachments: ChatAttachmentInput[] = [],
     visiblePrompt?: string,
+    model?: string,
+    images?: string[],
   ) =>
     submitBrowserRuntimeChatPromptStream(
       requestId,
@@ -966,7 +1060,26 @@ export const coreBridge = {
       sessionId,
       prompt,
       visiblePrompt,
+      undefined,
+      undefined,
+      model,
+      images,
     ),
+  improvePrompt: (prompt: string) => electronImprovePrompt(prompt),
+  chatSuggestions: (prompt: string, answer: string) =>
+    electronChatSuggestions(prompt, answer),
+  autoTitleThread: (threadId: string, prompt: string, answer: string) =>
+    electronAutoTitleThread(threadId, prompt, answer),
+  transcribe: (audioBase64: string, language?: string) =>
+    electronTranscribe(audioBase64, language),
+  threadFolder: (threadId: string) => electronThreadFolder(threadId),
+  setThreadFolder: (threadId: string, path: string | null) =>
+    electronSetThreadFolder(threadId, path),
+  searchThreadFiles: (threadId: string, query: string) =>
+    electronSearchThreadFiles(threadId, query),
+  readThreadFile: (threadId: string, path: string) =>
+    electronReadThreadFile(threadId, path),
+  pickFolder: () => pickWorkspaceFolder(),
   cancelChatPromptStream: (requestId: string) => cancelChatPromptStream(requestId),
   debugChatStream: (
     requestId: string,
@@ -1260,6 +1373,8 @@ async function submitBrowserRuntimeChatPromptStream(
   visiblePrompt?: string,
   assistantMessageId?: string,
   previousAssistantText?: string,
+  model?: string,
+  images?: string[],
 ): Promise<CorePromptSubmissionResult> {
   const startedAt = performance.now();
   const maxTokens = browserChatMaxTokens(prompt);
@@ -1273,6 +1388,8 @@ async function submitBrowserRuntimeChatPromptStream(
     maxTokens,
     rawContext,
     threadId,
+    model,
+    images,
   );
   const promptBuildSeconds = roundedSeconds(
     (performance.now() - promptBuildStartedAt) / 1000,
@@ -1399,6 +1516,8 @@ async function openChatStreamWithGateway(
   maxTokens: number,
   rawContext: Array<{ role: "user" | "assistant"; text: string }>,
   threadId?: string,
+  model?: string,
+  images?: string[],
 ) {
   try {
     const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/chat/generate_stream`, {
@@ -1415,6 +1534,10 @@ async function openChatStreamWithGateway(
         temperature: 0.0,
         wait_if_busy: true,
         request_timeout_seconds: 120,
+        // Per-message model override (inline composer selector); omitted → default.
+        ...(model ? { model } : {}),
+        // Vision: base64 data-URL images for multimodal models.
+        ...(images && images.length > 0 ? { images } : {}),
       }),
     });
     if (response.ok) {

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell } = require("electron");
+const { app, BrowserWindow, shell, ipcMain, dialog } = require("electron");
 const { spawn, spawnSync } = require("node:child_process");
 const { randomBytes } = require("node:crypto");
 const fs = require("node:fs");
@@ -169,6 +169,14 @@ function createWindow() {
     return { action: "deny" };
   });
 
+  // Allow microphone access for on-device dictation (denied by default in
+  // Electron). Scoped to "media"; everything else stays denied.
+  window.webContents.session.setPermissionRequestHandler(
+    (_webContents, permission, callback) => {
+      callback(permission === "media");
+    },
+  );
+
   const entry = rendererEntry();
   void window.loadURL(entry.value);
 
@@ -176,6 +184,21 @@ function createWindow() {
     window.webContents.openDevTools({ mode: "detach" });
   }
 }
+
+// Native folder picker for the "@ linked folder" feature. User-initiated only
+// (invoked by clicking @ in the composer); returns the chosen absolute path.
+ipcMain.handle("lfpa:pick-folder", async () => {
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null;
+  const options = {
+    title: "Collega una cartella alla conversazione",
+    properties: ["openDirectory", "createDirectory"],
+  };
+  const result = win
+    ? await dialog.showOpenDialog(win, options)
+    : await dialog.showOpenDialog(options);
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+});
 
 app.whenReady().then(async () => {
   await ensureGateway();
