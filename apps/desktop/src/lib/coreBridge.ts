@@ -522,6 +522,38 @@ export interface ArtifactsUsage {
   threads: ArtifactThreadView[];
 }
 
+export interface ArtifactDestination {
+  label: string;
+  path: string;
+}
+
+async function electronArtifactDestinations(): Promise<ArtifactDestination[]> {
+  const { destinations } = await gatewayGetJson<{ destinations: ArtifactDestination[] }>(
+    "/api/artifacts/destinations",
+  );
+  return destinations;
+}
+
+async function electronAddArtifactDestination(
+  label: string,
+  path: string,
+): Promise<ArtifactDestination[]> {
+  const { destinations } = await gatewayPostJson<{ destinations: ArtifactDestination[] }>(
+    "/api/artifacts/destinations",
+    { label, path },
+  );
+  return destinations;
+}
+
+async function electronRemoveArtifactDestination(path: string): Promise<ArtifactDestination[]> {
+  const response = await fetch(
+    `${DESKTOP_GATEWAY_URL}/api/artifacts/destinations?path=${encodeURIComponent(path)}`,
+    { method: "DELETE", headers: gatewayHeaders() },
+  );
+  const { destinations } = (await response.json()) as { destinations: ArtifactDestination[] };
+  return destinations;
+}
+
 async function electronArtifactsUsage(): Promise<ArtifactsUsage> {
   return gatewayGetJson<ArtifactsUsage>("/api/artifacts/usage");
 }
@@ -1149,6 +1181,10 @@ export const coreBridge = {
   downloadArtifact: (thread: string, name: string) => electronArtifactBlob(thread, name),
   artifactFolder: (thread: string) => electronArtifactFolder(thread),
   artifactsUsage: () => electronArtifactsUsage(),
+  artifactDestinations: () => electronArtifactDestinations(),
+  addArtifactDestination: (label: string, path: string) =>
+    electronAddArtifactDestination(label, path),
+  removeArtifactDestination: (path: string) => electronRemoveArtifactDestination(path),
   deleteArtifactFile: (thread: string, name: string) =>
     electronDeleteArtifactFile(thread, name),
   deleteArtifactThread: (thread: string) => electronDeleteArtifactThread(thread),

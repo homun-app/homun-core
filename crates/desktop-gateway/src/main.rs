@@ -600,6 +600,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/artifacts/usage", get(artifacts_usage))
         .route("/api/artifacts/thread", delete(delete_artifact_thread))
         .route("/api/artifacts/clear", post(clear_artifacts))
+        .route(
+            "/api/artifacts/destinations",
+            get(list_artifact_destinations)
+                .post(add_artifact_destination)
+                .delete(remove_artifact_destination),
+        )
         .route("/api/chat/suggestions", post(chat_suggestions))
         .route("/api/chat/threads/{thread_id}/autotitle", post(autotitle_chat_thread))
         .route(
@@ -1723,6 +1729,35 @@ fn run_in_sandbox_tool_schema() -> serde_json::Value {
     })
 }
 
+/// Tool to deliver a generated artifact to a user-authorized destination folder.
+/// The gateway performs the copy host-side, scoped to granted destinations only.
+fn save_artifact_tool_schema(destinations: &[ArtifactDestination]) -> serde_json::Value {
+    let labels = destinations
+        .iter()
+        .map(|d| d.label.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "save_artifact",
+            "description": format!(
+                "Copia un file generato (artifact, salvato in $OUTPUT_DIR) in una cartella di \
+destinazione AUTORIZZATA dall'utente. Destinazioni disponibili: {labels}. Usalo quando l'utente \
+chiede di salvare/esportare un file in una cartella."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file": { "type": "string", "description": "Nome del file artifact da copiare, es. \"report.xlsx\"" },
+                    "destination": { "type": "string", "description": format!("Etichetta della destinazione tra: {labels}") }
+                },
+                "required": ["file", "destination"]
+            }
+        }
+    })
+}
+
 /// The discovery meta-tool: the model searches connected-service tools by intent
 /// instead of receiving all of them up front (progressive tool disclosure).
 fn find_connected_tools_schema() -> serde_json::Value {
@@ -1911,6 +1946,23 @@ cartella d'ambiente `$OUTPUT_DIR` (es. `... --output \"$OUTPUT_DIR/report.xlsx\"
 diventano automaticamente artifact scaricabili dall'utente.\n{lines}"
         )
     };
+    // Authorized write destinations: when present, the model can deliver
+    // generated files to user-granted folders via `save_artifact`.
+    let artifact_destinations = load_artifact_destinations();
+    let system = if artifact_destinations.is_empty() {
+        system
+    } else {
+        let labels = artifact_destinations
+            .iter()
+            .map(|d| d.label.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            "{system}\n\nCARTELLE DESTINAZIONE: puoi consegnare i file generati in queste cartelle \
+AUTORIZZATE dall'utente con lo strumento `save_artifact`: {labels}. Quando l'utente chiede di \
+salvare/esportare un file in una cartella, chiama save_artifact(file, destination)."
+        )
+    };
     let system = system.as_str();
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let mut base_tools = vec![browse_web_tool_schema()];
@@ -1920,6 +1972,9 @@ diventano automaticamente artifact scaricabili dall'utente.\n{lines}"
     if has_skills {
         base_tools.push(use_skill_tool_schema());
         base_tools.push(run_in_sandbox_tool_schema());
+    }
+    if !artifact_destinations.is_empty() {
+        base_tools.push(save_artifact_tool_schema(&artifact_destinations));
     }
     // Vision: when the request carries images, the user message becomes
     // multimodal content (text + image_url parts) per the OpenAI-compatible
@@ -2241,6 +2296,30 @@ disponibili (per dati dal web usa browse_web sull'URL indicato):\n\n{}",
                                 model_output
                             }
                         }
+                    } else if name == "save_artifact" {
+                        // Deliver a generated artifact to an authorized destination
+                        // (gateway performs the copy host-side, scoped to grants).
+                        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
+                            .unwrap_or_else(|_| serde_json::json!({}));
+                        let file = parsed.get("file").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let dest_name = parsed
+                            .get("destination")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let thread_slug = artifact_thread_slug(thread_id.as_deref());
+                        let _ = emit_stream_event(
+                            &tx,
+                            GenerateStreamEvent::Delta {
+                                text: format!("‹‹ACT››💾 Salvo {file} in «{dest_name}»‹‹/ACT››"),
+                            },
+                        )
+                        .await;
+                        tokio::task::spawn_blocking(move || {
+                            save_artifact_to_destination(&thread_slug, &file, &dest_name)
+                        })
+                        .await
+                        .unwrap_or_else(|e| format!("Errore di salvataggio: {e}"))
                     } else if name == "find_connected_tools" {
                         // Discovery: search the catalog, inject the matching tool
                         // schemas so the model can call them next round.
@@ -2806,6 +2885,107 @@ async fn download_artifact(Query(reference): Query<ArtifactRef>) -> Result<Respo
         .expect("valid artifact response"))
 }
 
+// ---- authorized write destinations (file-ops boundary) ----------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ArtifactDestination {
+    label: String,
+    path: String,
+}
+
+fn artifact_destinations_path() -> Option<PathBuf> {
+    gateway_data_dir().ok().map(|dir| dir.join("artifact-destinations.json"))
+}
+
+fn load_artifact_destinations() -> Vec<ArtifactDestination> {
+    artifact_destinations_path()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn write_artifact_destinations(list: &[ArtifactDestination]) -> Result<(), String> {
+    let path = artifact_destinations_path().ok_or_else(|| "data dir non disponibile".to_string())?;
+    let json = serde_json::to_string_pretty(list).map_err(|e| e.to_string())?;
+    fs::write(path, json).map_err(|e| e.to_string())
+}
+
+/// Resolves a destination (by label or exact path) among the AUTHORIZED ones.
+/// The agent can only write where the user explicitly granted.
+fn resolve_destination(name: &str) -> Option<ArtifactDestination> {
+    let needle = name.trim();
+    load_artifact_destinations().into_iter().find(|d| {
+        d.label.eq_ignore_ascii_case(needle) || d.path == needle
+    })
+}
+
+#[derive(Debug, Serialize)]
+struct ArtifactDestinationsResponse {
+    destinations: Vec<ArtifactDestination>,
+}
+
+async fn list_artifact_destinations() -> Json<ArtifactDestinationsResponse> {
+    Json(ArtifactDestinationsResponse { destinations: load_artifact_destinations() })
+}
+
+#[derive(Debug, Deserialize)]
+struct AddDestinationRequest {
+    label: String,
+    path: String,
+}
+
+async fn add_artifact_destination(
+    Json(request): Json<AddDestinationRequest>,
+) -> Result<Json<ArtifactDestinationsResponse>, GatewayError> {
+    let path = request.path.trim().to_string();
+    let label = request.label.trim().to_string();
+    if path.is_empty() || !PathBuf::from(&path).is_dir() {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "dest_not_found",
+            message: "La cartella indicata non esiste.".to_string(),
+        });
+    }
+    let mut list = load_artifact_destinations();
+    if !list.iter().any(|d| d.path == path) {
+        list.push(ArtifactDestination {
+            label: if label.is_empty() {
+                PathBuf::from(&path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| path.clone())
+            } else {
+                label
+            },
+            path,
+        });
+        write_artifact_destinations(&list).map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "dest_store",
+            message: e,
+        })?;
+    }
+    Ok(Json(ArtifactDestinationsResponse { destinations: list }))
+}
+
+#[derive(Debug, Deserialize)]
+struct RemoveDestinationQuery {
+    path: String,
+}
+
+async fn remove_artifact_destination(
+    Query(query): Query<RemoveDestinationQuery>,
+) -> Result<Json<ArtifactDestinationsResponse>, GatewayError> {
+    let mut list = load_artifact_destinations();
+    list.retain(|d| d.path != query.path);
+    write_artifact_destinations(&list).map_err(|e| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "dest_store",
+        message: e,
+    })?;
+    Ok(Json(ArtifactDestinationsResponse { destinations: list }))
+}
+
 #[derive(Debug, Deserialize)]
 struct ArtifactFolderQuery {
     #[serde(default)]
@@ -2931,6 +3111,40 @@ async fn clear_artifacts() -> Json<serde_json::Value> {
         }
     }
     ok_json()
+}
+
+/// Copies an artifact to an AUTHORIZED destination folder (host-side). Enforces:
+/// the file is a plain name within the thread's output dir, and the destination
+/// is one the user granted. Returns a user-facing result line for the model.
+fn save_artifact_to_destination(thread_slug: &str, file: &str, dest_name: &str) -> String {
+    if file.is_empty() || file.contains('/') || file.contains('\\') || file.contains("..") {
+        return "Nome file non valido.".to_string();
+    }
+    let Some(dest) = resolve_destination(dest_name) else {
+        let available = load_artifact_destinations()
+            .iter()
+            .map(|d| d.label.clone())
+            .collect::<Vec<_>>()
+            .join(", ");
+        return format!(
+            "Destinazione «{dest_name}» non autorizzata. Disponibili: {}.",
+            if available.is_empty() { "nessuna".to_string() } else { available }
+        );
+    };
+    let src_dir = sandbox::artifacts_dir().join(thread_slug);
+    let src = src_dir.join(file);
+    if !path_within(&src_dir, &src) || !src.is_file() {
+        return format!("File «{file}» non trovato tra gli artifact.");
+    }
+    let dest_dir = PathBuf::from(&dest.path);
+    if !dest_dir.is_dir() {
+        return format!("La cartella di destinazione «{}» non esiste più.", dest.label);
+    }
+    let target = dest_dir.join(file);
+    match fs::copy(&src, &target) {
+        Ok(_) => format!("✅ Salvato in {}", target.display()),
+        Err(error) => format!("Salvataggio non riuscito: {error}"),
+    }
 }
 
 /// Filesystem-safe per-conversation slug for the artifacts subfolder.
