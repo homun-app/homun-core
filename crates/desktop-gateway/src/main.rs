@@ -690,6 +690,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(chat_routes)
         .with_state(state)
         .layer(cors_layer());
+    // Warm up the contained computer so the live view + browser are ready without
+    // waiting for the first skill. Best-effort and non-intrusive: only when Docker
+    // is already running (we never force-open Docker Desktop at boot), and off the
+    // async runtime so startup is not blocked by the container build/boot.
+    std::thread::spawn(|| {
+        if sandbox::docker_running() && !sandbox::container_up() {
+            let _ = sandbox::ensure_contained_computer();
+        }
+    });
     let listener = TcpListener::bind(addr).await?;
     println!("local-first-desktop-gateway listening on http://{addr}");
     axum::serve(listener, app).await?;
@@ -10263,11 +10272,70 @@ fn resolve_contained_computer_cdp(
     enabled.then(|| "http://127.0.0.1:9222".to_string())
 }
 
+/// Detects whether the contained computer container is currently running, with a
+/// short-lived cache so the hot paths (every browse + the 1.5s live poll) don't
+/// shell out to `docker ps` each time. Self-correcting: picks up the container
+/// appearing/disappearing within the TTL. The first call probes synchronously for
+/// a correct initial answer; later refreshes happen on a background thread so the
+/// async live handler never blocks on the Docker CLI.
+fn contained_container_detected() -> bool {
+    use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+
+    struct Probe {
+        value: bool,
+        fetched_at: Option<Instant>,
+        refreshing: bool,
+    }
+    static CACHE: OnceLock<Mutex<Probe>> = OnceLock::new();
+    const TTL: Duration = Duration::from_secs(8);
+
+    let cache = CACHE
+        .get_or_init(|| Mutex::new(Probe { value: false, fetched_at: None, refreshing: false }));
+    let mut guard = cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let fresh = guard.fetched_at.map(|at| at.elapsed() < TTL).unwrap_or(false);
+    if fresh || guard.refreshing {
+        return guard.value;
+    }
+    if guard.fetched_at.is_none() {
+        // First call ever: probe synchronously so the initial answer is correct.
+        let up = sandbox::container_up();
+        guard.value = up;
+        guard.fetched_at = Some(Instant::now());
+        return up;
+    }
+    // Stale: refresh on a background thread, serve the last-known value now.
+    guard.refreshing = true;
+    drop(guard);
+    std::thread::spawn(|| {
+        let up = sandbox::container_up();
+        if let Some(cache) = CACHE.get() {
+            let mut guard = cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            guard.value = up;
+            guard.fetched_at = Some(Instant::now());
+            guard.refreshing = false;
+        }
+    });
+    cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).value
+}
+
+/// Resolves the contained computer's CDP endpoint. An explicit env endpoint wins;
+/// then the `LOCAL_FIRST_CONTAINED_COMPUTER` enable flag; otherwise we auto-detect
+/// a running container — the app auto-starts it for skills, so the browser and the
+/// live view should use it whenever it is up. `None` means "use the on-host
+/// browser", the graceful fallback when Docker is unavailable.
 fn contained_computer_cdp_endpoint() -> Option<String> {
-    resolve_contained_computer_cdp(
+    if let Some(endpoint) = resolve_contained_computer_cdp(
         env::var("LOCAL_FIRST_CONTAINED_COMPUTER_CDP").ok().as_deref(),
         env::var("LOCAL_FIRST_CONTAINED_COMPUTER").ok().as_deref(),
-    )
+    ) {
+        return Some(endpoint);
+    }
+    if contained_container_detected() {
+        // Reuse the resolver's well-known default endpoint (DRY).
+        return resolve_contained_computer_cdp(None, Some("true"));
+    }
+    None
 }
 
 /// The noVNC live-view URL for the contained computer (ADR 0010), or `None` when
