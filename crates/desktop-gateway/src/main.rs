@@ -1202,14 +1202,21 @@ ricordare, restituisci {\"memories\":[]}.";
     let payload = serde_json::json!({
         "model": model,
         "temperature": 0.0,
-        "max_tokens": 700,
+        // Generous budget: the active model may be a reasoning model that spends
+        // tokens "thinking" before emitting content — too small a cap leaves
+        // content empty (finish_reason=length). json_object steers it to emit the
+        // JSON directly into content.
+        "max_tokens": 2000,
+        "response_format": { "type": "json_object" },
         "messages": [
             { "role": "system", "content": system },
             { "role": "user", "content": format!("UTENTE: {user_message}\n\nASSISTENTE: {assistant_message}") },
         ],
     });
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-    let mut builder = state.http.post(&endpoint).timeout(std::time::Duration::from_secs(30));
+    // Generous timeout: the role model may be a slow cloud reasoning model
+    // (e.g. glm-4.6 via ollama). Extraction is background, so a long wait is fine.
+    let mut builder = state.http.post(&endpoint).timeout(std::time::Duration::from_secs(120));
     if let Some(key) = api_key.as_ref() {
         builder = builder.bearer_auth(key);
     }
