@@ -16,6 +16,7 @@ export type SettingsSectionId =
   | "general"
   | "runtime"
   | "privacy"
+  | "memory"
   | "connections"
   | "skills"
   | "computer"
