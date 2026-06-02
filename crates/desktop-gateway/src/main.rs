@@ -73,6 +73,7 @@ use local_first_memory::{
     MemoryDashboard, MemoryFacade, MemoryLifecycleRequest, MemoryRef, MemoryRefKind,
     MemoryUiReadModel, MemoryWikiProjection, PrivacyDomain, SQLiteMemoryStore,
     UserId as MemoryUserId, WikiFileStore, WikiPage, WorkspaceId as MemoryWorkspaceId,
+    PERSONAL_WORKSPACE,
 };
 use bytes::Bytes;
 use local_first_subagents::{
@@ -1036,6 +1037,106 @@ fn sanitize_wiki_filename(reference: &str) -> String {
         .collect()
 }
 
+/// Character budget for the always-on memory profile injected into the chat
+/// prompt. Small on purpose: this is the stable "what I know about you", not the
+/// deep, query-relevant recall (that arrives with the on-demand `recall` tool).
+const CHAT_MEMORY_BUDGET_CHARS: usize = 1500;
+
+/// Reads confirmed memories for the PERSONAL scope and the active PROJECT scope,
+/// to inject as the always-on profile. Sensitivity is capped at `Private`
+/// (explicit user saves) — Confidential/Secret (e.g. a codice fiscale) are NEVER
+/// auto-injected here; they surface only via on-demand recall (M3). Returns
+/// `(personal, project)` summaries. Best-effort: any failure yields empties.
+fn gather_profile_memory(state: &AppState) -> (Vec<String>, Vec<String>) {
+    let Ok(facade) = lock_memory_facade(state) else {
+        return (Vec::new(), Vec::new());
+    };
+    let user = gateway_memory_user_id();
+    let active = gateway_memory_workspace_id();
+    let read = |workspace: MemoryWorkspaceId| -> Vec<String> {
+        let request = MemoryAccessRequest {
+            actor_id: "desktop-chat".to_string(),
+            user_id: user.clone(),
+            workspace_id: workspace,
+            purpose: "chat_context".to_string(),
+            allowed_domains: vec![
+                PrivacyDomain::new("personal"),
+                PrivacyDomain::new("work"),
+                PrivacyDomain::new("general"),
+            ],
+            max_sensitivity: MemoryDataSensitivity::Private,
+            allow_raw_payload: false,
+            allow_export: true,
+            broad_query: false,
+        };
+        facade
+            .context_pack(&request)
+            .map(|pack| pack.items.into_iter().map(|item| item.summary).collect())
+            .unwrap_or_default()
+    };
+    let personal = read(MemoryWorkspaceId::new(PERSONAL_WORKSPACE));
+    let project = if active.as_str() == PERSONAL_WORKSPACE {
+        Vec::new()
+    } else {
+        read(active)
+    };
+    (personal, project)
+}
+
+/// Formats the personal + project memories into a compact, budgeted prompt block.
+/// Pure (testable): one item per line, sections labelled, truncated to `budget`
+/// with a marker. Returns `None` when there is nothing to inject.
+fn format_memory_block(personal: &[String], project: &[String], budget: usize) -> Option<String> {
+    if budget == 0 {
+        return None;
+    }
+    let sections = [("Personale", personal), ("Progetto", project)];
+    let mut body = String::new();
+    let mut used = 0usize;
+    let mut truncated = false;
+    for (title, items) in sections {
+        let mut section = String::new();
+        for raw in items {
+            let one = raw.trim().replace('\n', " ");
+            if one.is_empty() {
+                continue;
+            }
+            let clipped = if one.chars().count() > 200 {
+                format!("{}…", one.chars().take(199).collect::<String>())
+            } else {
+                one
+            };
+            let line = format!("- {clipped}\n");
+            if used + line.len() > budget {
+                truncated = true;
+                break;
+            }
+            used += line.len();
+            section.push_str(&line);
+        }
+        if !section.is_empty() {
+            body.push_str(title);
+            body.push_str(":\n");
+            body.push_str(&section);
+        }
+        if truncated {
+            break;
+        }
+    }
+    if body.trim().is_empty() {
+        return None;
+    }
+    let mut block = String::from(
+        "PROFILO E MEMORIA — ciò che ricordi dell'utente e del progetto. Usalo se \
+pertinente; non elencarlo a pappagallo e non inventare nulla che non sia qui.\n",
+    );
+    block.push_str(&body);
+    if truncated {
+        block.push_str("- … (altro disponibile in memoria)\n");
+    }
+    Some(block.trim_end().to_string())
+}
+
 async fn generate_stream(
     State(state): State<AppState>,
     Json(request): Json<ChatGenerateStreamRequest>,
@@ -1995,6 +2096,18 @@ diventano automaticamente artifact scaricabili dall'utente.\n{lines}"
 AUTORIZZATE dall'utente con lo strumento `save_artifact`: {labels}. Quando l'utente chiede di \
 salvare/esportare un file in una cartella, chiama save_artifact(file, destination)."
         )
+    };
+    // Always-on memory profile (M1): inject what we durably know about the user
+    // (personal scope) and the active project, so the chat is continuous instead
+    // of starting cold every turn. Sensitive items are excluded here by design.
+    let (memory_personal, memory_project) = gather_profile_memory(state);
+    let system = match format_memory_block(
+        &memory_personal,
+        &memory_project,
+        CHAT_MEMORY_BUDGET_CHARS,
+    ) {
+        Some(block) => format!("{system}\n\n{block}"),
+        None => system,
     };
     let system = system.as_str();
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
@@ -11882,6 +11995,7 @@ mod tests {
         adapt_skill_body,
         extract_source_urls,
         fonti_section,
+        format_memory_block,
         skill_id_from_command,
         browser_method_for_capability_tool,
         browser_targets_for_goal,
@@ -11945,6 +12059,34 @@ mod tests {
         assert!(fonti_section(&sources, "Risposta\n\n**Fonti**\n- x").is_none());
         assert!(fonti_section(&[], "Risposta").is_none());
         assert!(fonti_section(&sources, "Risposta").is_some());
+    }
+
+    #[test]
+    fn memory_block_is_none_when_empty_or_zero_budget() {
+        assert!(format_memory_block(&[], &[], 1500).is_none());
+        let some = vec!["Preferisce risposte concise".to_string()];
+        assert!(format_memory_block(&some, &[], 0).is_none());
+    }
+
+    #[test]
+    fn memory_block_labels_sections_and_includes_text() {
+        let personal = vec!["Preferisce risposte concise in italiano".to_string()];
+        let project = vec!["Repo principale: /Clients/Acme/app".to_string()];
+        let block = format_memory_block(&personal, &project, 1500).expect("block");
+        assert!(block.contains("Personale:"));
+        assert!(block.contains("risposte concise"));
+        assert!(block.contains("Progetto:"));
+        assert!(block.contains("/Clients/Acme/app"));
+    }
+
+    #[test]
+    fn memory_block_respects_budget_and_marks_truncation() {
+        let many: Vec<String> = (0..200)
+            .map(|i| format!("fatto numero {i} con testo abbastanza lungo da occupare spazio"))
+            .collect();
+        let block = format_memory_block(&many, &[], 300).expect("block");
+        assert!(block.len() < 600, "block should be bounded, got {}", block.len());
+        assert!(block.contains("altro disponibile in memoria"));
     }
 
     #[test]
