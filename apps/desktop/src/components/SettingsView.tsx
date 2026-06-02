@@ -2782,6 +2782,7 @@ type MemoryItem = {
 function MemoryItemsList() {
   const [items, setItems] = useState<MemoryItem[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState<{ ref: string; text: string } | null>(null);
 
   const load = async () => {
     try {
@@ -2794,10 +2795,15 @@ function MemoryItemsList() {
     void load();
   }, []);
 
-  const decide = async (reference: string, action: "confirm" | "reject" | "delete") => {
+  const decide = async (
+    reference: string,
+    action: "confirm" | "reject" | "delete" | "edit",
+    text?: string,
+  ) => {
     setBusy(true);
     try {
-      await coreBridge.decideMemory(reference, action);
+      await coreBridge.decideMemory(reference, action, text);
+      setEditing(null);
       await load();
     } finally {
       setBusy(false);
@@ -2827,50 +2833,99 @@ function MemoryItemsList() {
             <div key={group.key}>
               <p className="set-meter-sub">{group.label}</p>
               <div className="set-rows">
-                {rows.map((item) => (
-                  <div className="set-row" key={item.reference}>
-                    <div style={{ minWidth: 0 }}>
-                      <div className="rv">{item.text}</div>
-                      <div className="rk">
-                        {item.memory_type}
-                        {item.status === "candidate" ? " · da confermare" : ""}
-                        {item.sensitivity !== "internal" && item.sensitivity !== "public"
-                          ? ` · ${item.sensitivity}`
-                          : ""}
+                {rows.map((item) => {
+                  const isEditing = editing?.ref === item.reference;
+                  return (
+                    <div className="set-row" key={item.reference}>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        {isEditing ? (
+                          <input
+                            autoFocus
+                            value={editing.text}
+                            onChange={(e) =>
+                              setEditing({ ref: item.reference, text: e.target.value })
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") void decide(item.reference, "edit", editing.text);
+                              if (e.key === "Escape") setEditing(null);
+                            }}
+                            style={{ width: "100%" }}
+                          />
+                        ) : (
+                          <div className="rv">{item.text}</div>
+                        )}
+                        <div className="rk">
+                          {item.memory_type}
+                          {item.status === "candidate" ? " · da confermare" : ""}
+                          {item.sensitivity !== "internal" && item.sensitivity !== "public"
+                            ? ` · ${item.sensitivity}`
+                            : ""}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 6, flex: "none" }}>
+                        {isEditing ? (
+                          <>
+                            <button
+                              className="set-btn"
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void decide(item.reference, "edit", editing.text)}
+                            >
+                              Salva
+                            </button>
+                            <button
+                              className="set-btn"
+                              type="button"
+                              disabled={busy}
+                              onClick={() => setEditing(null)}
+                            >
+                              Annulla
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            {item.status === "candidate" && (
+                              <>
+                                <button
+                                  className="set-btn"
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => void decide(item.reference, "confirm")}
+                                >
+                                  Conferma
+                                </button>
+                                <button
+                                  className="set-btn"
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => void decide(item.reference, "reject")}
+                                >
+                                  Rifiuta
+                                </button>
+                              </>
+                            )}
+                            <button
+                              className="set-btn"
+                              type="button"
+                              disabled={busy}
+                              onClick={() => setEditing({ ref: item.reference, text: item.text })}
+                            >
+                              Modifica
+                            </button>
+                            <button
+                              className="set-btn danger"
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void decide(item.reference, "delete")}
+                            >
+                              Dimentica
+                            </button>
+                          </>
+                        )}
                       </div>
                     </div>
-                    <div style={{ display: "flex", gap: 6, flex: "none" }}>
-                      {item.status === "candidate" && (
-                        <>
-                          <button
-                            className="set-btn"
-                            type="button"
-                            disabled={busy}
-                            onClick={() => void decide(item.reference, "confirm")}
-                          >
-                            Conferma
-                          </button>
-                          <button
-                            className="set-btn"
-                            type="button"
-                            disabled={busy}
-                            onClick={() => void decide(item.reference, "reject")}
-                          >
-                            Rifiuta
-                          </button>
-                        </>
-                      )}
-                      <button
-                        className="set-btn danger"
-                        type="button"
-                        disabled={busy}
-                        onClick={() => void decide(item.reference, "delete")}
-                      >
-                        Dimentica
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           );
