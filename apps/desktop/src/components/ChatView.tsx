@@ -158,6 +158,7 @@ export function ChatView({
   const [autoContinueMessageId, setAutoContinueMessageId] = useState<string | null>(null);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const [artifactsOpen, setArtifactsOpen] = useState(false);
+  const [artifactsInitial, setArtifactsInitial] = useState<string | null>(null);
   const [followUps, setFollowUps] = useState<string[]>([]);
   const [followUpsFor, setFollowUpsFor] = useState<string | null>(null);
   const titledThreadsRef = useRef<Set<string>>(new Set());
@@ -1428,6 +1429,10 @@ export function ChatView({
                   text={displayMessage.text}
                   messageId={displayMessage.id}
                   threadId={thread.threadId}
+                  onOpenArtifact={(artifact) => {
+                    setArtifactsInitial(artifact.name);
+                    setArtifactsOpen(true);
+                  }}
                 />
               ) : (
                 <AssistantThinkingState
@@ -1663,6 +1668,7 @@ export function ChatView({
       {artifactsOpen && conversationArtifacts.length > 0 && (
         <ArtifactsPanel
           artifacts={conversationArtifacts}
+          initialName={artifactsInitial}
           onClose={() => setArtifactsOpen(false)}
         />
       )}
@@ -2419,58 +2425,72 @@ function parseArtifacts(text: string): ParsedArtifact[] {
   return out;
 }
 
-/** Downloadable cards for files a skill generated (xlsx/pdf/…). */
-function MessageArtifacts({ text }: { text: string }) {
+async function openArtifactFolder(artifact: ParsedArtifact) {
+  try {
+    const path = await coreBridge.artifactFolder(artifact.thread);
+    await coreBridge.revealPath(path);
+  } catch {
+    /* reveal unavailable → ignore */
+  }
+}
+
+/** Cards for files generated/authored in the conversation. The NAME opens the
+ *  right-side workspace panel; the chevron expands an inline scrollable preview
+ *  (Claude Code's two-affordance pattern). */
+function MessageArtifacts({
+  text,
+  onOpen,
+}: {
+  text: string;
+  onOpen: (artifact: ParsedArtifact) => void;
+}) {
   const artifacts = useMemo(() => parseArtifacts(text), [text]);
+  const [expanded, setExpanded] = useState<string | null>(null);
   if (artifacts.length === 0) return null;
-
-  async function download(artifact: ParsedArtifact) {
-    try {
-      const blob = await coreBridge.downloadArtifact(artifact.thread, artifact.name);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = artifact.name;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 4000);
-    } catch {
-      /* download failed → ignore */
-    }
-  }
-
-  async function openFolder(artifact: ParsedArtifact) {
-    try {
-      const path = await coreBridge.artifactFolder(artifact.thread);
-      await coreBridge.revealPath(path);
-    } catch {
-      /* reveal unavailable → ignore */
-    }
-  }
 
   return (
     <div className="msg-artifacts" aria-label="File generati">
-      {artifacts.map((artifact, index) => (
-        <div className="artifact-card" key={`${artifact.name}-${index}`}>
-          <FileText size={18} className="artifact-icon" />
-          <div className="artifact-meta">
-            <strong>{artifact.name}</strong>
-            <small>{formatFileSize(artifact.size)}</small>
+      {artifacts.map((artifact) => (
+        <div className="artifact-card-wrap" key={artifact.name}>
+          <div className="artifact-card">
+            <button
+              type="button"
+              className="artifact-expand"
+              aria-label={expanded === artifact.name ? "Comprimi anteprima" : "Espandi anteprima"}
+              onClick={() =>
+                setExpanded((current) => (current === artifact.name ? null : artifact.name))
+              }
+            >
+              <ChevronDown
+                size={15}
+                className={expanded === artifact.name ? "artifact-chevron open" : "artifact-chevron"}
+              />
+            </button>
+            <FileText size={18} className="artifact-icon" />
+            <button
+              type="button"
+              className="artifact-name"
+              onClick={() => onOpen(artifact)}
+              title="Apri nel pannello"
+            >
+              <strong>{artifact.name}</strong>
+              <small>{formatFileSize(artifact.size)}</small>
+            </button>
+            <button type="button" onClick={() => void triggerArtifactDownload(artifact)} title="Scarica">
+              <Download size={14} />
+              <span>Scarica</span>
+            </button>
+            <button
+              type="button"
+              className="artifact-folder"
+              onClick={() => void openArtifactFolder(artifact)}
+              aria-label="Apri cartella"
+              title="Apri cartella"
+            >
+              <FolderOpen size={14} />
+            </button>
           </div>
-          <button type="button" onClick={() => void download(artifact)} title="Scarica">
-            <Download size={14} />
-            <span>Scarica</span>
-          </button>
-          <button
-            type="button"
-            className="artifact-folder"
-            onClick={() => void openFolder(artifact)}
-            aria-label="Apri cartella"
-            title="Apri cartella"
-          >
-            <FolderOpen size={14} />
-          </button>
+          {expanded === artifact.name && <InlineArtifactPreview artifact={artifact} />}
         </div>
       ))}
     </div>
@@ -2508,17 +2528,74 @@ type ArtifactPreview =
   | { kind: "markdown" | "code" | "csv" | "text"; text: string; ext: string }
   | { kind: "binary" | "error"; ext: string };
 
+/** Fetches an artifact and builds a renderable preview by type. For image/pdf it
+ *  creates an object URL the caller must revoke (preview.url). */
+async function buildArtifactPreview(
+  artifact: ParsedArtifact,
+  version?: number,
+): Promise<ArtifactPreview> {
+  const ext = artifactExt(artifact.name);
+  const blob = await coreBridge.downloadArtifact(artifact.thread, artifact.name, version);
+  if (ARTIFACT_IMAGE_EXT.includes(ext)) return { kind: "image", url: URL.createObjectURL(blob), ext };
+  if (ext === "pdf") return { kind: "pdf", url: URL.createObjectURL(blob), ext };
+  if (ext === "md" || ext === "markdown") return { kind: "markdown", text: await blob.text(), ext };
+  if (ext === "csv") return { kind: "csv", text: await blob.text(), ext };
+  if (ARTIFACT_CODE_EXT.has(ext)) return { kind: "code", text: await blob.text(), ext };
+  if (ext === "txt" || ext === "log" || ext === "") return { kind: "text", text: await blob.text(), ext };
+  return { kind: "binary", ext };
+}
+
+/** Inline, scrollable preview of an artifact shown under its card (Claude Code's
+ *  "expand the document in the list" affordance). */
+function InlineArtifactPreview({ artifact }: { artifact: ParsedArtifact }) {
+  const [preview, setPreview] = useState<ArtifactPreview | null>(null);
+  const urlRef = useRef<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const next = await buildArtifactPreview(artifact);
+        if (cancelled) {
+          if ("url" in next) URL.revokeObjectURL(next.url);
+          return;
+        }
+        if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+        urlRef.current = "url" in next ? next.url : null;
+        setPreview(next);
+      } catch {
+        if (!cancelled) setPreview({ kind: "error", ext: artifactExt(artifact.name) });
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (urlRef.current) {
+        URL.revokeObjectURL(urlRef.current);
+        urlRef.current = null;
+      }
+    };
+  }, [artifact]);
+  return (
+    <div className="artifact-inline-preview">
+      {preview ? <ArtifactPreviewBody preview={preview} /> : <p className="artifacts-preview-note">Carico…</p>}
+    </div>
+  );
+}
+
 /** Artifacts workspace: a side panel listing the conversation's generated files
  *  and rendering each by type (markdown, code, csv table, image, pdf) — the
  *  "interactive workspace alongside the chat" model. */
 function ArtifactsPanel({
   artifacts,
+  initialName,
   onClose,
 }: {
   artifacts: ParsedArtifact[];
+  initialName?: string | null;
   onClose: () => void;
 }) {
-  const [selectedName, setSelectedName] = useState<string | null>(artifacts[0]?.name ?? null);
+  const [selectedName, setSelectedName] = useState<string | null>(
+    initialName ?? artifacts[0]?.name ?? null,
+  );
   const [preview, setPreview] = useState<ArtifactPreview | null>(null);
   const [loading, setLoading] = useState(false);
   // Versioning: `versions` = archived count; selectable slots are 0..versions,
@@ -2533,26 +2610,10 @@ function ArtifactsPanel({
 
   const selected = artifacts.find((a) => a.name === selectedName) ?? artifacts[0] ?? null;
 
-  async function previewFromBlob(blob: Blob, ext: string): Promise<ArtifactPreview> {
-    if (urlRef.current) {
-      URL.revokeObjectURL(urlRef.current);
-      urlRef.current = null;
-    }
-    if (ARTIFACT_IMAGE_EXT.includes(ext)) {
-      const url = URL.createObjectURL(blob);
-      urlRef.current = url;
-      return { kind: "image", url, ext };
-    }
-    if (ext === "pdf") {
-      const url = URL.createObjectURL(blob);
-      urlRef.current = url;
-      return { kind: "pdf", url, ext };
-    }
-    if (ext === "md" || ext === "markdown") return { kind: "markdown", text: await blob.text(), ext };
-    if (ext === "csv") return { kind: "csv", text: await blob.text(), ext };
-    if (ARTIFACT_CODE_EXT.has(ext)) return { kind: "code", text: await blob.text(), ext };
-    if (ext === "txt" || ext === "log" || ext === "") return { kind: "text", text: await blob.text(), ext };
-    return { kind: "binary", ext };
+  function applyPreview(next: ArtifactPreview) {
+    if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    urlRef.current = "url" in next ? next.url : null;
+    setPreview(next);
   }
 
   useEffect(() => {
@@ -2575,8 +2636,12 @@ function ArtifactsPanel({
       setVersions(count);
       setSlot(count);
       try {
-        const blob = await coreBridge.downloadArtifact(selected.thread, selected.name);
-        if (!cancelled) setPreview(await previewFromBlob(blob, ext));
+        const next = await buildArtifactPreview(selected);
+        if (cancelled) {
+          if ("url" in next) URL.revokeObjectURL(next.url);
+          return;
+        }
+        applyPreview(next);
       } catch {
         if (!cancelled) setPreview({ kind: "error", ext });
       } finally {
@@ -2617,12 +2682,8 @@ function ArtifactsPanel({
     const ext = artifactExt(selected.name);
     void (async () => {
       try {
-        const blob = await coreBridge.downloadArtifact(
-          selected.thread,
-          selected.name,
-          clamped < versions ? clamped : undefined,
-        );
-        setPreview(await previewFromBlob(blob, ext));
+        const next = await buildArtifactPreview(selected, clamped < versions ? clamped : undefined);
+        applyPreview(next);
       } catch {
         setPreview({ kind: "error", ext });
       } finally {
@@ -2888,11 +2949,13 @@ function AssistantMessageBody({
   streaming,
   messageId,
   threadId,
+  onOpenArtifact,
 }: {
   text: string;
   streaming?: boolean;
   messageId?: string;
   threadId?: string;
+  onOpenArtifact?: (artifact: ParsedArtifact) => void;
 }) {
   const { visible, action, doneTool } = useMemo(() => parseComposioConfirm(text), [text]);
   const readable = useMemo(() => humanizeToolSlugs(visible), [visible]);
@@ -2900,7 +2963,7 @@ function AssistantMessageBody({
     <>
       <MessageActivity text={text} />
       {readable && <RichMessage text={readable} streaming={streaming} />}
-      {!streaming && <MessageArtifacts text={text} />}
+      {!streaming && onOpenArtifact && <MessageArtifacts text={text} onOpen={onOpenArtifact} />}
       {doneTool && !streaming && (
         <div className="cmp-confirm done">
           <ShieldCheck size={15} />
