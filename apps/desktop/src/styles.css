@@ -2805,6 +2805,55 @@ body.resizing-drawer {
   color: var(--muted);
 }
 
+/* Source viewer with line-number gutter (Claude Code look). */
+.code-view {
+  display: flex;
+  align-items: stretch;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  background: #fbfbfc;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.code-view-gutter {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 10px 12px 12px;
+  text-align: right;
+  color: #b3b8c0;
+  background: #f6f6f7;
+  border-right: 1px solid var(--line);
+  user-select: none;
+}
+.code-view-gutter span {
+  display: block;
+}
+.code-view-body {
+  margin: 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  flex: 1;
+  min-width: 0;
+  color: #24272d;
+  background: transparent;
+}
+.code-view-body code.hljs {
+  display: inline;
+  padding: 0;
+  background: transparent;
+  white-space: pre;
+}
+.code-view.wrap .code-view-body {
+  overflow-x: hidden;
+}
+.code-view.wrap .code-view-body code.hljs {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* Generated-file artifact cards (skill outputs). */
 .msg-artifacts {
   display: flex;
@@ -2816,11 +2865,29 @@ body.resizing-drawer {
 .artifact-card {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
+  gap: 8px;
+  padding: 6px 8px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: var(--surface-muted);
+  background: var(--surface);
+}
+.artifact-card:hover {
+  border-color: var(--line-strong);
+}
+.artifact-quick {
+  flex: none;
+  display: grid !important;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--muted);
+}
+.artifact-quick:hover {
+  color: var(--text);
+  background: var(--surface-hover) !important;
 }
 .artifact-icon {
   flex: none;
@@ -2903,12 +2970,8 @@ body.resizing-drawer {
 }
 .artifact-inline-preview {
   margin-top: 6px;
-  max-height: 340px;
+  max-height: 360px;
   overflow: auto;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 10px 12px;
-  background: var(--surface);
 }
 
 /* Variant navigation for regenerated answers (‹ n/m ›). */
