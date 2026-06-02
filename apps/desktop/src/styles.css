@@ -3055,6 +3055,14 @@ body.resizing-drawer {
   font-size: 10.5px;
   font-weight: 650;
 }
+.artifact-name small {
+  display: inline-flex;
+  align-items: center;
+}
+.artifact-name .diff-counts {
+  margin: 0 7px 0 0;
+  font-weight: 650;
+}
 
 /* Variant navigation for regenerated answers (‹ n/m ›). */
 .branch-picker {
