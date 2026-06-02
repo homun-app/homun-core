@@ -1276,6 +1276,13 @@ ricordare, restituisci {\"memories\":[]}.";
     if extraction.memories.is_empty() {
         return;
     }
+    // The model is unreliable about the privacy domain; pin it deterministically
+    // to "personal" so the read queries (profile injection + recall, which allow
+    // the "personal" domain) can actually find what we store. Sensitivity (which
+    // gates auto-confirm + injection) is still the model's call.
+    for memory in &mut extraction.memories {
+        memory.privacy_domain = PrivacyDomain::new("personal");
+    }
 
     let kept = extraction.memories.clone();
     let Ok(summary) = facade.apply_extraction(&user_id, &personal, extraction) else {
