@@ -32,6 +32,7 @@ import {
   coreBridge,
   type ActiveModelInfo,
   type AllowedTool,
+  type ArtifactsUsage,
   type ComposioToolkit,
   type ContainedComputerLive,
   type CoreCapabilitySnapshot,
@@ -2459,6 +2460,108 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
         </div>
       </div>
       {closedNote && <p className="set-hint">{closedNote}</p>}
+
+      <ArtifactsCard />
+    </>
+  );
+}
+
+function formatArtifactBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function ArtifactsCard() {
+  const [usage, setUsage] = useState<ArtifactsUsage | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = async () => {
+    try {
+      setUsage(await coreBridge.artifactsUsage());
+    } catch {
+      /* keep previous */
+    }
+  };
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  async function run(action: () => Promise<void>) {
+    setBusy(true);
+    try {
+      await action();
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const hasArtifacts = (usage?.threads.length ?? 0) > 0;
+
+  return (
+    <>
+      <div className="set-section-label">File generati (artifacts)</div>
+      <div className="set-card">
+        <div className="set-card-top">
+          <span className="set-card-name">Spazio usato</span>
+          <span className="set-badge muted">
+            {usage ? formatArtifactBytes(usage.total_bytes) : "—"}
+          </span>
+        </div>
+        <div className="set-card-divider" />
+        <p className="set-meter-sub">
+          I file creati dalle skill restano sul disco{usage?.base_path ? ` in ${usage.base_path}` : ""}.
+          Elimina ciò che non ti serve per non occupare spazio. Le conversazioni eliminate puliscono i
+          loro file automaticamente.
+        </p>
+        <div className="set-meter" style={{ marginTop: 8, gap: 8 }}>
+          <button
+            className="set-btn"
+            type="button"
+            onClick={() => void coreBridge.revealPath(usage?.base_path ?? "")}
+            disabled={!usage?.base_path}
+          >
+            <Folder size={14} />
+            <span style={{ marginLeft: 6 }}>Apri cartella</span>
+          </button>
+          <button
+            className="set-btn danger"
+            type="button"
+            disabled={busy || !hasArtifacts}
+            onClick={() => void run(() => coreBridge.clearArtifacts())}
+          >
+            <Trash2 size={14} />
+            <span style={{ marginLeft: 6 }}>Elimina tutto</span>
+          </button>
+        </div>
+        {hasArtifacts ? (
+          <div className="set-rows" style={{ marginTop: 10 }}>
+            {usage!.threads.map((thread) => (
+              <div className="set-row" key={thread.thread}>
+                <div style={{ minWidth: 0 }}>
+                  <div className="rk" style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {thread.thread}
+                  </div>
+                  <div className="rv">
+                    {thread.files.length} file · {formatArtifactBytes(thread.bytes)}
+                  </div>
+                </div>
+                <button
+                  className="set-btn"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void run(() => coreBridge.deleteArtifactThread(thread.thread))}
+                >
+                  Elimina
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="set-hint">Nessun file generato finora.</p>
+        )}
+      </div>
     </>
   );
 }

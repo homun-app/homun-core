@@ -595,8 +595,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/chat/stream_resume/{request_id}", get(resume_stream))
         .route("/api/chat/improve_prompt", post(improve_prompt))
         .route("/api/chat/transcribe", post(transcribe_audio))
-        .route("/api/artifacts/file", get(download_artifact))
+        .route("/api/artifacts/file", get(download_artifact).delete(delete_artifact_file))
         .route("/api/artifacts/path", get(artifact_folder_path))
+        .route("/api/artifacts/usage", get(artifacts_usage))
+        .route("/api/artifacts/thread", delete(delete_artifact_thread))
+        .route("/api/artifacts/clear", post(clear_artifacts))
         .route("/api/chat/suggestions", post(chat_suggestions))
         .route("/api/chat/threads/{thread_id}/autotitle", post(autotitle_chat_thread))
         .route(
@@ -2822,6 +2825,112 @@ async fn artifact_folder_path(Query(query): Query<ArtifactFolderQuery>) -> Json<
         path = path.join(artifact_thread_slug(Some(thread)));
     }
     Json(ArtifactFolderResponse { path: path.to_string_lossy().to_string() })
+}
+
+#[derive(Debug, Serialize)]
+struct ArtifactFileView {
+    name: String,
+    size: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct ArtifactThreadView {
+    thread: String,
+    bytes: u64,
+    files: Vec<ArtifactFileView>,
+}
+
+#[derive(Debug, Serialize)]
+struct ArtifactsUsage {
+    base_path: String,
+    total_bytes: u64,
+    threads: Vec<ArtifactThreadView>,
+}
+
+/// Disk usage of generated artifacts, grouped per conversation — drives the
+/// management/cleanup view so the folder can't silently fill the disk.
+async fn artifacts_usage() -> Json<ArtifactsUsage> {
+    let base = sandbox::artifacts_dir();
+    let mut threads: Vec<ArtifactThreadView> = Vec::new();
+    let mut total: u64 = 0;
+    if let Ok(entries) = std::fs::read_dir(&base) {
+        for entry in entries.flatten() {
+            if !entry.path().is_dir() {
+                continue;
+            }
+            let thread = entry.file_name().to_string_lossy().to_string();
+            let mut files: Vec<ArtifactFileView> = Vec::new();
+            let mut bytes: u64 = 0;
+            if let Ok(inner) = std::fs::read_dir(entry.path()) {
+                for file in inner.flatten() {
+                    if !file.path().is_file() {
+                        continue;
+                    }
+                    let size = file.metadata().map(|m| m.len()).unwrap_or(0);
+                    bytes += size;
+                    files.push(ArtifactFileView {
+                        name: file.file_name().to_string_lossy().to_string(),
+                        size,
+                    });
+                }
+            }
+            if files.is_empty() {
+                continue;
+            }
+            files.sort_by(|a, b| a.name.cmp(&b.name));
+            total += bytes;
+            threads.push(ArtifactThreadView { thread, bytes, files });
+        }
+    }
+    threads.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+    Json(ArtifactsUsage {
+        base_path: base.to_string_lossy().to_string(),
+        total_bytes: total,
+        threads,
+    })
+}
+
+fn ok_json() -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "ok": true }))
+}
+
+/// Deletes a single artifact file (anti path-traversal, scoped to its thread).
+async fn delete_artifact_file(Query(reference): Query<ArtifactRef>) -> Result<Json<serde_json::Value>, GatewayError> {
+    if reference.name.contains('/') || reference.name.contains("..") || reference.thread.contains('/') {
+        return Err(GatewayError {
+            status: StatusCode::FORBIDDEN,
+            code: "bad_artifact_path",
+            message: "Percorso non valido.".to_string(),
+        });
+    }
+    let dir = sandbox::artifacts_dir().join(&reference.thread);
+    let path = dir.join(&reference.name);
+    if path_within(&dir, &path) {
+        let _ = std::fs::remove_file(&path);
+    }
+    Ok(ok_json())
+}
+
+/// Deletes all artifacts of one conversation.
+async fn delete_artifact_thread(Query(query): Query<ArtifactFolderQuery>) -> Json<serde_json::Value> {
+    if let Some(thread) = query.thread.as_ref().filter(|t| !t.trim().is_empty()) {
+        let dir = sandbox::artifacts_dir().join(artifact_thread_slug(Some(thread)));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    ok_json()
+}
+
+/// Clears all generated artifacts (every conversation subfolder).
+async fn clear_artifacts() -> Json<serde_json::Value> {
+    let base = sandbox::artifacts_dir();
+    if let Ok(entries) = std::fs::read_dir(&base) {
+        for entry in entries.flatten() {
+            if entry.path().is_dir() {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+    }
+    ok_json()
 }
 
 /// Filesystem-safe per-conversation slug for the artifacts subfolder.

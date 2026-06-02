@@ -507,6 +507,43 @@ async function electronArtifactBlob(thread: string, name: string): Promise<Blob>
   return response.blob();
 }
 
+export interface ArtifactFileView {
+  name: string;
+  size: number;
+}
+export interface ArtifactThreadView {
+  thread: string;
+  bytes: number;
+  files: ArtifactFileView[];
+}
+export interface ArtifactsUsage {
+  base_path: string;
+  total_bytes: number;
+  threads: ArtifactThreadView[];
+}
+
+async function electronArtifactsUsage(): Promise<ArtifactsUsage> {
+  return gatewayGetJson<ArtifactsUsage>("/api/artifacts/usage");
+}
+
+async function electronDeleteArtifactFile(thread: string, name: string): Promise<void> {
+  await fetch(
+    `${DESKTOP_GATEWAY_URL}/api/artifacts/file?thread=${encodeURIComponent(thread)}&name=${encodeURIComponent(name)}`,
+    { method: "DELETE", headers: gatewayHeaders() },
+  );
+}
+
+async function electronDeleteArtifactThread(thread: string): Promise<void> {
+  await fetch(
+    `${DESKTOP_GATEWAY_URL}/api/artifacts/thread?thread=${encodeURIComponent(thread)}`,
+    { method: "DELETE", headers: gatewayHeaders() },
+  );
+}
+
+async function electronClearArtifacts(): Promise<void> {
+  await gatewayPostJson("/api/artifacts/clear", {});
+}
+
 async function electronArtifactFolder(thread: string): Promise<string> {
   const { path } = await gatewayGetJson<{ path: string }>(
     `/api/artifacts/path?thread=${encodeURIComponent(thread)}`,
@@ -1111,6 +1148,11 @@ export const coreBridge = {
     electronTranscribe(audioBase64, language),
   downloadArtifact: (thread: string, name: string) => electronArtifactBlob(thread, name),
   artifactFolder: (thread: string) => electronArtifactFolder(thread),
+  artifactsUsage: () => electronArtifactsUsage(),
+  deleteArtifactFile: (thread: string, name: string) =>
+    electronDeleteArtifactFile(thread, name),
+  deleteArtifactThread: (thread: string) => electronDeleteArtifactThread(thread),
+  clearArtifacts: () => electronClearArtifacts(),
   revealPath: (path: string) => revealWorkspacePath(path),
   threadFolder: (threadId: string) => electronThreadFolder(threadId),
   setThreadFolder: (threadId: string, path: string | null) =>
