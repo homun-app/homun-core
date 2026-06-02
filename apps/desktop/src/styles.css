@@ -3883,26 +3883,14 @@ body.resizing-drawer {
   cursor: pointer;
 }
 
-/* Render the live frame at a "sane" size, correctly clipped like the stage,
-   then uniformly scale the whole thing down — a faithful 0.25x of the stage.
-   Far more robust than relying on noVNC's internal scaling at a tiny size
-   (which left the toolbar visible). 136 / 544 = 0.25. */
-.cc-thumb-scaler {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 544px;
-  height: 340px;
-  transform: scale(0.25);
-  transform-origin: top left;
-}
-
+/* The embed page (lfpa-view.html) scales the whole framebuffer to fit, so the
+   thumbnail is just a full-bleed iframe — no transform tricks, no toolbar to
+   clip. The 16:10 .cc-thumb box keeps it proportioned. */
 .cc-thumb-frame {
   position: absolute;
-  left: 0;
-  top: -34px;
-  width: 544px;
-  height: 374px;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   border: 0;
   display: block;
   pointer-events: none;
@@ -4010,8 +3998,8 @@ body.resizing-drawer {
 }
 
 /* Stage matches the contained display's 16:10 aspect ratio → no black bars.
-   overflow:hidden + the frame's negative top offset clip noVNC's thin status
-   bar ("Connected… CtrlAltDel") so the preview is clean. */
+   The embed page (lfpa-view.html) scales the whole framebuffer to fit, so the
+   frame just fills the stage — no toolbar/status bar to clip. */
 .cc-stage {
   position: relative;
   width: 100%;
@@ -4028,11 +4016,9 @@ body.resizing-drawer {
 
 .cc-frame {
   position: absolute;
-  left: 0;
-  right: 0;
-  top: -34px;
-  height: calc(100% + 34px);
+  inset: 0;
   width: 100%;
+  height: 100%;
   border: 0;
   display: block;
 }
@@ -4109,7 +4095,9 @@ body.resizing-drawer {
   box-shadow: inset 0 0 0 1px var(--line);
 }
 
-.cc-stage {
+/* Scoped to the Settings "Computer" page so these do NOT clobber the chat
+   dock's .cc-stage/.cc-frame (which use a 16:10 aspect-ratio box). */
+.contained-computer-view .cc-stage {
   flex: 1;
   min-height: 420px;
   border-radius: var(--radius);
@@ -4121,7 +4109,7 @@ body.resizing-drawer {
   justify-content: center;
 }
 
-.cc-frame {
+.contained-computer-view .cc-frame {
   width: 100%;
   height: 100%;
   min-height: 420px;

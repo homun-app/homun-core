@@ -77,8 +77,10 @@ export function ChatComputerPanel() {
 
   if (!live?.enabled || !live.novnc_url || !live.active) return null;
 
-  const base = live.novnc_url.replace("/vnc.html", "/vnc_lite.html");
-  const src = `${base}${base.includes("?") ? "&" : "?"}autoconnect=true&resize=scale&reconnect=true&view_only=true`;
+  // Chrome-free embed page (RFB core with scaleViewport) — shows the WHOLE
+  // contained display, scaled to fit and proportioned, with no noVNC toolbar.
+  const base = live.novnc_url.replace("/vnc.html", "/lfpa-view.html");
+  const src = `${base}${base.includes("?") ? "&" : "?"}view_only=1`;
   const activity = live.activity?.trim() || "sta lavorando…";
   const fullscreen = view === "full";
   const showStage = view === "expanded" || fullscreen;
@@ -141,14 +143,12 @@ export function ChatComputerPanel() {
                 title="Espandi il computer"
                 aria-label="Espandi il computer"
               >
-                <span className="cc-thumb-scaler">
-                  <iframe
-                    className="cc-thumb-frame"
-                    title="Anteprima computer (live)"
-                    src={src}
-                    tabIndex={-1}
-                  />
-                </span>
+                <iframe
+                  className="cc-thumb-frame"
+                  title="Anteprima computer (live)"
+                  src={src}
+                  tabIndex={-1}
+                />
                 <span className="cc-thumb-expand">
                   <Maximize2 size={13} />
                 </span>
