@@ -158,6 +158,7 @@ export function ChatView({
   const [followUps, setFollowUps] = useState<string[]>([]);
   const [followUpsFor, setFollowUpsFor] = useState<string | null>(null);
   const titledThreadsRef = useRef<Set<string>>(new Set());
+  const resumedThreadsRef = useRef<Set<string>>(new Set());
   const conversationRef = useRef<HTMLDivElement>(null);
   const shouldStickToBottomRef = useRef(true);
   const streamingUserPinnedRef = useRef(false);
@@ -396,6 +397,12 @@ export function ChatView({
       streamingUserPinnedRef.current = conversationBottomDistance() < 220;
       window.setTimeout(() => scrollConversationToBottomIfPinned("auto"), 0);
       cancelStreamingRequestRef.current = cancelStreamingRequest;
+      // Record an active stream so a reload mid-answer can reattach (resume).
+      writeResumeMarker(thread.threadId, {
+        requestId,
+        userText: userVisibleText,
+        assistantMessageId: streamingMessage.id,
+      });
       unlistenStream = await coreBridge.listenChatStreamDelta((payload) => {
         if (payload.request_id !== requestId) return;
         if (cancelledStreamIdsRef.current.has(requestId)) return;
@@ -501,11 +508,91 @@ export function ChatView({
         cancelStreamingRequestRef.current = null;
       }
       cancelledStreamIdsRef.current.delete(requestId);
+      clearResumeMarker(thread.threadId);
     }
   }
 
   function cancelActiveStreaming() {
     cancelStreamingRequestRef.current?.();
+  }
+
+  // Reattach to an answer that was streaming when the app was reloaded: replays
+  // the buffered events from the gateway and continues live, then persists.
+  async function resumeActiveStream(marker: ResumeMarker) {
+    if (promptSubmitting || streamingAssistantId) return;
+    const requestId = marker.requestId;
+    const userMessage: ChatMessage = {
+      id: `resume_user_${Date.now()}`,
+      role: "user",
+      text: marker.userText,
+      timestamp: currentTimestampSeconds(),
+    };
+    const streamingMessage: ChatMessage = {
+      id: marker.assistantMessageId,
+      role: "assistant",
+      text: "",
+      timestamp: currentTimestampSeconds(),
+      metadata: "Modello locale",
+    };
+    const promptMessages = [...messages, userMessage];
+    let streamedText = "";
+    let unlistenStream: (() => void) | undefined;
+    const flushStreamingMessage = () => {
+      streamingFrameRef.current = null;
+      setOptimisticMessages([...promptMessages, { ...streamingMessage, text: streamedText }]);
+      afterStreamingFramePaint();
+    };
+    const scheduleStreamingMessage = () => {
+      if (streamingFrameRef.current !== null) return;
+      streamingFrameRef.current = window.requestAnimationFrame(flushStreamingMessage);
+    };
+
+    setPromptSubmitting(true);
+    setOptimisticMessages([...promptMessages, streamingMessage]);
+    resetStreamingState("");
+    setStreamingAssistantId(streamingMessage.id);
+    streamingUserPinnedRef.current = true;
+    setStreamStatus({
+      requestId,
+      phase: "thinking",
+      title: "Riprendo la risposta",
+      detail: "Mi riaggancio alla generazione in corso.",
+    });
+    try {
+      unlistenStream = await coreBridge.listenChatStreamDelta((payload) => {
+        if (payload.request_id !== requestId) return;
+        streamedText += payload.delta;
+        setStreamHasVisibleText(true);
+        scheduleStreamingMessage();
+      });
+      const result = await coreBridge.resumeChatPromptStream(
+        requestId,
+        thread.threadId,
+        computerSessionId,
+        marker.userText,
+        marker.assistantMessageId,
+      );
+      streamedText = result.assistant_message.text || streamedText;
+      cancelScheduledStreamingFrame();
+      const finalAssistant = chatMessageFromAssistantResult(result, streamedText);
+      const finalMessages = [...promptMessages, finalAssistant];
+      setOptimisticMessages(finalMessages);
+      onMessagesChange(finalMessages);
+      await refreshAfterChatSubmit();
+      setOptimisticMessages(null);
+    } catch {
+      // Stream gone (expired/evicted) → drop the optimistic pair, keep persisted.
+      setOptimisticMessages(null);
+    } finally {
+      cancelScheduledStreamingFrame();
+      unlistenStream?.();
+      streamingUserPinnedRef.current = false;
+      setStreamingAssistantId(null);
+      resetStreamingState("");
+      setStreamStatus((current) => (current?.requestId === requestId ? null : current));
+      setPromptSubmitting(false);
+      clearResumeMarker(thread.threadId);
+    }
   }
 
   async function refreshAfterChatSubmit() {
@@ -1122,6 +1209,17 @@ export function ChatView({
       cancelled = true;
     };
   }, [threadMessages, streamingAssistantId, followUpsFor]);
+
+  // After a reload, reattach to an answer that was still streaming (resume).
+  useEffect(() => {
+    if (resumedThreadsRef.current.has(thread.threadId)) return;
+    if (promptSubmitting || streamingAssistantId) return;
+    const marker = readResumeMarker(thread.threadId);
+    if (!marker) return;
+    resumedThreadsRef.current.add(thread.threadId);
+    void resumeActiveStream(marker);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [thread.threadId]);
 
   // Auto-title a thread (LLM) once its first exchange is complete; persisted by
   // the gateway, then the thread list refreshes. Once per thread.
@@ -3807,6 +3905,44 @@ function Composer({
       </div>
     </form>
   );
+}
+
+interface ResumeMarker {
+  requestId: string;
+  userText: string;
+  assistantMessageId: string;
+}
+
+function resumeMarkerKey(threadId: string) {
+  return `lfpa.resume.${threadId}`;
+}
+
+function writeResumeMarker(threadId: string, marker: ResumeMarker) {
+  try {
+    window.localStorage.setItem(resumeMarkerKey(threadId), JSON.stringify(marker));
+  } catch {
+    /* storage unavailable → resume simply won't be offered */
+  }
+}
+
+function clearResumeMarker(threadId: string) {
+  try {
+    window.localStorage.removeItem(resumeMarkerKey(threadId));
+  } catch {
+    /* ignore */
+  }
+}
+
+function readResumeMarker(threadId: string): ResumeMarker | null {
+  try {
+    const raw = window.localStorage.getItem(resumeMarkerKey(threadId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as ResumeMarker;
+    if (parsed && parsed.requestId && parsed.assistantMessageId) return parsed;
+  } catch {
+    /* ignore malformed */
+  }
+  return null;
 }
 
 /** Reads a Blob as a base64 string (without the `data:...;base64,` prefix). */

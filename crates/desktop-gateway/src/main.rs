@@ -592,6 +592,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .route("/api/chat/build_prompt", post(build_prompt))
         .route("/api/chat/generate_stream", post(generate_stream))
+        .route("/api/chat/stream_resume/{request_id}", get(resume_stream))
         .route("/api/chat/improve_prompt", post(improve_prompt))
         .route("/api/chat/transcribe", post(transcribe_audio))
         .route("/api/chat/suggestions", post(chat_suggestions))
@@ -1929,7 +1930,20 @@ strumento `run_in_sandbox`, che li lancia nel computer contenuto, e usa l'output
         serde_json::json!({ "role": "user", "content": user_content }),
     ];
 
-    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(32);
+    let (mpsc_tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(32);
+    // Resume registry entry: the generation records here so a reloaded client can
+    // reattach to the in-flight answer (GET /api/chat/stream_resume/{id}).
+    let (broadcast_tx, _) = tokio::sync::broadcast::channel::<String>(512);
+    let stream_entry = std::sync::Arc::new(StreamEntry {
+        lines: std::sync::Mutex::new(Vec::new()),
+        tx: broadcast_tx,
+        finished: std::sync::atomic::AtomicBool::new(false),
+    });
+    let resume_id = request.request_id.clone();
+    if let Ok(mut map) = stream_registry().lock() {
+        map.insert(resume_id.clone(), stream_entry.clone());
+    }
+    let tx = StreamSink { mpsc: mpsc_tx, entry: stream_entry };
     let http = state.http.clone();
     let state_owned = state.clone();
     let temperature = request.temperature;
@@ -2401,6 +2415,18 @@ verifica anti-bot). Riprova o indica una fonte preferita.".to_string()
             )
             .await;
         }
+        // Mark the resume entry finished and evict it after a grace window so a
+        // client that reloaded right at the end can still reattach and read it.
+        tx.entry
+            .finished
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        let cleanup_id = resume_id.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+            if let Ok(mut map) = stream_registry().lock() {
+                map.remove(&cleanup_id);
+            }
+        });
     });
 
     let body = Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move {
@@ -2762,14 +2788,108 @@ fn execute_browse_web_tool(
     Ok(result)
 }
 
-async fn emit_stream_event(
-    tx: &tokio::sync::mpsc::Sender<Result<Bytes, std::io::Error>>,
-    event: GenerateStreamEvent,
-) -> Result<(), ()> {
+/// A live chat stream, kept in a server-side registry so a client that reloads
+/// mid-answer can REATTACH (replay the buffered events + continue live) instead
+/// of losing the in-flight response. The generation writes here regardless of
+/// whether any HTTP client is currently attached.
+struct StreamEntry {
+    /// NDJSON lines emitted so far (replayed to a late/reattaching reader).
+    lines: std::sync::Mutex<Vec<String>>,
+    /// Live fan-out to currently-attached readers.
+    tx: tokio::sync::broadcast::Sender<String>,
+    finished: std::sync::atomic::AtomicBool,
+}
+
+/// Sink the generation emits to: tees every event to the ORIGINAL live response
+/// (mpsc, unchanged behaviour) AND to the resume registry (buffer + broadcast).
+struct StreamSink {
+    mpsc: tokio::sync::mpsc::Sender<Result<Bytes, std::io::Error>>,
+    entry: std::sync::Arc<StreamEntry>,
+}
+
+fn stream_registry()
+-> &'static std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<StreamEntry>>> {
+    static CELL: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<StreamEntry>>>,
+    > = std::sync::OnceLock::new();
+    CELL.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+fn stream_event_is_terminal(line: &str) -> bool {
+    line.contains("\"type\":\"done\"") || line.contains("\"type\":\"error\"")
+}
+
+/// Builds an NDJSON response body for a reattaching reader: replays the buffered
+/// events, then forwards live ones until a terminal (done/error) event.
+fn ndjson_body_for_entry(entry: std::sync::Arc<StreamEntry>) -> Body {
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(64);
+    tokio::spawn(async move {
+        // Snapshot + subscribe under the same lock so no event is missed/duplicated.
+        let (snapshot, mut brx) = {
+            let buf = entry.lines.lock().expect("stream lines lock");
+            (buf.clone(), entry.tx.subscribe())
+        };
+        for line in &snapshot {
+            if tx.send(Ok(Bytes::from(format!("{line}\n")))).await.is_err() {
+                return;
+            }
+            if stream_event_is_terminal(line) {
+                return;
+            }
+        }
+        loop {
+            match brx.recv().await {
+                Ok(line) => {
+                    let terminal = stream_event_is_terminal(&line);
+                    if tx.send(Ok(Bytes::from(format!("{line}\n")))).await.is_err() {
+                        return;
+                    }
+                    if terminal {
+                        return;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+            }
+        }
+    });
+    Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move {
+        rx.recv().await.map(|item| (item, rx))
+    }))
+}
+
+/// Reattach to an in-flight (or just-finished) chat stream by request id.
+async fn resume_stream(Path(request_id): Path<String>) -> Result<Response, GatewayError> {
+    let entry = stream_registry()
+        .lock()
+        .ok()
+        .and_then(|map| map.get(&request_id).cloned());
+    match entry {
+        Some(entry) => Ok(Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "application/x-ndjson")
+            .body(ndjson_body_for_entry(entry))
+            .expect("valid streaming response")),
+        None => Err(GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "stream_not_found",
+            message: "Nessuno stream attivo per questa richiesta.".to_string(),
+        }),
+    }
+}
+
+async fn emit_stream_event(sink: &StreamSink, event: GenerateStreamEvent) -> Result<(), ()> {
     let line = serde_json::to_string(&event).map_err(|_| ())?;
-    tx.send(Ok(Bytes::from(format!("{line}\n"))))
-        .await
-        .map_err(|_| ())
+    // Tee to the resume registry (buffer + broadcast) under one lock so a
+    // reattaching reader never misses or duplicates an event.
+    if let Ok(mut buf) = sink.entry.lines.lock() {
+        buf.push(line.clone());
+        let _ = sink.entry.tx.send(line.clone());
+    }
+    // Original live response; ignored if the client already disconnected (the
+    // generation keeps running and recording into the registry).
+    let _ = sink.mpsc.send(Ok(Bytes::from(format!("{line}\n")))).await;
+    Ok(())
 }
 
 async fn task_queue(
