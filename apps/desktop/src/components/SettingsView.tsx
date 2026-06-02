@@ -2715,6 +2715,8 @@ function AuditPane() {
         )}
       </div>
 
+      <MemoryItemsList />
+
       <div className="set-section-label">Audit</div>
       <div className="set-rows">
         <div className="set-row">
@@ -2744,6 +2746,119 @@ function AuditPane() {
           Svuota
         </button>
       </div>
+    </>
+  );
+}
+
+/* What the assistant has learned about you (M5): list + confirm/reject/delete.
+   Personal scope spans all projects; project scope is the active workspace. */
+type MemoryItem = {
+  reference: string;
+  scope: string;
+  memory_type: string;
+  status: string;
+  sensitivity: string;
+  confidence: number;
+  text: string;
+};
+
+function MemoryItemsList() {
+  const [items, setItems] = useState<MemoryItem[] | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = async () => {
+    try {
+      setItems(await coreBridge.memoryItems());
+    } catch {
+      setItems([]);
+    }
+  };
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const decide = async (reference: string, action: "confirm" | "reject" | "delete") => {
+    setBusy(true);
+    try {
+      await coreBridge.decideMemory(reference, action);
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!items) return null;
+
+  const groups = [
+    { key: "personal", label: "Personale (vale ovunque)" },
+    { key: "project", label: "Progetto attivo" },
+  ];
+
+  return (
+    <>
+      <div className="set-section-label">Cosa ricordo di te</div>
+      {items.length === 0 ? (
+        <p className="set-hint">
+          Non ho ancora memorizzato nulla. Dimmi in chat le tue preferenze o informazioni e le
+          imparerò automaticamente.
+        </p>
+      ) : (
+        groups.map((group) => {
+          const rows = items.filter((item) => item.scope === group.key);
+          if (rows.length === 0) return null;
+          return (
+            <div key={group.key}>
+              <p className="set-meter-sub">{group.label}</p>
+              <div className="set-rows">
+                {rows.map((item) => (
+                  <div className="set-row" key={item.reference}>
+                    <div style={{ minWidth: 0 }}>
+                      <div className="rv">{item.text}</div>
+                      <div className="rk">
+                        {item.memory_type}
+                        {item.status === "candidate" ? " · da confermare" : ""}
+                        {item.sensitivity !== "internal" && item.sensitivity !== "public"
+                          ? ` · ${item.sensitivity}`
+                          : ""}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 6, flex: "none" }}>
+                      {item.status === "candidate" && (
+                        <>
+                          <button
+                            className="set-btn"
+                            type="button"
+                            disabled={busy}
+                            onClick={() => void decide(item.reference, "confirm")}
+                          >
+                            Conferma
+                          </button>
+                          <button
+                            className="set-btn"
+                            type="button"
+                            disabled={busy}
+                            onClick={() => void decide(item.reference, "reject")}
+                          >
+                            Rifiuta
+                          </button>
+                        </>
+                      )}
+                      <button
+                        className="set-btn danger"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void decide(item.reference, "delete")}
+                      >
+                        Dimentica
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })
+      )}
     </>
   );
 }

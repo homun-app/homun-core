@@ -664,6 +664,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/system/status", get(system_status))
         .route("/api/system/browser/close-all", post(close_all_browsers))
         .route("/api/memory/dashboard", get(memory_dashboard))
+        .route("/api/memory/items", get(memory_items))
+        .route("/api/memory/decide", post(memory_decide))
         .route("/api/capabilities/snapshot", get(capability_snapshot))
         .route(
             "/api/workspaces",
@@ -10196,6 +10198,105 @@ async fn memory_dashboard(
         .dashboard(&request)
         .map_err(GatewayError::memory)?;
     Ok(Json(dashboard))
+}
+
+/// One memory in the management view (M5): UI-safe, with its scope and a string ref.
+#[derive(Debug, Serialize)]
+struct MemoryItemView {
+    reference: String,
+    scope: String,
+    memory_type: String,
+    status: String,
+    sensitivity: String,
+    confidence: f64,
+    text: String,
+}
+
+/// Lists individual memories from the PERSONAL + active PROJECT scopes so the user
+/// can see and manage what the assistant has learned (M5). Rejected/deleted are
+/// hidden; candidates are shown so they can be confirmed.
+async fn memory_items(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<MemoryItemView>>, GatewayError> {
+    let facade = lock_memory_facade(&state)?;
+    let user = gateway_memory_user_id();
+    let active = gateway_memory_workspace_id();
+    let mut out: Vec<MemoryItemView> = Vec::new();
+    let mut push_scope = |workspace: &MemoryWorkspaceId, scope: &str| {
+        if let Ok(memories) = facade.list_memories_for_ui(&user, workspace) {
+            for memory in memories {
+                if matches!(memory.status, MemoryStatus::Deleted | MemoryStatus::Rejected) {
+                    continue;
+                }
+                out.push(MemoryItemView {
+                    reference: memory.reference.to_string(),
+                    scope: scope.to_string(),
+                    memory_type: memory.memory_type,
+                    status: format!("{:?}", memory.status).to_lowercase(),
+                    sensitivity: format!("{:?}", memory.sensitivity).to_lowercase(),
+                    confidence: memory.confidence,
+                    text: memory.text,
+                });
+            }
+        }
+    };
+    push_scope(&MemoryWorkspaceId::new(PERSONAL_WORKSPACE), "personal");
+    if active.as_str() != PERSONAL_WORKSPACE {
+        push_scope(&active, "project");
+    }
+    Ok(Json(out))
+}
+
+#[derive(Debug, Deserialize)]
+struct MemoryDecideRequest {
+    reference: String,
+    /// "confirm" | "reject" | "delete"
+    action: String,
+}
+
+/// Confirm / reject / delete a single memory by ref (M5 management actions). The
+/// lifecycle scope is taken from the ref itself so personal + project both work.
+async fn memory_decide(
+    State(state): State<AppState>,
+    Json(request): Json<MemoryDecideRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let reference = request.reference.parse::<MemoryRef>().map_err(|error| GatewayError {
+        status: StatusCode::BAD_REQUEST,
+        code: "memory_bad_ref",
+        message: error,
+    })?;
+    let facade = lock_memory_facade(&state)?;
+    let lifecycle = MemoryLifecycleRequest {
+        actor_id: "desktop-ui".to_string(),
+        user_id: reference.user_id.clone(),
+        workspace_id: reference.workspace_id.clone(),
+        purpose: "memory_management".to_string(),
+    };
+    match request.action.as_str() {
+        "confirm" => {
+            facade
+                .confirm_memory(&lifecycle, &reference, "user confirmed")
+                .map_err(|error| GatewayError::memory(error.to_string()))?;
+        }
+        "reject" => {
+            facade
+                .reject_memory(&lifecycle, &reference, "user rejected")
+                .map_err(|error| GatewayError::memory(error.to_string()))?;
+        }
+        "delete" => {
+            facade
+                .delete_memory(&lifecycle, &reference, "user deleted")
+                .map_err(|error| GatewayError::memory(error.to_string()))?;
+        }
+        _ => {
+            return Err(GatewayError {
+                status: StatusCode::BAD_REQUEST,
+                code: "memory_bad_action",
+                message: "azione non valida (confirm|reject|delete)".to_string(),
+            });
+        }
+    }
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 async fn capability_snapshot(

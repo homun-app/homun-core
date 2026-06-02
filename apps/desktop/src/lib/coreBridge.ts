@@ -1158,6 +1158,9 @@ export const coreBridge = {
   rejectApproval: (approvalId: string, reason: string) =>
     electronRejectApproval(approvalId, reason),
   memoryDashboard: () => electronMemoryDashboard(),
+  memoryItems: () => electronMemoryItems(),
+  decideMemory: (reference: string, action: "confirm" | "reject" | "delete") =>
+    electronDecideMemory(reference, action),
   capabilities: () => electronCapabilities(),
   localComputerSession: (sessionId: string) =>
     electronLocalComputerSession(sessionId),
@@ -1492,6 +1495,44 @@ async function electronMemoryDashboard(): Promise<CoreMemoryDashboard> {
     return response.json() as Promise<CoreMemoryDashboard>;
   } catch {
     return emptyMemoryDashboard();
+  }
+}
+
+export type CoreMemoryItem = {
+  reference: string;
+  scope: string;
+  memory_type: string;
+  status: string;
+  sensitivity: string;
+  confidence: number;
+  text: string;
+};
+
+async function electronMemoryItems(): Promise<CoreMemoryItem[]> {
+  try {
+    const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/memory/items`, {
+      headers: gatewayHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error(`Desktop Gateway memory items HTTP ${response.status}`);
+    }
+    return response.json() as Promise<CoreMemoryItem[]>;
+  } catch {
+    return [];
+  }
+}
+
+async function electronDecideMemory(
+  reference: string,
+  action: "confirm" | "reject" | "delete",
+): Promise<void> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/memory/decide`, {
+    method: "POST",
+    headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ reference, action }),
+  });
+  if (!response.ok) {
+    throw new Error(`Desktop Gateway memory decide HTTP ${response.status}`);
   }
 }
 
