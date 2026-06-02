@@ -1182,6 +1182,19 @@ fn normalize_for_dedup(text: &str) -> String {
     text.trim().to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// Fills the required `privacy_domain`/`sensitivity` on an extracted item when the
+/// model omitted them, so deserialization (which requires both) doesn't silently
+/// drop otherwise-valid memories/entities/relations. The domain is re-pinned to
+/// "personal" later regardless; this just keeps the item parseable.
+fn fill_extraction_defaults(item: &serde_json::Value) -> serde_json::Value {
+    let mut item = item.clone();
+    if let Some(obj) = item.as_object_mut() {
+        obj.entry("privacy_domain").or_insert(serde_json::json!("personal"));
+        obj.entry("sensitivity").or_insert(serde_json::json!("internal"));
+    }
+    item
+}
+
 /// Persists a batch of extracted memories into ONE scope (workspace): dedups
 /// against what's already there, applies them as candidates, then auto-confirms
 /// the low-risk ones. Shared by the personal and project scopes.
@@ -1431,20 +1444,32 @@ relations sono vuoti). Se non c'è nulla da ricordare: {\"memories\":[],\"entiti
     let Ok(root) = serde_json::from_str::<serde_json::Value>(strip_json_fences(content)) else {
         return;
     };
-    let parse_array = |key: &str| -> serde_json::Value {
-        root.get(key).cloned().unwrap_or(serde_json::Value::Null)
-    };
-    let memories: Vec<ExtractedMemory> = parse_array("memories")
-        .as_array()
-        .map(|a| a.iter().filter_map(|i| serde_json::from_value(i.clone()).ok()).collect())
+    let memories: Vec<ExtractedMemory> = root
+        .get("memories")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|i| serde_json::from_value(fill_extraction_defaults(i)).ok())
+                .collect()
+        })
         .unwrap_or_default();
-    let entities: Vec<ExtractedEntity> = parse_array("entities")
-        .as_array()
-        .map(|a| a.iter().filter_map(|i| serde_json::from_value(i.clone()).ok()).collect())
+    let entities: Vec<ExtractedEntity> = root
+        .get("entities")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|i| serde_json::from_value(fill_extraction_defaults(i)).ok())
+                .collect()
+        })
         .unwrap_or_default();
-    let relations: Vec<ExtractedRelation> = parse_array("relations")
-        .as_array()
-        .map(|a| a.iter().filter_map(|i| serde_json::from_value(i.clone()).ok()).collect())
+    let relations: Vec<ExtractedRelation> = root
+        .get("relations")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|i| serde_json::from_value(fill_extraction_defaults(i)).ok())
+                .collect()
+        })
         .unwrap_or_default();
     let mut extraction = MemoryExtraction { memories, entities, relations };
     // M4: one-line episodic summary of this turn (stored in the thread scope).
