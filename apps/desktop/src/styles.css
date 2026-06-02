@@ -2805,6 +2805,54 @@ body.resizing-drawer {
   color: var(--muted);
 }
 
+/* Unified line diff (added / removed). */
+.diff-view {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: auto;
+  background: #fbfbfc;
+}
+.diff-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 0 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.diff-row .diff-sign {
+  flex: none;
+  width: 10px;
+  text-align: center;
+  color: var(--muted);
+  user-select: none;
+}
+.diff-row.add {
+  background: rgba(46, 160, 67, 0.12);
+}
+.diff-row.add .diff-sign {
+  color: var(--green);
+}
+.diff-row.del {
+  background: rgba(229, 72, 77, 0.12);
+}
+.diff-row.del .diff-sign {
+  color: var(--red);
+}
+.diff-counts {
+  margin-left: 6px;
+  font-size: 11px;
+}
+.diff-counts .add {
+  color: var(--green);
+}
+.diff-counts .del {
+  color: var(--red);
+}
+
 /* Source viewer with line-number gutter (Claude Code look). */
 .code-view {
   display: flex;
