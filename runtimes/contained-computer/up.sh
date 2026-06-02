@@ -21,6 +21,10 @@ docker build -t "${IMAGE}" "${HERE}"
 
 echo "==> (re)starting ${NAME}"
 docker rm -f "${NAME}" >/dev/null 2>&1 || true
+# Generated-file output dir: a real HOST folder bind-mounted at /home/agent/output
+# so skill artifacts (xlsx/pdf/…) persist on disk and are listed/downloadable.
+ARTIFACTS_DIR="${LFPA_ARTIFACTS_DIR:-$HOME/.local-first-personal-assistant/artifacts}"
+mkdir -p "${ARTIFACTS_DIR}"
 # Publish to loopback only. --shm-size avoids Chromium crashes on small /dev/shm.
 # Port 9100→9000: on-device Whisper STT server. Named volume persists the model
 # download (~/.cache) across the --rm container lifecycle.
@@ -30,6 +34,7 @@ docker run -d --rm --name "${NAME}" \
   -p 127.0.0.1:6080:6080 \
   -p 127.0.0.1:9100:9000 \
   -v lfpa-whisper-cache:/home/agent/.cache \
+  -v "${ARTIFACTS_DIR}":/home/agent/output \
   "${IMAGE}"
 
 echo "==> validating CDP (real browser reachable)"

@@ -54,8 +54,8 @@ RUN python3 -m venv /opt/whisper-venv \
 # `.cache` is pre-created and owned by agent so a named volume mounted there
 # inherits agent ownership on first init (persists the Whisper model download).
 RUN useradd --create-home --shell /bin/bash agent \
-    && mkdir -p "${PROFILE_DIR}" /home/agent/.cache \
-    && chown -R agent:agent /data /home/agent/.cache
+    && mkdir -p "${PROFILE_DIR}" /home/agent/.cache /home/agent/output \
+    && chown -R agent:agent /data /home/agent/.cache /home/agent/output
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY whisper_server.py /usr/local/bin/whisper_server.py

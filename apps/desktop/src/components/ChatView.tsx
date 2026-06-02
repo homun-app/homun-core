@@ -9,7 +9,9 @@ import {
   ChevronRight,
   Copy,
   Clock3,
+  Download,
   FileText,
+  FolderOpen,
   Globe2,
   HardDrive,
   ListTodo,
@@ -2356,6 +2358,91 @@ function parseActivitySteps(text: string): string[] {
   );
 }
 
+// Generated-file artifacts surfaced by the gateway (skill outputs in $OUTPUT_DIR).
+const ARTIFACT_RE = /‹‹ARTIFACT››([\s\S]*?)‹‹\/ARTIFACT››/g;
+
+interface ParsedArtifact {
+  name: string;
+  thread: string;
+  size: number;
+}
+
+function parseArtifacts(text: string): ParsedArtifact[] {
+  if (!text.includes("‹‹ARTIFACT››")) return [];
+  const seen = new Set<string>();
+  const out: ParsedArtifact[] = [];
+  for (const match of text.matchAll(ARTIFACT_RE)) {
+    try {
+      const parsed = JSON.parse(match[1]) as ParsedArtifact;
+      if (parsed?.name && !seen.has(parsed.name)) {
+        seen.add(parsed.name);
+        out.push(parsed);
+      }
+    } catch {
+      /* malformed marker → skip */
+    }
+  }
+  return out;
+}
+
+/** Downloadable cards for files a skill generated (xlsx/pdf/…). */
+function MessageArtifacts({ text }: { text: string }) {
+  const artifacts = useMemo(() => parseArtifacts(text), [text]);
+  if (artifacts.length === 0) return null;
+
+  async function download(artifact: ParsedArtifact) {
+    try {
+      const blob = await coreBridge.downloadArtifact(artifact.thread, artifact.name);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = artifact.name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch {
+      /* download failed → ignore */
+    }
+  }
+
+  async function openFolder(artifact: ParsedArtifact) {
+    try {
+      const path = await coreBridge.artifactFolder(artifact.thread);
+      await coreBridge.revealPath(path);
+    } catch {
+      /* reveal unavailable → ignore */
+    }
+  }
+
+  return (
+    <div className="msg-artifacts" aria-label="File generati">
+      {artifacts.map((artifact, index) => (
+        <div className="artifact-card" key={`${artifact.name}-${index}`}>
+          <FileText size={18} className="artifact-icon" />
+          <div className="artifact-meta">
+            <strong>{artifact.name}</strong>
+            <small>{formatFileSize(artifact.size)}</small>
+          </div>
+          <button type="button" onClick={() => void download(artifact)} title="Scarica">
+            <Download size={14} />
+            <span>Scarica</span>
+          </button>
+          <button
+            type="button"
+            className="artifact-folder"
+            onClick={() => void openFolder(artifact)}
+            aria-label="Apri cartella"
+            title="Apri cartella"
+          >
+            <FolderOpen size={14} />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** Compact, collapsible trace of the tool steps the assistant ran (browse, skill,
  *  sandbox, connected tools). Always collapsed by default: while streaming, the
  *  collapsed line reflects the latest action in progress; once done it shows the
@@ -2444,6 +2531,7 @@ function AssistantMessageBody({
     <>
       <MessageActivity text={text} />
       {readable && <RichMessage text={readable} streaming={streaming} />}
+      {!streaming && <MessageArtifacts text={text} />}
       {doneTool && !streaming && (
         <div className="cmp-confirm done">
           <ShieldCheck size={15} />

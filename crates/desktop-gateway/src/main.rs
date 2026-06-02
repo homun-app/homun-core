@@ -595,6 +595,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/chat/stream_resume/{request_id}", get(resume_stream))
         .route("/api/chat/improve_prompt", post(improve_prompt))
         .route("/api/chat/transcribe", post(transcribe_audio))
+        .route("/api/artifacts/file", get(download_artifact))
+        .route("/api/artifacts/path", get(artifact_folder_path))
         .route("/api/chat/suggestions", post(chat_suggestions))
         .route("/api/chat/threads/{thread_id}/autotitle", post(autotitle_chat_thread))
         .route(
@@ -798,6 +800,9 @@ async fn delete_chat_thread(
     let st = state.clone();
     let tid = thread_id.clone();
     let _ = tokio::task::spawn_blocking(move || close_thread_browser_session(&st, &tid)).await;
+    // Also drop the thread's generated artifacts so they don't fill the disk.
+    let artifacts = sandbox::artifacts_dir().join(artifact_thread_slug(Some(&thread_id)));
+    let _ = tokio::task::spawn_blocking(move || std::fs::remove_dir_all(&artifacts)).await;
     Ok(Json(snapshot))
 }
 
@@ -1897,7 +1902,10 @@ non dà un totale affidabile, dichiara che è una stima."
             "{system}\n\nSKILL INSTALLATE — quando la richiesta corrisponde alla descrizione di una \
 di queste, PREFERISCILA al browser: chiama `use_skill` con il suo id per ricevere le istruzioni \
 complete (SKILL.md). Poi ESEGUI i comandi che la skill indica (es. `curl …`, `python …`) con lo \
-strumento `run_in_sandbox`, che li lancia nel computer contenuto, e usa l'output per rispondere.\n{lines}"
+strumento `run_in_sandbox`, che li lancia nel computer contenuto, e usa l'output per rispondere.\n\
+FILE GENERATI: se una skill o un comando produce file (xlsx, pdf, csv, immagini, …), SALVALI nella \
+cartella d'ambiente `$OUTPUT_DIR` (es. `... --output \"$OUTPUT_DIR/report.xlsx\"`): i file lì \
+diventano automaticamente artifact scaricabili dall'utente.\n{lines}"
         )
     };
     let system = system.as_str();
@@ -2166,7 +2174,16 @@ disponibili (per dati dal web usa browse_web sull'URL indicato):\n\n{}",
                                 .await;
                                 // Publish the command to the computer terminal panel.
                                 sandbox_begin(command.clone());
-                                let cmd = command.clone();
+                                // Per-conversation output dir: skills save generated
+                                // files to $OUTPUT_DIR, bind-mounted to the host so
+                                // they become downloadable artifacts.
+                                let thread_slug = artifact_thread_slug(thread_id.as_deref());
+                                let container_out = sandbox::container_output_dir(&thread_slug);
+                                let host_out = sandbox::artifacts_dir().join(&thread_slug);
+                                let run_started = std::time::SystemTime::now();
+                                let cmd = format!(
+                                    "export OUTPUT_DIR='{container_out}'; mkdir -p \"$OUTPUT_DIR\"; {command}"
+                                );
                                 // The model may omit skill_id; derive it from the
                                 // command's `/home/agent/skills/<id>/…` path so the
                                 // skill's files are always synced before running.
@@ -2180,7 +2197,7 @@ disponibili (per dati dal web usa browse_web sull'URL indicato):\n\n{}",
                                     sandbox::run_command(&cmd, sid.as_deref())
                                 })
                                 .await;
-                                let (panel_output, model_output) = match outcome {
+                                let (panel_output, mut model_output) = match outcome {
                                     Ok(Ok(out)) => {
                                         if out.trim().is_empty() {
                                             ("(nessun output)".to_string(), "(nessun output)".to_string())
@@ -2198,6 +2215,26 @@ disponibili (per dati dal web usa browse_web sull'URL indicato):\n\n{}",
                                     }
                                 };
                                 sandbox_end(panel_output);
+                                // Surface files the command produced in the output dir
+                                // as downloadable artifacts (marker → card in chat).
+                                for (file_name, size) in detect_new_artifacts(&host_out, run_started) {
+                                    let marker = serde_json::json!({
+                                        "name": file_name,
+                                        "thread": thread_slug,
+                                        "size": size,
+                                    });
+                                    let _ = emit_stream_event(
+                                        &tx,
+                                        GenerateStreamEvent::Delta {
+                                            text: format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››"),
+                                        },
+                                    )
+                                    .await;
+                                    model_output.push_str(&format!(
+                                        "\n[file generato: {} in $OUTPUT_DIR]",
+                                        marker.get("name").and_then(|v| v.as_str()).unwrap_or("")
+                                    ));
+                                }
                                 model_output
                             }
                         }
@@ -2694,6 +2731,143 @@ fn browser_step_label(iteration: &local_first_browser_automation::BrowserLoopIte
 /// runs the observe-act loop synchronously (in contained-computer mode it drives
 /// the real browser in the container, visible via noVNC), returning the loop's
 /// human-facing result for the model to read.
+#[derive(Debug, Deserialize)]
+struct ArtifactRef {
+    thread: String,
+    name: String,
+}
+
+fn artifact_mime(name: &str) -> &'static str {
+    let lower = name.to_lowercase();
+    let ext = lower.rsplit('.').next().unwrap_or("");
+    match ext {
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "xls" => "application/vnd.ms-excel",
+        "csv" => "text/csv",
+        "pdf" => "application/pdf",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "json" => "application/json",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "txt" | "md" => "text/plain",
+        "zip" => "application/zip",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Streams a generated artifact for download, scoped to the per-thread output dir
+/// (anti path-traversal: simple filename within the thread folder only).
+async fn download_artifact(Query(reference): Query<ArtifactRef>) -> Result<Response, GatewayError> {
+    let forbidden = reference.name.contains('/')
+        || reference.name.contains('\\')
+        || reference.name.contains("..")
+        || reference.thread.contains('/')
+        || reference.thread.contains("..");
+    if forbidden {
+        return Err(GatewayError {
+            status: StatusCode::FORBIDDEN,
+            code: "bad_artifact_path",
+            message: "Percorso non valido.".to_string(),
+        });
+    }
+    let dir = sandbox::artifacts_dir().join(&reference.thread);
+    let path = dir.join(&reference.name);
+    if !path_within(&dir, &path) {
+        return Err(GatewayError {
+            status: StatusCode::FORBIDDEN,
+            code: "artifact_outside_dir",
+            message: "Percorso fuori dalla cartella artifact.".to_string(),
+        });
+    }
+    let bytes = tokio::task::spawn_blocking(move || std::fs::read(&path))
+        .await
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "artifact_read",
+            message: e.to_string(),
+        })?
+        .map_err(|e| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "artifact_read",
+            message: e.to_string(),
+        })?;
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", artifact_mime(&reference.name))
+        .header(
+            "content-disposition",
+            format!("attachment; filename=\"{}\"", reference.name.replace('"', "")),
+        )
+        .body(Body::from(bytes))
+        .expect("valid artifact response"))
+}
+
+#[derive(Debug, Deserialize)]
+struct ArtifactFolderQuery {
+    #[serde(default)]
+    thread: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ArtifactFolderResponse {
+    path: String,
+}
+
+/// Host filesystem path of the artifacts folder (optionally a thread subfolder),
+/// so the desktop shell can reveal it in the Finder.
+async fn artifact_folder_path(Query(query): Query<ArtifactFolderQuery>) -> Json<ArtifactFolderResponse> {
+    let mut path = sandbox::artifacts_dir();
+    if let Some(thread) = query.thread.as_ref().filter(|t| !t.trim().is_empty()) {
+        path = path.join(artifact_thread_slug(Some(thread)));
+    }
+    Json(ArtifactFolderResponse { path: path.to_string_lossy().to_string() })
+}
+
+/// Filesystem-safe per-conversation slug for the artifacts subfolder.
+fn artifact_thread_slug(thread: Option<&str>) -> String {
+    let raw = thread.unwrap_or("default").trim();
+    let slug: String = raw
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .collect();
+    if slug.is_empty() {
+        "default".to_string()
+    } else {
+        slug
+    }
+}
+
+/// Lists files created/modified in the output dir since a run started — the
+/// generated artifacts to surface as downloadable cards.
+fn detect_new_artifacts(dir: &std::path::Path, since: std::time::SystemTime) -> Vec<(String, u64)> {
+    let mut out: Vec<(String, u64)> = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return out;
+    };
+    let cutoff = since
+        .checked_sub(std::time::Duration::from_secs(2))
+        .unwrap_or(since);
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Ok(meta) = entry.metadata() else { continue };
+        let recent = meta.modified().map(|m| m >= cutoff).unwrap_or(true);
+        if !recent {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') {
+            continue;
+        }
+        out.push((name, meta.len()));
+    }
+    out.sort();
+    out
+}
+
 /// Extracts http(s) URLs from a browser tool result (manual scan, no regex dep),
 /// trimming trailing punctuation. Used to build the deterministic "Fonti" footer.
 fn extract_source_urls(text: &str) -> Vec<String> {

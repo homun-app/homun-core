@@ -2,6 +2,7 @@ interface LocalFirstDesktopConfig {
   gatewayUrl?: string;
   gatewayToken?: string;
   pickFolder?: () => Promise<string | null>;
+  revealPath?: (path: string) => Promise<boolean>;
 }
 
 declare global {
@@ -48,5 +49,16 @@ export async function pickWorkspaceFolder(): Promise<string | null> {
     return await pick();
   } catch {
     return null;
+  }
+}
+
+/** Reveals a folder/file in the OS file manager (no-op outside Electron). */
+export async function revealWorkspacePath(path: string): Promise<boolean> {
+  const reveal = desktopConfig?.revealPath;
+  if (!reveal) return false;
+  try {
+    return await reveal(path);
+  } catch {
+    return false;
   }
 }

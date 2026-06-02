@@ -5,4 +5,6 @@ contextBridge.exposeInMainWorld("localFirstDesktop", {
   gatewayToken: process.env.LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN ?? "",
   // Opens a native directory picker; resolves to the chosen path or null.
   pickFolder: () => ipcRenderer.invoke("lfpa:pick-folder"),
+  // Reveals a folder/file in the OS file manager (artifacts "Open folder").
+  revealPath: (path) => ipcRenderer.invoke("lfpa:reveal-path", path),
 });
