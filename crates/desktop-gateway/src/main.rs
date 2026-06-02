@@ -1730,6 +1730,27 @@ fn run_in_sandbox_tool_schema() -> serde_json::Value {
     })
 }
 
+/// Tool for the model to author a document/code artifact directly (no skill):
+/// writes the content to the conversation's output area and surfaces it as an
+/// artifact (card + workspace panel).
+fn create_artifact_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "create_artifact",
+            "description": "Crea un file 'artifact' (documento, codice, markdown, csv, html, json, testo) scrivendone il contenuto completo. Il file appare come artifact scaricabile e anteprimabile nella chat (pannello File). Usalo quando l'utente chiede di PRODURRE un documento o del codice da consegnare, invece di incollarlo solo nel messaggio.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "Nome file con estensione, es. \"report.md\", \"script.py\", \"dati.csv\"" },
+                    "content": { "type": "string", "description": "Contenuto testuale COMPLETO del file" }
+                },
+                "required": ["name", "content"]
+            }
+        }
+    })
+}
+
 /// Tool to deliver a generated artifact to a user-authorized destination folder.
 /// The gateway performs the copy host-side, scoped to granted destinations only.
 fn save_artifact_tool_schema(destinations: &[ArtifactDestination]) -> serde_json::Value {
@@ -1966,7 +1987,7 @@ salvare/esportare un file in una cartella, chiama save_artifact(file, destinatio
     };
     let system = system.as_str();
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-    let mut base_tools = vec![browse_web_tool_schema()];
+    let mut base_tools = vec![browse_web_tool_schema(), create_artifact_tool_schema()];
     if has_composio {
         base_tools.push(find_connected_tools_schema());
     }
@@ -2309,6 +2330,46 @@ disponibili (per dati dal web usa browse_web sull'URL indicato):\n\n{}",
                                 }
                                 model_output
                             }
+                        }
+                    } else if name == "create_artifact" {
+                        // Model-authored document/code → file artifact (host-side).
+                        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
+                            .unwrap_or_else(|_| serde_json::json!({}));
+                        let fname = parsed.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let content =
+                            parsed.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let thread_slug = artifact_thread_slug(thread_id.as_deref());
+                        let _ = emit_stream_event(
+                            &tx,
+                            GenerateStreamEvent::Delta {
+                                text: format!("‹‹ACT››📝 Creo il file {fname}‹‹/ACT››"),
+                            },
+                        )
+                        .await;
+                        let fname_w = fname.clone();
+                        let slug_w = thread_slug.clone();
+                        let result = tokio::task::spawn_blocking(move || {
+                            write_text_artifact(&slug_w, &fname_w, &content)
+                        })
+                        .await
+                        .unwrap_or_else(|e| Err(format!("Errore: {e}")));
+                        match result {
+                            Ok(size) => {
+                                let marker = serde_json::json!({
+                                    "name": fname,
+                                    "thread": thread_slug,
+                                    "size": size,
+                                });
+                                let _ = emit_stream_event(
+                                    &tx,
+                                    GenerateStreamEvent::Delta {
+                                        text: format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››"),
+                                    },
+                                )
+                                .await;
+                                format!("Artifact «{fname}» creato.")
+                            }
+                            Err(error) => error,
                         }
                     } else if name == "save_artifact" {
                         // Deliver a generated artifact to an authorized destination
@@ -3125,6 +3186,27 @@ async fn clear_artifacts() -> Json<serde_json::Value> {
         }
     }
     ok_json()
+}
+
+/// Writes a model-authored text artifact to the conversation's managed output
+/// dir (so it stays downloadable/previewable) and, if a project is active, also
+/// to the project folder. Returns the byte size on success.
+fn write_text_artifact(thread_slug: &str, name: &str, content: &str) -> Result<u64, String> {
+    if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
+        return Err("Nome file non valido.".to_string());
+    }
+    let managed_dir = sandbox::artifacts_dir().join(thread_slug);
+    if let Err(error) = fs::create_dir_all(&managed_dir) {
+        return Err(format!("Impossibile creare la cartella artifact: {error}"));
+    }
+    let managed_path = managed_dir.join(name);
+    if let Err(error) = fs::write(&managed_path, content) {
+        return Err(format!("Scrittura artifact non riuscita: {error}"));
+    }
+    if let Some(folder) = active_workspace_folder() {
+        let _ = fs::copy(&managed_path, std::path::Path::new(&folder).join(name));
+    }
+    Ok(content.len() as u64)
 }
 
 /// Copies an artifact to an AUTHORIZED destination folder (host-side). Enforces:
