@@ -69,8 +69,9 @@ use local_first_local_computer_session::{
 };
 use local_first_local_computer_session::{LocalComputerReadModel, LocalComputerSessionStore};
 use local_first_memory::{
-    DataSensitivity as MemoryDataSensitivity, MemoryAccessRequest, MemoryCreateRequest,
-    MemoryDashboard, MemoryExtraction, MemoryFacade, MemoryLifecycleRequest, MemoryRef, MemoryRefKind,
+    DataSensitivity as MemoryDataSensitivity, ExtractedMemory, MemoryAccessRequest,
+    MemoryCreateRequest, MemoryDashboard, MemoryExtraction, MemoryFacade, MemoryLifecycleRequest,
+    MemoryRef, MemoryRefKind,
     MemorySearchRequest, MemoryStatus, MemoryUiReadModel, MemoryWikiProjection, PrivacyDomain,
     SQLiteMemoryStore, UserId as MemoryUserId, WikiFileStore, WikiPage,
     WorkspaceId as MemoryWorkspaceId, PERSONAL_WORKSPACE,
@@ -1159,7 +1160,9 @@ fn is_salient_exchange(user_message: &str) -> bool {
 /// sensitive (PII like a codice fiscale → secret) or uncertain stays a candidate
 /// for the user to confirm later.
 fn is_auto_confirmable(memory_type: &str, sensitivity: MemoryDataSensitivity, confidence: f64) -> bool {
-    matches!(memory_type, "preference" | "fact")
+    // Decisions are factual records of choices made during work (low privacy risk),
+    // so they auto-confirm like facts/preferences when confident + non-sensitive.
+    matches!(memory_type, "preference" | "fact" | "decision")
         && sensitivity <= MemoryDataSensitivity::Internal
         && confidence >= 0.8
 }
@@ -1179,10 +1182,63 @@ fn normalize_for_dedup(text: &str) -> String {
     text.trim().to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// M2: after a chat turn, mine the exchange for durable PERSONAL facts/preferences
-/// and write them to the personal scope — auto-confirming only low-risk ones.
-/// Fire-and-forget: best-effort, never blocks the response, swallows all errors.
-/// (Decisions + graph edges land in M3, where the graph makes them useful.)
+/// Persists a batch of extracted memories into ONE scope (workspace): dedups
+/// against what's already there, applies them as candidates, then auto-confirms
+/// the low-risk ones. Shared by the personal and project scopes.
+fn persist_scope_memories(
+    facade: &MemoryFacade,
+    user_id: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+    mut memories: Vec<ExtractedMemory>,
+) {
+    if memories.is_empty() {
+        return;
+    }
+    let dedup_request = MemoryAccessRequest {
+        actor_id: "memory-extractor".to_string(),
+        user_id: user_id.clone(),
+        workspace_id: workspace.clone(),
+        purpose: "dedup".to_string(),
+        allowed_domains: vec![PrivacyDomain::new("personal"), PrivacyDomain::new("general")],
+        max_sensitivity: MemoryDataSensitivity::Secret,
+        allow_raw_payload: true,
+        allow_export: true,
+        broad_query: false,
+    };
+    let existing: std::collections::HashSet<String> = facade
+        .context_pack(&dedup_request)
+        .map(|pack| pack.items.into_iter().map(|i| normalize_for_dedup(&i.summary)).collect())
+        .unwrap_or_default();
+    memories.retain(|m| !existing.contains(&normalize_for_dedup(&m.text)));
+    if memories.is_empty() {
+        return;
+    }
+    let kept = memories.clone();
+    let extraction = MemoryExtraction {
+        memories,
+        entities: Vec::new(),
+        relations: Vec::new(),
+    };
+    let Ok(summary) = facade.apply_extraction(user_id, workspace, extraction) else {
+        return;
+    };
+    let lifecycle = MemoryLifecycleRequest {
+        actor_id: "memory-extractor".to_string(),
+        user_id: user_id.clone(),
+        workspace_id: workspace.clone(),
+        purpose: "auto_extract".to_string(),
+    };
+    for (memory, reference) in kept.iter().zip(summary.memory_refs.iter()) {
+        if is_auto_confirmable(&memory.memory_type, memory.sensitivity, memory.confidence) {
+            let _ = facade.confirm_memory(&lifecycle, reference, "auto-confirmed (low risk)");
+        }
+    }
+}
+
+/// M2/M3: after a chat turn, mine the exchange for durable facts, preferences and
+/// DECISIONS (with the why), routing each to its scope (personal vs active
+/// project) and auto-confirming the low-risk ones. Fire-and-forget: best-effort,
+/// never blocks the response, swallows all errors.
 async fn learn_from_exchange(state: &AppState, user_message: &str, assistant_message: &str) {
     if !is_salient_exchange(user_message) {
         return;
@@ -1190,17 +1246,22 @@ async fn learn_from_exchange(state: &AppState, user_message: &str, assistant_mes
     let Some((base_url, model, api_key)) = extractor_openai_config() else {
         return;
     };
-    let system = "Sei un estrattore di MEMORIA. Dall'ultimo scambio estrai SOLO fatti e \
-preferenze DUREVOLI sull'UTENTE (chi è, persone della sua vita, come preferisce lavorare/le \
-risposte), NON il contenuto transitorio del compito, NON fatti generali del mondo, NON ciò che \
-ha detto l'assistente. Rispondi SOLO con JSON valido in questo schema, niente altro:\n\
-{\"memories\":[{\"memory_type\":\"fact|preference\",\"text\":\"frase breve in 3a persona nella \
-lingua dell'utente\",\"sensitivity\":\"internal|private|confidential|secret\",\"confidence\":0.0-1.0,\
-\"privacy_domain\":\"personal\"}]}\n\
-REGOLE sensitivity: dati identificativi/PII (codice fiscale, indirizzo, salute, documenti) = \
-\"secret\"; fatti personali normali (figli, partner, città) = \"private\"; preferenze di lavoro = \
-\"internal\". confidence alta (>=0.8) solo se esplicito e inequivocabile. Se non c'è nulla da \
-ricordare, restituisci {\"memories\":[]}.";
+    let system = "Sei un estrattore di MEMORIA. Dall'ultimo scambio estrai conoscenza DUREVOLE e \
+RIUTILIZZABILE: (1) fatti e preferenze sull'UTENTE (chi è, persone della sua vita, come preferisce \
+lavorare); (2) DECISIONI prese durante il lavoro (scelte tecniche o di progetto) con il PERCHÉ e le \
+alternative scartate. NON estrarre il contenuto transitorio del compito, NON fatti generali del \
+mondo, NON ciò che l'assistente ha detto come semplice risposta. Rispondi SOLO con JSON valido, \
+niente altro:\n\
+{\"memories\":[{\"memory_type\":\"fact|preference|decision\",\"text\":\"frase breve in 3a persona \
+nella lingua dell'utente\",\"sensitivity\":\"internal|private|confidential|secret\",\"confidence\":0.0-1.0,\
+\"metadata\":{\"scope\":\"personal|project\",\"decision\":{\"rationale\":\"il perché\",\
+\"alternatives\":[{\"option\":\"alternativa\",\"rejected_because\":\"motivo\"}]}}}]}\n\
+REGOLE: scope \"personal\" = vale ovunque (preferenze, persone, dati personali); scope \"project\" \
+= specifico del progetto/lavoro corrente (decisioni tecniche, file, scelte). Per memory_type \
+\"decision\" metadata.decision è OBBLIGATORIO (rationale, e alternatives se citate) e lo scope è di \
+norma \"project\". sensitivity: PII (codice fiscale, indirizzo, salute, documenti) = \"secret\"; \
+fatti personali (figli, partner, città) = \"private\"; preferenze e decisioni = \"internal\". \
+confidence >=0.8 solo se esplicito e inequivocabile. Se non c'è nulla da ricordare: {\"memories\":[]}.";
     let payload = serde_json::json!({
         "model": model,
         "temperature": 0.0,
@@ -1241,63 +1302,54 @@ ricordare, restituisci {\"memories\":[]}.";
     let Ok(mut extraction) = serde_json::from_str::<MemoryExtraction>(strip_json_fences(content)) else {
         return;
     };
-    // v1: personal facts/preferences only; graph (entities/relations) is M3.
+    // Keep durable knowledge only: facts, preferences, decisions. (Graph
+    // entities/relations are M3b.)
     extraction.entities.clear();
     extraction.relations.clear();
-    extraction.memories.retain(|m| matches!(m.memory_type.as_str(), "fact" | "preference"));
-    if extraction.memories.is_empty() {
-        return;
-    }
-
-    let user_id = gateway_memory_user_id();
-    let personal = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
-    let Ok(facade) = lock_memory_facade(state) else {
-        return;
-    };
-    // Dedup against what's already stored personally (any sensitivity, for matching).
-    let dedup_request = MemoryAccessRequest {
-        actor_id: "memory-extractor".to_string(),
-        user_id: user_id.clone(),
-        workspace_id: personal.clone(),
-        purpose: "dedup".to_string(),
-        allowed_domains: vec![PrivacyDomain::new("personal"), PrivacyDomain::new("general")],
-        max_sensitivity: MemoryDataSensitivity::Secret,
-        allow_raw_payload: true,
-        allow_export: true,
-        broad_query: false,
-    };
-    let existing: std::collections::HashSet<String> = facade
-        .context_pack(&dedup_request)
-        .map(|pack| pack.items.into_iter().map(|i| normalize_for_dedup(&i.summary)).collect())
-        .unwrap_or_default();
     extraction
         .memories
-        .retain(|m| !existing.contains(&normalize_for_dedup(&m.text)));
+        .retain(|m| matches!(m.memory_type.as_str(), "fact" | "preference" | "decision"));
     if extraction.memories.is_empty() {
         return;
     }
-    // The model is unreliable about the privacy domain; pin it deterministically
-    // to "personal" so the read queries (profile injection + recall, which allow
-    // the "personal" domain) can actually find what we store. Sensitivity (which
-    // gates auto-confirm + injection) is still the model's call.
+    // The model is unreliable about the privacy DOMAIN; pin it to "personal" so the
+    // read queries (profile + recall) can find what we store. Sensitivity (gates
+    // auto-confirm + injection) and SCOPE (personal vs project) stay its call.
     for memory in &mut extraction.memories {
         memory.privacy_domain = PrivacyDomain::new("personal");
     }
 
-    let kept = extraction.memories.clone();
-    let Ok(summary) = facade.apply_extraction(&user_id, &personal, extraction) else {
+    let user_id = gateway_memory_user_id();
+    let active = gateway_memory_workspace_id();
+    let has_project = active.as_str() != PERSONAL_WORKSPACE;
+
+    // Route each memory to its scope: explicit metadata.scope wins; otherwise
+    // decisions default to the project, everything else to personal.
+    let mut personal_mems: Vec<ExtractedMemory> = Vec::new();
+    let mut project_mems: Vec<ExtractedMemory> = Vec::new();
+    for memory in extraction.memories {
+        let scope = memory.metadata.get("scope").and_then(|s| s.as_str()).unwrap_or("");
+        let to_project = has_project
+            && (scope == "project"
+                || (scope.is_empty() && memory.memory_type.as_str() == "decision"));
+        if to_project {
+            project_mems.push(memory);
+        } else {
+            personal_mems.push(memory);
+        }
+    }
+
+    let Ok(facade) = lock_memory_facade(state) else {
         return;
     };
-    let lifecycle = MemoryLifecycleRequest {
-        actor_id: "memory-extractor".to_string(),
-        user_id,
-        workspace_id: personal,
-        purpose: "auto_extract".to_string(),
-    };
-    for (memory, reference) in kept.iter().zip(summary.memory_refs.iter()) {
-        if is_auto_confirmable(&memory.memory_type, memory.sensitivity, memory.confidence) {
-            let _ = facade.confirm_memory(&lifecycle, reference, "auto-confirmed (low risk)");
-        }
+    persist_scope_memories(
+        &facade,
+        &user_id,
+        &MemoryWorkspaceId::new(PERSONAL_WORKSPACE),
+        personal_mems,
+    );
+    if has_project {
+        persist_scope_memories(&facade, &user_id, &active, project_mems);
     }
 }
 
@@ -12521,8 +12573,10 @@ mod tests {
         assert!(!is_auto_confirmable("fact", MemoryDataSensitivity::Private, 0.99));
         // low confidence stays candidate
         assert!(!is_auto_confirmable("preference", MemoryDataSensitivity::Internal, 0.5));
-        // decisions are not auto-confirmed here
-        assert!(!is_auto_confirmable("decision", MemoryDataSensitivity::Internal, 0.99));
+        // decisions are factual records of work → auto-confirm when confident + low-risk
+        assert!(is_auto_confirmable("decision", MemoryDataSensitivity::Internal, 0.9));
+        // but a sensitive decision still waits for confirmation
+        assert!(!is_auto_confirmable("decision", MemoryDataSensitivity::Confidential, 0.99));
     }
 
     #[test]
