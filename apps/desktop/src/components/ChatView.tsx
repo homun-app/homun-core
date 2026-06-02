@@ -16,7 +16,9 @@ import {
   HardDrive,
   ListTodo,
   Loader2,
+  Maximize2,
   Mic,
+  Minimize2,
   MoreHorizontal,
   Paperclip,
   Pause,
@@ -2606,7 +2608,9 @@ function ArtifactsPanel({
   const [wrap, setWrap] = useState(false);
   const [showDiff, setShowDiff] = useState(false);
   const [diffData, setDiffData] = useState<{ oldText: string; newText: string } | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const urlRef = useRef<string | null>(null);
+  const showList = artifacts.length > 1;
 
   const selected = artifacts.find((a) => a.name === selectedName) ?? artifacts[0] ?? null;
 
@@ -2733,28 +2737,41 @@ function ArtifactsPanel({
   );
 
   return (
-    <aside className="artifacts-panel" aria-label="File del progetto">
+    <aside
+      className={`artifacts-panel${expanded ? " expanded" : ""}`}
+      aria-label="File del progetto"
+    >
       <header className="artifacts-panel-head">
         <strong>File del progetto</strong>
+        <button
+          type="button"
+          aria-label={expanded ? "Riduci" : "Schermo intero"}
+          title={expanded ? "Riduci" : "Schermo intero"}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+        </button>
         <button type="button" aria-label="Chiudi" onClick={onClose}>
           <X size={16} />
         </button>
       </header>
-      <div className="artifacts-panel-body">
-        <ul className="artifacts-list">
-          {artifacts.map((artifact) => (
-            <li key={artifact.name}>
-              <button
-                type="button"
-                className={selected?.name === artifact.name ? "active" : ""}
-                onClick={() => setSelectedName(artifact.name)}
-              >
-                <FileText size={14} />
-                <span>{artifact.name}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
+      <div className={`artifacts-panel-body${showList ? "" : " no-list"}`}>
+        {showList && (
+          <ul className="artifacts-list">
+            {artifacts.map((artifact) => (
+              <li key={artifact.name}>
+                <button
+                  type="button"
+                  className={selected?.name === artifact.name ? "active" : ""}
+                  onClick={() => setSelectedName(artifact.name)}
+                >
+                  <FileText size={14} />
+                  <span>{artifact.name}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
         <div className="artifacts-preview">
           {selected && (
             <div className="artifacts-preview-bar">
