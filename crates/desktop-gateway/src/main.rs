@@ -667,6 +667,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(workspaces_list).post(create_workspace),
         )
         .route("/api/workspaces/{workspace_id}/select", post(select_workspace))
+        .route("/api/workspaces/{workspace_id}/folder", post(set_workspace_folder))
         .route("/api/capabilities/mcp/connect", post(connect_mcp))
         .route("/api/capabilities/composio/connect", post(connect_composio))
         .route("/api/capabilities/composio/toolkits", get(composio_toolkits))
@@ -2273,9 +2274,19 @@ disponibili (per dati dal web usa browse_web sull'URL indicato):\n\n{}",
                                     }
                                 };
                                 sandbox_end(panel_output);
-                                // Surface files the command produced in the output dir
-                                // as downloadable artifacts (marker → card in chat).
+                                // Surface files the command produced as downloadable
+                                // artifacts (marker → card). If a PROJECT folder is
+                                // active, also copy them there — it's the project's
+                                // default folder for generated files.
+                                let project_folder = active_workspace_folder();
                                 for (file_name, size) in detect_new_artifacts(&host_out, run_started) {
+                                    let mut delivered_to: Option<String> = None;
+                                    if let Some(folder) = project_folder.as_ref() {
+                                        let dest = std::path::Path::new(folder).join(&file_name);
+                                        if std::fs::copy(host_out.join(&file_name), &dest).is_ok() {
+                                            delivered_to = Some(dest.to_string_lossy().to_string());
+                                        }
+                                    }
                                     let marker = serde_json::json!({
                                         "name": file_name,
                                         "thread": thread_slug,
@@ -2288,10 +2299,13 @@ disponibili (per dati dal web usa browse_web sull'URL indicato):\n\n{}",
                                         },
                                     )
                                     .await;
-                                    model_output.push_str(&format!(
-                                        "\n[file generato: {} in $OUTPUT_DIR]",
-                                        marker.get("name").and_then(|v| v.as_str()).unwrap_or("")
-                                    ));
+                                    match delivered_to {
+                                        Some(path) => model_output
+                                            .push_str(&format!("\n[file generato e salvato in {path}]")),
+                                        None => model_output.push_str(&format!(
+                                            "\n[file generato: {file_name} in $OUTPUT_DIR]"
+                                        )),
+                                    }
                                 }
                                 model_output
                             }
@@ -5769,6 +5783,13 @@ fn thread_folder(thread_id: &str) -> Option<String> {
     load_thread_folders().get(thread_id).cloned()
 }
 
+/// The folder @ should search for a thread: the active PROJECT folder takes
+/// precedence (a conversation in a project searches that project), falling back
+/// to a per-conversation linked folder for projectless chats.
+fn effective_thread_folder(thread_id: &str) -> Option<String> {
+    active_workspace_folder().or_else(|| thread_folder(thread_id))
+}
+
 /// True if a candidate path stays inside `root` after canonicalization (anti
 /// path-traversal): the user-linked folder is the only readable scope.
 fn path_within(root: &std::path::Path, candidate: &std::path::Path) -> bool {
@@ -5850,7 +5871,7 @@ struct SetThreadFolderRequest {
 }
 
 async fn get_thread_folder(Path(thread_id): Path<String>) -> Json<ThreadFolderResponse> {
-    Json(ThreadFolderResponse { path: thread_folder(&thread_id) })
+    Json(ThreadFolderResponse { path: effective_thread_folder(&thread_id) })
 }
 
 async fn set_thread_folder(
@@ -5898,7 +5919,7 @@ async fn search_thread_files(
     Path(thread_id): Path<String>,
     Query(query): Query<ThreadFilesQuery>,
 ) -> Result<Json<ThreadFilesResponse>, GatewayError> {
-    let Some(folder) = thread_folder(&thread_id) else {
+    let Some(folder) = effective_thread_folder(&thread_id) else {
         return Ok(Json(ThreadFilesResponse { files: Vec::new() }));
     };
     let root = PathBuf::from(folder);
@@ -5926,7 +5947,7 @@ async fn read_thread_file(
     Path(thread_id): Path<String>,
     Query(query): Query<ThreadFileQuery>,
 ) -> Result<Json<ThreadFileResponse>, GatewayError> {
-    let folder = thread_folder(&thread_id).ok_or_else(|| GatewayError {
+    let folder = effective_thread_folder(&thread_id).ok_or_else(|| GatewayError {
         status: StatusCode::BAD_REQUEST,
         code: "no_folder",
         message: "Nessuna cartella collegata.".to_string(),
@@ -11348,6 +11369,10 @@ fn gateway_capability_workspace_id() -> CapabilityWorkspaceId {
 struct WorkspaceRecord {
     id: String,
     name: String,
+    /// Project root folder: drives @ file search and generated-file output for
+    /// every conversation in this project. None for the legacy default project.
+    #[serde(default)]
+    folder: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -11365,6 +11390,9 @@ struct WorkspacesResponse {
 #[derive(Debug, Deserialize)]
 struct CreateWorkspaceRequest {
     name: String,
+    /// Project folder (required): becomes the @ search root + output dir.
+    #[serde(default)]
+    folder: Option<String>,
 }
 
 fn gateway_workspaces_path() -> Result<PathBuf, std::io::Error> {
@@ -11393,8 +11421,20 @@ fn load_workspaces_file() -> WorkspacesFile {
             workspaces: vec![WorkspaceRecord {
                 id: default_id,
                 name: "Predefinito".to_string(),
+                folder: None,
             }],
         })
+}
+
+/// The active project's root folder, if one is set.
+fn active_workspace_folder() -> Option<String> {
+    let active = active_workspace_id();
+    load_workspaces_file()
+        .workspaces
+        .into_iter()
+        .find(|w| w.id == active)
+        .and_then(|w| w.folder)
+        .filter(|f| !f.trim().is_empty())
 }
 
 fn save_workspaces_file(file: &WorkspacesFile) -> Result<(), std::io::Error> {
@@ -11463,9 +11503,66 @@ async fn create_workspace(
             message: "workspace name must not be empty".to_string(),
         });
     }
+    let folder = request.folder.as_ref().map(|f| f.trim()).filter(|f| !f.is_empty());
+    let Some(folder) = folder else {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "workspace_folder_required",
+            message: "Scegli una cartella per il progetto.".to_string(),
+        });
+    };
+    if !PathBuf::from(folder).is_dir() {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "workspace_folder_not_found",
+            message: "La cartella del progetto non esiste.".to_string(),
+        });
+    }
     let mut file = load_workspaces_file();
     let id = format!("workspace_{}", uuid::Uuid::new_v4().simple());
-    file.workspaces.push(WorkspaceRecord { id, name });
+    file.workspaces.push(WorkspaceRecord {
+        id,
+        name,
+        folder: Some(folder.to_string()),
+    });
+    save_workspaces_file(&file).map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "workspaces_write_failed",
+        message: error.to_string(),
+    })?;
+    Ok(Json(WorkspacesResponse {
+        active_workspace_id: file.active.clone(),
+        workspaces: file.workspaces,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+struct SetWorkspaceFolderRequest {
+    folder: String,
+}
+
+/// Sets (or changes) a project's folder — also for the legacy default project.
+async fn set_workspace_folder(
+    Path(workspace_id): Path<String>,
+    Json(request): Json<SetWorkspaceFolderRequest>,
+) -> Result<Json<WorkspacesResponse>, GatewayError> {
+    let folder = request.folder.trim().to_string();
+    if !folder.is_empty() && !PathBuf::from(&folder).is_dir() {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "workspace_folder_not_found",
+            message: "La cartella non esiste.".to_string(),
+        });
+    }
+    let mut file = load_workspaces_file();
+    let Some(workspace) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) else {
+        return Err(GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "workspace_not_found",
+            message: format!("workspace not found: {workspace_id}"),
+        });
+    };
+    workspace.folder = if folder.is_empty() { None } else { Some(folder) };
     save_workspaces_file(&file).map_err(|error| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "workspaces_write_failed",

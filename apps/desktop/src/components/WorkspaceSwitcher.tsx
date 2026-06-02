@@ -71,10 +71,17 @@ export function WorkspaceSwitcher() {
   async function handleCreate() {
     const name = newName.trim();
     if (!name) return;
-    setBusy(true);
     setError(null);
+    // A project is tied to a folder: pick it before creating (drives @ search
+    // and where generated files land).
+    const folder = await coreBridge.pickFolder();
+    if (!folder) {
+      setError("Scegli una cartella per il progetto.");
+      return;
+    }
+    setBusy(true);
     try {
-      const snap = await coreBridge.createWorkspace(name);
+      const snap = await coreBridge.createWorkspace(name, folder);
       const created = snap.workspaces.find((w) => w.name === name);
       if (created) {
         await coreBridge.selectWorkspace(created.id);
