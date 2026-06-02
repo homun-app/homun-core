@@ -313,6 +313,7 @@ export interface ActiveModelInfo {
 export interface WorkspaceRecord {
   id: string;
   name: string;
+  folder?: string | null;
 }
 
 export interface WorkspacesSnapshot {
@@ -798,8 +799,21 @@ async function electronWorkspaces(): Promise<WorkspacesSnapshot> {
   return gatewayGetJson<WorkspacesSnapshot>("/api/workspaces");
 }
 
-async function electronCreateWorkspace(name: string): Promise<WorkspacesSnapshot> {
-  return gatewayPostJson<WorkspacesSnapshot>("/api/workspaces", { name });
+async function electronCreateWorkspace(
+  name: string,
+  folder: string,
+): Promise<WorkspacesSnapshot> {
+  return gatewayPostJson<WorkspacesSnapshot>("/api/workspaces", { name, folder });
+}
+
+async function electronSetWorkspaceFolder(
+  id: string,
+  folder: string,
+): Promise<WorkspacesSnapshot> {
+  return gatewayPostJson<WorkspacesSnapshot>(
+    `/api/workspaces/${encodeURIComponent(id)}/folder`,
+    { folder },
+  );
 }
 
 async function electronSelectWorkspace(id: string): Promise<WorkspacesSnapshot> {
@@ -1059,7 +1073,8 @@ export const coreBridge = {
   systemStatus: () => electronSystemStatus(),
   closeAllBrowsers: () => electronCloseAllBrowsers(),
   workspaces: () => electronWorkspaces(),
-  createWorkspace: (name: string) => electronCreateWorkspace(name),
+  createWorkspace: (name: string, folder: string) => electronCreateWorkspace(name, folder),
+  setWorkspaceFolder: (id: string, folder: string) => electronSetWorkspaceFolder(id, folder),
   selectWorkspace: (id: string) => electronSelectWorkspace(id),
   mcpConnect: (input: {
     name: string;
