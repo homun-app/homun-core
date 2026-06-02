@@ -2408,6 +2408,8 @@ interface ParsedArtifact {
   name: string;
   thread: string;
   size: number;
+  /** True when this emission overwrote an existing file (a new version). */
+  updated?: boolean;
 }
 
 function parseArtifacts(text: string): ParsedArtifact[] {
@@ -2477,7 +2479,10 @@ function MessageArtifacts({
               title="Apri nel pannello"
             >
               <strong>{artifact.name}</strong>
-              <small>{formatFileSize(artifact.size)}</small>
+              <small>
+                {artifact.updated && <span className="artifact-updated">Modificato</span>}
+                {formatFileSize(artifact.size)}
+              </small>
             </button>
             <button
               type="button"
@@ -2544,14 +2549,23 @@ async function buildArtifactPreview(
   return { kind: "binary", ext };
 }
 
-/** Inline, scrollable preview of an artifact shown under its card (Claude Code's
- *  "expand the document in the list" affordance). */
+/** Inline, scrollable preview of an artifact under its card. For an UPDATED file
+ *  it defaults to the DIFF vs the previous version (with a File/Diff toggle), so
+ *  a modification shows the change right in the chat. */
 function InlineArtifactPreview({ artifact }: { artifact: ParsedArtifact }) {
   const [preview, setPreview] = useState<ArtifactPreview | null>(null);
+  const [diff, setDiff] = useState<{ oldText: string; newText: string } | null>(null);
+  const [mode, setMode] = useState<"diff" | "file">(artifact.updated ? "diff" : "file");
   const urlRef = useRef<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     void (async () => {
+      let count = 0;
+      try {
+        count = await coreBridge.artifactVersions(artifact.thread, artifact.name);
+      } catch {
+        /* no versions */
+      }
       try {
         const next = await buildArtifactPreview(artifact);
         if (cancelled) {
@@ -2564,6 +2578,19 @@ function InlineArtifactPreview({ artifact }: { artifact: ParsedArtifact }) {
       } catch {
         if (!cancelled) setPreview({ kind: "error", ext: artifactExt(artifact.name) });
       }
+      if (count > 0) {
+        try {
+          const newBlob = await coreBridge.downloadArtifact(artifact.thread, artifact.name);
+          const oldBlob = await coreBridge.downloadArtifact(artifact.thread, artifact.name, count - 1);
+          const [newText, oldText] = await Promise.all([newBlob.text(), oldBlob.text()]);
+          if (!cancelled) setDiff({ oldText, newText });
+        } catch {
+          /* no diff */
+        }
+      } else if (!cancelled) {
+        setDiff(null);
+        setMode("file");
+      }
     })();
     return () => {
       cancelled = true;
@@ -2573,9 +2600,47 @@ function InlineArtifactPreview({ artifact }: { artifact: ParsedArtifact }) {
       }
     };
   }, [artifact]);
+
+  const counts = diff ? diffStats(diff.oldText, diff.newText) : null;
+  const textLike =
+    preview?.kind === "code" ||
+    preview?.kind === "text" ||
+    preview?.kind === "markdown" ||
+    preview?.kind === "csv";
+
   return (
     <div className="artifact-inline-preview">
-      {preview ? <ArtifactPreviewBody preview={preview} /> : <p className="artifacts-preview-note">Carico…</p>}
+      {diff && textLike && (
+        <div className="artifact-inline-toolbar">
+          <button
+            type="button"
+            className={mode === "diff" ? "active" : ""}
+            onClick={() => setMode("diff")}
+          >
+            Diff
+            {counts && (
+              <span className="diff-counts">
+                <span className="add">+{counts.added}</span>{" "}
+                <span className="del">−{counts.removed}</span>
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            className={mode === "file" ? "active" : ""}
+            onClick={() => setMode("file")}
+          >
+            File
+          </button>
+        </div>
+      )}
+      {diff && mode === "diff" && textLike ? (
+        <DiffView oldText={diff.oldText} newText={diff.newText} />
+      ) : preview ? (
+        <ArtifactPreviewBody preview={preview} />
+      ) : (
+        <p className="artifacts-preview-note">Carico…</p>
+      )}
     </div>
   );
 }

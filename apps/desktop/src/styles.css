@@ -3027,6 +3027,34 @@ body.resizing-drawer {
   max-height: 360px;
   overflow: auto;
 }
+.artifact-inline-toolbar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.artifact-inline-toolbar button {
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+}
+.artifact-inline-toolbar button.active {
+  color: var(--text);
+  background: var(--surface-hover);
+  border-color: var(--line-strong);
+}
+.artifact-updated {
+  margin-right: 7px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--amber-soft);
+  color: var(--amber);
+  font-size: 10.5px;
+  font-weight: 650;
+}
 
 /* Variant navigation for regenerated answers (‹ n/m ›). */
 .branch-picker {

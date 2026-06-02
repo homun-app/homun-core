@@ -2356,11 +2356,12 @@ disponibili (per dati dal web usa browse_web sull'URL indicato):\n\n{}",
                         .await
                         .unwrap_or_else(|e| Err(format!("Errore: {e}")));
                         match result {
-                            Ok(size) => {
+                            Ok((size, updated)) => {
                                 let marker = serde_json::json!({
                                     "name": fname,
                                     "thread": thread_slug,
                                     "size": size,
+                                    "updated": updated,
                                 });
                                 let _ = emit_stream_event(
                                     &tx,
@@ -2369,7 +2370,11 @@ disponibili (per dati dal web usa browse_web sull'URL indicato):\n\n{}",
                                     },
                                 )
                                 .await;
-                                format!("Artifact «{fname}» creato.")
+                                if updated {
+                                    format!("Artifact «{fname}» aggiornato (nuova versione).")
+                                } else {
+                                    format!("Artifact «{fname}» creato.")
+                                }
                             }
                             Err(error) => error,
                         }
@@ -3249,7 +3254,7 @@ async fn clear_artifacts() -> Json<serde_json::Value> {
 /// Writes a model-authored text artifact to the conversation's managed output
 /// dir (so it stays downloadable/previewable) and, if a project is active, also
 /// to the project folder. Returns the byte size on success.
-fn write_text_artifact(thread_slug: &str, name: &str, content: &str) -> Result<u64, String> {
+fn write_text_artifact(thread_slug: &str, name: &str, content: &str) -> Result<(u64, bool), String> {
     if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
         return Err("Nome file non valido.".to_string());
     }
@@ -3259,8 +3264,9 @@ fn write_text_artifact(thread_slug: &str, name: &str, content: &str) -> Result<u
     }
     let managed_path = managed_dir.join(name);
     // Versioning: archive the previous content before overwriting, so the panel
-    // can navigate ‹ n/m › through the artifact's history.
-    if managed_path.exists() {
+    // can navigate ‹ n/m › through the artifact's history. `updated` = it existed.
+    let updated = managed_path.exists();
+    if updated {
         let versions_dir = managed_dir.join(".versions").join(name);
         let _ = fs::create_dir_all(&versions_dir);
         let index = fs::read_dir(&versions_dir)
@@ -3274,7 +3280,7 @@ fn write_text_artifact(thread_slug: &str, name: &str, content: &str) -> Result<u
     if let Some(folder) = active_workspace_folder() {
         let _ = fs::copy(&managed_path, std::path::Path::new(&folder).join(name));
     }
-    Ok(content.len() as u64)
+    Ok((content.len() as u64, updated))
 }
 
 /// Copies an artifact to an AUTHORIZED destination folder (host-side). Enforces:
