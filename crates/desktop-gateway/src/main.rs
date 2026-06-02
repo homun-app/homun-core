@@ -1235,6 +1235,50 @@ fn persist_scope_memories(
     }
 }
 
+/// Reserved workspace for THREAD (episodic) memory — "what we discussed". Kept
+/// out of the personal/project scopes so episodes never flood the always-on
+/// profile or the management list; reached only via recall.
+const THREADS_WORKSPACE: &str = "__threads__";
+
+/// M4: store a one-line episodic summary of a conversation turn, tagged with its
+/// thread, in the thread scope. Confirmed directly (a factual record), retrievable
+/// later via recall ("cosa dicevamo l'altra volta").
+fn store_episode(facade: &MemoryFacade, user_id: &MemoryUserId, thread_id: &str, summary: &str) {
+    let summary = summary.trim();
+    if summary.is_empty() {
+        return;
+    }
+    let workspace = MemoryWorkspaceId::new(THREADS_WORKSPACE);
+    let extracted = ExtractedMemory {
+        memory_type: "episode".to_string(),
+        text: summary.to_string(),
+        aliases: Vec::new(),
+        language_hints: Vec::new(),
+        confidence: 1.0,
+        privacy_domain: PrivacyDomain::new("personal"),
+        sensitivity: MemoryDataSensitivity::Internal,
+        evidence_refs: Vec::new(),
+        metadata: serde_json::json!({ "thread_id": thread_id, "scope": "thread" }),
+    };
+    let extraction = MemoryExtraction {
+        memories: vec![extracted],
+        entities: Vec::new(),
+        relations: Vec::new(),
+    };
+    let Ok(result) = facade.apply_extraction(user_id, &workspace, extraction) else {
+        return;
+    };
+    let lifecycle = MemoryLifecycleRequest {
+        actor_id: "memory-extractor".to_string(),
+        user_id: user_id.clone(),
+        workspace_id: workspace,
+        purpose: "episode".to_string(),
+    };
+    if let Some(reference) = result.memory_refs.first() {
+        let _ = facade.confirm_memory(&lifecycle, reference, "episode");
+    }
+}
+
 /// Persists extracted entities + relations into the graph (M3b), 2-pass so a
 /// relation never aborts on an unresolved ref: (1) upsert each entity, building a
 /// canonical_key → ref map (seeded with existing entities so relations can link to
@@ -1307,7 +1351,12 @@ fn persist_graph(
 /// DECISIONS (with the why), plus graph entities/relations — routing each to its
 /// scope (personal vs active project) and auto-confirming the low-risk ones.
 /// Fire-and-forget: best-effort, never blocks the response, swallows all errors.
-async fn learn_from_exchange(state: &AppState, user_message: &str, assistant_message: &str) {
+async fn learn_from_exchange(
+    state: &AppState,
+    user_message: &str,
+    assistant_message: &str,
+    thread_id: Option<&str>,
+) {
     if !is_salient_exchange(user_message) {
         return;
     }
@@ -1327,7 +1376,8 @@ nella lingua dell'utente\",\"sensitivity\":\"internal|private|confidential|secre
 \"entities\":[{\"entity_type\":\"person|project|tool\",\"name\":\"Nome\",\"canonical_key\":\"person:nome-normalizzato\",\
 \"sensitivity\":\"internal|private\",\"privacy_domain\":\"personal\"}],\
 \"relations\":[{\"source_ref\":\"person:fabio\",\"relation_type\":\"child_of|parent_of|partner_of|sibling_of|works_as|relates_to\",\
-\"target_ref\":\"person:sara\",\"sensitivity\":\"internal\",\"privacy_domain\":\"personal\"}]}\n\
+\"target_ref\":\"person:sara\",\"sensitivity\":\"internal\",\"privacy_domain\":\"personal\"}],\
+\"episode\":\"riassunto in UNA frase di cosa si è discusso o deciso in questo scambio\"}\n\
 REGOLE: scope \"personal\" = vale ovunque (preferenze, persone, dati personali); scope \"project\" \
 = specifico del progetto/lavoro corrente (decisioni tecniche, file, scelte). Per memory_type \
 \"decision\" metadata.decision è OBBLIGATORIO (rationale, e alternatives se citate) e lo scope è di \
@@ -1336,7 +1386,8 @@ norma \"project\". ENTITÀ = persone/progetti/strumenti citati, con canonical_ke
 entità e relazioni SOLO se esplicite, altrimenti lascia gli array vuoti. sensitivity: PII (codice \
 fiscale, indirizzo, salute, documenti) = \"secret\"; fatti personali (figli, partner, città) = \
 \"private\"; preferenze e decisioni = \"internal\". confidence >=0.8 solo se esplicito e \
-inequivocabile. Se non c'è nulla da ricordare: {\"memories\":[],\"entities\":[],\"relations\":[]}.";
+inequivocabile. \"episode\" è SEMPRE una frase breve sullo scambio (anche se memories/entities/\
+relations sono vuoti). Se non c'è nulla da ricordare: {\"memories\":[],\"entities\":[],\"relations\":[],\"episode\":\"…\"}.";
     let payload = serde_json::json!({
         "model": model,
         "temperature": 0.0,
@@ -1396,6 +1447,8 @@ inequivocabile. Se non c'è nulla da ricordare: {\"memories\":[],\"entities\":[]
         .map(|a| a.iter().filter_map(|i| serde_json::from_value(i.clone()).ok()).collect())
         .unwrap_or_default();
     let mut extraction = MemoryExtraction { memories, entities, relations };
+    // M4: one-line episodic summary of this turn (stored in the thread scope).
+    let episode = root.get("episode").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     // Take the graph (entities/relations) out before we consume the memories;
     // keep durable memory types only (facts, preferences, decisions).
     let graph_entities = std::mem::take(&mut extraction.entities);
@@ -1403,7 +1456,11 @@ inequivocabile. Se non c'è nulla da ricordare: {\"memories\":[],\"entities\":[]
     extraction
         .memories
         .retain(|m| matches!(m.memory_type.as_str(), "fact" | "preference" | "decision"));
-    if extraction.memories.is_empty() && graph_entities.is_empty() && graph_relations.is_empty() {
+    if extraction.memories.is_empty()
+        && graph_entities.is_empty()
+        && graph_relations.is_empty()
+        && episode.is_empty()
+    {
         return;
     }
     // The model is unreliable about the privacy DOMAIN; pin it to "personal" so the
@@ -1453,6 +1510,10 @@ inequivocabile. Se non c'è nulla da ricordare: {\"memories\":[],\"entities\":[]
         graph_entities,
         graph_relations,
     );
+    // Episodic memory (M4): one line per turn, in the thread scope.
+    if let Some(tid) = thread_id {
+        store_episode(&facade, &user_id, tid, &episode);
+    }
 }
 
 /// Tool schema for on-demand deep memory recall (M3). The always-on profile is a
@@ -1536,6 +1597,10 @@ fn recall_memory(state: &AppState, query: &str) -> String {
         for (kind, text) in search(active) {
             lines.push(format!("- [{kind}, progetto] {text}"));
         }
+    }
+    // Episodic memory (M4): what we discussed in past conversations.
+    for (_kind, text) in search(MemoryWorkspaceId::new(THREADS_WORKSPACE)) {
+        lines.push(format!("- [conversazione] {text}"));
     }
     // Graph traversal: surface known relationships (resolved to entity names) so
     // the model can answer relational questions ("chi è la nonna di…").
@@ -3218,8 +3283,10 @@ verifica anti-bot). Riprova o indica una fonte preferita.".to_string()
             let learn_state = state_owned.clone();
             let learn_user = memory_user_message.clone();
             let learn_answer = memory_answer.clone();
+            let learn_thread = thread_id.clone();
             tokio::spawn(async move {
-                learn_from_exchange(&learn_state, &learn_user, &learn_answer).await;
+                learn_from_exchange(&learn_state, &learn_user, &learn_answer, learn_thread.as_deref())
+                    .await;
             });
         }
         // Mark the resume entry finished and evict it after a grace window so a
