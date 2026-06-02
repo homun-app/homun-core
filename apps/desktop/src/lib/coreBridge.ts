@@ -1070,6 +1070,20 @@ export const coreBridge = {
     electronChatSuggestions(prompt, answer),
   autoTitleThread: (threadId: string, prompt: string, answer: string) =>
     electronAutoTitleThread(threadId, prompt, answer),
+  resumeChatPromptStream: (
+    requestId: string,
+    threadId: string,
+    sessionId: string,
+    userText: string,
+    assistantMessageId: string,
+  ) =>
+    resumeBrowserRuntimeChatPromptStream(
+      requestId,
+      threadId,
+      sessionId,
+      userText,
+      assistantMessageId,
+    ),
   transcribe: (audioBase64: string, language?: string) =>
     electronTranscribe(audioBase64, language),
   threadFolder: (threadId: string) => electronThreadFolder(threadId),
@@ -1475,6 +1489,89 @@ async function submitBrowserRuntimeChatPromptStream(
   } else {
     await chatApi.commitChatPromptResult(threadId, result);
   }
+  result.computer_session = await electronLocalComputerSession(sessionId);
+  return result;
+}
+
+// Reattaches to an in-flight (or just-finished, within the server grace window)
+// chat stream by request id: GET the resume endpoint and consume it like a fresh
+// stream, persisting the reconstructed user+assistant pair on completion.
+async function resumeBrowserRuntimeChatPromptStream(
+  requestId: string,
+  threadId: string,
+  sessionId: string,
+  userText: string,
+  assistantMessageId: string,
+): Promise<CorePromptSubmissionResult> {
+  const startedAt = performance.now();
+  const response = await fetch(
+    `${DESKTOP_GATEWAY_URL}/api/chat/stream_resume/${encodeURIComponent(requestId)}`,
+    { headers: gatewayHeaders() },
+  );
+  if (!response.ok) {
+    throw new Error(`Stream non più disponibile: HTTP ${response.status}`);
+  }
+  if (!response.body) {
+    throw new Error("Lo stream da riprendere non ha un corpo.");
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let text = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const event = parseBrowserStreamEvent(line);
+      if (!event) continue;
+      if (event.type === "delta") {
+        text += String(event.text ?? "");
+        chatApi.notifyChatStreamDelta({ request_id: requestId, delta: String(event.text ?? "") });
+      } else if (event.type === "done") {
+        if (!text && event.text) text = String(event.text);
+      } else if (event.type === "error") {
+        throw new Error(String(event.message ?? "Errore runtime locale"));
+      }
+    }
+  }
+  const timestamp = currentTimestampSeconds();
+  const totalElapsedSeconds = roundedSeconds((performance.now() - startedAt) / 1000);
+  const result: CorePromptSubmissionResult = {
+    user_message: {
+      id: `browser_user_${Date.now()}`,
+      role: "user",
+      text: userText,
+      timestamp,
+      metadata: null,
+      metrics: null,
+    },
+    assistant_message: {
+      id: assistantMessageId,
+      role: "assistant",
+      text: text.trim(),
+      timestamp,
+      metadata: "Modello locale",
+      metrics: {
+        prompt_tokens: 0,
+        generation_tokens: 0,
+        prompt_tps: 0,
+        generation_tps: 0,
+        peak_memory_gb: 0,
+        elapsed_seconds: totalElapsedSeconds,
+        max_tokens: 0,
+        prompt_build_seconds: 0,
+        time_to_first_token_seconds: null,
+        total_elapsed_seconds: totalElapsedSeconds,
+        runtime_status_before: "desktop_gateway",
+      },
+    },
+    computer_session: browserComputerSession(sessionId, totalElapsedSeconds),
+    plan: null,
+  };
+  await chatApi.commitChatPromptResult(threadId, result);
   result.computer_session = await electronLocalComputerSession(sessionId);
   return result;
 }
