@@ -1,10 +1,18 @@
 import { Check, Copy } from "lucide-react";
-import { useEffect, useId, useMemo, useState } from "react";
+import { Fragment, useEffect, useId, useMemo, useState } from "react";
+import { jsx, jsxs } from "react/jsx-runtime";
 import ReactMarkdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
+import { common, createLowlight } from "lowlight";
+import { toJsxRuntime } from "hast-util-to-jsx-runtime";
 import type { Components } from "react-markdown";
 import type { Mermaid } from "mermaid";
+import "highlight.js/styles/github.css";
+
+// highlight.js (via lowlight) → hAST → real React elements (no innerHTML).
+// `common` covers ~37 mainstream languages, enough for chat code blocks.
+const lowlight = createLowlight(common);
 
 interface RichMessageRendererProps {
   text: string;
@@ -192,6 +200,20 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
     window.setTimeout(() => setCopied(false), 1_400);
   }
 
+  // Highlight to React elements (no innerHTML): use the declared language when
+  // registered, otherwise auto-detect; fall back to plain text on any failure.
+  const highlighted = useMemo(() => {
+    try {
+      const tree =
+        language && language !== "text" && lowlight.registered(language)
+          ? lowlight.highlight(language, code)
+          : lowlight.highlightAuto(code);
+      return toJsxRuntime(tree, { Fragment, jsx, jsxs });
+    } catch {
+      return null;
+    }
+  }, [code, language]);
+
   return (
     <figure className="rich-code-block">
       <figcaption>
@@ -202,7 +224,7 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
         </button>
       </figcaption>
       <pre>
-        <code>{code}</code>
+        <code className="hljs">{highlighted ?? code}</code>
       </pre>
     </figure>
   );

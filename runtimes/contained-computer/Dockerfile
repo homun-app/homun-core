@@ -38,14 +38,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python3 \
       python3-pip \
       python3-venv \
+      # On-device speech-to-text (dictation): faster-whisper decodes audio via
+      # ffmpeg and runs on CPU, identically on every OS.
+      ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
+# faster-whisper (CTranslate2 — no torch) in an isolated venv: powers on-device,
+# multilingual dictation. The model itself downloads at first use into ~/.cache
+# (a persistent volume), not baked into the image.
+RUN python3 -m venv /opt/whisper-venv \
+    && /opt/whisper-venv/bin/pip install --no-cache-dir --upgrade pip \
+    && /opt/whisper-venv/bin/pip install --no-cache-dir faster-whisper
+
 # Non-root runtime user; the container boundary is the sandbox (ADR 0010).
+# `.cache` is pre-created and owned by agent so a named volume mounted there
+# inherits agent ownership on first init (persists the Whisper model download).
 RUN useradd --create-home --shell /bin/bash agent \
-    && mkdir -p "${PROFILE_DIR}" \
-    && chown -R agent:agent /data
+    && mkdir -p "${PROFILE_DIR}" /home/agent/.cache \
+    && chown -R agent:agent /data /home/agent/.cache
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY whisper_server.py /usr/local/bin/whisper_server.py
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 USER agent

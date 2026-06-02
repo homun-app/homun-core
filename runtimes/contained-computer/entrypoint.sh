@@ -67,5 +67,14 @@ CONTAINER_IP="$(hostname -I | awk '{print $1}')"
 log "bridging ${CONTAINER_IP}:${CDP_PORT} -> 127.0.0.1:${CDP_PORT} (socat)"
 socat "TCP-LISTEN:${CDP_PORT},fork,reuseaddr,bind=${CONTAINER_IP}" "TCP:127.0.0.1:${CDP_PORT}" &
 
+# 6) On-device speech-to-text server (faster-whisper), best-effort. Binds 0.0.0.0
+#    so the published port reaches it; the model loads lazily on first use and
+#    stays warm afterward. Never fails the container if absent.
+if [ -x /opt/whisper-venv/bin/python ]; then
+  log "starting whisper STT server on :${LFPA_WHISPER_PORT:-9000}"
+  HOME=/home/agent /opt/whisper-venv/bin/python /usr/local/bin/whisper_server.py \
+    >/tmp/whisper.log 2>&1 &
+fi
+
 # Tie the container lifecycle to the browser: exit when Chromium exits.
 wait "${CHROMIUM_PID}"

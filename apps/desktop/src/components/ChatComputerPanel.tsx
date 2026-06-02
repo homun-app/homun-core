@@ -8,8 +8,9 @@ import {
   Minimize2,
   Monitor,
   RotateCcw,
+  SquareTerminal,
 } from "lucide-react";
-import { coreBridge, type ContainedComputerLive } from "../lib/coreBridge";
+import { coreBridge, type ContainedComputerLive, type TerminalEntry } from "../lib/coreBridge";
 
 const IDLE: ContainedComputerLive = {
   enabled: false,
@@ -17,6 +18,8 @@ const IDLE: ContainedComputerLive = {
   active: false,
   activity: null,
   steps: [],
+  terminal_active: false,
+  terminal: [],
 };
 
 // Manus-style: a short card DOCKED above the prompt (same width), shown ONLY
@@ -54,6 +57,23 @@ export function ChatComputerPanel() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [view]);
+
+  const browserActive = Boolean(live?.active && live?.novnc_url);
+  const terminal = live?.terminal ?? [];
+  const hasTerminal = terminal.length > 0;
+
+  // Terminal-only mode: CLI skill running/ran, no browser GUI to show. Render a
+  // Manus-style terminal with the executed commands + their output.
+  if (!browserActive && hasTerminal) {
+    return (
+      <TerminalDock
+        entries={terminal}
+        running={Boolean(live?.terminal_active)}
+        expanded={view !== "bar"}
+        onToggle={() => setView(view === "bar" ? "expanded" : "bar")}
+      />
+    );
+  }
 
   if (!live?.enabled || !live.novnc_url || !live.active) return null;
 
@@ -172,5 +192,74 @@ export function ChatComputerPanel() {
         )}
       </div>
     </>
+  );
+}
+
+/** Terminal view of CLI skill execution in the contained computer: the commands
+ *  run + their output, Manus-style. Shown when a skill uses the shell (no GUI). */
+function TerminalDock({
+  entries,
+  running,
+  expanded,
+  onToggle,
+}: {
+  entries: TerminalEntry[];
+  running: boolean;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // Keep the latest line in view as commands/output arrive.
+    if (expanded && bodyRef.current) {
+      bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+    }
+  }, [entries, expanded]);
+
+  const last = entries[entries.length - 1];
+  const summary = running
+    ? last?.command ?? "esecuzione…"
+    : `${entries.length} ${entries.length === 1 ? "comando" : "comandi"}`;
+
+  return (
+    <div className={`cc-dock ${expanded ? "expanded" : "bar"}`}>
+      <header className="cc-dock-bar">
+        <span className="cc-dock-title">
+          <SquareTerminal size={15} />
+          <strong>Computer</strong>
+          {running && (
+            <span className="cc-live">
+              <i className="cc-live-dot" /> live
+            </span>
+          )}
+        </span>
+        <span className="cc-dock-activity" title={summary}>
+          {summary}
+        </span>
+        <button
+          className="cc-icon-btn"
+          type="button"
+          onClick={onToggle}
+          title={expanded ? "Comprimi" : "Mostra il terminale"}
+          aria-label={expanded ? "Comprimi" : "Mostra il terminale"}
+        >
+          {expanded ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
+        </button>
+      </header>
+      {expanded && (
+        <div className="cc-term" ref={bodyRef}>
+          {entries.map((entry, index) => (
+            <div className="cc-term-entry" key={index}>
+              <div className="cc-term-cmd">
+                <span className="cc-term-prompt">$</span>
+                <span>{entry.command}</span>
+                {entry.running && <Loader2 size={12} className="spin" />}
+              </div>
+              {entry.output && <pre className="cc-term-out">{entry.output}</pre>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

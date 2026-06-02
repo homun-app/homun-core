@@ -22,10 +22,14 @@ docker build -t "${IMAGE}" "${HERE}"
 echo "==> (re)starting ${NAME}"
 docker rm -f "${NAME}" >/dev/null 2>&1 || true
 # Publish to loopback only. --shm-size avoids Chromium crashes on small /dev/shm.
+# Port 9100→9000: on-device Whisper STT server. Named volume persists the model
+# download (~/.cache) across the --rm container lifecycle.
 docker run -d --rm --name "${NAME}" \
   --shm-size=512m \
   -p 127.0.0.1:9222:9222 \
   -p 127.0.0.1:6080:6080 \
+  -p 127.0.0.1:9100:9000 \
+  -v lfpa-whisper-cache:/home/agent/.cache \
   "${IMAGE}"
 
 echo "==> validating CDP (real browser reachable)"

@@ -1,6 +1,7 @@
 interface LocalFirstDesktopConfig {
   gatewayUrl?: string;
   gatewayToken?: string;
+  pickFolder?: () => Promise<string | null>;
 }
 
 declare global {
@@ -36,4 +37,16 @@ export function gatewayHeaders(extra: HeadersInit = {}): HeadersInit {
     ...(gatewayToken ? { Authorization: `Bearer ${gatewayToken}` } : {}),
     ...extra,
   };
+}
+
+/** Opens the native directory picker (Electron). Returns the chosen absolute
+ *  path, or null if unavailable (e.g. browser dev) or cancelled. */
+export async function pickWorkspaceFolder(): Promise<string | null> {
+  const pick = desktopConfig?.pickFolder;
+  if (!pick) return null;
+  try {
+    return await pick();
+  } catch {
+    return null;
+  }
 }
