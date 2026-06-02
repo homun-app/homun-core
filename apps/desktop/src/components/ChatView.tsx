@@ -50,6 +50,7 @@ import {
   mapCoreComputerSession,
 } from "../lib/localComputerViewModel";
 import { RichMessage } from "./RichMessage";
+import { CodeView } from "./CodeView";
 import { ChatComputerPanel } from "./ChatComputerPanel";
 import type {
   ChatMessage,
@@ -2476,18 +2477,14 @@ function MessageArtifacts({
               <strong>{artifact.name}</strong>
               <small>{formatFileSize(artifact.size)}</small>
             </button>
-            <button type="button" onClick={() => void triggerArtifactDownload(artifact)} title="Scarica">
-              <Download size={14} />
-              <span>Scarica</span>
-            </button>
             <button
               type="button"
-              className="artifact-folder"
-              onClick={() => void openArtifactFolder(artifact)}
-              aria-label="Apri cartella"
-              title="Apri cartella"
+              className="artifact-quick"
+              onClick={() => void triggerArtifactDownload(artifact)}
+              aria-label="Scarica"
+              title="Scarica"
             >
-              <FolderOpen size={14} />
+              <Download size={15} />
             </button>
           </div>
           {expanded === artifact.name && <InlineArtifactPreview artifact={artifact} />}
@@ -2606,6 +2603,7 @@ function ArtifactsPanel({
   const [editText, setEditText] = useState("");
   const [saving, setSaving] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const [wrap, setWrap] = useState(false);
   const urlRef = useRef<string | null>(null);
 
   const selected = artifacts.find((a) => a.name === selectedName) ?? artifacts[0] ?? null;
@@ -2749,6 +2747,16 @@ function ArtifactsPanel({
                   </button>
                 </div>
               )}
+              {(preview?.kind === "code" || preview?.kind === "text") && (
+                <button
+                  type="button"
+                  className={wrap ? "active" : ""}
+                  onClick={() => setWrap((value) => !value)}
+                  title="A capo automatico"
+                >
+                  Word wrap
+                </button>
+              )}
               {editableKind && !editing && slot === versions && (
                 <button
                   type="button"
@@ -2769,6 +2777,15 @@ function ArtifactsPanel({
               >
                 <Download size={14} />
                 <span>Scarica</span>
+              </button>
+              <button
+                type="button"
+                className="artifact-folder"
+                onClick={() => void openArtifactFolder(selected)}
+                aria-label="Apri cartella"
+                title="Apri cartella"
+              >
+                <FolderOpen size={14} />
               </button>
             </div>
           )}
@@ -2798,7 +2815,7 @@ function ArtifactsPanel({
             ) : loading ? (
               <p className="artifacts-preview-note">Carico…</p>
             ) : (
-              <ArtifactPreviewBody preview={preview} />
+              <ArtifactPreviewBody preview={preview} wrap={wrap} />
             )}
           </div>
         </div>
@@ -2807,7 +2824,13 @@ function ArtifactsPanel({
   );
 }
 
-function ArtifactPreviewBody({ preview }: { preview: ArtifactPreview | null }) {
+function ArtifactPreviewBody({
+  preview,
+  wrap = false,
+}: {
+  preview: ArtifactPreview | null;
+  wrap?: boolean;
+}) {
   if (!preview) return <p className="artifacts-preview-note">Seleziona un file.</p>;
   switch (preview.kind) {
     case "image":
@@ -2821,15 +2844,11 @@ function ArtifactPreviewBody({ preview }: { preview: ArtifactPreview | null }) {
         </div>
       );
     case "code":
-      return (
-        <div className="artifact-preview-doc">
-          <RichMessage text={`\`\`\`${preview.ext}\n${preview.text}\n\`\`\``} />
-        </div>
-      );
+      return <CodeView code={preview.text} language={preview.ext} wrap={wrap} />;
+    case "text":
+      return <CodeView code={preview.text} language="text" wrap={wrap} />;
     case "csv":
       return <ArtifactCsvTable text={preview.text} />;
-    case "text":
-      return <pre className="artifact-preview-text">{preview.text}</pre>;
     case "error":
       return <p className="artifacts-preview-note">Anteprima non disponibile.</p>;
     default:
