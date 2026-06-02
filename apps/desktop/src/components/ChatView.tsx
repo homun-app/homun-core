@@ -50,7 +50,7 @@ import {
   mapCoreComputerSession,
 } from "../lib/localComputerViewModel";
 import { RichMessage } from "./RichMessage";
-import { CodeView } from "./CodeView";
+import { CodeView, DiffView, diffStats } from "./CodeView";
 import { ChatComputerPanel } from "./ChatComputerPanel";
 import type {
   ChatMessage,
@@ -2604,6 +2604,8 @@ function ArtifactsPanel({
   const [saving, setSaving] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [wrap, setWrap] = useState(false);
+  const [showDiff, setShowDiff] = useState(false);
+  const [diffData, setDiffData] = useState<{ oldText: string; newText: string } | null>(null);
   const urlRef = useRef<string | null>(null);
 
   const selected = artifacts.find((a) => a.name === selectedName) ?? artifacts[0] ?? null;
@@ -2622,6 +2624,8 @@ function ArtifactsPanel({
     let cancelled = false;
     setLoading(true);
     setEditing(false);
+    setShowDiff(false);
+    setDiffData(null);
     const ext = artifactExt(selected.name);
     void (async () => {
       let count = 0;
@@ -2657,6 +2661,37 @@ function ArtifactsPanel({
     preview?.kind === "code" ||
     preview?.kind === "text" ||
     preview?.kind === "csv";
+  const textKind = preview?.kind === "code" || preview?.kind === "text";
+  const canDiff = textKind && versions > 0 && slot > 0;
+
+  // Load the diff between the shown version and the previous one when requested.
+  useEffect(() => {
+    if (!showDiff || !selected || slot <= 0) {
+      setDiffData(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const newBlob = await coreBridge.downloadArtifact(
+          selected.thread,
+          selected.name,
+          slot < versions ? slot : undefined,
+        );
+        const oldBlob = await coreBridge.downloadArtifact(selected.thread, selected.name, slot - 1);
+        const [newText, oldText] = await Promise.all([newBlob.text(), oldBlob.text()]);
+        if (!cancelled) setDiffData({ oldText, newText });
+      } catch {
+        if (!cancelled) setDiffData(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showDiff, slot, selected, versions]);
+
+  const diffCounts = diffData ? diffStats(diffData.oldText, diffData.newText) : null;
 
   async function saveEdit() {
     if (!selected) return;
@@ -2747,7 +2782,23 @@ function ArtifactsPanel({
                   </button>
                 </div>
               )}
-              {(preview?.kind === "code" || preview?.kind === "text") && (
+              {canDiff && (
+                <button
+                  type="button"
+                  className={showDiff ? "active" : ""}
+                  onClick={() => setShowDiff((value) => !value)}
+                  title="Mostra le modifiche rispetto alla versione precedente"
+                >
+                  Diff
+                  {showDiff && diffCounts && (
+                    <span className="diff-counts">
+                      <span className="add">+{diffCounts.added}</span>{" "}
+                      <span className="del">−{diffCounts.removed}</span>
+                    </span>
+                  )}
+                </button>
+              )}
+              {textKind && !showDiff && (
                 <button
                   type="button"
                   className={wrap ? "active" : ""}
@@ -2814,6 +2865,8 @@ function ArtifactsPanel({
               </div>
             ) : loading ? (
               <p className="artifacts-preview-note">Carico…</p>
+            ) : showDiff && diffData ? (
+              <DiffView oldText={diffData.oldText} newText={diffData.newText} />
             ) : (
               <ArtifactPreviewBody preview={preview} wrap={wrap} />
             )}
