@@ -71,9 +71,9 @@ use local_first_local_computer_session::{LocalComputerReadModel, LocalComputerSe
 use local_first_memory::{
     DataSensitivity as MemoryDataSensitivity, MemoryAccessRequest, MemoryCreateRequest,
     MemoryDashboard, MemoryExtraction, MemoryFacade, MemoryLifecycleRequest, MemoryRef, MemoryRefKind,
-    MemoryUiReadModel, MemoryWikiProjection, PrivacyDomain, SQLiteMemoryStore,
-    UserId as MemoryUserId, WikiFileStore, WikiPage, WorkspaceId as MemoryWorkspaceId,
-    PERSONAL_WORKSPACE,
+    MemorySearchRequest, MemoryStatus, MemoryUiReadModel, MemoryWikiProjection, PrivacyDomain,
+    SQLiteMemoryStore, UserId as MemoryUserId, WikiFileStore, WikiPage,
+    WorkspaceId as MemoryWorkspaceId, PERSONAL_WORKSPACE,
 };
 use bytes::Bytes;
 use local_first_subagents::{
@@ -1292,6 +1292,95 @@ ricordare, restituisci {\"memories\":[]}.";
     }
 }
 
+/// Tool schema for on-demand deep memory recall (M3). The always-on profile is a
+/// small slice; this lets the model fetch specific personal/project knowledge
+/// (names, data, past decisions + their why) when it needs more.
+fn recall_memory_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "recall_memory",
+            "description": "Cerca nella memoria a lungo termine dell'utente (fatti, preferenze, persone, \
+decisioni passate e il loro perché) ciò che è pertinente alla richiesta. Usalo quando ti serve un \
+dettaglio personale o di progetto che potresti aver appreso prima e che NON è già nel profilo del \
+prompt, PRIMA di dire che non lo sai.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Cosa cercare in memoria (parole chiave o domanda)."
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    })
+}
+
+/// Searches the user's long-term memory (personal + active project) for the query
+/// and returns a compact, readable result for the model. Includes confirmed AND
+/// candidate items and all sensitivities: the model asked explicitly, and it is
+/// the user's own data answered back to the user.
+fn recall_memory(state: &AppState, query: &str) -> String {
+    let query = query.trim();
+    if query.is_empty() {
+        return "Nessuna query fornita.".to_string();
+    }
+    let Ok(facade) = lock_memory_facade(state) else {
+        return "Memoria non disponibile.".to_string();
+    };
+    let user = gateway_memory_user_id();
+    let active = gateway_memory_workspace_id();
+    let search = |workspace: MemoryWorkspaceId| -> Vec<(String, String)> {
+        let access = MemoryAccessRequest {
+            actor_id: "recall".to_string(),
+            user_id: user.clone(),
+            workspace_id: workspace,
+            purpose: "recall".to_string(),
+            allowed_domains: vec![
+                PrivacyDomain::new("personal"),
+                PrivacyDomain::new("work"),
+                PrivacyDomain::new("general"),
+            ],
+            max_sensitivity: MemoryDataSensitivity::Secret,
+            allow_raw_payload: true,
+            allow_export: true,
+            broad_query: true,
+        };
+        facade
+            .search_memories(MemorySearchRequest {
+                access,
+                query: query.to_string(),
+                statuses: vec![MemoryStatus::Confirmed, MemoryStatus::Candidate],
+                memory_types: Vec::new(),
+                limit: 8,
+                offset: 0,
+            })
+            .map(|page| {
+                page.items
+                    .into_iter()
+                    .map(|item| (item.memory_type, item.summary))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let mut lines = Vec::new();
+    for (kind, text) in search(MemoryWorkspaceId::new(PERSONAL_WORKSPACE)) {
+        lines.push(format!("- [{kind}] {text}"));
+    }
+    if active.as_str() != PERSONAL_WORKSPACE {
+        for (kind, text) in search(active) {
+            lines.push(format!("- [{kind}, progetto] {text}"));
+        }
+    }
+    if lines.is_empty() {
+        format!("Nessun ricordo pertinente a «{query}».")
+    } else {
+        format!("Ricordi pertinenti dalla memoria:\n{}", lines.join("\n"))
+    }
+}
+
 async fn generate_stream(
     State(state): State<AppState>,
     Json(request): Json<ChatGenerateStreamRequest>,
@@ -2275,9 +2364,19 @@ salvare/esportare un file in una cartella, chiama save_artifact(file, destinatio
         Some(block) => format!("{system}\n\n{block}"),
         None => system,
     };
+    let system = format!(
+        "{system}\n\nMEMORIA: hai una memoria a lungo termine dell'utente. Se ti serve un dettaglio \
+personale o di progetto che potresti aver già appreso (un nome, una preferenza, un dato, una \
+decisione passata e il suo perché) e NON è già nel profilo qui sopra, chiama lo strumento \
+recall_memory PRIMA di dire che non lo sai."
+    );
     let system = system.as_str();
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-    let mut base_tools = vec![browse_web_tool_schema(), create_artifact_tool_schema()];
+    let mut base_tools = vec![
+        browse_web_tool_schema(),
+        create_artifact_tool_schema(),
+        recall_memory_tool_schema(),
+    ];
     if has_composio {
         base_tools.push(find_connected_tools_schema());
     }
@@ -2694,6 +2793,25 @@ disponibili (per dati dal web usa browse_web sull'URL indicato):\n\n{}",
                         })
                         .await
                         .unwrap_or_else(|e| format!("Errore di salvataggio: {e}"))
+                    } else if name == "recall_memory" {
+                        let query = serde_json::from_str::<serde_json::Value>(args_raw)
+                            .ok()
+                            .and_then(|a| a.get("query").and_then(|q| q.as_str()).map(String::from))
+                            .unwrap_or_default();
+                        let _ = emit_stream_event(
+                            &tx,
+                            GenerateStreamEvent::Delta {
+                                text: format!(
+                                    "‹‹ACT››🧠 Cerco in memoria: {}‹‹/ACT››",
+                                    if query.is_empty() { "(query)" } else { query.as_str() }
+                                ),
+                            },
+                        )
+                        .await;
+                        let st = state_owned.clone();
+                        tokio::task::spawn_blocking(move || recall_memory(&st, &query))
+                            .await
+                            .unwrap_or_else(|e| format!("Errore di esecuzione: {e}"))
                     } else if name == "find_connected_tools" {
                         // Discovery: search the catalog, inject the matching tool
                         // schemas so the model can call them next round.
