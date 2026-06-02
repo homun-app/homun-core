@@ -72,7 +72,8 @@ use local_first_memory::{
     DataSensitivity as MemoryDataSensitivity, ExtractedEntity, ExtractedMemory, ExtractedRelation,
     MemoryAccessRequest, MemoryCreateRequest, MemoryDashboard, MemoryEntity, MemoryExtraction,
     MemoryFacade, MemoryLifecycleRequest, MemoryRef, MemoryRefKind, MemoryRelation,
-    MemorySearchRequest, MemoryStatus, MemoryUiReadModel, MemoryWikiProjection, PrivacyDomain,
+    MemorySearchRequest, MemoryStatus, MemoryUiReadModel, MemoryUpdatePatch, MemoryWikiProjection,
+    PrivacyDomain,
     SQLiteMemoryStore, UserId as MemoryUserId, WikiFileStore, WikiPage,
     WorkspaceId as MemoryWorkspaceId, PERSONAL_WORKSPACE,
 };
@@ -1313,6 +1314,27 @@ fn persist_graph(
             key_to_ref.insert(entity.canonical_key.clone(), entity.reference);
         }
     }
+    // Ensure a stable "self" node so relations to the user (canonical_key
+    // "person:self", which the extractor is told to use) resolve instead of being
+    // dropped — e.g. "ho una figlia Sara" → parent_of(person:self → person:sara).
+    if !key_to_ref.contains_key("person:self") {
+        let reference = MemoryRef::generated(MemoryRefKind::Entity, user_id.clone(), workspace.clone());
+        let entity = MemoryEntity {
+            reference: reference.clone(),
+            user_id: user_id.clone(),
+            workspace_id: workspace.clone(),
+            entity_type: "person".to_string(),
+            name: "Tu".to_string(),
+            canonical_key: "person:self".to_string(),
+            aliases: Vec::new(),
+            privacy_domain: PrivacyDomain::new("personal"),
+            sensitivity: MemoryDataSensitivity::Internal,
+            metadata: serde_json::json!({ "self": true }),
+        };
+        if facade.upsert_entity(&entity).is_ok() {
+            key_to_ref.insert("person:self".to_string(), reference);
+        }
+    }
     for extracted in entities {
         if extracted.canonical_key.trim().is_empty() {
             continue;
@@ -1395,8 +1417,10 @@ REGOLE: scope \"personal\" = vale ovunque (preferenze, persone, dati personali);
 = specifico del progetto/lavoro corrente (decisioni tecniche, file, scelte). Per memory_type \
 \"decision\" metadata.decision è OBBLIGATORIO (rationale, e alternatives se citate) e lo scope è di \
 norma \"project\". ENTITÀ = persone/progetti/strumenti citati, con canonical_key STABILE (es. \
-\"person:sara\"). RELAZIONI = usa gli STESSI canonical_key in source_ref/target_ref. Inserisci \
-entità e relazioni SOLO se esplicite, altrimenti lascia gli array vuoti. sensitivity: PII (codice \
+\"person:sara\"). Per l'UTENTE stesso usa SEMPRE canonical_key \"person:self\" (sia nelle entità \
+sia nelle relazioni), es. per \"ho una figlia Sara\": relation parent_of person:self → person:sara. \
+RELAZIONI = usa gli STESSI canonical_key in source_ref/target_ref. Inserisci entità e relazioni \
+SOLO se esplicite, altrimenti lascia gli array vuoti. sensitivity: PII (codice \
 fiscale, indirizzo, salute, documenti) = \"secret\"; fatti personali (figli, partner, città) = \
 \"private\"; preferenze e decisioni = \"internal\". confidence >=0.8 solo se esplicito e \
 inequivocabile. \"episode\" è SEMPRE una frase breve sullo scambio (anche se memories/entities/\
@@ -2641,8 +2665,9 @@ salvare/esportare un file in una cartella, chiama save_artifact(file, destinatio
     let system = format!(
         "{system}\n\nMEMORIA: hai una memoria a lungo termine dell'utente. Se ti serve un dettaglio \
 personale o di progetto che potresti aver già appreso (un nome, una preferenza, un dato, una \
-decisione passata e il suo perché) e NON è già nel profilo qui sopra, chiama lo strumento \
-recall_memory PRIMA di dire che non lo sai."
+decisione passata e il suo perché), OPPURE se l'utente chiede cosa è stato discusso o deciso in \
+conversazioni PRECEDENTI, e l'informazione NON è già nel profilo qui sopra, chiama SEMPRE lo \
+strumento recall_memory PRIMA di dire che non lo sai o non lo ricordi."
     );
     let system = system.as_str();
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
@@ -10524,8 +10549,11 @@ async fn memory_items(
 #[derive(Debug, Deserialize)]
 struct MemoryDecideRequest {
     reference: String,
-    /// "confirm" | "reject" | "delete"
+    /// "confirm" | "reject" | "delete" | "edit"
     action: String,
+    /// New text for the "edit" action.
+    #[serde(default)]
+    text: Option<String>,
 }
 
 /// Confirm / reject / delete a single memory by ref (M5 management actions). The
@@ -10560,6 +10588,20 @@ async fn memory_decide(
         "delete" => {
             facade
                 .delete_memory(&lifecycle, &reference, "user deleted")
+                .map_err(|error| GatewayError::memory(error.to_string()))?;
+        }
+        "edit" => {
+            let text = request.text.unwrap_or_default();
+            if text.trim().is_empty() {
+                return Err(GatewayError {
+                    status: StatusCode::BAD_REQUEST,
+                    code: "memory_empty_text",
+                    message: "testo vuoto".to_string(),
+                });
+            }
+            let patch = MemoryUpdatePatch { text: Some(text), ..Default::default() };
+            facade
+                .update_memory(&lifecycle, &reference, patch)
                 .map_err(|error| GatewayError::memory(error.to_string()))?;
         }
         _ => {
