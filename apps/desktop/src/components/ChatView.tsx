@@ -157,6 +157,7 @@ export function ChatView({
   const [streamHasVisibleText, setStreamHasVisibleText] = useState(false);
   const [autoContinueMessageId, setAutoContinueMessageId] = useState<string | null>(null);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+  const [artifactsOpen, setArtifactsOpen] = useState(false);
   const [followUps, setFollowUps] = useState<string[]>([]);
   const [followUpsFor, setFollowUpsFor] = useState<string | null>(null);
   const titledThreadsRef = useRef<Set<string>>(new Set());
@@ -172,6 +173,21 @@ export function ChatView({
     [health],
   );
   const threadMessages = optimisticMessages ?? messages;
+  // All artifacts generated in this conversation (from persisted ‹‹ARTIFACT››
+  // markers) — drives the Artifacts workspace panel.
+  const conversationArtifacts = useMemo(() => {
+    const seen = new Set<string>();
+    const out: ParsedArtifact[] = [];
+    for (const message of threadMessages) {
+      for (const artifact of parseArtifacts(message.text ?? "")) {
+        if (!seen.has(artifact.name)) {
+          seen.add(artifact.name);
+          out.push(artifact);
+        }
+      }
+    }
+    return out;
+  }, [threadMessages]);
   const activeApprovals = approvals.filter((approval) =>
     approval.requestedBy.includes(computerSessionId),
   );
@@ -1302,6 +1318,17 @@ export function ChatView({
               {item.label}
             </span>
           ))}
+          {conversationArtifacts.length > 0 && (
+            <button
+              className={`top-action${artifactsOpen ? " active" : ""}`}
+              type="button"
+              onClick={() => setArtifactsOpen((value) => !value)}
+            >
+              <FileText size={15} />
+              File
+              <span className="top-action-count">{conversationArtifacts.length}</span>
+            </button>
+          )}
           <button
             className="top-action"
             type="button"
@@ -1631,6 +1658,13 @@ export function ChatView({
         >
           <ChevronDown size={18} />
         </button>
+      )}
+
+      {artifactsOpen && conversationArtifacts.length > 0 && (
+        <ArtifactsPanel
+          artifacts={conversationArtifacts}
+          onClose={() => setArtifactsOpen(false)}
+        />
       )}
 
       <ChatComputerPanel />
@@ -2439,6 +2473,219 @@ function MessageArtifacts({ text }: { text: string }) {
           </button>
         </div>
       ))}
+    </div>
+  );
+}
+
+const ARTIFACT_CODE_EXT = new Set([
+  "js", "jsx", "ts", "tsx", "py", "rs", "go", "java", "rb", "php", "c", "cpp", "h",
+  "cs", "json", "yaml", "yml", "toml", "sh", "bash", "sql", "html", "css", "scss", "xml",
+]);
+const ARTIFACT_IMAGE_EXT = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"];
+
+function artifactExt(name: string): string {
+  return name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
+}
+
+async function triggerArtifactDownload(artifact: ParsedArtifact) {
+  try {
+    const blob = await coreBridge.downloadArtifact(artifact.thread, artifact.name);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = artifact.name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+  } catch {
+    /* ignore */
+  }
+}
+
+type ArtifactPreview =
+  | { kind: "image" | "pdf"; url: string; ext: string }
+  | { kind: "markdown" | "code" | "csv" | "text"; text: string; ext: string }
+  | { kind: "binary" | "error"; ext: string };
+
+/** Artifacts workspace: a side panel listing the conversation's generated files
+ *  and rendering each by type (markdown, code, csv table, image, pdf) — the
+ *  "interactive workspace alongside the chat" model. */
+function ArtifactsPanel({
+  artifacts,
+  onClose,
+}: {
+  artifacts: ParsedArtifact[];
+  onClose: () => void;
+}) {
+  const [selectedName, setSelectedName] = useState<string | null>(artifacts[0]?.name ?? null);
+  const [preview, setPreview] = useState<ArtifactPreview | null>(null);
+  const [loading, setLoading] = useState(false);
+  const urlRef = useRef<string | null>(null);
+
+  const selected = artifacts.find((a) => a.name === selectedName) ?? artifacts[0] ?? null;
+
+  useEffect(() => {
+    if (!selected) {
+      setPreview(null);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    const ext = artifactExt(selected.name);
+    void (async () => {
+      try {
+        const blob = await coreBridge.downloadArtifact(selected.thread, selected.name);
+        if (cancelled) return;
+        if (urlRef.current) {
+          URL.revokeObjectURL(urlRef.current);
+          urlRef.current = null;
+        }
+        if (ARTIFACT_IMAGE_EXT.includes(ext)) {
+          const url = URL.createObjectURL(blob);
+          urlRef.current = url;
+          setPreview({ kind: "image", url, ext });
+        } else if (ext === "pdf") {
+          const url = URL.createObjectURL(blob);
+          urlRef.current = url;
+          setPreview({ kind: "pdf", url, ext });
+        } else if (ext === "md" || ext === "markdown") {
+          setPreview({ kind: "markdown", text: await blob.text(), ext });
+        } else if (ext === "csv") {
+          setPreview({ kind: "csv", text: await blob.text(), ext });
+        } else if (ARTIFACT_CODE_EXT.has(ext)) {
+          setPreview({ kind: "code", text: await blob.text(), ext });
+        } else if (ext === "txt" || ext === "log" || ext === "") {
+          setPreview({ kind: "text", text: await blob.text(), ext });
+        } else {
+          setPreview({ kind: "binary", ext });
+        }
+      } catch {
+        if (!cancelled) setPreview({ kind: "error", ext });
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selected]);
+
+  useEffect(
+    () => () => {
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    },
+    [],
+  );
+
+  return (
+    <aside className="artifacts-panel" aria-label="File del progetto">
+      <header className="artifacts-panel-head">
+        <strong>File del progetto</strong>
+        <button type="button" aria-label="Chiudi" onClick={onClose}>
+          <X size={16} />
+        </button>
+      </header>
+      <div className="artifacts-panel-body">
+        <ul className="artifacts-list">
+          {artifacts.map((artifact) => (
+            <li key={artifact.name}>
+              <button
+                type="button"
+                className={selected?.name === artifact.name ? "active" : ""}
+                onClick={() => setSelectedName(artifact.name)}
+              >
+                <FileText size={14} />
+                <span>{artifact.name}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+        <div className="artifacts-preview">
+          {selected && (
+            <div className="artifacts-preview-bar">
+              <span title={selected.name}>{selected.name}</span>
+              <button type="button" onClick={() => void triggerArtifactDownload(selected)}>
+                <Download size={14} />
+                <span>Scarica</span>
+              </button>
+            </div>
+          )}
+          <div className="artifacts-preview-body">
+            {loading ? (
+              <p className="artifacts-preview-note">Carico…</p>
+            ) : (
+              <ArtifactPreviewBody preview={preview} />
+            )}
+          </div>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function ArtifactPreviewBody({ preview }: { preview: ArtifactPreview | null }) {
+  if (!preview) return <p className="artifacts-preview-note">Seleziona un file.</p>;
+  switch (preview.kind) {
+    case "image":
+      return <img className="artifact-preview-img" src={preview.url} alt="" />;
+    case "pdf":
+      return <iframe className="artifact-preview-frame" src={preview.url} title="Anteprima PDF" />;
+    case "markdown":
+      return (
+        <div className="artifact-preview-doc">
+          <RichMessage text={preview.text} />
+        </div>
+      );
+    case "code":
+      return (
+        <div className="artifact-preview-doc">
+          <RichMessage text={`\`\`\`${preview.ext}\n${preview.text}\n\`\`\``} />
+        </div>
+      );
+    case "csv":
+      return <ArtifactCsvTable text={preview.text} />;
+    case "text":
+      return <pre className="artifact-preview-text">{preview.text}</pre>;
+    case "error":
+      return <p className="artifacts-preview-note">Anteprima non disponibile.</p>;
+    default:
+      return (
+        <p className="artifacts-preview-note">
+          Anteprima non disponibile per questo tipo. Usa “Scarica”.
+        </p>
+      );
+  }
+}
+
+function ArtifactCsvTable({ text }: { text: string }) {
+  const rows = text
+    .split(/\r?\n/)
+    .filter((line) => line.length > 0)
+    .slice(0, 200)
+    .map((line) => line.split(","));
+  if (rows.length === 0) return <p className="artifacts-preview-note">Vuoto.</p>;
+  const [head, ...body] = rows;
+  return (
+    <div className="artifact-preview-table-wrap">
+      <table className="artifact-preview-table">
+        <thead>
+          <tr>
+            {head.map((cell, index) => (
+              <th key={index}>{cell}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {body.map((row, rowIndex) => (
+            <tr key={rowIndex}>
+              {row.map((cell, cellIndex) => (
+                <td key={cellIndex}>{cell}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
