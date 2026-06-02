@@ -200,6 +200,13 @@ ipcMain.handle("lfpa:pick-folder", async () => {
   return result.filePaths[0];
 });
 
+// Reveal a folder/file in the OS file manager (artifacts "Apri cartella").
+ipcMain.handle("lfpa:reveal-path", async (_event, targetPath) => {
+  if (typeof targetPath !== "string" || !targetPath) return false;
+  const error = await shell.openPath(targetPath);
+  return error === "";
+});
+
 app.whenReady().then(async () => {
   await ensureGateway();
   createWindow();

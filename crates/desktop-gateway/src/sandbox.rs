@@ -15,6 +15,26 @@ pub const CONTAINER: &str = "lfpa-cc";
 /// Where skills are copied inside the container.
 const CONTAINER_SKILLS_DIR: &str = "/home/agent/skills";
 
+/// Host directory holding generated artifacts (bind-mounted into the container
+/// at `/home/agent/output`). Overridable via `LFPA_ARTIFACTS_DIR`.
+pub fn artifacts_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("LFPA_ARTIFACTS_DIR") {
+        if !dir.trim().is_empty() {
+            return PathBuf::from(dir);
+        }
+    }
+    std::env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir())
+        .join(".local-first-personal-assistant")
+        .join("artifacts")
+}
+
+/// The per-conversation output directory INSIDE the container.
+pub fn container_output_dir(thread: &str) -> String {
+    format!("/home/agent/output/{thread}")
+}
+
 /// Base URL of the on-device Whisper STT server (published from the contained
 /// computer). Overridable via `LFPA_WHISPER_URL` for tests/alternate setups.
 pub fn whisper_base_url() -> String {
@@ -97,8 +117,12 @@ pub fn ensure_contained_computer() -> Result<(), String> {
         return Ok(());
     }
     if let Some(script) = up_script() {
-        // up.sh builds the image (with the skill toolchain) and runs the container.
-        let _ = Command::new("bash").arg(&script).output();
+        // up.sh builds the image (with the skill toolchain) and runs the container,
+        // bind-mounting the artifacts dir so generated files land on the host.
+        let _ = Command::new("bash")
+            .arg(&script)
+            .env("LFPA_ARTIFACTS_DIR", artifacts_dir())
+            .output();
         for _ in 0..30 {
             if container_up() {
                 return Ok(());

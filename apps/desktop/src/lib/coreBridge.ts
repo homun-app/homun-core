@@ -1,5 +1,10 @@
 import { chatApi } from "./chatApi";
-import { DESKTOP_GATEWAY_URL, gatewayHeaders, pickWorkspaceFolder } from "./gatewayConfig";
+import {
+  DESKTOP_GATEWAY_URL,
+  gatewayHeaders,
+  pickWorkspaceFolder,
+  revealWorkspacePath,
+} from "./gatewayConfig";
 
 const BROWSER_CHAT_DEFAULT_MAX_TOKENS = 768;
 const BROWSER_CHAT_EXTENDED_MAX_TOKENS = 1_536;
@@ -489,6 +494,24 @@ async function electronChatSuggestions(prompt: string, answer: string): Promise<
     { prompt, answer },
   );
   return suggestions;
+}
+
+async function electronArtifactBlob(thread: string, name: string): Promise<Blob> {
+  const response = await fetch(
+    `${DESKTOP_GATEWAY_URL}/api/artifacts/file?thread=${encodeURIComponent(thread)}&name=${encodeURIComponent(name)}`,
+    { headers: gatewayHeaders() },
+  );
+  if (!response.ok) {
+    throw new Error(`Download artifact HTTP ${response.status}`);
+  }
+  return response.blob();
+}
+
+async function electronArtifactFolder(thread: string): Promise<string> {
+  const { path } = await gatewayGetJson<{ path: string }>(
+    `/api/artifacts/path?thread=${encodeURIComponent(thread)}`,
+  );
+  return path;
 }
 
 async function electronTranscribe(audioBase64: string, language?: string): Promise<string> {
@@ -1086,6 +1109,9 @@ export const coreBridge = {
     ),
   transcribe: (audioBase64: string, language?: string) =>
     electronTranscribe(audioBase64, language),
+  downloadArtifact: (thread: string, name: string) => electronArtifactBlob(thread, name),
+  artifactFolder: (thread: string) => electronArtifactFolder(thread),
+  revealPath: (path: string) => revealWorkspacePath(path),
   threadFolder: (threadId: string) => electronThreadFolder(threadId),
   setThreadFolder: (threadId: string, path: string | null) =>
     electronSetThreadFolder(threadId, path),

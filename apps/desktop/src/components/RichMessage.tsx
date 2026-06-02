@@ -13,11 +13,19 @@ const RichMessageRenderer = lazy(() => import("./RichMessageRenderer"));
 // raw text inside the answer body.
 const CONTROL_MARKER_RE = /‹‹COMPOSIO_(?:CONFIRM|DONE)››[\s\S]*?‹‹\/COMPOSIO_(?:CONFIRM|DONE)››/g;
 const ACTIVITY_MARKER_RE = /‹‹ACT››[\s\S]*?‹‹\/ACT››/g;
+const ARTIFACT_MARKER_RE = /‹‹ARTIFACT››[\s\S]*?‹‹\/ARTIFACT››/g;
+// Plain "[file generato: …]" notes the gateway adds for the model are dropped too.
+const ARTIFACT_NOTE_RE = /\n?\[file generato: [^\]]*\]/g;
 
 export function RichMessage({ text, streaming = false }: RichMessageProps) {
   const clean =
-    text.includes("‹‹COMPOSIO_") || text.includes("‹‹ACT››")
-      ? text.replace(CONTROL_MARKER_RE, "").replace(ACTIVITY_MARKER_RE, "").trim()
+    text.includes("‹‹COMPOSIO_") || text.includes("‹‹ACT››") || text.includes("‹‹ARTIFACT››")
+      ? text
+          .replace(CONTROL_MARKER_RE, "")
+          .replace(ACTIVITY_MARKER_RE, "")
+          .replace(ARTIFACT_MARKER_RE, "")
+          .replace(ARTIFACT_NOTE_RE, "")
+          .trim()
       : text;
 
   if (streaming) {
