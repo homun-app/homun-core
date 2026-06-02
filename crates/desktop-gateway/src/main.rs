@@ -70,7 +70,7 @@ use local_first_local_computer_session::{
 use local_first_local_computer_session::{LocalComputerReadModel, LocalComputerSessionStore};
 use local_first_memory::{
     DataSensitivity as MemoryDataSensitivity, MemoryAccessRequest, MemoryCreateRequest,
-    MemoryDashboard, MemoryFacade, MemoryLifecycleRequest, MemoryRef, MemoryRefKind,
+    MemoryDashboard, MemoryExtraction, MemoryFacade, MemoryLifecycleRequest, MemoryRef, MemoryRefKind,
     MemoryUiReadModel, MemoryWikiProjection, PrivacyDomain, SQLiteMemoryStore,
     UserId as MemoryUserId, WikiFileStore, WikiPage, WorkspaceId as MemoryWorkspaceId,
     PERSONAL_WORKSPACE,
@@ -1137,6 +1137,154 @@ pertinente; non elencarlo a pappagallo e non inventare nulla che non sia qui.\n"
     Some(block.trim_end().to_string())
 }
 
+/// Is this exchange worth mining for memory? Skips trivial turns (greetings,
+/// acks, very short messages) to avoid noise and needless extractor calls.
+fn is_salient_exchange(user_message: &str) -> bool {
+    let trimmed = user_message.trim();
+    if trimmed.chars().count() < 12 {
+        return false;
+    }
+    let low = trimmed.to_lowercase();
+    const TRIVIAL: [&str; 12] = [
+        "grazie", "ok", "okay", "va bene", "perfetto", "ciao", "sì", "si", "no",
+        "thanks", "ottimo", "capito",
+    ];
+    !TRIVIAL.contains(&low.as_str())
+}
+
+/// Auto-confirm policy (M2): only durable, low-risk knowledge enters memory
+/// without asking. Preferences/facts, low sensitivity, high confidence. Anything
+/// sensitive (PII like a codice fiscale → secret) or uncertain stays a candidate
+/// for the user to confirm later.
+fn is_auto_confirmable(memory_type: &str, sensitivity: MemoryDataSensitivity, confidence: f64) -> bool {
+    matches!(memory_type, "preference" | "fact")
+        && sensitivity <= MemoryDataSensitivity::Internal
+        && confidence >= 0.8
+}
+
+/// Strip a ```json … ``` fence the model may wrap JSON in.
+fn strip_json_fences(text: &str) -> &str {
+    let trimmed = text.trim();
+    let without_open = trimmed
+        .strip_prefix("```json")
+        .or_else(|| trimmed.strip_prefix("```"))
+        .unwrap_or(trimmed);
+    without_open.trim().strip_suffix("```").unwrap_or(without_open.trim()).trim()
+}
+
+/// Normalize a memory's text for cheap dedup against what's already stored.
+fn normalize_for_dedup(text: &str) -> String {
+    text.trim().to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// M2: after a chat turn, mine the exchange for durable PERSONAL facts/preferences
+/// and write them to the personal scope — auto-confirming only low-risk ones.
+/// Fire-and-forget: best-effort, never blocks the response, swallows all errors.
+/// (Decisions + graph edges land in M3, where the graph makes them useful.)
+async fn learn_from_exchange(state: &AppState, user_message: &str, assistant_message: &str) {
+    if !is_salient_exchange(user_message) {
+        return;
+    }
+    let Some((base_url, model, api_key)) = chat_openai_stream_config() else {
+        return;
+    };
+    let system = "Sei un estrattore di MEMORIA. Dall'ultimo scambio estrai SOLO fatti e \
+preferenze DUREVOLI sull'UTENTE (chi è, persone della sua vita, come preferisce lavorare/le \
+risposte), NON il contenuto transitorio del compito, NON fatti generali del mondo, NON ciò che \
+ha detto l'assistente. Rispondi SOLO con JSON valido in questo schema, niente altro:\n\
+{\"memories\":[{\"memory_type\":\"fact|preference\",\"text\":\"frase breve in 3a persona nella \
+lingua dell'utente\",\"sensitivity\":\"internal|private|confidential|secret\",\"confidence\":0.0-1.0,\
+\"privacy_domain\":\"personal\"}]}\n\
+REGOLE sensitivity: dati identificativi/PII (codice fiscale, indirizzo, salute, documenti) = \
+\"secret\"; fatti personali normali (figli, partner, città) = \"private\"; preferenze di lavoro = \
+\"internal\". confidence alta (>=0.8) solo se esplicito e inequivocabile. Se non c'è nulla da \
+ricordare, restituisci {\"memories\":[]}.";
+    let payload = serde_json::json!({
+        "model": model,
+        "temperature": 0.0,
+        "max_tokens": 700,
+        "messages": [
+            { "role": "system", "content": system },
+            { "role": "user", "content": format!("UTENTE: {user_message}\n\nASSISTENTE: {assistant_message}") },
+        ],
+    });
+    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let mut builder = state.http.post(&endpoint).timeout(std::time::Duration::from_secs(30));
+    if let Some(key) = api_key.as_ref() {
+        builder = builder.bearer_auth(key);
+    }
+    let Ok(resp) = builder.json(&payload).send().await else {
+        return;
+    };
+    if !resp.status().is_success() {
+        return;
+    }
+    let Ok(body) = resp.json::<serde_json::Value>().await else {
+        return;
+    };
+    let content = body
+        .get("choices")
+        .and_then(|c| c.get(0))
+        .and_then(|c| c.get("message"))
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_str())
+        .unwrap_or("");
+    let Ok(mut extraction) = serde_json::from_str::<MemoryExtraction>(strip_json_fences(content)) else {
+        return;
+    };
+    // v1: personal facts/preferences only; graph (entities/relations) is M3.
+    extraction.entities.clear();
+    extraction.relations.clear();
+    extraction.memories.retain(|m| matches!(m.memory_type.as_str(), "fact" | "preference"));
+    if extraction.memories.is_empty() {
+        return;
+    }
+
+    let user_id = gateway_memory_user_id();
+    let personal = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
+    let Ok(facade) = lock_memory_facade(state) else {
+        return;
+    };
+    // Dedup against what's already stored personally (any sensitivity, for matching).
+    let dedup_request = MemoryAccessRequest {
+        actor_id: "memory-extractor".to_string(),
+        user_id: user_id.clone(),
+        workspace_id: personal.clone(),
+        purpose: "dedup".to_string(),
+        allowed_domains: vec![PrivacyDomain::new("personal"), PrivacyDomain::new("general")],
+        max_sensitivity: MemoryDataSensitivity::Secret,
+        allow_raw_payload: true,
+        allow_export: true,
+        broad_query: false,
+    };
+    let existing: std::collections::HashSet<String> = facade
+        .context_pack(&dedup_request)
+        .map(|pack| pack.items.into_iter().map(|i| normalize_for_dedup(&i.summary)).collect())
+        .unwrap_or_default();
+    extraction
+        .memories
+        .retain(|m| !existing.contains(&normalize_for_dedup(&m.text)));
+    if extraction.memories.is_empty() {
+        return;
+    }
+
+    let kept = extraction.memories.clone();
+    let Ok(summary) = facade.apply_extraction(&user_id, &personal, extraction) else {
+        return;
+    };
+    let lifecycle = MemoryLifecycleRequest {
+        actor_id: "memory-extractor".to_string(),
+        user_id,
+        workspace_id: personal,
+        purpose: "auto_extract".to_string(),
+    };
+    for (memory, reference) in kept.iter().zip(summary.memory_refs.iter()) {
+        if is_auto_confirmable(&memory.memory_type, memory.sensitivity, memory.confidence) {
+            let _ = facade.confirm_memory(&lifecycle, reference, "auto-confirmed (low risk)");
+        }
+    }
+}
+
 async fn generate_stream(
     State(state): State<AppState>,
     Json(request): Json<ChatGenerateStreamRequest>,
@@ -2162,8 +2310,12 @@ salvare/esportare un file in una cartella, chiama save_artifact(file, destinatio
     // Thread this chat belongs to: lets browser work reuse a persistent
     // per-thread browser session (search → then book on the same tab).
     let thread_id = request.thread_id.clone();
+    // Raw user message captured for post-turn memory extraction (M2).
+    let memory_user_message = request.prompt.clone();
     tokio::spawn(async move {
         let mut accumulated = String::new();
+        // Final answer text captured for post-turn memory extraction (M2).
+        let mut memory_answer = String::new();
         let mut final_done = false;
         // Source URLs visited via browse_web this request, for the "Fonti" footer.
         let mut browse_sources: Vec<String> = Vec::new();
@@ -2667,6 +2819,7 @@ card di conferma nell'interfaccia. NON dire che è stata eseguita."
                 accumulated.push_str(&fonti);
                 let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: fonti }).await;
             }
+            memory_answer = accumulated.clone();
             let _ = emit_stream_event(
                 &tx,
                 GenerateStreamEvent::Done {
@@ -2728,6 +2881,7 @@ verifica anti-bot). Riprova o indica una fonte preferita.".to_string()
             if let Some(fonti) = fonti_section(&browse_sources, &final_text) {
                 final_text.push_str(&fonti);
             }
+            memory_answer = final_text.clone();
             let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: final_text.clone() }).await;
             let _ = emit_stream_event(
                 &tx,
@@ -2737,6 +2891,16 @@ verifica anti-bot). Riprova o indica una fonte preferita.".to_string()
                 },
             )
             .await;
+        }
+        // M2: mine this exchange for durable personal memory (fire-and-forget, off
+        // the response path). Best-effort; never blocks or fails the turn.
+        if !memory_answer.trim().is_empty() {
+            let learn_state = state_owned.clone();
+            let learn_user = memory_user_message.clone();
+            let learn_answer = memory_answer.clone();
+            tokio::spawn(async move {
+                learn_from_exchange(&learn_state, &learn_user, &learn_answer).await;
+            });
         }
         // Mark the resume entry finished and evict it after a grace window so a
         // client that reloaded right at the end can still reattach and read it.
@@ -11996,6 +12160,11 @@ mod tests {
         extract_source_urls,
         fonti_section,
         format_memory_block,
+        is_auto_confirmable,
+        is_salient_exchange,
+        normalize_for_dedup,
+        strip_json_fences,
+        MemoryDataSensitivity,
         skill_id_from_command,
         browser_method_for_capability_tool,
         browser_targets_for_goal,
@@ -12087,6 +12256,37 @@ mod tests {
         let block = format_memory_block(&many, &[], 300).expect("block");
         assert!(block.len() < 600, "block should be bounded, got {}", block.len());
         assert!(block.contains("altro disponibile in memoria"));
+    }
+
+    #[test]
+    fn salience_skips_trivial_turns() {
+        assert!(!is_salient_exchange("grazie"));
+        assert!(!is_salient_exchange("ok"));
+        assert!(!is_salient_exchange("  Sì  "));
+        assert!(!is_salient_exchange("ciao"));
+        assert!(is_salient_exchange("preferisco risposte brevi e in italiano"));
+        assert!(is_salient_exchange("ho due figli, Luca e Sara"));
+    }
+
+    #[test]
+    fn auto_confirm_only_low_risk() {
+        assert!(is_auto_confirmable("preference", MemoryDataSensitivity::Internal, 0.9));
+        assert!(is_auto_confirmable("fact", MemoryDataSensitivity::Public, 0.85));
+        // PII / sensitive never auto-confirms
+        assert!(!is_auto_confirmable("fact", MemoryDataSensitivity::Secret, 0.99));
+        assert!(!is_auto_confirmable("fact", MemoryDataSensitivity::Private, 0.99));
+        // low confidence stays candidate
+        assert!(!is_auto_confirmable("preference", MemoryDataSensitivity::Internal, 0.5));
+        // decisions are not auto-confirmed here
+        assert!(!is_auto_confirmable("decision", MemoryDataSensitivity::Internal, 0.99));
+    }
+
+    #[test]
+    fn strip_fences_and_normalize() {
+        assert_eq!(strip_json_fences("```json\n{\"a\":1}\n```"), "{\"a\":1}");
+        assert_eq!(strip_json_fences("```\n{\"a\":1}\n```"), "{\"a\":1}");
+        assert_eq!(strip_json_fences("{\"a\":1}"), "{\"a\":1}");
+        assert_eq!(normalize_for_dedup("  Preferisce   risposte  BREVI "), "preferisce risposte brevi");
     }
 
     #[test]
