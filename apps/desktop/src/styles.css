@@ -2862,6 +2862,54 @@ body.resizing-drawer {
 .artifact-card .artifact-folder {
   padding: 0 8px;
 }
+/* Name is a button that opens the workspace panel; chevron expands inline. */
+.artifact-name {
+  flex: 1;
+  min-width: 0;
+  display: flex !important;
+  flex-direction: column;
+  align-items: flex-start !important;
+  gap: 1px;
+  padding: 2px 6px !important;
+  background: transparent !important;
+  border: 0 !important;
+}
+.artifact-name strong {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.artifact-name small {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.artifact-name:hover strong {
+  text-decoration: underline;
+}
+.artifact-card .artifact-expand {
+  padding: 0 4px !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--muted);
+}
+.artifact-chevron {
+  transition: transform 140ms ease;
+}
+.artifact-chevron.open {
+  transform: rotate(180deg);
+}
+.artifact-inline-preview {
+  margin-top: 6px;
+  max-height: 340px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--surface);
+}
 
 /* Variant navigation for regenerated answers (‹ n/m ›). */
 .branch-picker {
