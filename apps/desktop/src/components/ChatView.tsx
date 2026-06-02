@@ -2487,9 +2487,9 @@ function artifactExt(name: string): string {
   return name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
 }
 
-async function triggerArtifactDownload(artifact: ParsedArtifact) {
+async function triggerArtifactDownload(artifact: ParsedArtifact, version?: number) {
   try {
-    const blob = await coreBridge.downloadArtifact(artifact.thread, artifact.name);
+    const blob = await coreBridge.downloadArtifact(artifact.thread, artifact.name, version);
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -2521,9 +2521,39 @@ function ArtifactsPanel({
   const [selectedName, setSelectedName] = useState<string | null>(artifacts[0]?.name ?? null);
   const [preview, setPreview] = useState<ArtifactPreview | null>(null);
   const [loading, setLoading] = useState(false);
+  // Versioning: `versions` = archived count; selectable slots are 0..versions,
+  // where `versions` is the current (latest). `slot` is the shown version.
+  const [versions, setVersions] = useState(0);
+  const [slot, setSlot] = useState(0);
+  const [editing, setEditing] = useState(false);
+  const [editText, setEditText] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const urlRef = useRef<string | null>(null);
 
   const selected = artifacts.find((a) => a.name === selectedName) ?? artifacts[0] ?? null;
+
+  async function previewFromBlob(blob: Blob, ext: string): Promise<ArtifactPreview> {
+    if (urlRef.current) {
+      URL.revokeObjectURL(urlRef.current);
+      urlRef.current = null;
+    }
+    if (ARTIFACT_IMAGE_EXT.includes(ext)) {
+      const url = URL.createObjectURL(blob);
+      urlRef.current = url;
+      return { kind: "image", url, ext };
+    }
+    if (ext === "pdf") {
+      const url = URL.createObjectURL(blob);
+      urlRef.current = url;
+      return { kind: "pdf", url, ext };
+    }
+    if (ext === "md" || ext === "markdown") return { kind: "markdown", text: await blob.text(), ext };
+    if (ext === "csv") return { kind: "csv", text: await blob.text(), ext };
+    if (ARTIFACT_CODE_EXT.has(ext)) return { kind: "code", text: await blob.text(), ext };
+    if (ext === "txt" || ext === "log" || ext === "") return { kind: "text", text: await blob.text(), ext };
+    return { kind: "binary", ext };
+  }
 
   useEffect(() => {
     if (!selected) {
@@ -2532,34 +2562,21 @@ function ArtifactsPanel({
     }
     let cancelled = false;
     setLoading(true);
+    setEditing(false);
     const ext = artifactExt(selected.name);
     void (async () => {
+      let count = 0;
+      try {
+        count = await coreBridge.artifactVersions(selected.thread, selected.name);
+      } catch {
+        /* no versions */
+      }
+      if (cancelled) return;
+      setVersions(count);
+      setSlot(count);
       try {
         const blob = await coreBridge.downloadArtifact(selected.thread, selected.name);
-        if (cancelled) return;
-        if (urlRef.current) {
-          URL.revokeObjectURL(urlRef.current);
-          urlRef.current = null;
-        }
-        if (ARTIFACT_IMAGE_EXT.includes(ext)) {
-          const url = URL.createObjectURL(blob);
-          urlRef.current = url;
-          setPreview({ kind: "image", url, ext });
-        } else if (ext === "pdf") {
-          const url = URL.createObjectURL(blob);
-          urlRef.current = url;
-          setPreview({ kind: "pdf", url, ext });
-        } else if (ext === "md" || ext === "markdown") {
-          setPreview({ kind: "markdown", text: await blob.text(), ext });
-        } else if (ext === "csv") {
-          setPreview({ kind: "csv", text: await blob.text(), ext });
-        } else if (ARTIFACT_CODE_EXT.has(ext)) {
-          setPreview({ kind: "code", text: await blob.text(), ext });
-        } else if (ext === "txt" || ext === "log" || ext === "") {
-          setPreview({ kind: "text", text: await blob.text(), ext });
-        } else {
-          setPreview({ kind: "binary", ext });
-        }
+        if (!cancelled) setPreview(await previewFromBlob(blob, ext));
       } catch {
         if (!cancelled) setPreview({ kind: "error", ext });
       } finally {
@@ -2569,7 +2586,50 @@ function ArtifactsPanel({
     return () => {
       cancelled = true;
     };
-  }, [selected]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, reloadKey]);
+
+  const editableKind =
+    preview?.kind === "markdown" ||
+    preview?.kind === "code" ||
+    preview?.kind === "text" ||
+    preview?.kind === "csv";
+
+  async function saveEdit() {
+    if (!selected) return;
+    setSaving(true);
+    try {
+      await coreBridge.saveArtifactContent(selected.thread, selected.name, editText);
+      setEditing(false);
+      setReloadKey((key) => key + 1);
+    } catch {
+      /* keep editing on failure */
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function goToVersion(target: number) {
+    if (!selected) return;
+    const clamped = Math.max(0, Math.min(versions, target));
+    setSlot(clamped);
+    setLoading(true);
+    const ext = artifactExt(selected.name);
+    void (async () => {
+      try {
+        const blob = await coreBridge.downloadArtifact(
+          selected.thread,
+          selected.name,
+          clamped < versions ? clamped : undefined,
+        );
+        setPreview(await previewFromBlob(blob, ext));
+      } catch {
+        setPreview({ kind: "error", ext });
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }
 
   useEffect(
     () => () => {
@@ -2605,14 +2665,76 @@ function ArtifactsPanel({
           {selected && (
             <div className="artifacts-preview-bar">
               <span title={selected.name}>{selected.name}</span>
-              <button type="button" onClick={() => void triggerArtifactDownload(selected)}>
+              {versions > 0 && (
+                <div className="artifact-version-switch" aria-label="Versioni">
+                  <button
+                    type="button"
+                    aria-label="Versione precedente"
+                    disabled={slot === 0}
+                    onClick={() => goToVersion(slot - 1)}
+                  >
+                    <ChevronLeft size={13} />
+                  </button>
+                  <span>
+                    v{slot + 1}/{versions + 1}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="Versione successiva"
+                    disabled={slot === versions}
+                    onClick={() => goToVersion(slot + 1)}
+                  >
+                    <ChevronRight size={13} />
+                  </button>
+                </div>
+              )}
+              {editableKind && !editing && slot === versions && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditText(preview && "text" in preview ? preview.text : "");
+                    setEditing(true);
+                  }}
+                >
+                  <Pencil size={14} />
+                  <span>Modifica</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() =>
+                  void triggerArtifactDownload(selected, slot < versions ? slot : undefined)
+                }
+              >
                 <Download size={14} />
                 <span>Scarica</span>
               </button>
             </div>
           )}
           <div className="artifacts-preview-body">
-            {loading ? (
+            {editing ? (
+              <div className="artifact-edit">
+                <textarea
+                  className="artifact-edit-area"
+                  value={editText}
+                  onChange={(event) => setEditText(event.target.value)}
+                  spellCheck={false}
+                />
+                <div className="artifact-edit-actions">
+                  <button type="button" onClick={() => setEditing(false)} disabled={saving}>
+                    Annulla
+                  </button>
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={() => void saveEdit()}
+                    disabled={saving}
+                  >
+                    {saving ? "Salvo…" : "Salva versione"}
+                  </button>
+                </div>
+              </div>
+            ) : loading ? (
               <p className="artifacts-preview-note">Carico…</p>
             ) : (
               <ArtifactPreviewBody preview={preview} />

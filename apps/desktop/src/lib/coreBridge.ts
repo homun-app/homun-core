@@ -497,15 +497,35 @@ async function electronChatSuggestions(prompt: string, answer: string): Promise<
   return suggestions;
 }
 
-async function electronArtifactBlob(thread: string, name: string): Promise<Blob> {
+async function electronArtifactBlob(
+  thread: string,
+  name: string,
+  version?: number,
+): Promise<Blob> {
+  const versionParam = version !== undefined ? `&version=${version}` : "";
   const response = await fetch(
-    `${DESKTOP_GATEWAY_URL}/api/artifacts/file?thread=${encodeURIComponent(thread)}&name=${encodeURIComponent(name)}`,
+    `${DESKTOP_GATEWAY_URL}/api/artifacts/file?thread=${encodeURIComponent(thread)}&name=${encodeURIComponent(name)}${versionParam}`,
     { headers: gatewayHeaders() },
   );
   if (!response.ok) {
     throw new Error(`Download artifact HTTP ${response.status}`);
   }
   return response.blob();
+}
+
+async function electronSaveArtifactContent(
+  thread: string,
+  name: string,
+  content: string,
+): Promise<void> {
+  await gatewayPostJson("/api/artifacts/content", { thread, name, content });
+}
+
+async function electronArtifactVersions(thread: string, name: string): Promise<number> {
+  const { versions } = await gatewayGetJson<{ versions: number }>(
+    `/api/artifacts/versions?thread=${encodeURIComponent(thread)}&name=${encodeURIComponent(name)}`,
+  );
+  return versions;
 }
 
 export interface ArtifactFileView {
@@ -1193,7 +1213,11 @@ export const coreBridge = {
     ),
   transcribe: (audioBase64: string, language?: string) =>
     electronTranscribe(audioBase64, language),
-  downloadArtifact: (thread: string, name: string) => electronArtifactBlob(thread, name),
+  downloadArtifact: (thread: string, name: string, version?: number) =>
+    electronArtifactBlob(thread, name, version),
+  artifactVersions: (thread: string, name: string) => electronArtifactVersions(thread, name),
+  saveArtifactContent: (thread: string, name: string, content: string) =>
+    electronSaveArtifactContent(thread, name, content),
   artifactFolder: (thread: string) => electronArtifactFolder(thread),
   artifactsUsage: () => electronArtifactsUsage(),
   artifactDestinations: () => electronArtifactDestinations(),
