@@ -384,6 +384,11 @@ pub const ROLES: &[RoleInfo] = &[
         label: "Browser",
         description: "Pianificatore del loop osserva-agisci sul browser.",
     },
+    RoleInfo {
+        key: "memory",
+        label: "Memoria",
+        description: "Estrazione di fatti/preferenze dalle conversazioni: meglio un modello veloce ed economico.",
+    },
 ];
 
 /// Hard requirements a model must meet to serve a role (the gate), plus a soft
@@ -423,6 +428,14 @@ pub fn role_requirements(role: &str) -> RoleReq {
             needs_vision: false,
             modality: "text",
             preferred_tier: Some(ModelTier::Balanced),
+        },
+        // Memory extraction is simple structured output run in the background on
+        // every salient turn → prefer a fast, cheap model; no tools needed.
+        "memory" => RoleReq {
+            needs_tools: false,
+            needs_vision: false,
+            modality: "text",
+            preferred_tier: Some(ModelTier::Fast),
         },
         _ => RoleReq {
             needs_tools: true,

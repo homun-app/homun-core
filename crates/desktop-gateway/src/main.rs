@@ -1185,7 +1185,7 @@ async fn learn_from_exchange(state: &AppState, user_message: &str, assistant_mes
     if !is_salient_exchange(user_message) {
         return;
     }
-    let Some((base_url, model, api_key)) = chat_openai_stream_config() else {
+    let Some((base_url, model, api_key)) = extractor_openai_config() else {
         return;
     };
     let system = "Sei un estrattore di MEMORIA. Dall'ultimo scambio estrai SOLO fatti e \
@@ -1847,6 +1847,17 @@ fn chat_openai_stream_config() -> Option<(String, String, Option<String>)> {
     }
     let base_url = effective_inference_base_url()?;
     Some((base_url, active_inference_model(), resolve_inference_api_key()))
+}
+
+/// Provider/model for background MEMORY extraction: prefers the "memory" role
+/// (a fast, cheap model) so mining each turn doesn't cost as much as answering.
+/// Falls back to the orchestrator config when no memory model is resolvable.
+fn extractor_openai_config() -> Option<(String, String, Option<String>)> {
+    if let Some(resolved) = load_provider_registry().resolve_role("memory") {
+        let api_key = provider_api_key(&resolved.provider_id).or_else(env_inference_api_key);
+        return Some((resolved.base_url, resolved.model, api_key));
+    }
+    chat_openai_stream_config()
 }
 
 /// Chat context-char budget for the capable backend, derived from the model's
