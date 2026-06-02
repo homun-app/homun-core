@@ -69,9 +69,9 @@ use local_first_local_computer_session::{
 };
 use local_first_local_computer_session::{LocalComputerReadModel, LocalComputerSessionStore};
 use local_first_memory::{
-    DataSensitivity as MemoryDataSensitivity, ExtractedMemory, MemoryAccessRequest,
-    MemoryCreateRequest, MemoryDashboard, MemoryExtraction, MemoryFacade, MemoryLifecycleRequest,
-    MemoryRef, MemoryRefKind,
+    DataSensitivity as MemoryDataSensitivity, ExtractedEntity, ExtractedMemory, ExtractedRelation,
+    MemoryAccessRequest, MemoryCreateRequest, MemoryDashboard, MemoryEntity, MemoryExtraction,
+    MemoryFacade, MemoryLifecycleRequest, MemoryRef, MemoryRefKind, MemoryRelation,
     MemorySearchRequest, MemoryStatus, MemoryUiReadModel, MemoryWikiProjection, PrivacyDomain,
     SQLiteMemoryStore, UserId as MemoryUserId, WikiFileStore, WikiPage,
     WorkspaceId as MemoryWorkspaceId, PERSONAL_WORKSPACE,
@@ -1235,10 +1235,78 @@ fn persist_scope_memories(
     }
 }
 
+/// Persists extracted entities + relations into the graph (M3b), 2-pass so a
+/// relation never aborts on an unresolved ref: (1) upsert each entity, building a
+/// canonical_key → ref map (seeded with existing entities so relations can link to
+/// already-known nodes); (2) upsert each relation only when BOTH endpoints resolve.
+/// The model gives source/target as canonical_keys in source_ref/target_ref.
+fn persist_graph(
+    facade: &MemoryFacade,
+    user_id: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+    entities: Vec<ExtractedEntity>,
+    relations: Vec<ExtractedRelation>,
+) {
+    if entities.is_empty() && relations.is_empty() {
+        return;
+    }
+    let mut key_to_ref: std::collections::HashMap<String, MemoryRef> = std::collections::HashMap::new();
+    if let Ok(existing) = facade.list_entities_for_ui(user_id, workspace) {
+        for entity in existing {
+            key_to_ref.insert(entity.canonical_key.clone(), entity.reference);
+        }
+    }
+    for extracted in entities {
+        if extracted.canonical_key.trim().is_empty() {
+            continue;
+        }
+        let reference = key_to_ref.get(&extracted.canonical_key).cloned().unwrap_or_else(|| {
+            MemoryRef::generated(MemoryRefKind::Entity, user_id.clone(), workspace.clone())
+        });
+        let entity = MemoryEntity {
+            reference: reference.clone(),
+            user_id: user_id.clone(),
+            workspace_id: workspace.clone(),
+            entity_type: extracted.entity_type,
+            name: extracted.name,
+            canonical_key: extracted.canonical_key.clone(),
+            aliases: extracted.aliases,
+            privacy_domain: PrivacyDomain::new("personal"),
+            sensitivity: extracted.sensitivity,
+            metadata: extracted.metadata,
+        };
+        if facade.upsert_entity(&entity).is_ok() {
+            key_to_ref.insert(extracted.canonical_key, reference);
+        }
+    }
+    for extracted in relations {
+        let (Some(source), Some(target)) = (
+            key_to_ref.get(&extracted.source_ref),
+            key_to_ref.get(&extracted.target_ref),
+        ) else {
+            continue;
+        };
+        let relation = MemoryRelation {
+            reference: MemoryRef::generated(MemoryRefKind::Relation, user_id.clone(), workspace.clone()),
+            user_id: user_id.clone(),
+            workspace_id: workspace.clone(),
+            source_ref: source.clone(),
+            relation_type: extracted.relation_type,
+            target_ref: target.clone(),
+            confidence: extracted.confidence,
+            privacy_domain: PrivacyDomain::new("personal"),
+            sensitivity: extracted.sensitivity,
+            evidence: Vec::new(),
+            metadata: extracted.metadata,
+        };
+        let _ = facade.upsert_relation(&relation);
+    }
+}
+
 /// M2/M3: after a chat turn, mine the exchange for durable facts, preferences and
-/// DECISIONS (with the why), routing each to its scope (personal vs active
-/// project) and auto-confirming the low-risk ones. Fire-and-forget: best-effort,
-/// never blocks the response, swallows all errors.
+/// DECISIONS (with the why), plus graph entities/relations — routing each to its
+/// scope (personal vs active project) and auto-confirming the low-risk ones.
+/// Fire-and-forget: best-effort, never blocks the response, swallows all errors.
 async fn learn_from_exchange(state: &AppState, user_message: &str, assistant_message: &str) {
     if !is_salient_exchange(user_message) {
         return;
@@ -1255,13 +1323,20 @@ niente altro:\n\
 {\"memories\":[{\"memory_type\":\"fact|preference|decision\",\"text\":\"frase breve in 3a persona \
 nella lingua dell'utente\",\"sensitivity\":\"internal|private|confidential|secret\",\"confidence\":0.0-1.0,\
 \"metadata\":{\"scope\":\"personal|project\",\"decision\":{\"rationale\":\"il perché\",\
-\"alternatives\":[{\"option\":\"alternativa\",\"rejected_because\":\"motivo\"}]}}}]}\n\
+\"alternatives\":[{\"option\":\"alternativa\",\"rejected_because\":\"motivo\"}]}}}],\
+\"entities\":[{\"entity_type\":\"person|project|tool\",\"name\":\"Nome\",\"canonical_key\":\"person:nome-normalizzato\",\
+\"sensitivity\":\"internal|private\",\"privacy_domain\":\"personal\"}],\
+\"relations\":[{\"source_ref\":\"person:fabio\",\"relation_type\":\"child_of|parent_of|partner_of|sibling_of|works_as|relates_to\",\
+\"target_ref\":\"person:sara\",\"sensitivity\":\"internal\",\"privacy_domain\":\"personal\"}]}\n\
 REGOLE: scope \"personal\" = vale ovunque (preferenze, persone, dati personali); scope \"project\" \
 = specifico del progetto/lavoro corrente (decisioni tecniche, file, scelte). Per memory_type \
 \"decision\" metadata.decision è OBBLIGATORIO (rationale, e alternatives se citate) e lo scope è di \
-norma \"project\". sensitivity: PII (codice fiscale, indirizzo, salute, documenti) = \"secret\"; \
-fatti personali (figli, partner, città) = \"private\"; preferenze e decisioni = \"internal\". \
-confidence >=0.8 solo se esplicito e inequivocabile. Se non c'è nulla da ricordare: {\"memories\":[]}.";
+norma \"project\". ENTITÀ = persone/progetti/strumenti citati, con canonical_key STABILE (es. \
+\"person:sara\"). RELAZIONI = usa gli STESSI canonical_key in source_ref/target_ref. Inserisci \
+entità e relazioni SOLO se esplicite, altrimenti lascia gli array vuoti. sensitivity: PII (codice \
+fiscale, indirizzo, salute, documenti) = \"secret\"; fatti personali (figli, partner, città) = \
+\"private\"; preferenze e decisioni = \"internal\". confidence >=0.8 solo se esplicito e \
+inequivocabile. Se non c'è nulla da ricordare: {\"memories\":[],\"entities\":[],\"relations\":[]}.";
     let payload = serde_json::json!({
         "model": model,
         "temperature": 0.0,
@@ -1299,17 +1374,36 @@ confidence >=0.8 solo se esplicito e inequivocabile. Se non c'è nulla da ricord
         .and_then(|m| m.get("content"))
         .and_then(|c| c.as_str())
         .unwrap_or("");
-    let Ok(mut extraction) = serde_json::from_str::<MemoryExtraction>(strip_json_fences(content)) else {
+    // Resilient parse: deserialize memories / entities / relations INDEPENDENTLY
+    // and item-by-item, so a malformed entity never makes us lose the facts (they
+    // share one JSON blob from the model).
+    let Ok(root) = serde_json::from_str::<serde_json::Value>(strip_json_fences(content)) else {
         return;
     };
-    // Keep durable knowledge only: facts, preferences, decisions. (Graph
-    // entities/relations are M3b.)
-    extraction.entities.clear();
-    extraction.relations.clear();
+    let parse_array = |key: &str| -> serde_json::Value {
+        root.get(key).cloned().unwrap_or(serde_json::Value::Null)
+    };
+    let memories: Vec<ExtractedMemory> = parse_array("memories")
+        .as_array()
+        .map(|a| a.iter().filter_map(|i| serde_json::from_value(i.clone()).ok()).collect())
+        .unwrap_or_default();
+    let entities: Vec<ExtractedEntity> = parse_array("entities")
+        .as_array()
+        .map(|a| a.iter().filter_map(|i| serde_json::from_value(i.clone()).ok()).collect())
+        .unwrap_or_default();
+    let relations: Vec<ExtractedRelation> = parse_array("relations")
+        .as_array()
+        .map(|a| a.iter().filter_map(|i| serde_json::from_value(i.clone()).ok()).collect())
+        .unwrap_or_default();
+    let mut extraction = MemoryExtraction { memories, entities, relations };
+    // Take the graph (entities/relations) out before we consume the memories;
+    // keep durable memory types only (facts, preferences, decisions).
+    let graph_entities = std::mem::take(&mut extraction.entities);
+    let graph_relations = std::mem::take(&mut extraction.relations);
     extraction
         .memories
         .retain(|m| matches!(m.memory_type.as_str(), "fact" | "preference" | "decision"));
-    if extraction.memories.is_empty() {
+    if extraction.memories.is_empty() && graph_entities.is_empty() && graph_relations.is_empty() {
         return;
     }
     // The model is unreliable about the privacy DOMAIN; pin it to "personal" so the
@@ -1351,6 +1445,14 @@ confidence >=0.8 solo se esplicito e inequivocabile. Se non c'è nulla da ricord
     if has_project {
         persist_scope_memories(&facade, &user_id, &active, project_mems);
     }
+    // Graph (people + kinship/work relations) → personal scope.
+    persist_graph(
+        &facade,
+        &user_id,
+        &MemoryWorkspaceId::new(PERSONAL_WORKSPACE),
+        graph_entities,
+        graph_relations,
+    );
 }
 
 /// Tool schema for on-demand deep memory recall (M3). The always-on profile is a
@@ -1433,6 +1535,27 @@ fn recall_memory(state: &AppState, query: &str) -> String {
     if active.as_str() != PERSONAL_WORKSPACE {
         for (kind, text) in search(active) {
             lines.push(format!("- [{kind}, progetto] {text}"));
+        }
+    }
+    // Graph traversal: surface known relationships (resolved to entity names) so
+    // the model can answer relational questions ("chi è la nonna di…").
+    let personal = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
+    if let Ok(relations) = facade.list_relations_for_ui(&user, &personal) {
+        if !relations.is_empty() {
+            let names: std::collections::HashMap<String, String> = facade
+                .list_entities_for_ui(&user, &personal)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|entity| (entity.reference.to_string(), entity.name))
+                .collect();
+            for relation in relations.iter().take(12) {
+                if let (Some(source), Some(target)) = (
+                    names.get(&relation.source_ref.to_string()),
+                    names.get(&relation.target_ref.to_string()),
+                ) {
+                    lines.push(format!("- {source} —{}→ {target}", relation.relation_type));
+                }
+            }
         }
     }
     if lines.is_empty() {
