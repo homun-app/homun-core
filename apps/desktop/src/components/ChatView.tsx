@@ -8,8 +8,13 @@ import {
   ChevronLeft,
   ChevronRight,
   Copy,
+  Braces,
   Clock3,
   Download,
+  FileCode,
+  FileCog,
+  FileImage,
+  FileSpreadsheet,
   FileText,
   FolderOpen,
   Globe2,
@@ -2430,6 +2435,20 @@ function parseArtifacts(text: string): ParsedArtifact[] {
   return out;
 }
 
+/** File-type icon (colored) by extension — like Claude Code's file list. */
+function artifactTypeIcon(name: string) {
+  const ext = artifactExt(name);
+  if (["json"].includes(ext)) return <Braces size={16} color="#d19a00" />;
+  if (["yml", "yaml"].includes(ext)) return <FileCode size={16} color="#e5484d" />;
+  if (["toml", "ini", "conf", "cfg", "env"].includes(ext)) return <FileCog size={16} color="#2f7ed8" />;
+  if (["csv", "xlsx", "xls", "tsv"].includes(ext)) return <FileSpreadsheet size={16} color="#1a9b53" />;
+  if (["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"].includes(ext))
+    return <FileImage size={16} color="#7c5cff" />;
+  if (["md", "markdown", "txt", "log"].includes(ext)) return <FileText size={16} color="#6b7280" />;
+  if (ARTIFACT_CODE_EXT.has(ext)) return <FileCode size={16} color="#2f7ed8" />;
+  return <FileText size={16} color="#6b7280" />;
+}
+
 async function openArtifactFolder(artifact: ParsedArtifact) {
   try {
     const path = await coreBridge.artifactFolder(artifact.thread);
@@ -2510,29 +2529,20 @@ function ArtifactCardRow({
   }, [artifact]);
 
   return (
-    <div className="artifact-card-wrap">
-      <div className="artifact-card">
-        <button
-          type="button"
-          className="artifact-expand"
-          aria-label={expanded ? "Comprimi anteprima" : "Espandi anteprima"}
-          onClick={onToggle}
-        >
-          <ChevronDown size={15} className={expanded ? "artifact-chevron open" : "artifact-chevron"} />
-        </button>
-        <FileText size={18} className="artifact-icon" />
+    <div className="artifact-row-wrap">
+      <div className="artifact-row">
+        <span className="artifact-type-icon" aria-hidden="true">
+          {artifactTypeIcon(artifact.name)}
+        </span>
         <button type="button" className="artifact-name" onClick={onOpen} title="Apri nel pannello">
-          <strong>{artifact.name}</strong>
-          <small>
-            {artifact.updated && <span className="artifact-updated">Modificato</span>}
-            {counts && (
-              <span className="diff-counts">
-                <span className="add">+{counts.added}</span>{" "}
-                <span className="del">−{counts.removed}</span>
-              </span>
-            )}
-            {formatFileSize(artifact.size)}
-          </small>
+          <span className="artifact-fname">{artifact.name}</span>
+          {artifact.updated && <span className="artifact-updated">Modificato</span>}
+          {counts && (
+            <span className="diff-counts">
+              <span className="add">+{counts.added}</span>{" "}
+              <span className="del">−{counts.removed}</span>
+            </span>
+          )}
         </button>
         <button
           type="button"
@@ -2541,7 +2551,18 @@ function ArtifactCardRow({
           aria-label="Scarica"
           title="Scarica"
         >
-          <Download size={15} />
+          <Download size={14} />
+        </button>
+        <button
+          type="button"
+          className="artifact-expand"
+          aria-label={expanded ? "Comprimi anteprima" : "Espandi anteprima"}
+          onClick={onToggle}
+        >
+          <ChevronRight
+            size={15}
+            className={expanded ? "artifact-chevron open" : "artifact-chevron"}
+          />
         </button>
       </div>
       {expanded && <InlineArtifactPreview artifact={artifact} />}

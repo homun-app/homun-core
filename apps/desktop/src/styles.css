@@ -2916,111 +2916,71 @@ body.resizing-drawer {
   margin-top: 10px;
   max-width: 680px;
 }
-.artifact-card {
+/* Minimal one-line artifact row (no card box), with a file-type icon. */
+.artifact-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 8px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface);
-}
-.artifact-card:hover {
-  border-color: var(--line-strong);
-}
-.artifact-quick {
-  flex: none;
-  display: grid !important;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  padding: 0 !important;
-  border: 0 !important;
-  background: transparent !important;
-  color: var(--muted);
-}
-.artifact-quick:hover {
-  color: var(--text);
-  background: var(--surface-hover) !important;
-}
-.artifact-icon {
-  flex: none;
-  color: var(--blue);
-}
-.artifact-meta {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-.artifact-meta strong {
-  font-size: 13px;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.artifact-meta small {
-  font-size: 11.5px;
-  color: var(--muted);
-}
-.artifact-card button {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-height: 30px;
-  padding: 0 10px;
+  padding: 3px 4px;
   border-radius: 8px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  color: var(--text);
-  font-size: 12.5px;
 }
-.artifact-card button:hover {
+.artifact-row:hover {
   background: var(--surface-hover);
 }
-.artifact-card .artifact-folder {
-  padding: 0 8px;
+.artifact-type-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
 }
-/* Name is a button that opens the workspace panel; chevron expands inline. */
 .artifact-name {
   flex: 1;
   min-width: 0;
   display: flex !important;
-  flex-direction: column;
-  align-items: flex-start !important;
-  gap: 1px;
-  padding: 2px 6px !important;
+  align-items: center;
+  gap: 8px;
+  padding: 2px !important;
   background: transparent !important;
   border: 0 !important;
+  color: var(--text);
 }
-.artifact-name strong {
-  font-size: 13px;
-  font-weight: 600;
+.artifact-fname {
+  font-size: 13.5px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 100%;
 }
-.artifact-name small {
-  font-size: 11.5px;
-  color: var(--muted);
-}
-.artifact-name:hover strong {
+.artifact-name:hover .artifact-fname {
   text-decoration: underline;
 }
-.artifact-card .artifact-expand {
-  padding: 0 4px !important;
-  border: 0 !important;
-  background: transparent !important;
+.artifact-quick,
+.artifact-expand {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  background: transparent;
   color: var(--muted);
+}
+.artifact-quick {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.artifact-row:hover .artifact-quick,
+.artifact-quick:focus-visible {
+  opacity: 1;
+}
+.artifact-quick:hover,
+.artifact-expand:hover {
+  color: var(--text);
+  background: var(--surface-hover);
 }
 .artifact-chevron {
   transition: transform 140ms ease;
 }
 .artifact-chevron.open {
-  transform: rotate(180deg);
+  transform: rotate(90deg);
 }
 .artifact-inline-preview {
   margin-top: 6px;
