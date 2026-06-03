@@ -1,0 +1,24 @@
+# Standalone sidecar — intentionally NOT part of the root Cargo workspace, so the
+# gateway never compiles frankenstein and its builds stay fast. The gateway talks
+# to this process over the same local channel protocol as the WhatsApp sidecar.
+[package]
+name = "channel-telegram"
+version = "0.1.0"
+edition = "2024"
+description = "Telegram channel bridge sidecar (frankenstein Bot API) for the local-first assistant"
+
+# Empty [workspace] detaches this crate from the parent repo's workspace.
+[workspace]
+
+[dependencies]
+# Telegram Bot API client (reqwest backend) — ported from Homun's channel.
+frankenstein = { version = "0.49", default-features = false, features = ["client-reqwest"] }
+
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+# Local HTTP server (receive /send + /chatstate from the gateway) + client
+# (forward inbound messages to the gateway). http-only, no TLS (localhost).
+axum = "0.7"
+reqwest = { version = "0.12", default-features = false, features = ["json"] }

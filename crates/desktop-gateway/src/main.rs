@@ -677,6 +677,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/channels/whatsapp/disconnect", post(whatsapp_disconnect))
         .route("/api/channels/whatsapp/send", post(whatsapp_send))
         .route("/api/channels/whatsapp/inbound", post(whatsapp_inbound))
+        .route("/api/channels/telegram/status", get(telegram_status))
+        .route("/api/channels/telegram/connect", post(telegram_connect))
+        .route("/api/channels/telegram/disconnect", post(telegram_disconnect))
+        .route("/api/channels/telegram/inbound", post(telegram_inbound))
         .route("/api/capabilities/snapshot", get(capability_snapshot))
         .route(
             "/api/workspaces",
@@ -4019,10 +4023,180 @@ async fn whatsapp_disconnect() -> Json<serde_json::Value> {
 
 /// Local port the WhatsApp sidecar listens on for outbound /send commands.
 const WHATSAPP_HTTP_PORT: u16 = 18766;
+const TELEGRAM_HTTP_PORT: u16 = 18767;
 
-/// Sends a text message via the sidecar (C2). The sidecar holds the wa-rs client.
-async fn whatsapp_send_to(state: &AppState, recipient: &str, text: &str) -> Result<(), String> {
-    let url = format!("http://127.0.0.1:{WHATSAPP_HTTP_PORT}/send");
+// ---------------------------------------------------------------- telegram
+// Telegram is a Bot API sidecar (frankenstein): a bot token from @BotFather,
+// no phone pairing. Same gateway↔sidecar protocol as WhatsApp.
+
+#[derive(Default, Serialize, Deserialize)]
+struct TelegramStatus {
+    #[serde(default)]
+    connected: bool,
+    #[serde(default)]
+    bot_username: Option<String>,
+    #[serde(default)]
+    error: Option<String>,
+    /// Gateway-computed: is the sidecar process currently running?
+    #[serde(default)]
+    running: bool,
+}
+
+fn telegram_status_path() -> Option<PathBuf> {
+    gateway_data_dir().ok().map(|dir| dir.join("channel-telegram-status.json"))
+}
+
+/// Persisted bot token (0600). Lets "Connetti" work without re-entering it.
+fn telegram_token_path() -> Option<PathBuf> {
+    gateway_data_dir().ok().map(|dir| dir.join("telegram-bot-token"))
+}
+
+fn telegram_bin() -> Option<PathBuf> {
+    if let Ok(p) = env::var("LOCAL_FIRST_TELEGRAM_BIN") {
+        let path = PathBuf::from(p);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    for base in [
+        "runtimes/channel-telegram/target/release/channel-telegram",
+        "../runtimes/channel-telegram/target/release/channel-telegram",
+    ] {
+        let path = PathBuf::from(base);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    None
+}
+
+fn telegram_child() -> &'static std::sync::Mutex<Option<std::process::Child>> {
+    static CHILD: std::sync::OnceLock<std::sync::Mutex<Option<std::process::Child>>> =
+        std::sync::OnceLock::new();
+    CHILD.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+fn telegram_port_open() -> bool {
+    std::net::TcpStream::connect_timeout(
+        &std::net::SocketAddr::from(([127, 0, 0, 1], TELEGRAM_HTTP_PORT)),
+        std::time::Duration::from_millis(150),
+    )
+    .is_ok()
+}
+
+fn telegram_running() -> bool {
+    if let Ok(mut guard) = telegram_child().lock() {
+        if let Some(child) = guard.as_mut() {
+            match child.try_wait() {
+                Ok(None) => return true,
+                _ => *guard = None,
+            }
+        }
+    }
+    telegram_port_open()
+}
+
+async fn telegram_status() -> Json<TelegramStatus> {
+    let mut status = telegram_status_path()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|raw| serde_json::from_str::<TelegramStatus>(&raw).ok())
+        .unwrap_or_default();
+    status.running = telegram_running();
+    if !status.running {
+        // Stale file: not connected once the sidecar is gone.
+        status.connected = false;
+    }
+    Json(status)
+}
+
+#[derive(Debug, Deserialize)]
+struct TelegramConnectRequest {
+    /// Bot token from @BotFather. If absent, reuse the persisted token.
+    #[serde(default)]
+    token: Option<String>,
+}
+
+async fn telegram_connect(
+    Json(request): Json<TelegramConnectRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    if telegram_running() {
+        return Ok(Json(serde_json::json!({ "ok": true, "already_running": true })));
+    }
+    // Resolve the token: explicit (persist it 0600) or previously persisted.
+    let token = match request.token.as_ref().map(|t| t.trim()).filter(|t| !t.is_empty()) {
+        Some(token) => {
+            if let Some(path) = telegram_token_path() {
+                write_private_file(&path, token.as_bytes()).map_err(|error| GatewayError {
+                    status: StatusCode::INTERNAL_SERVER_ERROR,
+                    code: "telegram_token_save",
+                    message: error.to_string(),
+                })?;
+            }
+            token.to_string()
+        }
+        None => telegram_token_path()
+            .and_then(|p| fs::read_to_string(p).ok())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| GatewayError {
+                status: StatusCode::BAD_REQUEST,
+                code: "telegram_token_missing",
+                message: "Inserisci il bot token di @BotFather.".to_string(),
+            })?,
+    };
+
+    let bin = telegram_bin().ok_or_else(|| GatewayError {
+        status: StatusCode::SERVICE_UNAVAILABLE,
+        code: "telegram_bin_missing",
+        message: "Bridge non compilato: esegui `cargo build --release` in runtimes/channel-telegram."
+            .to_string(),
+    })?;
+    let mut command = std::process::Command::new(bin);
+    command.env("TG_BOT_TOKEN", &token);
+    command.env("TG_HTTP_PORT", TELEGRAM_HTTP_PORT.to_string());
+    if let Some(path) = telegram_status_path() {
+        command.env("TG_STATUS_FILE", path);
+    }
+    let gw_port = env::var("LOCAL_FIRST_DESKTOP_GATEWAY_PORT").unwrap_or_else(|_| "18765".to_string());
+    command.env("TG_GATEWAY_URL", format!("http://127.0.0.1:{gw_port}"));
+    if let Ok(token) = env::var("LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN") {
+        command.env("TG_GATEWAY_TOKEN", token);
+    }
+    let child = command.spawn().map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "telegram_spawn",
+        message: error.to_string(),
+    })?;
+    if let Ok(mut guard) = telegram_child().lock() {
+        *guard = Some(child);
+    }
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn telegram_disconnect() -> Json<serde_json::Value> {
+    if let Ok(mut guard) = telegram_child().lock() {
+        if let Some(mut child) = guard.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+    // Also kill any sidecar orphaned by a gateway restart (still on the port).
+    let _ = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("lsof -tiTCP:{TELEGRAM_HTTP_PORT} -sTCP:LISTEN | xargs kill 2>/dev/null"))
+        .status();
+    Json(serde_json::json!({ "ok": true }))
+}
+
+/// Sends a text message via a channel sidecar (C2). `port` selects the sidecar
+/// (WhatsApp / Telegram / …); both speak the same `/send` protocol.
+async fn channel_send(
+    state: &AppState,
+    port: u16,
+    recipient: &str,
+    text: &str,
+) -> Result<(), String> {
+    let url = format!("http://127.0.0.1:{port}/send");
     let response = state
         .http
         .post(&url)
@@ -4038,14 +4212,15 @@ async fn whatsapp_send_to(state: &AppState, recipient: &str, text: &str) -> Resu
     }
 }
 
-/// Drives the WhatsApp typing indicator via the sidecar: `presence` is
+/// Drives a channel's typing indicator via its sidecar: `presence` is
 /// "composing" (typing…) or "paused" (cleared). Best-effort, short timeout.
-async fn whatsapp_set_presence(
+async fn channel_set_presence(
     state: &AppState,
+    port: u16,
     recipient: &str,
     presence: &str,
 ) -> Result<(), String> {
-    let url = format!("http://127.0.0.1:{WHATSAPP_HTTP_PORT}/chatstate");
+    let url = format!("http://127.0.0.1:{port}/chatstate");
     let response = state
         .http
         .post(&url)
@@ -4059,6 +4234,11 @@ async fn whatsapp_set_presence(
     } else {
         Err(format!("sidecar /chatstate ha risposto {}", response.status()))
     }
+}
+
+/// WhatsApp-specific thin wrapper (kept for the manual /send endpoint).
+async fn whatsapp_send_to(state: &AppState, recipient: &str, text: &str) -> Result<(), String> {
+    channel_send(state, WHATSAPP_HTTP_PORT, recipient, text).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -4087,28 +4267,51 @@ async fn whatsapp_send(
 /// data; the reply generator is told never to act on instructions inside it, and
 /// no tools are available to it.
 #[derive(Debug, Deserialize)]
-struct WhatsAppInbound {
+struct ChannelInbound {
+    /// Stable sender identifier (WhatsApp phone/LID user, Telegram numeric id).
     sender: String,
     #[serde(default)]
     sender_name: String,
     content: String,
-    /// Full reply-target JID (e.g. "…@lid" / "…@s.whatsapp.net"); reply here.
+    /// Reply-target id: a WhatsApp JID ("…@lid" / "…@s.whatsapp.net") or a
+    /// Telegram chat id (numeric). Reply here.
     #[serde(default)]
     chat: Option<String>,
-    /// Phone-number JID alternative when the chat is LID-addressed. Sending to a
-    /// raw @lid can ack-OK yet never deliver, so the PN is the preferred target.
+    /// WhatsApp only: phone-number JID alternative when the chat is LID-addressed.
+    /// Sending to a raw @lid can ack-OK yet never deliver, so the PN is preferred.
+    /// Telegram leaves this unset.
     #[serde(default)]
     sender_pn: Option<String>,
 }
 
 async fn whatsapp_inbound(
     State(state): State<AppState>,
-    Json(message): Json<WhatsAppInbound>,
+    Json(message): Json<ChannelInbound>,
+) -> Json<serde_json::Value> {
+    handle_channel_inbound(&state, "whatsapp", WHATSAPP_HTTP_PORT, message).await
+}
+
+async fn telegram_inbound(
+    State(state): State<AppState>,
+    Json(message): Json<ChannelInbound>,
+) -> Json<serde_json::Value> {
+    handle_channel_inbound(&state, "telegram", TELEGRAM_HTTP_PORT, message).await
+}
+
+/// Shared inbound pipeline for every channel: applies the C0 policy, records the
+/// message into memory, and (on allowlist) auto-replies via the channel's sidecar
+/// with a live typing indicator. `channel` is the tag ("whatsapp"/"telegram");
+/// `port` selects the sidecar to send the reply + typing through.
+async fn handle_channel_inbound(
+    state: &AppState,
+    channel: &'static str,
+    port: u16,
+    message: ChannelInbound,
 ) -> Json<serde_json::Value> {
     let action = inbound_action(&load_channel_settings(), &message.sender);
     // Privacy-safe trace: identifier + decision only, never the message content.
     eprintln!(
-        "channel/whatsapp: inbound from={} chat={} pn={} action={action:?}",
+        "channel/{channel}: inbound from={} chat={} pn={} action={action:?}",
         message.sender,
         message.chat.as_deref().unwrap_or("-"),
         message.sender_pn.as_deref().unwrap_or("-"),
@@ -4117,13 +4320,13 @@ async fn whatsapp_inbound(
         return Json(serde_json::json!({ "action": "ignore" }));
     }
     // Best-effort: record the contact (person node) + the message (episodic).
-    record_channel_message(&state, &message);
+    record_channel_message(state, channel, &message);
     match action {
         InboundAction::AutoReply => {
             let st = state.clone();
-            // Reply-target preference: phone-number JID (most reliable) > chat JID
-            // (handles @lid) > bare sender. Sending to a raw @lid can ack-OK yet
-            // never deliver, so prefer the PN when the sidecar resolved one.
+            // Reply-target preference: phone-number JID (most reliable) > chat id
+            // (WhatsApp @lid / Telegram chat id) > bare sender. Sending to a raw
+            // @lid can ack-OK yet never deliver, so prefer the PN when present.
             let non_empty = |s: &String| !s.trim().is_empty();
             let reply_to = message
                 .sender_pn
@@ -4139,14 +4342,14 @@ async fn whatsapp_inbound(
             let content = message.content.clone();
             tokio::spawn(async move {
                 // Show a "typing…" indicator while the (reasoning) model generates,
-                // so the sender sees the assistant is working. WhatsApp expires the
-                // indicator after ~25s, so refresh it on a short interval until the
-                // reply is ready; sending the message clears it automatically.
+                // so the sender sees the assistant is working. The indicator expires
+                // on its own (~25s WhatsApp / ~5s Telegram), so refresh it on a short
+                // interval until the reply is ready; sending the message clears it.
                 let typing_target = reply_to.clone();
                 let st_typing = st.clone();
                 let keepalive = tokio::spawn(async move {
                     loop {
-                        if whatsapp_set_presence(&st_typing, &typing_target, "composing")
+                        if channel_set_presence(&st_typing, port, &typing_target, "composing")
                             .await
                             .is_err()
                         {
@@ -4160,19 +4363,19 @@ async fn whatsapp_inbound(
                 keepalive.abort();
 
                 match reply {
-                    Some(reply) => match whatsapp_send_to(&st, &reply_to, &reply).await {
+                    Some(reply) => match channel_send(&st, port, &reply_to, &reply).await {
                         Ok(()) => {
-                            eprintln!("channel/whatsapp: auto-reply inviata a {reply_to}")
+                            eprintln!("channel/{channel}: auto-reply inviata a {reply_to}")
                         }
                         Err(error) => eprintln!(
-                            "channel/whatsapp: auto-reply FALLITA verso {reply_to}: {error}"
+                            "channel/{channel}: auto-reply FALLITA verso {reply_to}: {error}"
                         ),
                     },
                     None => {
                         // No reply: clear the indicator we may have just set.
-                        let _ = whatsapp_set_presence(&st, &reply_to, "paused").await;
+                        let _ = channel_set_presence(&st, port, &reply_to, "paused").await;
                         eprintln!(
-                            "channel/whatsapp: nessuna risposta generata (modello vuoto) per {reply_to}"
+                            "channel/{channel}: nessuna risposta generata (modello vuoto) per {reply_to}"
                         );
                     }
                 }
@@ -4186,16 +4389,22 @@ async fn whatsapp_inbound(
 
 /// Records an inbound channel message into memory: ensures a person node for the
 /// contact and stores the message as an episodic memory tagged with the channel.
-fn record_channel_message(state: &AppState, message: &WhatsAppInbound) {
+fn record_channel_message(state: &AppState, channel: &str, message: &ChannelInbound) {
     let Ok(facade) = lock_memory_facade(state) else {
         return;
     };
     let user = gateway_memory_user_id();
-    let key = format!("person:wa:{}", message.sender);
+    let key = format!("person:{channel}:{}", message.sender);
     let display = if message.sender_name.is_empty() {
         message.sender.clone()
     } else {
         message.sender_name.clone()
+    };
+    // Title-case label for human-readable episode text.
+    let label = match channel {
+        "whatsapp" => "WhatsApp",
+        "telegram" => "Telegram",
+        other => other,
     };
     persist_graph(
         &facade,
@@ -4208,15 +4417,15 @@ fn record_channel_message(state: &AppState, message: &WhatsAppInbound) {
             aliases: Vec::new(),
             privacy_domain: PrivacyDomain::new("personal"),
             sensitivity: MemoryDataSensitivity::Private,
-            metadata: serde_json::json!({ "channel": "whatsapp", "number": message.sender }),
+            metadata: serde_json::json!({ "channel": channel, "sender": message.sender }),
         }],
         Vec::new(),
     );
     store_episode(
         &facade,
         &user,
-        &format!("whatsapp:{}", message.sender),
-        &format!("WhatsApp da {display}: {}", message.content),
+        &format!("{channel}:{}", message.sender),
+        &format!("{label} da {display}: {}", message.content),
     );
 }
 
