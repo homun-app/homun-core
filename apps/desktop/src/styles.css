@@ -5967,14 +5967,9 @@ body.resizing-drawer {
 .cmp-confirm.done svg { color: var(--green); }
 
 /* ---------------------------------------------------------------- contacts */
-.contacts-view { display: flex; flex-direction: column; height: 100%; padding: 18px 22px; gap: 14px; overflow: hidden; }
-.contacts-head { display: flex; align-items: center; gap: 8px; }
-.contacts-head h2 { margin: 0; font-size: 18px; }
-.contacts-head svg { color: var(--muted); }
-.contacts-count { font-size: 12px; font-weight: 650; color: var(--muted); background: var(--surface-muted); border-radius: 999px; padding: 1px 8px; }
-.contacts-view .mdl-layout { flex: 1; min-height: 0; }
-.contacts-view .mdl-rail { overflow-y: auto; gap: 4px; }
-.contacts-view .mdl-detail { overflow-y: auto; }
+/* Lives inside the Settings pane (set-pane scrolls), so no full-height chrome. */
+.contacts-view { display: flex; flex-direction: column; gap: 12px; }
+.contacts-view .mdl-rail { gap: 4px; max-height: 70vh; overflow-y: auto; }
 .contacts-view .mdl-rail-item { align-items: flex-start; }
 .contacts-view .mdl-rail-name { display: flex; flex-direction: column; white-space: normal; gap: 1px; }
 .contacts-view .mdl-rail-name small { color: var(--muted); font-size: 11px; }

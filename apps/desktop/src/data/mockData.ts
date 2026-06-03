@@ -38,7 +38,6 @@ export const navItems: NavItem[] = [
   { id: "learning", label: "Apprendimento", icon: Brain },
   { id: "tasks", label: "Pianificato", icon: CalendarClock },
   { id: "memory", label: "Libreria", icon: Database },
-  { id: "contacts", label: "Contatti", icon: Users },
 ];
 
 export const chatMessages: ChatMessage[] = [
@@ -400,6 +399,7 @@ export const settingsSections: Array<{
   { id: "runtime", label: "Modello & Runtime", icon: Cpu, group: "account" },
   { id: "privacy", label: "Privacy & Autonomia", icon: KeyRound, group: "account" },
   { id: "memory", label: "Memoria", icon: Brain, group: "account" },
+  { id: "contacts", label: "Contatti", icon: Users, group: "account" },
   { id: "channels", label: "Canali", icon: MessageSquare, group: "capabilities" },
   { id: "connections", label: "Connettori", icon: Plug, group: "capabilities" },
   { id: "skills", label: "Skill", icon: Sparkles, group: "capabilities" },
