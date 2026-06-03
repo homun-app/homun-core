@@ -69,6 +69,7 @@ function mapCoreChatThread(thread: CoreChatThread): ChatThread {
     taskId: thread.task_id,
     updatedAt: thread.updated_at,
     messageCount: thread.message_count,
+    source: thread.source ?? null,
   };
 }
 

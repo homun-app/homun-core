@@ -562,6 +562,15 @@ function ThreadLink({
       onClick={onSelect}
     >
       <span>{thread.title}</span>
+      {thread.source && (
+        <span className={`thread-channel-badge ${thread.source}`}>
+          {thread.source === "whatsapp"
+            ? "WhatsApp"
+            : thread.source === "telegram"
+              ? "Telegram"
+              : thread.source}
+        </span>
+      )}
       {thread.pinned && <Pin size={12} aria-hidden="true" />}
     </button>
   );

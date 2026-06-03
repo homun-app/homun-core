@@ -74,6 +74,10 @@ pub struct ChatGenerateStreamRequest {
     pub wait_if_busy: bool,
     #[serde(default)]
     pub request_timeout_seconds: Option<f64>,
+    /// Tool policy for this turn. "read_only" (channel turns) offers only tools
+    /// without side effects; None/other = full toolset (in-app chat). See M8.
+    #[serde(default)]
+    pub tool_policy: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -92,6 +96,10 @@ pub struct ChatThread {
     pub task_id: String,
     pub updated_at: String,
     pub message_count: u32,
+    /// Origin: a channel tag ("whatsapp"/"telegram") or None for an in-app chat.
+    /// Lets the UI badge channel-originated conversations.
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

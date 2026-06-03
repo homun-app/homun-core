@@ -58,8 +58,8 @@ use local_first_secrets::{
     DevelopmentSecretKeyProvider, EncryptedFileSecretStore, SecretMaterial, SecretRef, SecretStore,
 };
 use local_first_desktop_gateway::{
-    BuildPromptRequest, BuildPromptResponse, ChatGenerateStreamRequest,
-    ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot,
+    BuildPromptRequest, BuildPromptResponse, ChatContextMessage, ChatContextRole,
+    ChatGenerateStreamRequest, ChatMessage, ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot,
     CommitContinuationResultRequest, CommitPromptResultRequest, SetThreadPinnedRequest,
     build_chat_runtime_prompt, compact_thread_title,
 };
@@ -2713,19 +2713,25 @@ strumento recall_memory PRIMA di dire che non lo sai o non lo ricordi."
     );
     let system = system.as_str();
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-    let mut base_tools = vec![
-        browse_web_tool_schema(),
-        create_artifact_tool_schema(),
-        recall_memory_tool_schema(),
-    ];
+    // Channel turns run read-only: offer only tools without side effects (search,
+    // recall, skill instructions, Composio reads). Side-effecting tools (write
+    // files, run sandbox, Composio writes) are withheld → Phase 2 routes them to
+    // approval. App chat (tool_policy unset) keeps the full toolset.
+    let read_only = request.tool_policy.as_deref() == Some("read_only");
+    let mut base_tools = vec![browse_web_tool_schema(), recall_memory_tool_schema()];
+    if !read_only {
+        base_tools.push(create_artifact_tool_schema());
+    }
     if has_composio {
         base_tools.push(find_connected_tools_schema());
     }
     if has_skills {
         base_tools.push(use_skill_tool_schema());
-        base_tools.push(run_in_sandbox_tool_schema());
+        if !read_only {
+            base_tools.push(run_in_sandbox_tool_schema());
+        }
     }
-    if !artifact_destinations.is_empty() {
+    if !artifact_destinations.is_empty() && !read_only {
         base_tools.push(save_artifact_tool_schema(&artifact_destinations));
     }
     // Vision: when the request carries images, the user message becomes
@@ -2893,7 +2899,15 @@ strumento recall_memory PRIMA di dire che non lo sai o non lo ricordi."
                         .and_then(|a| a.get("goal").and_then(|g| g.as_str()).map(String::from))
                         .unwrap_or_default();
 
-                    let result = if name == "browse_web" {
+                    let result = if read_only
+                        && matches!(name, "run_in_sandbox" | "create_artifact" | "save_artifact")
+                    {
+                        // Defensive: these aren't offered in read-only mode, but if the
+                        // model calls one anyway, refuse instead of executing.
+                        "Azione non disponibile dal canale: le operazioni con effetti \
+richiedono la tua conferma nell'app. Proponila e fermati."
+                            .to_string()
+                    } else if name == "browse_web" {
                         let _ = emit_stream_event(
                             &tx,
                             GenerateStreamEvent::Delta {
@@ -3179,6 +3193,11 @@ servizio (es. \"email\", \"calendar\", \"drive\")."
                         } else {
                             let mut lines = Vec::new();
                             for (slug, schema) in &matches {
+                                // Channel (read-only) turns expose only Composio READ
+                                // tools; writes are withheld (Phase 2 → approval).
+                                if read_only && !composio_tool_is_read(slug) {
+                                    continue;
+                                }
                                 if loaded_tools.insert(slug.clone()) {
                                     tool_schemas.push(schema.clone());
                                 }
@@ -3192,12 +3211,24 @@ servizio (es. \"email\", \"calendar\", \"drive\")."
                                     .collect::<String>();
                                 lines.push(format!("- {slug}: {desc}"));
                             }
-                            format!(
-                                "Strumenti trovati (ora richiamabili — chiama quello giusto con i \
+                            if lines.is_empty() {
+                                "Per questa richiesta servono solo strumenti con effetti, non \
+disponibili dal canale (richiedono la tua conferma nell'app).".to_string()
+                            } else {
+                                format!(
+                                    "Strumenti trovati (ora richiamabili — chiama quello giusto con i \
 suoi argomenti):\n{}",
-                                lines.join("\n")
-                            )
+                                    lines.join("\n")
+                                )
+                            }
                         }
+                    } else if read_only && !name.is_empty() && composio_writes.contains(name) {
+                        // Channel (read-only) turn: never run a write tool, never even
+                        // surface a confirm card (no UI on the channel). Phase 2 routes
+                        // these to the in-app approval center.
+                        "Azione non disponibile dal canale: le operazioni con effetti \
+richiedono la tua conferma nell'app. Proponila e fermati."
+                            .to_string()
                     } else if !name.is_empty() {
                         // A connected-service (Composio) tool. Writes need explicit
                         // confirmation unless the user marked this tool "always allow".
@@ -3371,7 +3402,10 @@ verifica anti-bot). Riprova o indica una fonte preferita.".to_string()
         }
         // M2: mine this exchange for durable personal memory (fire-and-forget, off
         // the response path). Best-effort; never blocks or fails the turn.
-        if !memory_answer.trim().is_empty() {
+        // Skip for channel turns (read_only): the inbound is from a CONTACT, not the
+        // user, and the channel handler runs its own speaker-attributed learn — this
+        // one (speaker=None) would mis-attribute the contact's facts to person:self.
+        if !memory_answer.trim().is_empty() && !read_only {
             let learn_state = state_owned.clone();
             let learn_user = memory_user_message.clone();
             let learn_answer = memory_answer.clone();
@@ -4390,11 +4424,26 @@ async fn handle_channel_inbound(
                 message.sender_name.clone()
             };
             let content = message.content.clone();
+            let sender = message.sender.clone();
             tokio::spawn(async move {
-                // Show a "typing…" indicator while the (reasoning) model generates,
-                // so the sender sees the assistant is working. The indicator expires
-                // on its own (~25s WhatsApp / ~5s Telegram), so refresh it on a short
-                // interval until the reply is ready; sending the message clears it.
+                let label = match channel {
+                    "whatsapp" => "WhatsApp",
+                    "telegram" => "Telegram",
+                    other => other,
+                };
+                // The channel conversation is a first-class chat thread (M8): one
+                // persistent thread per contact, tagged with its origin so the app
+                // badges it. The agent runs on it with history + tools.
+                let thread_id = match lock_store(&st) {
+                    Ok(store) => store
+                        .find_or_create_channel_thread("default", channel, &sender, &format!("{label} · {name}"))
+                        .ok()
+                        .map(|thread| thread.thread_id),
+                    Err(_) => None,
+                };
+
+                // Typing indicator while the agent works (refreshed; expires on its
+                // own). Cleared automatically when the message is sent.
                 let typing_target = reply_to.clone();
                 let st_typing = st.clone();
                 let keepalive = tokio::spawn(async move {
@@ -4409,8 +4458,31 @@ async fn handle_channel_inbound(
                     }
                 });
 
-                let reply = generate_channel_reply(&st, &name, &content).await;
+                // Full agent turn on the thread (read-only tools); fall back to the
+                // stateless reply if there's no thread or the agent yields nothing.
+                let reply = match thread_id.as_deref() {
+                    Some(tid) => run_agent_turn(&st, tid, &content, "read_only").await,
+                    None => None,
+                };
+                let reply = match reply {
+                    Some(reply) => Some(reply),
+                    None => generate_channel_reply(&st, &name, &content).await,
+                };
                 keepalive.abort();
+
+                // Persist the exchange into the thread so it appears in the app.
+                if let Some(tid) = thread_id.as_deref() {
+                    if let Ok(store) = lock_store(&st) {
+                        let _ = store
+                            .append_assistant_message(tid, &channel_chat_message("user", &content));
+                        if let Some(reply) = reply.as_deref() {
+                            let _ = store.append_assistant_message(
+                                tid,
+                                &channel_chat_message("assistant", reply),
+                            );
+                        }
+                    }
+                }
 
                 match reply {
                     Some(reply) => match channel_send(&st, port, &reply_to, &reply).await {
@@ -4422,10 +4494,9 @@ async fn handle_channel_inbound(
                         ),
                     },
                     None => {
-                        // No reply: clear the indicator we may have just set.
                         let _ = channel_set_presence(&st, port, &reply_to, "paused").await;
                         eprintln!(
-                            "channel/{channel}: nessuna risposta generata (modello vuoto) per {reply_to}"
+                            "channel/{channel}: nessuna risposta generata per {reply_to}"
                         );
                     }
                 }
@@ -4516,6 +4587,102 @@ fn record_channel_message(state: &AppState, channel: &str, message: &ChannelInbo
 
 /// Generates a short reply to an inbound channel message. The content is treated
 /// strictly as untrusted data (no instruction-following, no tools).
+/// Builds a chat message for a channel thread (user inbound or assistant reply).
+fn channel_chat_message(role: &str, text: &str) -> ChatMessage {
+    ChatMessage {
+        id: format!("msg_{}_{}", now_epoch_secs(), uuid::Uuid::new_v4().simple()),
+        role: role.to_string(),
+        text: text.to_string(),
+        timestamp: now_epoch_secs().to_string(),
+        metadata: None,
+        metrics: None,
+        feedback: None,
+        saved_memory_ref: None,
+        linked_task_id: None,
+        linked_automation_ref: None,
+        attachments: Vec::new(),
+    }
+}
+
+/// Runs ONE full agent turn (tools + memory + history) headless on `thread_id`
+/// and returns the final assistant text. Reuses the exact app pipeline
+/// (`stream_chat_via_openai`): builds a chat request with the thread's prior
+/// messages as context, runs it, and drains the NDJSON stream for the `done`
+/// event. `tool_policy` ("read_only" for channels) restricts side-effecting tools.
+async fn run_agent_turn(
+    state: &AppState,
+    thread_id: &str,
+    prompt: &str,
+    tool_policy: &str,
+) -> Option<String> {
+    let (base_url, model, api_key) = chat_openai_stream_config()?;
+    // Prior conversation on this thread (oldest→newest), user/assistant only,
+    // capped to the last 16 turns. The current inbound is passed as `prompt`, so
+    // it is NOT yet in the thread (the handler appends it after the reply).
+    let context: Vec<ChatContextMessage> = {
+        let Ok(store) = lock_store(state) else {
+            return None;
+        };
+        let snapshot = store.messages(thread_id).ok()?;
+        let mut msgs: Vec<ChatContextMessage> = snapshot
+            .messages
+            .into_iter()
+            .filter(|m| matches!(m.role.as_str(), "user" | "assistant"))
+            .map(|m| ChatContextMessage {
+                role: if m.role == "assistant" {
+                    ChatContextRole::Assistant
+                } else {
+                    ChatContextRole::User
+                },
+                text: m.text,
+            })
+            .collect();
+        let len = msgs.len();
+        if len > 16 {
+            msgs.drain(0..len - 16);
+        }
+        msgs
+    };
+    let request = ChatGenerateStreamRequest {
+        request_id: format!("agentturn-{thread_id}-{}", now_epoch_secs()),
+        prompt: prompt.to_string(),
+        thread_id: Some(thread_id.to_string()),
+        context,
+        max_context_chars: None,
+        model: None,
+        images: Vec::new(),
+        max_tokens: 2000,
+        temperature: 0.3,
+        wait_if_busy: true,
+        request_timeout_seconds: None,
+        tool_policy: Some(tool_policy.to_string()),
+    };
+    let response = stream_chat_via_openai(state, request, base_url, model, api_key)
+        .await
+        .ok()?;
+    // Drain the NDJSON stream in-process; the generation runs in a spawned task,
+    // so to_bytes collects every event up to (and including) the `done` event.
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.ok()?;
+    let text = String::from_utf8_lossy(&bytes);
+    let mut final_text: Option<String> = None;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(line) {
+            if value.get("type").and_then(|t| t.as_str()) == Some("done") {
+                if let Some(t) = value.get("text").and_then(|t| t.as_str()) {
+                    final_text = Some(t.to_string());
+                }
+            }
+        }
+    }
+    final_text
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+}
+
 async fn generate_channel_reply(state: &AppState, sender_name: &str, content: &str) -> Option<String> {
     let (base_url, model, api_key) = chat_openai_stream_config()?;
     let system = "Sei l'assistente personale dell'utente e rispondi ai suoi messaggi in chat. Sii \
