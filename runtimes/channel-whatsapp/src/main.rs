@@ -108,10 +108,16 @@ async fn send_handler(
         conversation: Some(request.text),
         ..Default::default()
     };
+    // Log the *resolved* recipient JID so we can see exactly where a send went
+    // (a transport Ok is not a delivery guarantee on WhatsApp).
+    let target = jid.to_string();
     match client.send_message(jid, message).await {
-        Ok(_) => StatusCode::OK,
+        Ok(id) => {
+            println!("invio ok → {target} (msg id {id})");
+            StatusCode::OK
+        }
         Err(error) => {
-            eprintln!("invio fallito: {error}");
+            eprintln!("invio fallito → {target}: {error}");
             StatusCode::BAD_GATEWAY
         }
     }
@@ -196,6 +202,18 @@ fn main() -> anyhow::Result<()> {
                             if let (Some(url), Some(token)) =
                                 (gateway_url.as_ref(), gateway_token.as_ref())
                             {
+                                // The phone-number (PN) address: for a LID-addressed
+                                // chat, `sender_alt` carries the PN, which is the
+                                // reliably-deliverable reply target (sending to a raw
+                                // @lid can ack-OK yet never deliver).
+                                let sender_pn =
+                                    info.source.sender_alt.as_ref().map(|j| j.to_string());
+                                println!(
+                                    "inbound: chat={} mode={:?} sender_alt_present={}",
+                                    info.source.chat,
+                                    info.source.addressing_mode,
+                                    sender_pn.is_some(),
+                                );
                                 let payload = serde_json::json!({
                                     "sender": info.source.sender.user,
                                     "sender_name": info.push_name,
@@ -205,6 +223,8 @@ fn main() -> anyhow::Result<()> {
                                     // device + @lid/@s.whatsapp.net) so the reply
                                     // round-trips losslessly through Jid::from_str.
                                     "chat": info.source.chat.to_string(),
+                                    // Preferred reply target when present (PN > LID).
+                                    "sender_pn": sender_pn,
                                 });
                                 // Don't log message content (privacy): only the outcome.
                                 if let Err(error) = http
