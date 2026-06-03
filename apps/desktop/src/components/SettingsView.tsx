@@ -2841,11 +2841,13 @@ function ChannelsPane() {
         ) : (
           <div>
             <p className="set-hint" style={{ marginTop: 0 }}>
-              Collega WhatsApp col tuo numero in formato internazionale senza «+» (es. 39333…).
+              Se hai già collegato il dispositivo, premi <strong>Connetti</strong> (riusa la
+              sessione salvata). Per il primo collegamento, inserisci il numero in formato
+              internazionale senza «+» (es. 39333…).
             </p>
             <div style={{ display: "flex", gap: 8 }}>
               <input
-                placeholder="numero di telefono"
+                placeholder="numero di telefono (solo primo collegamento)"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 style={{ flex: 1 }}
@@ -2853,14 +2855,14 @@ function ChannelsPane() {
               <button
                 className="set-btn"
                 type="button"
-                disabled={busy || !phone.trim()}
+                disabled={busy}
                 onClick={() => void connect()}
               >
                 Connetti
               </button>
             </div>
             {status?.running && (
-              <p className="set-hint">Bridge avviato, in attesa del codice…</p>
+              <p className="set-hint">Bridge avviato, in attesa di connessione/codice…</p>
             )}
             {error && (
               <p className="set-hint" style={{ color: "var(--danger)" }}>
