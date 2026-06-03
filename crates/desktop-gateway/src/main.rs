@@ -668,6 +668,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/memory/dashboard", get(memory_dashboard))
         .route("/api/memory/items", get(memory_items))
         .route("/api/memory/decide", post(memory_decide))
+        .route(
+            "/api/channels/settings",
+            get(get_channel_settings).post(set_channel_settings),
+        )
         .route("/api/capabilities/snapshot", get(capability_snapshot))
         .route(
             "/api/workspaces",
@@ -3769,6 +3773,92 @@ fn write_artifact_destinations(list: &[ArtifactDestination]) -> Result<(), Strin
     let path = artifact_destinations_path().ok_or_else(|| "data dir non disponibile".to_string())?;
     let json = serde_json::to_string_pretty(list).map_err(|e| e.to_string())?;
     fs::write(path, json).map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------- channels (C0)
+//
+// Channel bridges (WhatsApp via wa-rs, Telegram, …) deliver INBOUND messages and
+// can send OUTBOUND ones. This is the in-repo foundation that does NOT depend on
+// any bridge: the safety policy + settings. The concrete bridge (C1) plugs in
+// later and calls `inbound_action` to decide what to do with each message.
+
+/// Auto-reply settings for channels. OFF by default — the user opts in. `enabled`
+/// is the global kill-switch; `auto_reply` the master toggle; `allowlist` the
+/// contact ids cleared for automatic replies.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct ChannelSettings {
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default)]
+    auto_reply: bool,
+    #[serde(default)]
+    allowlist: Vec<String>,
+}
+
+/// What to do with an inbound channel message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum InboundAction {
+    /// Channels off (kill-switch): do nothing.
+    Ignore,
+    /// Prepare a reply for the user to review/send (default, safe).
+    Draft,
+    /// Send a text reply automatically (allowlisted sender only).
+    AutoReply,
+}
+
+/// Decides how to handle an inbound message. Kill-switch wins; auto-reply only for
+/// allowlisted senders when the master toggle is on; otherwise a draft for review.
+///
+/// SECURITY: the allowlist auto-confirms ONLY a text reply. Message CONTENT is
+/// always untrusted DATA (never instructions — even from an allowlisted sender,
+/// whose account could be compromised), and any TOOL/action the assistant would
+/// take in response still passes through an approval gate downstream (C4).
+fn inbound_action(settings: &ChannelSettings, sender: &str) -> InboundAction {
+    if !settings.enabled {
+        return InboundAction::Ignore;
+    }
+    let allowlisted = settings
+        .allowlist
+        .iter()
+        .any(|contact| contact.trim().eq_ignore_ascii_case(sender.trim()));
+    if settings.auto_reply && allowlisted {
+        InboundAction::AutoReply
+    } else {
+        InboundAction::Draft
+    }
+}
+
+fn channel_settings_path() -> Option<PathBuf> {
+    gateway_data_dir().ok().map(|dir| dir.join("channel-settings.json"))
+}
+
+fn load_channel_settings() -> ChannelSettings {
+    channel_settings_path()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn save_channel_settings(settings: &ChannelSettings) -> Result<(), String> {
+    let path = channel_settings_path().ok_or_else(|| "data dir non disponibile".to_string())?;
+    let json = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
+    fs::write(path, json).map_err(|e| e.to_string())
+}
+
+async fn get_channel_settings() -> Json<ChannelSettings> {
+    Json(load_channel_settings())
+}
+
+async fn set_channel_settings(
+    Json(settings): Json<ChannelSettings>,
+) -> Result<Json<ChannelSettings>, GatewayError> {
+    save_channel_settings(&settings).map_err(|message| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "channel_settings_save",
+        message,
+    })?;
+    Ok(Json(settings))
 }
 
 /// Resolves a destination (by label or exact path) among the AUTHORIZED ones.
@@ -12717,6 +12807,9 @@ mod tests {
         is_salient_exchange,
         normalize_for_dedup,
         strip_json_fences,
+        inbound_action,
+        ChannelSettings,
+        InboundAction,
         MemoryDataSensitivity,
         skill_id_from_command,
         browser_method_for_capability_tool,
@@ -12834,6 +12927,26 @@ mod tests {
         assert!(is_auto_confirmable("decision", MemoryDataSensitivity::Internal, 0.9));
         // but a sensitive decision still waits for confirmation
         assert!(!is_auto_confirmable("decision", MemoryDataSensitivity::Confidential, 0.99));
+    }
+
+    #[test]
+    fn inbound_action_kill_switch_allowlist_and_master_toggle() {
+        // Kill-switch off (default) → ignore everything.
+        assert_eq!(inbound_action(&ChannelSettings::default(), "alice"), InboundAction::Ignore);
+
+        let mut settings = ChannelSettings {
+            enabled: true,
+            auto_reply: true,
+            allowlist: vec!["alice".to_string()],
+        };
+        // Allowlisted + master on → auto-reply (text only; tools still gated).
+        assert_eq!(inbound_action(&settings, "alice"), InboundAction::AutoReply);
+        assert_eq!(inbound_action(&settings, "ALICE"), InboundAction::AutoReply);
+        // Not allowlisted → draft for review.
+        assert_eq!(inbound_action(&settings, "bob"), InboundAction::Draft);
+        // Master toggle off → draft even for allowlisted.
+        settings.auto_reply = false;
+        assert_eq!(inbound_action(&settings, "alice"), InboundAction::Draft);
     }
 
     #[test]
