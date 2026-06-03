@@ -4038,6 +4038,29 @@ async fn whatsapp_send_to(state: &AppState, recipient: &str, text: &str) -> Resu
     }
 }
 
+/// Drives the WhatsApp typing indicator via the sidecar: `presence` is
+/// "composing" (typing…) or "paused" (cleared). Best-effort, short timeout.
+async fn whatsapp_set_presence(
+    state: &AppState,
+    recipient: &str,
+    presence: &str,
+) -> Result<(), String> {
+    let url = format!("http://127.0.0.1:{WHATSAPP_HTTP_PORT}/chatstate");
+    let response = state
+        .http
+        .post(&url)
+        .timeout(std::time::Duration::from_secs(10))
+        .json(&serde_json::json!({ "recipient": recipient, "state": presence }))
+        .send()
+        .await
+        .map_err(|error| format!("sidecar non raggiungibile: {error}"))?;
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        Err(format!("sidecar /chatstate ha risposto {}", response.status()))
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct WhatsAppSendRequest {
     recipient: String,
@@ -4115,7 +4138,28 @@ async fn whatsapp_inbound(
             };
             let content = message.content.clone();
             tokio::spawn(async move {
-                match generate_channel_reply(&st, &name, &content).await {
+                // Show a "typing…" indicator while the (reasoning) model generates,
+                // so the sender sees the assistant is working. WhatsApp expires the
+                // indicator after ~25s, so refresh it on a short interval until the
+                // reply is ready; sending the message clears it automatically.
+                let typing_target = reply_to.clone();
+                let st_typing = st.clone();
+                let keepalive = tokio::spawn(async move {
+                    loop {
+                        if whatsapp_set_presence(&st_typing, &typing_target, "composing")
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+                    }
+                });
+
+                let reply = generate_channel_reply(&st, &name, &content).await;
+                keepalive.abort();
+
+                match reply {
                     Some(reply) => match whatsapp_send_to(&st, &reply_to, &reply).await {
                         Ok(()) => {
                             eprintln!("channel/whatsapp: auto-reply inviata a {reply_to}")
@@ -4124,9 +4168,13 @@ async fn whatsapp_inbound(
                             "channel/whatsapp: auto-reply FALLITA verso {reply_to}: {error}"
                         ),
                     },
-                    None => eprintln!(
-                        "channel/whatsapp: nessuna risposta generata (modello vuoto) per {reply_to}"
-                    ),
+                    None => {
+                        // No reply: clear the indicator we may have just set.
+                        let _ = whatsapp_set_presence(&st, &reply_to, "paused").await;
+                        eprintln!(
+                            "channel/whatsapp: nessuna risposta generata (modello vuoto) per {reply_to}"
+                        );
+                    }
                 }
             });
             Json(serde_json::json!({ "action": "auto_reply" }))

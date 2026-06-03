@@ -76,6 +76,23 @@ fn print_qr(code: &str) {
     }
 }
 
+/// Parse a recipient into a Jid. A full JID ("user[:device]@server", e.g. …@lid)
+/// is parsed losslessly via FromStr — this preserves the device + the
+/// LID-specific handling, matching wa-rs' own reply path
+/// (MessageContext::send_message clones info.source.chat). A bare value is
+/// treated as a phone number on the default user server.
+fn parse_recipient(raw: &str) -> Result<Jid, String> {
+    let recipient = raw.trim().trim_start_matches('+');
+    if recipient.is_empty() {
+        return Err("recipient vuoto".to_string());
+    }
+    if recipient.contains('@') {
+        recipient.parse::<Jid>().map_err(|error| error.to_string())
+    } else {
+        Ok(Jid::pn(recipient))
+    }
+}
+
 /// Outbound send command from the gateway (C2).
 #[derive(Deserialize)]
 struct SendRequest {
@@ -88,21 +105,12 @@ async fn send_handler(
     State(client): State<Arc<Client>>,
     Json(request): Json<SendRequest>,
 ) -> StatusCode {
-    let recipient = request.recipient.trim().trim_start_matches('+');
-    // A full JID ("user[:device]@server", e.g. …@lid) is parsed losslessly via
-    // FromStr — this preserves the device + the LID-specific handling, matching
-    // wa-rs' own reply path (MessageContext::send_message clones info.source.chat).
-    // A bare value is treated as a phone number on the default user server.
-    let jid = if recipient.contains('@') {
-        match recipient.parse::<Jid>() {
-            Ok(jid) => jid,
-            Err(error) => {
-                eprintln!("recipient JID non valido: {error}");
-                return StatusCode::BAD_REQUEST;
-            }
+    let jid = match parse_recipient(&request.recipient) {
+        Ok(jid) => jid,
+        Err(error) => {
+            eprintln!("recipient JID non valido: {error}");
+            return StatusCode::BAD_REQUEST;
         }
-    } else {
-        Jid::pn(recipient)
     };
     let message = wa::Message {
         conversation: Some(request.text),
@@ -123,10 +131,49 @@ async fn send_handler(
     }
 }
 
-/// Tiny local HTTP server so the gateway can ask us to send messages (C2).
+/// Chat-state command from the gateway: show/hide the "typing…" indicator while
+/// a (slow) reply is being generated, so the sender sees the assistant working.
+#[derive(Deserialize)]
+struct PresenceRequest {
+    recipient: String,
+    /// "composing" (typing…) or "paused" (cleared).
+    state: String,
+}
+
+async fn presence_handler(
+    State(client): State<Arc<Client>>,
+    Json(request): Json<PresenceRequest>,
+) -> StatusCode {
+    let jid = match parse_recipient(&request.recipient) {
+        Ok(jid) => jid,
+        Err(error) => {
+            eprintln!("chatstate: recipient non valido: {error}");
+            return StatusCode::BAD_REQUEST;
+        }
+    };
+    let result = match request.state.as_str() {
+        "composing" => client.chatstate().send_composing(&jid).await,
+        "paused" => client.chatstate().send_paused(&jid).await,
+        other => {
+            eprintln!("chatstate: stato sconosciuto «{other}»");
+            return StatusCode::BAD_REQUEST;
+        }
+    };
+    match result {
+        Ok(()) => StatusCode::OK,
+        Err(error) => {
+            eprintln!("chatstate fallita → {jid}: {error:?}");
+            StatusCode::BAD_GATEWAY
+        }
+    }
+}
+
+/// Tiny local HTTP server so the gateway can ask us to send messages (C2) and
+/// drive the typing indicator (/chatstate).
 async fn serve_send(client: Arc<Client>, port: u16) {
     let app = Router::new()
         .route("/send", post(send_handler))
+        .route("/chatstate", post(presence_handler))
         .with_state(client);
     match tokio::net::TcpListener::bind(("127.0.0.1", port)).await {
         Ok(listener) => {
