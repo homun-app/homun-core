@@ -27,6 +27,11 @@ function initial(name: string): string {
 function normalizeName(name: string): string {
   return name.trim().toLowerCase();
 }
+function factTag(temporality: string): string {
+  if (temporality === "transient") return "ora";
+  if (temporality === "event") return "evento";
+  return "sempre";
+}
 
 type MergePair = { from: CoreContact; into: CoreContact };
 
@@ -388,9 +393,15 @@ function ContactCard({
           </p>
         ) : (
           <>
-            <ul className="contacts-memory">
+            <ul className="contacts-facts">
               {profile.facts.map((f, i) => (
-                <li key={i}>{f}</li>
+                <li key={i}>
+                  <span className={`fact-tag ${f.temporality || "durable"}`}>
+                    {factTag(f.temporality)}
+                  </span>
+                  <span className="fact-text">{f.text}</span>
+                  {f.date && <span className="fact-date">{f.date}</span>}
+                </li>
               ))}
             </ul>
             {profile.stale && (
