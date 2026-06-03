@@ -8,11 +8,18 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use serde::Serialize;
+use axum::extract::State;
+use axum::http::StatusCode;
+use axum::routing::post;
+use axum::{Json, Router};
+use serde::{Deserialize, Serialize};
 use wa_rs::bot::Bot;
 use wa_rs::pair_code::PairCodeOptions;
 use wa_rs::store::SqliteStore;
+use wa_rs::{Client, Jid};
+use wa_rs_core::proto_helpers::MessageExt;
 use wa_rs_core::types::events::Event;
+use wa_rs_proto::whatsapp as wa;
 use wa_rs_tokio_transport::TokioWebSocketTransportFactory;
 use wa_rs_ureq_http::UreqHttpClient;
 
@@ -69,6 +76,49 @@ fn print_qr(code: &str) {
     }
 }
 
+/// Outbound send command from the gateway (C2).
+#[derive(Deserialize)]
+struct SendRequest {
+    /// Phone number (international, no '+') or full JID user part.
+    recipient: String,
+    text: String,
+}
+
+async fn send_handler(
+    State(client): State<Arc<Client>>,
+    Json(request): Json<SendRequest>,
+) -> StatusCode {
+    let recipient = request.recipient.trim().trim_start_matches('+');
+    let jid = Jid::new(recipient, "s.whatsapp.net");
+    let message = wa::Message {
+        conversation: Some(request.text),
+        ..Default::default()
+    };
+    match client.send_message(jid, message).await {
+        Ok(_) => StatusCode::OK,
+        Err(error) => {
+            eprintln!("invio fallito: {error}");
+            StatusCode::BAD_GATEWAY
+        }
+    }
+}
+
+/// Tiny local HTTP server so the gateway can ask us to send messages (C2).
+async fn serve_send(client: Arc<Client>, port: u16) {
+    let app = Router::new()
+        .route("/send", post(send_handler))
+        .with_state(client);
+    match tokio::net::TcpListener::bind(("127.0.0.1", port)).await {
+        Ok(listener) => {
+            println!("sidecar: HTTP /send in ascolto su 127.0.0.1:{port}");
+            if let Err(error) = axum::serve(listener, app).await {
+                eprintln!("server HTTP terminato: {error}");
+            }
+        }
+        Err(error) => eprintln!("impossibile aprire la porta {port}: {error}"),
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
 
@@ -87,6 +137,12 @@ fn main() -> anyhow::Result<()> {
         write_status(&status.lock().unwrap());
 
         let handler_status = Arc::clone(&status);
+        // Where to forward inbound messages (C3): the gateway passes its URL +
+        // token when it spawns us.
+        let gateway_url = std::env::var("WA_GATEWAY_URL").ok().filter(|s| !s.is_empty());
+        let gateway_token = std::env::var("WA_GATEWAY_TOKEN").ok().filter(|s| !s.is_empty());
+        let http = Arc::new(reqwest::Client::new());
+
         let mut builder = Bot::builder()
             .with_backend(backend)
             .with_transport_factory(TokioWebSocketTransportFactory::new())
@@ -107,10 +163,38 @@ fn main() -> anyhow::Result<()> {
         let mut bot = builder
             .on_event(move |event, _client| {
                 let status = Arc::clone(&handler_status);
-                // No `.await` inside → the future is trivially Send; we only do
-                // quick sync work (render QR, write the status file).
+                let http = Arc::clone(&http);
+                let gateway_url = gateway_url.clone();
+                let gateway_token = gateway_token.clone();
                 async move {
                     match event {
+                        // C3: forward incoming text messages to the gateway (which
+                        // applies the C0 policy → memory + draft/auto-reply). Skip
+                        // our own messages and groups (v1: direct chats only).
+                        Event::Message(message, info) => {
+                            if info.source.is_from_me || info.source.is_group {
+                                return;
+                            }
+                            let Some(text) = message.text_content() else {
+                                return;
+                            };
+                            if let (Some(url), Some(token)) =
+                                (gateway_url.as_ref(), gateway_token.as_ref())
+                            {
+                                let payload = serde_json::json!({
+                                    "sender": info.source.sender.user,
+                                    "sender_name": info.push_name,
+                                    "content": text,
+                                    "message_id": info.id.to_string(),
+                                });
+                                let _ = http
+                                    .post(format!("{url}/api/channels/whatsapp/inbound"))
+                                    .bearer_auth(token)
+                                    .json(&payload)
+                                    .send()
+                                    .await;
+                            }
+                        }
                         Event::PairingQrCode { code, .. } => {
                             print_qr(&code);
                             let mut s = status.lock().unwrap();
@@ -178,6 +262,13 @@ Serve impostare una versione recente con .with_version((2, 3000, <revision>))."
             .build()
             .await
             .map_err(|e| anyhow::anyhow!("build bot: {e}"))?;
+
+        // C2: expose /send for the gateway (uses the bot's client handle).
+        let send_port: u16 = std::env::var("WA_HTTP_PORT")
+            .ok()
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(18766);
+        tokio::spawn(serve_send(bot.client(), send_port));
 
         let handle = bot.run().await.map_err(|e| anyhow::anyhow!("avvio bot: {e}"))?;
         handle.await.map_err(|e| anyhow::anyhow!("task bot: {e}"))?;
