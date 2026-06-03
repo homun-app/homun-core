@@ -89,11 +89,20 @@ async fn send_handler(
     Json(request): Json<SendRequest>,
 ) -> StatusCode {
     let recipient = request.recipient.trim().trim_start_matches('+');
-    // Accept a full JID ("user@server", e.g. …@lid) as-is; otherwise treat the
-    // value as a phone number on the default user server.
-    let jid = match recipient.split_once('@') {
-        Some((user, server)) => Jid::new(user, server),
-        None => Jid::new(recipient, "s.whatsapp.net"),
+    // A full JID ("user[:device]@server", e.g. …@lid) is parsed losslessly via
+    // FromStr — this preserves the device + the LID-specific handling, matching
+    // wa-rs' own reply path (MessageContext::send_message clones info.source.chat).
+    // A bare value is treated as a phone number on the default user server.
+    let jid = if recipient.contains('@') {
+        match recipient.parse::<Jid>() {
+            Ok(jid) => jid,
+            Err(error) => {
+                eprintln!("recipient JID non valido: {error}");
+                return StatusCode::BAD_REQUEST;
+            }
+        }
+    } else {
+        Jid::pn(recipient)
     };
     let message = wa::Message {
         conversation: Some(request.text),
@@ -192,11 +201,10 @@ fn main() -> anyhow::Result<()> {
                                     "sender_name": info.push_name,
                                     "content": text,
                                     "message_id": info.id.to_string(),
-                                    // Correct reply target (preserves @lid / @s.whatsapp.net).
-                                    "chat": format!(
-                                        "{}@{}",
-                                        info.source.chat.user, info.source.chat.server
-                                    ),
+                                    // Correct reply target via Display (preserves
+                                    // device + @lid/@s.whatsapp.net) so the reply
+                                    // round-trips losslessly through Jid::from_str.
+                                    "chat": info.source.chat.to_string(),
                                 });
                                 // Don't log message content (privacy): only the outcome.
                                 if let Err(error) = http
