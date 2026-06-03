@@ -4079,6 +4079,12 @@ async fn whatsapp_inbound(
     Json(message): Json<WhatsAppInbound>,
 ) -> Json<serde_json::Value> {
     let action = inbound_action(&load_channel_settings(), &message.sender);
+    // Privacy-safe trace: identifier + decision only, never the message content.
+    eprintln!(
+        "channel/whatsapp: inbound from={} chat={} action={action:?}",
+        message.sender,
+        message.chat.as_deref().unwrap_or("-"),
+    );
     if matches!(action, InboundAction::Ignore) {
         return Json(serde_json::json!({ "action": "ignore" }));
     }
@@ -4101,8 +4107,18 @@ async fn whatsapp_inbound(
             };
             let content = message.content.clone();
             tokio::spawn(async move {
-                if let Some(reply) = generate_channel_reply(&st, &name, &content).await {
-                    let _ = whatsapp_send_to(&st, &reply_to, &reply).await;
+                match generate_channel_reply(&st, &name, &content).await {
+                    Some(reply) => match whatsapp_send_to(&st, &reply_to, &reply).await {
+                        Ok(()) => {
+                            eprintln!("channel/whatsapp: auto-reply inviata a {reply_to}")
+                        }
+                        Err(error) => eprintln!(
+                            "channel/whatsapp: auto-reply FALLITA verso {reply_to}: {error}"
+                        ),
+                    },
+                    None => eprintln!(
+                        "channel/whatsapp: nessuna risposta generata (modello vuoto) per {reply_to}"
+                    ),
                 }
             });
             Json(serde_json::json!({ "action": "auto_reply" }))
