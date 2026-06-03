@@ -4244,18 +4244,56 @@ nella lingua del messaggio, come farebbe l'utente. Rispondi SOLO con il testo de
         ],
     });
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-    let mut builder = state.http.post(&endpoint).timeout(std::time::Duration::from_secs(60));
-    if let Some(key) = api_key.as_ref() {
+
+    // Cloud reasoning models are slow (tens of seconds) and occasionally return
+    // an empty completion. Retry once on any transient failure, logging the
+    // precise reason so an empty reply is never silently swallowed.
+    for attempt in 1..=2u8 {
+        match channel_reply_once(state, &endpoint, api_key.as_deref(), &payload).await {
+            Ok(reply) => return Some(reply),
+            Err(reason) => {
+                eprintln!("channel/whatsapp: reply tentativo {attempt}/2 fallito: {reason}");
+                if attempt < 2 {
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                }
+            }
+        }
+    }
+    None
+}
+
+/// One reply attempt. Distinguishes failure modes (transport/timeout, non-2xx,
+/// empty completion with its finish_reason) so the logs are actionable.
+async fn channel_reply_once(
+    state: &AppState,
+    endpoint: &str,
+    api_key: Option<&str>,
+    payload: &serde_json::Value,
+) -> Result<String, String> {
+    let mut builder = state
+        .http
+        .post(endpoint)
+        .timeout(std::time::Duration::from_secs(120));
+    if let Some(key) = api_key {
         builder = builder.bearer_auth(key);
     }
-    let response = builder.json(&payload).send().await.ok()?;
-    if !response.status().is_success() {
-        return None;
+    let response = builder.json(payload).send().await.map_err(|error| {
+        if error.is_timeout() {
+            "timeout (120s)".to_string()
+        } else {
+            format!("rete: {error}")
+        }
+    })?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("HTTP {status}"));
     }
-    let body = response.json::<serde_json::Value>().await.ok()?;
-    let reply = body
-        .get("choices")
-        .and_then(|c| c.get(0))
+    let body = response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|error| format!("body non JSON: {error}"))?;
+    let choice = body.get("choices").and_then(|c| c.get(0));
+    let reply = choice
         .and_then(|c| c.get("message"))
         .and_then(|m| m.get("content"))
         .and_then(|c| c.as_str())
@@ -4263,10 +4301,13 @@ nella lingua del messaggio, come farebbe l'utente. Rispondi SOLO con il testo de
         .trim()
         .to_string();
     if reply.is_empty() {
-        None
-    } else {
-        Some(reply)
+        let finish = choice
+            .and_then(|c| c.get("finish_reason"))
+            .and_then(|f| f.as_str())
+            .unwrap_or("?");
+        return Err(format!("content vuoto (finish_reason={finish})"));
     }
+    Ok(reply)
 }
 
 /// Resolves a destination (by label or exact path) among the AUTHORIZED ones.
