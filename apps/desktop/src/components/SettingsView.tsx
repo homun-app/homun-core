@@ -37,6 +37,7 @@ import {
   type ComposioToolkit,
   type ContainedComputerLive,
   type CoreCapabilitySnapshot,
+  type CoreChannelSettings,
   type CoreMemoryDashboard,
   type ProviderModelView,
   type ProviderView,
@@ -2762,11 +2763,23 @@ type WhatsAppStatus = {
   running: boolean;
 };
 
+/** Normalize a contact identifier: trim + drop a leading "+". Keeps a full JID
+ *  (e.g. "1234@lid") intact so power users can allowlist a precise address. */
+function normalizeContact(raw: string): string {
+  const trimmed = raw.trim();
+  return trimmed.startsWith("+") ? trimmed.slice(1).trim() : trimmed;
+}
+
 function ChannelsPane() {
   const [status, setStatus] = useState<WhatsAppStatus | null>(null);
   const [phone, setPhone] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [settings, setSettings] = useState<CoreChannelSettings | null>(null);
+  const [newContact, setNewContact] = useState("");
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
 
   const refresh = async () => {
     try {
@@ -2780,6 +2793,45 @@ function ChannelsPane() {
     const id = setInterval(() => void refresh(), 2500);
     return () => clearInterval(id);
   }, []);
+  // Settings are user-edited, not live state: load once, then mutate locally.
+  useEffect(() => {
+    void coreBridge.channelSettings().then(setSettings);
+  }, []);
+
+  // Persist optimistically: the gateway is the source of truth, so we echo its
+  // saved copy back into state and roll back on failure.
+  const saveSettings = async (next: CoreChannelSettings) => {
+    const previous = settings;
+    setSettings(next);
+    setSavingSettings(true);
+    setSettingsError(null);
+    try {
+      setSettings(await coreBridge.setChannelSettings(next));
+    } catch (e) {
+      setSettings(previous);
+      setSettingsError((e as Error).message);
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const addContact = () => {
+    if (!settings) return;
+    const contact = normalizeContact(newContact);
+    if (!contact || settings.allowlist.includes(contact)) {
+      setNewContact("");
+      return;
+    }
+    void saveSettings({ ...settings, allowlist: [...settings.allowlist, contact] });
+    setNewContact("");
+  };
+  const removeContact = (contact: string) => {
+    if (!settings) return;
+    void saveSettings({
+      ...settings,
+      allowlist: settings.allowlist.filter((c) => c !== contact),
+    });
+  };
 
   const connect = async () => {
     setBusy(true);
@@ -2872,8 +2924,99 @@ function ChannelsPane() {
           </div>
         )}
       </div>
+
+      <div className="set-section-label">Auto-risposta</div>
+      <div className="set-card">
+        <div className="set-row">
+          <div>
+            <div className="rk">Canale attivo</div>
+            <div className="rv">
+              {settings?.enabled
+                ? "I messaggi in arrivo vengono elaborati"
+                : "Interruttore generale: tutti i messaggi in arrivo sono ignorati"}
+            </div>
+          </div>
+          <Toggle
+            on={!!settings?.enabled}
+            onChange={(on) => {
+              if (settings) void saveSettings({ ...settings, enabled: on });
+            }}
+          />
+        </div>
+        <div className="set-row">
+          <div>
+            <div className="rk">Auto-risposta (solo testo)</div>
+            <div className="rv">
+              Risponde da sola ai contatti in allowlist; le altre azioni restano dietro conferma.
+            </div>
+          </div>
+          <Toggle
+            on={!!settings?.auto_reply}
+            onChange={(on) => {
+              if (settings) void saveSettings({ ...settings, auto_reply: on });
+            }}
+          />
+        </div>
+        {settings && !settings.enabled && (
+          <p className="set-hint" style={{ marginBottom: 0 }}>
+            Il canale è spento: l'auto-risposta non scatta finché non riattivi «Canale attivo».
+          </p>
+        )}
+      </div>
+
+      <div className="set-section-label">Allowlist</div>
+      <div className="set-card">
+        <p className="set-hint" style={{ marginTop: 0 }}>
+          Solo questi contatti possono ricevere una risposta automatica. Inserisci il numero in
+          formato internazionale senza «+» (es. 39333…) o un JID completo (es. 1234@lid).
+        </p>
+        {settings && settings.allowlist.length > 0 ? (
+          <div>
+            {settings.allowlist.map((contact) => (
+              <div key={contact} className="set-row">
+                <span style={{ fontFamily: "monospace" }}>{contact}</span>
+                <button
+                  className="set-btn danger"
+                  type="button"
+                  disabled={savingSettings}
+                  onClick={() => removeContact(contact)}
+                >
+                  Rimuovi
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="set-hint">Nessun contatto in allowlist.</p>
+        )}
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <input
+            placeholder="numero o JID"
+            value={newContact}
+            onChange={(e) => setNewContact(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") addContact();
+            }}
+            style={{ flex: 1 }}
+          />
+          <button
+            className="set-btn"
+            type="button"
+            disabled={savingSettings || !newContact.trim()}
+            onClick={addContact}
+          >
+            Aggiungi
+          </button>
+        </div>
+        {settingsError && (
+          <p className="set-hint" style={{ color: "var(--danger)" }}>
+            {settingsError}
+          </p>
+        )}
+      </div>
+
       <p className="set-hint">
-        I messaggi in arrivo sono trattati come dati non fidati; l'auto-risposta (solo testo) vale
+        I messaggi in arrivo sono trattati come dati non fidati: l'auto-risposta (solo testo) vale
         unicamente per i contatti in allowlist e le azioni restano dietro conferma.
       </p>
     </>
