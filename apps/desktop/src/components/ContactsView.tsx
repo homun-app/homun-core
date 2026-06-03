@@ -1,4 +1,4 @@
-import { Search, Users } from "lucide-react";
+import { Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { coreBridge, type CoreContact } from "../lib/coreBridge";
@@ -121,12 +121,6 @@ export function ContactsView() {
 
   return (
     <div className="contacts-view">
-      <header className="contacts-head">
-        <Users size={18} />
-        <h2>Contatti</h2>
-        <span className="contacts-count">{contacts ? contacts.length : "…"}</span>
-      </header>
-
       <div className="mdl-layout">
         <aside className="mdl-rail">
           <label className="chat-search-input">

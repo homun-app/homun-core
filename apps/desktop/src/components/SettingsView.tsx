@@ -25,6 +25,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { ContactsView } from "./ContactsView";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize from "rehype-sanitize";
@@ -70,6 +71,7 @@ const SECTION_TITLES: Record<SettingsSectionId, string> = {
   runtime: "Modello & Runtime",
   privacy: "Privacy & Autonomia",
   memory: "Memoria",
+  contacts: "Contatti",
   channels: "Canali",
   connections: "Connettori",
   skills: "Skill",
@@ -105,7 +107,10 @@ export function SettingsView({ section }: SettingsViewProps) {
   return (
     <section
       className={`settings-view ${
-        section === "runtime" || section === "connections" || section === "skills"
+        section === "runtime" ||
+        section === "connections" ||
+        section === "skills" ||
+        section === "contacts"
           ? "settings-wide"
           : ""
       }`}
@@ -120,6 +125,7 @@ export function SettingsView({ section }: SettingsViewProps) {
         {section === "runtime" && <RuntimePane model={model} />}
         {section === "privacy" && <PrivacyPane />}
         {section === "memory" && <MemoryPane />}
+        {section === "contacts" && <ContactsView />}
         {section === "channels" && <ChannelsPane />}
         {section === "connections" && <ConnectorsPane />}
         {section === "skills" && <SkillsPane />}
@@ -3149,7 +3155,7 @@ function MemoryPane() {
       </p>
       <p className="set-hint">
         I <strong>contatti</strong> (persone, canali, schede) si gestiscono nella sezione
-        dedicata <strong>Contatti</strong> nella barra laterale.
+        <strong>Contatti</strong> qui nelle impostazioni.
       </p>
       <MemoryItemsList />
     </>
