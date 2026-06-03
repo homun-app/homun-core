@@ -5965,3 +5965,42 @@ body.resizing-drawer {
   color: var(--text);
 }
 .cmp-confirm.done svg { color: var(--green); }
+
+/* ---------------------------------------------------------------- contacts */
+.contacts-view { display: flex; flex-direction: column; height: 100%; padding: 18px 22px; gap: 14px; overflow: hidden; }
+.contacts-head { display: flex; align-items: center; gap: 8px; }
+.contacts-head h2 { margin: 0; font-size: 18px; }
+.contacts-head svg { color: var(--muted); }
+.contacts-count { font-size: 12px; font-weight: 650; color: var(--muted); background: var(--surface-muted); border-radius: 999px; padding: 1px 8px; }
+.contacts-view .mdl-layout { flex: 1; min-height: 0; }
+.contacts-view .mdl-rail { overflow-y: auto; gap: 4px; }
+.contacts-view .mdl-detail { overflow-y: auto; }
+.contacts-view .mdl-rail-item { align-items: flex-start; }
+.contacts-view .mdl-rail-name { display: flex; flex-direction: column; white-space: normal; gap: 1px; }
+.contacts-view .mdl-rail-name small { color: var(--muted); font-size: 11px; }
+.contacts-view .mdl-rail-item.active .mdl-rail-name small { color: var(--blue); }
+.mdl-rail-item.drag-over { outline: 2px dashed var(--blue); outline-offset: -2px; background: var(--blue-soft); }
+
+.contacts-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.contacts-chip { border: 1px solid var(--border); background: transparent; color: var(--muted); border-radius: 999px; padding: 3px 10px; font: inherit; font-size: 12px; cursor: pointer; }
+.contacts-chip.active { background: var(--blue-soft); color: var(--blue); border-color: var(--blue-soft); font-weight: 600; }
+
+.contacts-suggest { background: var(--green-soft); border-radius: var(--radius); padding: 8px 10px; margin-bottom: 4px; }
+.contacts-suggest-title { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 4px; }
+.contacts-suggest-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; padding: 2px 0; }
+
+.contacts-avatar-lg { width: 40px; height: 40px; border-radius: 10px; background: var(--surface-muted); display: inline-flex; align-items: center; justify-content: center; font-size: 17px; font-weight: 700; color: var(--muted); flex-shrink: 0; }
+.mdl-detail-head { display: flex; align-items: center; gap: 12px; }
+.contacts-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+.contacts-fields label { display: flex; flex-direction: column; gap: 4px; }
+.contacts-section { margin-top: 16px; display: flex; flex-direction: column; gap: 6px; }
+.contacts-channels { display: flex; flex-wrap: wrap; gap: 6px; }
+.contacts-channel { font-size: 12px; background: var(--surface-muted); border-radius: 6px; padding: 2px 8px; font-family: ui-monospace, monospace; }
+.contacts-memory { margin: 0; padding-left: 18px; font-size: 13px; color: var(--text); display: flex; flex-direction: column; gap: 3px; max-height: 280px; overflow-y: auto; }
+
+.set-btn.primary { background: var(--blue); color: #fff; border-color: var(--blue); }
+.contacts-modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.32); display: flex; align-items: center; justify-content: center; z-index: 50; }
+.contacts-modal { background: var(--bg); border-radius: 12px; padding: 20px 22px; max-width: 420px; box-shadow: 0 18px 50px rgba(0,0,0,0.25); }
+.contacts-modal h3 { margin: 0 0 8px; font-size: 16px; }
+.contacts-modal p { margin: 0 0 12px; font-size: 13.5px; color: var(--text); line-height: 1.5; }
+.contacts-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
