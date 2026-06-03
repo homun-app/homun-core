@@ -1,0 +1,27 @@
+# Standalone sidecar — intentionally NOT part of the root Cargo workspace, so the
+# gateway never compiles wa-rs (heavy: libsignal/noise/protobuf) and its builds
+# stay fast. The gateway talks to this process over the local channel protocol.
+[package]
+name = "channel-whatsapp"
+version = "0.1.0"
+edition = "2024"
+description = "WhatsApp channel bridge sidecar (wa-rs) for the local-first assistant"
+
+# Empty [workspace] detaches this crate from the parent repo's workspace.
+[workspace]
+
+[dependencies]
+# wa-rs (homunbot/wa-rs) + the sub-crates the canonical example uses.
+wa-rs = { git = "https://github.com/homunbot/wa-rs" }
+wa-rs-core = { git = "https://github.com/homunbot/wa-rs", package = "wa-rs-core" }
+wa-rs-proto = { git = "https://github.com/homunbot/wa-rs", package = "wa-rs-proto" }
+wa-rs-tokio-transport = { git = "https://github.com/homunbot/wa-rs", package = "wa-rs-tokio-transport" }
+wa-rs-ureq-http = { git = "https://github.com/homunbot/wa-rs", package = "wa-rs-ureq-http" }
+
+tokio = { version = "1", features = ["full"] }
+qrcode = "0.14"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+log = "0.4"
+env_logger = "0.11"
