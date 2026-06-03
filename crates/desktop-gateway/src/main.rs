@@ -4072,6 +4072,10 @@ struct WhatsAppInbound {
     /// Full reply-target JID (e.g. "…@lid" / "…@s.whatsapp.net"); reply here.
     #[serde(default)]
     chat: Option<String>,
+    /// Phone-number JID alternative when the chat is LID-addressed. Sending to a
+    /// raw @lid can ack-OK yet never deliver, so the PN is the preferred target.
+    #[serde(default)]
+    sender_pn: Option<String>,
 }
 
 async fn whatsapp_inbound(
@@ -4081,9 +4085,10 @@ async fn whatsapp_inbound(
     let action = inbound_action(&load_channel_settings(), &message.sender);
     // Privacy-safe trace: identifier + decision only, never the message content.
     eprintln!(
-        "channel/whatsapp: inbound from={} chat={} action={action:?}",
+        "channel/whatsapp: inbound from={} chat={} pn={} action={action:?}",
         message.sender,
         message.chat.as_deref().unwrap_or("-"),
+        message.sender_pn.as_deref().unwrap_or("-"),
     );
     if matches!(action, InboundAction::Ignore) {
         return Json(serde_json::json!({ "action": "ignore" }));
@@ -4093,12 +4098,15 @@ async fn whatsapp_inbound(
     match action {
         InboundAction::AutoReply => {
             let st = state.clone();
-            // Reply to the chat JID (correct addressing, incl. @lid); fall back to
-            // the bare sender only if the sidecar didn't provide it.
+            // Reply-target preference: phone-number JID (most reliable) > chat JID
+            // (handles @lid) > bare sender. Sending to a raw @lid can ack-OK yet
+            // never deliver, so prefer the PN when the sidecar resolved one.
+            let non_empty = |s: &String| !s.trim().is_empty();
             let reply_to = message
-                .chat
+                .sender_pn
                 .clone()
-                .filter(|c| !c.trim().is_empty())
+                .filter(&non_empty)
+                .or_else(|| message.chat.clone().filter(&non_empty))
                 .unwrap_or_else(|| message.sender.clone());
             let name = if message.sender_name.is_empty() {
                 message.sender.clone()
