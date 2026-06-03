@@ -3937,9 +3937,12 @@ async fn whatsapp_status() -> Json<WhatsAppStatus> {
         .and_then(|raw| serde_json::from_str::<WhatsAppStatus>(&raw).ok())
         .unwrap_or_default();
     status.running = whatsapp_running();
-    // If the sidecar isn't running, we are not connected live (the file may be stale).
+    // If the sidecar isn't running, the file is stale: not connected, and any
+    // QR/pair-code from a past session no longer applies.
     if !status.running {
         status.connected = false;
+        status.qr = None;
+        status.pair_code = None;
     }
     Json(status)
 }
