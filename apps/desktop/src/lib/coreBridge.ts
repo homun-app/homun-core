@@ -844,6 +844,20 @@ async function electronSelectWorkspace(id: string): Promise<WorkspacesSnapshot> 
   );
 }
 
+async function electronRenameWorkspace(id: string, name: string): Promise<WorkspacesSnapshot> {
+  return gatewayPostJson<WorkspacesSnapshot>(
+    `/api/workspaces/${encodeURIComponent(id)}/rename`,
+    { name },
+  );
+}
+
+async function electronDeleteWorkspace(id: string): Promise<WorkspacesSnapshot> {
+  return gatewayPostJson<WorkspacesSnapshot>(
+    `/api/workspaces/${encodeURIComponent(id)}/delete`,
+    {},
+  );
+}
+
 async function electronMcpConnect(input: {
   name: string;
   command: string;
@@ -1097,6 +1111,8 @@ export const coreBridge = {
   createWorkspace: (name: string, folder: string) => electronCreateWorkspace(name, folder),
   setWorkspaceFolder: (id: string, folder: string) => electronSetWorkspaceFolder(id, folder),
   selectWorkspace: (id: string) => electronSelectWorkspace(id),
+  renameWorkspace: (id: string, name: string) => electronRenameWorkspace(id, name),
+  deleteWorkspace: (id: string) => electronDeleteWorkspace(id),
   mcpConnect: (input: {
     name: string;
     command: string;

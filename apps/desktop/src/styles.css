@@ -454,6 +454,33 @@ body.resizing-drawer {
   padding: 2px 8px;
 }
 
+/* Project rows with inline edit (rename / link folder / delete). */
+.workspace-switcher-row { display: flex; align-items: center; gap: 2px; }
+.workspace-switcher-row .workspace-switcher-item { flex: 1; }
+.workspace-switcher-edit-btn {
+  border: none; background: transparent; color: var(--muted); cursor: pointer;
+  padding: 6px; border-radius: 6px; display: inline-flex; opacity: 0; flex-shrink: 0;
+}
+.workspace-switcher-row:hover .workspace-switcher-edit-btn { opacity: 1; }
+.workspace-switcher-edit-btn:hover { background: var(--surface-muted); color: var(--text); }
+.workspace-switcher-edit { display: flex; flex-direction: column; gap: 6px; padding: 6px 8px; width: 100%; }
+.workspace-switcher-edit input {
+  width: 100%; padding: 6px 8px; border: 1px solid var(--line, var(--border));
+  border-radius: 8px; font: inherit; font-size: 13px;
+}
+.workspace-switcher-edit-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.link-button {
+  border: none; background: transparent; color: var(--blue); cursor: pointer;
+  font: inherit; font-size: 12px; padding: 2px 4px;
+}
+.link-button.danger { color: var(--danger); }
+.link-button:disabled { opacity: 0.5; cursor: default; }
+.workspace-switcher-edit-actions .primary-button { margin-left: auto; }
+.workspace-switcher-hint {
+  font-size: 10.5px; color: var(--muted); padding: 4px 8px 2px; display: flex;
+  align-items: center; gap: 5px; line-height: 1.35;
+}
+
 .drawer-nav,
 .drawer-section {
   display: flex;
