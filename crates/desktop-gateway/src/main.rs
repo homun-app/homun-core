@@ -695,6 +695,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .route("/api/workspaces/{workspace_id}/select", post(select_workspace))
         .route("/api/workspaces/{workspace_id}/folder", post(set_workspace_folder))
+        .route("/api/workspaces/{workspace_id}/rename", post(rename_workspace))
+        .route("/api/workspaces/{workspace_id}/delete", post(delete_workspace))
         .route("/api/capabilities/mcp/connect", post(connect_mcp))
         .route("/api/capabilities/composio/connect", post(connect_composio))
         .route("/api/capabilities/composio/toolkits", get(composio_toolkits))
@@ -14158,27 +14160,25 @@ async fn create_workspace(
             message: "workspace name must not be empty".to_string(),
         });
     }
+    // The folder is OPTIONAL (like "Predefinito" and other existing projects, which
+    // have none). If provided it must exist; it drives @ search + file output and
+    // can be linked later via the folder action.
     let folder = request.folder.as_ref().map(|f| f.trim()).filter(|f| !f.is_empty());
-    let Some(folder) = folder else {
-        return Err(GatewayError {
-            status: StatusCode::BAD_REQUEST,
-            code: "workspace_folder_required",
-            message: "Scegli una cartella per il progetto.".to_string(),
-        });
-    };
-    if !PathBuf::from(folder).is_dir() {
-        return Err(GatewayError {
-            status: StatusCode::BAD_REQUEST,
-            code: "workspace_folder_not_found",
-            message: "La cartella del progetto non esiste.".to_string(),
-        });
+    if let Some(folder) = folder {
+        if !PathBuf::from(folder).is_dir() {
+            return Err(GatewayError {
+                status: StatusCode::BAD_REQUEST,
+                code: "workspace_folder_not_found",
+                message: "La cartella del progetto non esiste.".to_string(),
+            });
+        }
     }
     let mut file = load_workspaces_file();
     let id = format!("workspace_{}", uuid::Uuid::new_v4().simple());
     file.workspaces.push(WorkspaceRecord {
         id,
         name,
-        folder: Some(folder.to_string()),
+        folder: folder.map(|f| f.to_string()),
     });
     save_workspaces_file(&file).map_err(|error| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
@@ -14218,6 +14218,81 @@ async fn set_workspace_folder(
         });
     };
     workspace.folder = if folder.is_empty() { None } else { Some(folder) };
+    save_workspaces_file(&file).map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "workspaces_write_failed",
+        message: error.to_string(),
+    })?;
+    Ok(Json(WorkspacesResponse {
+        active_workspace_id: file.active.clone(),
+        workspaces: file.workspaces,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+struct RenameWorkspaceRequest {
+    name: String,
+}
+
+/// Renames a project.
+async fn rename_workspace(
+    Path(workspace_id): Path<String>,
+    Json(request): Json<RenameWorkspaceRequest>,
+) -> Result<Json<WorkspacesResponse>, GatewayError> {
+    let name = request.name.trim().to_string();
+    if name.is_empty() {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "workspace_name_required",
+            message: "Il nome non può essere vuoto.".to_string(),
+        });
+    }
+    let mut file = load_workspaces_file();
+    let Some(workspace) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) else {
+        return Err(GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "workspace_not_found",
+            message: format!("workspace not found: {workspace_id}"),
+        });
+    };
+    workspace.name = name;
+    save_workspaces_file(&file).map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "workspaces_write_failed",
+        message: error.to_string(),
+    })?;
+    Ok(Json(WorkspacesResponse {
+        active_workspace_id: file.active.clone(),
+        workspaces: file.workspaces,
+    }))
+}
+
+/// Deletes a project. The base personal workspace ("Predefinito") is protected.
+/// If the active project is deleted, the active falls back to the base workspace.
+async fn delete_workspace(
+    Path(workspace_id): Path<String>,
+) -> Result<Json<WorkspacesResponse>, GatewayError> {
+    if workspace_id == base_workspace_id() {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "workspace_base_protected",
+            message: "Lo spazio predefinito non può essere eliminato.".to_string(),
+        });
+    }
+    let mut file = load_workspaces_file();
+    let before = file.workspaces.len();
+    file.workspaces.retain(|w| w.id != workspace_id);
+    if file.workspaces.len() == before {
+        return Err(GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "workspace_not_found",
+            message: format!("workspace not found: {workspace_id}"),
+        });
+    }
+    if file.active == workspace_id {
+        file.active = base_workspace_id();
+        set_active_workspace(&file.active);
+    }
     save_workspaces_file(&file).map_err(|error| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "workspaces_write_failed",
