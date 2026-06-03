@@ -1167,6 +1167,9 @@ export const coreBridge = {
   whatsappStatus: () => electronWhatsAppStatus(),
   whatsappConnect: (phone?: string) => electronWhatsAppConnect(phone),
   whatsappDisconnect: () => electronWhatsAppDisconnect(),
+  telegramStatus: () => electronTelegramStatus(),
+  telegramConnect: (token?: string) => electronTelegramConnect(token),
+  telegramDisconnect: () => electronTelegramDisconnect(),
   channelSettings: () => electronChannelSettings(),
   setChannelSettings: (settings: CoreChannelSettings) => electronSetChannelSettings(settings),
   capabilities: () => electronCapabilities(),
@@ -1581,6 +1584,46 @@ async function electronWhatsAppConnect(phone?: string): Promise<void> {
 
 async function electronWhatsAppDisconnect(): Promise<void> {
   await fetch(`${DESKTOP_GATEWAY_URL}/api/channels/whatsapp/disconnect`, {
+    method: "POST",
+    headers: gatewayHeaders(),
+  });
+}
+
+export type CoreTelegramStatus = {
+  connected: boolean;
+  bot_username: string | null;
+  error: string | null;
+  running: boolean;
+};
+
+async function electronTelegramStatus(): Promise<CoreTelegramStatus> {
+  try {
+    const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/channels/telegram/status`, {
+      headers: gatewayHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error(`telegram status HTTP ${response.status}`);
+    }
+    return response.json() as Promise<CoreTelegramStatus>;
+  } catch {
+    return { connected: false, bot_username: null, error: null, running: false };
+  }
+}
+
+async function electronTelegramConnect(token?: string): Promise<void> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/channels/telegram/connect`, {
+    method: "POST",
+    headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(token ? { token } : {}),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(detail || `telegram connect HTTP ${response.status}`);
+  }
+}
+
+async function electronTelegramDisconnect(): Promise<void> {
+  await fetch(`${DESKTOP_GATEWAY_URL}/api/channels/telegram/disconnect`, {
     method: "POST",
     headers: gatewayHeaders(),
   });

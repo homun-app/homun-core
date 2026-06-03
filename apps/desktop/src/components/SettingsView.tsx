@@ -39,6 +39,7 @@ import {
   type CoreCapabilitySnapshot,
   type CoreChannelSettings,
   type CoreMemoryDashboard,
+  type CoreTelegramStatus,
   type ProviderModelView,
   type ProviderView,
   type CatalogPreview,
@@ -2770,6 +2771,114 @@ function normalizeContact(raw: string): string {
   return trimmed.startsWith("+") ? trimmed.slice(1).trim() : trimmed;
 }
 
+/** Telegram (Bot API) connect/status section. Auth is a @BotFather token —
+ *  no phone pairing — persisted server-side so reconnect needs no re-entry. */
+function TelegramSection() {
+  const [status, setStatus] = useState<CoreTelegramStatus | null>(null);
+  const [token, setToken] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = async () => {
+    try {
+      setStatus(await coreBridge.telegramStatus());
+    } catch {
+      /* keep previous */
+    }
+  };
+  useEffect(() => {
+    void refresh();
+    const id = setInterval(() => void refresh(), 2500);
+    return () => clearInterval(id);
+  }, []);
+
+  const connect = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await coreBridge.telegramConnect(token.trim() || undefined);
+      setToken("");
+      await refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const disconnect = async () => {
+    setBusy(true);
+    try {
+      await coreBridge.telegramDisconnect();
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="set-section-label">Telegram</div>
+      <div className="set-card">
+        {status?.connected ? (
+          <div className="set-row">
+            <div>
+              <div className="rk">Stato</div>
+              <div className="rv">
+                ✅ Connesso{status.bot_username ? ` — @${status.bot_username}` : ""}
+              </div>
+            </div>
+            <button
+              className="set-btn danger"
+              type="button"
+              disabled={busy}
+              onClick={() => void disconnect()}
+            >
+              Disconnetti
+            </button>
+          </div>
+        ) : (
+          <div>
+            <p className="set-hint" style={{ marginTop: 0 }}>
+              Crea un bot con <strong>@BotFather</strong> e incolla qui il token. Se l'hai già
+              inserito, premi <strong>Connetti</strong> (il token resta salvato).
+            </p>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                type="password"
+                placeholder="token bot (123456:ABC…) — vuoto se già salvato"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                style={{ flex: 1 }}
+              />
+              <button
+                className="set-btn"
+                type="button"
+                disabled={busy}
+                onClick={() => void connect()}
+              >
+                Connetti
+              </button>
+            </div>
+            {status?.running && !status.connected && (
+              <p className="set-hint">Bridge avviato, verifica del token in corso…</p>
+            )}
+            {status?.error && (
+              <p className="set-hint" style={{ color: "var(--danger)" }}>
+                {status.error}
+              </p>
+            )}
+            {error && (
+              <p className="set-hint" style={{ color: "var(--danger)" }}>
+                {error}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
 function ChannelsPane() {
   const [status, setStatus] = useState<WhatsAppStatus | null>(null);
   const [phone, setPhone] = useState("");
@@ -2925,6 +3034,8 @@ function ChannelsPane() {
         )}
       </div>
 
+      <TelegramSection />
+
       <div className="set-section-label">Auto-risposta</div>
       <div className="set-card">
         <div className="set-row">
@@ -2967,8 +3078,9 @@ function ChannelsPane() {
       <div className="set-section-label">Allowlist</div>
       <div className="set-card">
         <p className="set-hint" style={{ marginTop: 0 }}>
-          Solo questi contatti possono ricevere una risposta automatica. Inserisci il numero in
-          formato internazionale senza «+» (es. 39333…) o un JID completo (es. 1234@lid).
+          Solo questi contatti possono ricevere una risposta automatica (vale per tutti i canali).
+          WhatsApp: numero internazionale senza «+» (es. 39333…) o JID completo (es. 1234@lid).
+          Telegram: id utente numerico (es. 123456789).
         </p>
         {settings && settings.allowlist.length > 0 ? (
           <div>
