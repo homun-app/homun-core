@@ -1749,7 +1749,18 @@ async function electronMergeContacts(from: string, into: string): Promise<CoreCo
   return response.json() as Promise<CoreContact>;
 }
 
-export type CoreContactProfile = { facts: string[]; stale: boolean; episode_count: number };
+export type CoreContactFact = {
+  text: string;
+  /** "durable" | "transient" | "event" */
+  temporality: string;
+  /** Period the fact refers to (YYYY-MM-DD / YYYY-MM), "" if durable/undatable. */
+  date: string;
+};
+export type CoreContactProfile = {
+  facts: CoreContactFact[];
+  stale: boolean;
+  episode_count: number;
+};
 
 async function electronContactProfile(reference: string): Promise<CoreContactProfile> {
   try {

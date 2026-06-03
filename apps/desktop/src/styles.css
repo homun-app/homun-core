@@ -5993,6 +5993,14 @@ body.resizing-drawer {
 .contacts-channels { display: flex; flex-wrap: wrap; gap: 6px; }
 .contacts-channel { font-size: 12px; background: var(--surface-muted); border-radius: 6px; padding: 2px 8px; font-family: ui-monospace, monospace; }
 .contacts-memory { margin: 0; padding-left: 18px; font-size: 13px; color: var(--text); display: flex; flex-direction: column; gap: 3px; max-height: 280px; overflow-y: auto; }
+.contacts-facts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto; }
+.contacts-facts li { display: flex; align-items: baseline; gap: 8px; font-size: 13px; color: var(--text); }
+.fact-text { flex: 1; }
+.fact-date { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fact-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; border-radius: 5px; padding: 1px 6px; flex-shrink: 0; min-width: 48px; text-align: center; }
+.fact-tag.durable { background: var(--surface-muted); color: var(--muted); }
+.fact-tag.event { background: var(--blue-soft); color: var(--blue); }
+.fact-tag.transient { background: #fdeede; color: #b06a00; }
 
 .set-btn.primary { background: var(--blue); color: #fff; border-color: var(--blue); }
 .contacts-modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.32); display: flex; align-items: center; justify-content: center; z-index: 50; }
