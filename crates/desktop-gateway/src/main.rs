@@ -11581,11 +11581,14 @@ async fn contacts_merge(
         std::mem::swap(&mut from, &mut into);
     }
 
-    // (1) SQL (source of truth): move the absorbed handles onto the survivor
-    // (dedup); keep the survivor's curated name unless it's empty.
-    for alias in &from.aliases {
-        if !into.aliases.contains(alias) {
-            into.aliases.push(alias.clone());
+    // (1) SQL (source of truth): move ALL of the absorbed contact's handles onto
+    // the survivor (dedup). Use `contact_handles` (not raw `aliases`) so a handle
+    // that lives only in the canonical_key — e.g. a legacy "person:wa:123" — is
+    // carried over too; otherwise it (and its episodes) would be orphaned.
+    let moved_handles = contact_handles(&from);
+    for handle in &moved_handles {
+        if !into.aliases.contains(handle) {
+            into.aliases.push(handle.clone());
         }
     }
     if into.name.trim().is_empty() && !from.name.trim().is_empty() {
@@ -11641,7 +11644,7 @@ async fn contacts_merge(
         payload: serde_json::json!({
             "from": from.reference.to_string(),
             "into": into.reference.to_string(),
-            "moved_aliases": from.aliases,
+            "moved_aliases": moved_handles,
         }),
         privacy_domain: PrivacyDomain::new("personal"),
         sensitivity: MemoryDataSensitivity::Internal,
