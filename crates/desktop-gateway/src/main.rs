@@ -4026,6 +4026,7 @@ async fn whatsapp_send_to(state: &AppState, recipient: &str, text: &str) -> Resu
     let response = state
         .http
         .post(&url)
+        .timeout(std::time::Duration::from_secs(30))
         .json(&serde_json::json!({ "recipient": recipient, "text": text }))
         .send()
         .await
@@ -4068,6 +4069,9 @@ struct WhatsAppInbound {
     #[serde(default)]
     sender_name: String,
     content: String,
+    /// Full reply-target JID (e.g. "…@lid" / "…@s.whatsapp.net"); reply here.
+    #[serde(default)]
+    chat: Option<String>,
 }
 
 async fn whatsapp_inbound(
@@ -4083,7 +4087,13 @@ async fn whatsapp_inbound(
     match action {
         InboundAction::AutoReply => {
             let st = state.clone();
-            let sender = message.sender.clone();
+            // Reply to the chat JID (correct addressing, incl. @lid); fall back to
+            // the bare sender only if the sidecar didn't provide it.
+            let reply_to = message
+                .chat
+                .clone()
+                .filter(|c| !c.trim().is_empty())
+                .unwrap_or_else(|| message.sender.clone());
             let name = if message.sender_name.is_empty() {
                 message.sender.clone()
             } else {
@@ -4092,7 +4102,7 @@ async fn whatsapp_inbound(
             let content = message.content.clone();
             tokio::spawn(async move {
                 if let Some(reply) = generate_channel_reply(&st, &name, &content).await {
-                    let _ = whatsapp_send_to(&st, &sender, &reply).await;
+                    let _ = whatsapp_send_to(&st, &reply_to, &reply).await;
                 }
             });
             Json(serde_json::json!({ "action": "auto_reply" }))
