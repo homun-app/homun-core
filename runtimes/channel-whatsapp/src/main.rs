@@ -89,7 +89,12 @@ async fn send_handler(
     Json(request): Json<SendRequest>,
 ) -> StatusCode {
     let recipient = request.recipient.trim().trim_start_matches('+');
-    let jid = Jid::new(recipient, "s.whatsapp.net");
+    // Accept a full JID ("user@server", e.g. …@lid) as-is; otherwise treat the
+    // value as a phone number on the default user server.
+    let jid = match recipient.split_once('@') {
+        Some((user, server)) => Jid::new(user, server),
+        None => Jid::new(recipient, "s.whatsapp.net"),
+    };
     let message = wa::Message {
         conversation: Some(request.text),
         ..Default::default()
@@ -187,6 +192,11 @@ fn main() -> anyhow::Result<()> {
                                     "sender_name": info.push_name,
                                     "content": text,
                                     "message_id": info.id.to_string(),
+                                    // Correct reply target (preserves @lid / @s.whatsapp.net).
+                                    "chat": format!(
+                                        "{}@{}",
+                                        info.source.chat.user, info.source.chat.server
+                                    ),
                                 });
                                 // Don't log message content (privacy): only the outcome.
                                 if let Err(error) = http
