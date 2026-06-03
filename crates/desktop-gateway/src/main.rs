@@ -4436,7 +4436,12 @@ async fn handle_channel_inbound(
                 // badges it. The agent runs on it with history + tools.
                 let thread_id = match lock_store(&st) {
                     Ok(store) => store
-                        .find_or_create_channel_thread("default", channel, &sender, &format!("{label} · {name}"))
+                        .find_or_create_channel_thread(
+                            &base_workspace_id(),
+                            channel,
+                            &sender,
+                            &format!("{label} · {name}"),
+                        )
                         .ok()
                         .map(|thread| thread.thread_id),
                     Err(_) => None,
@@ -13975,6 +13980,16 @@ fn set_active_workspace(id: &str) {
 
 fn gateway_workspace_id() -> WorkspaceId {
     WorkspaceId::new(active_workspace_id())
+}
+
+/// The base "personal" workspace (the free "Compiti"/"Predefinito" space) where
+/// channel conversations live — independent of whichever project is active, since
+/// a WhatsApp/Telegram chat is personal, not project-scoped.
+fn base_workspace_id() -> String {
+    env::var("LOCAL_FIRST_WORKSPACE_ID")
+        .unwrap_or_else(|_| "local-workspace".to_string())
+        .trim()
+        .to_string()
 }
 
 fn gateway_memory_user_id() -> MemoryUserId {
