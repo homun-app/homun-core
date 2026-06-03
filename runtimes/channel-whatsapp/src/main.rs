@@ -118,7 +118,29 @@ fn main() -> anyhow::Result<()> {
                             write_status(&s);
                             eprintln!("❌ WhatsApp disconnesso (logout): rifai il pairing.");
                         }
-                        _ => {}
+                        // Surface WHY pairing failed instead of a silent "impossibile collegare".
+                        Event::PairError(err) => {
+                            eprintln!("❌ Pairing fallito: {}", err.error);
+                        }
+                        Event::QrScannedWithoutMultidevice(_) => {
+                            eprintln!(
+                                "❌ QR scansionato ma l'account non è in modalità multi-dispositivo. \
+Aggiorna WhatsApp sul telefono e riprova."
+                            );
+                        }
+                        Event::ClientOutdated(_) => {
+                            eprintln!(
+                                "❌ ClientOutdated: WhatsApp ha rifiutato la versione del client. \
+Serve impostare una versione recente con .with_version((2, 3000, <revision>))."
+                            );
+                        }
+                        Event::ConnectFailure(_) => {
+                            eprintln!("❌ ConnectFailure: handshake col server WhatsApp non riuscito.");
+                        }
+                        other => {
+                            // Log unhandled events at info level to aid diagnosis.
+                            log::info!("evento non gestito: {other:?}");
+                        }
                     }
                 }
             })
