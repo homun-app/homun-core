@@ -1164,6 +1164,9 @@ export const coreBridge = {
     action: "confirm" | "reject" | "delete" | "edit",
     text?: string,
   ) => electronDecideMemory(reference, action, text),
+  whatsappStatus: () => electronWhatsAppStatus(),
+  whatsappConnect: (phone?: string) => electronWhatsAppConnect(phone),
+  whatsappDisconnect: () => electronWhatsAppDisconnect(),
   capabilities: () => electronCapabilities(),
   localComputerSession: (sessionId: string) =>
     electronLocalComputerSession(sessionId),
@@ -1538,6 +1541,47 @@ async function electronDecideMemory(
   if (!response.ok) {
     throw new Error(`Desktop Gateway memory decide HTTP ${response.status}`);
   }
+}
+
+export type CoreWhatsAppStatus = {
+  connected: boolean;
+  needs_pairing: boolean;
+  qr: string | null;
+  pair_code: string | null;
+  running: boolean;
+};
+
+async function electronWhatsAppStatus(): Promise<CoreWhatsAppStatus> {
+  try {
+    const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/channels/whatsapp/status`, {
+      headers: gatewayHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error(`whatsapp status HTTP ${response.status}`);
+    }
+    return response.json() as Promise<CoreWhatsAppStatus>;
+  } catch {
+    return { connected: false, needs_pairing: false, qr: null, pair_code: null, running: false };
+  }
+}
+
+async function electronWhatsAppConnect(phone?: string): Promise<void> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/channels/whatsapp/connect`, {
+    method: "POST",
+    headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(phone ? { phone } : {}),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(detail || `connect HTTP ${response.status}`);
+  }
+}
+
+async function electronWhatsAppDisconnect(): Promise<void> {
+  await fetch(`${DESKTOP_GATEWAY_URL}/api/channels/whatsapp/disconnect`, {
+    method: "POST",
+    headers: gatewayHeaders(),
+  });
 }
 
 function emptyCapabilitySnapshot(): CoreCapabilitySnapshot {

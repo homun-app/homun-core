@@ -68,6 +68,7 @@ const SECTION_TITLES: Record<SettingsSectionId, string> = {
   runtime: "Modello & Runtime",
   privacy: "Privacy & Autonomia",
   memory: "Memoria",
+  channels: "Canali",
   connections: "Connettori",
   skills: "Skill",
   computer: "Computer locale",
@@ -117,6 +118,7 @@ export function SettingsView({ section }: SettingsViewProps) {
         {section === "runtime" && <RuntimePane model={model} />}
         {section === "privacy" && <PrivacyPane />}
         {section === "memory" && <MemoryPane />}
+        {section === "channels" && <ChannelsPane />}
         {section === "connections" && <ConnectorsPane />}
         {section === "skills" && <SkillsPane />}
         {section === "computer" && <ComputerPane computer={computer} />}
@@ -2746,6 +2748,132 @@ function AuditPane() {
           Svuota
         </button>
       </div>
+    </>
+  );
+}
+
+/* --------------------------------------------------------------- channels */
+
+type WhatsAppStatus = {
+  connected: boolean;
+  needs_pairing: boolean;
+  qr: string | null;
+  pair_code: string | null;
+  running: boolean;
+};
+
+function ChannelsPane() {
+  const [status, setStatus] = useState<WhatsAppStatus | null>(null);
+  const [phone, setPhone] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = async () => {
+    try {
+      setStatus(await coreBridge.whatsappStatus());
+    } catch {
+      /* leave previous */
+    }
+  };
+  useEffect(() => {
+    void refresh();
+    const id = setInterval(() => void refresh(), 2500);
+    return () => clearInterval(id);
+  }, []);
+
+  const connect = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await coreBridge.whatsappConnect(phone.trim() || undefined);
+      await refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const disconnect = async () => {
+    setBusy(true);
+    try {
+      await coreBridge.whatsappDisconnect();
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="set-section-label" style={{ marginTop: 0 }}>
+        WhatsApp
+      </div>
+      <div className="set-card">
+        {status?.connected ? (
+          <div className="set-row">
+            <div>
+              <div className="rk">Stato</div>
+              <div className="rv">✅ Connesso</div>
+            </div>
+            <button className="set-btn danger" type="button" disabled={busy} onClick={() => void disconnect()}>
+              Disconnetti
+            </button>
+          </div>
+        ) : status?.pair_code ? (
+          <div>
+            <p className="set-hint" style={{ marginTop: 0 }}>
+              Sul telefono: WhatsApp ▸ Dispositivi collegati ▸ Collega un dispositivo ▸{" "}
+              <strong>Collega con numero di telefono</strong>, poi inserisci:
+            </p>
+            <div className="set-card-name" style={{ fontSize: 28, letterSpacing: 3 }}>
+              {status.pair_code}
+            </div>
+            <button
+              className="set-btn"
+              type="button"
+              disabled={busy}
+              onClick={() => void disconnect()}
+              style={{ marginTop: 12 }}
+            >
+              Annulla
+            </button>
+          </div>
+        ) : (
+          <div>
+            <p className="set-hint" style={{ marginTop: 0 }}>
+              Collega WhatsApp col tuo numero in formato internazionale senza «+» (es. 39333…).
+            </p>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                placeholder="numero di telefono"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                style={{ flex: 1 }}
+              />
+              <button
+                className="set-btn"
+                type="button"
+                disabled={busy || !phone.trim()}
+                onClick={() => void connect()}
+              >
+                Connetti
+              </button>
+            </div>
+            {status?.running && (
+              <p className="set-hint">Bridge avviato, in attesa del codice…</p>
+            )}
+            {error && (
+              <p className="set-hint" style={{ color: "var(--danger)" }}>
+                {error}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+      <p className="set-hint">
+        I messaggi in arrivo sono trattati come dati non fidati; l'auto-risposta (solo testo) vale
+        unicamente per i contatti in allowlist e le azioni restano dietro conferma.
+      </p>
     </>
   );
 }
