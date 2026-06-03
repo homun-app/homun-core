@@ -172,6 +172,7 @@ fn main() -> anyhow::Result<()> {
                         // applies the C0 policy → memory + draft/auto-reply). Skip
                         // our own messages and groups (v1: direct chats only).
                         Event::Message(message, info) => {
+                            // Direct text messages only (v1); skip our own + groups.
                             if info.source.is_from_me || info.source.is_group {
                                 return;
                             }
@@ -187,12 +188,16 @@ fn main() -> anyhow::Result<()> {
                                     "content": text,
                                     "message_id": info.id.to_string(),
                                 });
-                                let _ = http
+                                // Don't log message content (privacy): only the outcome.
+                                if let Err(error) = http
                                     .post(format!("{url}/api/channels/whatsapp/inbound"))
                                     .bearer_auth(token)
                                     .json(&payload)
                                     .send()
-                                    .await;
+                                    .await
+                                {
+                                    eprintln!("inbound: inoltro al gateway fallito: {error}");
+                                }
                             }
                         }
                         Event::PairingQrCode { code, .. } => {
@@ -253,8 +258,9 @@ Serve impostare una versione recente con .with_version((2, 3000, <revision>))."
                             eprintln!("❌ ConnectFailure: handshake col server WhatsApp non riuscito.");
                         }
                         other => {
-                            // Log unhandled events at info level to aid diagnosis.
-                            log::info!("evento non gestito: {other:?}");
+                            // Diagnostic: show that events flow + which kind arrive.
+                            let dump = format!("{other:?}");
+                            eprintln!("SIDECAR evt: {}", &dump[..dump.len().min(80)]);
                         }
                     }
                 }
