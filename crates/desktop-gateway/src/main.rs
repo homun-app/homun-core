@@ -1411,6 +1411,9 @@ async fn learn_from_exchange(
     user_message: &str,
     assistant_message: &str,
     thread_id: Option<&str>,
+    // When Some(name), the message comes from a channel CONTACT (not the user):
+    // facts are attributed to them, not to person:self.
+    speaker: Option<&str>,
 ) {
     if !is_salient_exchange(user_message) {
         return;
@@ -1418,7 +1421,7 @@ async fn learn_from_exchange(
     let Some((base_url, model, api_key)) = extractor_openai_config() else {
         return;
     };
-    let system = "Sei un estrattore di MEMORIA. Dall'ultimo scambio estrai conoscenza DUREVOLE e \
+    let base_system = "Sei un estrattore di MEMORIA. Dall'ultimo scambio estrai conoscenza DUREVOLE e \
 RIUTILIZZABILE: (1) fatti e preferenze sull'UTENTE (chi è, persone della sua vita, come preferisce \
 lavorare); (2) DECISIONI prese durante il lavoro (scelte tecniche o di progetto) con il PERCHÉ e le \
 alternative scartate. NON estrarre il contenuto transitorio del compito, NON fatti generali del \
@@ -1445,6 +1448,22 @@ fiscale, indirizzo, salute, documenti) = \"secret\"; fatti personali (figli, par
 \"private\"; preferenze e decisioni = \"internal\". confidence >=0.8 solo se esplicito e \
 inequivocabile. \"episode\" è SEMPRE una frase breve sullo scambio (anche se memories/entities/\
 relations sono vuoti). Se non c'è nulla da ricordare: {\"memories\":[],\"entities\":[],\"relations\":[],\"episode\":\"…\"}.";
+    // Channel mode: clarify that the speaker is a contact so facts are attributed
+    // to them (e.g. person:marco), not mistakenly to the user (person:self).
+    let system = match speaker {
+        Some(name) => format!(
+            "{base_system}\n\nIMPORTANTE: questo messaggio proviene dal CONTATTO «{name}» via un \
+canale di messaggistica, NON dall'utente. Attribuisci i fatti a «{name}» (canonical_key \
+person:<nome-normalizzato>); usa person:self SOLO se il messaggio parla esplicitamente dell'utente."
+        ),
+        None => base_system.to_string(),
+    };
+    let user_content = match speaker {
+        Some(name) => {
+            format!("MESSAGGIO da {name} (canale):\n{user_message}\n\nRISPOSTA: {assistant_message}")
+        }
+        None => format!("UTENTE: {user_message}\n\nASSISTENTE: {assistant_message}"),
+    };
     let payload = serde_json::json!({
         "model": model,
         "temperature": 0.0,
@@ -1456,7 +1475,7 @@ relations sono vuoti). Se non c'è nulla da ricordare: {\"memories\":[],\"entiti
         "response_format": { "type": "json_object" },
         "messages": [
             { "role": "system", "content": system },
-            { "role": "user", "content": format!("UTENTE: {user_message}\n\nASSISTENTE: {assistant_message}") },
+            { "role": "user", "content": user_content },
         ],
     });
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
@@ -3355,8 +3374,14 @@ verifica anti-bot). Riprova o indica una fonte preferita.".to_string()
             let learn_answer = memory_answer.clone();
             let learn_thread = thread_id.clone();
             tokio::spawn(async move {
-                learn_from_exchange(&learn_state, &learn_user, &learn_answer, learn_thread.as_deref())
-                    .await;
+                learn_from_exchange(
+                    &learn_state,
+                    &learn_user,
+                    &learn_answer,
+                    learn_thread.as_deref(),
+                    None,
+                )
+                .await;
             });
         }
         // Mark the resume entry finished and evict it after a grace window so a
@@ -4328,6 +4353,21 @@ async fn handle_channel_inbound(
     }
     // Best-effort: record the contact (person node) + the message (episodic).
     record_channel_message(state, channel, &message);
+    // Learn durable knowledge from the channel conversation into the general
+    // memory (fire-and-forget), attributed to the CONTACT rather than the user.
+    {
+        let st = state.clone();
+        let speaker = if message.sender_name.is_empty() {
+            message.sender.clone()
+        } else {
+            message.sender_name.clone()
+        };
+        let content = message.content.clone();
+        tokio::spawn(async move {
+            // thread_id=None: record_channel_message already stored the episode.
+            learn_from_exchange(&st, &content, "", None, Some(&speaker)).await;
+        });
+    }
     match action {
         InboundAction::AutoReply => {
             let st = state.clone();
