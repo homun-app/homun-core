@@ -47,6 +47,20 @@ impl MemoryFacade {
         Ok(self.store.upsert_relation(relation)?)
     }
 
+    /// Tombstones an entity (hidden from listings/lookups). Used to merge a
+    /// duplicate contact into another after its handles have been moved over.
+    pub fn tombstone_entity(
+        &self,
+        reference: &MemoryRef,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        reason: &str,
+    ) -> MemoryResult<()> {
+        Ok(self
+            .store
+            .tombstone(reference, user_id, workspace_id, reason)?)
+    }
+
     pub fn link_evidence(&self, evidence: &MemoryEvidence) -> MemoryResult<()> {
         Ok(self.store.link_evidence(evidence)?)
     }
