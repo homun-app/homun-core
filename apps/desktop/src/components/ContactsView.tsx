@@ -1,7 +1,7 @@
 import { Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { coreBridge, type CoreContact } from "../lib/coreBridge";
+import { coreBridge, type CoreContact, type CoreContactProfile } from "../lib/coreBridge";
 
 /* First-class Contacts manager (M7): a searchable master-detail of every person
    the assistant knows, with type/notes, per-channel handles, conversation memory,
@@ -35,7 +35,6 @@ export function ContactsView() {
   const [selected, setSelected] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
-  const [memories, setMemories] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [dragRef, setDragRef] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<string | null>(null);
@@ -50,11 +49,8 @@ export function ContactsView() {
   const byRef = (reference: string) => contacts?.find((c) => c.reference === reference) ?? null;
   const open = selected ? byRef(selected) : null;
 
-  const selectContact = async (reference: string) => {
-    setSelected(reference);
-    setMemories(null);
-    setMemories(await coreBridge.contactMemories(reference));
-  };
+  // The detail card (keyed by reference) loads its own distilled profile.
+  const selectContact = (reference: string) => setSelected(reference);
 
   // Merge suggestions: same normalized name across distinct (non-self) cards.
   const suggestions = useMemo(() => {
@@ -100,7 +96,7 @@ export function ContactsView() {
       const survivor = pending.into.reference;
       setPending(null);
       await reload();
-      await selectContact(survivor);
+      selectContact(survivor);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -221,7 +217,6 @@ export function ContactsView() {
               key={open.reference}
               contact={open}
               contacts={contacts ?? []}
-              memories={memories}
               busy={busy}
               onPatch={patch}
               onMerge={(target) => openMerge(open, target)}
@@ -263,20 +258,35 @@ export function ContactsView() {
 function ContactCard({
   contact,
   contacts,
-  memories,
   busy,
   onPatch,
   onMerge,
 }: {
   contact: CoreContact;
   contacts: CoreContact[];
-  memories: string[] | null;
   busy: boolean;
   onPatch: (u: { name?: string; contact_type?: string; notes?: string }) => void;
   onMerge: (target: CoreContact) => void;
 }) {
   const [mergeTarget, setMergeTarget] = useState("");
   const others = contacts.filter((c) => c.reference !== contact.reference);
+
+  // Distilled profile (important facts, not the raw transcript). Cached server
+  // side; we only trigger the (slow) extraction on explicit refresh.
+  const [profile, setProfile] = useState<CoreContactProfile | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  useEffect(() => {
+    setProfile(null);
+    void coreBridge.contactProfile(contact.reference).then(setProfile);
+  }, [contact.reference]);
+  const refreshProfile = async () => {
+    setRefreshing(true);
+    try {
+      setProfile(await coreBridge.refreshContactProfile(contact.reference));
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   return (
     <>
@@ -351,17 +361,44 @@ function ContactCard({
       </div>
 
       <div className="contacts-section">
-        <div className="rk">Cosa so di lui/lei</div>
-        {memories === null ? (
+        <div className="contacts-section-head">
+          <span className="rk">Cosa so di lui/lei</span>
+          {profile && (profile.episode_count > 0 || profile.facts.length > 0) && (
+            <button
+              type="button"
+              className="set-btn"
+              disabled={refreshing}
+              onClick={() => void refreshProfile()}
+            >
+              {refreshing
+                ? "Analizzo…"
+                : profile.facts.length === 0
+                  ? "Genera dai messaggi"
+                  : "Aggiorna"}
+            </button>
+          )}
+        </div>
+        {profile === null ? (
           <p className="set-hint">Carico…</p>
-        ) : memories.length === 0 ? (
-          <p className="set-hint">Nessun messaggio registrato.</p>
+        ) : profile.facts.length === 0 ? (
+          <p className="set-hint">
+            {profile.episode_count === 0
+              ? "Nessun messaggio ancora."
+              : "Nessuna informazione estratta. Premi «Genera dai messaggi»."}
+          </p>
         ) : (
-          <ul className="contacts-memory">
-            {memories.slice(0, 50).map((m, i) => (
-              <li key={i}>{m}</li>
-            ))}
-          </ul>
+          <>
+            <ul className="contacts-memory">
+              {profile.facts.map((f, i) => (
+                <li key={i}>{f}</li>
+              ))}
+            </ul>
+            {profile.stale && (
+              <p className="set-hint" style={{ marginBottom: 0 }}>
+                Ci sono nuovi messaggi: «Aggiorna» per rigenerare il profilo.
+              </p>
+            )}
+          </>
         )}
       </div>
 
