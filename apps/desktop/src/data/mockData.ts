@@ -16,6 +16,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   User,
+  Users,
 } from "lucide-react";
 import type {
   ApprovalItem,
@@ -37,6 +38,7 @@ export const navItems: NavItem[] = [
   { id: "learning", label: "Apprendimento", icon: Brain },
   { id: "tasks", label: "Pianificato", icon: CalendarClock },
   { id: "memory", label: "Libreria", icon: Database },
+  { id: "contacts", label: "Contatti", icon: Users },
 ];
 
 export const chatMessages: ChatMessage[] = [

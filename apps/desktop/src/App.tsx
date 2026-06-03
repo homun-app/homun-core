@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChatView } from "./components/ChatView";
+import { ContactsView } from "./components/ContactsView";
 import { ContainedComputerView } from "./components/ContainedComputerView";
 import { LearningView } from "./components/LearningView";
 import { Shell } from "./components/Shell";
@@ -971,6 +972,7 @@ export default function App() {
             ]}
           />
         )}
+        {activeView === "contacts" && <ContactsView />}
         {activeView === "automations" && (
           <ShallowView
             title="Automazioni"

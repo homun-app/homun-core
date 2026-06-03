@@ -70,7 +70,8 @@ use local_first_local_computer_session::{
 use local_first_local_computer_session::{LocalComputerReadModel, LocalComputerSessionStore};
 use local_first_memory::{
     DataSensitivity as MemoryDataSensitivity, ExtractedEntity, ExtractedMemory, ExtractedRelation,
-    MemoryAccessRequest, MemoryCreateRequest, MemoryDashboard, MemoryEntity, MemoryExtraction,
+    MemoryAccessRequest, MemoryCreateRequest, MemoryDashboard, MemoryEntity, MemoryEvent,
+    MemoryExtraction,
     MemoryFacade, MemoryLifecycleRequest, MemoryRef, MemoryRefKind, MemoryRelation,
     MemorySearchRequest, MemoryStatus, MemoryUiReadModel, MemoryUpdatePatch, MemoryWikiProjection,
     PrivacyDomain,
@@ -11564,7 +11565,7 @@ async fn contacts_merge(
     }
     let from = find_contact_by_ref(&facade, &user, &workspace, &request.from);
     let into = find_contact_by_ref(&facade, &user, &workspace, &request.into);
-    let (from, mut into) = match (from, into) {
+    let (mut from, mut into) = match (from, into) {
         (Some(f), Some(i)) => (f, i),
         _ => {
             return Err(GatewayError {
@@ -11574,7 +11575,14 @@ async fn contacts_merge(
             });
         }
     };
-    // Move the absorbed contact's handles onto the survivor (dedup), keep a name.
+    // Self protection: the user's own "person:self" card is never absorbed — if
+    // it's on either side it always survives (becomes `into`).
+    if contact_is_self(&from) {
+        std::mem::swap(&mut from, &mut into);
+    }
+
+    // (1) SQL (source of truth): move the absorbed handles onto the survivor
+    // (dedup); keep the survivor's curated name unless it's empty.
     for alias in &from.aliases {
         if !into.aliases.contains(alias) {
             into.aliases.push(alias.clone());
@@ -11588,6 +11596,59 @@ async fn contacts_merge(
         code: "contact_merge",
         message: error.to_string(),
     })?;
+
+    // (2) Graph: repoint every relation that referenced the absorbed entity to the
+    // survivor (in-place, same relation reference).
+    if let Ok(relations) = facade.list_relations_for_ui(&user, &workspace) {
+        for mut relation in relations {
+            let mut touched = false;
+            if relation.source_ref == from.reference {
+                relation.source_ref = into.reference.clone();
+                touched = true;
+            }
+            if relation.target_ref == from.reference {
+                relation.target_ref = into.reference.clone();
+                touched = true;
+            }
+            if touched {
+                let _ = facade.upsert_relation(&relation);
+            }
+        }
+    }
+
+    // (3) Markdown/wiki: repoint any page that linked the absorbed entity.
+    if let Ok(pages) = facade.list_wiki_pages_for_ui(&user, &workspace) {
+        for mut page in pages {
+            if page.linked_refs.iter().any(|r| *r == from.reference) {
+                for r in page.linked_refs.iter_mut() {
+                    if *r == from.reference {
+                        *r = into.reference.clone();
+                    }
+                }
+                let _ = facade.record_wiki_page_for_ui(&page);
+            }
+        }
+    }
+
+    // (4) Event-log (sync spine + audit): record the merge.
+    let event = MemoryEvent {
+        reference: MemoryRef::generated(MemoryRefKind::Event, user.clone(), workspace.clone()),
+        user_id: user.clone(),
+        workspace_id: workspace.clone(),
+        timestamp: now_epoch_secs().to_string(),
+        source: "contacts".to_string(),
+        event_type: "contact_merge".to_string(),
+        payload: serde_json::json!({
+            "from": from.reference.to_string(),
+            "into": into.reference.to_string(),
+            "moved_aliases": from.aliases,
+        }),
+        privacy_domain: PrivacyDomain::new("personal"),
+        sensitivity: MemoryDataSensitivity::Internal,
+    };
+    let _ = facade.record_event(&event);
+
+    // (5) Tombstone the absorbed contact (hidden from listings/lookups).
     facade
         .tombstone_entity(&from.reference, &user, &workspace, "merged into contact")
         .map_err(|error| GatewayError {
@@ -11595,6 +11656,7 @@ async fn contacts_merge(
             code: "contact_merge_tombstone",
             message: error.to_string(),
         })?;
+
     let count = contact_episode_texts(&facade, &user, &into).len();
     Ok(Json(contact_view(&into, count)))
 }
