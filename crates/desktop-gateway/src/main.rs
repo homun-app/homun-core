@@ -3917,7 +3917,10 @@ fn whatsapp_child() -> &'static std::sync::Mutex<Option<std::process::Child>> {
     CHILD.get_or_init(|| std::sync::Mutex::new(None))
 }
 
-/// True if the sidecar process is alive; reaps it from the slot if it has exited.
+/// True if the sidecar is alive: either our tracked child, OR something is
+/// listening on the sidecar's port (covers a sidecar orphaned by a gateway
+/// restart). Port-awareness prevents double-spawning onto the same WhatsApp
+/// session (which invalidates it).
 fn whatsapp_running() -> bool {
     if let Ok(mut guard) = whatsapp_child().lock() {
         if let Some(child) = guard.as_mut() {
@@ -3927,7 +3930,16 @@ fn whatsapp_running() -> bool {
             }
         }
     }
-    false
+    whatsapp_port_open()
+}
+
+/// Quick TCP probe of the sidecar's /send port (is a sidecar serving?).
+fn whatsapp_port_open() -> bool {
+    std::net::TcpStream::connect_timeout(
+        &std::net::SocketAddr::from(([127, 0, 0, 1], WHATSAPP_HTTP_PORT)),
+        std::time::Duration::from_millis(150),
+    )
+    .is_ok()
 }
 
 async fn whatsapp_status() -> Json<WhatsAppStatus> {
@@ -3997,6 +4009,11 @@ async fn whatsapp_disconnect() -> Json<serde_json::Value> {
             let _ = child.wait();
         }
     }
+    // Also kill any sidecar orphaned by a gateway restart (still on the port).
+    let _ = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("lsof -tiTCP:{WHATSAPP_HTTP_PORT} -sTCP:LISTEN | xargs kill 2>/dev/null"))
+        .status();
     Json(serde_json::json!({ "ok": true }))
 }
 
