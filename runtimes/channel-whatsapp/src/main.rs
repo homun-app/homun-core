@@ -137,6 +137,7 @@ WhatsApp ▸ Dispositivi collegati ▸ Collega un dispositivo ▸ Collega con nu
                             s.connected = true;
                             s.needs_pairing = false;
                             s.qr = None;
+                            s.pair_code = None;
                             write_status(&s);
                             println!("✅ WhatsApp connesso.");
                         }
