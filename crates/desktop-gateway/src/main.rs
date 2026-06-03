@@ -672,6 +672,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/channels/settings",
             get(get_channel_settings).post(set_channel_settings),
         )
+        .route("/api/channels/whatsapp/status", get(whatsapp_status))
+        .route("/api/channels/whatsapp/connect", post(whatsapp_connect))
+        .route("/api/channels/whatsapp/disconnect", post(whatsapp_disconnect))
         .route("/api/capabilities/snapshot", get(capability_snapshot))
         .route(
             "/api/workspaces",
@@ -3796,6 +3799,8 @@ struct ChannelSettings {
 }
 
 /// What to do with an inbound channel message.
+// Wired into the real inbound ingestion path in C3; defined + tested now (C0).
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum InboundAction {
@@ -3814,6 +3819,7 @@ enum InboundAction {
 /// always untrusted DATA (never instructions — even from an allowlisted sender,
 /// whose account could be compromised), and any TOOL/action the assistant would
 /// take in response still passes through an approval gate downstream (C4).
+#[allow(dead_code)] // wired into the inbound ingestion path in C3
 fn inbound_action(settings: &ChannelSettings, sender: &str) -> InboundAction {
     if !settings.enabled {
         return InboundAction::Ignore;
@@ -3859,6 +3865,130 @@ async fn set_channel_settings(
         message,
     })?;
     Ok(Json(settings))
+}
+
+// --- WhatsApp sidecar lifecycle + status (C1.5: connection managed from the app) ---
+
+/// Connection status, mirroring what the sidecar writes to its status file, plus
+/// a gateway-computed `running` (is the sidecar process alive?).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct WhatsAppStatus {
+    #[serde(default)]
+    connected: bool,
+    #[serde(default)]
+    needs_pairing: bool,
+    /// QR payload (when pairing via QR).
+    #[serde(default)]
+    qr: Option<String>,
+    /// 8-char code to enter on the phone (when pairing via phone number).
+    #[serde(default)]
+    pair_code: Option<String>,
+    /// Gateway-computed: is the sidecar process currently running?
+    #[serde(default)]
+    running: bool,
+}
+
+fn whatsapp_status_path() -> Option<PathBuf> {
+    gateway_data_dir().ok().map(|dir| dir.join("channel-whatsapp-status.json"))
+}
+
+/// Locates the built sidecar binary (env override, else repo-relative).
+fn whatsapp_bin() -> Option<PathBuf> {
+    if let Ok(p) = env::var("LOCAL_FIRST_WHATSAPP_BIN") {
+        let path = PathBuf::from(p);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    for base in [
+        "runtimes/channel-whatsapp/target/release/channel-whatsapp",
+        "../runtimes/channel-whatsapp/target/release/channel-whatsapp",
+    ] {
+        let path = PathBuf::from(base);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    None
+}
+
+fn whatsapp_child() -> &'static std::sync::Mutex<Option<std::process::Child>> {
+    static CHILD: std::sync::OnceLock<std::sync::Mutex<Option<std::process::Child>>> =
+        std::sync::OnceLock::new();
+    CHILD.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+/// True if the sidecar process is alive; reaps it from the slot if it has exited.
+fn whatsapp_running() -> bool {
+    if let Ok(mut guard) = whatsapp_child().lock() {
+        if let Some(child) = guard.as_mut() {
+            match child.try_wait() {
+                Ok(None) => return true,
+                _ => *guard = None,
+            }
+        }
+    }
+    false
+}
+
+async fn whatsapp_status() -> Json<WhatsAppStatus> {
+    let mut status = whatsapp_status_path()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|raw| serde_json::from_str::<WhatsAppStatus>(&raw).ok())
+        .unwrap_or_default();
+    status.running = whatsapp_running();
+    // If the sidecar isn't running, we are not connected live (the file may be stale).
+    if !status.running {
+        status.connected = false;
+    }
+    Json(status)
+}
+
+#[derive(Debug, Deserialize)]
+struct WhatsAppConnectRequest {
+    /// Phone number (international, no '+') for pair-code; absent → QR mode.
+    #[serde(default)]
+    phone: Option<String>,
+}
+
+async fn whatsapp_connect(
+    Json(request): Json<WhatsAppConnectRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    if whatsapp_running() {
+        return Ok(Json(serde_json::json!({ "ok": true, "already_running": true })));
+    }
+    let bin = whatsapp_bin().ok_or_else(|| GatewayError {
+        status: StatusCode::SERVICE_UNAVAILABLE,
+        code: "whatsapp_bin_missing",
+        message: "Bridge non compilato: esegui `cargo build --release` in runtimes/channel-whatsapp."
+            .to_string(),
+    })?;
+    let mut command = std::process::Command::new(bin);
+    if let Some(phone) = request.phone.as_ref().map(|p| p.trim()).filter(|p| !p.is_empty()) {
+        command.env("WA_PAIR_PHONE", phone);
+    }
+    if let Some(path) = whatsapp_status_path() {
+        command.env("WA_STATUS_FILE", path);
+    }
+    let child = command.spawn().map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "whatsapp_spawn",
+        message: error.to_string(),
+    })?;
+    if let Ok(mut guard) = whatsapp_child().lock() {
+        *guard = Some(child);
+    }
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn whatsapp_disconnect() -> Json<serde_json::Value> {
+    if let Ok(mut guard) = whatsapp_child().lock() {
+        if let Some(mut child) = guard.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+    Json(serde_json::json!({ "ok": true }))
 }
 
 /// Resolves a destination (by label or exact path) among the AUTHORIZED ones.

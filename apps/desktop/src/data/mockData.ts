@@ -398,6 +398,7 @@ export const settingsSections: Array<{
   { id: "runtime", label: "Modello & Runtime", icon: Cpu, group: "account" },
   { id: "privacy", label: "Privacy & Autonomia", icon: KeyRound, group: "account" },
   { id: "memory", label: "Memoria", icon: Brain, group: "account" },
+  { id: "channels", label: "Canali", icon: MessageSquare, group: "capabilities" },
   { id: "connections", label: "Connettori", icon: Plug, group: "capabilities" },
   { id: "skills", label: "Skill", icon: Sparkles, group: "capabilities" },
   { id: "computer", label: "Computer locale", icon: MonitorPlay, group: "capabilities" },
