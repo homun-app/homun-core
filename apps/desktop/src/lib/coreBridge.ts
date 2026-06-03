@@ -1172,6 +1172,16 @@ export const coreBridge = {
   telegramDisconnect: () => electronTelegramDisconnect(),
   channelSettings: () => electronChannelSettings(),
   setChannelSettings: (settings: CoreChannelSettings) => electronSetChannelSettings(settings),
+  contacts: () => electronContacts(),
+  contactMemories: (reference: string) => electronContactMemories(reference),
+  updateContact: (update: {
+    reference: string;
+    name?: string;
+    contact_type?: string;
+    notes?: string;
+    soul_md?: string;
+  }) => electronUpdateContact(update),
+  mergeContacts: (from: string, into: string) => electronMergeContacts(from, into),
   capabilities: () => electronCapabilities(),
   localComputerSession: (sessionId: string) =>
     electronLocalComputerSession(sessionId),
@@ -1665,6 +1675,76 @@ async function electronSetChannelSettings(
     throw new Error(detail || `channel settings HTTP ${response.status}`);
   }
   return response.json() as Promise<CoreChannelSettings>;
+}
+
+export type CoreContactChannel = { channel: string; address: string };
+export type CoreContact = {
+  reference: string;
+  name: string;
+  contact_type: string;
+  is_self: boolean;
+  channels: CoreContactChannel[];
+  notes: string;
+  soul_md: string;
+  memory_count: number;
+};
+
+async function electronContacts(): Promise<CoreContact[]> {
+  try {
+    const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/memory/contacts`, {
+      headers: gatewayHeaders(),
+    });
+    if (!response.ok) throw new Error(`contacts HTTP ${response.status}`);
+    return response.json() as Promise<CoreContact[]>;
+  } catch {
+    return [];
+  }
+}
+
+async function electronContactMemories(reference: string): Promise<string[]> {
+  try {
+    const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/memory/contacts/memories`, {
+      method: "POST",
+      headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ reference }),
+    });
+    if (!response.ok) throw new Error(`contact memories HTTP ${response.status}`);
+    return response.json() as Promise<string[]>;
+  } catch {
+    return [];
+  }
+}
+
+async function electronUpdateContact(update: {
+  reference: string;
+  name?: string;
+  contact_type?: string;
+  notes?: string;
+  soul_md?: string;
+}): Promise<CoreContact> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/memory/contacts/update`, {
+    method: "POST",
+    headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(update),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(detail || `contact update HTTP ${response.status}`);
+  }
+  return response.json() as Promise<CoreContact>;
+}
+
+async function electronMergeContacts(from: string, into: string): Promise<CoreContact> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/memory/contacts/merge`, {
+    method: "POST",
+    headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ from, into }),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(detail || `contact merge HTTP ${response.status}`);
+  }
+  return response.json() as Promise<CoreContact>;
 }
 
 function emptyCapabilitySnapshot(): CoreCapabilitySnapshot {

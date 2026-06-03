@@ -38,6 +38,7 @@ import {
   type ContainedComputerLive,
   type CoreCapabilitySnapshot,
   type CoreChannelSettings,
+  type CoreContact,
   type CoreMemoryDashboard,
   type CoreTelegramStatus,
   type ProviderModelView,
@@ -3137,6 +3138,207 @@ function ChannelsPane() {
 
 /* --------------------------------------------------------------- memory */
 
+const CONTACT_TYPES: { value: string; label: string }[] = [
+  { value: "unknown", label: "Da definire" },
+  { value: "self", label: "Sono io" },
+  { value: "family", label: "Famiglia" },
+  { value: "friend", label: "Amico/a" },
+  { value: "professional", label: "Professionale" },
+  { value: "colleague", label: "Collega" },
+  { value: "other", label: "Altro" },
+];
+function contactTypeLabel(value: string): string {
+  return CONTACT_TYPES.find((t) => t.value === value)?.label ?? value;
+}
+
+/* Contact cards (M6): each person the assistant knows, with their channels, type
+   and conversation memory. Identity is unified by merging handles onto one card. */
+function ContactsSection() {
+  const [contacts, setContacts] = useState<CoreContact[] | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [memories, setMemories] = useState<string[] | null>(null);
+  const [mergeInto, setMergeInto] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = async () => setContacts(await coreBridge.contacts());
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const open = contacts?.find((c) => c.reference === selected) ?? null;
+
+  const openContact = async (reference: string) => {
+    if (selected === reference) {
+      setSelected(null);
+      setMemories(null);
+      return;
+    }
+    setSelected(reference);
+    setMergeInto("");
+    setMemories(null);
+    setMemories(await coreBridge.contactMemories(reference));
+  };
+
+  const patch = async (update: { name?: string; contact_type?: string; notes?: string }) => {
+    if (!open) return;
+    setBusy(true);
+    try {
+      await coreBridge.updateContact({ reference: open.reference, ...update });
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const merge = async () => {
+    if (!open || !mergeInto) return;
+    setBusy(true);
+    try {
+      // Absorb the open contact INTO the chosen one (survivor gains the handles).
+      await coreBridge.mergeContacts(open.reference, mergeInto);
+      setSelected(mergeInto);
+      await load();
+      setMemories(await coreBridge.contactMemories(mergeInto));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!contacts) return null;
+
+  return (
+    <>
+      <div className="set-section-label">Contatti</div>
+      {contacts.length === 0 ? (
+        <p className="set-hint">
+          Nessun contatto ancora. Quando ricevi messaggi dai canali (WhatsApp/Telegram) i
+          contatti compaiono qui.
+        </p>
+      ) : (
+        <div className="set-rows">
+          {contacts.map((c) => {
+            const isOpen = c.reference === selected;
+            return (
+              <div key={c.reference} className="set-card" style={{ marginBottom: 8 }}>
+                <div
+                  className="set-row"
+                  style={{ cursor: "pointer" }}
+                  onClick={() => void openContact(c.reference)}
+                >
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div className="rv">
+                      {c.name || "(senza nome)"}
+                      {c.is_self ? " · tu" : ""}
+                    </div>
+                    <div className="rk">
+                      {contactTypeLabel(c.contact_type)}
+                      {c.channels.length
+                        ? ` · ${c.channels.map((ch) => ch.channel).join(", ")}`
+                        : ""}
+                      {` · ${c.memory_count} messaggi`}
+                    </div>
+                  </div>
+                  <span className="rk">{isOpen ? "▲" : "▼"}</span>
+                </div>
+                {isOpen && (
+                  <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+                    <label className="rk">
+                      Tipo di contatto
+                      <select
+                        className="set-input"
+                        value={c.contact_type}
+                        disabled={busy}
+                        onChange={(e) => void patch({ contact_type: e.target.value })}
+                      >
+                        {CONTACT_TYPES.map((t) => (
+                          <option key={t.value} value={t.value}>
+                            {t.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="rk">
+                      Nome
+                      <input
+                        className="set-input"
+                        defaultValue={c.name}
+                        disabled={busy}
+                        onBlur={(e) => {
+                          const v = e.target.value.trim();
+                          if (v && v !== c.name) void patch({ name: v });
+                        }}
+                      />
+                    </label>
+                    <label className="rk">
+                      Note
+                      <input
+                        className="set-input"
+                        defaultValue={c.notes}
+                        placeholder="es. fratello, collega di lavoro…"
+                        disabled={busy}
+                        onBlur={(e) => {
+                          if (e.target.value !== c.notes) void patch({ notes: e.target.value });
+                        }}
+                      />
+                    </label>
+                    <div className="rk">
+                      Canali:{" "}
+                      {c.channels.length
+                        ? c.channels.map((ch) => `${ch.channel}:${ch.address}`).join("  ·  ")
+                        : "nessuno"}
+                    </div>
+                    <div>
+                      <div className="rk">Cosa so di lui/lei</div>
+                      {memories === null ? (
+                        <p className="set-hint">Carico…</p>
+                      ) : memories.length === 0 ? (
+                        <p className="set-hint">Nessun messaggio registrato.</p>
+                      ) : (
+                        <ul className="set-hint" style={{ margin: 0, paddingLeft: 16 }}>
+                          {memories.slice(0, 30).map((m, i) => (
+                            <li key={i}>{m}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <span className="rk">Unisci a:</span>
+                      <select
+                        className="set-input"
+                        value={mergeInto}
+                        disabled={busy}
+                        onChange={(e) => setMergeInto(e.target.value)}
+                        style={{ flex: 1 }}
+                      >
+                        <option value="">— scegli un contatto —</option>
+                        {contacts
+                          .filter((o) => o.reference !== c.reference)
+                          .map((o) => (
+                            <option key={o.reference} value={o.reference}>
+                              {o.name || o.reference}
+                            </option>
+                          ))}
+                      </select>
+                      <button
+                        className="set-btn"
+                        type="button"
+                        disabled={busy || !mergeInto}
+                        onClick={() => void merge()}
+                      >
+                        Unisci
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+}
+
 function MemoryPane() {
   return (
     <>
@@ -3147,6 +3349,7 @@ function MemoryPane() {
         personali o documenti) restano <em>da confermare</em> e non vengono usati
         finché non li approvi.
       </p>
+      <ContactsSection />
       <MemoryItemsList />
     </>
   );
