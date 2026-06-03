@@ -1174,6 +1174,8 @@ export const coreBridge = {
   setChannelSettings: (settings: CoreChannelSettings) => electronSetChannelSettings(settings),
   contacts: () => electronContacts(),
   contactMemories: (reference: string) => electronContactMemories(reference),
+  contactProfile: (reference: string) => electronContactProfile(reference),
+  refreshContactProfile: (reference: string) => electronRefreshContactProfile(reference),
   updateContact: (update: {
     reference: string;
     name?: string;
@@ -1745,6 +1747,35 @@ async function electronMergeContacts(from: string, into: string): Promise<CoreCo
     throw new Error(detail || `contact merge HTTP ${response.status}`);
   }
   return response.json() as Promise<CoreContact>;
+}
+
+export type CoreContactProfile = { facts: string[]; stale: boolean; episode_count: number };
+
+async function electronContactProfile(reference: string): Promise<CoreContactProfile> {
+  try {
+    const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/memory/contacts/profile`, {
+      method: "POST",
+      headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ reference }),
+    });
+    if (!response.ok) throw new Error(`contact profile HTTP ${response.status}`);
+    return response.json() as Promise<CoreContactProfile>;
+  } catch {
+    return { facts: [], stale: false, episode_count: 0 };
+  }
+}
+
+async function electronRefreshContactProfile(reference: string): Promise<CoreContactProfile> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/memory/contacts/profile/refresh`, {
+    method: "POST",
+    headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ reference }),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(detail || `contact profile refresh HTTP ${response.status}`);
+  }
+  return response.json() as Promise<CoreContactProfile>;
 }
 
 function emptyCapabilitySnapshot(): CoreCapabilitySnapshot {

@@ -5989,6 +5989,7 @@ body.resizing-drawer {
 .contacts-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
 .contacts-fields label { display: flex; flex-direction: column; gap: 4px; }
 .contacts-section { margin-top: 16px; display: flex; flex-direction: column; gap: 6px; }
+.contacts-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .contacts-channels { display: flex; flex-wrap: wrap; gap: 6px; }
 .contacts-channel { font-size: 12px; background: var(--surface-muted); border-radius: 6px; padding: 2px 8px; font-family: ui-monospace, monospace; }
 .contacts-memory { margin: 0; padding-left: 18px; font-size: 13px; color: var(--text); display: flex; flex-direction: column; gap: 3px; max-height: 280px; overflow-y: auto; }
