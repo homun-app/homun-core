@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use wa_rs::bot::Bot;
+use wa_rs::pair_code::PairCodeOptions;
 use wa_rs::store::SqliteStore;
 use wa_rs_core::types::events::Event;
 use wa_rs_tokio_transport::TokioWebSocketTransportFactory;
@@ -20,8 +21,10 @@ use wa_rs_ureq_http::UreqHttpClient;
 struct Status {
     connected: bool,
     needs_pairing: bool,
-    /// The raw QR payload when pairing is required (the UI / a tool can render it).
+    /// The raw QR payload when pairing via QR (the UI renders it as an image).
     qr: Option<String>,
+    /// The 8-char code to enter on the phone when pairing via phone number.
+    pair_code: Option<String>,
 }
 
 fn data_dir() -> PathBuf {
@@ -84,10 +87,24 @@ fn main() -> anyhow::Result<()> {
         write_status(&status.lock().unwrap());
 
         let handler_status = Arc::clone(&status);
-        let mut bot = Bot::builder()
+        let mut builder = Bot::builder()
             .with_backend(backend)
             .with_transport_factory(TokioWebSocketTransportFactory::new())
-            .with_http_client(UreqHttpClient::new())
+            .with_http_client(UreqHttpClient::new());
+        // Phone-number pairing (more reliable than scanning a terminal QR): set
+        // WA_PAIR_PHONE to your number in international format WITHOUT '+' (e.g.
+        // 39333xxxxxxx). You'll get an 8-char code to enter on the phone.
+        if let Ok(phone) = std::env::var("WA_PAIR_PHONE") {
+            let phone = phone.trim().trim_start_matches('+').to_string();
+            if !phone.is_empty() {
+                println!("Pairing via numero {phone}: ti darò un CODICE da inserire sul telefono.");
+                builder = builder.with_pair_code(PairCodeOptions {
+                    phone_number: phone,
+                    ..Default::default()
+                });
+            }
+        }
+        let mut bot = builder
             .on_event(move |event, _client| {
                 let status = Arc::clone(&handler_status);
                 // No `.await` inside → the future is trivially Send; we only do
@@ -100,6 +117,19 @@ fn main() -> anyhow::Result<()> {
                             s.connected = false;
                             s.needs_pairing = true;
                             s.qr = Some(code);
+                            s.pair_code = None;
+                            write_status(&s);
+                        }
+                        Event::PairingCode { code, .. } => {
+                            println!(
+                                "\n── WhatsApp: inserisci questo CODICE sul telefono ──\n   \
+WhatsApp ▸ Dispositivi collegati ▸ Collega un dispositivo ▸ Collega con numero di telefono\n\n        {code}\n"
+                            );
+                            let mut s = status.lock().unwrap();
+                            s.connected = false;
+                            s.needs_pairing = true;
+                            s.pair_code = Some(code);
+                            s.qr = None;
                             write_status(&s);
                         }
                         Event::Connected(_) => {
