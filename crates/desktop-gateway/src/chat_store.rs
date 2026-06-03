@@ -47,7 +47,7 @@ impl ChatStore {
         };
         let mut stmt = self.conn.prepare(
             "select thread_id, title, subtitle, status, pinned, computer_session_id, task_id,
-                    updated_at, message_count
+                    updated_at, message_count, source
                from chat_threads
               where workspace_id = ?1
               order by pinned desc, cast(updated_at as integer) desc, rowid desc",
@@ -74,6 +74,7 @@ impl ChatStore {
             task_id: format!("task_{thread_id}"),
             updated_at: timestamp.clone(),
             message_count: 1,
+            source: None,
         };
         self.insert_thread(&thread, workspace_id)?;
         self.insert_message(
@@ -81,6 +82,37 @@ impl ChatStore {
             &seeded_ready_message(&thread.thread_id, timestamp),
         )?;
         self.set_active_thread(workspace_id, &thread.thread_id)?;
+        Ok(thread)
+    }
+
+    /// Find-or-create the persistent thread for a channel contact (one thread per
+    /// contact). Tagged with `source` so the UI badges it. No seeded "ready"
+    /// message — the first real message is the inbound one.
+    pub fn find_or_create_channel_thread(
+        &self,
+        workspace_id: &str,
+        source: &str,
+        sender: &str,
+        title: &str,
+    ) -> rusqlite::Result<ChatThread> {
+        let thread_id = format!("channel_{source}_{sender}");
+        if let Some(thread) = self.thread(&thread_id)? {
+            return Ok(thread);
+        }
+        let timestamp = current_timestamp_seconds();
+        let thread = ChatThread {
+            thread_id: thread_id.clone(),
+            title: title.to_string(),
+            subtitle: format!("Canale {source}"),
+            status: "active".to_string(),
+            pinned: false,
+            computer_session_id: format!("computer_{thread_id}"),
+            task_id: format!("task_{thread_id}"),
+            updated_at: timestamp,
+            message_count: 0,
+            source: Some(source.to_string()),
+        };
+        self.insert_thread(&thread, workspace_id)?;
         Ok(thread)
     }
 
@@ -175,7 +207,7 @@ impl ChatStore {
         self.conn
             .query_row(
                 "select thread_id, title, subtitle, status, pinned, computer_session_id, task_id,
-                        updated_at, message_count
+                        updated_at, message_count, source
                    from chat_threads
                   where thread_id = ?1",
                 params![thread_id],
@@ -190,7 +222,7 @@ impl ChatStore {
             .conn
             .query_row(
                 "select thread_id, title, subtitle, status, pinned, computer_session_id, task_id,
-                        updated_at, message_count
+                        updated_at, message_count, source
                    from chat_threads
                   where task_id = ?1",
                 params![task_id],
@@ -373,6 +405,12 @@ impl ChatStore {
                 on chat_threads(workspace_id)",
             [],
         )?;
+        // M8: channel-originated threads carry their origin ("whatsapp"/"telegram");
+        // in-app chats leave it NULL. Additive, guarded ALTER.
+        if !self.column_exists("chat_threads", "source")? {
+            self.conn
+                .execute("alter table chat_threads add column source text", [])?;
+        }
         Ok(())
     }
 
@@ -449,6 +487,7 @@ impl ChatStore {
             task_id: "task_prompt_session".to_string(),
             updated_at: timestamp.clone(),
             message_count: 1,
+            source: None,
         };
         self.insert_thread(&thread, "default")?;
         self.insert_message(
@@ -473,6 +512,7 @@ impl ChatStore {
             task_id: format!("task_{thread_id}"),
             updated_at: timestamp.clone(),
             message_count: 1,
+            source: None,
         };
         self.insert_thread(&thread, workspace_id)?;
         self.insert_message(
@@ -486,8 +526,8 @@ impl ChatStore {
         self.conn.execute(
             "insert or replace into chat_threads (
                 thread_id, title, subtitle, status, pinned, computer_session_id, task_id,
-                updated_at, message_count, workspace_id
-            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                updated_at, message_count, workspace_id, source
+            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 thread.thread_id,
                 thread.title,
@@ -499,6 +539,7 @@ impl ChatStore {
                 thread.updated_at,
                 thread.message_count,
                 workspace_id,
+                thread.source,
             ],
         )?;
         Ok(())
@@ -664,6 +705,7 @@ fn thread_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatThread> {
         task_id: row.get(6)?,
         updated_at: row.get(7)?,
         message_count: row.get::<_, i64>(8)? as u32,
+        source: row.get::<_, Option<String>>(9)?,
     })
 }
 

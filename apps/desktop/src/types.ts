@@ -90,6 +90,8 @@ export interface ChatThread {
   taskId: string;
   updatedAt: string;
   messageCount: number;
+  /** Channel origin ("whatsapp"/"telegram") or null for an in-app chat. */
+  source?: string | null;
 }
 
 export interface BrainStep {

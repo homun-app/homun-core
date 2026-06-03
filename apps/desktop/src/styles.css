@@ -6008,3 +6008,8 @@ body.resizing-drawer {
 .contacts-modal h3 { margin: 0 0 8px; font-size: 16px; }
 .contacts-modal p { margin: 0 0 12px; font-size: 13.5px; color: var(--text); line-height: 1.5; }
 .contacts-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* Channel origin badge on a chat thread in the sidebar (M8). */
+.thread-channel-badge { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; padding: 1px 5px; border-radius: 4px; background: var(--surface-muted); color: var(--muted); margin-left: 6px; flex-shrink: 0; }
+.thread-channel-badge.whatsapp { background: var(--green-soft); color: var(--green); }
+.thread-channel-badge.telegram { background: var(--blue-soft); color: var(--blue); }

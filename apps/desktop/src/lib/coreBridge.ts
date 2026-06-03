@@ -32,6 +32,7 @@ export interface CoreChatThread {
   task_id: string;
   updated_at: string;
   message_count: number;
+  source?: string | null;
 }
 
 export interface CoreChatThreadSnapshot {
