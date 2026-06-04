@@ -10679,6 +10679,39 @@ fn resolve_active_model(input: &ActiveModelInputs) -> ActiveModelResponse {
 /// recurring pain that started the de-gemma arc was "am I on cloud or gemma4?";
 /// this makes the answer visible in the UI instead of buried in env vars.
 fn active_inference_model_info() -> ActiveModelResponse {
+    // Prefer the provider registry — the source generations actually use — so the
+    // reported model/context match what runs. The legacy env/persisted fields
+    // below are only a fallback when no provider is configured yet.
+    {
+        let registry = load_provider_registry();
+        if let Some(provider) = registry.active()
+            && let Some(model) = provider.effective_model()
+        {
+            let context_window = provider
+                .models
+                .iter()
+                .find(|m| m.id == model)
+                .and_then(|m| m.context_window)
+                .unwrap_or(32_768);
+            let base = provider.base_url.to_ascii_lowercase();
+            let local = base.contains("127.0.0.1")
+                || base.contains("localhost")
+                || base.contains("0.0.0.0");
+            let backend = if provider.kind.as_str() == "anthropic" {
+                "anthropic"
+            } else {
+                "openai-compat"
+            };
+            return ActiveModelResponse {
+                backend: backend.to_string(),
+                model,
+                locality: if local { "local" } else { "cloud" }.to_string(),
+                context_window,
+                capable: true,
+                missing_api_key: !local && provider_api_key(&provider.id).is_none(),
+            };
+        }
+    }
     resolve_active_model(&ActiveModelInputs {
         backend: env::var("LOCAL_FIRST_INFERENCE_BACKEND")
             .unwrap_or_default()
@@ -10706,6 +10739,30 @@ struct RuntimeModelsResponse {
 /// Lists the models the configured backend exposes (OpenAI-compatible `/models`,
 /// which Ollama also serves) so Settings can offer a real picker.
 async fn runtime_models(State(state): State<AppState>) -> Json<RuntimeModelsResponse> {
+    // Prefer the provider registry (what the user configured): the active provider
+    // already carries its model catalog, so the in-app picker gets the REAL list
+    // with no network round-trip — this is why the composer model menu was empty.
+    {
+        let registry = load_provider_registry();
+        if let Some(provider) = registry.active() {
+            let active = provider.effective_model();
+            let mut available: Vec<String> = provider.models.iter().map(|m| m.id.clone()).collect();
+            if let Some(active) = active.as_ref()
+                && !available.iter().any(|m| m == active)
+            {
+                available.push(active.clone());
+            }
+            available.sort();
+            available.dedup();
+            if active.is_some() || !available.is_empty() {
+                return Json(RuntimeModelsResponse {
+                    active,
+                    backend: provider.kind.as_str().to_string(),
+                    available,
+                });
+            }
+        }
+    }
     let backend = env::var("LOCAL_FIRST_INFERENCE_BACKEND")
         .unwrap_or_default()
         .to_ascii_lowercase();

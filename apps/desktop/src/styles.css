@@ -1112,6 +1112,37 @@ body.resizing-drawer {
   background: var(--surface-muted);
 }
 
+/* Read-only status rows in the chat header model menu (the picker is in the composer). */
+.model-menu-row {
+  min-height: 34px;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  color: var(--text);
+}
+
+.model-menu-row > span:last-child {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.model-menu-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.model-menu-hint {
+  margin: 4px 10px 2px;
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
 .floating-menu button span {
   color: var(--muted);
   font-size: 12px;

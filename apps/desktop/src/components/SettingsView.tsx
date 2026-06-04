@@ -120,7 +120,7 @@ export function SettingsView({ section }: SettingsViewProps) {
         <h2 id="settings-title" className="set-title">
           {SECTION_TITLES[section]}
         </h2>
-        {section === "account" && <AccountPane model={model} computer={computer} />}
+        {section === "account" && <AccountPane computer={computer} />}
         {section === "general" && <GeneralPane />}
         {section === "runtime" && <RuntimePane model={model} />}
         {section === "privacy" && <PrivacyPane />}
@@ -200,10 +200,8 @@ function formatK(value: number): string {
 /* ------------------------------------------------------------------- account */
 
 function AccountPane({
-  model,
   computer,
 }: {
-  model: ActiveModelInfo | null;
   computer: ContainedComputerLive | null;
 }) {
   const [name, setName] = useSetting("displayName", "Fabio Cantone");
@@ -233,17 +231,6 @@ function AccountPane({
         </div>
         <div className="set-card-divider" />
         <div className="set-meter">
-          <span className="k">
-            <Cpu size={15} /> Modello attivo
-          </span>
-          <span className="v">{model?.model ?? "non disponibile"}</span>
-        </div>
-        <p className="set-meter-sub">
-          {model
-            ? `${model.backend} · ${model.locality} · contesto ~${formatK(model.context_window)}`
-            : "Configura un backend nelle impostazioni Modello & Runtime."}
-        </p>
-        <div className="set-meter" style={{ marginTop: 8 }}>
           <span className="k">
             <MonitorPlay size={15} /> Computer locale
           </span>

@@ -46,6 +46,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, KeyboardEvent } from "react";
 import {
   coreBridge,
+  type ActiveModelInfo,
   type ChatAttachmentInput,
   type CoreComputerSessionSnapshot,
   type CorePromptSubmissionResult,
@@ -159,6 +160,7 @@ export function ChatView({
   >({});
   const [shareOpen, setShareOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
+  const [activeModelInfo, setActiveModelInfo] = useState<ActiveModelInfo | null>(null);
   const [timelineCollapsed, setTimelineCollapsed] = useState(true);
   const [computerCardCollapsed, setComputerCardCollapsed] = useState(true);
   const [optimisticMessages, setOptimisticMessages] = useState<ChatMessage[] | null>(null);
@@ -1293,6 +1295,28 @@ export function ChatView({
     streamingAssistantId,
   ]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void coreBridge
+      .runtimeModel()
+      .then((info) => {
+        if (!cancelled) setActiveModelInfo(info);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Header status (read-only): the REAL active model; the per-chat picker lives in
+  // the composer. Channel threads run the read-only tool policy; in-app chats get
+  // the full local toolset.
+  const headerModelLabel = activeModelInfo ? shortModelName(activeModelInfo.model) : "Modello";
+  const headerModelMeta = activeModelInfo
+    ? `${activeModelInfo.locality} · ${formatContextTokens(activeModelInfo.context_window)}`
+    : "attivo";
+  const headerToolPolicy = thread.source ? "Solo lettura (canale)" : "Strumenti locali completi";
+
   return (
     <section className="chat-view active-task-layout" aria-labelledby="chat-title">
       <header className="task-topbar">
@@ -1307,16 +1331,17 @@ export function ChatView({
           </button>
           {modelOpen && (
             <div className="floating-menu model-menu" role="menu">
-              <button type="button">
+              <div className="model-menu-row" title={activeModelInfo?.model ?? undefined}>
                 <Sparkles size={15} />
-                Modello locale
-                <span>attivo</span>
-              </button>
-              <button type="button">
+                <span className="model-menu-name">{headerModelLabel}</span>
+                <span>{headerModelMeta}</span>
+              </div>
+              <div className="model-menu-row">
                 <HardDrive size={15} />
-                Solo strumenti locali
-                <span>default</span>
-              </button>
+                <span className="model-menu-name">Strumenti</span>
+                <span>{headerToolPolicy}</span>
+              </div>
+              <p className="model-menu-hint">Cambia il modello per questa chat dal selettore nel composer ↓</p>
             </div>
           )}
         </div>
@@ -4705,6 +4730,15 @@ function blobToBase64(blob: Blob): Promise<string> {
 function shortModelName(model: string): string {
   const tail = model.includes("/") ? model.slice(model.lastIndexOf("/") + 1) : model;
   return tail.length > 22 ? `${tail.slice(0, 21)}…` : tail;
+}
+
+function formatContextTokens(n: number): string {
+  if (!n || n <= 0) return "contesto n/d";
+  if (n >= 1_000_000) {
+    const m = n / 1_000_000;
+    return `~${Number.isInteger(m) ? m : m.toFixed(1)}M ctx`;
+  }
+  return `~${Math.round(n / 1000)}k ctx`;
 }
 
 function formatFileSize(size: number) {
