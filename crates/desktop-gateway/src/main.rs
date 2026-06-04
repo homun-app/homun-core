@@ -3086,17 +3086,48 @@ all'utente (tabella per riga + eventuale footer Fonti)."
                 .and_then(|choice| choice.get("message"))
                 .cloned()
                 .unwrap_or_else(|| serde_json::json!({}));
+            let raw_content = message
+                .get("content")
+                .and_then(|c| c.as_str())
+                .unwrap_or("")
+                .to_string();
             let tool_calls = message
                 .get("tool_calls")
                 .and_then(|value| value.as_array())
                 .filter(|calls| !calls.is_empty())
-                .cloned();
+                .cloned()
+                .or_else(|| {
+                    // Fallback: some models (e.g. minimax via Ollama) emit tool calls
+                    // as TEXT in their native template instead of the structured
+                    // tool_calls field. Parse those so the loop still progresses — but
+                    // NOT on the final round, which must synthesize a text answer.
+                    if is_final_round {
+                        return None;
+                    }
+                    let known: Vec<String> = tool_schemas
+                        .iter()
+                        .filter_map(|t| {
+                            t.get("function")
+                                .and_then(|f| f.get("name"))
+                                .and_then(|n| n.as_str())
+                                .map(String::from)
+                        })
+                        .collect();
+                    let parsed = parse_text_tool_calls(&raw_content, &known);
+                    if parsed.is_empty() {
+                        None
+                    } else {
+                        Some(synthesize_tool_calls(round, parsed))
+                    }
+                });
 
             if let Some(calls) = tool_calls {
                 // Echo the assistant's tool-call turn, then append each tool result.
+                // Content is sanitized so a leaked text tool-call doesn't pollute the
+                // conversation history.
                 messages.push(serde_json::json!({
                     "role": "assistant",
-                    "content": message.get("content").cloned().unwrap_or(serde_json::Value::Null),
+                    "content": sanitize_model_text(&raw_content),
                     "tool_calls": calls,
                 }));
                 // Set when a write tool needs confirmation: we stop the loop and let
@@ -3906,12 +3937,11 @@ card di conferma nell'interfaccia. NON dire che è stata eseguita."
                 continue;
             }
 
-            // No tool call → this is the final answer.
-            let content = message
-                .get("content")
-                .and_then(|c| c.as_str())
-                .unwrap_or("")
-                .to_string();
+            // No tool call → this is the final answer. Sanitize any leaked model
+            // control tokens (e.g. minimax `]<]minimax[>[` / `<tool_call>` text) so
+            // the user never sees raw template markup.
+            let content =
+                sanitize_model_text(message.get("content").and_then(|c| c.as_str()).unwrap_or(""));
             accumulated.push_str(&content);
             let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: content }).await;
             if let Some(fonti) = fonti_section(&browse_sources, &accumulated) {
@@ -3999,6 +4029,7 @@ completato il form, dillo così (non dire che è irraggiungibile) e proponi di r
                         .to_string();
                 }
             }
+            let synth_text = sanitize_model_text(&synth_text);
             let mut final_text = if !synth_text.trim().is_empty() {
                 synth_text
             } else if !accumulated.trim().is_empty() {
@@ -4093,6 +4124,151 @@ const PRUNED_SNAPSHOT_STUB: &str =
 /// user message carrying an `image_url`, stubbing all older ones. It never touches
 /// the system message, the original first user message, or non-browser tool
 /// results.
+/// Removes every `open..close` block (inclusive). `open` may be a tag prefix
+/// (e.g. "<invoke", to match attributed tags); `close` is the full closing tag.
+/// If a block is unterminated, everything from `open` to end is dropped.
+fn strip_tag_blocks(input: &str, open: &str, close: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(start) = rest.find(open) {
+        out.push_str(&rest[..start]);
+        let after = &rest[start..];
+        match after.find(close) {
+            Some(end_rel) => rest = &after[end_rel + close.len()..],
+            None => {
+                rest = "";
+                break;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Strips model control-token leakage from text shown to the user. Some models
+/// (notably MiniMax via Ollama's OpenAI-compat shim) leak their native tool-call
+/// or reasoning template tokens into the assistant `content` instead of the
+/// structured fields. Conservative: only known control markup is removed.
+fn sanitize_model_text(text: &str) -> String {
+    let mut s = text.replace("]<]minimax[>[", "");
+    for (open, close) in [
+        ("<tool_call>", "</tool_call>"),
+        ("<invoke", "</invoke>"),
+        ("<function_calls>", "</function_calls>"),
+        ("<think>", "</think>"),
+        ("<thinking>", "</thinking>"),
+    ] {
+        s = strip_tag_blocks(&s, open, close);
+    }
+    for stray in [
+        "<tool_call>",
+        "</tool_call>",
+        "</invoke>",
+        "<parameter>",
+        "</parameter>",
+    ] {
+        s = s.replace(stray, "");
+    }
+    s.trim().to_string()
+}
+
+/// Reads `attr="value"` from a tag/block.
+fn xml_attr_value(block: &str, attr: &str) -> Option<String> {
+    let needle = format!("{attr}=\"");
+    let start = block.find(&needle)? + needle.len();
+    let rest = &block[start..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}
+
+/// Builds a JSON args object from Claude-style
+/// `<parameter name="p">value</parameter>` pairs.
+fn parse_xml_parameters(block: &str) -> String {
+    let mut map = serde_json::Map::new();
+    let mut rest = block;
+    while let Some(pos) = rest.find("<parameter") {
+        let after = &rest[pos..];
+        let Some(name) = xml_attr_value(after, "name") else {
+            break;
+        };
+        let Some(gt) = after.find('>') else { break };
+        let value_region = &after[gt + 1..];
+        let Some(close) = value_region.find("</parameter>") else {
+            break;
+        };
+        let value = value_region[..close].trim().to_string();
+        map.insert(name, serde_json::Value::String(value));
+        rest = &value_region[close + "</parameter>".len()..];
+    }
+    serde_json::Value::Object(map).to_string()
+}
+
+/// Parses tool calls a model emitted as TEXT (when it should have used the
+/// structured `tool_calls` field). Handles the two common leaked formats:
+///   - Hermes/Qwen JSON:   `<tool_call>{"name":"X","arguments":{...}}</tool_call>`
+///   - Claude/MiniMax XML: `<invoke name="X"><parameter name="p">v</parameter></invoke>`
+/// Returns `(name, arguments_json)`, filtered to `known` tool names so prose that
+/// merely mentions a tag is not mistaken for a call.
+fn parse_text_tool_calls(text: &str, known: &[String]) -> Vec<(String, String)> {
+    let cleaned = text.replace("]<]minimax[>[", "");
+    let mut out: Vec<(String, String)> = Vec::new();
+    // 1) Claude/MiniMax XML invokes.
+    let mut rest = cleaned.as_str();
+    while let Some(pos) = rest.find("<invoke") {
+        let after = &rest[pos..];
+        let Some(close) = after.find("</invoke>") else {
+            break;
+        };
+        let block = &after[..close];
+        if let Some(name) = xml_attr_value(block, "name") {
+            if known.iter().any(|k| k == &name) {
+                out.push((name, parse_xml_parameters(block)));
+            }
+        }
+        rest = &after[close + "</invoke>".len()..];
+    }
+    // 2) Hermes/Qwen JSON tool_calls (only if no XML invokes were found).
+    if out.is_empty() {
+        let mut rest = cleaned.as_str();
+        while let Some(pos) = rest.find("<tool_call>") {
+            let after = &rest[pos + "<tool_call>".len()..];
+            let Some(close) = after.find("</tool_call>") else {
+                break;
+            };
+            let inner = after[..close].trim();
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(inner) {
+                if let Some(name) = value.get("name").and_then(|n| n.as_str()) {
+                    if known.iter().any(|k| k == name) {
+                        let args = value
+                            .get("arguments")
+                            .map(|a| a.to_string())
+                            .unwrap_or_else(|| "{}".to_string());
+                        out.push((name.to_string(), args));
+                    }
+                }
+            }
+            rest = &after[close + "</tool_call>".len()..];
+        }
+    }
+    out
+}
+
+/// Synthesizes an OpenAI-style `tool_calls` array from text-parsed calls so the
+/// existing dispatch path handles them unchanged.
+fn synthesize_tool_calls(round: usize, parsed: Vec<(String, String)>) -> Vec<serde_json::Value> {
+    parsed
+        .into_iter()
+        .enumerate()
+        .map(|(index, (name, arguments))| {
+            serde_json::json!({
+                "id": format!("textcall_{round}_{index}"),
+                "type": "function",
+                "function": { "name": name, "arguments": arguments }
+            })
+        })
+        .collect()
+}
+
 fn prune_browser_history(
     messages: &mut [serde_json::Value],
     browser_tool_call_ids: &std::collections::BTreeSet<String>,
