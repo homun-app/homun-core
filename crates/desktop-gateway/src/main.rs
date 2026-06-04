@@ -2304,6 +2304,21 @@ fn chat_openai_stream_config() -> Option<(String, String, Option<String>)> {
     Some((base_url, active_inference_model(), resolve_inference_api_key()))
 }
 
+/// Provider/model for the granular browser tools. With the OpenClaw-style rewrite
+/// the MAIN agent drives the browser, so a dedicated "browser" model only makes
+/// sense as an EXPLICIT per-role override: when the user has manually bound the
+/// "browser" role, browser-using turns switch the driver to it (a strong/cheap
+/// tool-caller for the heavy observe-act loop). Returns `None` for an auto-matched
+/// (non-explicit) binding so plain chats keep the orchestrator model.
+fn browser_openai_stream_config() -> Option<(String, String, Option<String>)> {
+    let resolved = load_provider_registry().resolve_role("browser")?;
+    if resolved.auto {
+        return None;
+    }
+    let api_key = provider_api_key(&resolved.provider_id).or_else(env_inference_api_key);
+    Some((resolved.base_url, resolved.model, api_key))
+}
+
 /// Provider/model for background MEMORY extraction: prefers the "memory" role
 /// (a fast, cheap model) so mining each turn doesn't cost as much as answering.
 /// Falls back to the orchestrator config when no memory model is resolvable.
@@ -2681,9 +2696,9 @@ fn search_composio_catalog(
 async fn stream_chat_via_openai(
     state: &AppState,
     request: ChatGenerateStreamRequest,
-    base_url: String,
-    model: String,
-    api_key: Option<String>,
+    mut base_url: String,
+    mut model: String,
+    mut api_key: Option<String>,
 ) -> Result<Response, GatewayError> {
     let prompt = build_chat_runtime_prompt(&BuildPromptRequest {
         prompt: request.prompt.clone(),
@@ -2881,7 +2896,7 @@ all'utente (tabella per riga + eventuale footer Fonti)."
         system
     };
     let system = system.as_str();
-    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let mut endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     // Channel turns run read-only: offer only tools without side effects (search,
     // recall, skill instructions, Composio reads). Side-effecting tools (write
     // files, run sandbox, Composio writes) are withheld → Phase 2 routes them to
@@ -3207,6 +3222,38 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                         if !browser_used {
                             browser_used = true;
                             begin_browser_activity(prompt.clone());
+                            // Honor an EXPLICIT "browser" role: switch the driver
+                            // model for the rest of this (browsing) turn. Skipped
+                            // when the user forced a per-message model override.
+                            let has_msg_override = request
+                                .model
+                                .as_deref()
+                                .map(|m| !m.trim().is_empty())
+                                .unwrap_or(false);
+                            if !has_msg_override {
+                                if let Some((b_url, b_model, b_key)) =
+                                    browser_openai_stream_config()
+                                {
+                                    if b_model != model || b_url != base_url {
+                                        let _ = emit_stream_event(
+                                            &tx,
+                                            GenerateStreamEvent::Delta {
+                                                text: format!(
+                                                    "‹‹ACT››🧠 Passo al modello browser: {b_model}‹‹/ACT››"
+                                                ),
+                                            },
+                                        )
+                                        .await;
+                                        base_url = b_url;
+                                        model = b_model;
+                                        api_key = b_key;
+                                        endpoint = format!(
+                                            "{}/chat/completions",
+                                            base_url.trim_end_matches('/')
+                                        );
+                                    }
+                                }
+                            }
                         }
                         if browser_session.is_none() {
                             let reused = match thread_id.as_deref() {
