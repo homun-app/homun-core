@@ -1141,7 +1141,7 @@ export const coreBridge = {
   skillCatalog: (query?: string, category?: string) => electronSkillCatalog(query, category),
   catalogPreview: (slug: string) => electronCatalogPreview(slug),
   catalogInstall: (slug: string) => electronCatalogInstall(slug),
-  chatThreads: () => chatApi.chatThreads(),
+  chatThreads: (workspace?: string) => chatApi.chatThreads(workspace),
   chatMessages: (threadId: string) => chatApi.chatMessages(threadId),
   setChatMessageFeedback: (
     threadId: string,
@@ -1159,7 +1159,7 @@ export const coreBridge = {
   createAutomationFromChatMessage: (threadId: string, messageId: string) =>
     chatApi.createAutomationFromChatMessage(threadId, messageId),
   selectChatThread: (threadId: string) => chatApi.selectChatThread(threadId),
-  createChatThread: () => chatApi.createChatThread(),
+  createChatThread: (workspace?: string) => chatApi.createChatThread(workspace),
   setChatThreadPinned: (threadId: string, pinned: boolean) =>
     chatApi.setChatThreadPinned(threadId, pinned),
   archiveChatThread: (threadId: string) =>

@@ -769,22 +769,43 @@ async fn build_prompt(Json(request): Json<BuildPromptRequest>) -> Json<BuildProm
     Json(build_chat_runtime_prompt(&request))
 }
 
+/// Optional `?workspace=<id>` selects a SPECIFIC workspace's threads (default: the
+/// active one). Lets the sidebar show the base/Personale list while a project is
+/// active, and create a free task in the base from within a project.
+#[derive(Debug, Deserialize, Default)]
+struct ChatThreadsQuery {
+    #[serde(default)]
+    workspace: Option<String>,
+}
+
+fn resolve_threads_workspace(query: &ChatThreadsQuery) -> String {
+    query
+        .workspace
+        .as_ref()
+        .map(|w| w.trim())
+        .filter(|w| !w.is_empty())
+        .map(|w| w.to_string())
+        .unwrap_or_else(active_workspace_id)
+}
+
 async fn chat_threads(
     State(state): State<AppState>,
+    Query(query): Query<ChatThreadsQuery>,
 ) -> Result<Json<ChatThreadSnapshot>, GatewayError> {
     Ok(Json(
         lock_store(&state)?
-            .threads(&active_workspace_id())
+            .threads(&resolve_threads_workspace(&query))
             .map_err(GatewayError::store)?,
     ))
 }
 
 async fn create_chat_thread(
     State(state): State<AppState>,
+    Query(query): Query<ChatThreadsQuery>,
 ) -> Result<Json<ChatThread>, GatewayError> {
     Ok(Json(
         lock_store(&state)?
-            .create_thread(&active_workspace_id())
+            .create_thread(&resolve_threads_workspace(&query))
             .map_err(GatewayError::store)?,
     ))
 }
