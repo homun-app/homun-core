@@ -2522,6 +2522,23 @@ fn browser_tabs_tool_schema() -> serde_json::Value {
     })
 }
 
+fn browser_dialog_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "browser_dialog",
+            "description": "Rispondi a un dialogo NATIVO del browser (alert/confirm/prompt/beforeunload) che blocca la pagina. Usalo quando un'azione riporta 'blocked by dialog' o compare un popup nativo. NON usarlo per accettare acquisti/pagamenti.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "accept": { "type": "boolean", "description": "true per confermare (OK), false per annullare/chiudere. Default: false." },
+                    "prompt_text": { "type": "string", "description": "Testo da inserire se è un dialogo di tipo prompt." }
+                }
+            }
+        }
+    })
+}
+
 /// Enabled installed skills as (id, name, description) for prompt discovery (L1).
 fn enabled_skills_summary() -> Vec<(String, String, String)> {
     let Ok(dir) = skills_dir() else {
@@ -2945,6 +2962,7 @@ all'utente (tabella per riga + eventuale footer Fonti)."
             browser_act_tool_schema(),
             browser_screenshot_tool_schema(),
             browser_tabs_tool_schema(),
+            browser_dialog_tool_schema(),
             recall_memory_tool_schema(),
         ]
     } else {
@@ -3246,6 +3264,7 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                             | "browser_act"
                             | "browser_screenshot"
                             | "browser_tabs"
+                            | "browser_dialog"
                     ) {
                         // Granular browser tools (LOCAL_FIRST_CHAT_BROWSER_GRANULAR):
                         // the main agent drives the browser one micro-action at a
@@ -3725,6 +3744,62 @@ Usa lo snapshot testuale."
                                     Err(error) => {
                                         push_browser_step("schede".to_string(), "error");
                                         Err(format!("Elenco schede non riuscito: {error}"))
+                                    }
+                                }
+                            }
+                            "browser_dialog" => {
+                                // Native alert/confirm/prompt blocks the page until
+                                // answered. In read-only (channel) turns we only allow
+                                // DISMISS, never accept (an accept could confirm an
+                                // action). The dialog message is returned so the model
+                                // sees what it answered.
+                                let accept = !read_only
+                                    && args.get("accept").and_then(|v| v.as_bool()).unwrap_or(false);
+                                let prompt_text = args
+                                    .get("prompt_text")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("");
+                                let _ = emit_stream_event(
+                                    &tx,
+                                    GenerateStreamEvent::Delta {
+                                        text: format!(
+                                            "‹‹ACT››💬 Dialogo: {}‹‹/ACT››",
+                                            if accept { "confermo" } else { "annullo" }
+                                        ),
+                                    },
+                                )
+                                .await;
+                                let guard = browse_web_lock().lock().await;
+                                let (client_back, dialog_res) = chat_browser_call(
+                                    client,
+                                    BrowserMethod::RespondDialog,
+                                    serde_json::json!({
+                                        "target_id": current_target.as_str(),
+                                        "accept": accept,
+                                        "promptText": prompt_text,
+                                        "timeoutMs": 5_000,
+                                    }),
+                                )
+                                .await;
+                                drop(guard);
+                                browser_session = client_back;
+                                match dialog_res {
+                                    Ok(value) => {
+                                        let msg = value
+                                            .get("message")
+                                            .and_then(|m| m.as_str())
+                                            .unwrap_or("");
+                                        push_browser_step("dialogo".to_string(), "done");
+                                        Ok(format!(
+                                            "Dialogo {} (messaggio: \"{msg}\"). Rileggi la pagina con browser_snapshot.",
+                                            if accept { "confermato" } else { "annullato" }
+                                        ))
+                                    }
+                                    Err(error) => {
+                                        push_browser_step("dialogo".to_string(), "error");
+                                        Err(format!(
+                                            "Nessun dialogo da gestire o errore: {error}"
+                                        ))
                                     }
                                 }
                             }
