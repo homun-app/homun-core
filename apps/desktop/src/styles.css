@@ -477,9 +477,16 @@ body.resizing-drawer {
 .link-button:disabled { opacity: 0.5; cursor: default; }
 .workspace-switcher-edit-actions .primary-button { margin-left: auto; }
 .workspace-switcher-hint {
-  font-size: 10.5px; color: var(--muted); padding: 4px 8px 2px; display: flex;
-  align-items: center; gap: 5px; line-height: 1.35;
+  font-size: 10.5px; color: var(--muted); padding: 4px 8px 2px; line-height: 1.35;
 }
+.workspace-switcher-folder-pick {
+  display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
+  border: 1px dashed var(--line, var(--border)); background: transparent;
+  color: var(--muted); border-radius: 8px; padding: 6px 8px; font: inherit;
+  font-size: 12px; cursor: pointer;
+}
+.workspace-switcher-folder-pick span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-switcher-folder-pick:hover { border-color: var(--blue); color: var(--text); }
 
 .drawer-nav,
 .drawer-section {
