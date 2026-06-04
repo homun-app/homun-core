@@ -2348,9 +2348,12 @@ const MAX_TOOL_ROUNDS_BROWSER: usize = 32;
 /// (`browser_navigate`/`browser_snapshot`/`browser_act`/`browser_screenshot`)
 /// instead of the coarse `browse_web` handoff. Gated so we can A/B in one build.
 fn chat_browser_granular_enabled() -> bool {
-    matches!(
+    // Phase 3: the main-agent-driven granular browser tools are the DEFAULT.
+    // Opt out (fall back to the legacy isolated `browse_web` planner) with
+    // LOCAL_FIRST_CHAT_BROWSER_GRANULAR=0|false|off.
+    !matches!(
         env::var("LOCAL_FIRST_CHAT_BROWSER_GRANULAR").as_deref(),
-        Ok("1") | Ok("true")
+        Ok("0") | Ok("false") | Ok("off")
     )
 }
 
