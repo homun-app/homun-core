@@ -3575,6 +3575,11 @@ Non ho eseguito nulla: proponi all'utente cosa fare e attendi."
                                     match act_res {
                                         Ok(value) => {
                                             let snap = browser_snapshot_text(&value);
+                                            // No-progress detection: if the action left
+                                            // the page identical, nudge the model to try
+                                            // a different element/approach instead of
+                                            // repeating the same move.
+                                            let no_change = !snap.is_empty() && snap == last_snapshot;
                                             if !snap.is_empty() {
                                                 last_snapshot = snap.clone();
                                             }
@@ -3584,6 +3589,12 @@ Non ho eseguito nulla: proponi all'utente cosa fare e attendi."
                                             } else {
                                                 format!("Azione eseguita. Snapshot aggiornato:\n{snap}")
                                             };
+                                            if no_change {
+                                                out.push_str(
+                                                    "\n[nota: la pagina NON è cambiata rispetto a prima — \
+non ripetere la stessa azione; prova un altro elemento, scrolla, oppure attendi (kind=wait).]",
+                                                );
+                                            }
                                             if let Some(committed) = value.get("committedOption") {
                                                 out.push_str(&format!(
                                                     "\n[selezione automatica: {committed}]"
