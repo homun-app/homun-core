@@ -73,31 +73,44 @@ const localMessages = new Map<string, CoreChatMessage[]>([
 ]);
 
 export const chatApi = {
-  async chatThreads() {
+  // `workspace` targets a SPECIFIC project/base instead of the active one. A
+  // specific fetch must NOT hydrate the module cache (that mirrors the ACTIVE
+  // workspace) — e.g. loading Personale's threads while a project is active.
+  async chatThreads(workspace?: string) {
+    const url = workspace
+      ? `/api/chat/threads?workspace=${encodeURIComponent(workspace)}`
+      : "/api/chat/threads";
     try {
-      return hydrateThreadSnapshot(
-        await gatewayJson<CoreChatThreadSnapshot>("/api/chat/threads"),
-      );
+      const snapshot = await gatewayJson<CoreChatThreadSnapshot>(url);
+      return workspace ? snapshot : hydrateThreadSnapshot(snapshot);
     } catch {
       return chatThreadSnapshot();
     }
   },
 
-  async createChatThread() {
+  async createChatThread(workspace?: string) {
+    const url = workspace
+      ? `/api/chat/threads?workspace=${encodeURIComponent(workspace)}`
+      : "/api/chat/threads";
     try {
-      const thread = await gatewayJson<CoreChatThread>("/api/chat/threads", {
-        method: "POST",
-      });
-      activeThreadId = thread.thread_id;
-      localThreads = [thread, ...localThreads.filter((item) => item.thread_id !== thread.thread_id)];
-      try {
-        hydrateMessagesSnapshot(
-          await gatewayJson<CoreChatMessagesSnapshot>(
-            `/api/chat/threads/${encodeURIComponent(thread.thread_id)}/messages`,
-          ),
-        );
-      } catch {
-        // Thread creation succeeded; messages can be loaded on the next view refresh.
+      const thread = await gatewayJson<CoreChatThread>(url, { method: "POST" });
+      // Cache only when created in the active context; a project/base-targeted
+      // create is placed into state by the caller (App.tsx).
+      if (!workspace) {
+        activeThreadId = thread.thread_id;
+        localThreads = [
+          thread,
+          ...localThreads.filter((item) => item.thread_id !== thread.thread_id),
+        ];
+        try {
+          hydrateMessagesSnapshot(
+            await gatewayJson<CoreChatMessagesSnapshot>(
+              `/api/chat/threads/${encodeURIComponent(thread.thread_id)}/messages`,
+            ),
+          );
+        } catch {
+          // Thread creation succeeded; messages load on the next view refresh.
+        }
       }
       return thread;
     } catch {

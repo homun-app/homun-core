@@ -5,29 +5,44 @@ import {
   Bell,
   ChevronDown,
   ChevronRight,
+  FolderOpen,
   FolderPlus,
   Info,
   PanelLeftClose,
   PanelLeftOpen,
+  Pencil,
   Pin,
   PinOff,
+  Plus,
   Search,
   Settings,
-  SquarePen,
   Trash2,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { MouseEvent } from "react";
-import {
-  drawerProjects,
-  navItems,
-  settingsGroupLabels,
-  settingsSections,
-} from "../data/mockData";
+import { navItems, settingsGroupLabels, settingsSections } from "../data/mockData";
 import type { ChatThread, SettingsSectionId, ViewId } from "../types";
 import { useSetting } from "../lib/settingsStore";
-import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
+import { coreBridge, type CoreChatThread, type WorkspaceRecord } from "../lib/coreBridge";
+
+// The base personal workspace ("Predefinito"): always present, never a "project".
+const PERSONAL_WORKSPACE_ID = "local-workspace";
+
+function toChatThread(thread: CoreChatThread): ChatThread {
+  return {
+    threadId: thread.thread_id,
+    title: thread.title,
+    subtitle: thread.subtitle,
+    status: thread.status === "archived" ? "archived" : "active",
+    pinned: thread.pinned,
+    computerSessionId: thread.computer_session_id,
+    taskId: thread.task_id,
+    updatedAt: thread.updated_at,
+    messageCount: thread.message_count,
+    source: thread.source ?? null,
+  };
+}
 
 interface NavigationRailProps {
   activeView: ViewId;
@@ -96,6 +111,414 @@ export function NavigationRail({
   );
 }
 
+/* Projects + Personale sections (M9). Self-contained: fetches the workspace list
+   and the base ("Personale") threads itself; the active project's chats come from
+   the active-context `activeThreads`. Switching context re-scopes the whole app, so
+   those actions reload (consistent with the rest of the workspace flow). */
+interface ProjectsNavProps {
+  activeView: ViewId;
+  activeThreadId: string;
+  activeThreads: ChatThread[];
+  onSelectThread: (threadId: string) => void;
+  onCreateChatThread: () => void;
+  onThreadContextMenu: (thread: ChatThread, event: MouseEvent<HTMLButtonElement>) => void;
+}
+
+function ProjectsNav({
+  activeView,
+  activeThreadId,
+  activeThreads,
+  onSelectThread,
+  onCreateChatThread,
+  onThreadContextMenu,
+}: ProjectsNavProps) {
+  const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState(PERSONAL_WORKSPACE_ID);
+  const [personalThreads, setPersonalThreads] = useState<ChatThread[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [showProjects, setShowProjects] = useState(true);
+  const [showPersonal, setShowPersonal] = useState(true);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newFolder, setNewFolder] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function reloadWorkspaces() {
+    const snap = await coreBridge.workspaces();
+    setWorkspaces(snap.workspaces);
+    setActiveWorkspaceId(snap.active_workspace_id);
+  }
+  useEffect(() => {
+    void reloadWorkspaces().catch(() => {});
+    coreBridge
+      .chatThreads(PERSONAL_WORKSPACE_ID)
+      .then((snap) => setPersonalThreads(snap.threads.map(toChatThread)))
+      .catch(() => {});
+  }, []);
+
+  const inProject = activeWorkspaceId !== PERSONAL_WORKSPACE_ID;
+  const projects = workspaces.filter((w) => w.id !== PERSONAL_WORKSPACE_ID);
+  const activeProjectName = projects.find((w) => w.id === activeWorkspaceId)?.name;
+  const personalList = (inProject ? personalThreads : activeThreads).filter(
+    (t) => t.status === "active",
+  );
+
+  // Context switches re-scope memory/capabilities/artifacts-folder → full reload.
+  async function selectProject(id: string) {
+    setBusy(true);
+    try {
+      await coreBridge.selectWorkspace(id);
+      window.location.reload();
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  }
+  async function openPersonalThread(threadId: string) {
+    if (!inProject) {
+      onSelectThread(threadId);
+      return;
+    }
+    setBusy(true);
+    try {
+      await coreBridge.selectChatThread(threadId);
+      await coreBridge.selectWorkspace(PERSONAL_WORKSPACE_ID);
+      window.location.reload();
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  }
+  async function createFreeTask() {
+    if (!inProject) {
+      onCreateChatThread();
+      return;
+    }
+    setBusy(true);
+    try {
+      await coreBridge.createChatThread(PERSONAL_WORKSPACE_ID);
+      await coreBridge.selectWorkspace(PERSONAL_WORKSPACE_ID);
+      window.location.reload();
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  }
+
+  async function renameProject(id: string) {
+    const name = editName.trim();
+    if (!name) return;
+    setBusy(true);
+    try {
+      await coreBridge.renameWorkspace(id, name);
+      await reloadWorkspaces();
+      setEditingId(null);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function linkProjectFolder(id: string) {
+    const folder = await coreBridge.pickFolder();
+    if (!folder) return;
+    setBusy(true);
+    try {
+      await coreBridge.setWorkspaceFolder(id, folder);
+      await reloadWorkspaces();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function deleteProject(id: string) {
+    setBusy(true);
+    try {
+      await coreBridge.deleteWorkspace(id);
+      if (id === activeWorkspaceId) {
+        window.location.reload();
+        return;
+      }
+      await reloadWorkspaces();
+      setEditingId(null);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function pickNewFolder() {
+    const folder = await coreBridge.pickFolder();
+    if (folder) setNewFolder(folder);
+  }
+  async function createProject() {
+    const name = newName.trim();
+    if (!name || !newFolder) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const snap = await coreBridge.createWorkspace(name, newFolder);
+      const created = snap.workspaces.find((w) => w.name === name);
+      if (created) {
+        await coreBridge.selectWorkspace(created.id);
+        window.location.reload();
+      } else {
+        setBusy(false);
+        setCreating(false);
+      }
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      {inProject && (
+        <div className="drawer-context-chip" role="status">
+          <FolderOpen size={13} />
+          <span>
+            Sei in: <strong>{activeProjectName ?? "progetto"}</strong>
+          </span>
+        </div>
+      )}
+
+      <section className="drawer-section">
+        <button
+          className="drawer-section-title"
+          type="button"
+          onClick={() => setShowProjects((v) => !v)}
+        >
+          <span>Progetti</span>
+          {showProjects ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+        </button>
+        {showProjects && (
+          <>
+            {projects.length === 0 && (
+              <p className="drawer-empty">Nessun progetto: creane uno per lavorare in una cartella.</p>
+            )}
+            {projects.map((project) => {
+              const isActive = project.id === activeWorkspaceId;
+              if (editingId === project.id) {
+                return (
+                  <div key={project.id} className="drawer-project-edit">
+                    <input
+                      autoFocus
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void renameProject(project.id);
+                        if (e.key === "Escape") setEditingId(null);
+                      }}
+                    />
+                    <div className="drawer-project-edit-actions">
+                      <button
+                        className="link-button"
+                        type="button"
+                        disabled={busy}
+                        title={project.folder ?? "Nessuna cartella"}
+                        onClick={() => void linkProjectFolder(project.id)}
+                      >
+                        Cartella
+                      </button>
+                      <button
+                        className="link-button danger"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void deleteProject(project.id)}
+                      >
+                        Elimina
+                      </button>
+                      <button
+                        className="primary-button"
+                        type="button"
+                        disabled={busy || !editName.trim()}
+                        onClick={() => void renameProject(project.id)}
+                      >
+                        Salva
+                      </button>
+                    </div>
+                  </div>
+                );
+              }
+              return (
+                <div key={project.id} className={`drawer-project ${isActive ? "active" : ""}`}>
+                  <div className="drawer-project-row">
+                    <button
+                      className="drawer-link drawer-project-name"
+                      type="button"
+                      onClick={() => {
+                        if (!isActive) void selectProject(project.id);
+                      }}
+                    >
+                      <FolderOpen size={14} />
+                      <span>{project.name}</span>
+                    </button>
+                    <button
+                      className="drawer-edit-btn"
+                      type="button"
+                      aria-label={`Modifica ${project.name}`}
+                      disabled={busy}
+                      onClick={() => {
+                        setEditingId(project.id);
+                        setEditName(project.name);
+                      }}
+                    >
+                      <Pencil size={12} />
+                    </button>
+                  </div>
+                  {isActive && (
+                    <div className="drawer-project-chats">
+                      {activeThreads.filter((t) => t.status === "active").length === 0 && (
+                        <p className="drawer-empty">Nessuna chat ancora.</p>
+                      )}
+                      {activeThreads
+                        .filter((t) => t.status === "active")
+                        .map((thread) => (
+                          <ThreadLink
+                            key={thread.threadId}
+                            active={thread.threadId === activeThreadId && activeView === "chat"}
+                            thread={thread}
+                            onContextMenu={(e) => onThreadContextMenu(thread, e)}
+                            onSelect={() => onSelectThread(thread.threadId)}
+                          />
+                        ))}
+                      <button className="drawer-add-task" type="button" onClick={onCreateChatThread}>
+                        <Plus size={13} />
+                        <span>compito in questo progetto</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            <button
+              className="drawer-new-project"
+              type="button"
+              onClick={() => {
+                setNewName("");
+                setNewFolder(null);
+                setError(null);
+                setCreating(true);
+              }}
+            >
+              <FolderPlus size={14} />
+              <span>Nuovo progetto</span>
+            </button>
+          </>
+        )}
+      </section>
+
+      <section className="drawer-section">
+        <button
+          className="drawer-section-title"
+          type="button"
+          onClick={() => setShowPersonal((v) => !v)}
+        >
+          <span>Personale{inProject ? "" : " · attivo"}</span>
+          {showPersonal ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+        </button>
+        {showPersonal && (
+          <>
+            {personalList.length === 0 && <p className="drawer-empty">Nessun compito libero.</p>}
+            {personalList.map((thread) => (
+              <ThreadLink
+                key={thread.threadId}
+                active={!inProject && thread.threadId === activeThreadId && activeView === "chat"}
+                thread={thread}
+                onContextMenu={(e) => onThreadContextMenu(thread, e)}
+                onSelect={() => void openPersonalThread(thread.threadId)}
+              />
+            ))}
+            <button className="drawer-add-task" type="button" onClick={() => void createFreeTask()}>
+              <Plus size={13} />
+              <span>compito libero</span>
+            </button>
+          </>
+        )}
+      </section>
+
+      {error && (
+        <p className="drawer-empty" style={{ color: "var(--danger)" }}>
+          {error}
+        </p>
+      )}
+
+      {creating && (
+        <div
+          className="confirm-modal-backdrop"
+          role="presentation"
+          onClick={() => {
+            if (!busy) setCreating(false);
+          }}
+        >
+          <div
+            className="confirm-modal"
+            role="dialog"
+            aria-label="Nuovo progetto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <header>
+              <strong>Nuovo progetto</strong>
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="Chiudi"
+                onClick={() => setCreating(false)}
+              >
+                <X size={17} />
+              </button>
+            </header>
+            <p className="drawer-modal-hint">
+              Un progetto lavora <strong>dentro una cartella</strong>: i file generati e gli
+              artefatti finiscono lì.
+            </p>
+            <input
+              className="set-input drawer-modal-input"
+              autoFocus
+              placeholder="Nome progetto"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+            />
+            <button
+              className="workspace-switcher-folder-pick"
+              type="button"
+              disabled={busy}
+              title={newFolder ?? "Cartella del progetto"}
+              onClick={() => void pickNewFolder()}
+            >
+              <FolderPlus size={13} />
+              <span>{newFolder ? newFolder.split("/").pop() : "Scegli cartella…"}</span>
+            </button>
+            <footer>
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={busy}
+                onClick={() => setCreating(false)}
+              >
+                Annulla
+              </button>
+              <button
+                className="primary-button"
+                type="button"
+                disabled={busy || !newName.trim() || !newFolder}
+                onClick={() => void createProject()}
+              >
+                Crea
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 interface NavDrawerProps {
   activeView: ViewId;
   activeThreadId: string;
@@ -126,8 +549,6 @@ export function NavDrawer({
   onUnarchiveChatThread,
 }: NavDrawerProps) {
   const [collapsedSections, setCollapsedSections] = useState({
-    projects: false,
-    tasks: false,
     archived: false,
   });
   const [deleteCandidate, setDeleteCandidate] = useState<ChatThread | null>(null);
@@ -176,17 +597,6 @@ export function NavDrawer({
         </button>
       </header>
 
-      <WorkspaceSwitcher />
-
-      <button
-        className="drawer-primary-action"
-        type="button"
-        onClick={onCreateChatThread}
-      >
-        <SquarePen size={17} />
-        <span>Nuovo compito</span>
-      </button>
-
       <nav className="drawer-nav">
         {navItems.map((item) => {
           const Icon = item.icon;
@@ -209,57 +619,17 @@ export function NavDrawer({
       </nav>
 
       <div className="drawer-scroll">
-        <section className="drawer-section">
-          <button
-            className="drawer-section-title"
-            type="button"
-            onClick={() => toggleSection("projects")}
-          >
-            <span>Progetti</span>
-            {collapsedSections.projects ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
-          </button>
-          {!collapsedSections.projects && (
-            <>
-              {drawerProjects.map((project) => (
-                <button className="drawer-link" type="button" key={project}>
-                  <span>{project}</span>
-                </button>
-              ))}
-              <button className="drawer-link drawer-link-muted" type="button">
-                <span>Nuovo progetto</span>
-                <FolderPlus size={14} />
-              </button>
-            </>
-          )}
-        </section>
-
-        <section className="drawer-section">
-          <button
-            className="drawer-section-title"
-            type="button"
-            onClick={() => toggleSection("tasks")}
-          >
-            <span>Tutti i compiti</span>
-            {collapsedSections.tasks ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
-          </button>
-          {!collapsedSections.tasks &&
-            activeThreads.map((thread) => (
-              <ThreadLink
-                active={thread.threadId === activeThreadId && activeView === "chat"}
-                key={thread.threadId}
-                thread={thread}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  setThreadMenu({
-                    thread,
-                    x: event.clientX,
-                    y: event.clientY,
-                  });
-                }}
-                onSelect={() => onSelectThread(thread.threadId)}
-              />
-            ))}
-        </section>
+        <ProjectsNav
+          activeView={activeView}
+          activeThreadId={activeThreadId}
+          activeThreads={activeThreads}
+          onSelectThread={onSelectThread}
+          onCreateChatThread={onCreateChatThread}
+          onThreadContextMenu={(thread, event) => {
+            event.preventDefault();
+            setThreadMenu({ thread, x: event.clientX, y: event.clientY });
+          }}
+        />
 
         {archivedThreads.length > 0 && (
           <section className="drawer-section">
