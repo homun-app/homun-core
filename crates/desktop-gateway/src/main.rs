@@ -2424,6 +2424,14 @@ fn browser_navigate_tool_schema() -> serde_json::Value {
                     "url": {
                         "type": "string",
                         "description": "URL completo da aprire, es. 'https://www.trenitalia.com'."
+                    },
+                    "target": {
+                        "type": "string",
+                        "description": "id della scheda (tab) su cui operare; default: la scheda corrente."
+                    },
+                    "new_tab": {
+                        "type": "boolean",
+                        "description": "apri in una NUOVA scheda invece di riusare quella corrente."
                     }
                 },
                 "required": ["url"]
@@ -2439,7 +2447,15 @@ fn browser_snapshot_tool_schema() -> serde_json::Value {
         "function": {
             "name": "browser_snapshot",
             "description": "Rilegge lo SNAPSHOT della pagina corrente (testo accessibile + riferimenti [ref=...]). Chiamalo per aggiornare la tua visione della pagina dopo che è cambiata (es. dopo un caricamento dinamico) o se hai perso il contesto della pagina. Sola lettura, non modifica nulla.",
-            "parameters": { "type": "object", "properties": {} }
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "id della scheda (tab) su cui operare; default: la scheda corrente."
+                    }
+                }
+            }
         }
     })
 }
@@ -2467,7 +2483,8 @@ fn browser_act_tool_schema() -> serde_json::Value {
                     "value": { "type": "string", "description": "Valore da selezionare (kind='select'/'select_option')." },
                     "values": { "type": "array", "items": { "type": "string" }, "description": "Valori multipli per una selezione multipla." },
                     "submit": { "type": "boolean", "description": "Se true, invia il form dopo aver scritto (equivale a premere Invio)." },
-                    "key": { "type": "string", "description": "Tasto da premere (kind='press'/'press_key'), es. 'Enter', 'ArrowDown'." }
+                    "key": { "type": "string", "description": "Tasto da premere (kind='press'/'press_key'), es. 'Enter', 'ArrowDown'." },
+                    "target": { "type": "string", "description": "id della scheda (tab) su cui operare; default: la scheda corrente." }
                 },
                 "required": ["kind"]
             }
@@ -2485,9 +2502,22 @@ fn browser_screenshot_tool_schema() -> serde_json::Value {
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "full_page": { "type": "boolean", "description": "Se true cattura l'intera pagina scrollabile, altrimenti solo la porzione visibile." }
+                    "full_page": { "type": "boolean", "description": "Se true cattura l'intera pagina scrollabile, altrimenti solo la porzione visibile." },
+                    "target": { "type": "string", "description": "id della scheda (tab) su cui operare; default: la scheda corrente." }
                 }
             }
+        }
+    })
+}
+
+/// Granular browser tool: list the open tabs (read-only).
+fn browser_tabs_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "browser_tabs",
+            "description": "Elenca le schede (tab) attualmente aperte nel browser, con id, URL e titolo. Usa l'id di una scheda come parametro 'target' degli altri strumenti browser per operarci sopra. Sola lettura, non modifica nulla.",
+            "parameters": { "type": "object", "properties": {} }
         }
     })
 }
@@ -2914,6 +2944,7 @@ all'utente (tabella per riga + eventuale footer Fonti)."
             browser_snapshot_tool_schema(),
             browser_act_tool_schema(),
             browser_screenshot_tool_schema(),
+            browser_tabs_tool_schema(),
             recall_memory_tool_schema(),
         ]
     } else {
@@ -3000,11 +3031,12 @@ all'utente (tabella per riga + eventuale footer Fonti)."
         let mut pending_browser_image: Option<String> = None;
         let mut browser_tool_call_ids: std::collections::BTreeSet<String> =
             std::collections::BTreeSet::new();
-        // Fixed tab label/target for the whole turn (so navigate/snapshot/act/
-        // screenshot all drive the same page).
-        const CHAT_BROWSER_TARGET: &str = "chat_0";
-        // Whether browser_navigate has opened the tab yet this turn (Open vs Navigate).
-        let mut browser_tab_opened = false;
+        // Multi-tab support: a turn-local CURRENT TAB the tools operate on, plus
+        // the set of tab ids we've already Opened (or reused) this turn. A tab id
+        // is "opened" once we've done Open (or reused a warm session) on it; the
+        // first navigate on a not-yet-opened id Opens it, later ones Navigate.
+        let mut current_target: String = "chat_0".to_string();
+        let mut opened_targets: Vec<String> = Vec::new();
         // Fresh terminal buffer for this request; the computer panel shows the
         // CLI commands + output run during THIS response.
         sandbox_clear();
@@ -3209,7 +3241,11 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                         }
                     } else if matches!(
                         name,
-                        "browser_navigate" | "browser_snapshot" | "browser_act" | "browser_screenshot"
+                        "browser_navigate"
+                            | "browser_snapshot"
+                            | "browser_act"
+                            | "browser_screenshot"
+                            | "browser_tabs"
                     ) {
                         // Granular browser tools (LOCAL_FIRST_CHAT_BROWSER_GRANULAR):
                         // the main agent drives the browser one micro-action at a
@@ -3269,9 +3305,12 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                                 }
                                 None => None,
                             };
-                            // A reused session already has the tab open; a fresh one
-                            // must Open before Navigate.
-                            browser_tab_opened = reused.is_some();
+                            // A reused session already has the "chat_0" tab open;
+                            // mark it opened so navigate reuses it (Navigate, not
+                            // Open). A fresh session has no tabs yet.
+                            if reused.is_some() && !opened_targets.iter().any(|t| t == "chat_0") {
+                                opened_targets.push("chat_0".to_string());
+                            }
                             match reused {
                                 Some(existing) => browser_session = Some(existing),
                                 None => {
@@ -3284,7 +3323,6 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                                         Ok(Ok(session)) => {
                                             browser_session =
                                                 Some(BrowserAutomationClient::new(session));
-                                            browser_tab_opened = false;
                                         }
                                         Ok(Err(_error)) => {
                                             // Spawn failed: fall through with no
@@ -3311,6 +3349,17 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                             }
                             Some(client) => match name {
                             "browser_navigate" => {
+                                // Multi-tab: an explicit `target` switches the current
+                                // tab; `new_tab` allocates a fresh chat_N id (so the
+                                // logic below treats it as not-yet-opened → Open).
+                                if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
+                                    if !t.trim().is_empty() {
+                                        current_target = t.to_string();
+                                    }
+                                }
+                                if args.get("new_tab").and_then(|v| v.as_bool()).unwrap_or(false) {
+                                    current_target = format!("chat_{}", opened_targets.len());
+                                }
                                 let url = args
                                     .get("url")
                                     .and_then(|v| v.as_str())
@@ -3328,12 +3377,14 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                                     )
                                     .await;
                                     let guard = browse_web_lock().lock().await;
-                                    // Open the fixed tab the first time, then Navigate.
-                                    let (open_method, open_params) = if browser_tab_opened {
+                                    // Open the current tab the first time, then Navigate.
+                                    let already_open =
+                                        opened_targets.iter().any(|t| t == &current_target);
+                                    let (open_method, open_params) = if already_open {
                                         (
                                             BrowserMethod::Navigate,
                                             serde_json::json!({
-                                                "target_id": CHAT_BROWSER_TARGET,
+                                                "target_id": current_target.as_str(),
                                                 "url": url,
                                             }),
                                         )
@@ -3342,7 +3393,7 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                                             BrowserMethod::Open,
                                             serde_json::json!({
                                                 "url": url,
-                                                "label": CHAT_BROWSER_TARGET,
+                                                "label": current_target.as_str(),
                                             }),
                                         )
                                     };
@@ -3356,7 +3407,7 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                                             let (c2, snap) = chat_browser_call(
                                                 c,
                                                 BrowserMethod::Snapshot,
-                                                browser_chat_snapshot_params(CHAT_BROWSER_TARGET),
+                                                browser_chat_snapshot_params(current_target.as_str()),
                                             )
                                             .await;
                                             client_now = c2;
@@ -3369,7 +3420,12 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                                     };
                                     drop(guard);
                                     browser_session = client_now;
-                                    browser_tab_opened = browser_tab_opened || nav_err.is_none();
+                                    // Mark this tab opened once the Open/Navigate succeeds.
+                                    if nav_err.is_none()
+                                        && !opened_targets.iter().any(|t| t == &current_target)
+                                    {
+                                        opened_targets.push(current_target.clone());
+                                    }
                                     match (nav_err, snap_result) {
                                         (Some(error), _) => {
                                             push_browser_step(
@@ -3402,6 +3458,11 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                                 }
                             }
                             "browser_snapshot" => {
+                                if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
+                                    if !t.trim().is_empty() {
+                                        current_target = t.to_string();
+                                    }
+                                }
                                 let _ = emit_stream_event(
                                     &tx,
                                     GenerateStreamEvent::Delta {
@@ -3413,7 +3474,7 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                                 let (client_back, snap) = chat_browser_call(
                                     client,
                                     BrowserMethod::Snapshot,
-                                    browser_chat_snapshot_params(CHAT_BROWSER_TARGET),
+                                    browser_chat_snapshot_params(current_target.as_str()),
                                 )
                                 .await;
                                 drop(guard);
@@ -3434,12 +3495,17 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                                 }
                             }
                             "browser_act" => {
+                                if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
+                                    if !t.trim().is_empty() {
+                                        current_target = t.to_string();
+                                    }
+                                }
                                 // Build the action value the safety gate inspects.
                                 let mut action = args.clone();
                                 if let Some(obj) = action.as_object_mut() {
                                     obj.insert(
                                         "target_id".to_string(),
-                                        serde_json::Value::String(CHAT_BROWSER_TARGET.to_string()),
+                                        serde_json::Value::String(current_target.clone()),
                                     );
                                 }
                                 // SAFETY GATE: high-risk (buy/login/booking, or
@@ -3517,6 +3583,11 @@ Non ho eseguito nulla: proponi all'utente cosa fare e attendi."
                                 }
                             }
                             "browser_screenshot" => {
+                                if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
+                                    if !t.trim().is_empty() {
+                                        current_target = t.to_string();
+                                    }
+                                }
                                 let full_page = args
                                     .get("full_page")
                                     .and_then(|v| v.as_bool())
@@ -3535,7 +3606,7 @@ Non ho eseguito nulla: proponi all'utente cosa fare e attendi."
                                     client,
                                     BrowserMethod::Screenshot,
                                     serde_json::json!({
-                                        "target_id": CHAT_BROWSER_TARGET,
+                                        "target_id": current_target.as_str(),
                                         "file_name": file_name,
                                         "full_page": full_page,
                                     }),
@@ -3584,6 +3655,76 @@ Usa lo snapshot testuale."
                                     Err(error) => {
                                         push_browser_step("screenshot".to_string(), "error");
                                         Err(format!("Screenshot non riuscito: {error}"))
+                                    }
+                                }
+                            }
+                            "browser_tabs" => {
+                                let _ = emit_stream_event(
+                                    &tx,
+                                    GenerateStreamEvent::Delta {
+                                        text: "‹‹ACT››🗂️ Elenco schede‹‹/ACT››".to_string(),
+                                    },
+                                )
+                                .await;
+                                let guard = browse_web_lock().lock().await;
+                                let (client_back, tabs_res) = chat_browser_call(
+                                    client,
+                                    BrowserMethod::Tabs,
+                                    serde_json::json!({}),
+                                )
+                                .await;
+                                drop(guard);
+                                browser_session = client_back;
+                                match tabs_res {
+                                    Ok(value) => {
+                                        // Sidecar shape: { tabs: [ { targetId, url,
+                                        // label?, title? } ] }. Parse defensively in
+                                        // case it's a bare array or uses target_id/id.
+                                        let list = value
+                                            .get("tabs")
+                                            .and_then(|t| t.as_array())
+                                            .or_else(|| value.as_array())
+                                            .cloned()
+                                            .unwrap_or_default();
+                                        let mut lines: Vec<String> = Vec::new();
+                                        for tab in &list {
+                                            let id = tab
+                                                .get("targetId")
+                                                .or_else(|| tab.get("target_id"))
+                                                .or_else(|| tab.get("id"))
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("?");
+                                            let url = tab
+                                                .get("url")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("");
+                                            let title = tab
+                                                .get("title")
+                                                .or_else(|| tab.get("label"))
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("");
+                                            let mut line = format!("- {id}");
+                                            if !url.is_empty() {
+                                                line.push_str(&format!(" | {url}"));
+                                            }
+                                            if !title.is_empty() {
+                                                line.push_str(&format!(" | {title}"));
+                                            }
+                                            lines.push(line);
+                                        }
+                                        push_browser_step("schede".to_string(), "done");
+                                        if lines.is_empty() {
+                                            Ok("Nessuna scheda aperta.".to_string())
+                                        } else {
+                                            Ok(format!(
+                                                "Schede aperte:\n{}",
+                                                lines.join("\n")
+                                            ))
+                                        }
+                                    }
+                                    Err(error) => {
+                                        push_browser_step("schede".to_string(), "error");
+                                        Err(format!("Elenco schede non riuscito: {error}"))
                                     }
                                 }
                             }
