@@ -14160,25 +14160,30 @@ async fn create_workspace(
             message: "workspace name must not be empty".to_string(),
         });
     }
-    // The folder is OPTIONAL (like "Predefinito" and other existing projects, which
-    // have none). If provided it must exist; it drives @ search + file output and
-    // can be linked later via the folder action.
+    // A project IS a folder: working inside a folder is its defining purpose
+    // (drives @ search + where generated files land). The folder is REQUIRED and
+    // must exist. (Only the base "Predefinito"/personal space is folderless.)
     let folder = request.folder.as_ref().map(|f| f.trim()).filter(|f| !f.is_empty());
-    if let Some(folder) = folder {
-        if !PathBuf::from(folder).is_dir() {
-            return Err(GatewayError {
-                status: StatusCode::BAD_REQUEST,
-                code: "workspace_folder_not_found",
-                message: "La cartella del progetto non esiste.".to_string(),
-            });
-        }
+    let Some(folder) = folder else {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "workspace_folder_required",
+            message: "Scegli una cartella per il progetto.".to_string(),
+        });
+    };
+    if !PathBuf::from(folder).is_dir() {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "workspace_folder_not_found",
+            message: "La cartella del progetto non esiste.".to_string(),
+        });
     }
     let mut file = load_workspaces_file();
     let id = format!("workspace_{}", uuid::Uuid::new_v4().simple());
     file.workspaces.push(WorkspaceRecord {
         id,
         name,
-        folder: folder.map(|f| f.to_string()),
+        folder: Some(folder.to_string()),
     });
     save_workspaces_file(&file).map_err(|error| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,

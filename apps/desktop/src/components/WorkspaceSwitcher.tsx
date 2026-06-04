@@ -1,13 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  Check,
-  ChevronDown,
-  FolderPlus,
-  Layers,
-  Loader2,
-  Pencil,
-  Trash2,
-} from "lucide-react";
+import { Check, ChevronDown, FolderPlus, Layers, Loader2, Pencil } from "lucide-react";
 import {
   coreBridge,
   type WorkspaceRecord,
@@ -26,6 +18,7 @@ export function WorkspaceSwitcher() {
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
+  const [newFolder, setNewFolder] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -53,6 +46,7 @@ export function WorkspaceSwitcher() {
       if (!containerRef.current?.contains(event.target as Node)) {
         setOpen(false);
         setCreating(false);
+        setNewFolder(null);
         setEditingId(null);
       }
     }
@@ -82,23 +76,33 @@ export function WorkspaceSwitcher() {
     }
   }
 
-  // Create needs only a name — a folder is optional (like the existing projects)
-  // and can be linked later. No surprise native dialog on the critical path.
+  // A project IS a folder: pick it as an explicit step BEFORE "Crea" (no surprise
+  // native dialog mid-flow). Create is enabled only with a name AND a folder.
+  async function handlePickNewFolder() {
+    const folder = await coreBridge.pickFolder();
+    if (folder) setNewFolder(folder);
+  }
+
+  function resetCreate() {
+    setCreating(false);
+    setNewName("");
+    setNewFolder(null);
+  }
+
   async function handleCreate() {
     const name = newName.trim();
-    if (!name) return;
+    if (!name || !newFolder) return;
     setBusy(true);
     setError(null);
     try {
-      const snap = await coreBridge.createWorkspace(name, "");
+      const snap = await coreBridge.createWorkspace(name, newFolder);
       const created = snap.workspaces.find((w) => w.name === name);
       if (created) {
         await coreBridge.selectWorkspace(created.id);
         window.location.reload();
       } else {
         setSnapshot(snap);
-        setCreating(false);
-        setNewName("");
+        resetCreate();
         setBusy(false);
       }
     } catch (e) {
@@ -264,13 +268,23 @@ export function WorkspaceSwitcher() {
                 onChange={(e) => setNewName(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") void handleCreate();
-                  if (e.key === "Escape") setCreating(false);
+                  if (e.key === "Escape") resetCreate();
                 }}
               />
               <button
+                className="workspace-switcher-folder-pick"
+                type="button"
+                disabled={busy}
+                onClick={() => void handlePickNewFolder()}
+                title={newFolder ?? "Ogni progetto lavora dentro una cartella"}
+              >
+                <FolderPlus size={13} />
+                <span>{newFolder ? newFolder.split("/").pop() : "Scegli cartella…"}</span>
+              </button>
+              <button
                 className="primary-button"
                 type="button"
-                disabled={busy || !newName.trim()}
+                disabled={busy || !newName.trim() || !newFolder}
                 onClick={() => void handleCreate()}
               >
                 Crea
@@ -281,8 +295,10 @@ export function WorkspaceSwitcher() {
               className="workspace-switcher-item workspace-switcher-new"
               type="button"
               onClick={() => {
-                setCreating(true);
                 setEditingId(null);
+                setNewName("");
+                setNewFolder(null);
+                setCreating(true);
               }}
             >
               <FolderPlus size={15} />
@@ -291,8 +307,8 @@ export function WorkspaceSwitcher() {
           )}
           {!creating && (
             <p className="workspace-switcher-hint">
-              <Trash2 size={11} /> Usa la matita per rinominare, collegare una cartella o
-              eliminare un progetto.
+              Ogni progetto è una cartella. Usa la matita per rinominare, cambiare cartella o
+              eliminare.
             </p>
           )}
         </div>
