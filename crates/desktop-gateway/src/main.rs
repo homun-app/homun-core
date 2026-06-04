@@ -1,4 +1,7 @@
 mod browser_loop_controller;
+// Shared browser high-risk safety gate (used by the planner loop and the new
+// main-agent-driven browser_* tools).
+mod browser_safety;
 // Brain -> OperationalPlan adapter (A1), wired via `try_brain_operational_plan`.
 mod brain_adapter;
 mod chat_store;
@@ -2335,6 +2338,31 @@ fn chat_context_budget_chars() -> usize {
 /// Max model↔tool rounds. Allows discovery (find_connected_tools) → execute →
 /// synthesize without starving the final answer.
 const MAX_TOOL_ROUNDS: usize = 5;
+/// Round budget once a browser tool is in play. Driving a browser one micro-action
+/// at a time (navigate → snapshot → act → re-snapshot …) needs many more
+/// model↔tool round-trips than a normal chat turn. Env-overridable via
+/// `LOCAL_FIRST_CHAT_BROWSER_MAX_ROUNDS`.
+const MAX_TOOL_ROUNDS_BROWSER: usize = 32;
+
+/// Whether the main chat agent drives the browser via the four GRANULAR tools
+/// (`browser_navigate`/`browser_snapshot`/`browser_act`/`browser_screenshot`)
+/// instead of the coarse `browse_web` handoff. Gated so we can A/B in one build.
+fn chat_browser_granular_enabled() -> bool {
+    matches!(
+        env::var("LOCAL_FIRST_CHAT_BROWSER_GRANULAR").as_deref(),
+        Ok("1") | Ok("true")
+    )
+}
+
+/// Round budget once a browser tool has been used this turn (env-overridable).
+fn chat_browser_max_rounds() -> usize {
+    env::var("LOCAL_FIRST_CHAT_BROWSER_MAX_ROUNDS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(MAX_TOOL_ROUNDS_BROWSER)
+}
+
 /// How many connected-service tools to pull into the searchable catalog (NOT
 /// sent to the model — only searched by `find_connected_tools`).
 const COMPOSIO_CATALOG_CAP: usize = 200;
@@ -2360,6 +2388,87 @@ fn browse_web_tool_schema() -> serde_json::Value {
                     }
                 },
                 "required": ["goal"]
+            }
+        }
+    })
+}
+
+/// Granular browser tool: navigate to a URL (and auto-snapshot the result).
+fn browser_navigate_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "browser_navigate",
+            "description": "Apre un URL nel browser reale e restituisce lo SNAPSHOT (testo accessibile, con i riferimenti [ref=...] degli elementi interattivi) della pagina caricata. Usalo per andare su un sito (es. una fonte di treni/voli). Dopo la navigazione leggi lo snapshot per decidere la prossima azione con browser_act.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "URL completo da aprire, es. 'https://www.trenitalia.com'."
+                    }
+                },
+                "required": ["url"]
+            }
+        }
+    })
+}
+
+/// Granular browser tool: re-read the current page snapshot (read-only).
+fn browser_snapshot_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "browser_snapshot",
+            "description": "Rilegge lo SNAPSHOT della pagina corrente (testo accessibile + riferimenti [ref=...]). Chiamalo per aggiornare la tua visione della pagina dopo che è cambiata (es. dopo un caricamento dinamico) o se hai perso il contesto della pagina. Sola lettura, non modifica nulla.",
+            "parameters": { "type": "object", "properties": {} }
+        }
+    })
+}
+
+/// Granular browser tool: perform ONE interaction on the page (then auto-snapshot).
+fn browser_act_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "browser_act",
+            "description": "Esegue UNA SOLA micro-azione sulla pagina corrente (un clic, scrivere in un campo, selezionare, premere un tasto, ecc.) e restituisce lo snapshot AGGIORNATO. Una azione alla volta: dopo ogni azione rileggi lo snapshot prima della successiva. Per i campi con autocompletamento usa kind='type' (la selezione del suggerimento è automatica). Non usare per acquisti, login o pagamenti: fermati e proponi all'utente.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "enum": ["click","type","fill","select","select_option","press","press_key","hover","scroll","scrollIntoView","wait"],
+                        "description": "Tipo di azione. 'type' scrive con eventuale autocompletamento; 'fill' imposta direttamente il valore; 'wait' attende."
+                    },
+                    "ref": {
+                        "type": "string",
+                        "description": "Riferimento dell'elemento bersaglio dallo snapshot, es. 'e5' (dal token [ref=e5])."
+                    },
+                    "text": { "type": "string", "description": "Testo da digitare (kind='type') o valore (kind='fill')." },
+                    "value": { "type": "string", "description": "Valore da selezionare (kind='select'/'select_option')." },
+                    "values": { "type": "array", "items": { "type": "string" }, "description": "Valori multipli per una selezione multipla." },
+                    "submit": { "type": "boolean", "description": "Se true, invia il form dopo aver scritto (equivale a premere Invio)." },
+                    "key": { "type": "string", "description": "Tasto da premere (kind='press'/'press_key'), es. 'Enter', 'ArrowDown'." }
+                },
+                "required": ["kind"]
+            }
+        }
+    })
+}
+
+/// Granular browser tool: capture a screenshot fed back to the vision model.
+fn browser_screenshot_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "browser_screenshot",
+            "description": "Cattura uno screenshot della pagina corrente e te lo mostra come immagine. Usalo SOLO quando lo snapshot testuale non basta (es. layout grafico, mappa, calendario, contenuto reso solo come immagine). Sola lettura.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "full_page": { "type": "boolean", "description": "Se true cattura l'intera pagina scrollabile, altrimenti solo la porzione visibile." }
+                }
             }
         }
     })
@@ -2739,6 +2848,35 @@ decisione passata e il suo perché), OPPURE se l'utente chiede cosa è stato dis
 conversazioni PRECEDENTI, e l'informazione NON è già nel profilo qui sopra, chiama SEMPRE lo \
 strumento recall_memory PRIMA di dire che non lo sai o non lo ricordi."
     );
+    // Granular browser operating guide (OpenClaw-SKILL-style). Appended ONLY when
+    // the granular flag is on; when off the prompt is unchanged (browse_web
+    // guidance above stays authoritative).
+    let browser_granular = chat_browser_granular_enabled();
+    let system = if browser_granular {
+        format!(
+            "{system}\n\nBROWSER (strumenti granulari): per i compiti sul web pilota TU il browser, \
+una micro-azione alla volta, con browser_navigate / browser_snapshot / browser_act / \
+browser_screenshot (NON esiste più browse_web).\n\
+- FLUSSO: browser_navigate(url) → leggi lo snapshot → browser_act UNA azione → ri-leggi lo \
+snapshot (browser_act ti restituisce già quello aggiornato) → prossima azione. Mai due azioni \
+senza rileggere la pagina.\n\
+- CAMPI: compila UN campo alla volta. Per i campi con autocompletamento usa kind='type' (la \
+selezione del suggerimento è automatica): scrivi il valore e attendi lo snapshot, non forzare il clic \
+sul suggerimento.\n\
+- DATE/FINESTRE: se l'utente dà un intervallo (es. 7–13), imposta il limite inferiore e poi pagina \
+tra i risultati; non scartare l'intervallo.\n\
+- RISULTATI: una pagina con righe di risultati È un successo: ESTRAI le righe (operatore, orari, \
+durata, cambi, prezzo). NON dire \"nessun risultato\" se ci sono righe visibili.\n\
+- SCREENSHOT: usa browser_screenshot SOLO se il testo dello snapshot non basta (layout/mappa/\
+immagine).\n\
+- SICUREZZA: MAI acquisti, login, prenotazioni o pagamenti. Se servono, FERMATI e proponi \
+all'utente cosa fare (non cliccare \"Acquista\"/\"Accedi\"/\"Prenota\").\n\
+- STOP: appena hai dati sufficienti, SMETTI di usare il browser e scrivi la risposta finale \
+all'utente (tabella per riga + eventuale footer Fonti)."
+        )
+    } else {
+        system
+    };
     let system = system.as_str();
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     // Channel turns run read-only: offer only tools without side effects (search,
@@ -2746,7 +2884,23 @@ strumento recall_memory PRIMA di dire che non lo sai o non lo ricordi."
     // files, run sandbox, Composio writes) are withheld → Phase 2 routes them to
     // approval. App chat (tool_policy unset) keeps the full toolset.
     let read_only = request.tool_policy.as_deref() == Some("read_only");
-    let mut base_tools = vec![browse_web_tool_schema(), recall_memory_tool_schema()];
+    // Browser toolset: when the granular flag is ON, the main agent drives the
+    // browser itself via four micro-tools and `browse_web` is REMOVED so it can't
+    // fall back. When OFF, behaviour is byte-identical to today (browse_web only).
+    // (`browser_granular` computed above for the operating-guide prompt block.)
+    let mut base_tools = if browser_granular {
+        // read_only (channels) still gets browser_act, but the dispatch blocks any
+        // committing action — channels can fill/scroll/read, never click-submit.
+        vec![
+            browser_navigate_tool_schema(),
+            browser_snapshot_tool_schema(),
+            browser_act_tool_schema(),
+            browser_screenshot_tool_schema(),
+            recall_memory_tool_schema(),
+        ]
+    } else {
+        vec![browse_web_tool_schema(), recall_memory_tool_schema()]
+    };
     if !read_only {
         base_tools.push(create_artifact_tool_schema());
     }
@@ -2815,11 +2969,46 @@ strumento recall_memory PRIMA di dire che non lo sai o non lo ricordi."
         // model discovers via `find_connected_tools` (injected on demand).
         let mut tool_schemas = base_tools;
         let mut loaded_tools: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        // Turn-local browser state for the granular tools. The sidecar session is
+        // held for the WHOLE turn (lock acquired only around each single call) and
+        // parked back at every exit path. `last_snapshot` feeds the safety gate so
+        // it can resolve a ref's label. `browser_used` raises the round budget.
+        // `pending_browser_image` queues a screenshot data-url to inject as a user
+        // message AFTER all the round's tool results. `browser_tool_call_ids`
+        // tracks which tool results carry big snapshots so pruning can stub them.
+        let mut browser_session: Option<BrowserAutomationClient<BrowserSidecarSession>> = None;
+        let mut browser_used = false;
+        let mut last_snapshot = String::new();
+        let mut pending_browser_image: Option<String> = None;
+        let mut browser_tool_call_ids: std::collections::BTreeSet<String> =
+            std::collections::BTreeSet::new();
+        // Fixed tab label/target for the whole turn (so navigate/snapshot/act/
+        // screenshot all drive the same page).
+        const CHAT_BROWSER_TARGET: &str = "chat_0";
+        // Whether browser_navigate has opened the tab yet this turn (Open vs Navigate).
+        let mut browser_tab_opened = false;
         // Fresh terminal buffer for this request; the computer panel shows the
         // CLI commands + output run during THIS response.
         sandbox_clear();
 
-        for round in 0..MAX_TOOL_ROUNDS {
+        // The outer ceiling is the BROWSER budget; the EFFECTIVE budget is dynamic
+        // (the normal 5 rounds until a browser tool is actually used, then the
+        // larger browser budget). This keeps non-browser turns identical to today.
+        for round in 0..MAX_TOOL_ROUNDS_BROWSER {
+            let max_rounds = if browser_used {
+                chat_browser_max_rounds()
+            } else {
+                MAX_TOOL_ROUNDS
+            };
+            // Hard stop once the effective budget is reached (the forced-synthesis
+            // fallback below still runs because `final_done` is false).
+            if round >= max_rounds {
+                break;
+            }
+            // Context hygiene: at up to 32 rounds the accumulated snapshots/images
+            // would overflow the window and silently truncate the page. Stub all
+            // but the latest browser snapshot + the latest screenshot image.
+            prune_browser_history(&mut messages, &browser_tool_call_ids);
             // On the LAST allowed round, forbid tools so the model MUST synthesize
             // a final answer from what it already gathered — otherwise it can burn
             // every round on tool calls and end with no answer ("limite di passi").
@@ -2827,7 +3016,7 @@ strumento recall_memory PRIMA di dire che non lo sai o non lo ricordi."
             // tool_choice:"none" — minimax-via-Ollama ignores it and keeps calling
             // tools, so the loop never synthesizes and ends with "limite di passi").
             // Omitting the tools field forces a text answer.
-            let is_final_round = round + 1 >= MAX_TOOL_ROUNDS;
+            let is_final_round = round + 1 >= max_rounds;
             let mut payload = serde_json::json!({
                 "model": model,
                 "messages": messages,
@@ -2968,6 +3157,361 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                                 format!("Lo strumento browser ha riportato un errore: {error}")
                             }
                             Err(error) => format!("Errore di esecuzione dello strumento: {error}"),
+                        }
+                    } else if matches!(
+                        name,
+                        "browser_navigate" | "browser_snapshot" | "browser_act" | "browser_screenshot"
+                    ) {
+                        // Granular browser tools (LOCAL_FIRST_CHAT_BROWSER_GRANULAR):
+                        // the main agent drives the browser one micro-action at a
+                        // time against a per-turn session.
+                        let args: serde_json::Value =
+                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        // First browser tool this turn: mark used (raises round
+                        // budget), publish live activity, acquire the session
+                        // (reuse the thread's warm one, else spawn a chat sidecar).
+                        if !browser_used {
+                            browser_used = true;
+                            begin_browser_activity(prompt.clone());
+                        }
+                        if browser_session.is_none() {
+                            let reused = match thread_id.as_deref() {
+                                Some(t) => {
+                                    let st = state_owned.clone();
+                                    let t = t.to_string();
+                                    tokio::task::spawn_blocking(move || {
+                                        take_thread_browser_session(&st, &t)
+                                    })
+                                    .await
+                                    .ok()
+                                    .flatten()
+                                }
+                                None => None,
+                            };
+                            // A reused session already has the tab open; a fresh one
+                            // must Open before Navigate.
+                            browser_tab_opened = reused.is_some();
+                            match reused {
+                                Some(existing) => browser_session = Some(existing),
+                                None => {
+                                    let st = state_owned.clone();
+                                    let spawned = tokio::task::spawn_blocking(move || {
+                                        spawn_browser_sidecar_for_chat(&st)
+                                    })
+                                    .await;
+                                    match spawned {
+                                        Ok(Ok(session)) => {
+                                            browser_session =
+                                                Some(BrowserAutomationClient::new(session));
+                                            browser_tab_opened = false;
+                                        }
+                                        Ok(Err(_error)) => {
+                                            // Spawn failed: fall through with no
+                                            // session → the None arm below reports it.
+                                        }
+                                        Err(_) => {}
+                                    }
+                                }
+                            }
+                        }
+                        // Mark this tool result as carrying a (potentially large)
+                        // snapshot so the pruner stubs older ones.
+                        browser_tool_call_ids.insert(call_id.clone());
+                        // We hold the session for the duration of this branch; the
+                        // GLOBAL lock is acquired only around each single call.
+                        let outcome: Result<String, String> = match browser_session.take() {
+                            None => {
+                                push_browser_step(
+                                    "browser: sessione non disponibile".to_string(),
+                                    "error",
+                                );
+                                Err("Browser non disponibile: impossibile avviare la sessione."
+                                    .to_string())
+                            }
+                            Some(client) => match name {
+                            "browser_navigate" => {
+                                let url = args
+                                    .get("url")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                if url.trim().is_empty() {
+                                    browser_session = Some(client);
+                                    Err("URL mancante per browser_navigate.".to_string())
+                                } else {
+                                    let _ = emit_stream_event(
+                                        &tx,
+                                        GenerateStreamEvent::Delta {
+                                            text: format!("‹‹ACT››🌐 Apro {url}‹‹/ACT››"),
+                                        },
+                                    )
+                                    .await;
+                                    let guard = browse_web_lock().lock().await;
+                                    // Open the fixed tab the first time, then Navigate.
+                                    let (open_method, open_params) = if browser_tab_opened {
+                                        (
+                                            BrowserMethod::Navigate,
+                                            serde_json::json!({
+                                                "target_id": CHAT_BROWSER_TARGET,
+                                                "url": url,
+                                            }),
+                                        )
+                                    } else {
+                                        (
+                                            BrowserMethod::Open,
+                                            serde_json::json!({
+                                                "url": url,
+                                                "label": CHAT_BROWSER_TARGET,
+                                            }),
+                                        )
+                                    };
+                                    let (client_back, nav_res) =
+                                        chat_browser_call(client, open_method, open_params).await;
+                                    let nav_err = nav_res.err();
+                                    // Navigate/Open return no snapshot → snapshot now.
+                                    let mut client_now = client_back;
+                                    let snap_result = if nav_err.is_none() {
+                                        if let Some(c) = client_now.take() {
+                                            let (c2, snap) = chat_browser_call(
+                                                c,
+                                                BrowserMethod::Snapshot,
+                                                browser_chat_snapshot_params(CHAT_BROWSER_TARGET),
+                                            )
+                                            .await;
+                                            client_now = c2;
+                                            snap
+                                        } else {
+                                            Err("sessione persa dopo navigazione".to_string())
+                                        }
+                                    } else {
+                                        Err(nav_err.clone().unwrap_or_default())
+                                    };
+                                    drop(guard);
+                                    browser_session = client_now;
+                                    browser_tab_opened = browser_tab_opened || nav_err.is_none();
+                                    match (nav_err, snap_result) {
+                                        (Some(error), _) => {
+                                            push_browser_step(
+                                                format!("naviga {url}"),
+                                                "error",
+                                            );
+                                            Err(format!("Navigazione fallita: {error}"))
+                                        }
+                                        (None, Ok(value)) => {
+                                            let snap = browser_snapshot_text(&value);
+                                            if !snap.is_empty() {
+                                                last_snapshot = snap.clone();
+                                            }
+                                            push_browser_step(format!("naviga {url}"), "done");
+                                            let page_url = value
+                                                .get("url")
+                                                .and_then(|u| u.as_str())
+                                                .unwrap_or(url.as_str());
+                                            Ok(format!(
+                                                "Pagina aperta ({page_url}). Snapshot:\n{snap}"
+                                            ))
+                                        }
+                                        (None, Err(error)) => {
+                                            push_browser_step(format!("naviga {url}"), "error");
+                                            Err(format!(
+                                                "Pagina aperta ma snapshot non riuscito: {error}"
+                                            ))
+                                        }
+                                    }
+                                }
+                            }
+                            "browser_snapshot" => {
+                                let _ = emit_stream_event(
+                                    &tx,
+                                    GenerateStreamEvent::Delta {
+                                        text: "‹‹ACT››👁️ Rileggo la pagina‹‹/ACT››".to_string(),
+                                    },
+                                )
+                                .await;
+                                let guard = browse_web_lock().lock().await;
+                                let (client_back, snap) = chat_browser_call(
+                                    client,
+                                    BrowserMethod::Snapshot,
+                                    browser_chat_snapshot_params(CHAT_BROWSER_TARGET),
+                                )
+                                .await;
+                                drop(guard);
+                                browser_session = client_back;
+                                match snap {
+                                    Ok(value) => {
+                                        let snap = browser_snapshot_text(&value);
+                                        if !snap.is_empty() {
+                                            last_snapshot = snap.clone();
+                                        }
+                                        push_browser_step("snapshot".to_string(), "done");
+                                        Ok(format!("Snapshot della pagina:\n{snap}"))
+                                    }
+                                    Err(error) => {
+                                        push_browser_step("snapshot".to_string(), "error");
+                                        Err(format!("Snapshot non riuscito: {error}"))
+                                    }
+                                }
+                            }
+                            "browser_act" => {
+                                // Build the action value the safety gate inspects.
+                                let mut action = args.clone();
+                                if let Some(obj) = action.as_object_mut() {
+                                    obj.insert(
+                                        "target_id".to_string(),
+                                        serde_json::Value::String(CHAT_BROWSER_TARGET.to_string()),
+                                    );
+                                }
+                                // SAFETY GATE: high-risk (buy/login/booking, or
+                                // evaluate) is refused. In read-only (channel) turns
+                                // ANY committing action is also refused.
+                                let blocked = browser_safety::high_risk_reason(&action, &last_snapshot)
+                                    .or_else(|| {
+                                        if read_only && browser_safety::is_committing_action(&action) {
+                                            Some(
+                                                "azione che conferma/invia non consentita dal canale"
+                                                    .to_string(),
+                                            )
+                                        } else {
+                                            None
+                                        }
+                                    });
+                                if let Some(reason) = blocked {
+                                    browser_session = Some(client);
+                                    push_browser_step(
+                                        format!(
+                                            "azione bloccata: {}",
+                                            args.get("kind").and_then(|k| k.as_str()).unwrap_or("?")
+                                        ),
+                                        "error",
+                                    );
+                                    Err(format!(
+                                        "🚫 azione bloccata, serve conferma utente: {reason}. \
+Non ho eseguito nulla: proponi all'utente cosa fare e attendi."
+                                    ))
+                                } else {
+                                    let kind = args
+                                        .get("kind")
+                                        .and_then(|k| k.as_str())
+                                        .unwrap_or("azione")
+                                        .to_string();
+                                    let _ = emit_stream_event(
+                                        &tx,
+                                        GenerateStreamEvent::Delta {
+                                            text: format!("‹‹ACT››✋ {kind} sulla pagina‹‹/ACT››"),
+                                        },
+                                    )
+                                    .await;
+                                    let guard = browse_web_lock().lock().await;
+                                    let (client_back, act_res) =
+                                        chat_browser_call(client, BrowserMethod::Act, action).await;
+                                    drop(guard);
+                                    browser_session = client_back;
+                                    match act_res {
+                                        Ok(value) => {
+                                            let snap = browser_snapshot_text(&value);
+                                            if !snap.is_empty() {
+                                                last_snapshot = snap.clone();
+                                            }
+                                            push_browser_step(format!("{kind}"), "done");
+                                            let mut out = if snap.is_empty() {
+                                                "Azione eseguita.".to_string()
+                                            } else {
+                                                format!("Azione eseguita. Snapshot aggiornato:\n{snap}")
+                                            };
+                                            if let Some(committed) = value.get("committedOption") {
+                                                out.push_str(&format!(
+                                                    "\n[selezione automatica: {committed}]"
+                                                ));
+                                            }
+                                            if let Some(sugg) = value.get("suggestions") {
+                                                out.push_str(&format!("\n[suggerimenti: {sugg}]"));
+                                            }
+                                            Ok(out)
+                                        }
+                                        Err(error) => {
+                                            push_browser_step(format!("{kind}"), "error");
+                                            Err(format!("Azione non riuscita: {error}"))
+                                        }
+                                    }
+                                }
+                            }
+                            "browser_screenshot" => {
+                                let full_page = args
+                                    .get("full_page")
+                                    .and_then(|v| v.as_bool())
+                                    .unwrap_or(false);
+                                let _ = emit_stream_event(
+                                    &tx,
+                                    GenerateStreamEvent::Delta {
+                                        text: "‹‹ACT››📸 Catturo uno screenshot‹‹/ACT››".to_string(),
+                                    },
+                                )
+                                .await;
+                                let file_name =
+                                    format!("chat_shot_{}.png", uuid::Uuid::new_v4().simple());
+                                let guard = browse_web_lock().lock().await;
+                                let (client_back, shot_res) = chat_browser_call(
+                                    client,
+                                    BrowserMethod::Screenshot,
+                                    serde_json::json!({
+                                        "target_id": CHAT_BROWSER_TARGET,
+                                        "file_name": file_name,
+                                        "full_page": full_page,
+                                    }),
+                                )
+                                .await;
+                                drop(guard);
+                                browser_session = client_back;
+                                match shot_res {
+                                    Ok(value) => {
+                                        let path = value
+                                            .get("path")
+                                            .and_then(|p| p.as_str())
+                                            .unwrap_or("")
+                                            .to_string();
+                                        // Read + base64 the PNG. Skip the image (text
+                                        // note only) if missing or too large (~1.5MB
+                                        // encoded ≈ 1.1MB raw).
+                                        match std::fs::read(&path) {
+                                            Ok(bytes) if bytes.len() <= 1_100_000 => {
+                                                let encoded = base64::engine::general_purpose::STANDARD
+                                                    .encode(&bytes);
+                                                let dataurl =
+                                                    format!("data:image/png;base64,{encoded}");
+                                                pending_browser_image = Some(dataurl);
+                                                push_browser_step("screenshot".to_string(), "done");
+                                                Ok("Screenshot catturato (vedi immagine allegata sotto)."
+                                                    .to_string())
+                                            }
+                                            Ok(bytes) => {
+                                                push_browser_step("screenshot".to_string(), "done");
+                                                Ok(format!(
+                                                    "Screenshot catturato ma troppo grande per \
+l'anteprima ({} byte). Procedi con lo snapshot testuale.",
+                                                    bytes.len()
+                                                ))
+                                            }
+                                            Err(error) => {
+                                                push_browser_step("screenshot".to_string(), "error");
+                                                Ok(format!(
+                                                    "Screenshot non leggibile dal disco: {error}. \
+Usa lo snapshot testuale."
+                                                ))
+                                            }
+                                        }
+                                    }
+                                    Err(error) => {
+                                        push_browser_step("screenshot".to_string(), "error");
+                                        Err(format!("Screenshot non riuscito: {error}"))
+                                    }
+                                }
+                            }
+                                _ => Err(format!("Strumento browser sconosciuto: {name}")),
+                            },
+                        };
+                        match outcome {
+                            Ok(text) => text,
+                            Err(text) => text,
                         }
                     } else if name == "use_skill" {
                         // Progressive disclosure L2: load the full SKILL.md so the
@@ -3312,8 +3856,10 @@ card di conferma nell'interfaccia. NON dire che è stata eseguita."
                     };
 
                     // Collect source URLs from browser results so the final
-                    // answer can carry a deterministic "Fonti" section.
-                    if name == "browse_web" {
+                    // answer can carry a deterministic "Fonti" section. Both the
+                    // coarse browse_web result and the granular browser_navigate
+                    // result embed the visited page URL.
+                    if matches!(name, "browse_web" | "browser_navigate") {
                         for url in extract_source_urls(&result) {
                             if !browse_sources.contains(&url) {
                                 browse_sources.push(url);
@@ -3324,6 +3870,20 @@ card di conferma nell'interfaccia. NON dire che è stata eseguita."
                         "role": "tool",
                         "tool_call_id": call_id,
                         "content": result,
+                    }));
+                }
+                // A browser screenshot this round → feed the image to the (vision)
+                // model as a SEPARATE user message. It MUST come AFTER every tool
+                // result of this round (OpenAI-compat requires each assistant
+                // tool_call to be immediately followed by its tool message; the
+                // image cannot sit between them).
+                if let Some(dataurl) = pending_browser_image.take() {
+                    messages.push(serde_json::json!({
+                        "role": "user",
+                        "content": [
+                            { "type": "text", "text": "Screenshot della pagina corrente:" },
+                            { "type": "image_url", "image_url": { "url": dataurl } }
+                        ],
                     }));
                 }
                 if pending_confirm {
@@ -3366,6 +3926,34 @@ card di conferma nell'interfaccia. NON dire che è stata eseguita."
             .await;
             final_done = true;
             break;
+        }
+
+        // Turn end (ALL exit paths converge here: normal answer, pending_confirm,
+        // round-budget break, natural exhaustion). Park the browser session warm
+        // for the thread's next turn, or stop it for an anonymous (thread-less)
+        // chat so the sidecar doesn't leak. Hide the "● LIVE" activity.
+        if let Some(client) = browser_session.take() {
+            end_browser_activity();
+            match thread_id.as_deref() {
+                Some(t) => {
+                    let st = state_owned.clone();
+                    let t = t.to_string();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        store_thread_browser_session(&st, &t, client);
+                    })
+                    .await;
+                }
+                None => {
+                    let _ = tokio::task::spawn_blocking(move || {
+                        let _ = client.call(BrowserMethod::Stop, serde_json::json!({}));
+                    })
+                    .await;
+                }
+            }
+        } else if browser_used {
+            // Session was lost mid-turn (spawn failed / call panicked): still clear
+            // the live activity indicator.
+            end_browser_activity();
         }
 
         if !final_done {
@@ -3487,6 +4075,170 @@ fn today_iso() -> String {
 fn browse_web_lock() -> &'static tokio::sync::Mutex<()> {
     static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+/// Placeholder substituted for an old browser-snapshot tool result so the model
+/// still sees the call happened but the giant snapshot text is dropped.
+const PRUNED_SNAPSHOT_STUB: &str =
+    "[snapshot precedente rimosso — richiama browser_snapshot se serve]";
+
+/// Context hygiene for the 32-round browser loop. Each browser snapshot/act tool
+/// result and each screenshot image is large; at 32 rounds they would overflow
+/// the context window and silently truncate the conversation, making the model
+/// "forget" the page. Called at the TOP of each round, this keeps only the LATEST
+/// browser tool-result (whose id is in `browser_tool_call_ids`) and the LATEST
+/// user message carrying an `image_url`, stubbing all older ones. It never touches
+/// the system message, the original first user message, or non-browser tool
+/// results.
+fn prune_browser_history(
+    messages: &mut [serde_json::Value],
+    browser_tool_call_ids: &std::collections::BTreeSet<String>,
+) {
+    if browser_tool_call_ids.is_empty() {
+        // No browser tool ran yet: only image pruning could apply, and that is
+        // driven by browser screenshots too, so nothing to do.
+        return;
+    }
+    // 1) Snapshots: keep only the LATEST browser tool-result; stub older ones.
+    let mut latest_browser_tool: Option<usize> = None;
+    for (idx, message) in messages.iter().enumerate() {
+        let is_browser_tool = message.get("role").and_then(|r| r.as_str()) == Some("tool")
+            && message
+                .get("tool_call_id")
+                .and_then(|c| c.as_str())
+                .map(|id| browser_tool_call_ids.contains(id))
+                .unwrap_or(false);
+        if is_browser_tool {
+            latest_browser_tool = Some(idx);
+        }
+    }
+    if let Some(keep) = latest_browser_tool {
+        for (idx, message) in messages.iter_mut().enumerate() {
+            if idx == keep {
+                continue;
+            }
+            let is_browser_tool = message.get("role").and_then(|r| r.as_str()) == Some("tool")
+                && message
+                    .get("tool_call_id")
+                    .and_then(|c| c.as_str())
+                    .map(|id| browser_tool_call_ids.contains(id))
+                    .unwrap_or(false);
+            if is_browser_tool {
+                if let Some(obj) = message.as_object_mut() {
+                    obj.insert(
+                        "content".to_string(),
+                        serde_json::Value::String(PRUNED_SNAPSHOT_STUB.to_string()),
+                    );
+                }
+            }
+        }
+    }
+    // 2) Images: keep only the LATEST user message that has an image_url part;
+    //    strip image parts from older ones (down to a text stub).
+    let mut latest_image_msg: Option<usize> = None;
+    for (idx, message) in messages.iter().enumerate() {
+        if message_has_image_url(message) {
+            latest_image_msg = Some(idx);
+        }
+    }
+    if let Some(keep) = latest_image_msg {
+        for (idx, message) in messages.iter_mut().enumerate() {
+            if idx == keep {
+                continue;
+            }
+            if message_has_image_url(message) {
+                strip_image_url_parts(message);
+            }
+        }
+    }
+}
+
+/// Runs ONE blocking `client.call` off the async runtime, moving the client in
+/// and handing it back out (so the turn keeps ownership of the warm session —
+/// mirrors `BrowserLoopRunner::into_client`). The global `browse_web_lock` MUST be
+/// held by the caller around this so the single shared browser is driven by one
+/// turn at a time. Returns the client plus the call result.
+async fn chat_browser_call(
+    client: BrowserAutomationClient<BrowserSidecarSession>,
+    method: BrowserMethod,
+    params: serde_json::Value,
+) -> (
+    Option<BrowserAutomationClient<BrowserSidecarSession>>,
+    Result<serde_json::Value, String>,
+) {
+    let join = tokio::task::spawn_blocking(move || {
+        let result = client.call(method, params).map_err(|error| error.to_string());
+        (client, result)
+    })
+    .await;
+    match join {
+        Ok((client, result)) => (Some(client), result),
+        // The closure does no panicking work, so this is effectively unreachable;
+        // if it ever fires, the client is gone (we cannot recover a moved value
+        // after a panic), so report None and let the next call spawn a fresh one.
+        Err(error) => (None, Err(format!("browser call task failed: {error}"))),
+    }
+}
+
+/// Canonical Snapshot params for the chat-driven browser (mirrors the planner's
+/// `browser_loop.rs` snapshot call). 12000 chars keeps it simple and bounded.
+fn browser_chat_snapshot_params(target_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "target_id": target_id,
+        "snapshot_format": "ai",
+        "refs_mode": "aria",
+        "mode": "efficient",
+        "interactive": true,
+        "compact": true,
+        "depth": 10,
+        "max_chars": 12_000,
+        "urls": true,
+    })
+}
+
+/// Extracts the `.snapshot` (and `.url`) text from a sidecar Snapshot/Act result.
+fn browser_snapshot_text(value: &serde_json::Value) -> String {
+    value
+        .get("snapshot")
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+/// True if a message's `content` is an array containing an `image_url` part.
+fn message_has_image_url(message: &serde_json::Value) -> bool {
+    message
+        .get("content")
+        .and_then(|c| c.as_array())
+        .map(|parts| {
+            parts
+                .iter()
+                .any(|p| p.get("type").and_then(|t| t.as_str()) == Some("image_url"))
+        })
+        .unwrap_or(false)
+}
+
+/// Replaces the `image_url` parts of a multimodal message with a short text stub,
+/// keeping any existing text parts intact.
+fn strip_image_url_parts(message: &mut serde_json::Value) {
+    let Some(parts) = message.get_mut("content").and_then(|c| c.as_array_mut()) else {
+        return;
+    };
+    let mut had_image = false;
+    parts.retain(|p| {
+        if p.get("type").and_then(|t| t.as_str()) == Some("image_url") {
+            had_image = true;
+            false
+        } else {
+            true
+        }
+    });
+    if had_image {
+        parts.push(serde_json::json!({
+            "type": "text",
+            "text": "[immagine precedente rimossa — cattura un nuovo screenshot se serve]"
+        }));
+    }
 }
 
 /// How long a per-thread browser session may sit idle before it is reaped.
@@ -8419,6 +9171,33 @@ fn spawn_browser_sidecar_for_task(
     })
 }
 
+/// Spawn a browser sidecar for the CHAT granular-tool path (no TaskRecord). The
+/// env mirrors `spawn_browser_sidecar_for_task` so profile/CDP/allow-private-
+/// network/artifact-root are not lost; only the visibility (headless) falls back
+/// to the global default since there is no task to read it from.
+fn spawn_browser_sidecar_for_chat(
+    state: &AppState,
+) -> Result<BrowserSidecarSession, LocalTaskExecutionError> {
+    let _ = state; // reserved for future per-state env (parity with the task path)
+    let browser_dir = browser_automation_dir();
+    if !browser_dir.exists() {
+        return Err(LocalTaskExecutionError {
+            message: format!("Runtime browser non trovato: {}", browser_dir.display()),
+        });
+    }
+    BrowserSidecarSession::spawn_with_options(
+        "npm",
+        &["run", "start", "--silent"],
+        BrowserSidecarSpawnOptions {
+            current_dir: Some(browser_dir),
+            env: browser_sidecar_env_for_chat(),
+        },
+    )
+    .map_err(|error| LocalTaskExecutionError {
+        message: format!("Browser sidecar non avviato: {error}"),
+    })
+}
+
 fn browser_method_for_capability_tool(tool_name: &str) -> Option<BrowserMethod> {
     match tool_name {
         "browser.health" => Some(BrowserMethod::Health),
@@ -13106,12 +13885,23 @@ async fn close_all_browsers(State(state): State<AppState>) -> Json<CloseAllBrows
 /// mode we add the CDP endpoint of the in-container real browser; the sidecar
 /// then attaches via connectOverCDP instead of launching a host Chromium.
 fn browser_sidecar_env(state: &AppState, task: &TaskRecord) -> Vec<(String, String)> {
+    browser_sidecar_env_with_headless(browser_headless_env_value_for_task(state, task))
+}
+
+/// Sidecar env for a CHAT-driven browser session (granular tools): same env as the
+/// task path (artifact root, CDP endpoint, isolated-context opt-in, allow-private-
+/// network via the sidecar default) but WITHOUT a TaskRecord — there is no task to
+/// derive visibility from, so the global headless default is used.
+fn browser_sidecar_env_for_chat() -> Vec<(String, String)> {
+    browser_sidecar_env_with_headless(browser_headless_env_value())
+}
+
+/// Shared sidecar env builder. PRESERVE every var here when adding new spawn
+/// callers — only the headless value differs between task and chat sessions.
+fn browser_sidecar_env_with_headless(headless: String) -> Vec<(String, String)> {
     let artifact_root = env::temp_dir().join("local-first-browser-artifacts");
     let mut env = vec![
-        (
-            "BROWSER_AUTOMATION_HEADLESS".to_string(),
-            browser_headless_env_value_for_task(state, task),
-        ),
+        ("BROWSER_AUTOMATION_HEADLESS".to_string(), headless),
         (
             "BROWSER_AUTOMATION_ARTIFACT_ROOT".to_string(),
             artifact_root.display().to_string(),
@@ -14535,7 +15325,11 @@ mod tests {
         sanitize_wiki_filename,
         task_queue_response,
         wiki_title_from_text,
+        prune_browser_history,
+        message_has_image_url,
+        browser_snapshot_text,
     };
+    use crate::browser_safety;
     use local_first_capabilities::{CapabilityCallResult, ProviderId as CapProviderId};
     use crate::chat_store::ChatStore;
     use local_first_browser_automation::BrowserAutomationError;
@@ -15314,5 +16108,88 @@ mod tests {
         assert!(!composio_tool_is_read("GMAIL_SEND_EMAIL"));
         assert!(!composio_tool_is_read("GMAIL_DELETE_MESSAGE"));
         assert!(!composio_tool_is_read("GOOGLECALENDAR_CREATE_EVENT"));
+    }
+
+    #[test]
+    fn prune_keeps_only_latest_browser_snapshot() {
+        let ids: std::collections::BTreeSet<String> =
+            ["b1".to_string(), "b2".to_string()].into_iter().collect();
+        let mut messages = vec![
+            serde_json::json!({ "role": "system", "content": "sys" }),
+            serde_json::json!({ "role": "user", "content": "original" }),
+            serde_json::json!({ "role": "assistant", "content": null }),
+            // Older browser snapshot — should be stubbed.
+            serde_json::json!({ "role": "tool", "tool_call_id": "b1", "content": "SNAP-OLD huge" }),
+            // A non-browser tool result — must NOT be touched.
+            serde_json::json!({ "role": "tool", "tool_call_id": "x9", "content": "composio result" }),
+            // Latest browser snapshot — kept verbatim.
+            serde_json::json!({ "role": "tool", "tool_call_id": "b2", "content": "SNAP-NEW huge" }),
+        ];
+        prune_browser_history(&mut messages, &ids);
+        assert_eq!(messages[1]["content"], serde_json::json!("original"));
+        assert_eq!(messages[3]["content"], serde_json::json!(super::PRUNED_SNAPSHOT_STUB));
+        assert_eq!(messages[4]["content"], serde_json::json!("composio result"));
+        assert_eq!(messages[5]["content"], serde_json::json!("SNAP-NEW huge"));
+    }
+
+    #[test]
+    fn prune_keeps_only_latest_image_message() {
+        let ids: std::collections::BTreeSet<String> = ["b1".to_string()].into_iter().collect();
+        let mut messages = vec![
+            serde_json::json!({ "role": "tool", "tool_call_id": "b1", "content": "snap" }),
+            serde_json::json!({ "role": "user", "content": [
+                { "type": "text", "text": "Screenshot 1:" },
+                { "type": "image_url", "image_url": { "url": "data:image/png;base64,AAA" } }
+            ]}),
+            serde_json::json!({ "role": "user", "content": [
+                { "type": "text", "text": "Screenshot 2:" },
+                { "type": "image_url", "image_url": { "url": "data:image/png;base64,BBB" } }
+            ]}),
+        ];
+        prune_browser_history(&mut messages, &ids);
+        // Older image message: image_url stripped to a text stub.
+        assert!(!message_has_image_url(&messages[1]));
+        // Latest image message: untouched.
+        assert!(message_has_image_url(&messages[2]));
+    }
+
+    #[test]
+    fn prune_noop_without_browser_ids() {
+        let ids: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let mut messages = vec![
+            serde_json::json!({ "role": "tool", "tool_call_id": "b1", "content": "snap" }),
+        ];
+        let before = messages.clone();
+        prune_browser_history(&mut messages, &ids);
+        assert_eq!(messages, before);
+    }
+
+    #[test]
+    fn act_gate_blocks_purchase_click() {
+        let snapshot = "- button \"Acquista ora\" [ref=e9]\n- textbox \"Da\" [ref=e1]";
+        let action = serde_json::json!({ "kind": "click", "ref": "e9", "target_id": "chat_0" });
+        assert!(browser_safety::high_risk_reason(&action, snapshot).is_some());
+    }
+
+    #[test]
+    fn act_gate_allows_typing_into_field() {
+        let snapshot = "- textbox \"Da\" [ref=e1]";
+        let action = serde_json::json!({ "kind": "type", "ref": "e1", "text": "Napoli", "target_id": "chat_0" });
+        assert!(browser_safety::high_risk_reason(&action, snapshot).is_none());
+    }
+
+    #[test]
+    fn read_only_blocks_any_committing_action() {
+        // In read-only (channel) turns, a plain click (even on a benign label) is a
+        // committing action and must be refused.
+        let action = serde_json::json!({ "kind": "click", "ref": "e7", "target_id": "chat_0" });
+        assert!(browser_safety::is_committing_action(&action));
+    }
+
+    #[test]
+    fn snapshot_text_reads_snapshot_field() {
+        let value = serde_json::json!({ "snapshot": "- page", "url": "https://x" });
+        assert_eq!(browser_snapshot_text(&value), "- page");
+        assert_eq!(browser_snapshot_text(&serde_json::json!({})), "");
     }
 }
