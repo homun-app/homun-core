@@ -1,10 +1,39 @@
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const devUrl = process.env.LOCAL_FIRST_DESKTOP_URL ?? "http://127.0.0.1:1420/";
-const gatewayToken =
-  process.env.LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN ?? randomBytes(32).toString("hex");
+
+// Stable dev token: reuse the SAME 0600 file the gateway persists
+// (~/.local-first-personal-assistant/desktop-gateway-token) instead of minting
+// a fresh random token each launch. This keeps the token constant across
+// gateway restarts, so long-lived children (e.g. the WhatsApp sidecar) keep a
+// valid WA_GATEWAY_TOKEN and don't need to be reconnected after every restart.
+function resolveGatewayToken() {
+  const fromEnv = (process.env.LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN ?? "").trim();
+  if (fromEnv) return fromEnv;
+  const dir = join(homedir(), ".local-first-personal-assistant");
+  const tokenPath = join(dir, "desktop-gateway-token");
+  try {
+    const existing = readFileSync(tokenPath, "utf8").trim();
+    if (existing) return existing;
+  } catch {
+    // No persisted token yet — fall through to generate one.
+  }
+  const token = randomBytes(32).toString("hex");
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(tokenPath, token, { mode: 0o600 });
+  } catch {
+    // Non-fatal: fall back to an ephemeral in-memory token for this run.
+  }
+  return token;
+}
+
+const gatewayToken = resolveGatewayToken();
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const children = new Set();
 
