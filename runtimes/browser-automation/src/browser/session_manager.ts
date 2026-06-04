@@ -60,6 +60,14 @@ type ArtifactMetadata = {
   bytes: number;
 };
 
+// Set-of-marks legend entry: one numbered badge -> the ref the model can act on.
+type ScreenshotMark = {
+  mark: number;
+  ref: string;
+  role: string;
+  name: string;
+};
+
 export class BrowserSessionManager {
   private readonly options: BrowserSessionOptions;
   private context?: BrowserContext;
@@ -268,13 +276,100 @@ export class BrowserSessionManager {
     targetId: string;
     fileName: string;
     fullPage?: boolean;
-  }): Promise<ArtifactMetadata> {
+    labels?: boolean;
+  }): Promise<ArtifactMetadata & { marks?: ScreenshotMark[] }> {
     const state = await this.resolvePage(params.targetId);
     const root = this.requireArtifactRoot();
     await root.ensureKind("screenshots");
     const outputPath = root.outputPath("screenshots", params.fileName);
-    await state.page.screenshot({ path: outputPath, fullPage: params.fullPage ?? false });
-    return await artifactMetadata("screenshots", outputPath);
+
+    if (!params.labels) {
+      await state.page.screenshot({ path: outputPath, fullPage: params.fullPage ?? false });
+      return await artifactMetadata("screenshots", outputPath);
+    }
+
+    // Set-of-marks: reuse the same snapshot builder that backs browser.snapshot
+    // so the numbered badges line up with refs the model can act on. Each badge
+    // number maps 1:1 to an [ref=eN] in the returned legend.
+    const snapshot = await this.snapshot({
+      targetId: params.targetId,
+      snapshotFormat: "ai",
+      refsMode: "aria",
+      interactive: true,
+      compact: true,
+      depth: 12,
+    });
+
+    const MAX_MARKS = 50;
+    const items: Array<{
+      n: number;
+      ref: string;
+      role: string;
+      name: string;
+      box: { x: number; y: number; width: number; height: number };
+    }> = [];
+    let n = 0;
+    for (const ref of snapshot.refs) {
+      if (n >= MAX_MARKS) {
+        break;
+      }
+      const loc = state.refs.get(ref.ref) ?? state.page.locator(`aria-ref=${ref.ref}`);
+      const box = await loc.boundingBox().catch(() => null);
+      if (!box || box.width < 2 || box.height < 2) {
+        continue;
+      }
+      // Skip elements that are entirely offscreen above/left of the document.
+      if (box.x + box.width < 0 || box.y + box.height < 0) {
+        continue;
+      }
+      n += 1;
+      items.push({ n, ref: ref.ref, role: ref.role, name: ref.name, box });
+    }
+
+    try {
+      await state.page.evaluate((data) => {
+        const PREV = document.getElementById("__som_overlay__");
+        if (PREV) {
+          PREV.remove();
+        }
+        const container = document.createElement("div");
+        container.id = "__som_overlay__";
+        container.setAttribute(
+          "style",
+          "position:absolute;top:0;left:0;width:0;height:0;z-index:2147483647;pointer-events:none;",
+        );
+        for (const item of data) {
+          const outline = document.createElement("div");
+          outline.setAttribute(
+            "style",
+            `position:absolute;left:${item.box.x}px;top:${item.box.y}px;width:${item.box.width}px;height:${item.box.height}px;border:2px solid #e11;box-sizing:border-box;`,
+          );
+          const badge = document.createElement("div");
+          badge.textContent = String(item.n);
+          const badgeTop = Math.max(0, item.box.y - 14);
+          badge.setAttribute(
+            "style",
+            `position:absolute;left:${item.box.x}px;top:${badgeTop}px;background:#e11;color:#fff;font:bold 12px/1 sans-serif;padding:1px 4px;border-radius:3px;`,
+          );
+          container.appendChild(outline);
+          container.appendChild(badge);
+        }
+        document.documentElement.appendChild(container);
+      }, items);
+      // Marks are placed in document coordinates; full_page is intentionally
+      // ignored here so the badges stay aligned with the captured viewport.
+      await state.page.screenshot({ path: outputPath, fullPage: false });
+    } finally {
+      await state.page
+        .evaluate(() => document.getElementById("__som_overlay__")?.remove())
+        .catch(() => undefined);
+    }
+
+    const meta = await artifactMetadata("screenshots", outputPath);
+    return {
+      ...meta,
+      marks: items.map((item) => ({ mark: item.n, ref: item.ref, role: item.role, name: item.name })),
+    };
   }
 
   async pdf(params: { targetId: string; fileName: string; format?: string }): Promise<ArtifactMetadata> {
