@@ -2503,6 +2503,7 @@ fn browser_screenshot_tool_schema() -> serde_json::Value {
                 "type": "object",
                 "properties": {
                     "full_page": { "type": "boolean", "description": "Se true cattura l'intera pagina scrollabile, altrimenti solo la porzione visibile." },
+                    "marks": { "type": "boolean", "description": "true per disegnare numeri sugli elementi cliccabili e ricevere la legenda numero→elemento (utile per agire con precisione su pagine visivamente ambigue)." },
                     "target": { "type": "string", "description": "id della scheda (tab) su cui operare; default: la scheda corrente." }
                 }
             }
@@ -3622,6 +3623,10 @@ non ripetere la stessa azione; prova un altro elemento, scrolla, oppure attendi 
                                     .get("full_page")
                                     .and_then(|v| v.as_bool())
                                     .unwrap_or(false);
+                                let marks = args
+                                    .get("marks")
+                                    .and_then(|v| v.as_bool())
+                                    .unwrap_or(false);
                                 let _ = emit_stream_event(
                                     &tx,
                                     GenerateStreamEvent::Delta {
@@ -3639,6 +3644,7 @@ non ripetere la stessa azione; prova un altro elemento, scrolla, oppure attendi 
                                         "target_id": current_target.as_str(),
                                         "file_name": file_name,
                                         "full_page": full_page,
+                                        "labels": marks,
                                     }),
                                 )
                                 .await;
@@ -3651,6 +3657,41 @@ non ripetere la stessa azione; prova un altro elemento, scrolla, oppure attendi 
                                             .and_then(|p| p.as_str())
                                             .unwrap_or("")
                                             .to_string();
+                                        // Set-of-marks legend: map each numbered badge
+                                        // in the image back to the element's ref so the
+                                        // model can act precisely (browser_act ref=eN).
+                                        let legend = value
+                                            .get("marks")
+                                            .and_then(|m| m.as_array())
+                                            .map(|entries| {
+                                                let mut text = String::from(
+                                                    "\nElementi numerati nello screenshot \
+(numero = elemento):",
+                                                );
+                                                for entry in entries {
+                                                    let mark = entry
+                                                        .get("mark")
+                                                        .and_then(|v| v.as_i64())
+                                                        .unwrap_or_default();
+                                                    let role = entry
+                                                        .get("role")
+                                                        .and_then(|v| v.as_str())
+                                                        .unwrap_or("");
+                                                    let name = entry
+                                                        .get("name")
+                                                        .and_then(|v| v.as_str())
+                                                        .unwrap_or("");
+                                                    let ref_id = entry
+                                                        .get("ref")
+                                                        .and_then(|v| v.as_str())
+                                                        .unwrap_or("");
+                                                    text.push_str(&format!(
+                                                        "\n{mark} = {role} \"{name}\" [ref={ref_id}]"
+                                                    ));
+                                                }
+                                                text
+                                            })
+                                            .unwrap_or_default();
                                         // Read + base64 the PNG. Skip the image (text
                                         // note only) if missing or too large (~1.5MB
                                         // encoded ≈ 1.1MB raw).
@@ -3662,8 +3703,10 @@ non ripetere la stessa azione; prova un altro elemento, scrolla, oppure attendi 
                                                     format!("data:image/png;base64,{encoded}");
                                                 pending_browser_image = Some(dataurl);
                                                 push_browser_step("screenshot".to_string(), "done");
-                                                Ok("Screenshot catturato (vedi immagine allegata sotto)."
-                                                    .to_string())
+                                                Ok(format!(
+                                                    "Screenshot catturato (vedi immagine allegata \
+sotto).{legend}"
+                                                ))
                                             }
                                             Ok(bytes) => {
                                                 push_browser_step("screenshot".to_string(), "done");

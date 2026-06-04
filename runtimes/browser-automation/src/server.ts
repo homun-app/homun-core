@@ -90,6 +90,7 @@ async function dispatch(request: BrowserRequest): Promise<unknown> {
         targetId: requireString(request.params, "target_id"),
         fileName: requireString(request.params, "file_name"),
         fullPage: optionalBoolean(request.params, "full_page"),
+        labels: optionalBoolean(request.params, "labels"),
       });
     case "browser.arm_file_chooser":
       return await manager.armFileChooser({
