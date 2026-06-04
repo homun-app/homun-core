@@ -2580,7 +2580,12 @@ preferenza. È il browser stesso a provarle a turno (se una è bloccata/senza da
 passa alla successiva). NON chiamare browse_web più volte per provare fonti diverse \
 e NON ripetere la stessa ricerca.\n\
 5. SINTETIZZA: appena ricevi il risultato del browser, scrivi la risposta finale \
-all'utente. Se una fonte è risultata bloccata/vuota, dillo con onestà.\n\
+all'utente. Riporta lo stato REALE di ogni fonte e NON confondere i casi: usa \
+\"bloccata/non raggiungibile\" SOLO se la fonte ha status \"failed\" (non si è \
+aperta) o un captcha esplicito. Se la fonte è stata RAGGIUNTA ma il form non è \
+stato completato (status \"blocked\"/raggiunta-incompleta), NON dire che è \
+bloccata o irraggiungibile: di' che ci sei arrivato ma non hai completato la \
+ricerca, mostra i dati parziali eventualmente raccolti e proponi di riprovare.\n\
 \n\
 OBIETTIVO AUTO-CONTENUTO (fondamentale): il browser NON conosce i messaggi \
 precedenti. Ogni obiettivo di browse_web deve contenere TUTTI i parametri già \
@@ -3351,7 +3356,9 @@ card di conferma nell'interfaccia. NON dire che è stata eseguita."
                 "role": "user",
                 "content": "Non sono più disponibili strumenti. Scrivi ORA la risposta finale per \
 l'utente sintetizzando i risultati raccolti dai passi precedenti (sii esaustivo: orari, durata, \
-scali, compagnia, prezzo per ogni opzione). Se una fonte era bloccata o senza dati, dillo con onestà."
+scali, compagnia, prezzo per ogni opzione). Riporta lo stato reale: di' \"bloccata/non \
+raggiungibile\" SOLO per fonti non apertesi o con captcha; se sei arrivato al sito ma non hai \
+completato il form, dillo così (non dire che è irraggiungibile) e proponi di riprovare."
             }));
             let mut synth_text = String::new();
             let mut builder = http.post(&endpoint);
@@ -3385,8 +3392,9 @@ scali, compagnia, prezzo per ogni opzione). Se una fonte era bloccata o senza da
             } else if !accumulated.trim().is_empty() {
                 accumulated
             } else {
-                "Non sono riuscito a recuperare i risultati dalle fonti (alcune bloccate da \
-verifica anti-bot). Riprova o indica una fonte preferita.".to_string()
+                "Non sono riuscito a estrarre i risultati dalle fonti in questa sessione. \
+Se ho raggiunto i siti, il limite è stato completare il form di ricerca, non un blocco: \
+posso riprovare o puoi indicarmi una fonte preferita.".to_string()
             };
             if let Some(fonti) = fonti_section(&browse_sources, &final_text) {
                 final_text.push_str(&fonti);
@@ -8962,47 +8970,66 @@ fn browser_final_answer_for_task(
     // structured options. No domain/keyword special-casing (de-gemma): just
     // report honestly which sources were read.
     let _ = task;
+    // Three distinct outcomes — do NOT conflate them (the old text said "blocked
+    // or unreachable" for everything, which lied when we actually loaded the site
+    // but couldn't finish the form). "completed" = verified data; "blocked" =
+    // REACHED the page/form but could not extract verified results; "failed" =
+    // could not reach/load the source at all.
     let completed = sources
         .iter()
         .filter(|source| source.status == "completed")
         .collect::<Vec<_>>();
-    let failed = sources
+    let reached_incomplete = sources
         .iter()
-        .filter(|source| source.status != "completed")
+        .filter(|source| source.status == "blocked")
+        .collect::<Vec<_>>();
+    let unreachable = sources
+        .iter()
+        .filter(|source| source.status != "completed" && source.status != "blocked")
         .collect::<Vec<_>>();
     let title = if completed.is_empty() {
         "Ricerca browser non conclusa".to_string()
     } else {
         "Ricerca browser completata".to_string()
     };
-    let summary = if completed.is_empty() {
-        "Non sono riuscito a leggere fonti browser utili in questa sessione (alcune potrebbero essere bloccate o non aver caricato i risultati).".to_string()
-    } else {
+    let summary = if !completed.is_empty() {
         "Ho aperto le fonti disponibili ma non ho estratto un elenco strutturato di opzioni; qui sotto cosa ho raggiunto.".to_string()
+    } else if !reached_incomplete.is_empty() {
+        // The key fix: we DID reach the site(s). Be honest about WHERE it stopped
+        // instead of claiming they were unreachable/blocked.
+        "Ho RAGGIUNTO le fonti ma non sono riuscito a completare il form di ricerca / estrarre i risultati in questa sessione. Le pagine NON erano bloccate o irraggiungibili: il problema è stato compilare la ricerca (es. stazioni, data/ora) e leggere l'elenco. Posso riprovare.".to_string()
+    } else {
+        "Non sono riuscito ad aprire le fonti browser in questa sessione (errore di caricamento o connessione).".to_string()
     };
     let findings = vec![format!(
-        "Fonti raggiunte: {} su {}.",
+        "Fonti: {} con dati, {} raggiunte ma non completate, {} non aperte (su {} totali).",
         completed.len(),
+        reached_incomplete.len(),
+        unreachable.len(),
         sources.len()
     )];
     let sources_markdown = sources
         .iter()
-        .map(|source| {
-            if source.status == "completed" {
-                format!("{}: {}", source.label, source.url)
-            } else {
-                format!("{}: non raggiungibile/bloccata in questa sessione", source.label)
-            }
+        .map(|source| match source.status.as_str() {
+            "completed" => format!("{}: {} (dati estratti)", source.label, source.url),
+            "blocked" => format!(
+                "{}: {} — raggiunta, ma form di ricerca non completato",
+                source.label, source.url
+            ),
+            _ => format!("{}: non aperta (errore di caricamento)", source.label),
         })
         .collect::<Vec<_>>();
     let mut limitations = vec![
         "Non ho selezionato opzioni, fatto login, inserito dati o acquistato nulla.".to_string(),
     ];
-    if !failed.is_empty() {
+    if !reached_incomplete.is_empty() {
         limitations.push(format!(
-            "{} fonte/i non erano leggibili o raggiungibili.",
-            failed.len()
+            "{} fonte/i sono state raggiunte ma il form non è stato completato (non sono bloccate).",
+            reached_incomplete.len()
         ));
+    }
+    if !unreachable.is_empty() {
+        limitations.push(format!("{} fonte/i non si sono aperte.", unreachable.len()));
     }
     TaskFinalAnswer {
         title,

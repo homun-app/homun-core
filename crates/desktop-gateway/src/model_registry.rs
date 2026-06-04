@@ -381,8 +381,8 @@ pub const ROLES: &[RoleInfo] = &[
     },
     RoleInfo {
         key: "browser",
-        label: "Browser",
-        description: "Pianificatore del loop osserva-agisci sul browser.",
+        label: "Modello del browser",
+        description: "Pianificatore del loop osserva-agisci sul web: è il consumatore più pesante (una chiamata per ogni micro-azione). Spesso conviene un modello veloce qui e uno più capace per chat e sintesi.",
     },
     RoleInfo {
         key: "memory",

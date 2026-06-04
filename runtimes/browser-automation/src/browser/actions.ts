@@ -33,6 +33,10 @@ export type BrowserActionResult = {
   failedRefs?: Array<{ ref: string; error: string }>;
   batchResults?: Array<BrowserActionResult | { ok: false; error: string }>;
   result?: unknown;
+  /** For "type": the autocomplete suggestion that was selected, if any. */
+  committedOption?: string;
+  /** For "type": the visible suggestion options observed (for disambiguation). */
+  suggestions?: string[];
 };
 
 export type BrowserActRequest = BrowserActRequestInner & SnapshotAfterAction;
@@ -262,24 +266,34 @@ async function executeActionUnchecked(
       const locator = requireRefOrSelector(page, refs, action.ref, action.selector, "type");
       const timeout = actionTimeout(action.timeoutMs);
       await locator.click({ timeout });
-      await locator.press(process.platform === "darwin" ? "Meta+A" : "Control+A", { timeout });
+      // Clear robustly BEFORE typing — relying on select-all+overwrite let weak
+      // widgets append (the "Roma TerminiRoma Termini" bug). clear() focuses,
+      // selects, deletes and fires input events; we fall back to select-all+Delete.
+      await clearField(locator, timeout);
       await locator.type(action.text, { delay: action.slowly ? 75 : 20 });
-      // Resolve the confirmation strategy: explicit `commit`, else `submit`
-      // (legacy Enter), else auto-confirm autocomplete comboboxes by keyboard
-      // so weak local models that cannot click a non-ref suggestion still
-      // select an option deterministically.
-      const commit =
-        action.commit ?? (action.submit ? "enter" : await autocompleteCommitMode(locator));
-      if (commit === "arrow_enter") {
-        await page.waitForTimeout(500); // let the suggestion list render
+
+      // Confirmation strategy. Explicit `commit`/`submit` win; otherwise OBSERVE
+      // the page: if typing opened a suggestion popup, pick the matching option.
+      // This is the part naive flows miss — they decide up-front from the input's
+      // ARIA attributes (which most sites omit) and so never select, then keep
+      // typing. We instead look at the suggestions that actually appeared.
+      const explicit = action.commit ?? (action.submit ? "enter" : undefined);
+      let committedOption: string | undefined;
+      let suggestions: string[] | undefined;
+      if (explicit === "enter") {
+        await locator.press("Enter", { timeout });
+      } else if (explicit === "arrow_enter") {
+        await page.waitForTimeout(400); // let the suggestion list render
         await locator.press("ArrowDown", { timeout });
-        await page.waitForTimeout(150);
+        await page.waitForTimeout(120);
         await locator.press("Enter", { timeout });
-      } else if (commit === "enter") {
-        await locator.press("Enter", { timeout });
+      } else if (explicit !== "none") {
+        const outcome = await confirmAutocomplete(page, locator, action.text, timeout);
+        committedOption = outcome.committed;
+        suggestions = outcome.options.length ? outcome.options : undefined;
       }
-      await page.waitForTimeout(1000);
-      return { ok: true, url: page.url() };
+      await page.waitForTimeout(800);
+      return { ok: true, url: page.url(), committedOption, suggestions };
     }
     case "press": {
       await page.keyboard.press(action.key, { delay: nonNegativeDelay(action.delayMs) });
@@ -544,21 +558,256 @@ export function requireRef(refs: Map<string, Locator>, ref: string): Locator {
   return locator;
 }
 
-/// Detects whether a just-typed field is an autocomplete combobox (ARIA
-/// `role=combobox` or `aria-autocomplete=list|both`). Such fields commonly
-/// expose suggestions only as a transient listbox with no stable ref, so the
-/// reliable way to pick a suggestion is the keyboard (ArrowDown+Enter).
-async function autocompleteCommitMode(locator: Locator): Promise<"arrow_enter" | "none"> {
+const MAX_SUGGESTIONS = 8;
+
+/// Normalizes text for matching: strip diacritics, lowercase, collapse spaces.
+/// "Milano Centrale" and "MILANO  CENTRALE" and "milàno centrale" all align.
+function normalizeForMatch(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/// True only on RELIABLE combobox signals tied to the typed field. We gate the
+/// auto-select on this so plain text fields never pay a popup-wait, and so we
+/// never misfire on a real page's unrelated list items. Suggestion lists that
+/// are plain clickable buttons (no ARIA) are handled by the model clicking the
+/// visible ref instead — they already appear in the snapshot.
+async function inputComboboxInfo(
+  input: Locator,
+): Promise<{ isCombobox: boolean; listboxId: string | null }> {
   try {
-    const isAutocomplete = await locator.evaluate((element) => {
+    return await input.evaluate((element) => {
       const role = (element.getAttribute("role") ?? "").toLowerCase();
-      const autocomplete = (element.getAttribute("aria-autocomplete") ?? "").toLowerCase();
-      return role === "combobox" || autocomplete === "list" || autocomplete === "both";
+      const ac = (element.getAttribute("aria-autocomplete") ?? "").toLowerCase();
+      const expanded = element.getAttribute("aria-expanded");
+      const controls = element.getAttribute("aria-controls") || element.getAttribute("aria-owns");
+      const isCombobox =
+        role === "combobox" ||
+        ac === "list" ||
+        ac === "both" ||
+        expanded === "true" ||
+        expanded === "false" || // present-but-collapsed still signals a combobox
+        Boolean(controls) ||
+        element.hasAttribute("list");
+      const listboxId = (controls ?? "").split(/\s+/).find(Boolean) ?? null;
+      return { isCombobox, listboxId };
     });
-    return isAutocomplete ? "arrow_enter" : "none";
   } catch {
-    return "none";
+    return { isCombobox: false, listboxId: null };
   }
+}
+
+/// Has the suggestion actually been applied? A real autocomplete sets the input
+/// to the canonical value and/or closes the popup; either is a success signal.
+async function selectionConfirmed(
+  input: Locator,
+  optionLocator: Locator,
+  targetText: string,
+): Promise<boolean> {
+  try {
+    const value = normalizeForMatch(await input.inputValue());
+    if (value && value === normalizeForMatch(targetText)) return true;
+  } catch {
+    /* not an <input> (e.g. contenteditable) — fall back to popup-closed check */
+  }
+  try {
+    return !(await optionLocator.first().isVisible());
+  } catch {
+    return true; // detached/closed
+  }
+}
+
+/// Selects `best` among the open suggestions, robust to BOTH mouse-driven and
+/// keyboard-only widgets:
+///   A. click the option element (fires the site's onSelect) — verify;
+///   B. keyboard-navigate to the option's position then Enter — verify;
+///   C. last resort: a single ArrowDown+Enter (the top suggestion).
+/// Verification after each step means we don't double-act when the first works,
+/// and we don't give up when a keyboard-only list ignored the click.
+async function selectSuggestion(
+  page: Page,
+  input: Locator,
+  optionLocator: Locator,
+  best: { text: string; index: number; locator: Locator },
+  optionCount: number,
+  timeout: number,
+): Promise<boolean> {
+  try {
+    await best.locator.click({ timeout });
+    await page.waitForTimeout(120);
+    if (await selectionConfirmed(input, optionLocator, best.text)) return true;
+  } catch {
+    /* keyboard-only widget or stale — try the keyboard */
+  }
+  try {
+    await input.click({ timeout }).catch(() => undefined);
+    const steps = Math.min(best.index + 1, optionCount);
+    for (let i = 0; i < steps; i += 1) {
+      await input.press("ArrowDown", { timeout });
+      await page.waitForTimeout(40);
+    }
+    await input.press("Enter", { timeout });
+    await page.waitForTimeout(120);
+    if (await selectionConfirmed(input, optionLocator, best.text)) return true;
+  } catch {
+    /* ignore — try the final fallback */
+  }
+  try {
+    await input.press("ArrowDown", { timeout });
+    await page.waitForTimeout(60);
+    await input.press("Enter", { timeout });
+    await page.waitForTimeout(120);
+    return await selectionConfirmed(input, optionLocator, best.text);
+  } catch {
+    return false;
+  }
+}
+
+/// Clears an editable field reliably. select-all+overwrite is not enough on some
+/// custom widgets (they append) — clear() focuses, selects, deletes and fires
+/// input events; we fall back to select-all+Delete only if clear() is unsupported.
+async function clearField(input: Locator, timeout: number): Promise<void> {
+  try {
+    await input.clear({ timeout });
+  } catch {
+    try {
+      await input.click({ timeout });
+      await input.press(process.platform === "darwin" ? "Meta+A" : "Control+A", { timeout });
+      await input.press("Delete", { timeout });
+    } catch {
+      /* best effort — leave whatever is there */
+    }
+  }
+}
+
+/// A short prefix that reliably triggers a typeahead: the FIRST WORD for a
+/// multi-word value ("Roma Termini" -> "Roma"), else the first few letters for a
+/// single word. null when the value is already too short to shorten.
+function autocompletePrefix(value: string): string | null {
+  const v = value.trim();
+  if (!v) return null;
+  const firstWord = v.split(/\s+/)[0];
+  if (firstWord.length < v.length) return firstWord;
+  if (v.length > 4) return v.slice(0, 4);
+  return null;
+}
+
+/// With a suggestion dropdown possibly open for the field's CURRENT content,
+/// wait briefly, read the visible options, and select the one best matching
+/// `target` (the FULL intended value — even when we only typed a prefix to open
+/// the list). `appeared` distinguishes "no dropdown at all" from "dropdown shown
+/// but nothing matched", which the caller uses to decide whether to retry.
+async function trySelectFromOpenList(
+  page: Page,
+  input: Locator,
+  optionLocator: Locator,
+  target: string,
+  timeout: number,
+): Promise<{ committed?: string; options: string[]; appeared: boolean }> {
+  try {
+    await optionLocator.first().waitFor({ state: "visible", timeout: Math.min(timeout, 1800) });
+  } catch {
+    return { options: [], appeared: false };
+  }
+  const handles = await optionLocator.all();
+  const options: Array<{ text: string; locator: Locator }> = [];
+  for (const handle of handles) {
+    if (options.length >= MAX_SUGGESTIONS) break;
+    try {
+      if (!(await handle.isVisible())) continue;
+      const text = (await handle.innerText()).replace(/\s+/g, " ").trim();
+      if (text) options.push({ text, locator: handle });
+    } catch {
+      /* stale handle — skip */
+    }
+  }
+  if (options.length === 0) {
+    return { options: [], appeared: false };
+  }
+
+  const want = normalizeForMatch(target);
+  const scored = options
+    .map((option, index) => {
+      const normalized = normalizeForMatch(option.text);
+      let score = 0;
+      if (normalized === want) score = 4;
+      else if (normalized.startsWith(want)) score = 3;
+      else if (want.startsWith(normalized)) score = 2; // option is the canonical short form
+      else if (normalized.includes(want)) score = 1;
+      return { ...option, score, index };
+    })
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+
+  const optionTexts = options.map((option) => option.text);
+  const best = scored[0];
+  if (best.score >= 1 || options.length === 1) {
+    const confirmed = await selectSuggestion(page, input, optionLocator, best, options.length, timeout);
+    return { committed: confirmed ? best.text : undefined, options: optionTexts, appeared: true };
+  }
+  // Dropdown shown, but nothing relates to the target → ambiguous, don't guess.
+  return { options: optionTexts, appeared: true };
+}
+
+/// Owns the autocomplete protocol so the MODEL doesn't have to: the caller types
+/// the full value once; here we (1) try to select a matching suggestion; (2) if
+/// no dropdown opened for the full value, retype a PREFIX to coax the typeahead
+/// and match the full value against it; (3) otherwise leave the full value (plain
+/// field). Scoped to genuine combobox inputs so plain fields pay no popup-wait.
+async function confirmAutocomplete(
+  page: Page,
+  input: Locator,
+  typed: string,
+  timeout: number,
+): Promise<{ committed?: string; options: string[] }> {
+  const { isCombobox, listboxId } = await inputComboboxInfo(input);
+  if (!isCombobox) {
+    return { options: [] }; // plain field — leave the text as-is, no wait
+  }
+
+  const optionLocator = listboxId
+    ? page.locator(`[id="${listboxId.replace(/["\\]/g, "\\$&")}"]`).locator('[role="option"], li')
+    : page.locator('[role="listbox"] [role="option"], [role="option"]');
+
+  // 1) Full value already typed by the caller — try to select from its dropdown.
+  let result = await trySelectFromOpenList(page, input, optionLocator, typed, timeout);
+  if (result.committed) return { committed: result.committed, options: result.options };
+  if (result.appeared) return { options: result.options }; // shown but ambiguous
+
+  // 2) No dropdown for the full value: some widgets only suggest on a PARTIAL
+  //    query. Type a prefix to open the list, then match the FULL value.
+  const prefix = autocompletePrefix(typed);
+  if (prefix) {
+    await clearField(input, timeout);
+    await input.type(prefix, { delay: 40 });
+    result = await trySelectFromOpenList(page, input, optionLocator, typed, timeout);
+    if (result.committed) return { committed: result.committed, options: result.options };
+    if (result.appeared) {
+      // Suggestions appeared but none matched: restore the full typed value so we
+      // don't leave just the prefix in the field.
+      await clearField(input, timeout);
+      await input.type(typed, { delay: 20 });
+      return { options: result.options };
+    }
+  }
+
+  // 3) Genuinely no suggestions (or the prefix attempt left only the prefix):
+  //    ensure the field holds the FULL value, with a keyboard last-resort for a
+  //    combobox that selects only via the keyboard.
+  await clearField(input, timeout);
+  await input.type(typed, { delay: 20 });
+  try {
+    await optionLocator.first().waitFor({ state: "visible", timeout: 800 });
+    await input.press("ArrowDown", { timeout });
+    await page.waitForTimeout(120);
+    await input.press("Enter", { timeout });
+  } catch {
+    /* leave the full typed value as-is */
+  }
+  return { options: [] };
 }
 
 function requireRefOrSelector(
