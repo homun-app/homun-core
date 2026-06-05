@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain, dialog } = require("electron");
+const { app, BrowserWindow, shell, ipcMain, dialog, nativeImage } = require("electron");
 const { spawn, spawnSync } = require("node:child_process");
 const { randomBytes } = require("node:crypto");
 const fs = require("node:fs");
@@ -18,8 +18,26 @@ const RESOURCES_ROOT =
 let gatewayProcess = null;
 let isQuitting = false;
 
+// Brand icon (Homun pictogram on a white rounded square). Used as the window
+// icon on Windows/Linux and as the macOS dock icon in dev. macOS ignores the
+// BrowserWindow `icon` option, so the dock icon must be set explicitly via
+// app.dock.setIcon. Resolved from staged resources when packaged, otherwise
+// from the repo assets folder.
+function brandIconPath() {
+  const candidates = [
+    path.join(RESOURCES_ROOT, "assets", "brand", "icon.png"),
+    path.join(__dirname, "..", "assets", "brand", "icon.png"),
+  ];
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
+}
+
 process.env.LOCAL_FIRST_DESKTOP_GATEWAY_URL = GATEWAY_URL;
 process.env.LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN = GATEWAY_TOKEN;
+
+// Product/display name (macOS menu bar, About panel, dock tooltip). Set early,
+// before the app is ready, so the menu reflects it. Technical identifiers
+// (crate/binary "local-first-desktop-gateway", LOCAL_FIRST_* env) are unchanged.
+app.setName("homün");
 
 function normalizeGatewayUrl(value) {
   return value.endsWith("/") ? value : `${value}/`;
@@ -146,12 +164,14 @@ function rendererEntry() {
 }
 
 function createWindow() {
+  const iconPath = brandIconPath();
   const window = new BrowserWindow({
     width: 1360,
     height: 900,
     minWidth: 980,
     minHeight: 680,
-    title: "Local First Assistant",
+    ...(iconPath ? { icon: iconPath } : {}),
+    title: "homün",
     backgroundColor: "#ffffff",
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 16, y: 16 },
@@ -208,6 +228,13 @@ ipcMain.handle("lfpa:reveal-path", async (_event, targetPath) => {
 });
 
 app.whenReady().then(async () => {
+  if (process.platform === "darwin" && app.dock) {
+    const iconPath = brandIconPath();
+    if (iconPath) {
+      const dockIcon = nativeImage.createFromPath(iconPath);
+      if (!dockIcon.isEmpty()) app.dock.setIcon(dockIcon);
+    }
+  }
   await ensureGateway();
   createWindow();
 
