@@ -4,6 +4,16 @@ Questo documento e' la mappa operativa del progetto. Va tenuto aggiornato insiem
 `docs/architecture/final-roadmap.md` e `docs/work-memory.md` quando cambiano
 scopo, componenti, responsabilita' o ordine di implementazione.
 
+> **Stato 2026-06-05.** Lo stato per-componente piu' sotto e' in parte storico
+> (scritto a fine maggio). Realta' attuale: il gateway espone gia' i read model
+> operativi (task, memoria, capability, Local Computer); chat, canali (WhatsApp/
+> Telegram), contatti, artifacts/files e la sidebar a progetti sono in esercizio;
+> il modello e' **capable-first** (registry + ruoli verso modelli SOTA, MLX/Gemma
+> come fallback piccolo), quindi i riferimenti a "Gemma" vanno letti come
+> "modello attivo del ruolo"; il browser e' stato riscritto in stile OpenClaw
+> (tool granulari guidati dal modello) e affianca il planner legacy ancora vivo
+> per i task durevoli. Le priorita' correnti sono in `docs/roadmap.md`.
+
 ## Scopo Prodotto
 
 L'obiettivo e' costruire un assistente personale local-first, desktop-first e
@@ -203,11 +213,14 @@ Non deve:
 
 Stato attuale:
 
-- prompt understanding via Gemma locale JSON validato;
-- route per risposta diretta, ora locale, calcolo locale, pianificazione,
-  chiarimento e rifiuto;
-- planner prompt-level che genera `PromptExecutionPlan`;
-- Orchestrator Brain completo con tool selection multi-step ancora da chiudere.
+- prompt understanding capable-first: il modello attivo del ruolo orchestrator
+  (registry, cloud SOTA per default) produce intenzioni/JSON validati; MLX/Gemma
+  resta fallback locale piccolo;
+- route per risposta diretta, calcolo, pianificazione, chiarimento e rifiuto;
+- planner che genera piani materializzati come task durevoli;
+- budget di contesto adattivi alla context-window del modello attivo (niente
+  clamp del contenuto essenziale sui modelli capaci);
+- DAG completo e selezione capability multi-provider ancora da rifinire.
 
 ### Durable Task Runtime
 
@@ -369,34 +382,25 @@ Stato attuale:
 
 ## Sequenza Di Implementazione Aggiornata
 
-1. Completare il Desktop HTTP Gateway Rust autonomo collegato a Electron.
-   Slice fatti: prompt builder/context compression Rust, proxy NDJSON
-   stream/cancel, runtime health/warmup/shutdown, read model persistente
-   thread/messaggi su SQLite locale, token bearer locale e CORS allowlist.
-   Restano packaging gateway/runtime, log diagnostici e read model locali più
-   ampi senza ripristinare IPC desktop per stream.
+Gli step 1-7 sono in larga parte realizzati (vedi `docs/roadmap.md` per lo stato
+vivo). In sintesi:
 
-2. Collegare executor dei task pianificati dal Brain.
-   Deve usare Task Runtime, Resource Governor, Approval Gate e checkpoint.
+1. Desktop HTTP Gateway Rust autonomo collegato a Electron: FATTO, inclusi i
+   read model operativi (task, memoria, capability, Local Computer).
+2. Executor dei task pianificati dal Brain (Task Runtime + Resource Governor +
+   Approval Gate + checkpoint): FATTO (read-only governato).
+3. Tasks/Approvals UI sui read model reali: FATTO.
+4. Browser/Shell reali nel Local Computer: FATTO; il browser e' poi stato
+   riscritto in stile OpenClaw (tool granulari guidati dal modello). Debito
+   aperto: unificare i task durevoli sul motore granular e ritirare il planner.
+5. Orchestrator Brain con tool selection dal Capability Registry: avanzato.
+6. Connections/Settings sui provider reali (MCP/connettori/skill): di base FATTO.
+7. Persistenza degli stati desktop: FATTO (store locali, recovery all'avvio).
+8. Auto-apprendimento: ancora da fare (gated su eventi reali affidabili).
 
-3. Collegare Tasks/Approvals UI ai read model reali.
-   Serve vedere task in coda, attivi, bloccati per risorsa, bloccati per
-   approval e completati.
-
-4. Collegare Browser/Shell reali al Local Computer.
-   Serve preview, screenshot/artifact, transcript redatto e takeover/approval.
-
-5. Promuovere il planner prompt-level nell'Orchestrator Brain completo.
-   Deve scegliere uno o piu' tool/MCP/skill/subagenti dal Capability Registry.
-
-6. Collegare Connections/Settings ai provider reali.
-   Serve configurazione locale, grants, policy e segreti.
-
-7. Rendere persistenti gli stati desktop ancora in-memory.
-   Thread, sessioni, task snapshot e preferenze devono sopravvivere ai riavvii.
-
-8. Implementare auto-apprendimento.
-   Solo dopo che eventi, memoria, privacy e task reali sono affidabili.
+Dimensioni aggiunte fuori dal piano originale e ora attive: canali WhatsApp/
+Telegram (inbound-come-agente), contatti/identity resolution, artifacts/files,
+sidebar a progetti.
 
 ## Regole Architetturali
 
@@ -416,40 +420,28 @@ Stato attuale:
 
 ## Stato Production Ready
 
-Production-ready a livello di base contrattuale/test:
+In esercizio (base contrattuale/test + cablaggio reale):
 
-- runtime Gemma locale;
-- Durable Task Runtime;
-- Resource Governor;
-- Memory Core;
-- Capability Registry base;
-- Process Manager;
-- Local Computer Session contracts;
-- Browser Automation contracts;
-- subagent task-runtime bridge;
-- UI shell V1 e chat thread isolati.
+- gateway Rust con read model operativi (task, memoria, capability, Computer);
+- modello capable-first (registry + ruoli; MLX/Gemma come fallback locale);
+- Durable Task Runtime, Resource Governor, Memory Core, Process Manager;
+- Capability Registry + connettori/MCP/skill di base;
+- Local Computer Session con preview browser/shell;
+- browser automation riscritto stile OpenClaw (tool granulari) + planner legacy;
+- canali WhatsApp/Telegram, contatti, artifacts/files;
+- persistenza desktop (store locali, recovery all'avvio);
+- UI shell + chat thread isolati con rendering ricco.
 
-Non ancora production-ready end-to-end:
+Non ancora chiuso end-to-end:
 
-- executor live dei piani Brain;
-- browser/shell live completi dentro Local Computer;
-- tool selection completa via Orchestrator Brain;
-- connettori reali e configurazione provider;
-- persistenza desktop completa;
+- unificazione browser durevole sul motore granular (ritiro planner legacy);
+- affidabilita' browser su siti reali complessi (extractor, recovery);
 - auto-apprendimento reale;
-- packaging e recovery end-to-end su workflow lunghi.
+- packaging/notarization e recovery e2e su workflow lunghi.
 
 ## Prossimo Blocco Consigliato
 
-Implementare il Prompt Plan Executor V1:
-
-- prende task `prompt_plan.*` dalla coda;
-- rispetta priorita', dipendenze, approval e resource limits;
-- riserva risorse prima di eseguire;
-- se non puo' riservare, lascia il task in `waiting_resource`;
-- esegue inizialmente step read-only browser/shell;
-- registra checkpoint redatti;
-- aggiorna Local Computer Session;
-- espone tutto alla UI Tasks/Chat.
-
-La sequenza completa e' dettagliata in `docs/architecture/final-roadmap.md`.
+Il Prompt Plan Executor (il blocco originariamente consigliato qui) e' fatto.
+Le priorita' correnti sono in `docs/roadmap.md` -> "Next Action": ruolo browser
+vision, unificazione del browser durevole sul motore granular, affidabilita' su
+siti reali, poi packaging e auto-apprendimento.
