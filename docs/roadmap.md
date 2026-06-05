@@ -84,9 +84,9 @@ ruoli/modelli.
    durevole `browser_task` (orchestrato dal Brain), e i **tool granulari** del
    percorso chat. Da risolvere portando i task durevoli sul motore granular e poi
    ritirando il planner.
-2. **Ruolo browser su modello vision.** Set-of-marks e screenshot rendono solo se
-   il ruolo `browser` punta a un modello vision; con un modello text-only la
-   legenda c'e' ma l'immagine e' sprecata.
+2. **Ruolo browser su modello vision.** RISOLTO (2026-06-05): ruolo `browser` =
+   `minimax-m3:cloud` (vision + tools, context 1M). Set-of-marks e screenshot ora
+   vengono effettivamente consumati dal modello.
 3. **Packaging / notarization macOS.** Da scegliere il packager finale
    (`electron-builder` o equivalente) e formalizzare firma/notarization, con
    lifecycle gateway equivalente al dev (token, autostart, shutdown su quit).
@@ -103,10 +103,9 @@ ruoli/modelli.
 
 Ordine consigliato, rivedibile; razionale accanto a ciascuna voce.
 
-1. **Ruolo browser su modello vision** (quick win / prerequisito). Puntare il
-   ruolo `browser` a un modello vision per far rendere davvero set-of-marks e
-   screenshot, gia' implementati. Costo minimo, sblocca investimento gia' fatto.
-   Chiude il debito #2.
+1. ~~**Ruolo browser su modello vision**~~ FATTO (2026-06-05): ruolo `browser` =
+   `minimax-m3:cloud` (vision). Debito #2 chiuso; set-of-marks/screenshot attivi.
+   La priorita' #1 effettiva diventa quindi la voce successiva.
 2. **Browser durevole sul motore granular**. Unificare `browser_task` sul
    percorso capable-first e ritirare il planner legacy: e' il debito
    architetturale piu' costoso da mantenere (due percorsi browser paralleli).
