@@ -3,7 +3,6 @@ pub enum GatewayTaskExecutorKind {
     CapabilityBrowser,
     CapabilityGeneric,
     Subagent,
-    LegacyBrowser,
     LegacyShell,
     LegacyLocal,
 }
@@ -32,7 +31,6 @@ impl TaskExecutorRegistry {
         );
         registry.register("capability.*", GatewayTaskExecutorKind::CapabilityGeneric);
         registry.register("subagent.*", GatewayTaskExecutorKind::Subagent);
-        registry.register("browser_task", GatewayTaskExecutorKind::LegacyBrowser);
         registry.register("local_shell_task", GatewayTaskExecutorKind::LegacyShell);
         registry.register("*", GatewayTaskExecutorKind::LegacyLocal);
         registry
@@ -83,9 +81,11 @@ mod tests {
             registry.resolve("subagent.MemoryAgent"),
             Some(GatewayTaskExecutorKind::Subagent)
         );
+        // The durable browser_task executor was retired (browser is driven inline
+        // by chat now); the kind falls through to the `*` LegacyLocal fallback.
         assert_eq!(
             registry.resolve("browser_task"),
-            Some(GatewayTaskExecutorKind::LegacyBrowser)
+            Some(GatewayTaskExecutorKind::LegacyLocal)
         );
         assert_eq!(
             registry.resolve("unknown"),

@@ -2,10 +2,9 @@
 //! high-risk (a purchase/login/booking commit, or arbitrary page script) and
 //! must be refused without explicit user approval.
 //!
-//! Extracted so BOTH the legacy planner loop (`browser_loop_controller`) and the
-//! new main-agent-driven `browser_act` tool can enforce the SAME guard. Takes the
-//! snapshot as `&str` (not a `BrowserObservation`) so it has no dependency on the
-//! planner crate types.
+//! Used by the main-agent-driven `browser_act` tool to enforce the guard. Takes
+//! the snapshot as `&str` (not a `BrowserObservation`) so it has no dependency on
+//! the browser-automation crate types.
 
 use serde_json::Value;
 
