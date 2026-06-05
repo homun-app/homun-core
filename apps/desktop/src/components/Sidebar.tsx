@@ -595,7 +595,6 @@ export function NavDrawer({
             alt="homun"
             style={{ height: 20, width: "auto", display: "block" }}
           />
-          <small>local-first · multi-modello</small>
         </div>
         <button className="icon-button" type="button" aria-label="Chiudi menu" onClick={onToggleDrawer}>
           <PanelLeftClose size={18} />

@@ -327,6 +327,10 @@ body.resizing-drawer {
   justify-content: space-between;
   gap: 10px;
   min-width: 0;
+  /* Same inner horizontal padding as .drawer-nav-item (0 10px) so the wordmark's
+     left edge lines up with the menu icons on one rail, and the close button
+     aligns with the nav items' right edge. */
+  padding: 0 10px;
 }
 
 .drawer-header strong,
