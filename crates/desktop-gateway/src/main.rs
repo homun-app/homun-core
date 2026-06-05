@@ -2915,6 +2915,17 @@ decisione passata e il suo perché), OPPURE se l'utente chiede cosa è stato dis
 conversazioni PRECEDENTI, e l'informazione NON è già nel profilo qui sopra, chiama SEMPRE lo \
 strumento recall_memory PRIMA di dire che non lo sai o non lo ricordi."
     );
+    let system = format!(
+        "{system}\n\nFRESCHEZZA / VERIFICA: la tua conoscenza interna può essere datata. Per QUALSIASI \
+domanda la cui risposta dipende da informazioni che cambiano nel tempo o che richiedono accuratezza \
+aggiornata — notizie e attualità, stato/condizioni/salute di persone, risultati o punteggi, prezzi, \
+orari, classifiche; ma ANCHE software (librerie, framework, API, SDK, strumenti: versioni, sintassi, \
+opzioni, best practice, stato dell'arte attuale) — DEVI verificare sul web col browser, preferendo la \
+documentazione UFFICIALE o fonti recenti, PRIMA di rispondere, invece di rispondere a memoria. NON \
+citare MAI una fonte (sito/testata/doc) che non hai effettivamente aperto in QUESTO turno: niente fonti, \
+versioni o date inventate. Se non puoi verificare, dillo apertamente invece di indovinare. Le domande \
+atemporali (concetti, logica, codice generico) puoi rispondere direttamente."
+    );
     // Granular browser operating guide (OpenClaw-SKILL-style). Appended ONLY when
     // the granular flag is on; when off the prompt is unchanged (browse_web
     // guidance above stays authoritative).
