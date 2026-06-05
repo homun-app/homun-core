@@ -9,6 +9,21 @@ Ogni fase deve chiudersi con test, documentazione aggiornata e una demo locale
 verificabile. Una fase non e' chiusa se funziona solo tramite mock o se bypassa
 Task Runtime, Resource Governor, Approval Gate o privacy policy.
 
+> **Stato 2026-06-05.** Questa roadmap per fasi e' in larga parte realizzata.
+> Le fasi 0.5-4 (chat foundation, executor governato, UI task/approval, Local
+> Computer, browser end-to-end) sono operative; le fasi 5-9 (Brain, capability/
+> MCP/connettori, subagenti, memoria, persistenza) sono avanzate o di base
+> completa. Tre cambi importanti NON previsti nel piano originale e ora in
+> esercizio: **(1) capable-first** — provider registry + ruoli orchestrator/
+> browser/memory verso modelli SOTA (cloud), con MLX/Gemma come fallback locale
+> piccolo: ogni riferimento a "Gemma" qui sotto va letto come "modello attivo
+> del ruolo"; **(2) canali** WhatsApp/Telegram con inbound-come-agente e
+> **contatti**/identity resolution; **(3) riscrittura browser stile OpenClaw** —
+> tool granulari guidati dal modello principale, che affianca il planner legacy
+> ancora vivo per i task durevoli (debito da chiudere). Le **priorita' correnti**
+> vivono in `docs/roadmap.md`; le fasi qui sotto restano valide come spec di
+> dettaglio, ma i loro "Stato" sono in parte storici.
+
 ## Principi Guida
 
 - Finire un blocco per volta prima di passare al successivo.
@@ -23,14 +38,15 @@ Task Runtime, Resource Governor, Approval Gate o privacy policy.
 - La chat experience e' fondazione di prodotto: non e' polish finale. Markdown,
   codice, allegati, azioni messaggio, streaming e activity progressive
   disclosure devono essere solidi prima di cablare altri tool complessi.
-- Lo streaming chat non deve dipendere da IPC desktop. La shell desktop e'
-  Electron/Chromium e la chat deve passare a un Desktop HTTP Gateway Rust
-  locale, protetto e loopback-only. Il gateway costruisce gia' il prompt con
-  context compression Rust, proxy stream/cancel verso Gemma, espone
-  health/warmup/shutdown runtime, persiste thread/messaggi in SQLite locale e
-  protegge `/api/chat/*` e `/api/runtime/*` con token bearer locale + CORS
-  allowlist; warmup usa il ProcessManager per avviare Gemma se non e' in
-  ascolto. Restano packaging, diagnostica runtime e poi il Brain operativo.
+- Lo streaming chat non dipende da IPC desktop: passa dal Desktop HTTP Gateway
+  Rust locale, loopback-only, con token bearer + CORS allowlist. Questo e' fatto
+  e in esercizio (`crates/desktop-gateway`): prompt building con context
+  compression, stream/cancel, thread/messaggi persistenti, e i read model
+  operativi (task, memoria, capability, Local Computer).
+- Capable-first: il modello attivo per ruolo (orchestrator/browser/memory) e'
+  scelto dal provider registry (cloud SOTA per default sui ruoli che lo
+  richiedono); MLX/Gemma locale resta come fallback per modelli piccoli. Niente
+  vincoli di prompt/contesto pensati per il modello piccolo sui modelli capaci.
 - Ogni fase aggiorna `docs/work-memory.md`; se cambia architettura o ordine,
   aggiorna anche `docs/architecture/system-map.md` e questo file.
 
@@ -763,15 +779,13 @@ Risultato:
 
 ## Prossima Azione
 
-Partire dalla Fase 1: Prompt Plan Executor V1.
+La Fase 1 (Prompt Plan Executor) e le fasi 2-4 sono realizzate. Le priorita'
+correnti sono in `docs/roadmap.md` -> sezione "Next Action", in sintesi:
 
-Il primo slice deve essere piccolo ma reale:
-
-- prendere un task `prompt_plan.research`;
-- passare da scheduler e Resource Governor;
-- eseguire solo uno step read-only;
-- registrare checkpoint e timeline;
-- mostrare il risultato nella UI.
-
-Questo sblocca test reali senza introdurre ancora browser mutativo,
-connettori complessi o auto-apprendimento.
+1. ruolo browser su modello vision (quick win: sblocca set-of-marks/screenshot);
+2. portare i task durevoli `browser_task` sul motore browser granular e ritirare
+   il planner legacy (chiude il debito del doppio motore);
+3. affidabilita' browser su siti reali (extractor tabellari, cookie preflight,
+   stale-ref recovery, wait predicates);
+4. Fase 12 — packaging/notarization macOS (distribuzione);
+5. Fase 10 — auto-apprendimento (gated: solo dopo eventi reali affidabili).
