@@ -62,8 +62,11 @@ Pilastri completati e in esercizio (dettaglio task in work-memory):
   sposta in tempo reale. **Resilienza offline (2026-06-05)**: i messaggi mandati
   a sistema spento vengono ripresi ed eseguiti al ritorno — auto-reconnect dei
   canali all'avvio, offset Telegram persistito (forward-before-advance), inoltro
-  sidecar->gateway con retry (at-least-once). Limite residuo: la finestra di
-  ritenzione della piattaforma (~24h Telegram, store-and-forward WhatsApp).
+  sidecar->gateway con retry (at-least-once). **Recupero WhatsApp via history-sync**:
+  i messaggi consegnati al telefono mentre il bot era offline vengono ripresi
+  dall'history-sync di wa-rs e auto-risposti, con 3 guardie anti-spam (recency
+  ~48h + watermark per-contatto + dedup durevole per message_id). Limite residuo:
+  la finestra in cui le piattaforme inviano backlog/history-sync.
 - **Artifacts & Files**: cartella montata host<->container, tool
   `create_artifact`/`save_artifact`, versioning, edit in-app, download + gestione.
 - **Sidebar IA (M9)**: progetti reali + Personale sempre attivo + modale nuovo
