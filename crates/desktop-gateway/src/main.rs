@@ -383,6 +383,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_active_workspace_from_disk();
     start_task_executor_worker(state.clone());
     spawn_thread_browser_session_reaper(state.clone());
+    reconnect_channels_on_startup();
     let chat_routes = Router::new()
         .route(
             "/api/chat/threads",
@@ -4932,6 +4933,9 @@ fn whatsapp_bin() -> Option<PathBuf> {
     for base in [
         "runtimes/channel-whatsapp/target/release/channel-whatsapp",
         "../runtimes/channel-whatsapp/target/release/channel-whatsapp",
+        // Dev fallback: a plain `cargo build` (debug) is enough to run locally.
+        "runtimes/channel-whatsapp/target/debug/channel-whatsapp",
+        "../runtimes/channel-whatsapp/target/debug/channel-whatsapp",
     ] {
         let path = PathBuf::from(base);
         if path.is_file() {
@@ -4993,6 +4997,81 @@ struct WhatsAppConnectRequest {
     /// Phone number (international, no '+') for pair-code; absent → QR mode.
     #[serde(default)]
     phone: Option<String>,
+}
+
+/// On gateway startup, bring channel sidecars back up automatically when they
+/// were previously connected (WhatsApp session paired / Telegram bot token saved)
+/// AND the channel master switch is on. This is what makes "messages sent while
+/// the system was down get fetched and executed on restart" actually happen: the
+/// sidecars resume, the platforms replay their backlog (Telegram getUpdates from
+/// the persisted offset; WhatsApp store-and-forward), and the (now retrying)
+/// forward delivers them to the gateway. Best-effort: failures are logged.
+fn reconnect_channels_on_startup() {
+    if !load_channel_settings().enabled {
+        return; // kill-switch off: stay disconnected.
+    }
+    let gw_port =
+        env::var("LOCAL_FIRST_DESKTOP_GATEWAY_PORT").unwrap_or_else(|_| "18765".to_string());
+    let gw_token = env::var("LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN").ok();
+
+    // WhatsApp: only if a session was previously paired (matches the sidecar's
+    // own session path under $HOME/.local-first-personal-assistant).
+    let wa_session = env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default()
+        .join(".local-first-personal-assistant")
+        .join("whatsapp-session.db");
+    if !whatsapp_running() && wa_session.exists() {
+        if let Some(bin) = whatsapp_bin() {
+            let mut command = std::process::Command::new(bin);
+            if let Some(path) = whatsapp_status_path() {
+                command.env("WA_STATUS_FILE", path);
+            }
+            command.env("WA_HTTP_PORT", WHATSAPP_HTTP_PORT.to_string());
+            command.env("WA_GATEWAY_URL", format!("http://127.0.0.1:{gw_port}"));
+            if let Some(token) = gw_token.as_ref() {
+                command.env("WA_GATEWAY_TOKEN", token);
+            }
+            match command.spawn() {
+                Ok(child) => {
+                    if let Ok(mut guard) = whatsapp_child().lock() {
+                        *guard = Some(child);
+                    }
+                    eprintln!("channel/whatsapp: auto-reconnect all'avvio (sessione presente)");
+                }
+                Err(error) => eprintln!("channel/whatsapp: auto-reconnect fallito: {error}"),
+            }
+        }
+    }
+
+    // Telegram: only if a bot token was saved.
+    let tg_token = telegram_token_path()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    if !telegram_running() {
+        if let (Some(bin), Some(token)) = (telegram_bin(), tg_token) {
+            let mut command = std::process::Command::new(bin);
+            command.env("TG_BOT_TOKEN", &token);
+            command.env("TG_HTTP_PORT", TELEGRAM_HTTP_PORT.to_string());
+            if let Some(path) = telegram_status_path() {
+                command.env("TG_STATUS_FILE", path);
+            }
+            command.env("TG_GATEWAY_URL", format!("http://127.0.0.1:{gw_port}"));
+            if let Some(token) = gw_token.as_ref() {
+                command.env("TG_GATEWAY_TOKEN", token);
+            }
+            match command.spawn() {
+                Ok(child) => {
+                    if let Ok(mut guard) = telegram_child().lock() {
+                        *guard = Some(child);
+                    }
+                    eprintln!("channel/telegram: auto-reconnect all'avvio (token presente)");
+                }
+                Err(error) => eprintln!("channel/telegram: auto-reconnect fallito: {error}"),
+            }
+        }
+    }
 }
 
 async fn whatsapp_connect(
@@ -5087,6 +5166,9 @@ fn telegram_bin() -> Option<PathBuf> {
     for base in [
         "runtimes/channel-telegram/target/release/channel-telegram",
         "../runtimes/channel-telegram/target/release/channel-telegram",
+        // Dev fallback: a plain `cargo build` (debug) is enough to run locally.
+        "runtimes/channel-telegram/target/debug/channel-telegram",
+        "../runtimes/channel-telegram/target/debug/channel-telegram",
     ] {
         let path = PathBuf::from(base);
         if path.is_file() {
