@@ -79,11 +79,10 @@ ruoli/modelli.
 
 ## Debito tecnico / fronti aperti
 
-1. **Doppio motore browser.** Convivono il **planner legacy**
-   (`browser_loop_controller.rs` + `BrowserLoopRunner`), ancora il motore del task
-   durevole `browser_task` (orchestrato dal Brain), e i **tool granulari** del
-   percorso chat. Da risolvere portando i task durevoli sul motore granular e poi
-   ritirando il planner.
+1. **Doppio motore browser.** RISOLTO (2026-06-05): rimosso il `browser_task`
+   durevole e il planner legacy (`browser_loop_controller.rs`, `RuntimeBrowserLoopPlanner`,
+   `brain_adapter.rs`, `browse_web`). Il browser e' guidato SEMPRE inline
+   dall'agente coi tool granulari (motore unico).
 2. **Ruolo browser su modello vision.** RISOLTO (2026-06-05): ruolo `browser` =
    `minimax-m3:cloud` (vision + tools, context 1M). Set-of-marks e screenshot ora
    vengono effettivamente consumati dal modello.
@@ -106,13 +105,12 @@ Ordine consigliato, rivedibile; razionale accanto a ciascuna voce.
 1. ~~**Ruolo browser su modello vision**~~ FATTO (2026-06-05): ruolo `browser` =
    `minimax-m3:cloud` (vision). Debito #2 chiuso; set-of-marks/screenshot attivi.
    La priorita' #1 effettiva diventa quindi la voce successiva.
-2. **Browser durevole sul motore granular**. Unificare `browser_task` sul
-   percorso capable-first e ritirare il planner legacy: e' il debito
-   architetturale piu' costoso da mantenere (due percorsi browser paralleli).
-   Chiude il debito #1.
-3. **Affidabilita' browser su siti reali**. Dopo l'unificazione del motore:
-   extractor strutturati per tabelle/listbox, cookie/banner preflight,
-   stale-ref recovery, wait predicates bounded.
+2. ~~**Browser durevole sul motore granular**~~ FATTO (2026-06-05): rimosso il
+   path durevole + planner legacy; browser inline-only (motore unico). Debito #1
+   chiuso. La priorita' #1 effettiva diventa la voce successiva.
+3. **Affidabilita' browser su siti reali** (ora priorita' #1). Extractor
+   strutturati per tabelle/listbox, cookie/banner preflight, stale-ref recovery,
+   wait predicates bounded.
 4. **Packaging / notarization macOS**. Necessario per distribuire, ma l'app e'
    ancora single-dev: importante, non urgente rispetto al core. Chiude #3.
 5. **Auto-apprendimento** (gated: solo dopo eventi reali affidabili). Salvare
