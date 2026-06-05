@@ -203,6 +203,18 @@ impl ChatStore {
         })
     }
 
+    /// Unix-seconds timestamp of the most recent message in a thread (None when
+    /// the thread has no messages). Per-contact watermark for channel
+    /// history-recovery: a recovered message older-or-equal to this was already
+    /// handled and must not be replied to again.
+    pub fn latest_message_timestamp(&self, thread_id: &str) -> rusqlite::Result<Option<i64>> {
+        self.conn.query_row(
+            "select max(cast(timestamp as integer)) from chat_messages where thread_id = ?1",
+            params![thread_id],
+            |row| row.get::<_, Option<i64>>(0),
+        )
+    }
+
     pub fn thread(&self, thread_id: &str) -> rusqlite::Result<Option<ChatThread>> {
         self.conn
             .query_row(
@@ -387,6 +399,16 @@ impl ChatStore {
 
             create index if not exists idx_task_thread_links_thread
                 on task_thread_links(thread_id);
+
+            -- C: channel inbound dedup. Every inbound channel message (live or
+            -- recovered from a WhatsApp history sync) is keyed by
+            -- channel + message_id and recorded here on first sight. A second
+            -- arrival (e.g. a live message re-appearing in a later history sync)
+            -- is detected as a duplicate and dropped WITHOUT a second auto-reply.
+            create table if not exists channel_inbound_seen (
+                dedup_key text primary key,
+                seen_at integer not null
+            );
             ",
         )?;
 
@@ -428,6 +450,39 @@ impl ChatStore {
             }
         }
         Ok(found)
+    }
+
+    /// Records a channel inbound message as seen, keyed by "{channel}:{message_id}".
+    /// Returns `true` if the key was NEWLY inserted (first time we see this
+    /// message), `false` if it already existed (a duplicate — e.g. a live message
+    /// re-arriving inside a later history sync). Callers treat `false` as
+    /// "already handled; do not record or auto-reply again", which makes the
+    /// inbound pipeline idempotent across the live and history-recovery paths.
+    pub fn mark_inbound_seen(&self, key: &str) -> rusqlite::Result<bool> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let inserted = self.conn.execute(
+            "insert or ignore into channel_inbound_seen (dedup_key, seen_at) values (?1, ?2)",
+            params![key, now],
+        )?;
+        Ok(inserted == 1)
+    }
+
+    /// Prunes channel dedup entries older than `max_age_secs` (best-effort
+    /// housekeeping; the table only needs to remember the recent offline window
+    /// plus a margin). Returns the number of rows removed.
+    pub fn prune_inbound_seen(&self, max_age_secs: i64) -> rusqlite::Result<usize> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let cutoff = now.saturating_sub(max_age_secs);
+        self.conn.execute(
+            "delete from channel_inbound_seen where seen_at < ?1",
+            params![cutoff],
+        )
     }
 
     /// Links an additional (non-primary) task to a thread so it resolves via

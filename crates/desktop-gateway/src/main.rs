@@ -5390,6 +5390,18 @@ struct ChannelInbound {
     /// Telegram leaves this unset.
     #[serde(default)]
     sender_pn: Option<String>,
+    /// Channel-native message id (WhatsApp message-key id, Telegram message id).
+    /// Used for idempotency: a message already handled live is dropped when it
+    /// re-appears in a WhatsApp history sync. Optional — payloads without it skip
+    /// dedup and process as before.
+    #[serde(default)]
+    message_id: Option<String>,
+    /// Unix-seconds timestamp of the original message. Set by the WhatsApp
+    /// history-recovery path so the gateway can defensively drop messages older
+    /// than the recency window even if the sidecar filter let one slip. Live
+    /// payloads may leave it unset.
+    #[serde(default)]
+    ts: Option<i64>,
 }
 
 async fn whatsapp_inbound(
@@ -5427,6 +5439,95 @@ async fn handle_channel_inbound(
     if matches!(action, InboundAction::Ignore) {
         return Json(serde_json::json!({ "action": "ignore" }));
     }
+
+    // Recency ceiling shared by the dedup/recency guard below and the WhatsApp
+    // history-recovery sidecar (env WA_HISTORY_RECENCY_HOURS, default 48h). The
+    // initial WhatsApp history sync carries months of chats; we only ever want
+    // to act on messages from the recent offline window.
+    let recency_secs: i64 = std::env::var("WA_HISTORY_RECENCY_HOURS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(48)
+        .saturating_mul(3600)
+        .min(i64::MAX as u64) as i64;
+
+    // Defense-in-depth on top of the sidecar filter: if the payload carries the
+    // original message timestamp (history-recovery path sets it) and it is older
+    // than the recency ceiling, mark it seen and drop it WITHOUT replying. We
+    // still mark it seen so a later, in-window re-delivery of the same id can't
+    // sneak through.
+    if let Some(ts) = message.ts {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        if ts > 0 && now.saturating_sub(ts) > recency_secs {
+            if let (Some(message_id), Ok(store)) =
+                (message.message_id.as_deref(), lock_store(state))
+            {
+                let _ = store.mark_inbound_seen(&format!("{channel}:{message_id}"));
+            }
+            eprintln!(
+                "channel/{channel}: drop too-old inbound (ts={ts}, recency={recency_secs}s)"
+            );
+            return Json(serde_json::json!({ "action": "too_old" }));
+        }
+
+        // Per-contact watermark. A recovered message older-or-equal to our last
+        // activity in this contact's thread was already handled BEFORE the dedup
+        // table existed (so its id isn't recorded there). Skip it — only messages
+        // genuinely newer than our last thread activity are missed-while-offline.
+        // Live messages carry no `ts`, so they always process.
+        let watermark_thread = format!("channel_{channel}_{}", message.sender);
+        if let Ok(store) = lock_store(state) {
+            if let Ok(Some(latest)) = store.latest_message_timestamp(&watermark_thread) {
+                if ts <= latest {
+                    if let Some(message_id) = message.message_id.as_deref() {
+                        let _ = store.mark_inbound_seen(&format!("{channel}:{message_id}"));
+                    }
+                    eprintln!(
+                        "channel/{channel}: skip already-handled inbound (ts={ts} <= watermark={latest})"
+                    );
+                    return Json(serde_json::json!({ "action": "already_handled" }));
+                }
+            }
+        }
+    }
+
+    // Idempotency: dedup on "{channel}:{message_id}". The SAME handler runs for
+    // live and history-recovered messages, so marking-seen here covers both:
+    //  - a live message is recorded as seen, so when it later re-appears in a
+    //    history sync it is recognized as a duplicate and not re-replied;
+    //  - a recovered message that was never seen live is processed once.
+    // Payloads without a message_id (none today, but allowed) skip dedup and
+    // process as before.
+    if let Some(message_id) = message.message_id.as_deref() {
+        let dedup_key = format!("{channel}:{message_id}");
+        match lock_store(state) {
+            Ok(store) => match store.mark_inbound_seen(&dedup_key) {
+                // Newly inserted → first time we see it; fall through and process.
+                // Opportunistically trim entries well past the recency window so
+                // the dedup table stays bounded (margin = 2× recency).
+                Ok(true) => {
+                    let _ = store.prune_inbound_seen(recency_secs.saturating_mul(2));
+                }
+                // Already present → duplicate; drop without recording or replying.
+                Ok(false) => {
+                    eprintln!("channel/{channel}: duplicate inbound {dedup_key} dropped");
+                    return Json(serde_json::json!({ "action": "duplicate" }));
+                }
+                // On a store error, fail open: process the message rather than
+                // silently dropping a possibly-new message.
+                Err(error) => {
+                    eprintln!("channel/{channel}: dedup check failed for {dedup_key}: {error}")
+                }
+            },
+            Err(error) => {
+                eprintln!("channel/{channel}: dedup store lock failed: {error:?}")
+            }
+        }
+    }
+
     // Best-effort: record the contact (person node) + the message (episodic).
     record_channel_message(state, channel, &message);
     // Learn durable knowledge from the channel conversation into the general
