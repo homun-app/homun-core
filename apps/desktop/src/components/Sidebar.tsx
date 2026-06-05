@@ -589,7 +589,7 @@ export function NavDrawer({
     <aside className="nav-drawer" aria-label="Menu principale">
       <header className="drawer-header">
         <div>
-          <strong>Assistant locale</strong>
+          <strong>homün</strong>
           <small>local-first · multi-modello</small>
         </div>
         <button className="icon-button" type="button" aria-label="Chiudi menu" onClick={onToggleDrawer}>
