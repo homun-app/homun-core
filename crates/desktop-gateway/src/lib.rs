@@ -1,10 +1,5 @@
 //! Local HTTP gateway contracts for the Electron desktop shell.
 
-/// Browser observe/act loop planner (prompt construction + decision parsing).
-/// Exposed from the library so it can be exercised by integration harnesses and
-/// examples, not only from inside the gateway binary.
-pub mod browser_loop_controller;
-
 use local_first_context_compression::{
     CompressionMetrics, CompressionPolicy, CompressionResult, ContextCompressor, ContextItem,
     ContextKind,

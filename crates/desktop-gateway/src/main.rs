@@ -1,9 +1,6 @@
-mod browser_loop_controller;
-// Shared browser high-risk safety gate (used by the planner loop and the new
-// main-agent-driven browser_* tools).
+// Shared browser high-risk safety gate (used by the main-agent-driven
+// browser_* tools).
 mod browser_safety;
-// Brain -> OperationalPlan adapter (A1), wired via `try_brain_operational_plan`.
-mod brain_adapter;
 mod chat_store;
 // Multi-provider inference registry (Phase 1 of per-role model routing).
 mod model_registry;
@@ -32,13 +29,11 @@ use axum::{
     routing::post,
 };
 use base64::Engine as _;
-use browser_loop_controller::{BrowserContextProfile, RuntimeBrowserLoopPlanner};
 use chat_store::ChatStore;
 use local_first_browser_automation::{
-    BrowserAutomationClient, BrowserAutomationError, BrowserLoopRequest, BrowserLoopRunner,
-    BrowserMethod, BrowserResponse, BrowserSidecarSession, BrowserSidecarSpawnOptions,
-    BrowserUrlApprovalGrant, BrowserUrlApprovalScope, BrowserUrlPolicyStore, BrowserVisibilityMode,
-    browser_loop_event_payload,
+    BrowserAutomationClient, BrowserAutomationError, BrowserMethod, BrowserResponse,
+    BrowserSidecarSession, BrowserSidecarSpawnOptions, BrowserUrlApprovalGrant,
+    BrowserUrlApprovalScope, BrowserUrlPolicyStore, BrowserVisibilityMode,
 };
 use local_first_inference::{
     AnthropicProvider, CapabilityDescriptor, Locality, ModelRouter, OpenAiCompatProvider,
@@ -54,8 +49,8 @@ use local_first_capabilities::{
     WorkspaceId as CapabilityWorkspaceId,
 };
 use local_first_orchestrator::{
-    ExecutionPlan, MemoryContextProvider, MemoryContextSnippet, OrchestratorBrain,
-    OrchestratorBudgets, OrchestratorRequest, OrchestratorResult, ToolSearchIndexStore,
+    MemoryContextProvider, MemoryContextSnippet, OrchestratorBrain, OrchestratorBudgets,
+    OrchestratorRequest, OrchestratorResult, ToolSearchIndexStore,
 };
 use local_first_secrets::{
     DevelopmentSecretKeyProvider, EncryptedFileSecretStore, SecretMaterial, SecretRef, SecretStore,
@@ -86,10 +81,10 @@ use local_first_subagents::{
     GenerateJsonRequest, GenerateStreamEvent, SubagentTaskExecutor, TokenMetrics,
 };
 use local_first_task_runtime::{
-    ApprovalGate, ApprovalRequest, ApprovalStatus, ExecutorResult, LeaseManager, ResourceClass,
-    ResourceGovernor, ResourceLimits, ResourceRequirement, TaskExecutor, TaskId, TaskPriority,
-    TaskQueueSnapshot, TaskRecord, TaskRuntimeError, TaskScheduler, TaskStatus, TaskStore,
-    TaskUiDetail, TaskUiItem, TaskUiReadModel, UserId, WorkspaceId,
+    ApprovalGate, ApprovalRequest, ExecutorResult, LeaseManager, ResourceClass, ResourceGovernor,
+    ResourceLimits, TaskExecutor, TaskId, TaskQueueSnapshot, TaskRecord, TaskRuntimeError,
+    TaskScheduler, TaskStatus, TaskStore, TaskUiDetail, TaskUiItem, TaskUiReadModel, UserId,
+    WorkspaceId,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -287,170 +282,6 @@ struct TaskArtifactOutput {
     preview_ref: Option<String>,
 }
 
-#[derive(Debug, Clone)]
-struct BrowserSourceSummary {
-    label: String,
-    url: String,
-    status: String,
-}
-
-#[derive(Debug, Clone)]
-struct BrowserFormDraftSummary {
-    label: String,
-    url: String,
-    status: String,
-    filled_fields: Vec<String>,
-    reason: Option<String>,
-    search_status: Option<String>,
-    search_excerpt: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum OperationalIntentType {
-    Informational,
-    Transactional,
-    Navigational,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum OperationalAutonomy {
-    AutomaticUntilGate,
-    AskBeforeEachExternalAction,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum OperationalStepStatus {
-    Pending,
-    InProgress,
-    Completed,
-    Blocked,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct OperationalPlanStep {
-    id: String,
-    title: String,
-    detail: String,
-    tool: Option<String>,
-    status: OperationalStepStatus,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct OperationalPlan {
-    objective: String,
-    intent_type: OperationalIntentType,
-    autonomy: OperationalAutonomy,
-    tools: Vec<String>,
-    steps: Vec<OperationalPlanStep>,
-    constraints: Vec<String>,
-    success_criteria: Vec<String>,
-    stop_conditions: Vec<String>,
-    approval_gates: Vec<String>,
-    data_schema: Vec<String>,
-}
-
-impl OperationalPlan {
-    fn start_step(&mut self, id: &str) {
-        for step in &mut self.steps {
-            if step.id == id {
-                step.status = OperationalStepStatus::InProgress;
-            }
-        }
-    }
-
-    fn complete_step(&mut self, id: &str) {
-        for step in &mut self.steps {
-            if step.id == id {
-                step.status = OperationalStepStatus::Completed;
-            }
-        }
-    }
-
-    fn block_step(&mut self, id: &str) {
-        for step in &mut self.steps {
-            if step.id == id {
-                step.status = OperationalStepStatus::Blocked;
-            }
-        }
-    }
-}
-
-fn operational_step(
-    id: impl Into<String>,
-    title: impl Into<String>,
-    detail: impl Into<String>,
-    tool: Option<&str>,
-) -> OperationalPlanStep {
-    OperationalPlanStep {
-        id: id.into(),
-        title: title.into(),
-        detail: detail.into(),
-        tool: tool.map(str::to_string),
-        status: OperationalStepStatus::Pending,
-    }
-}
-
-#[derive(Debug, Clone)]
-struct TaskFinalAnswer {
-    title: String,
-    summary: String,
-    findings: Vec<String>,
-    sources: Vec<String>,
-    limitations: Vec<String>,
-    next_steps: Vec<String>,
-}
-
-impl TaskFinalAnswer {
-    fn to_markdown(&self) -> String {
-        let mut sections = Vec::new();
-        sections.push(format!("**{}**\n\n{}", self.title, self.summary));
-        if !self.findings.is_empty() {
-            sections.push(format!(
-                "**Risultato**\n{}",
-                self.findings
-                    .iter()
-                    .map(|item| format!("- {item}"))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            ));
-        }
-        if !self.sources.is_empty() {
-            sections.push(format!(
-                "**Fonti controllate**\n{}",
-                self.sources
-                    .iter()
-                    .map(|item| format!("- {item}"))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            ));
-        }
-        if !self.limitations.is_empty() {
-            sections.push(format!(
-                "**Limiti**\n{}",
-                self.limitations
-                    .iter()
-                    .map(|item| format!("- {item}"))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            ));
-        }
-        if !self.next_steps.is_empty() {
-            sections.push(format!(
-                "**Prossimo passo**\n{}",
-                self.next_steps
-                    .iter()
-                    .map(|item| format!("- {item}"))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            ));
-        }
-        sections.join("\n\n")
-    }
-}
-
 #[derive(Debug, Serialize)]
 struct ComputerArtifactPreviewResponse {
     artifact_id: String,
@@ -505,12 +336,6 @@ struct RejectApprovalRequest {
 struct ApproveApprovalRequest {
     scope: Option<String>,
     browser_visibility: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TaskCreationMode {
-    AutoFromPrompt,
-    ExplicitMessageAction,
 }
 
 #[derive(Debug, Serialize)]
@@ -935,41 +760,22 @@ async fn create_task_from_chat_message(
         })?;
     // Model-driven (Brain) planning when a capable backend is configured: the
     // OrchestratorBrain comprehends the message and materializes the right
-    // durable tasks. Falls back to a single browser_task (de-keyworded) only if
-    // the Brain is off or yields nothing. No keyword classification anywhere.
-    let brain_task_ids = if brain_materialize_enabled() {
+    // durable (non-browser) tasks. There is no longer a browser_task fallback:
+    // browser interaction is driven inline by the chat agent (granular tools),
+    // so when the Brain is off or yields nothing we simply create no task here.
+    if brain_materialize_enabled() {
         let state_for_brain = state.clone();
         let thread_for_brain = thread_id.clone();
         let goal = message.text.clone();
-        match tokio::task::spawn_blocking(move || {
+        if let Err(error) = tokio::task::spawn_blocking(move || {
             brain_materialize_tasks(&state_for_brain, &thread_for_brain, &goal)
         })
         .await
+        .map_err(|join_error| format!("join error: {join_error}"))
+        .and_then(|result| result.map_err(|error| error.message))
         {
-            Ok(Ok(ids)) if !ids.is_empty() => Some(ids),
-            Ok(Ok(_)) => None,
-            Ok(Err(error)) => {
-                eprintln!("brain_materialize (create_task): {}; using fallback", error.message);
-                None
-            }
-            Err(join_error) => {
-                eprintln!(
-                    "brain_materialize (create_task) join error: {join_error}; using fallback"
-                );
-                None
-            }
+            eprintln!("brain_materialize (create_task): {error}");
         }
-    } else {
-        None
-    };
-    if brain_task_ids.is_none() {
-        ensure_operational_task_for_thread(
-            &state,
-            &thread_id,
-            &message_id,
-            &message.text,
-            TaskCreationMode::ExplicitMessageAction,
-        )?;
     }
     Ok(Json(
         lock_store(&state)?
@@ -2360,19 +2166,6 @@ const MAX_TOOL_ROUNDS: usize = 5;
 /// `LOCAL_FIRST_CHAT_BROWSER_MAX_ROUNDS`.
 const MAX_TOOL_ROUNDS_BROWSER: usize = 32;
 
-/// Whether the main chat agent drives the browser via the four GRANULAR tools
-/// (`browser_navigate`/`browser_snapshot`/`browser_act`/`browser_screenshot`)
-/// instead of the coarse `browse_web` handoff. Gated so we can A/B in one build.
-fn chat_browser_granular_enabled() -> bool {
-    // Phase 3: the main-agent-driven granular browser tools are the DEFAULT.
-    // Opt out (fall back to the legacy isolated `browse_web` planner) with
-    // LOCAL_FIRST_CHAT_BROWSER_GRANULAR=0|false|off.
-    !matches!(
-        env::var("LOCAL_FIRST_CHAT_BROWSER_GRANULAR").as_deref(),
-        Ok("0") | Ok("false") | Ok("off")
-    )
-}
-
 /// Round budget once a browser tool has been used this turn (env-overridable).
 fn chat_browser_max_rounds() -> usize {
     env::var("LOCAL_FIRST_CHAT_BROWSER_MAX_ROUNDS")
@@ -2389,28 +2182,6 @@ const COMPOSIO_CATALOG_CAP: usize = 200;
 const COMPOSIO_DISCOVERY_RESULTS: usize = 8;
 /// Cap on a Composio tool result fed back to the model (email bodies can be huge).
 const COMPOSIO_RESULT_CHARS: usize = 6000;
-
-/// The browser tool the chat model can invoke. No keyword gate: the MODEL reads
-/// this description and decides to call it when the request needs the live web.
-fn browse_web_tool_schema() -> serde_json::Value {
-    serde_json::json!({
-        "type": "function",
-        "function": {
-            "name": "browse_web",
-            "description": "Naviga il web con un browser reale e contenuto (non headless) per raggiungere un obiettivo concreto e riportare ciò che trovi (orari, prezzi, risultati, contenuti di pagina). USA questo strumento per QUALSIASI richiesta che richieda dati dal web in tempo reale o azioni nel browser (voli, treni, prezzi, ricerche, prenotazioni, consultare un sito) invece di rispondere che non hai accesso a internet.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "goal": {
-                        "type": "string",
-                        "description": "Obiettivo concreto e autonomo da raggiungere nel browser, es: 'cerca voli da Milano a Napoli per il 10 giugno e riporta orari e prezzi'."
-                    }
-                },
-                "required": ["goal"]
-            }
-        }
-    })
-}
 
 /// Granular browser tool: navigate to a URL (and auto-snapshot the result).
 fn browser_navigate_tool_schema() -> serde_json::Value {
@@ -2760,37 +2531,33 @@ async fn stream_chat_via_openai(
         "Sei l'assistente locale e agisci come ORCHESTRATORE. Oggi è {today}: usa \
 SEMPRE questa data per risolvere richieste temporali (es. \"10 giugno\" = il 10 \
 giugno dell'anno corretto rispetto a oggi, sempre nel futuro). Hai accesso a un \
-browser reale e contenuto tramite lo strumento browse_web.\n\
+browser reale che PILOTI TU con gli strumenti granulari (browser_navigate / \
+browser_snapshot / browser_act / browser_screenshot).\n\
 \n\
 METODO (vale per qualsiasi richiesta, non solo viaggi):\n\
 1. COMPRENDI: cosa vuole l'utente e qual è il RISULTATO concreto atteso.\n\
 2. CRITERI DI SUCCESSO: definisci esplicitamente cosa significa \"fatto\" (quali \
-dati/campi e quante opzioni servono). Includili SEMPRE nell'obiettivo di browse_web.\n\
+dati/campi e quante opzioni servono) e tienili a mente mentre navighi.\n\
 3. CHIARIMENTI: se manca un parametro davvero bloccante e ambiguo, fai UNA sola \
 domanda concisa PRIMA di cercare; altrimenti procedi con default sensati e \
 DICHIARALI (non bloccare l'utente per dettagli minori).\n\
 4. ESEGUI: quando servono dati dal web in tempo reale o azioni nel browser, DEVI \
-usare browse_web (non dire che non hai accesso a internet). Chiama browse_web UNA \
-SOLA VOLTA: nell'unico obiettivo includi il compito concreto con date esplicite \
-(anno incluso), i CRITERI DI SUCCESSO, e 2-3 FONTI candidate in ordine di \
-preferenza. È il browser stesso a provarle a turno (se una è bloccata/senza dati \
-passa alla successiva). NON chiamare browse_web più volte per provare fonti diverse \
-e NON ripetere la stessa ricerca.\n\
-5. SINTETIZZA: appena ricevi il risultato del browser, scrivi la risposta finale \
-all'utente. Riporta lo stato REALE di ogni fonte e NON confondere i casi: usa \
-\"bloccata/non raggiungibile\" SOLO se la fonte ha status \"failed\" (non si è \
-aperta) o un captcha esplicito. Se la fonte è stata RAGGIUNTA ma il form non è \
-stato completato (status \"blocked\"/raggiunta-incompleta), NON dire che è \
-bloccata o irraggiungibile: di' che ci sei arrivato ma non hai completato la \
-ricerca, mostra i dati parziali eventualmente raccolti e proponi di riprovare.\n\
+usare il browser (non dire che non hai accesso a internet). Apri la fonte con \
+browser_navigate, leggi lo snapshot e procedi UNA micro-azione alla volta. Tieni a \
+mente 2-3 FONTI candidate in ordine di preferenza e provale a turno: se una è \
+bloccata/senza dati, passa alla successiva. Non ripetere la stessa ricerca.\n\
+5. SINTETIZZA: appena hai dati sufficienti, SMETTI di usare il browser e scrivi la \
+risposta finale all'utente. Riporta lo stato REALE di ogni fonte: di' che una fonte \
+è \"bloccata/non raggiungibile\" SOLO se non si è aperta o mostra un captcha \
+esplicito. Se l'hai RAGGIUNTA ma non hai completato la ricerca, NON dire che è \
+bloccata o irraggiungibile: di' che ci sei arrivato ma non hai completato, mostra i \
+dati parziali eventualmente raccolti e proponi di riprovare.\n\
 \n\
-OBIETTIVO AUTO-CONTENUTO (fondamentale): il browser NON conosce i messaggi \
-precedenti. Ogni obiettivo di browse_web deve contenere TUTTI i parametri già \
-risolti nella conversazione. Anche nei follow-up brevi (es. l'utente dice \"cerca \
-anche su easyJet\" o \"e in treno?\"): NON passare \"cerca su easyJet\" da solo — \
-passa l'obiettivo completo, es. \"Cerca su easyJet i voli da Milano a Napoli del 10 \
-giugno 2026, solo andata; riporta orari, durata, scali, prezzo\". Ripeti sempre \
-tratta/luogo, data con anno e vincoli.\n\
+Viaggi e follow-up: porta sempre con te TUTTI i parametri già risolti nella \
+conversazione (tratta/luogo, data con anno, vincoli). Anche su un follow-up breve \
+(\"cerca anche su easyJet\", \"e in treno?\") riprendi l'obiettivo completo, es. \
+voli da Milano a Napoli del 10 giugno 2026, solo andata, con orari, durata, scali, \
+prezzo.\n\
 \n\
 Viaggi: se l'utente NON chiede esplicitamente il ritorno, cerca SOLO ANDATA \
 (one-way). Un passeggero salvo diversa indicazione.\n\
@@ -2926,13 +2693,11 @@ citare MAI una fonte (sito/testata/doc) che non hai effettivamente aperto in QUE
 versioni o date inventate. Se non puoi verificare, dillo apertamente invece di indovinare. Le domande \
 atemporali (concetti, logica, codice generico) puoi rispondere direttamente."
     );
-    // Granular browser operating guide (OpenClaw-SKILL-style). Appended ONLY when
-    // the granular flag is on; when off the prompt is unchanged (browse_web
-    // guidance above stays authoritative).
-    let browser_granular = chat_browser_granular_enabled();
-    let system = if browser_granular {
-        format!(
-            "{system}\n\nBROWSER (strumenti granulari): per i compiti sul web pilota TU il browser, \
+    // Granular browser operating guide (OpenClaw-SKILL-style). Always present:
+    // the main agent drives the browser via the granular micro-tools (there is no
+    // legacy browse_web handoff anymore).
+    let system = format!(
+        "{system}\n\nBROWSER (strumenti granulari): per i compiti sul web pilota TU il browser, \
 una micro-azione alla volta, con browser_navigate / browser_snapshot / browser_act / \
 browser_screenshot (NON esiste più browse_web).\n\
 - FLUSSO: browser_navigate(url) → leggi lo snapshot → browser_act UNA azione → ri-leggi lo \
@@ -2951,10 +2716,7 @@ immagine).\n\
 all'utente cosa fare (non cliccare \"Acquista\"/\"Accedi\"/\"Prenota\").\n\
 - STOP: appena hai dati sufficienti, SMETTI di usare il browser e scrivi la risposta finale \
 all'utente (tabella per riga + eventuale footer Fonti)."
-        )
-    } else {
-        system
-    };
+    );
     let system = system.as_str();
     let mut endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     // Channel turns run read-only: offer only tools without side effects (search,
@@ -2962,25 +2724,19 @@ all'utente (tabella per riga + eventuale footer Fonti)."
     // files, run sandbox, Composio writes) are withheld → Phase 2 routes them to
     // approval. App chat (tool_policy unset) keeps the full toolset.
     let read_only = request.tool_policy.as_deref() == Some("read_only");
-    // Browser toolset: when the granular flag is ON, the main agent drives the
-    // browser itself via four micro-tools and `browse_web` is REMOVED so it can't
-    // fall back. When OFF, behaviour is byte-identical to today (browse_web only).
-    // (`browser_granular` computed above for the operating-guide prompt block.)
-    let mut base_tools = if browser_granular {
-        // read_only (channels) still gets browser_act, but the dispatch blocks any
-        // committing action — channels can fill/scroll/read, never click-submit.
-        vec![
-            browser_navigate_tool_schema(),
-            browser_snapshot_tool_schema(),
-            browser_act_tool_schema(),
-            browser_screenshot_tool_schema(),
-            browser_tabs_tool_schema(),
-            browser_dialog_tool_schema(),
-            recall_memory_tool_schema(),
-        ]
-    } else {
-        vec![browse_web_tool_schema(), recall_memory_tool_schema()]
-    };
+    // Browser toolset: the main agent ALWAYS drives the browser itself via the
+    // granular micro-tools. The legacy coarse `browse_web` handoff is gone.
+    // read_only (channels) still gets browser_act, but the dispatch blocks any
+    // committing action — channels can fill/scroll/read, never click-submit.
+    let mut base_tools = vec![
+        browser_navigate_tool_schema(),
+        browser_snapshot_tool_schema(),
+        browser_act_tool_schema(),
+        browser_screenshot_tool_schema(),
+        browser_tabs_tool_schema(),
+        browser_dialog_tool_schema(),
+        recall_memory_tool_schema(),
+    ];
     if !read_only {
         base_tools.push(create_artifact_tool_schema());
     }
@@ -3223,10 +2979,6 @@ all'utente (tabella per riga + eventuale footer Fonti)."
                         .and_then(|a| a.as_str())
                         .unwrap_or("{}");
                     let call_id = call.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
-                    let goal = serde_json::from_str::<serde_json::Value>(args_raw)
-                        .ok()
-                        .and_then(|a| a.get("goal").and_then(|g| g.as_str()).map(String::from))
-                        .unwrap_or_default();
 
                     let result = if read_only
                         && matches!(name, "run_in_sandbox" | "create_artifact" | "save_artifact")
@@ -3236,40 +2988,6 @@ all'utente (tabella per riga + eventuale footer Fonti)."
                         "Azione non disponibile dal canale: le operazioni con effetti \
 richiedono la tua conferma nell'app. Proponila e fermati."
                             .to_string()
-                    } else if name == "browse_web" {
-                        let _ = emit_stream_event(
-                            &tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!(
-                                    "‹‹ACT››🌐 Navigo sul web: {}‹‹/ACT››",
-                                    if goal.is_empty() { "(obiettivo dal contesto)" } else { goal.as_str() }
-                                ),
-                            },
-                        )
-                        .await;
-                        let st = state_owned.clone();
-                        let effective = if goal.is_empty() { prompt.clone() } else { goal.clone() };
-                        let thread_id_for_tool = thread_id.clone();
-                        // Serialize browser work: the contained browser is a single
-                        // shared instance, so only ONE browse_web may drive it at a
-                        // time. Without this, concurrent chat requests spawn multiple
-                        // sidecars onto the same browser and pile up tabs/state.
-                        let _browse_guard = browse_web_lock().lock().await;
-                        // Publish the live activity so the UI shows a truthful
-                        // "● LIVE · <goal>" + step checklist only while working.
-                        begin_browser_activity(effective.clone());
-                        let outcome = tokio::task::spawn_blocking(move || {
-                            execute_browse_web_tool(&st, &effective, thread_id_for_tool.as_deref())
-                        })
-                        .await;
-                        end_browser_activity();
-                        match outcome {
-                            Ok(Ok(text)) => text,
-                            Ok(Err(error)) => {
-                                format!("Lo strumento browser ha riportato un errore: {error}")
-                            }
-                            Err(error) => format!("Errore di esecuzione dello strumento: {error}"),
-                        }
                     } else if matches!(
                         name,
                         "browser_navigate"
@@ -3892,7 +3610,7 @@ Usa lo snapshot testuale."
                         match tokio::task::spawn_blocking(move || load_skill_body(&id_for_load)).await {
                             Ok(Some(body)) => format!(
                                 "Istruzioni della skill «{id}» (SKILL.md) — SEGUILE con gli strumenti \
-disponibili (per dati dal web usa browse_web sull'URL indicato):\n\n{}",
+disponibili (per dati dal web usa il browser: browser_navigate sull'URL indicato):\n\n{}",
                                 body.chars().take(8000).collect::<String>()
                             ),
                             _ => format!("Skill «{id}» non trovata o non leggibile."),
@@ -4219,10 +3937,9 @@ card di conferma nell'interfaccia. NON dire che è stata eseguita."
                     };
 
                     // Collect source URLs from browser results so the final
-                    // answer can carry a deterministic "Fonti" section. Both the
-                    // coarse browse_web result and the granular browser_navigate
-                    // result embed the visited page URL.
-                    if matches!(name, "browse_web" | "browser_navigate") {
+                    // answer can carry a deterministic "Fonti" section. The
+                    // granular browser_navigate result embeds the visited page URL.
+                    if name == "browser_navigate" {
                         for url in extract_source_urls(&result) {
                             if !browse_sources.contains(&url) {
                                 browse_sources.push(url);
@@ -4940,57 +4657,6 @@ fn current_sandbox_activity() -> Vec<TerminalEntryView> {
     sandbox_activity_cell().read().ok().map(|guard| guard.clone()).unwrap_or_default()
 }
 
-/// Human-readable label for a loop iteration, for the activity checklist.
-/// Prefers the model's own user-facing `step` description ("Inserisco
-/// l'aeroporto di partenza"); falls back to a mechanical summary only if the
-/// model didn't provide one.
-fn browser_step_label(iteration: &local_first_browser_automation::BrowserLoopIteration) -> String {
-    let action = &iteration.action;
-    if let Some(step) = action
-        .get("step")
-        .or_else(|| action.get("summary"))
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        return step.chars().take(90).collect();
-    }
-    let kind = action
-        .get("kind")
-        .or_else(|| action.get("action"))
-        .and_then(|value| value.as_str())
-        .unwrap_or("azione");
-    let verb = match kind {
-        "navigate" | "open" | "goto" => "Navigo",
-        "click" => "Clic",
-        "type" | "fill" | "fill_form" => "Digito",
-        "scroll" | "scroll_into_view" => "Scorro",
-        "wait" => "Attendo",
-        "snapshot" => "Osservo",
-        "select" | "select_option" => "Seleziono",
-        "hover" => "Passo sopra",
-        "planner_validation_error" => "Riprovo",
-        other => other,
-    };
-    let detail = action
-        .get("ref")
-        .or_else(|| action.get("target"))
-        .or_else(|| action.get("text"))
-        .or_else(|| action.get("url"))
-        .and_then(|value| value.as_str())
-        .map(|value| value.chars().take(60).collect::<String>())
-        .unwrap_or_default();
-    if detail.is_empty() {
-        format!("Passo {}: {verb}", iteration.iteration)
-    } else {
-        format!("Passo {}: {verb} · {detail}", iteration.iteration)
-    }
-}
-
-/// Executes the `browse_web` tool: materializes a browser task for the goal and
-/// runs the observe-act loop synchronously (in contained-computer mode it drives
-/// the real browser in the container, visible via noVNC), returning the loop's
-/// human-facing result for the model to read.
 #[derive(Debug, Deserialize)]
 struct ArtifactRef {
     thread: String,
@@ -6452,53 +6118,6 @@ fn fonti_section(sources: &[String], answer: &str) -> Option<String> {
     Some(format!("\n\n**Fonti**\n{list}"))
 }
 
-fn execute_browse_web_tool(
-    state: &AppState,
-    goal: &str,
-    thread_id: Option<&str>,
-) -> Result<String, String> {
-    let task_id = format!("chat_browse_{}", uuid::Uuid::new_v4().simple());
-    let mut task = TaskRecord::new(
-        task_id,
-        gateway_user_id(),
-        gateway_workspace_id(),
-        "browser_task",
-        task_goal_summary(goal),
-        serde_json::json!({
-            "source": "chat_tool_browse_web",
-            "prompt_redacted": redact_sensitive_text(goal),
-            "raw_prompt_stored": false,
-            // Thread scope for per-thread browser session reuse (read back by
-            // execute_browser_read_only_task to attach/keep-alive the session).
-            "thread_id": thread_id,
-        }),
-    )
-    .with_resource(ResourceRequirement::new(ResourceClass::ComputerSession, 1));
-    task.risk_level = "low".to_string();
-    task.permission_context = serde_json::json!({
-        "privacy_domains": ["local", "browser"],
-        "requires_user_approval": false,
-        "cloud_allowed": false
-    });
-
-    {
-        let store = lock_task_store(state).map_err(|error| error.message.to_string())?;
-        store
-            .insert_task(&task)
-            .map_err(|error| format!("inserimento task browser: {error}"))?;
-    }
-
-    let outcome = execute_browser_read_only_task(state, &task).map_err(|error| error.message)?;
-    let result = if !outcome.chat_message.trim().is_empty() {
-        outcome.chat_message
-    } else if !outcome.summary.trim().is_empty() {
-        outcome.summary
-    } else {
-        "Nessun risultato dal browser.".to_string()
-    };
-    Ok(result)
-}
-
 /// A live chat stream, kept in a server-side registry so a client that reloads
 /// mid-answer can REATTACH (replay the buffered events + continue live) instead
 /// of losing the in-flight response. The generation writes here regardless of
@@ -7651,29 +7270,6 @@ fn append_task_progress_checkpoint(
     append_task_progress_event(state, task, phase, surface, title, subtitle, payload)
 }
 
-fn append_operational_plan_progress(
-    state: &AppState,
-    task: &TaskRecord,
-    plan: &OperationalPlan,
-    phase: &str,
-    title: &str,
-    subtitle: &str,
-) -> Result<(), GatewayError> {
-    append_task_progress_checkpoint(
-        state,
-        task,
-        phase,
-        SurfaceKind::Logs,
-        title,
-        subtitle,
-        serde_json::json!({
-            "kind": phase,
-            "operational_plan": operational_plan_payload(plan),
-            "operational_plan_markdown": operational_plan_markdown(plan),
-        }),
-    )
-}
-
 fn append_task_progress_event(
     state: &AppState,
     task: &TaskRecord,
@@ -7764,7 +7360,6 @@ fn execute_read_only_task(
         GatewayTaskExecutorKind::CapabilityGeneric => execute_capability_generic(state, task),
         GatewayTaskExecutorKind::Subagent => execute_subagent_task(task),
         GatewayTaskExecutorKind::LegacyShell => execute_shell_read_only_task(task),
-        GatewayTaskExecutorKind::LegacyBrowser => execute_browser_read_only_task(state, task),
         GatewayTaskExecutorKind::LegacyLocal => execute_local_read_only_task(task),
     }
 }
@@ -9905,605 +9500,6 @@ fn run_read_only_command(command: &str, args: &[&str]) -> Result<String, LocalTa
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-fn execute_browser_read_only_task(
-    state: &AppState,
-    task: &TaskRecord,
-) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
-    // The observe-act loop is the only browser execution path now. The legacy
-    // keyword/train form-fill path was removed (de-gemma); this stays as a thin
-    // alias because callers (chat tool, LegacyBrowser executor) use this name.
-    execute_browser_loop_read_only_task(state, task)
-}
-
-fn execute_browser_loop_read_only_task(
-    state: &AppState,
-    task: &TaskRecord,
-) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
-    let effective_goal = task_effective_goal(task);
-    let mut operational_plan = task
-        .input_json
-        .get("operational_plan")
-        .and_then(|value| serde_json::from_value::<OperationalPlan>(value.clone()).ok())
-        .or_else(|| {
-            // A1: prefer the OrchestratorBrain's plan when enabled; fall back to
-            // the legacy keyword/train planner on any failure.
-            brain_planner_enabled()
-                .then(|| try_brain_operational_plan(state, &effective_goal))
-                .flatten()
-        })
-        .unwrap_or_else(|| operational_plan_for_goal(&effective_goal, &task.kind));
-    operational_plan.start_step("understand_request");
-    operational_plan.complete_step("understand_request");
-    append_operational_plan_progress(
-        state,
-        task,
-        &operational_plan,
-        "operational_plan_started",
-        "Piano operativo",
-        "Eseguo il task con loop browser osserva-agisci-verifica.",
-    )
-    .map_err(local_task_gateway_error)?;
-
-    append_task_progress_checkpoint(
-        state,
-        task,
-        "browser_runtime_starting",
-        SurfaceKind::Browser,
-        "Browser locale",
-        "Avvio browser controllato locale.",
-        serde_json::json!({ "kind": "browser_runtime_starting" }),
-    )
-    .map_err(local_task_gateway_error)?;
-
-    // Per-thread reuse: if this chat thread already has a warm browser session,
-    // attach to it (keeps cookies/login + the open tab) instead of spawning a
-    // fresh sidecar. Otherwise spawn one and register it after the loop.
-    let thread_id = task
-        .input_json
-        .get("thread_id")
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string);
-    let reused_session = thread_id
-        .as_deref()
-        .and_then(|thread| take_thread_browser_session(state, thread));
-    let session_reused = reused_session.is_some();
-    let mut client = match reused_session {
-        Some(existing) => existing,
-        None => BrowserAutomationClient::new(spawn_browser_sidecar_for_task(state, task)?),
-    };
-    append_task_progress_checkpoint(
-        state,
-        task,
-        "browser_runtime_ready",
-        SurfaceKind::Browser,
-        if session_reused {
-            "Browser pronto (sessione del thread riusata)"
-        } else {
-            "Browser pronto"
-        },
-        if session_reused {
-            "Riuso la sessione browser già aperta per questo thread."
-        } else {
-            "Runtime browser locale avviato."
-        },
-        serde_json::json!({ "kind": "browser_runtime_ready", "reused": session_reused }),
-    )
-    .map_err(local_task_gateway_error)?;
-    let targets = browser_targets_for_goal(&effective_goal);
-    let mut source_snapshots = Vec::new();
-    let mut source_summaries = Vec::new();
-    let mut form_drafts = Vec::new();
-    let mut first_target_id: Option<String> = None;
-    let mut completed_output: Option<Value> = None;
-
-    // Load the local inference backend once per task and share it across every
-    // source via Arc (a single mistral.rs model load, not one per target).
-    let inference_router =
-        std::sync::Arc::new(build_browser_inference_router());
-    let context_profile = BrowserContextProfile::for_context_window(
-        inference_router.active_context_window(&Requirements::default()),
-    );
-
-    operational_plan.start_step("open_sources");
-    for (index, target) in targets.iter().enumerate() {
-        let target_id = format!("loop_{index}");
-        first_target_id.get_or_insert_with(|| target_id.clone());
-        append_task_progress_checkpoint(
-            state,
-            task,
-            "browser_loop_source_started",
-            SurfaceKind::Browser,
-            &format!("Loop browser {}", target.label),
-            "Apro la fonte e procedo una micro-azione alla volta usando snapshot freschi.",
-            serde_json::json!({
-                "kind": "browser_loop_source_started",
-                "label": target.label,
-                "target_id": target_id,
-                "url": target.url,
-            }),
-        )
-        .map_err(local_task_gateway_error)?;
-
-        let planner = RuntimeBrowserLoopPlanner::with_context_profile(
-            std::sync::Arc::clone(&inference_router),
-            context_profile,
-        );
-        let mut runner = BrowserLoopRunner::from_client(client, planner);
-        let mut request = BrowserLoopRequest::new(
-            format!("{effective_goal}\nFonte: {}", target.label),
-            &target_id,
-        )
-        .with_max_iterations(browser_loop_max_iterations());
-        // Tab reuse: when continuing a thread's warm session on the first source,
-        // start from the EXISTING tab (snapshot the current page) instead of
-        // navigating fresh — so a follow-up continues on the prior results/page
-        // rather than redoing the search. The model still navigates if it needs
-        // a different page. For a fresh session (or later sources) open the URL.
-        if !(session_reused && index == 0) {
-            request = request.with_initial_url(target.url.clone());
-        }
-        let loop_result = runner.run_with_iteration_observer(&request, |iteration| {
-            // Live checklist for the Computer panel ("Avanzamento attività").
-            push_browser_step(
-                browser_step_label(iteration),
-                if iteration.status == "no_progress" || iteration.status == "stale_ref_rejected" {
-                    "retry"
-                } else {
-                    "done"
-                },
-            );
-            append_task_progress_checkpoint(
-                state,
-                task,
-                "browser_loop_iteration",
-                SurfaceKind::Browser,
-                &format!("{} azione {}", target.label, iteration.iteration),
-                if iteration.status == "no_progress" {
-                    "Azione eseguita, ma lo snapshot non e' cambiato: il controller dovra' cambiare strategia."
-                } else {
-                    "Azione eseguita e nuovo snapshot acquisito."
-                },
-                serde_json::json!({
-                    "kind": "browser_loop_iteration",
-                    "label": target.label,
-                    "target_id": target_id,
-                    "iteration": browser_loop_event_payload(iteration),
-                }),
-            )
-            .map_err(|error| {
-                BrowserAutomationError::InvalidResponse(format!(
-                    "browser loop progress checkpoint failed: {}",
-                    error.message
-                ))
-            })?;
-            Ok(())
-        });
-        client = runner.into_client();
-
-        match loop_result {
-            Ok(output) => {
-                let excerpt = truncate_chars(&output.final_observation.snapshot, 1_800);
-                let verified_output = if output.completed {
-                    Some(output.output.clone())
-                } else {
-                    None
-                };
-                let output_for_payload = verified_output.as_ref().unwrap_or(&output.output);
-                let status = if let Some(verified_output) = verified_output.as_ref() {
-                    completed_output.get_or_insert_with(|| verified_output.clone());
-                    "completed"
-                } else if output.completed {
-                    "blocked"
-                } else {
-                    "blocked"
-                };
-                source_snapshots.push(serde_json::json!({
-                    "label": target.label,
-                    "url": output.final_observation.url,
-                    "status": status,
-                    "snapshot_excerpt": excerpt,
-                    "loop_completed": output.completed,
-                    "loop_output": redact_json_for_task_output(output_for_payload),
-                    "iterations": output.iterations.len(),
-                }));
-                source_summaries.push(BrowserSourceSummary {
-                    label: target.label.clone(),
-                    url: output.final_observation.url.clone(),
-                    status: status.to_string(),
-                });
-                form_drafts.push(BrowserFormDraftSummary {
-                    label: target.label.clone(),
-                    url: output.final_observation.url,
-                    status: if verified_output.is_some() {
-                        "completed".to_string()
-                    } else {
-                        "blocked".to_string()
-                    },
-                    filled_fields: Vec::new(),
-                    reason: if output.completed {
-                        None
-                    } else {
-                        output
-                            .output
-                            .get("blocked_reason")
-                            .and_then(Value::as_str)
-                            .map(ToString::to_string)
-                    },
-                    search_status: Some(status.to_string()),
-                    search_excerpt: Some(loop_output_excerpt(output_for_payload, &excerpt)),
-                });
-                append_task_progress_checkpoint(
-                    state,
-                    task,
-                    "browser_loop_source_completed",
-                    SurfaceKind::Browser,
-                    &format!("{} loop valutato", target.label),
-                    if verified_output.is_some() {
-                        "Il controller ha dichiarato completati i criteri sullo snapshot corrente."
-                    } else if output.completed {
-                        "Il controller ha terminato senza opzioni verificate; continuo con le altre fonti."
-                    } else {
-                        "Il controller ha bloccato questa fonte senza inventare risultati."
-                    },
-                    serde_json::json!({
-                        "kind": "browser_loop_source_completed",
-                        "label": target.label,
-                        "target_id": target_id,
-                        "completed": output.completed,
-                        "output": redact_json_for_task_output(output_for_payload),
-                    }),
-                )
-                .map_err(local_task_gateway_error)?;
-                if verified_output.is_some() {
-                    break;
-                }
-            }
-            Err(error) => {
-                let redacted_error =
-                    redact_sensitive_text(&truncate_chars(&error.to_string(), 500));
-                source_snapshots.push(serde_json::json!({
-                    "label": target.label,
-                    "url": target.url,
-                    "status": "failed",
-                    "error": redacted_error,
-                }));
-                source_summaries.push(BrowserSourceSummary {
-                    label: target.label.clone(),
-                    url: target.url.clone(),
-                    status: "failed".to_string(),
-                });
-                append_task_progress_checkpoint(
-                    state,
-                    task,
-                    "browser_loop_source_failed",
-                    SurfaceKind::Browser,
-                    &format!("{} loop fallito", target.label),
-                    "La fonte e' stata saltata; continuo con le altre fonti disponibili.",
-                    serde_json::json!({
-                        "kind": "browser_loop_source_failed",
-                        "label": target.label,
-                        "target_id": target_id,
-                        "error": redacted_error,
-                    }),
-                )
-                .map_err(local_task_gateway_error)?;
-            }
-        }
-    }
-    operational_plan.complete_step("open_sources");
-
-    if source_summaries.is_empty() {
-        return Err(LocalTaskExecutionError {
-            message: "Nessuna fonte browser raggiungibile dal loop.".to_string(),
-        });
-    }
-
-    let final_url = source_summaries
-        .iter()
-        .find(|source| source.status == "completed")
-        .or_else(|| source_summaries.first())
-        .map(|source| source.url.clone())
-        .unwrap_or_else(|| "about:blank".to_string());
-    let artifact_id = format!("artifact_{}_browser_snapshot", task.task_id.as_str());
-    let file_name = format!("{artifact_id}.png");
-    let screenshot = client
-        .call(
-            BrowserMethod::Screenshot,
-            serde_json::json!({
-                "target_id": first_target_id.as_deref().unwrap_or("loop_0"),
-                "file_name": file_name,
-                "full_page": false
-            }),
-        )
-        .map_err(|error| LocalTaskExecutionError {
-            message: format!("Browser screenshot fallito: {error}"),
-        })?;
-    let screenshot_path = screenshot
-        .get("path")
-        .and_then(Value::as_str)
-        .ok_or_else(|| LocalTaskExecutionError {
-            message: "Browser screenshot senza path artifact.".to_string(),
-        })?
-        .to_string();
-    let screenshot_bytes = screenshot
-        .get("bytes")
-        .and_then(Value::as_u64)
-        .unwrap_or_else(|| fs::metadata(&screenshot_path).map(|m| m.len()).unwrap_or(0));
-
-    // Lifecycle: a thread-scoped session is kept WARM for the next browse_web in
-    // the same thread (reaped on idle/thread-close), so a follow-up continues on
-    // the same tab. A one-off (no thread) session is closed now — the Drop impl
-    // only kills the child, so without this stop the context leaks in the
-    // contained Chromium and orphaned targets pile up (observed: 282 -> failures).
-    match thread_id.as_deref() {
-        Some(thread) => store_thread_browser_session(state, thread, client),
-        None => {
-            let _ = client.call(BrowserMethod::Stop, serde_json::json!({}));
-        }
-    }
-
-    let browser_success = completed_output.is_some();
-    operational_plan.start_step("consolidate_options");
-    if browser_success {
-        operational_plan.complete_step("consolidate_options");
-        operational_plan.complete_step("extract_options");
-        operational_plan.complete_step("answer_and_next_gate");
-    } else {
-        operational_plan.block_step("consolidate_options");
-        operational_plan.block_step("extract_options");
-        operational_plan.block_step("answer_and_next_gate");
-    }
-    append_operational_plan_progress(
-        state,
-        task,
-        &operational_plan,
-        "operational_plan_completed",
-        "Piano operativo valutato",
-        "La tasklist markdown contiene lo stato finale del loop browser.",
-    )
-    .map_err(local_task_gateway_error)?;
-
-    let plan_artifact = write_operational_plan_artifact(task, &operational_plan)?;
-    let final_answer = completed_output
-        .as_ref()
-        .map(browser_loop_final_answer_markdown)
-        .unwrap_or_else(|| {
-            browser_final_answer_for_task(task, &source_summaries, &form_drafts).to_markdown()
-        });
-    let blocked_reason = if browser_success {
-        None
-    } else {
-        Some("Il loop browser non ha completato il goal con dati verificabili.".to_string())
-    };
-
-    Ok(TaskExecutionOutcome {
-        completed: browser_success,
-        blocked_reason: blocked_reason.clone(),
-        pending_approval: None,
-        summary: if browser_success {
-            "Loop browser completato con output strutturato.".to_string()
-        } else {
-            "Loop browser bloccato: risultati non estratti.".to_string()
-        },
-        checkpoint_payload: serde_json::json!({
-            "kind": "browser_loop_guided",
-            "operational_plan": operational_plan_payload(&operational_plan),
-            "operational_plan_markdown": operational_plan_markdown(&operational_plan),
-            "operational_plan_artifact_id": plan_artifact.artifact_id.clone(),
-            "success_criteria_met": browser_success,
-            "blocked_reason": blocked_reason.clone(),
-            "url": final_url,
-            "sources": source_snapshots.clone(),
-            "form_drafts": form_drafts.iter().map(browser_form_draft_payload).collect::<Vec<_>>(),
-            "loop_output": completed_output.as_ref().map(redact_json_for_task_output),
-            "screenshot_artifact_id": artifact_id.clone(),
-        }),
-        checkpoint_redacted: serde_json::json!({
-            "kind": "browser_loop_guided",
-            "operational_plan": operational_plan_payload(&operational_plan),
-            "operational_plan_markdown": operational_plan_markdown(&operational_plan),
-            "operational_plan_artifact_id": plan_artifact.artifact_id.clone(),
-            "success_criteria_met": browser_success,
-            "blocked_reason": blocked_reason.clone(),
-            "url": final_url,
-            "sources": source_snapshots,
-            "form_drafts": form_drafts.iter().map(browser_form_draft_payload).collect::<Vec<_>>(),
-            "loop_output": completed_output.as_ref().map(redact_json_for_task_output),
-            "screenshot_artifact_id": artifact_id.clone(),
-        }),
-        chat_message: final_answer,
-        surface: SurfaceKind::Browser,
-        event_kind: "computer_browser_loop_completed".to_string(),
-        event_title: "Loop browser".to_string(),
-        event_subtitle: if browser_success {
-            "Risultato browser consolidato.".to_string()
-        } else {
-            "Loop browser bloccato prima di inventare dati.".to_string()
-        },
-        event_payload: serde_json::json!({
-            "url": final_url,
-            "operational_plan": operational_plan_payload(&operational_plan),
-            "operational_plan_markdown": operational_plan_markdown(&operational_plan),
-        }),
-        artifacts: vec![
-            TaskArtifactOutput {
-                artifact_id: artifact_id.clone(),
-                title: "Browser snapshot redatto".to_string(),
-                kind: "screenshot".to_string(),
-                path_ref: screenshot_path,
-                size_bytes: screenshot_bytes,
-                preview_ref: Some(format!("preview:{artifact_id}")),
-            },
-            plan_artifact,
-        ],
-    })
-}
-
-fn browser_final_answer_for_task(
-    task: &TaskRecord,
-    sources: &[BrowserSourceSummary],
-    _form_drafts: &[BrowserFormDraftSummary],
-) -> TaskFinalAnswer {
-    // Generic fallback, used ONLY when the observe-act loop did not return
-    // structured options. No domain/keyword special-casing (de-gemma): just
-    // report honestly which sources were read.
-    let _ = task;
-    // Three distinct outcomes — do NOT conflate them (the old text said "blocked
-    // or unreachable" for everything, which lied when we actually loaded the site
-    // but couldn't finish the form). "completed" = verified data; "blocked" =
-    // REACHED the page/form but could not extract verified results; "failed" =
-    // could not reach/load the source at all.
-    let completed = sources
-        .iter()
-        .filter(|source| source.status == "completed")
-        .collect::<Vec<_>>();
-    let reached_incomplete = sources
-        .iter()
-        .filter(|source| source.status == "blocked")
-        .collect::<Vec<_>>();
-    let unreachable = sources
-        .iter()
-        .filter(|source| source.status != "completed" && source.status != "blocked")
-        .collect::<Vec<_>>();
-    let title = if completed.is_empty() {
-        "Ricerca browser non conclusa".to_string()
-    } else {
-        "Ricerca browser completata".to_string()
-    };
-    let summary = if !completed.is_empty() {
-        "Ho aperto le fonti disponibili ma non ho estratto un elenco strutturato di opzioni; qui sotto cosa ho raggiunto.".to_string()
-    } else if !reached_incomplete.is_empty() {
-        // The key fix: we DID reach the site(s). Be honest about WHERE it stopped
-        // instead of claiming they were unreachable/blocked.
-        "Ho RAGGIUNTO le fonti ma non sono riuscito a completare il form di ricerca / estrarre i risultati in questa sessione. Le pagine NON erano bloccate o irraggiungibili: il problema è stato compilare la ricerca (es. stazioni, data/ora) e leggere l'elenco. Posso riprovare.".to_string()
-    } else {
-        "Non sono riuscito ad aprire le fonti browser in questa sessione (errore di caricamento o connessione).".to_string()
-    };
-    let findings = vec![format!(
-        "Fonti: {} con dati, {} raggiunte ma non completate, {} non aperte (su {} totali).",
-        completed.len(),
-        reached_incomplete.len(),
-        unreachable.len(),
-        sources.len()
-    )];
-    let sources_markdown = sources
-        .iter()
-        .map(|source| match source.status.as_str() {
-            "completed" => format!("{}: {} (dati estratti)", source.label, source.url),
-            "blocked" => format!(
-                "{}: {} — raggiunta, ma form di ricerca non completato",
-                source.label, source.url
-            ),
-            _ => format!("{}: non aperta (errore di caricamento)", source.label),
-        })
-        .collect::<Vec<_>>();
-    let mut limitations = vec![
-        "Non ho selezionato opzioni, fatto login, inserito dati o acquistato nulla.".to_string(),
-    ];
-    if !reached_incomplete.is_empty() {
-        limitations.push(format!(
-            "{} fonte/i sono state raggiunte ma il form non è stato completato (non sono bloccate).",
-            reached_incomplete.len()
-        ));
-    }
-    if !unreachable.is_empty() {
-        limitations.push(format!("{} fonte/i non si sono aperte.", unreachable.len()));
-    }
-    TaskFinalAnswer {
-        title,
-        summary,
-        findings,
-        sources: sources_markdown,
-        limitations,
-        next_steps: Vec::new(),
-    }
-}
-
-fn browser_loop_max_iterations() -> u32 {
-    // The loop ends when the goal is done/blocked; this bounds it so a slow,
-    // wandering model still RETURNS in reasonable time (and the forced-answer
-    // round can run) instead of timing out. Raise per install if needed.
-    env::var("LOCAL_FIRST_BROWSER_LOOP_MAX_ITERATIONS")
-        .ok()
-        .and_then(|value| value.parse::<u32>().ok())
-        .map(|value| value.clamp(1, 200))
-        // 28: form-filling sources (Google Flights: consent wall + origin +
-        // dest + date + search) need ~8-12 steps just to reach results, so 16
-        // ran out before extracting. Deep-link sources finish in 1-2; this
-        // budget covers both while still bounding latency.
-        .unwrap_or(28)
-}
-
-/// The inference router (see `build_browser_inference_router`) uses the
-/// configured OpenAI-compatible endpoint by default (Ollama local/cloud, OpenAI,
-/// OpenRouter, ...), or Anthropic when `LOCAL_FIRST_INFERENCE_BACKEND=anthropic`
-/// with a key. Cloud delegation is opt-in via `LOCAL_FIRST_INFERENCE_CLOUD` and
-/// gated by the router's privacy policy.
-fn brain_planner_enabled() -> bool {
-    env::var("LOCAL_FIRST_USE_BRAIN_PLANNER")
-        .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "on"))
-        .unwrap_or(false)
-}
-
-/// Produces an `OperationalPlan` via the OrchestratorBrain (plan-only, no side
-/// effects), or `None` on any failure so the caller falls back to the legacy
-/// planner. Transitional A1 wiring (ADR 0008 pillars #1/#2): the Brain becomes
-/// the live planner, seeing the registry's cached tools for planning visibility
-/// via `CachedToolProvider`. Gated by `LOCAL_FIRST_USE_BRAIN_PLANNER`.
-fn try_brain_operational_plan(state: &AppState, goal: &str) -> Option<OperationalPlan> {
-    let user = gateway_capability_user_id();
-    let workspace = gateway_capability_workspace_id();
-
-    let (policy_context, provider_tools) = {
-        let registry = state.capability_registry.lock().ok()?;
-        let policy = registry.policy_context(&user, &workspace).ok()?;
-        let mut provider_tools = Vec::new();
-        for provider in &policy.enabled_providers {
-            let tools = registry
-                .cached_tools(provider)
-                .ok()?
-                .into_iter()
-                .map(|cached| cached.tool)
-                .collect::<Vec<_>>();
-            provider_tools.push((provider.clone(), tools));
-        }
-        (policy, provider_tools)
-    };
-
-    let mut facade =
-        CapabilityFacade::new(CapabilityPolicy::default(), InMemoryCapabilityAudit::default());
-    for (provider_id, tools) in provider_tools {
-        let kind = tools
-            .first()
-            .map(|tool| tool.provider_kind)
-            .unwrap_or(CapabilityProviderKind::Native);
-        facade.register_provider(CachedToolProvider::new(provider_id, kind, tools));
-    }
-
-    let router = build_browser_inference_router();
-    let budgets = brain_budgets_for_context_window(
-        router.active_context_window(&Requirements::default()),
-    );
-    let mut brain = OrchestratorBrain::new(
-        router,
-        open_brain_memory(),
-        facade,
-        ToolSearchIndexStore::open_in_memory().ok()?,
-        TaskStore::open_in_memory().ok()?,
-    );
-    let request = OrchestratorRequest {
-        request_id: format!("brain_{}", uuid::Uuid::new_v4().simple()),
-        policy_context,
-        user_message: goal.to_string(),
-        conversation_summary: None,
-        attachments: Vec::new(),
-        budgets,
-    };
-    let plan = brain.plan_only(&request).ok()?;
-    Some(brain_adapter::execution_plan_to_operational_plan(&plan, goal))
-}
-
 fn brain_materialize_enabled() -> bool {
     match env::var("LOCAL_FIRST_BRAIN_MATERIALIZE") {
         // Explicit override always wins.
@@ -10654,52 +9650,6 @@ impl ComposioTransport for GatewayComposioTransport {
     }
 }
 
-/// True when the Brain's plan acts on the browser provider — i.e. it needs live
-/// web INTERACTION, which belongs to the observe-act loop rather than static
-/// per-call capability steps.
-fn plan_targets_browser(plan: &ExecutionPlan) -> bool {
-    plan.steps
-        .iter()
-        .any(|step| step.provider_id.as_deref() == Some("browser"))
-}
-
-/// Materializes ONE durable `browser_task` carrying the user goal. The task
-/// runtime worker dispatches `browser_task` to `execute_browser_loop_read_only_task`
-/// (GatewayTaskExecutorKind::LegacyBrowser), which plans each step with the Brain
-/// and drives the observe→act→verify loop — the validated end-to-end browser
-/// path. The loop self-gates risky in-page actions (login/purchase/payment), so
-/// this task does not require up-front approval.
-fn materialize_browser_loop_task(
-    store: &TaskStore,
-    goal: &str,
-) -> Result<String, LocalTaskExecutionError> {
-    let task_id = format!("orchestrator_browser_{}", uuid::Uuid::new_v4().simple());
-    let mut task = TaskRecord::new(
-        task_id.clone(),
-        gateway_user_id(),
-        gateway_workspace_id(),
-        "browser_task",
-        task_goal_summary(goal),
-        serde_json::json!({
-            "source": "brain_browser_loop",
-            "prompt_redacted": redact_sensitive_text(goal),
-            "raw_prompt_stored": false,
-        }),
-    )
-    .with_resource(ResourceRequirement::new(ResourceClass::ComputerSession, 1));
-    task.risk_level = "low".to_string();
-    task.permission_context = serde_json::json!({
-        "privacy_domains": ["local", "browser"],
-        "requires_user_approval": false,
-        "cloud_allowed": false
-    });
-    store
-        .insert_task(&task)
-        .map_err(GatewayError::task)
-        .map_err(local_task_gateway_error)?;
-    Ok(task_id)
-}
-
 fn brain_materialize_tasks(
     state: &AppState,
     thread_id: &str,
@@ -10775,20 +9725,10 @@ fn brain_materialize_tasks(
         attachments: Vec::new(),
         budgets,
     };
-    let plan = brain.plan_only(&request).map_err(|error| LocalTaskExecutionError {
-        message: format!("brain plan: {error}"),
-    })?;
-
-    // P1: browser INTERACTION is driven by the observe-act loop, not by static
-    // `capability.browser.*` steps (which can navigate but cannot fill a
-    // multi-field form — proven in live tests). When the Brain's plan targets
-    // the browser provider, materialize ONE durable `browser_task`: the worker
-    // runs it via execute_browser_loop_read_only_task, which itself plans each
-    // step with the Brain and drives observe→act→verify. Non-browser plans
-    // materialize their capability/subagent tasks as before.
-    let task_ids = if plan_targets_browser(&plan) {
-        vec![materialize_browser_loop_task(brain.task_store(), goal)?]
-    } else {
+    // Browser INTERACTION is no longer materialized as a durable `browser_task`:
+    // the main chat agent drives the browser inline (granular tools). The Brain
+    // here only materializes non-browser capability/subagent tasks.
+    let task_ids = {
         let outcome = brain.run(request).map_err(|error| LocalTaskExecutionError {
             message: format!("brain run: {error}"),
         })?;
@@ -12821,91 +11761,6 @@ async fn runtime_model() -> Json<ActiveModelResponse> {
     Json(active_inference_model_info())
 }
 
-fn loop_output_excerpt(output: &Value, fallback_excerpt: &str) -> String {
-    let rendered = serde_json::to_string_pretty(output).unwrap_or_default();
-    if rendered.trim().is_empty() || rendered == "{}" {
-        return fallback_excerpt.to_string();
-    }
-    truncate_chars(&rendered, 1_800)
-}
-
-fn browser_loop_final_answer_markdown(output: &Value) -> String {
-    let summary = output
-        .get("summary")
-        .and_then(Value::as_str)
-        .unwrap_or("Ho completato il controllo browser e raccolto l'output disponibile.");
-    let mut lines = vec![
-        "### Ricerca completata".to_string(),
-        String::new(),
-        summary.to_string(),
-    ];
-    if let Some(options) = output.get("options").and_then(Value::as_array)
-        && !options.is_empty()
-    {
-        lines.push(String::new());
-        lines.push("**Opzioni trovate**".to_string());
-        for option in options.iter().take(10) {
-            lines.push(format!("- {}", browser_loop_option_line(option)));
-        }
-    }
-    if let Some(sources) = output.get("sources").and_then(Value::as_array)
-        && !sources.is_empty()
-    {
-        lines.push(String::new());
-        lines.push("**Fonti**".to_string());
-        for source in sources.iter().take(8) {
-            if let Some(source) = source.as_str() {
-                lines.push(format!("- {source}"));
-            } else {
-                lines.push(format!("- {}", truncate_chars(&source.to_string(), 180)));
-            }
-        }
-    }
-    lines.push(String::new());
-    lines.push(
-        "Dimmi quale opzione vuoi prenotare e procedo fino al prossimo gate sicuro. Prima di login, dati passeggero, pagamento o acquisto ti chiedero' conferma esplicita."
-            .to_string(),
-    );
-    lines.join("\n")
-}
-
-fn browser_loop_option_line(option: &Value) -> String {
-    if let Some(text) = option.as_str() {
-        return text.to_string();
-    }
-    let Some(map) = option.as_object() else {
-        return truncate_chars(&option.to_string(), 240);
-    };
-    // Render EVERY field the worker extracted, in the order it emitted them —
-    // NO hardcoded key list at all (de-gemma): whatever the model captured
-    // (airline, airport, times, price, …) flows through to the orchestrator,
-    // which builds the per-row table from it.
-    let parts: Vec<String> = map
-        .iter()
-        .filter_map(|(key, value)| {
-            browser_option_scalar_text(value).map(|text| format!("{key}: {text}"))
-        })
-        .collect();
-    if parts.is_empty() {
-        truncate_chars(&option.to_string(), 240)
-    } else {
-        parts.join(" · ")
-    }
-}
-
-/// A scalar option field as display text (skips empty strings and nested values).
-fn browser_option_scalar_text(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) => {
-            let trimmed = text.trim();
-            (!trimmed.is_empty()).then(|| trimmed.to_string())
-        }
-        Value::Number(number) => Some(number.to_string()),
-        Value::Bool(flag) => Some(flag.to_string()),
-        _ => None,
-    }
-}
-
 async fn local_computer_session(
     State(state): State<AppState>,
     Path(session_id): Path<String>,
@@ -13793,140 +12648,6 @@ fn approval_item_response(approval: ApprovalRequest) -> Result<ApprovalItemRespo
     })
 }
 
-fn ensure_operational_task_for_thread(
-    state: &AppState,
-    thread_id: &str,
-    source_message_id: &str,
-    goal: &str,
-    mode: TaskCreationMode,
-) -> Result<Option<String>, GatewayError> {
-    let thread = lock_store(state)?
-        .thread(thread_id)
-        .map_err(GatewayError::store)?
-        .ok_or_else(|| GatewayError {
-            status: StatusCode::NOT_FOUND,
-            code: "chat_thread_not_found",
-            message: format!("chat thread not found: {thread_id}"),
-        })?;
-    let task_id = thread.task_id.clone();
-    let session_id = thread.computer_session_id.clone();
-    let user = gateway_user_id();
-    let workspace = gateway_workspace_id();
-    let task_id_ref = TaskId::new(task_id.clone());
-    let goal_redacted = task_goal_summary(goal);
-    let prompt_redacted = redact_sensitive_text(goal);
-    // De-gemma: no keyword classification of the task. The browser loop is the
-    // general model-driven executor and figures out the goal itself, so a chat
-    // task is a browser_task. (Multi-step/durable planning is the Brain-as-tool
-    // follow-up; shell tasks get their own explicit entry, not keyword-sniffed.)
-    let task_kind = "browser_task";
-    let operational_plan = operational_plan_for_goal(goal, task_kind);
-    // Approval is conservative and keyword-free: auto-created tasks always
-    // require confirmation; the browser loop's own action gate still stops
-    // before login/payment/purchase regardless. Pre-approved plans skip it.
-    let requires_approval = (mode == TaskCreationMode::AutoFromPrompt)
-        && !browser_plan_is_preapproved(state, task_kind, goal);
-
-    {
-        let store = lock_task_store(state)?;
-        if store
-            .get_task(&task_id_ref, &user, &workspace)
-            .map_err(GatewayError::task)?
-            .is_none()
-        {
-            let mut task = TaskRecord::new(
-                task_id.clone(),
-                user.clone(),
-                workspace.clone(),
-                task_kind,
-                goal_redacted.clone(),
-                serde_json::json!({
-                    "source": "desktop_chat",
-                    "thread_id": thread_id,
-                    "message_id": source_message_id,
-                    "mode": match mode {
-                        TaskCreationMode::AutoFromPrompt => "auto_from_prompt",
-                        TaskCreationMode::ExplicitMessageAction => "explicit_message_action",
-                    },
-                    "operational_plan": operational_plan_payload(&operational_plan),
-                    "prompt_redacted": prompt_redacted,
-                    "raw_prompt_stored": false
-                }),
-            )
-            .with_priority(if mode == TaskCreationMode::ExplicitMessageAction {
-                TaskPriority::High
-            } else {
-                TaskPriority::Normal
-            })
-            .with_resource(ResourceRequirement::new(ResourceClass::ComputerSession, 1))
-            .with_resource(ResourceRequirement::new(ResourceClass::BrowserSession, 1))
-            .with_resource(ResourceRequirement::new(ResourceClass::NetworkIo, 1));
-            task.risk_level = if requires_approval {
-                "medium".to_string()
-            } else {
-                "low".to_string()
-            };
-            task.permission_context = serde_json::json!({
-                "privacy_domains": ["local", "browser"],
-                "requires_user_approval": requires_approval,
-                "cloud_allowed": false
-            });
-            store.insert_task(&task).map_err(GatewayError::task)?;
-            store
-                .append_checkpoint(
-                    &task_id_ref,
-                    &user,
-                    &workspace,
-                    serde_json::json!({
-                        "kind": "operational_plan",
-                        "plan": operational_plan_payload(&operational_plan),
-                    }),
-                    serde_json::json!({
-                        "kind": "operational_plan",
-                        "plan": operational_plan_payload(&operational_plan),
-                    }),
-                )
-                .map_err(GatewayError::task)?;
-        }
-
-        let latest_approval = store
-            .latest_approval(&task_id_ref, &user, &workspace)
-            .map_err(GatewayError::task)?;
-        if requires_approval
-            && !matches!(
-                latest_approval.as_ref().map(|approval| approval.status),
-                Some(ApprovalStatus::Pending)
-            )
-        {
-            ApprovalGate::new()
-                .request_approval(
-                    &store,
-                    &task_id_ref,
-                    &user,
-                    &workspace,
-                    "prompt_plan.approve_step",
-                    "medium",
-                    "local_computer",
-                    &approval_explanation_for_plan(&operational_plan),
-                )
-                .map_err(GatewayError::task)?;
-        }
-    }
-
-    ensure_computer_session_for_task(
-        state,
-        &session_id,
-        &task_id,
-        thread_id,
-        &goal_redacted,
-        requires_approval,
-    )?;
-    lock_store(state)?
-        .link_message_task(thread_id, source_message_id, &task_id)
-        .map_err(GatewayError::store)?;
-    Ok(Some(task_id))
-}
-
 fn ensure_computer_session_for_task(
     state: &AppState,
     session_id: &str,
@@ -14554,31 +13275,6 @@ fn task_uses_browser(task: &TaskRecord) -> bool {
             .any(|resource| resource.class == ResourceClass::BrowserSession)
 }
 
-fn browser_plan_is_preapproved(state: &AppState, task_kind: &str, goal: &str) -> bool {
-    if task_kind != "browser_task" {
-        return false;
-    }
-    let targets = browser_targets_for_goal(goal);
-    if targets.is_empty() {
-        return false;
-    }
-    let Ok(policy_store) = lock_browser_url_policies(state) else {
-        return false;
-    };
-    targets.iter().all(|target| {
-        policy_store
-            .rule_for_url(
-                gateway_user_id().as_str(),
-                gateway_workspace_id().as_str(),
-                &target.url,
-                "navigate",
-            )
-            .ok()
-            .flatten()
-            .is_some()
-    })
-}
-
 fn parse_approval_scope(value: Option<&str>) -> BrowserUrlApprovalScope {
     match value {
         Some("always") => BrowserUrlApprovalScope::Always,
@@ -14625,171 +13321,11 @@ fn browser_targets_for_goal(goal: &str) -> Vec<BrowserTarget> {
     }]
 }
 
-fn operational_plan_for_goal(goal: &str, task_kind: &str) -> OperationalPlan {
-    let needs_browser = task_kind == "browser_task";
-    OperationalPlan {
-        objective: task_goal_summary(goal),
-        intent_type: if needs_browser {
-            OperationalIntentType::Navigational
-        } else {
-            OperationalIntentType::Informational
-        },
-        autonomy: if needs_browser {
-            OperationalAutonomy::AutomaticUntilGate
-        } else {
-            OperationalAutonomy::AskBeforeEachExternalAction
-        },
-        tools: if needs_browser {
-            vec!["browser".to_string()]
-        } else {
-            Vec::new()
-        },
-        steps: vec![
-            operational_step(
-                "understand_request",
-                "Comprendere richiesta",
-                "Capire obiettivo e vincoli dichiarati dall'utente.",
-                None,
-            ),
-            operational_step(
-                "execute_safe_actions",
-                "Eseguire azioni consentite",
-                "Usare solo strumenti locali e fermarsi ai gate di rischio.",
-                if needs_browser { Some("browser") } else { None },
-            ),
-            operational_step(
-                "answer",
-                "Rispondere",
-                "Sintetizzare risultato e limiti in chat.",
-                None,
-            ),
-        ],
-        constraints: vec!["Tutto local-first; nessuna API cloud.".to_string()],
-        success_criteria: vec!["Risposta utile prodotta senza violare i vincoli.".to_string()],
-        stop_conditions: vec!["Serve conferma utente per azioni rischiose.".to_string()],
-        approval_gates: Vec::new(),
-        data_schema: Vec::new(),
-    }
-}
-
-fn operational_plan_payload(plan: &OperationalPlan) -> Value {
-    serde_json::to_value(plan).unwrap_or_else(|_| serde_json::json!({ "error": "plan_encode" }))
-}
-
-fn operational_plan_markdown(plan: &OperationalPlan) -> String {
-    let mut lines = Vec::new();
-    lines.push(format!(
-        "# Piano operativo\n\nObiettivo: {}",
-        plan.objective
-    ));
-    lines.push(format!(
-        "Intento: {:?}  \nAutonomia: {:?}  \nTool: {}",
-        plan.intent_type,
-        plan.autonomy,
-        if plan.tools.is_empty() {
-            "nessuno".to_string()
-        } else {
-            plan.tools.join(", ")
-        }
-    ));
-    lines.push("\n## Tasklist".to_string());
-    for step in &plan.steps {
-        let marker = match step.status {
-            OperationalStepStatus::Pending => "[ ]",
-            OperationalStepStatus::InProgress => "[-]",
-            OperationalStepStatus::Completed => "[x]",
-            OperationalStepStatus::Blocked => "[!]",
-        };
-        let tool = step
-            .tool
-            .as_deref()
-            .map(|tool| format!(" `{tool}`"))
-            .unwrap_or_default();
-        lines.push(format!(
-            "- {marker} **{}**{} (`{}`): {}",
-            step.title, tool, step.id, step.detail
-        ));
-    }
-    if !plan.success_criteria.is_empty() {
-        lines.push("\n## Criteri di successo".to_string());
-        lines.extend(plan.success_criteria.iter().map(|item| format!("- {item}")));
-    }
-    if !plan.constraints.is_empty() {
-        lines.push("\n## Vincoli".to_string());
-        lines.extend(plan.constraints.iter().map(|item| format!("- {item}")));
-    }
-    if !plan.stop_conditions.is_empty() {
-        lines.push("\n## Stop condition".to_string());
-        lines.extend(plan.stop_conditions.iter().map(|item| format!("- {item}")));
-    }
-    if !plan.approval_gates.is_empty() {
-        lines.push("\n## Gate di approvazione".to_string());
-        lines.extend(plan.approval_gates.iter().map(|item| format!("- {item}")));
-    }
-    lines.join("\n")
-}
-
-fn write_operational_plan_artifact(
-    task: &TaskRecord,
-    plan: &OperationalPlan,
-) -> Result<TaskArtifactOutput, LocalTaskExecutionError> {
-    let artifact_id = format!("artifact_{}_operational_plan", task.task_id.as_str());
-    let file_name = format!("{artifact_id}.md");
-    let artifact_root = env::temp_dir().join("local-first-browser-artifacts");
-    fs::create_dir_all(&artifact_root).map_err(|error| LocalTaskExecutionError {
-        message: format!("Creazione directory artifact piano fallita: {error}"),
-    })?;
-    let path = artifact_root.join(file_name);
-    let markdown = operational_plan_markdown(plan);
-    fs::write(&path, markdown.as_bytes()).map_err(|error| LocalTaskExecutionError {
-        message: format!("Scrittura artifact piano fallita: {error}"),
-    })?;
-    Ok(TaskArtifactOutput {
-        artifact_id,
-        title: "Piano operativo seguito".to_string(),
-        kind: "markdown".to_string(),
-        path_ref: path.display().to_string(),
-        size_bytes: markdown.len() as u64,
-        preview_ref: None,
-    })
-}
-
-fn approval_explanation_for_plan(plan: &OperationalPlan) -> String {
-    let steps = plan
-        .steps
-        .iter()
-        .map(|step| step.title.as_str())
-        .collect::<Vec<_>>()
-        .join(" -> ");
-    let gates = if plan.approval_gates.is_empty() {
-        "Mi fermo prima di azioni rischiose o non comprese nel piano.".to_string()
-    } else {
-        plan.approval_gates.join(" ")
-    };
-    format!(
-        "Conferma il piano operativo prima di usare browser, terminale o azioni locali. Piano: {steps}. {gates}"
-    )
-}
-
 fn browser_url_for_goal(goal: &str) -> String {
     // Uniform entry for EVERY goal: a web search of the goal verbatim. No
     // keyword/site special-casing — the observe-act loop navigates from the
     // results to wherever the goal actually leads.
     format!("https://duckduckgo.com/?q={}", url_encode(goal))
-}
-
-
-
-fn browser_form_draft_payload(draft: &BrowserFormDraftSummary) -> Value {
-    serde_json::json!({
-        "label": draft.label,
-        "url": draft.url,
-        "status": draft.status,
-        "filled_fields": draft.filled_fields,
-        "reason": draft.reason,
-        "search_status": draft.search_status,
-        "search_excerpt": draft.search_excerpt,
-    })
 }
 
 fn url_encode(value: &str) -> String {
