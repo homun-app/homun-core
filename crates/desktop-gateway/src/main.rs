@@ -600,6 +600,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/chat/build_prompt", post(build_prompt))
         .route("/api/chat/generate_stream", post(generate_stream))
         .route("/api/chat/stream_resume/{request_id}", get(resume_stream))
+        .route("/api/events", get(app_events))
         .route("/api/chat/improve_prompt", post(improve_prompt))
         .route("/api/chat/transcribe", post(transcribe_audio))
         .route("/api/artifacts/file", get(download_artifact).delete(delete_artifact_file))
@@ -5726,6 +5727,18 @@ async fn handle_channel_inbound(
                     Err(_) => None,
                 };
 
+                if let Some(tid) = thread_id.as_deref() {
+                    // Tell the desktop app to create the card and jump to it NOW,
+                    // before the (possibly slow) agent turn fills in the messages.
+                    publish_app_event(serde_json::json!({
+                        "type": "thread.upserted",
+                        "thread_id": tid,
+                        "workspace": base_workspace_id(),
+                        "channel": channel,
+                        "title": format!("{label} · {name}"),
+                    }));
+                }
+
                 // Typing indicator while the agent works (refreshed; expires on its
                 // own). Cleared automatically when the message is sent.
                 let typing_target = reply_to.clone();
@@ -5766,6 +5779,16 @@ async fn handle_channel_inbound(
                             );
                         }
                     }
+                }
+
+                if let Some(tid) = thread_id.as_deref() {
+                    // Messages persisted: nudge the app to refresh the thread if open.
+                    publish_app_event(serde_json::json!({
+                        "type": "thread.updated",
+                        "thread_id": tid,
+                        "workspace": base_workspace_id(),
+                        "channel": channel,
+                    }));
                 }
 
                 match reply {
@@ -6553,6 +6576,55 @@ async fn resume_stream(Path(request_id): Path<String>) -> Result<Response, Gatew
             message: "Nessuno stream attivo per questa richiesta.".to_string(),
         }),
     }
+}
+
+/// Global fan-out for UI events (thread.upserted, thread.updated, …). One
+/// process-wide broadcast; every connected /api/events client subscribes to it.
+fn app_events_tx() -> &'static tokio::sync::broadcast::Sender<String> {
+    static CELL: std::sync::OnceLock<tokio::sync::broadcast::Sender<String>> =
+        std::sync::OnceLock::new();
+    CELL.get_or_init(|| tokio::sync::broadcast::channel::<String>(256).0)
+}
+
+/// Publish a UI event (JSON) to all connected /api/events listeners.
+/// Best-effort: silently dropped if there are no subscribers.
+fn publish_app_event(event: serde_json::Value) {
+    if let Ok(line) = serde_json::to_string(&event) {
+        let _ = app_events_tx().send(line);
+    }
+}
+
+/// GET /api/events — long-lived NDJSON stream of UI events so the desktop app
+/// updates in real time. E.g. an inbound Telegram/WhatsApp message creates a
+/// chat thread and the app jumps to it without a manual refresh. Fire-and-forget
+/// (no replay buffer): clients react to events as they arrive.
+async fn app_events() -> Response {
+    let mut rx = app_events_tx().subscribe();
+    let (tx, mpsc_rx) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(64);
+    // Greet immediately so the client knows the stream is live.
+    let _ = tx.try_send(Ok(Bytes::from("{\"type\":\"hello\"}\n")));
+    tokio::spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(line) => {
+                    if tx.send(Ok(Bytes::from(format!("{line}\n")))).await.is_err() {
+                        return;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+            }
+        }
+    });
+    let body = Body::from_stream(futures_util::stream::unfold(mpsc_rx, |mut rx| async move {
+        rx.recv().await.map(|item| (item, rx))
+    }));
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/x-ndjson")
+        .header("cache-control", "no-cache")
+        .body(body)
+        .expect("valid streaming response")
 }
 
 async fn emit_stream_event(sink: &StreamSink, event: GenerateStreamEvent) -> Result<(), ()> {
