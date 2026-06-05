@@ -1,0 +1,10 @@
+# Cargo config del workspace.
+#
+# incremental = false: disattiva la cache di compilazione incrementale
+# (target/debug/incremental/), che su questo repo era cresciuta fino a ~19G.
+# Le DIPENDENZE restano comunque in cache (target/debug/deps/), quindi i
+# rebuild ricompilano solo i crate del workspace che hai toccato, da zero.
+# Trade-off: build del crate `desktop-gateway` un po' piu' lente, ma niente
+# cache che si gonfia all'infinito. Per riattivarla, cancella questa riga.
+[build]
+incremental = false
