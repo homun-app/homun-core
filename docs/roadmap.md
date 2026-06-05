@@ -58,6 +58,12 @@ Pilastri completati e in esercizio (dettaglio task in work-memory):
 - **Canali (C0-C5)**: WhatsApp (wa-rs + QR) e Telegram (sidecar Bot API) sullo
   stesso `ChannelProvider`; inbound -> memoria -> bozza, auto-reply con allowlist
   e approval. **M8**: l'inbound diventa un thread-agente con tool read-only.
+  **Real-time push** (`/api/events`): un inbound crea la scheda e l'app ci si
+  sposta in tempo reale. **Resilienza offline (2026-06-05)**: i messaggi mandati
+  a sistema spento vengono ripresi ed eseguiti al ritorno — auto-reconnect dei
+  canali all'avvio, offset Telegram persistito (forward-before-advance), inoltro
+  sidecar->gateway con retry (at-least-once). Limite residuo: la finestra di
+  ritenzione della piattaforma (~24h Telegram, store-and-forward WhatsApp).
 - **Artifacts & Files**: cartella montata host<->container, tool
   `create_artifact`/`save_artifact`, versioning, edit in-app, download + gestione.
 - **Sidebar IA (M9)**: progetti reali + Personale sempre attivo + modale nuovo
