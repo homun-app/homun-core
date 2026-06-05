@@ -25,6 +25,7 @@ import { navItems, settingsGroupLabels, settingsSections } from "../data/mockDat
 import type { ChatThread, SettingsSectionId, ViewId } from "../types";
 import { useSetting } from "../lib/settingsStore";
 import { coreBridge, type CoreChatThread, type WorkspaceRecord } from "../lib/coreBridge";
+import wordmarkUrl from "../../assets/brand/wordmark.png";
 
 // The base personal workspace ("Predefinito"): always present, never a "project".
 const PERSONAL_WORKSPACE_ID = "local-workspace";
@@ -589,7 +590,11 @@ export function NavDrawer({
     <aside className="nav-drawer" aria-label="Menu principale">
       <header className="drawer-header">
         <div>
-          <strong>homün</strong>
+          <img
+            src={wordmarkUrl}
+            alt="homun"
+            style={{ height: 20, width: "auto", display: "block" }}
+          />
           <small>local-first · multi-modello</small>
         </div>
         <button className="icon-button" type="button" aria-label="Chiudi menu" onClick={onToggleDrawer}>
