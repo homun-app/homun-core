@@ -273,15 +273,36 @@ fn main() -> anyhow::Result<()> {
                                     // Preferred reply target when present (PN > LID).
                                     "sender_pn": sender_pn,
                                 });
+                                // At-least-once: retry a few times so a momentary
+                                // gateway outage doesn't drop the message. (WhatsApp
+                                // store-and-forward already delivered it to us, so
+                                // unlike Telegram there's no offset to replay from.)
                                 // Don't log message content (privacy): only the outcome.
-                                if let Err(error) = http
-                                    .post(format!("{url}/api/channels/whatsapp/inbound"))
-                                    .bearer_auth(token)
-                                    .json(&payload)
-                                    .send()
-                                    .await
-                                {
-                                    eprintln!("inbound: inoltro al gateway fallito: {error}");
+                                for attempt in 0..3u32 {
+                                    match http
+                                        .post(format!("{url}/api/channels/whatsapp/inbound"))
+                                        .bearer_auth(token)
+                                        .json(&payload)
+                                        .send()
+                                        .await
+                                    {
+                                        Ok(response) if response.status().is_success() => break,
+                                        Ok(response) => eprintln!(
+                                            "inbound: gateway ha risposto {} (tentativo {})",
+                                            response.status(),
+                                            attempt + 1
+                                        ),
+                                        Err(error) => eprintln!(
+                                            "inbound: inoltro al gateway fallito (tentativo {}): {error}",
+                                            attempt + 1
+                                        ),
+                                    }
+                                    if attempt + 1 < 3 {
+                                        tokio::time::sleep(std::time::Duration::from_secs(
+                                            attempt as u64 + 1,
+                                        ))
+                                        .await;
+                                    }
                                 }
                             }
                         }

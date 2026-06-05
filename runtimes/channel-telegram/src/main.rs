@@ -59,6 +59,25 @@ fn write_status(status: &Status) {
     }
 }
 
+/// File holding the last-confirmed getUpdates offset, so a restart resumes from
+/// where it left off instead of re-pulling (and re-executing) the whole backlog.
+fn offset_path() -> PathBuf {
+    std::env::var("TG_OFFSET_FILE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| data_dir().join("telegram-offset"))
+}
+
+fn read_offset() -> u32 {
+    std::fs::read_to_string(offset_path())
+        .ok()
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .unwrap_or(0)
+}
+
+fn persist_offset(offset: u32) {
+    let _ = std::fs::write(offset_path(), offset.to_string());
+}
+
 /// Outbound send command from the gateway.
 #[derive(Deserialize)]
 struct SendRequest {
@@ -142,15 +161,20 @@ async fn serve_http(bot: Arc<Bot>, port: u16) {
 }
 
 /// Forward one inbound Telegram message to the gateway (direct chats only, v1).
+/// Returns true when it is safe to ADVANCE the offset past this update: either
+/// the message was delivered to the gateway, or there was nothing to deliver
+/// (group/empty/no gateway configured). Returns false ONLY on a transient
+/// delivery failure (gateway momentarily unreachable) so the caller re-fetches
+/// the same update on the next poll instead of losing it.
 async fn forward_inbound(
     http: &reqwest::Client,
     gateway_url: Option<&str>,
     gateway_token: Option<&str>,
     msg: frankenstein::types::Message,
-) {
+) -> bool {
     // v1: direct chats only (parity with the WhatsApp bridge); skip groups.
     if matches!(msg.chat.type_field, ChatType::Group | ChatType::Supergroup) {
-        return;
+        return true;
     }
     let Some(text) = msg
         .text
@@ -158,7 +182,7 @@ async fn forward_inbound(
         .or(msg.caption.as_deref())
         .filter(|t| !t.is_empty())
     else {
-        return;
+        return true;
     };
     let sender_id = msg
         .from
@@ -179,7 +203,7 @@ async fn forward_inbound(
     let chat_id = msg.chat.id.to_string();
 
     let (Some(url), Some(token)) = (gateway_url, gateway_token) else {
-        return;
+        return true;
     };
     let payload = serde_json::json!({
         "sender": sender_id,
@@ -188,16 +212,29 @@ async fn forward_inbound(
         // Reply target = the chat id (numeric string).
         "chat": chat_id,
     });
-    // Don't log message content (privacy): only the outcome.
-    if let Err(error) = http
-        .post(format!("{url}/api/channels/telegram/inbound"))
-        .bearer_auth(token)
-        .json(&payload)
-        .send()
-        .await
-    {
-        eprintln!("inbound: inoltro al gateway fallito: {error}");
+    // At-least-once: retry a few times before giving up, so a momentary gateway
+    // outage doesn't drop the message. Don't log message content (privacy).
+    for attempt in 0..3u32 {
+        match http
+            .post(format!("{url}/api/channels/telegram/inbound"))
+            .bearer_auth(token)
+            .json(&payload)
+            .send()
+            .await
+        {
+            Ok(response) if response.status().is_success() => return true,
+            Ok(response) => eprintln!(
+                "inbound: gateway ha risposto {} (tentativo {})",
+                response.status(),
+                attempt + 1
+            ),
+            Err(error) => {
+                eprintln!("inbound: inoltro al gateway fallito (tentativo {}): {error}", attempt + 1)
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(attempt as u64 + 1)).await;
     }
+    false
 }
 
 fn main() -> anyhow::Result<()> {
@@ -253,8 +290,10 @@ fn main() -> anyhow::Result<()> {
         let gateway_token = std::env::var("TG_GATEWAY_TOKEN").ok().filter(|s| !s.is_empty());
         let http = reqwest::Client::new();
 
-        // Long-polling loop.
-        let mut offset: u32 = 0;
+        // Long-polling loop. Resume from the persisted offset so a restart picks
+        // up exactly where it left off (messages sent while down are still held
+        // by Telegram's servers ~24h and get re-fetched here).
+        let mut offset: u32 = read_offset();
         loop {
             let params = GetUpdatesParams {
                 offset: Some(offset as i64),
@@ -265,16 +304,24 @@ fn main() -> anyhow::Result<()> {
             match bot.get_updates(&params).await {
                 Ok(response) => {
                     for update in response.result {
-                        offset = update.update_id + 1;
+                        let next = update.update_id + 1;
+                        // Forward BEFORE confirming: only advance once the gateway
+                        // has the message. On a transient delivery failure, stop
+                        // the batch and re-fetch from the same offset next poll.
                         if let UpdateContent::Message(message) = update.content {
-                            forward_inbound(
+                            let delivered = forward_inbound(
                                 &http,
                                 gateway_url.as_deref(),
                                 gateway_token.as_deref(),
                                 *message,
                             )
                             .await;
+                            if !delivered {
+                                break;
+                            }
                         }
+                        offset = next;
+                        persist_offset(offset);
                     }
                 }
                 Err(error) => {
