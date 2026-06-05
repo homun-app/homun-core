@@ -395,6 +395,70 @@ async function gatewayErrorDetail(response: Response): Promise<string> {
   return `HTTP ${response.status}`;
 }
 
+/** A real-time UI event pushed by the gateway over /api/events. */
+export interface AppEvent {
+  type: string;
+  thread_id?: string;
+  workspace?: string;
+  channel?: string;
+  title?: string;
+}
+
+/**
+ * Subscribes to the gateway's real-time event stream (NDJSON over HTTP, the same
+ * push idiom the chat stream uses). Invokes `onEvent` for each event — e.g.
+ * `thread.upserted` when an inbound Telegram/WhatsApp message creates a thread,
+ * so the app can show the card and jump to it without a manual refresh.
+ * Auto-reconnects on drop. Returns an unsubscribe function.
+ */
+export function subscribeAppEvents(onEvent: (event: AppEvent) => void): () => void {
+  let stopped = false;
+  let controller: AbortController | null = null;
+
+  async function connect() {
+    while (!stopped) {
+      controller = new AbortController();
+      try {
+        const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/events`, {
+          headers: gatewayHeaders(),
+          signal: controller.signal,
+        });
+        if (!response.ok || !response.body) throw new Error(`events HTTP ${response.status}`);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let nl: number;
+          while ((nl = buffer.indexOf("\n")) >= 0) {
+            const line = buffer.slice(0, nl).trim();
+            buffer = buffer.slice(nl + 1);
+            if (!line) continue;
+            try {
+              onEvent(JSON.parse(line) as AppEvent);
+            } catch {
+              // ignore a malformed line
+            }
+          }
+        }
+      } catch {
+        if (stopped) return;
+      }
+      if (stopped) return;
+      // Reconnect after a short backoff (gateway restart, transient drop, …).
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+  }
+
+  void connect();
+  return () => {
+    stopped = true;
+    controller?.abort();
+  };
+}
+
 async function gatewayPostJson<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`${DESKTOP_GATEWAY_URL}${path}`, {
     method: "POST",

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChatView } from "./components/ChatView";
 import { ContainedComputerView } from "./components/ContainedComputerView";
 import { LearningView } from "./components/LearningView";
@@ -19,6 +19,8 @@ import {
 } from "./data/mockData";
 import {
   coreBridge,
+  subscribeAppEvents,
+  type AppEvent,
   type CoreApprovalItem,
   type CoreChatAttachment,
   type CoreChatMessage,
@@ -501,6 +503,48 @@ export default function App() {
       console.warn("select_chat_thread unavailable", error);
     }
   }
+
+  // Navigate to a thread that may live in ANOTHER workspace (e.g. a channel
+  // thread in Personale): select_thread is workspace-aware and returns that
+  // workspace's snapshot, so applying it switches context for us.
+  async function navigateToThread(threadId: string) {
+    try {
+      const snapshot = await coreBridge.selectChatThread(threadId);
+      const mappedThreads = snapshot.threads.map(mapCoreChatThread);
+      const selectedThread =
+        mappedThreads.find((item) => item.threadId === threadId) ??
+        mappedThreads[0] ??
+        defaultChatThread;
+      const messages = await coreBridge.chatMessages(threadId);
+      setChatThreads(mappedThreads.length ? mappedThreads : chatThreads);
+      setThreadMessages((current) => ({
+        ...current,
+        [threadId]: messages.messages.map(mapCoreChatMessage),
+      }));
+      setActiveThreadId(threadId);
+      setSelectedTaskId(selectedThread.taskId);
+      setActiveView("chat");
+    } catch (error) {
+      console.warn("navigate_to_thread unavailable", error);
+    }
+  }
+
+  // Real-time channel events. When an inbound Telegram/WhatsApp message creates a
+  // thread, jump to it (create the card + switch). A ref keeps the handler fresh
+  // (current state in closure) without re-subscribing on every render.
+  const appEventHandlerRef = useRef<(event: AppEvent) => void>(() => {});
+  appEventHandlerRef.current = (event: AppEvent) => {
+    if (!event.thread_id) return;
+    if (event.type === "thread.upserted") {
+      void navigateToThread(event.thread_id);
+    } else if (event.type === "thread.updated" && event.thread_id === activeThreadId) {
+      void refreshChatReadModels(activeThreadId);
+    }
+  };
+  useEffect(() => {
+    const unsubscribe = subscribeAppEvents((event) => appEventHandlerRef.current(event));
+    return unsubscribe;
+  }, []);
 
   async function handleCreateChatThread() {
     try {
