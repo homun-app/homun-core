@@ -782,7 +782,8 @@ Risultato:
 La Fase 1 (Prompt Plan Executor) e le fasi 2-4 sono realizzate. Le priorita'
 correnti sono in `docs/roadmap.md` -> sezione "Next Action", in sintesi:
 
-1. ruolo browser su modello vision (quick win: sblocca set-of-marks/screenshot);
+1. ~~ruolo browser su modello vision~~ FATTO (2026-06-05: ruolo browser =
+   `minimax-m3:cloud`, vision) -> la priorita' #1 effettiva e' ora la voce 2;
 2. portare i task durevoli `browser_task` sul motore browser granular e ritirare
    il planner legacy (chiude il debito del doppio motore);
 3. affidabilita' browser su siti reali (extractor tabellari, cookie preflight,

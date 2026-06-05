@@ -442,6 +442,7 @@ Non ancora chiuso end-to-end:
 ## Prossimo Blocco Consigliato
 
 Il Prompt Plan Executor (il blocco originariamente consigliato qui) e' fatto.
-Le priorita' correnti sono in `docs/roadmap.md` -> "Next Action": ruolo browser
-vision, unificazione del browser durevole sul motore granular, affidabilita' su
-siti reali, poi packaging e auto-apprendimento.
+Le priorita' correnti sono in `docs/roadmap.md` -> "Next Action". Il ruolo
+browser vision e' FATTO (`minimax-m3:cloud`); la priorita' attuale e' unificare
+il browser durevole sul motore granular, poi affidabilita' su siti reali,
+packaging e auto-apprendimento.
