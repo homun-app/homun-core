@@ -93,6 +93,70 @@ fn parse_recipient(raw: &str) -> Result<Jid, String> {
     }
 }
 
+/// One inbound message to forward to the gateway. Built identically from the
+/// live `Event::Message` path and the history-recovery `Event::HistorySync`
+/// path so both get the SAME auto-reply treatment downstream.
+struct InboundForward {
+    /// Stable sender identifier (the PN/LID user part).
+    sender: String,
+    /// Push name when known (history messages may not carry one).
+    sender_name: Option<String>,
+    content: String,
+    /// WhatsApp message-key id — the gateway dedups on `{channel}:{message_id}`.
+    message_id: String,
+    /// Reply target JID (Display form, round-trips via Jid::from_str).
+    chat: String,
+    /// Preferred reply target when present (PN > LID).
+    sender_pn: Option<String>,
+    /// Original message Unix-seconds timestamp, when known. Lets the gateway
+    /// apply a defensive recency ceiling on the recovery path.
+    ts: Option<u64>,
+}
+
+/// Forwards one inbound message to the gateway with the at-least-once retry
+/// loop. Shared by the live and history-recovery paths so the payload + endpoint
+/// + auth are byte-for-byte identical (only `ts` is added). Privacy: never logs
+/// message content, only outcomes.
+async fn forward_inbound(
+    http: &reqwest::Client,
+    url: &str,
+    token: &str,
+    msg: &InboundForward,
+) {
+    let payload = serde_json::json!({
+        "sender": msg.sender,
+        "sender_name": msg.sender_name,
+        "content": msg.content,
+        "message_id": msg.message_id,
+        "chat": msg.chat,
+        "sender_pn": msg.sender_pn,
+        "ts": msg.ts,
+    });
+    for attempt in 0..3u32 {
+        match http
+            .post(format!("{url}/api/channels/whatsapp/inbound"))
+            .bearer_auth(token)
+            .json(&payload)
+            .send()
+            .await
+        {
+            Ok(response) if response.status().is_success() => break,
+            Ok(response) => eprintln!(
+                "inbound: gateway ha risposto {} (tentativo {})",
+                response.status(),
+                attempt + 1
+            ),
+            Err(error) => eprintln!(
+                "inbound: inoltro al gateway fallito (tentativo {}): {error}",
+                attempt + 1
+            ),
+        }
+        if attempt + 1 < 3 {
+            tokio::time::sleep(std::time::Duration::from_secs(attempt as u64 + 1)).await;
+        }
+    }
+}
+
 /// Outbound send command from the gateway (C2).
 #[derive(Deserialize)]
 struct SendRequest {
@@ -261,50 +325,159 @@ fn main() -> anyhow::Result<()> {
                                     info.source.addressing_mode,
                                     sender_pn.is_some(),
                                 );
-                                let payload = serde_json::json!({
-                                    "sender": info.source.sender.user,
-                                    "sender_name": info.push_name,
-                                    "content": text,
-                                    "message_id": info.id.to_string(),
+                                // At-least-once forwarding. WhatsApp store-and-forward
+                                // already delivered it to us, so (unlike Telegram)
+                                // there's no offset to replay from — the retry loop
+                                // just rides out a momentary gateway outage.
+                                let forward = InboundForward {
+                                    sender: info.source.sender.user.clone(),
+                                    sender_name: Some(info.push_name.clone()),
+                                    content: text.to_string(),
+                                    message_id: info.id.to_string(),
                                     // Correct reply target via Display (preserves
                                     // device + @lid/@s.whatsapp.net) so the reply
                                     // round-trips losslessly through Jid::from_str.
-                                    "chat": info.source.chat.to_string(),
-                                    // Preferred reply target when present (PN > LID).
-                                    "sender_pn": sender_pn,
-                                });
-                                // At-least-once: retry a few times so a momentary
-                                // gateway outage doesn't drop the message. (WhatsApp
-                                // store-and-forward already delivered it to us, so
-                                // unlike Telegram there's no offset to replay from.)
-                                // Don't log message content (privacy): only the outcome.
-                                for attempt in 0..3u32 {
-                                    match http
-                                        .post(format!("{url}/api/channels/whatsapp/inbound"))
-                                        .bearer_auth(token)
-                                        .json(&payload)
-                                        .send()
-                                        .await
-                                    {
-                                        Ok(response) if response.status().is_success() => break,
-                                        Ok(response) => eprintln!(
-                                            "inbound: gateway ha risposto {} (tentativo {})",
-                                            response.status(),
-                                            attempt + 1
-                                        ),
-                                        Err(error) => eprintln!(
-                                            "inbound: inoltro al gateway fallito (tentativo {}): {error}",
-                                            attempt + 1
-                                        ),
+                                    chat: info.source.chat.to_string(),
+                                    sender_pn,
+                                    // Live messages are by definition current; leave
+                                    // ts unset so the gateway recency ceiling is a
+                                    // no-op here (it only guards the recovery path).
+                                    ts: None,
+                                };
+                                forward_inbound(&http, url, token, &forward).await;
+                            }
+                        }
+                        // Offline message recovery: when this companion device was
+                        // offline, messages delivered to the primary phone are
+                        // re-synced here on reconnect. wa-rs surfaces them via
+                        // HistorySync (enabled by default; we never call
+                        // skip_history_sync). We mine recent direct-chat text and
+                        // forward it through the SAME gateway path as live messages,
+                        // so allowlist + auto-reply apply identically — with a recency
+                        // guard so the initial months-long sync can't trigger a spam
+                        // of replies, and the gateway's dedup so an already-handled
+                        // live message that re-appears here is dropped.
+                        Event::HistorySync(hs) => {
+                            let (Some(url), Some(token)) =
+                                (gateway_url.as_ref(), gateway_token.as_ref())
+                            else {
+                                return;
+                            };
+                            // Recency window (default 48h). The initial bootstrap
+                            // sync carries months of history; we only want the
+                            // recent offline window.
+                            let recency_secs: u64 = std::env::var("WA_HISTORY_RECENCY_HOURS")
+                                .ok()
+                                .and_then(|v| v.parse::<u64>().ok())
+                                .unwrap_or(48)
+                                .saturating_mul(3600);
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_secs())
+                                .unwrap_or(0);
+                            let cutoff = now.saturating_sub(recency_secs);
+
+                            let mut considered = 0u32;
+                            let mut forwarded = 0u32;
+                            for conv in &hs.conversations {
+                                // Conversation.id is the chat JID string. A group
+                                // chat (…@g.us) is skipped wholesale (v1: direct
+                                // chats only), mirroring the live filter.
+                                if conv.id.ends_with("@g.us") {
+                                    continue;
+                                }
+                                for entry in &conv.messages {
+                                    let Some(wmi) = entry.message.as_ref() else {
+                                        continue;
+                                    };
+                                    let key = &wmi.key;
+                                    // Skip our own messages (same as the live filter).
+                                    if key.from_me == Some(true) {
+                                        continue;
                                     }
-                                    if attempt + 1 < 3 {
-                                        tokio::time::sleep(std::time::Duration::from_secs(
-                                            attempt as u64 + 1,
-                                        ))
-                                        .await;
+                                    // The chat JID: prefer the message-key remote_jid,
+                                    // fall back to the conversation id.
+                                    let chat_jid = key
+                                        .remote_jid
+                                        .as_deref()
+                                        .filter(|s| !s.is_empty())
+                                        .unwrap_or(conv.id.as_str());
+                                    // Skip groups (per-message guard, belt-and-braces).
+                                    if chat_jid.ends_with("@g.us") {
+                                        continue;
                                     }
+                                    considered += 1;
+                                    // RECENCY GUARD (mandatory): drop anything older
+                                    // than the window. Missing timestamps are treated
+                                    // as too-old (we can't prove recency) and skipped.
+                                    let Some(ts) = wmi.message_timestamp else {
+                                        continue;
+                                    };
+                                    if ts < cutoff {
+                                        continue;
+                                    }
+                                    // Text only — reuse the live extractor.
+                                    let Some(inner) = wmi.message.as_ref() else {
+                                        continue;
+                                    };
+                                    let Some(text) = inner.text_content() else {
+                                        continue;
+                                    };
+                                    // The message-key id is what the gateway dedups
+                                    // on; without it we can't dedup, so skip.
+                                    let Some(message_id) =
+                                        key.id.as_deref().filter(|s| !s.is_empty())
+                                    else {
+                                        continue;
+                                    };
+                                    // Derive sender as best the types allow: the chat
+                                    // JID's user part is the direct-chat counterparty.
+                                    // Prefer a phone-number JID as the reply target.
+                                    let chat: Jid = match chat_jid.parse() {
+                                        Ok(jid) => jid,
+                                        Err(_) => continue,
+                                    };
+                                    let sender = chat.user.clone();
+                                    let sender_pn = if chat.server == "s.whatsapp.net" {
+                                        Some(chat.to_string())
+                                    } else {
+                                        None
+                                    };
+                                    let forward = InboundForward {
+                                        sender,
+                                        sender_name: wmi.push_name.clone(),
+                                        content: text.to_string(),
+                                        message_id: message_id.to_string(),
+                                        chat: chat.to_string(),
+                                        sender_pn,
+                                        ts: Some(ts),
+                                    };
+                                    forward_inbound(&http, url, token, &forward).await;
+                                    forwarded += 1;
                                 }
                             }
+                            println!(
+                                "history-sync: type={} conv={} considered={} forwarded={}",
+                                hs.sync_type,
+                                hs.conversations.len(),
+                                considered,
+                                forwarded,
+                            );
+                        }
+                        // Observability for the offline-recovery flow: log the
+                        // server's offline-queue counts so we can correlate a burst
+                        // of recovered messages with what the server said was queued.
+                        Event::OfflineSyncPreview(preview) => {
+                            println!(
+                                "offline-sync preview: total={} messages={} notifications={} receipts={}",
+                                preview.total,
+                                preview.messages,
+                                preview.notifications,
+                                preview.receipts,
+                            );
+                        }
+                        Event::OfflineSyncCompleted(done) => {
+                            println!("offline-sync completed: count={}", done.count);
                         }
                         Event::PairingQrCode { code, .. } => {
                             print_qr(&code);
