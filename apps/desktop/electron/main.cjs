@@ -37,7 +37,7 @@ process.env.LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN = GATEWAY_TOKEN;
 // Product/display name (macOS menu bar, About panel, dock tooltip). Set early,
 // before the app is ready, so the menu reflects it. Technical identifiers
 // (crate/binary "local-first-desktop-gateway", LOCAL_FIRST_* env) are unchanged.
-app.setName("homün");
+app.setName("homun");
 
 function normalizeGatewayUrl(value) {
   return value.endsWith("/") ? value : `${value}/`;
@@ -171,7 +171,7 @@ function createWindow() {
     minWidth: 980,
     minHeight: 680,
     ...(iconPath ? { icon: iconPath } : {}),
-    title: "homün",
+    title: "homun",
     backgroundColor: "#ffffff",
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 16, y: 16 },
