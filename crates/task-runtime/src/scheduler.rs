@@ -24,6 +24,11 @@ impl TaskScheduler {
             if task.not_before.is_some_and(|not_before| not_before > now) {
                 continue;
             }
+            if overdue_reason(&task, now).is_some() {
+                // Past its hard time budget — never hand it to the worker; the
+                // `expire_overdue_tasks` sweep moves it to `Expired`.
+                continue;
+            }
             if !self.dependencies_completed(store, &task, user_id, workspace_id)? {
                 continue;
             }
@@ -79,6 +84,49 @@ impl TaskScheduler {
         Ok(())
     }
 
+    /// Marks non-terminal tasks whose hard time budget has elapsed as `Expired`,
+    /// so the worker never starts (nor keeps re-queuing) work it can no longer
+    /// deliver. Two "can't succeed anymore" bounds: `expires_at` = do-not-start
+    /// after (e.g. a stale recurring occurrence); `deadline` = must-finish-by.
+    /// A cheap sweep, mirrored on `mark_blocked_by_terminal_dependencies`, meant
+    /// to run before scheduling. Returns how many tasks were expired.
+    ///
+    /// Human-blocked states (`WaitingUserApproval`, `Paused`) are intentionally
+    /// left alone — expiring something the user is mid-decision on would surprise.
+    pub fn expire_overdue_tasks(
+        &self,
+        store: &TaskStore,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        now: OffsetDateTime,
+    ) -> TaskRuntimeResult<usize> {
+        let mut expired = 0usize;
+        for task in store.list_tasks(user_id, workspace_id)? {
+            if !matches!(
+                task.status,
+                TaskStatus::Queued
+                    | TaskStatus::Pending
+                    | TaskStatus::WaitingTime
+                    | TaskStatus::WaitingExternalEvent
+                    | TaskStatus::WaitingResource
+            ) {
+                continue;
+            }
+            let Some(reason) = overdue_reason(&task, now) else {
+                continue;
+            };
+            store.update_task_status(
+                &task.task_id,
+                user_id,
+                workspace_id,
+                TaskStatus::Expired,
+                Some(&reason),
+            )?;
+            expired += 1;
+        }
+        Ok(expired)
+    }
+
     fn dependencies_completed(
         &self,
         store: &TaskStore,
@@ -102,6 +150,19 @@ impl Default for TaskScheduler {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// `Some(reason)` when the task is past a hard time budget and can no longer
+/// succeed: `expires_at` (do-not-start-after) takes precedence over `deadline`
+/// (must-finish-by). Both are optional; absent bounds never expire a task.
+fn overdue_reason(task: &TaskRecord, now: OffsetDateTime) -> Option<String> {
+    if task.expires_at.is_some_and(|expires_at| expires_at <= now) {
+        return Some("task expired: past expires_at (not started in time)".to_string());
+    }
+    if task.deadline.is_some_and(|deadline| deadline <= now) {
+        return Some("task expired: past deadline (cannot complete in time)".to_string());
+    }
+    None
 }
 
 fn status_label(status: TaskStatus) -> &'static str {
