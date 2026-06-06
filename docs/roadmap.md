@@ -83,11 +83,15 @@ Auto-apprendimento e cloud NON sono prerequisiti dell'addon-host: arrivano dopo.
 Stato (2026-06-06):
 - punti 1-2: **fatti** (vedi passi 2/4/5 sopra: runtime, esecuzione+verifica sul
   repo reale, proattività con scheduling).
-- punto 3: **fondazione fatta** — crate `local-first-process-skill` (modello addon
-  + contratto di personalizzazione open/locked + `validate_overlay`/`apply_overlay`
-  + fixture `invoicing_example`, 5 test). Restano: store skill+overlay, wiring nei
-  tool del gateway (install/list/customize/run), l'esecutore VETTATO fatturazione
-  end-to-end, e la generazione (apprentice loop).
+- punto 3: **in corso** —
+  - crate `local-first-process-skill` (modello addon + contratto open/locked +
+    `validate_overlay`/`apply_overlay` + fixture `invoicing_example`, 5 test). FATTO.
+  - store gateway (`process_skills.rs`: addon installati + overlay per-istanza,
+    JSON, seed fattura) + tool `list_addons`/`show_addon`/`customize_addon` (il
+    contratto in azione: modifiche ai campi bloccati rifiutate e spiegate). FATTO.
+  - Restano: l'**esecutore VETTATO fatturazione** end-to-end (bozza reale) e la
+    **generazione** (apprentice loop: l'osservazione genera una process-skill
+    rivedibile).
 
 ## Stato attuale: fondamenta solide
 
