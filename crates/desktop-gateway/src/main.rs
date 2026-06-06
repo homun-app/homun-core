@@ -2753,6 +2753,12 @@ citare MAI una fonte (sito/testata/doc) che non hai effettivamente aperto in QUE
 versioni o date inventate. Se non puoi verificare, dillo apertamente invece di indovinare. Le domande \
 atemporali (concetti, logica, codice generico) puoi rispondere direttamente."
     );
+    let system = format!(
+        "{system}\n\nESECUZIONE / VERIFICA: quando produci CODICE o un calcolo e hai lo strumento di \
+esecuzione (run_in_sandbox), NON assumere che funzioni — VERIFICA ESEGUENDO: lancia build/test/lint o \
+esegui il codice, leggi l'output REALE e itera sui fallimenti finché passa, PRIMA di dire che è fatto. \
+Fidati del compilatore e dei test, non della tua stima."
+    );
     // Granular browser operating guide (OpenClaw-SKILL-style). Always present:
     // the main agent drives the browser via the granular micro-tools (there is no
     // legacy browse_web handoff anymore).
