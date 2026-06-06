@@ -241,8 +241,9 @@ Sequenza consigliata (ordine di dipendenza vera):
      every)`. Worker attivo di default (poll 1s). Anche deadline/expires applicati.
      Gestione **conversazionale** completa: `list_scheduled_tasks` +
      `cancel_scheduled_task` (un ricorrente non è più inarrestabile).
-   - Restano: ricorrenza **cron/calendar-anchored + timezone**, **UI** dedicata
-     (oggi gestibile a voce), verifica live end-to-end.
+   - Ricorrenza **calendar-anchored + timezone DST-aware** (jiff): "daily@08:00",
+     "weekly@mon@09:30" con `timezone` IANA. FATTO.
+   - Restano: **UI** dedicata (oggi gestibile a voce), verifica live end-to-end.
 6. **Auto-apprendimento** su substrato eventi reale + UI di controllo (XL; dipende
    da 2-5).
 7. **Production hardening** per l'always-on (TLS/auth, logging, e2e, export/delete,
