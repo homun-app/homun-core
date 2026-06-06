@@ -134,3 +134,64 @@ Ordine consigliato, rivedibile; razionale accanto a ciascuna voce.
    NON un SaaS multi-tenant. L'architettura e' gia' pronta (il gateway e' un
    servizio HTTP, l'app un client). Da fare: TLS + auth reale (oggi loopback +
    token), gestione segreti, esposizione di rete sicura, packaging server.
+
+## Gap di sistema (audit 2026-06-05, verificato sul codice)
+
+Audit a ventaglio (8 revisori per dimensione) + verifica avversariale. Tema
+dominante: **"costruito ma non cablato"** — piu' sottosistemi esistono e sono
+unit-testati ma non vengono mai invocati in produzione. I prossimi grandi
+guadagni sono **chiudere i loop**, non scrivere nuovi sottosistemi.
+
+Stato: agente **reattivo** competente (chat + browser). Lontano dalla visione
+"apprendista che osserva, propone, agisce in proattivita'".
+
+Gap verificati, per tema:
+
+- **Proattivita' (il salto verso la visione)** — 3 pezzi che vanno insieme:
+  - primitiva di **schedulazione/ricorrenza** assente (niente cron/RRULE nel task
+    model, niente invii programmati; `schedule_hint` salvato ma mai consumato). HIGH.
+  - **auto-apprendimento** tutto codificato ma **mai innescato**: manca il
+    substrato di **ingestione eventi** (solo `contact_merge` registra un evento)
+    che alimenta routine inference -> proposte di automazione. HIGH (gated).
+  - **UI di controllo** (Learning/Automations/Memory) ancora **mock**. MEDIUM.
+- **Profondita' d'esecuzione (oltre il browser)**:
+  - l'agente fa **solo browser**; shell/file/takeover esistono nel Local Computer
+    session manager (con `ShellCommandPolicy` + approval gia' pronti) ma **non
+    esposti come tool**. HIGH.
+  - **niente feedback/replanning**: il Brain pianifica una volta e non osserva i
+    risultati intermedi (il cascade di fallimento sui dipendenti FUNZIONA gia';
+    manca il replanning mid-stream). HIGH.
+- **Robustezza runtime** (fix piccoli su roba esistente): `heartbeat()` mai
+  chiamato (task >5min rischiano scadenza lease), `deadline/expires_at` non
+  applicati, nessun **cancel/abort** sicuro di un task Running, `ResourceGovernor`
+  istanziato ma inattivo. HIGH.
+- **Hardening / always-on** (gate per il cloud): niente TLS/auth reale (loopback+
+  token), niente signing/notarization, niente e2e test, logging strutturato,
+  rate limiting, rotazione segreti; **data lifecycle** incompleto (delete workspace
+  lascia orfani, niente export utente, niente retention/GC -> SQLite crescono
+  all'infinito). HIGH/MEDIUM.
+- **Ecosistema / reach**: MCP **solo stdio** (no HTTP/SSE), nessun provider HTTP
+  generico, grant **per-tool** assenti, canali **1:1** (no gruppi/broadcast),
+  solo WhatsApp+Telegram. MEDIUM.
+- **Trascurati minori**: onboarding/first-run wizard, import dati.
+
+Sequenza consigliata (ordine di dipendenza vera):
+1. **Affidabilita' browser su siti reali** (gia' Next Action #1; nessuna nuova
+   architettura).
+2. **Hardening runtime**: heartbeat + deadline + cancel cooperativo (prerequisito
+   di tutto cio' che e' long-running/proattivo).
+3. **Loop di feedback task->Brain** (replanning + osservazione mid-stream +
+   rollback subagenti): un solo canale risolve piu' buchi.
+4. **Profondita' d'esecuzione**: esporre shell/file + takeover come tool (riusa
+   policy + approval esistenti).
+5. **Primitiva di proattivita'**: ricorrenza + timezone nel task model + tick che
+   materializza le occorrenze + UI scheduling.
+6. **Auto-apprendimento** su substrato eventi reale + UI di controllo (XL; dipende
+   da 2-5).
+7. **Production hardening** per l'always-on (TLS/auth, logging, e2e, export/delete,
+   retention) -> sblocca il cloud che chiude davvero il buco canali-offline.
+8. **Ecosistema** per ultimo: MCP HTTP/SSE, provider HTTP generico, grant per-tool,
+   gruppi/altri canali.
+
+Nota: i passi 2->6 sono il binario verso la **proattivita'**; il cloud (passo 7 /
+Next Action #6) ne e' l'**abilitatore** 24/7, non un extra.
