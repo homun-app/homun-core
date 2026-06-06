@@ -7590,9 +7590,93 @@ fn execute_read_only_task(
         GatewayTaskExecutorKind::CapabilityBrowser => execute_capability_browser_task(state, task),
         GatewayTaskExecutorKind::CapabilityGeneric => execute_capability_generic(state, task),
         GatewayTaskExecutorKind::Subagent => execute_subagent_task(task),
+        GatewayTaskExecutorKind::ProactivePrompt => execute_proactive_prompt_task(state, task),
         GatewayTaskExecutorKind::LegacyShell => execute_shell_read_only_task(task),
         GatewayTaskExecutorKind::LegacyLocal => execute_local_read_only_task(task),
     }
+}
+
+/// Executes a scheduled/recurring "proactive prompt": runs a full agent turn on
+/// the task's goal in a stable per-schedule chat thread, persists the exchange,
+/// and pushes a live `/api/events` update so the desktop app surfaces it — the
+/// same delivery path channel messages use. Tools stay read-only (safe by
+/// default for unattended runs). Async `run_agent_turn` is driven to completion
+/// via the runtime handle: this executor runs inside `spawn_blocking`, so
+/// blocking on the current runtime here does not stall the async workers.
+fn execute_proactive_prompt_task(
+    state: &AppState,
+    task: &TaskRecord,
+) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
+    let goal = task.goal.clone();
+    let root = task
+        .task_id
+        .as_str()
+        .split("@occ@")
+        .next()
+        .unwrap_or_else(|| task.task_id.as_str())
+        .to_string();
+    let title = {
+        let trimmed: String = goal.chars().take(48).collect();
+        format!("Pianificato · {trimmed}")
+    };
+
+    let thread_id = match lock_store(state) {
+        Ok(store) => store
+            .find_or_create_channel_thread(&base_workspace_id(), "scheduled", &root, &title)
+            .ok()
+            .map(|thread| thread.thread_id),
+        Err(_) => None,
+    };
+    let Some(thread_id) = thread_id else {
+        return Err(LocalTaskExecutionError {
+            message: "impossibile creare il thread pianificato".to_string(),
+        });
+    };
+
+    // Surface the (possibly new) thread immediately, like an inbound channel msg.
+    publish_app_event(serde_json::json!({
+        "type": "thread.upserted",
+        "thread_id": thread_id,
+        "workspace": base_workspace_id(),
+        "channel": "scheduled",
+        "title": title,
+    }));
+
+    let answer = tokio::runtime::Handle::current()
+        .block_on(run_agent_turn(state, &thread_id, &goal, "read_only"))
+        .unwrap_or_else(|| "Nessuna risposta generata per il task pianificato.".to_string());
+
+    if let Ok(store) = lock_store(state) {
+        let _ = store.append_assistant_message(&thread_id, &channel_chat_message("user", &goal));
+        let _ =
+            store.append_assistant_message(&thread_id, &channel_chat_message("assistant", &answer));
+    }
+    publish_app_event(serde_json::json!({
+        "type": "thread.updated",
+        "thread_id": thread_id,
+        "workspace": base_workspace_id(),
+        "channel": "scheduled",
+    }));
+
+    Ok(TaskExecutionOutcome {
+        completed: true,
+        blocked_reason: None,
+        pending_approval: None,
+        summary: "Task pianificato eseguito.".to_string(),
+        checkpoint_payload: serde_json::json!({
+            "kind": "proactive_prompt",
+            "goal": goal,
+            "thread_id": thread_id,
+        }),
+        checkpoint_redacted: serde_json::json!({ "kind": "proactive_prompt" }),
+        chat_message: answer,
+        surface: SurfaceKind::Logs,
+        event_kind: "proactive_prompt_completed".to_string(),
+        event_title: "Task pianificato completato".to_string(),
+        event_subtitle: "Esecuzione proattiva schedulata.".to_string(),
+        event_payload: serde_json::json!({ "goal": goal }),
+        artifacts: vec![],
+    })
 }
 
 fn execute_capability_browser_task(
