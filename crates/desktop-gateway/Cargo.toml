@@ -15,6 +15,7 @@ local-first-inference = { path = "../inference" }
 local-first-local-computer-session = { path = "../local-computer-session" }
 local-first-memory = { path = "../memory" }
 local-first-orchestrator = { path = "../orchestrator" }
+local-first-process-skill = { path = "../process-skill" }
 local-first-secrets = { path = "../secrets" }
 local-first-subagents = { path = "../subagents" }
 local-first-task-runtime = { path = "../task-runtime" }
