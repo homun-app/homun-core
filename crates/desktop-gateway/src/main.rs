@@ -11,6 +11,7 @@ mod skills_catalog;
 // Static security scan for installed skills, ported from Homun.
 mod skill_security;
 // Skill execution sandbox (reuses the browser's contained-computer container).
+mod process_skills;
 mod sandbox;
 mod task_registry;
 
@@ -1728,6 +1729,50 @@ fn run_in_project_tool_schema() -> serde_json::Value {
     })
 }
 
+fn list_addons_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "list_addons",
+            "description": "Elenca gli addon (process-skill) installati: automazioni verticali configurabili (es. fatturazione). Usalo quando l'utente chiede cosa sai fare per il suo lavoro o vuole adattare un processo.",
+            "parameters": { "type": "object", "properties": {} }
+        }
+    })
+}
+
+fn show_addon_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "show_addon",
+            "description": "Mostra i campi configurabili di un addon e quali sono APERTI (adattabili) o BLOCCATI (invarianti — es. fiscali/legali). Usalo PRIMA di personalizzare, per sapere chiavi e valori attuali.",
+            "parameters": {
+                "type": "object",
+                "properties": { "addon_id": { "type": "string", "description": "id dell'addon (da list_addons)" } },
+                "required": ["addon_id"]
+            }
+        }
+    })
+}
+
+fn customize_addon_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "customize_addon",
+            "description": "Personalizza un addon a parole: applica modifiche ai SOLI campi APERTI (es. titolo documento, logo, default). Le modifiche ai campi BLOCCATI (invarianti fiscali/legali) vengono rifiutate e spiegate. 'changes' è un oggetto {chiave: nuovo_valore} con le chiavi viste in show_addon.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "addon_id": { "type": "string", "description": "id dell'addon (da list_addons)" },
+                    "changes": { "type": "object", "description": "Mappa chiave→nuovo valore, solo per i campi aperti" }
+                },
+                "required": ["addon_id", "changes"]
+            }
+        }
+    })
+}
+
 // ─── Project files: in-place coding on the conversation's project folder ───
 // A "project" (workspace) maps to a real host folder. Unlike the isolated sandbox
 // (browser + throwaway scripts), these tools let the agent read/write/edit the
@@ -3292,6 +3337,10 @@ all'utente (tabella per riga + eventuale footer Fonti)."
         base_tools.push(edit_file_tool_schema());
         base_tools.push(list_files_tool_schema());
         base_tools.push(run_in_project_tool_schema());
+        // Addons (process-skills, ADR 0011): inspect + customize-by-prompt.
+        base_tools.push(list_addons_tool_schema());
+        base_tools.push(show_addon_tool_schema());
+        base_tools.push(customize_addon_tool_schema());
     }
     if has_composio {
         base_tools.push(find_connected_tools_schema());
@@ -3543,6 +3592,7 @@ all'utente (tabella per riga + eventuale footer Fonti)."
                                 | "run_in_project"
                                 | "schedule_task"
                                 | "cancel_scheduled_task"
+                                | "customize_addon"
                         )
                     {
                         // Defensive: these aren't offered in read-only mode, but if the
@@ -4627,6 +4677,45 @@ suoi argomenti):\n{}",
                         )
                         .await;
                         run_in_project(&state_owned, thread_id.as_deref(), &command).await
+                    } else if name == "list_addons" {
+                        tokio::task::spawn_blocking(process_skills::addons_list_text)
+                            .await
+                            .unwrap_or_else(|e| format!("Errore: {e}"))
+                    } else if name == "show_addon" {
+                        let args_val: serde_json::Value =
+                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        let addon_id = args_val
+                            .get("addon_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        tokio::task::spawn_blocking(move || process_skills::addon_show_text(&addon_id))
+                            .await
+                            .unwrap_or_else(|e| format!("Errore: {e}"))
+                    } else if name == "customize_addon" {
+                        let args_val: serde_json::Value =
+                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        let addon_id = args_val
+                            .get("addon_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let changes = args_val
+                            .get("changes")
+                            .cloned()
+                            .unwrap_or_else(|| serde_json::json!({}));
+                        let _ = emit_stream_event(
+                            &tx,
+                            GenerateStreamEvent::Delta {
+                                text: format!("‹‹ACT››🧩 Personalizzo addon {addon_id}‹‹/ACT››"),
+                            },
+                        )
+                        .await;
+                        tokio::task::spawn_blocking(move || {
+                            process_skills::addon_customize_text(&addon_id, &changes)
+                        })
+                        .await
+                        .unwrap_or_else(|e| format!("Errore: {e}"))
                     } else if name == "list_scheduled_tasks" {
                         let st = state_owned.clone();
                         tokio::task::spawn_blocking(move || list_scheduled_tasks(&st))
