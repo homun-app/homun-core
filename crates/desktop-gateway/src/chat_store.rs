@@ -602,7 +602,7 @@ impl ChatStore {
 
     /// Resolves the project a thread belongs to, defaulting to 'default' for
     /// threads that predate workspace scoping or are unknown.
-    fn workspace_for_thread(&self, thread_id: &str) -> rusqlite::Result<String> {
+    pub fn workspace_for_thread(&self, thread_id: &str) -> rusqlite::Result<String> {
         Ok(self
             .conn
             .query_row(
