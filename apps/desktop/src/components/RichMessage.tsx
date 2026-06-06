@@ -11,7 +11,8 @@ const RichMessageRenderer = lazy(() => import("./RichMessageRenderer"));
 // action (or its executed state), and the tool-activity trace; both are rendered
 // out-of-band (confirmation card / collapsible activity panel) and never shown as
 // raw text inside the answer body.
-const CONTROL_MARKER_RE = /‹‹COMPOSIO_(?:CONFIRM|DONE)››[\s\S]*?‹‹\/COMPOSIO_(?:CONFIRM|DONE)››/g;
+const CONTROL_MARKER_RE =
+  /‹‹COMPOSIO_(?:CONFIRM|DONE|RECONNECT)››[\s\S]*?‹‹\/COMPOSIO_(?:CONFIRM|DONE|RECONNECT)››/g;
 const ACTIVITY_MARKER_RE = /‹‹ACT››[\s\S]*?‹‹\/ACT››/g;
 const ARTIFACT_MARKER_RE = /‹‹ARTIFACT››[\s\S]*?‹‹\/ARTIFACT››/g;
 // Plain "[file generato: …]" notes the gateway adds for the model are dropped too.
