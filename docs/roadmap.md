@@ -80,6 +80,15 @@ Il core e' "pronto agli addon" (NON serve tutta la visione) quando ha:
 
 Auto-apprendimento e cloud NON sono prerequisiti dell'addon-host: arrivano dopo.
 
+Stato (2026-06-06):
+- punti 1-2: **fatti** (vedi passi 2/4/5 sopra: runtime, esecuzione+verifica sul
+  repo reale, proattività con scheduling).
+- punto 3: **fondazione fatta** — crate `local-first-process-skill` (modello addon
+  + contratto di personalizzazione open/locked + `validate_overlay`/`apply_overlay`
+  + fixture `invoicing_example`, 5 test). Restano: store skill+overlay, wiring nei
+  tool del gateway (install/list/customize/run), l'esecutore VETTATO fatturazione
+  end-to-end, e la generazione (apprentice loop).
+
 ## Stato attuale: fondamenta solide
 
 Pilastri completati e in esercizio (dettaglio task in work-memory):
