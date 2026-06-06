@@ -223,6 +223,15 @@ Sequenza consigliata (ordine di dipendenza vera):
    rollback subagenti): un solo canale risolve piu' buchi.
 4. **Profondita' d'esecuzione**: esporre shell/file + takeover come tool (riusa
    policy + approval esistenti).
+   - FATTO in parte (2026-06-06): `run_in_sandbox` (shell arbitraria in sandbox
+     Docker isolata + security scan) **sganciato da has_skills** → disponibile in
+     ogni turno app; descrizione + direttiva di sistema orientate a
+     **verify-by-execution** (build/test/lint, output reale, itera). Il loop
+     inline `act→osserva→verifica→itera` ora è operativo per l'agente.
+   - Restano: **mount del repo reale dell'utente** nella sandbox (oggi il codice
+     gira self-contained nella sandbox, non sul progetto host), tool dedicati
+     **read/write/edit file**, **takeover** desktop, e il **replanning dei task
+     DURABILI** (passo 3: feedback task→Brain, distinto dal loop inline).
 5. **Primitiva di proattivita'**: ricorrenza + timezone nel task model + tick che
    materializza le occorrenze + UI scheduling.
    - FATTO (2026-06-06): `TaskRecord.recurrence` + modulo `recurrence` (interval
