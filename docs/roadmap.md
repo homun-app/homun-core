@@ -161,31 +161,35 @@ ruoli/modelli.
 
 ## Next Action (priorita')
 
-Ordine consigliato, rivedibile; razionale accanto a ciascuna voce.
+Aggiornato 2026-06-06 dopo la sessione autonoma. Ordine consigliato, rivedibile.
 
-1. ~~**Ruolo browser su modello vision**~~ FATTO (2026-06-05): ruolo `browser` =
-   `minimax-m3:cloud` (vision). Debito #2 chiuso; set-of-marks/screenshot attivi.
-   La priorita' #1 effettiva diventa quindi la voce successiva.
-2. ~~**Browser durevole sul motore granular**~~ FATTO (2026-06-05): rimosso il
-   path durevole + planner legacy; browser inline-only (motore unico). Debito #1
-   chiuso. La priorita' #1 effettiva diventa la voce successiva.
-3. **Affidabilita' browser su siti reali** (ora priorita' #1). Extractor
-   strutturati per tabelle/listbox, cookie/banner preflight, stale-ref recovery,
-   wait predicates bounded.
-4. **Packaging / notarization macOS**. Necessario per distribuire, ma l'app e'
-   ancora single-dev: importante, non urgente rispetto al core. Chiude #3.
-5. **Auto-apprendimento** (gated: solo dopo eventi reali affidabili). Salvare
-   come memoria utente solo preferenze stabili emerse da task confermati, con
+**Fatti di recente (questa sessione):** affidabilita' browser (stale-ref
+auto-recovery); hardening runtime (deadline/expires enforced; governor gia'
+attivo); **proattivita' completa** (scheduling interval + calendar/tz DST-aware,
+esecutore `proactive_prompt`, gestione a voce list/cancel); **esecuzione+verifica
+sul repo reale** (file tools in-place path-jailed + `run_in_project` + direttiva
+verify-by-execution); **addon-host** (crate process-skill + contratto + store +
+tool `list/show/customize_addon`). Packaging/notarization e ruolo-browser-vision:
+gia' chiusi in precedenza.
+
+1. **Addon fatturazione end-to-end (esecutore vettato).** Il primo addon che
+   produce una bozza reale: raccolta dati → calcoli/IVA → numerazione → documento
+   → consegna per conferma. Prova l'intera astrazione ADR 0011 su un caso vero.
+2. **Generazione di addon (apprentice loop).** Dall'osservazione/conversazione il
+   sistema propone una process-skill **rivedibile** (config, non codice per-cliente).
+3. **Feedback/replan dei task DURABILI.** Osservazione mid-stream + ripianificazione
+   del Brain: il loop inline c'e' gia', manca per i task durevoli multi-step.
+4. **Production hardening → cloud single-tenant.** TLS + auth reale (oggi loopback+
+   token), packaging server, retention/GC degli store, export/delete. Sblocca
+   l'always-on 24/7 (canali senza buchi `count: 0`, proattivita' continua). Vincolo:
+   restare **single-tenant / self-hostable**, NON SaaS multi-tenant.
+5. **Auto-apprendimento** (XL, gated). Preferenze stabili da task confermati, con
    anti-esfiltrazione e privacy domain.
-6. **Deployment cloud / always-on (self-hostable).** Far girare gateway + sidecar
-   su un host sempre acceso (mini-PC/VPS dell'utente), con l'app desktop/web come
-   client. Sblocca i canali 24/7 senza buchi: WhatsApp ricevuto anche a portatile
-   spento (il companion resta sempre online → niente `count: 0`), Telegram idem,
-   proattivita' continua. Vincolo di valore: restare **single-tenant /
-   self-hostable** ("la tua istanza, i tuoi dati") per non tradire il local-first;
-   NON un SaaS multi-tenant. L'architettura e' gia' pronta (il gateway e' un
-   servizio HTTP, l'app un client). Da fare: TLS + auth reale (oggi loopback +
-   token), gestione segreti, esposizione di rete sicura, packaging server.
+6. **Ecosistema.** MCP HTTP/SSE, provider HTTP generico, grant per-tool, gruppi /
+   altri canali.
+
+Rifiniture: UI scheduling (oggi gestione a voce), takeover desktop, approval-gate
+opzionale su `run_in_project`, packaging/notarization macOS gia' fatto.
 
 ## Gap di sistema (audit 2026-06-05, verificato sul codice)
 
