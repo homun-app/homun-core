@@ -3207,6 +3207,20 @@ assente), NON il numero di messaggi della singola pagina restituita; se il risul
 non dà un totale affidabile, dichiara che è una stima."
         )
     };
+    // Connected-but-EXPIRED services: the integration EXISTS, the OAuth lapsed. Tell
+    // the model so it says "reconnect" instead of "I have no integration" (the bug
+    // that surfaced on a real "leggi le email" with an expired Gmail).
+    let system = if catalog.inactive.is_empty() {
+        system
+    } else {
+        format!(
+            "{system}\n\nSERVIZI COLLEGATI MA SCADUTI: {}. Il collegamento ESISTE ma \
+l'autorizzazione e' SCADUTA. Se l'utente chiede uno di questi servizi, NON dire che non hai \
+l'integrazione: spiega che il collegamento e' scaduto e va RIAUTORIZZATO in Impostazioni → \
+Connettori (pulsante Riconnetti).",
+            catalog.inactive.join(", ")
+        )
+    };
     // Installed skills (Anthropic Agent Skills, progressive disclosure L1): pre-load
     // name+description; the model calls `use_skill(<id>)` to pull the full SKILL.md
     // when a request matches, then follows it.
@@ -9546,6 +9560,9 @@ struct ComposioChatTools {
     schemas: Vec<serde_json::Value>,
     /// Slugs classified as write/destructive actions.
     writes: std::collections::BTreeSet<String>,
+    /// Toolkits CONNECTED but not ACTIVE (e.g. EXPIRED OAuth) — drive a
+    /// "reconnect" hint so the agent doesn't claim it has no integration.
+    inactive: Vec<String>,
 }
 
 /// Read-vs-write classification from the tool slug. Composio puts the verb
@@ -9595,8 +9612,10 @@ fn humanize_composio_tool(slug: &str) -> String {
     format!("{action} · {toolkit}")
 }
 
-/// ACTIVE connected toolkit slugs for the current entity.
-fn composio_active_toolkit_slugs(transport: &GatewayComposioTransport) -> Vec<String> {
+/// Connected toolkits for the current entity as `(slug, is_active)`. A toolkit is
+/// active if ANY of its connected accounts has status ACTIVE; connected-but-not-
+/// active (e.g. EXPIRED OAuth) shows as `false` so the caller can prompt a reconnect.
+fn composio_connected_toolkits(transport: &GatewayComposioTransport) -> Vec<(String, bool)> {
     let resp = transport
         .request(
             "GET",
@@ -9604,27 +9623,25 @@ fn composio_active_toolkit_slugs(transport: &GatewayComposioTransport) -> Vec<St
             None,
         )
         .ok();
-    let mut slugs = std::collections::BTreeSet::new();
+    let mut by_slug: std::collections::BTreeMap<String, bool> = std::collections::BTreeMap::new();
     if let Some(items) = resp.as_ref().and_then(|r| r.get("items")).and_then(|v| v.as_array()) {
         for item in items {
             let active = item
                 .get("status")
                 .and_then(serde_json::Value::as_str)
                 .is_some_and(|s| s.eq_ignore_ascii_case("ACTIVE"));
-            if !active {
-                continue;
-            }
             if let Some(slug) = item
                 .get("toolkit")
                 .and_then(|t| t.get("slug"))
                 .or_else(|| item.get("toolkit_slug"))
                 .and_then(serde_json::Value::as_str)
             {
-                slugs.insert(slug.to_string());
+                let entry = by_slug.entry(slug.to_string()).or_insert(false);
+                *entry = *entry || active;
             }
         }
     }
-    slugs.into_iter().collect()
+    by_slug.into_iter().collect()
 }
 
 /// Fetches the executable tools (with input schemas) for the connected toolkits
@@ -9635,8 +9652,19 @@ fn composio_chat_tools(state: &AppState, cap: usize) -> ComposioChatTools {
     let Ok(transport) = composio_transport_for(state) else {
         return out;
     };
-    let slugs = composio_active_toolkit_slugs(&transport);
+    let connected = composio_connected_toolkits(&transport);
+    out.inactive = connected
+        .iter()
+        .filter(|(_, active)| !*active)
+        .map(|(slug, _)| slug.clone())
+        .collect();
+    let slugs: Vec<String> = connected
+        .into_iter()
+        .filter(|(_, active)| *active)
+        .map(|(slug, _)| slug)
+        .collect();
     if slugs.is_empty() {
+        // No ACTIVE tools, but `out.inactive` still drives the reconnect hint below.
         return out;
     }
     // Composio v3 /tools filters by the SINGULAR `toolkit_slug=` param, one
