@@ -239,8 +239,10 @@ Sequenza consigliata (ordine di dipendenza vera):
      completamento) + esecutore `proactive_prompt` (agent turn read-only consegnato
      nel thread «Pianificato» con push `/api/events`) + tool `schedule_task(goal,
      every)`. Worker attivo di default (poll 1s). Anche deadline/expires applicati.
-   - Restano: ricorrenza **cron/calendar-anchored + timezone**, **UI scheduling**
-     (lista/modifica/cancel), verifica live end-to-end.
+     Gestione **conversazionale** completa: `list_scheduled_tasks` +
+     `cancel_scheduled_task` (un ricorrente non è più inarrestabile).
+   - Restano: ricorrenza **cron/calendar-anchored + timezone**, **UI** dedicata
+     (oggi gestibile a voce), verifica live end-to-end.
 6. **Auto-apprendimento** su substrato eventi reale + UI di controllo (XL; dipende
    da 2-5).
 7. **Production hardening** per l'always-on (TLS/auth, logging, e2e, export/delete,
