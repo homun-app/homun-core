@@ -1526,6 +1526,125 @@ Ti aggiornerò nel thread «Pianificato»."
     }
 }
 
+fn list_scheduled_tasks_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "list_scheduled_tasks",
+            "description": "Elenca i task pianificati/ricorrenti attivi (creati con schedule_task), con id, cosa fanno, ogni quanto e quando girano la prossima volta. Usalo prima di annullarne uno o quando l'utente chiede cosa hai in programma.",
+            "parameters": { "type": "object", "properties": {} }
+        }
+    })
+}
+
+fn cancel_scheduled_task_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "cancel_scheduled_task",
+            "description": "Annulla un task pianificato così non verrà più eseguito. Passa l'id ESATTO ottenuto da list_scheduled_tasks. Usalo quando l'utente vuole fermare un'attività ricorrente.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": { "type": "string", "description": "id del task pianificato da annullare (da list_scheduled_tasks)" }
+                },
+                "required": ["task_id"]
+            }
+        }
+    })
+}
+
+/// Lists the user's active scheduled (recurring proactive) tasks for the agent.
+fn list_scheduled_tasks(state: &AppState) -> String {
+    let store = match lock_task_store(state) {
+        Ok(store) => store,
+        Err(_) => return "Store dei task non disponibile.".to_string(),
+    };
+    let tasks = match store.list_tasks(&gateway_user_id(), &gateway_workspace_id()) {
+        Ok(tasks) => tasks,
+        Err(error) => return format!("Errore nella lettura dei task: {error}"),
+    };
+    let mut rows: Vec<String> = Vec::new();
+    for task in tasks {
+        if task.kind != "proactive_prompt" {
+            continue;
+        }
+        if !matches!(
+            task.status,
+            local_first_task_runtime::TaskStatus::Queued
+                | local_first_task_runtime::TaskStatus::Pending
+                | local_first_task_runtime::TaskStatus::WaitingTime
+                | local_first_task_runtime::TaskStatus::Running
+        ) {
+            continue;
+        }
+        let every = task.recurrence.as_deref().unwrap_or("una tantum");
+        let next = task
+            .not_before
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| "—".to_string());
+        rows.push(format!(
+            "- id={} · «{}» · ogni {every} · prossima: {next}",
+            task.task_id.as_str(),
+            task.goal
+        ));
+    }
+    if rows.is_empty() {
+        "Nessun task pianificato attivo.".to_string()
+    } else {
+        format!("Task pianificati attivi:\n{}", rows.join("\n"))
+    }
+}
+
+/// Cancels an active scheduled task by id. Scoped to `proactive_prompt` so the
+/// agent can't cancel system/capability tasks. Setting the active occurrence to
+/// `Cancelled` stops the chain: it won't run, so it won't complete and re-enqueue.
+fn cancel_scheduled_task(state: &AppState, task_id: &str) -> String {
+    let id = task_id.trim();
+    if id.is_empty() {
+        return "Specifica l'id del task (usa prima list_scheduled_tasks).".to_string();
+    }
+    let store = match lock_task_store(state) {
+        Ok(store) => store,
+        Err(_) => return "Store dei task non disponibile.".to_string(),
+    };
+    let user = gateway_user_id();
+    let workspace = gateway_workspace_id();
+    let tid = local_first_task_runtime::TaskId::new(id);
+    let task = match store.get_task(&tid, &user, &workspace) {
+        Ok(Some(task)) => task,
+        Ok(None) => {
+            return format!("Nessun task con id '{id}'. Usa list_scheduled_tasks per gli id esatti.")
+        }
+        Err(error) => return format!("Errore: {error}"),
+    };
+    if task.kind != "proactive_prompt" {
+        return "Posso annullare solo task pianificati (proactive_prompt).".to_string();
+    }
+    if matches!(
+        task.status,
+        local_first_task_runtime::TaskStatus::Completed
+            | local_first_task_runtime::TaskStatus::Cancelled
+            | local_first_task_runtime::TaskStatus::Failed
+            | local_first_task_runtime::TaskStatus::Expired
+    ) {
+        return format!("Il task «{}» è già terminato, non attivo.", task.goal);
+    }
+    match store.update_task_status(
+        &tid,
+        &user,
+        &workspace,
+        local_first_task_runtime::TaskStatus::Cancelled,
+        Some("annullato dall'utente"),
+    ) {
+        Ok(()) => format!(
+            "✅ Task pianificato «{}» annullato: non verrà più eseguito.",
+            task.goal
+        ),
+        Err(error) => format!("Non sono riuscito ad annullare il task: {error}"),
+    }
+}
+
 /// Searches the user's long-term memory (personal + active project) for the query
 /// and returns a compact, readable result for the model. Includes confirmed AND
 /// candidate items and all sensitivities: the model asked explicitly, and it is
@@ -2806,6 +2925,8 @@ all'utente (tabella per riga + eventuale footer Fonti)."
     if !read_only {
         base_tools.push(create_artifact_tool_schema());
         base_tools.push(schedule_task_tool_schema());
+        base_tools.push(list_scheduled_tasks_tool_schema());
+        base_tools.push(cancel_scheduled_task_tool_schema());
         // Shell execution is a general capability (run scripts, process data, and
         // verify-by-execution: build/test/lint), not skill-only. The Docker
         // sandbox + security scan are the safety boundary, so it's safe to offer
@@ -4017,6 +4138,31 @@ es. \"every 1d\", \"every 6h\").".to_string()
                             .await
                             .unwrap_or_else(|e| format!("Errore di pianificazione: {e}"))
                         }
+                    } else if name == "list_scheduled_tasks" {
+                        let st = state_owned.clone();
+                        tokio::task::spawn_blocking(move || list_scheduled_tasks(&st))
+                            .await
+                            .unwrap_or_else(|e| format!("Errore: {e}"))
+                    } else if name == "cancel_scheduled_task" {
+                        let args_val: serde_json::Value =
+                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        let task_id = args_val
+                            .get("task_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
+                        let _ = emit_stream_event(
+                            &tx,
+                            GenerateStreamEvent::Delta {
+                                text: "‹‹ACT››🗑️ Annullo task pianificato‹‹/ACT››".to_string(),
+                            },
+                        )
+                        .await;
+                        let st = state_owned.clone();
+                        tokio::task::spawn_blocking(move || cancel_scheduled_task(&st, &task_id))
+                            .await
+                            .unwrap_or_else(|e| format!("Errore: {e}"))
                     } else if read_only && !name.is_empty() && composio_writes.contains(name) {
                         // Channel (read-only) turn: never run a write tool, never even
                         // surface a confirm card (no UI on the channel). Phase 2 routes
