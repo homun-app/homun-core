@@ -234,3 +234,28 @@ Sequenza consigliata (ordine di dipendenza vera):
 
 Nota: i passi 2->6 sono il binario verso la **proattivita'**; il cloud (passo 7 /
 Next Action #6) ne e' l'**abilitatore** 24/7, non un extra.
+
+## Loop agentico di core: plan(success-criteria) -> act -> verify-by-execution -> replan
+
+Primitivo trasversale (consolida i passi 3-4) e cuore dell'"assistente che fa anche
+codice". Stato dell'arte confermato (Claude Code/Codex/Cursor/SWE-bench, giugno
+2026): un harness MINIMO + modello capace + **verifica per esecuzione** batte i
+planner complessi.
+
+Forma del loop (agnostica, nel core):
+1. **Comprendi + pianifica** con **criteri di successo espliciti** (cosa significa
+   "fatto" in modo verificabile) — niente piano = niente verifica.
+2. **Agisci** (tool) e **osserva** ogni risultato (gia' presente nel tool-loop del turno).
+3. **Verifica ESEGUENDO**, non interrogando il modello: lancia un check/predicato e
+   leggi l'esito reale. Per il codice = build/test/lint; per il browser = righe
+   risultato presenti; per la fattura = campi obbligatori validi.
+4. **Replan / auto-correggi** sul fallimento (rifeed dell'errore); **stop** quando i
+   criteri sono soddisfatti. Replanning periodico per contrastare la deriva.
+5. **Governance**: approval sui passi rischiosi, round limitati, tracciabilita' del
+   piano e delle decisioni.
+
+Principio di design: il **core fornisce il loop** (plan/verify/replan, agnostico);
+l'**addon dichiara COSA verificare** (il predicato). Coding = primo banco di prova,
+riusando il contained-computer come workspace dev (run build/test). Coerente con
+ADR 0011 (il "cosa" sta nell'addon, il "come" nel core) e con lo SOTA (semplicita'
++ verify-by-execution). NON ricostruire un planner barocco.
