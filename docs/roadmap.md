@@ -125,3 +125,12 @@ Ordine consigliato, rivedibile; razionale accanto a ciascuna voce.
 5. **Auto-apprendimento** (gated: solo dopo eventi reali affidabili). Salvare
    come memoria utente solo preferenze stabili emerse da task confermati, con
    anti-esfiltrazione e privacy domain.
+6. **Deployment cloud / always-on (self-hostable).** Far girare gateway + sidecar
+   su un host sempre acceso (mini-PC/VPS dell'utente), con l'app desktop/web come
+   client. Sblocca i canali 24/7 senza buchi: WhatsApp ricevuto anche a portatile
+   spento (il companion resta sempre online → niente `count: 0`), Telegram idem,
+   proattivita' continua. Vincolo di valore: restare **single-tenant /
+   self-hostable** ("la tua istanza, i tuoi dati") per non tradire il local-first;
+   NON un SaaS multi-tenant. L'architettura e' gia' pronta (il gateway e' un
+   servizio HTTP, l'app un client). Da fare: TLS + auth reale (oggi loopback +
+   token), gestione segreti, esposizione di rete sicura, packaging server.
