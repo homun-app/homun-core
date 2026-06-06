@@ -172,24 +172,39 @@ verify-by-execution); **addon-host** (crate process-skill + contratto + store +
 tool `list/show/customize_addon`). Packaging/notarization e ruolo-browser-vision:
 gia' chiusi in precedenza.
 
-1. **Addon fatturazione end-to-end (esecutore vettato).** Il primo addon che
-   produce una bozza reale: raccolta dati → calcoli/IVA → numerazione → documento
-   → consegna per conferma. Prova l'intera astrazione ADR 0011 su un caso vero.
-2. **Generazione di addon (apprentice loop).** Dall'osservazione/conversazione il
-   sistema propone una process-skill **rivedibile** (config, non codice per-cliente).
-3. **Feedback/replan dei task DURABILI.** Osservazione mid-stream + ripianificazione
-   del Brain: il loop inline c'e' gia', manca per i task durevoli multi-step.
-4. **Production hardening → cloud single-tenant.** TLS + auth reale (oggi loopback+
-   token), packaging server, retention/GC degli store, export/delete. Sblocca
-   l'always-on 24/7 (canali senza buchi `count: 0`, proattivita' continua). Vincolo:
-   restare **single-tenant / self-hostable**, NON SaaS multi-tenant.
-5. **Auto-apprendimento** (XL, gated). Preferenze stabili da task confermati, con
-   anti-esfiltrazione e privacy domain.
-6. **Ecosistema.** MCP HTTP/SSE, provider HTTP generico, grant per-tool, gruppi /
-   altri canali.
+**DIREZIONE (decisione 2026-06-06):** prima una **release ufficiale come assistente
+personale solido** — skill, **Composio (1000+ connettori)**, MCP. Gli **addon
+(ADR 0011) restano fondazione PRONTA ma DORMIENTE** (gated off, `LOCAL_FIRST_ADDONS=1`):
+si studiano e attivano DOPO la prima release, senza stravolgere nulla. Mappa dello
+stato dei 3 layer: i path discovery/esecuzione/approval sono cablati; i buchi sono
+**completamento, gestione, onboarding**.
 
-Rifiniture: UI scheduling (oggi gestione a voce), takeover desktop, approval-gate
-opzionale su `run_in_project`, packaging/notarization macOS gia' fatto.
+Verso la prima release:
+1. **Composio OAuth end-to-end** (collo di bottiglia). Oggi `composio_link`
+   restituisce il `redirect_url` ma il flusso non si chiude (niente apertura
+   browser + polling stato) → la maggior parte dei 1000 connettori (managed OAuth)
+   e' di fatto inusabile. Aprire l'URL + poll `connected_accounts` fino ad ACTIVE
+   + esito chiaro in UI (auto-refresh toolkit).
+2. **Errori azionabili + token.** Mappare gli errori Composio/MCP/skill in messaggi
+   con recovery ("401 → chiave scaduta, ricollega"; "429 → rate limit"); rotazione
+   e scoping del token gateway.
+3. **MCP: gestione server.** Disconnect/reload/health + timeout sulle call (oggi
+   add-only, nessun cleanup); poi transport **HTTP/SSE** oltre allo stdio.
+4. **Onboarding first-run.** Wizard connettori (Composio prima, poi MCP/skill) cosi'
+   il nuovo utente non parte da schermate vuote.
+5. **Skill: gestione.** Install dal marketplace fluido, rilevamento update, override
+   security consapevole (oggi blocco opaco).
+6. **Status connettori + audit.** Dashboard stato (Composio/MCP attivi, tool count,
+   account collegati) + log esecuzioni tool.
+7. **Hardening release.** Packaging, retention/GC degli store, export/delete.
+
+DOPO la prima release (ADR 0011): esecutore addon fatturazione end-to-end +
+generazione (apprentice loop). Il loop di core (plan→verify→replan), la proattivita'
+e l'esecuzione sul repo reale — gia' fatti — restano i primitivi su cui gli addon
+si compongono.
+
+Rifiniture trasversali: UI scheduling (oggi a voce), takeover desktop, approval-gate
+opzionale su `run_in_project`.
 
 ## Gap di sistema (audit 2026-06-05, verificato sul codice)
 

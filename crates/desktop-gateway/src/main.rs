@@ -1729,6 +1729,15 @@ fn run_in_project_tool_schema() -> serde_json::Value {
     })
 }
 
+/// Addons (process-skills, ADR 0011) are a post-release direction. The foundation
+/// stays wired but the agent-facing tools are gated off by default, so the first
+/// release ships as a focused personal assistant. Enable with LOCAL_FIRST_ADDONS=1.
+fn addons_enabled() -> bool {
+    std::env::var("LOCAL_FIRST_ADDONS")
+        .map(|value| matches!(value.trim(), "1" | "true" | "on" | "yes"))
+        .unwrap_or(false)
+}
+
 fn list_addons_tool_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "function",
@@ -3337,10 +3346,13 @@ all'utente (tabella per riga + eventuale footer Fonti)."
         base_tools.push(edit_file_tool_schema());
         base_tools.push(list_files_tool_schema());
         base_tools.push(run_in_project_tool_schema());
-        // Addons (process-skills, ADR 0011): inspect + customize-by-prompt.
-        base_tools.push(list_addons_tool_schema());
-        base_tools.push(show_addon_tool_schema());
-        base_tools.push(customize_addon_tool_schema());
+        // Addons (process-skills, ADR 0011) stay DORMANT until the post-release
+        // addon phase: foundation wired but off by default (LOCAL_FIRST_ADDONS=1).
+        if addons_enabled() {
+            base_tools.push(list_addons_tool_schema());
+            base_tools.push(show_addon_tool_schema());
+            base_tools.push(customize_addon_tool_schema());
+        }
     }
     if has_composio {
         base_tools.push(find_connected_tools_schema());
