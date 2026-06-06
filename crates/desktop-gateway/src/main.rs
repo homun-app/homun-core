@@ -2454,7 +2454,7 @@ fn run_in_sandbox_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "run_in_sandbox",
-            "description": "Esegue un comando di shell nel computer contenuto (sandbox isolata con bash/curl/python). Usalo per eseguire i comandi indicati da una skill (es. 'curl -s wttr.in/Roma?format=3'). Restituisce l'output del comando.",
+            "description": "Esegue un comando di shell nel computer contenuto (sandbox isolata: bash, curl, python, git, compilatori). Usalo per: eseguire comandi/script, elaborare dati, e SOPRATTUTTO per VERIFICARE ESEGUENDO — lancia build/test/lint o esegui il codice e leggi l'output REALE invece di assumere che codice o calcoli siano corretti. Restituisce stdout/stderr. Itera sui fallimenti finché la verifica passa.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -2800,15 +2800,17 @@ all'utente (tabella per riga + eventuale footer Fonti)."
     if !read_only {
         base_tools.push(create_artifact_tool_schema());
         base_tools.push(schedule_task_tool_schema());
+        // Shell execution is a general capability (run scripts, process data, and
+        // verify-by-execution: build/test/lint), not skill-only. The Docker
+        // sandbox + security scan are the safety boundary, so it's safe to offer
+        // whenever the turn can act (not read-only channels).
+        base_tools.push(run_in_sandbox_tool_schema());
     }
     if has_composio {
         base_tools.push(find_connected_tools_schema());
     }
     if has_skills {
         base_tools.push(use_skill_tool_schema());
-        if !read_only {
-            base_tools.push(run_in_sandbox_tool_schema());
-        }
     }
     if !artifact_destinations.is_empty() && !read_only {
         base_tools.push(save_artifact_tool_schema(&artifact_destinations));
