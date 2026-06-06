@@ -1467,6 +1467,65 @@ prompt, PRIMA di dire che non lo sai.",
     })
 }
 
+fn schedule_task_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "schedule_task",
+            "description": "Pianifica un task RICORRENTE che verrà eseguito in autonomia (proattività). \
+Usalo quando l'utente chiede di fare/controllare qualcosa periodicamente (es. \"ogni mattina \
+controlla le news su X\", \"ogni lunedì mandami il riepilogo\"). A ogni occorrenza eseguo il 'goal' \
+con strumenti READ-ONLY e ti consegno il risultato in un thread dedicato. NON usarlo per azioni \
+una-tantum immediate (quelle falle ora).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "goal": {
+                        "type": "string",
+                        "description": "Cosa fare a ogni esecuzione, formulato come un'istruzione completa (es. \"Cerca sul web le ultime notizie su Jannik Sinner e riassumile\")."
+                    },
+                    "every": {
+                        "type": "string",
+                        "description": "Ogni quanto ripetere: \"every 30m\", \"every 6h\", \"every 1d\", \"every 1w\". La prima esecuzione avviene dopo un intervallo da ora."
+                    }
+                },
+                "required": ["goal", "every"]
+            }
+        }
+    })
+}
+
+/// Creates a recurring `proactive_prompt` task from chat. Inserts it under the
+/// gateway scope so the executor worker (`run_next_task_once`) picks it up; the
+/// first occurrence fires one interval from now, then `next_recurrence` re-enqueues.
+fn schedule_proactive_task(state: &AppState, goal: &str, every: &str) -> String {
+    let now = OffsetDateTime::now_utc();
+    let Some(next) = local_first_task_runtime::next_occurrence(every, None, now) else {
+        return format!("Intervallo '{every}' non valido. Usa \"every 30m\", \"every 6h\", \"every 1d\", \"every 1w\".");
+    };
+    let id = format!("sched_{}", uuid::Uuid::new_v4().simple());
+    let mut task = TaskRecord::new(
+        id,
+        gateway_user_id(),
+        gateway_workspace_id(),
+        "proactive_prompt",
+        goal,
+        serde_json::json!({}),
+    );
+    task.not_before = Some(next);
+    task.recurrence = Some(every.to_string());
+    match lock_task_store(state) {
+        Ok(store) => match store.insert_task(&task) {
+            Ok(()) => format!(
+                "✅ Pianificato: «{goal}» ({every}). Prima esecuzione: {next}. \
+Ti aggiornerò nel thread «Pianificato»."
+            ),
+            Err(error) => format!("Non sono riuscito a pianificare il task: {error}"),
+        },
+        Err(_) => "Store dei task non disponibile: pianificazione non riuscita.".to_string(),
+    }
+}
+
 /// Searches the user's long-term memory (personal + active project) for the query
 /// and returns a compact, readable result for the model. Includes confirmed AND
 /// candidate items and all sensitivities: the model asked explicitly, and it is
@@ -2740,6 +2799,7 @@ all'utente (tabella per riga + eventuale footer Fonti)."
     ];
     if !read_only {
         base_tools.push(create_artifact_tool_schema());
+        base_tools.push(schedule_task_tool_schema());
     }
     if has_composio {
         base_tools.push(find_connected_tools_schema());
@@ -3915,6 +3975,39 @@ suoi argomenti):\n{}",
                                     lines.join("\n")
                                 )
                             }
+                        }
+                    } else if name == "schedule_task" {
+                        let args_val: serde_json::Value =
+                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        let goal = args_val
+                            .get("goal")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
+                        let every = args_val
+                            .get("every")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
+                        if goal.is_empty() || every.is_empty() {
+                            "Per pianificare servono 'goal' (cosa fare) e 'every' (ogni quanto, \
+es. \"every 1d\", \"every 6h\").".to_string()
+                        } else {
+                            let _ = emit_stream_event(
+                                &tx,
+                                GenerateStreamEvent::Delta {
+                                    text: format!("‹‹ACT››⏰ Pianifico: {goal} ({every})‹‹/ACT››"),
+                                },
+                            )
+                            .await;
+                            let st = state_owned.clone();
+                            tokio::task::spawn_blocking(move || {
+                                schedule_proactive_task(&st, &goal, &every)
+                            })
+                            .await
+                            .unwrap_or_else(|e| format!("Errore di pianificazione: {e}"))
                         }
                     } else if read_only && !name.is_empty() && composio_writes.contains(name) {
                         // Channel (read-only) turn: never run a write tool, never even
