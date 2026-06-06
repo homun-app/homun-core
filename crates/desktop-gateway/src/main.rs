@@ -3214,10 +3214,12 @@ non dà un totale affidabile, dichiara che è una stima."
         system
     } else {
         format!(
-            "{system}\n\nSERVIZI COLLEGATI MA SCADUTI: {}. Il collegamento ESISTE ma \
-l'autorizzazione e' SCADUTA. Se l'utente chiede uno di questi servizi, NON dire che non hai \
-l'integrazione: spiega che il collegamento e' scaduto e va RIAUTORIZZATO in Impostazioni → \
-Connettori (pulsante Riconnetti).",
+            "{system}\n\nSERVIZI COLLEGATI MA SCADUTI (slug): {}. Il collegamento ESISTE ma \
+l'autorizzazione e' SCADUTA. Se l'utente chiede uno di questi servizi: NON dire che non hai \
+l'integrazione; spiega in UNA frase che il collegamento e' scaduto e basta riautorizzarlo, e \
+INCLUDI nella risposta il marker (riga a se') `‹‹COMPOSIO_RECONNECT››<slug>‹‹/COMPOSIO_RECONNECT››` \
+col solo slug del servizio interessato (es. gmail): l'interfaccia mostrera' un pulsante \
+\"Riconnetti\" che riapre l'autorizzazione in un clic.",
             catalog.inactive.join(", ")
         )
     };

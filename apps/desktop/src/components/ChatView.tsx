@@ -2417,7 +2417,9 @@ interface ComposioPendingAction {
 
 const COMPOSIO_CONFIRM_RE = /‹‹COMPOSIO_CONFIRM››([\s\S]*?)‹‹\/COMPOSIO_CONFIRM››/;
 const COMPOSIO_DONE_RE = /‹‹COMPOSIO_DONE››([\s\S]*?)‹‹\/COMPOSIO_DONE››/;
-const COMPOSIO_MARKERS_RE = /‹‹COMPOSIO_(?:CONFIRM|DONE)››[\s\S]*?‹‹\/COMPOSIO_(?:CONFIRM|DONE)››/g;
+const COMPOSIO_RECONNECT_RE = /‹‹COMPOSIO_RECONNECT››([\s\S]*?)‹‹\/COMPOSIO_RECONNECT››/;
+const COMPOSIO_MARKERS_RE =
+  /‹‹COMPOSIO_(?:CONFIRM|DONE|RECONNECT)››[\s\S]*?‹‹\/COMPOSIO_(?:CONFIRM|DONE|RECONNECT)››/g;
 
 // Tool-activity trace markers (browser / skill / sandbox / connected-tool steps).
 // They are extracted into a compact collapsible panel so the answer body stays
@@ -3164,6 +3166,7 @@ function parseComposioConfirm(text: string): {
   visible: string;
   action: ComposioPendingAction | null;
   doneTool: string | null;
+  reconnectSlug: string | null;
 } {
   let action: ComposioPendingAction | null = null;
   const confirm = text.match(COMPOSIO_CONFIRM_RE);
@@ -3177,9 +3180,11 @@ function parseComposioConfirm(text: string): {
   }
   const done = text.match(COMPOSIO_DONE_RE);
   const doneTool = done ? done[1].trim() : null;
+  const reconnectMatch = text.match(COMPOSIO_RECONNECT_RE);
+  const reconnectSlug = reconnectMatch ? reconnectMatch[1].trim() : null;
   const visible = text.replace(COMPOSIO_MARKERS_RE, "").trim();
   // A persisted "done" marker wins: never reopen the editable card.
-  return { visible, action: doneTool ? null : action, doneTool };
+  return { visible, action: doneTool ? null : action, doneTool, reconnectSlug };
 }
 
 /** Replaces raw tool slugs (GMAIL_SEND_EMAIL) anywhere in assistant text with a
@@ -3205,7 +3210,10 @@ function AssistantMessageBody({
   threadId?: string;
   onOpenArtifact?: (artifact: ParsedArtifact) => void;
 }) {
-  const { visible, action, doneTool } = useMemo(() => parseComposioConfirm(text), [text]);
+  const { visible, action, doneTool, reconnectSlug } = useMemo(
+    () => parseComposioConfirm(text),
+    [text],
+  );
   const readable = useMemo(() => humanizeToolSlugs(visible), [visible]);
   return (
     <>
@@ -3221,7 +3229,64 @@ function AssistantMessageBody({
       {action && !streaming && (
         <ComposioConfirmCard action={action} messageId={messageId} threadId={threadId} />
       )}
+      {reconnectSlug && !streaming && <ComposioReconnectCard slug={reconnectSlug} />}
     </>
+  );
+}
+
+/** One-click reconnect for an EXPIRED Composio connector, surfaced in-chat so the
+ *  user re-authorizes without hunting in Settings. OAuth re-consent is unavoidable
+ *  (security), so this opens the provider's consent and asks the user to retry. */
+function ComposioReconnectCard({ slug }: { slug: string }) {
+  const [status, setStatus] = useState<"idle" | "running" | "opened" | "error">("idle");
+  const [note, setNote] = useState<string | null>(null);
+  const name = slug.charAt(0).toUpperCase() + slug.slice(1);
+
+  const reconnect = async () => {
+    setStatus("running");
+    setNote(null);
+    try {
+      const result = await coreBridge.composioLink(slug);
+      if (result.redirect_url) {
+        window.open(result.redirect_url, "_blank", "noopener,noreferrer");
+        setNote(`Autorizza ${name} nel browser, poi ripeti la richiesta.`);
+      } else {
+        setNote("Riconnessione avviata. Ripeti la richiesta tra poco.");
+      }
+      setStatus("opened");
+    } catch (error) {
+      setStatus("error");
+      setNote((error as Error).message);
+    }
+  };
+
+  if (status === "opened") {
+    return (
+      <div className="cmp-confirm done">
+        <ShieldCheck size={15} />
+        <span>{note}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="cmp-confirm">
+      <div className="cmp-confirm-head">
+        <ShieldCheck size={15} />
+        <strong>Collegamento scaduto</strong>
+        <span className="cmp-confirm-name">{name}</span>
+      </div>
+      <div className="cmp-confirm-actions">
+        <button
+          className="set-btn primary"
+          type="button"
+          disabled={status === "running"}
+          onClick={() => void reconnect()}
+        >
+          {status === "running" ? "Apro…" : `Riconnetti ${name}`}
+        </button>
+      </div>
+      {status === "error" && note && <p className="cmp-confirm-note error">{note}</p>}
+    </div>
   );
 }
 
