@@ -228,10 +228,15 @@ Sequenza consigliata (ordine di dipendenza vera):
      ogni turno app; descrizione + direttiva di sistema orientate a
      **verify-by-execution** (build/test/lint, output reale, itera). Il loop
      inline `act→osserva→verifica→itera` ora è operativo per l'agente.
-   - Restano: **mount del repo reale dell'utente** nella sandbox (oggi il codice
-     gira self-contained nella sandbox, non sul progetto host), tool dedicati
-     **read/write/edit file**, **takeover** desktop, e il **replanning dei task
-     DURABILI** (passo 3: feedback task→Brain, distinto dal loop inline).
+   - Assistente-codice sul **repo reale** (modello Claude-Code) FATTO (2026-06-06):
+     tool file in-place `read_file`/`write_file`/`edit_file`/`list_files`
+     **path-jailed** alla cartella di progetto (`WorkspaceRecord.folder`), +
+     `run_in_project` (shell sul repo reale, cwd=cartella, timeout, security-scan)
+     per build/test sul codice vero. La sandbox resta per browser + script
+     usa-e-getta. Loop completo: list/read → edit/write → run/test → itera.
+   - Restano: **takeover** desktop, **approval gate** opzionale su run_in_project,
+     e il **replanning dei task DURABILI** (passo 3: feedback task→Brain, distinto
+     dal loop inline).
 5. **Primitiva di proattivita'**: ricorrenza + timezone nel task model + tick che
    materializza le occorrenze + UI scheduling.
    - FATTO (2026-06-06): `TaskRecord.recurrence` + modulo `recurrence` (interval
