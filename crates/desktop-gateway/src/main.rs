@@ -1650,6 +1650,275 @@ fn cancel_scheduled_task(state: &AppState, task_id: &str) -> String {
     }
 }
 
+fn read_file_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": "Legge un file della CARTELLA DI PROGETTO (i tuoi file reali, in-place — non la sandbox). Percorso RELATIVO alla radice del progetto. Usalo per ispezionare il codice prima di modificarlo.",
+            "parameters": {
+                "type": "object",
+                "properties": { "path": { "type": "string", "description": "Percorso relativo alla radice del progetto, es. \"src/main.rs\"" } },
+                "required": ["path"]
+            }
+        }
+    })
+}
+
+fn write_file_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "write_file",
+            "description": "Crea o SOVRASCRIVE un file nella cartella di progetto (in-place, file reale). Percorso relativo; crea le cartelle mancanti. Per modifiche puntuali a un file esistente preferisci edit_file.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Percorso relativo alla radice del progetto" },
+                    "content": { "type": "string", "description": "Contenuto COMPLETO del file" }
+                },
+                "required": ["path", "content"]
+            }
+        }
+    })
+}
+
+fn edit_file_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "edit_file",
+            "description": "Modifica un file di progetto sostituendo una stringa ESATTA con un'altra (in-place sul file reale). 'old_string' deve comparire UNA sola volta nel file: se è ambiguo aggiungi righe di contesto. Leggi prima con read_file.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Percorso relativo alla radice del progetto" },
+                    "old_string": { "type": "string", "description": "Testo esatto da sostituire (univoco nel file)" },
+                    "new_string": { "type": "string", "description": "Testo sostitutivo" }
+                },
+                "required": ["path", "old_string", "new_string"]
+            }
+        }
+    })
+}
+
+fn list_files_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "list_files",
+            "description": "Elenca i file della cartella di progetto (salta .git/node_modules/target/…). Usalo per orientarti nella struttura del progetto.",
+            "parameters": { "type": "object", "properties": {} }
+        }
+    })
+}
+
+// ─── Project files: in-place coding on the conversation's project folder ───
+// A "project" (workspace) maps to a real host folder. Unlike the isolated sandbox
+// (browser + throwaway scripts), these tools let the agent read/write/edit the
+// user's REAL files in place — the Claude-Code model — but **path-jailed** to the
+// authorized project root. No project folder → the tools refuse with a clear note.
+
+const PROJECT_READ_MAX_CHARS: usize = 50_000;
+const PROJECT_LIST_MAX_ENTRIES: usize = 300;
+const PROJECT_LIST_MAX_DEPTH: usize = 4;
+
+/// Resolves the host project root for the conversation's workspace, if one is set
+/// and exists on disk. Falls back to the active workspace when the thread is unknown.
+fn project_root_for_thread(state: &AppState, thread_id: Option<&str>) -> Option<PathBuf> {
+    let workspace_id = thread_id
+        .and_then(|tid| lock_store(state).ok().and_then(|s| s.workspace_for_thread(tid).ok()))
+        .unwrap_or_else(active_workspace_id);
+    let folder = load_workspaces_file()
+        .workspaces
+        .into_iter()
+        .find(|w| w.id == workspace_id)
+        .and_then(|w| w.folder)
+        .filter(|f| !f.trim().is_empty())?;
+    let path = PathBuf::from(folder);
+    path.is_dir().then_some(path)
+}
+
+/// Path-jail: resolves `rel` under `root`, rejecting absolute paths and `..`
+/// escapes, then (via canonicalizing the deepest existing ancestor) symlink
+/// escapes. Returns the joined path (which may not exist yet, for writes).
+fn jail_in_root(root: &std::path::Path, rel: &str) -> Result<PathBuf, String> {
+    let rel = rel.trim();
+    if rel.is_empty() {
+        return Err("percorso vuoto".to_string());
+    }
+    let candidate = std::path::Path::new(rel);
+    for component in candidate.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                return Err("'..' non consentito (fuori dal progetto)".to_string());
+            }
+            std::path::Component::Prefix(_) | std::path::Component::RootDir => {
+                return Err("usa un percorso RELATIVO alla cartella di progetto".to_string());
+            }
+            _ => {}
+        }
+    }
+    let joined = root.join(candidate);
+    let root_canon = root
+        .canonicalize()
+        .map_err(|e| format!("cartella di progetto non accessibile: {e}"))?;
+    // Symlink-escape guard: canonicalize the deepest ancestor that exists.
+    let mut ancestor = joined.clone();
+    loop {
+        if ancestor.exists() {
+            if let Ok(canon) = ancestor.canonicalize() {
+                if !canon.starts_with(&root_canon) {
+                    return Err("percorso fuori dalla cartella di progetto".to_string());
+                }
+            }
+            break;
+        }
+        match ancestor.parent() {
+            Some(parent) => ancestor = parent.to_path_buf(),
+            None => break,
+        }
+    }
+    Ok(joined)
+}
+
+fn no_project_folder_msg() -> String {
+    "Questo progetto non ha una cartella associata: aprine/creane uno con una cartella \
+(le destinazioni autorizzate), oppure usa run_in_sandbox per lavoro usa-e-getta.".to_string()
+}
+
+fn read_project_file(state: &AppState, thread_id: Option<&str>, rel: &str) -> String {
+    let Some(root) = project_root_for_thread(state, thread_id) else {
+        return no_project_folder_msg();
+    };
+    let path = match jail_in_root(&root, rel) {
+        Ok(path) => path,
+        Err(error) => return format!("Percorso non valido: {error}"),
+    };
+    match std::fs::read_to_string(&path) {
+        Ok(content) => {
+            if content.len() > PROJECT_READ_MAX_CHARS {
+                let head: String = content.chars().take(PROJECT_READ_MAX_CHARS).collect();
+                format!("{head}\n[…troncato: file più lungo di {PROJECT_READ_MAX_CHARS} caratteri]")
+            } else {
+                content
+            }
+        }
+        Err(error) => format!("Impossibile leggere '{rel}': {error}"),
+    }
+}
+
+fn write_project_file(state: &AppState, thread_id: Option<&str>, rel: &str, content: &str) -> String {
+    let Some(root) = project_root_for_thread(state, thread_id) else {
+        return no_project_folder_msg();
+    };
+    let path = match jail_in_root(&root, rel) {
+        Ok(path) => path,
+        Err(error) => return format!("Percorso non valido: {error}"),
+    };
+    if let Some(parent) = path.parent() {
+        if let Err(error) = std::fs::create_dir_all(parent) {
+            return format!("Impossibile creare le cartelle per '{rel}': {error}");
+        }
+    }
+    match std::fs::write(&path, content) {
+        Ok(()) => format!("✅ Scritto '{rel}' ({} byte).", content.len()),
+        Err(error) => format!("Impossibile scrivere '{rel}': {error}"),
+    }
+}
+
+fn edit_project_file(
+    state: &AppState,
+    thread_id: Option<&str>,
+    rel: &str,
+    old: &str,
+    new: &str,
+) -> String {
+    if old.is_empty() {
+        return "Per modificare serve 'old_string' non vuoto (usa write_file per creare).".to_string();
+    }
+    let Some(root) = project_root_for_thread(state, thread_id) else {
+        return no_project_folder_msg();
+    };
+    let path = match jail_in_root(&root, rel) {
+        Ok(path) => path,
+        Err(error) => return format!("Percorso non valido: {error}"),
+    };
+    let content = match std::fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(error) => return format!("Impossibile leggere '{rel}': {error}"),
+    };
+    let occurrences = content.matches(old).count();
+    match occurrences {
+        0 => format!("Testo da sostituire non trovato in '{rel}'. Copia esattamente il contenuto attuale."),
+        1 => {
+            let updated = content.replacen(old, new, 1);
+            match std::fs::write(&path, &updated) {
+                Ok(()) => format!("✅ Modificato '{rel}'."),
+                Err(error) => format!("Impossibile scrivere '{rel}': {error}"),
+            }
+        }
+        n => format!(
+            "'old_string' compare {n} volte in '{rel}': è ambiguo. Aggiungi contesto attorno per renderlo unico."
+        ),
+    }
+}
+
+fn list_project_files(state: &AppState, thread_id: Option<&str>) -> String {
+    let Some(root) = project_root_for_thread(state, thread_id) else {
+        return no_project_folder_msg();
+    };
+    const SKIP: [&str; 9] = [
+        ".git",
+        "node_modules",
+        "target",
+        "dist",
+        "build",
+        ".next",
+        "venv",
+        ".venv",
+        "__pycache__",
+    ];
+    let mut out: Vec<String> = Vec::new();
+    let mut stack: Vec<(PathBuf, usize)> = vec![(root.clone(), 0)];
+    while let Some((dir, depth)) = stack.pop() {
+        if out.len() >= PROJECT_LIST_MAX_ENTRIES || depth > PROJECT_LIST_MAX_DEPTH {
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') && name != ".env.example" || SKIP.contains(&name.as_str()) {
+                continue;
+            }
+            let rel = path.strip_prefix(&root).unwrap_or(&path).to_string_lossy().to_string();
+            if path.is_dir() {
+                out.push(format!("{rel}/"));
+                stack.push((path, depth + 1));
+            } else {
+                out.push(rel);
+            }
+            if out.len() >= PROJECT_LIST_MAX_ENTRIES {
+                break;
+            }
+        }
+    }
+    if out.is_empty() {
+        "Cartella di progetto vuota (o solo file nascosti/ignorati).".to_string()
+    } else {
+        out.sort();
+        let mut text = format!("File del progetto (root: {}):\n", root.display());
+        text.push_str(&out.join("\n"));
+        if out.len() >= PROJECT_LIST_MAX_ENTRIES {
+            text.push_str(&format!("\n[…elenco troncato a {PROJECT_LIST_MAX_ENTRIES} voci]"));
+        }
+        text
+    }
+}
+
 /// Searches the user's long-term memory (personal + active project) for the query
 /// and returns a compact, readable result for the model. Includes confirmed AND
 /// candidate items and all sensitivities: the model asked explicitly, and it is
@@ -2937,6 +3206,12 @@ all'utente (tabella per riga + eventuale footer Fonti)."
         // sandbox + security scan are the safety boundary, so it's safe to offer
         // whenever the turn can act (not read-only channels).
         base_tools.push(run_in_sandbox_tool_schema());
+        // In-place file tools on the conversation's project folder (Claude-Code
+        // style, path-jailed). No-op-with-explanation when no project folder.
+        base_tools.push(read_file_tool_schema());
+        base_tools.push(write_file_tool_schema());
+        base_tools.push(edit_file_tool_schema());
+        base_tools.push(list_files_tool_schema());
     }
     if has_composio {
         base_tools.push(find_connected_tools_schema());
@@ -3176,7 +3451,18 @@ all'utente (tabella per riga + eventuale footer Fonti)."
                     let call_id = call.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
 
                     let result = if read_only
-                        && matches!(name, "run_in_sandbox" | "create_artifact" | "save_artifact")
+                        && matches!(
+                            name,
+                            "run_in_sandbox"
+                                | "create_artifact"
+                                | "save_artifact"
+                                | "read_file"
+                                | "write_file"
+                                | "edit_file"
+                                | "list_files"
+                                | "schedule_task"
+                                | "cancel_scheduled_task"
+                        )
                     {
                         // Defensive: these aren't offered in read-only mode, but if the
                         // model calls one anyway, refuse instead of executing.
@@ -4149,6 +4435,98 @@ suoi argomenti):\n{}",
                             .await
                             .unwrap_or_else(|e| format!("Errore di pianificazione: {e}"))
                         }
+                    } else if name == "read_file" {
+                        let args_val: serde_json::Value =
+                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        let path = args_val
+                            .get("path")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let _ = emit_stream_event(
+                            &tx,
+                            GenerateStreamEvent::Delta {
+                                text: format!("‹‹ACT››📄 Leggo {path}‹‹/ACT››"),
+                            },
+                        )
+                        .await;
+                        let st = state_owned.clone();
+                        let tid = thread_id.clone();
+                        tokio::task::spawn_blocking(move || read_project_file(&st, tid.as_deref(), &path))
+                            .await
+                            .unwrap_or_else(|e| format!("Errore: {e}"))
+                    } else if name == "write_file" {
+                        let args_val: serde_json::Value =
+                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        let path = args_val
+                            .get("path")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let content = args_val
+                            .get("content")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let _ = emit_stream_event(
+                            &tx,
+                            GenerateStreamEvent::Delta {
+                                text: format!("‹‹ACT››✍️ Scrivo {path}‹‹/ACT››"),
+                            },
+                        )
+                        .await;
+                        let st = state_owned.clone();
+                        let tid = thread_id.clone();
+                        tokio::task::spawn_blocking(move || {
+                            write_project_file(&st, tid.as_deref(), &path, &content)
+                        })
+                        .await
+                        .unwrap_or_else(|e| format!("Errore: {e}"))
+                    } else if name == "edit_file" {
+                        let args_val: serde_json::Value =
+                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        let path = args_val
+                            .get("path")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let old = args_val
+                            .get("old_string")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let new = args_val
+                            .get("new_string")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let _ = emit_stream_event(
+                            &tx,
+                            GenerateStreamEvent::Delta {
+                                text: format!("‹‹ACT››✏️ Modifico {path}‹‹/ACT››"),
+                            },
+                        )
+                        .await;
+                        let st = state_owned.clone();
+                        let tid = thread_id.clone();
+                        tokio::task::spawn_blocking(move || {
+                            edit_project_file(&st, tid.as_deref(), &path, &old, &new)
+                        })
+                        .await
+                        .unwrap_or_else(|e| format!("Errore: {e}"))
+                    } else if name == "list_files" {
+                        let _ = emit_stream_event(
+                            &tx,
+                            GenerateStreamEvent::Delta {
+                                text: "‹‹ACT››📂 Esploro il progetto‹‹/ACT››".to_string(),
+                            },
+                        )
+                        .await;
+                        let st = state_owned.clone();
+                        let tid = thread_id.clone();
+                        tokio::task::spawn_blocking(move || list_project_files(&st, tid.as_deref()))
+                            .await
+                            .unwrap_or_else(|e| format!("Errore: {e}"))
                     } else if name == "list_scheduled_tasks" {
                         let st = state_owned.clone();
                         tokio::task::spawn_blocking(move || list_scheduled_tasks(&st))
@@ -15016,6 +15394,7 @@ mod tests {
         prune_browser_history,
         message_has_image_url,
         browser_snapshot_text,
+        jail_in_root,
     };
     use crate::browser_safety;
     use local_first_capabilities::{CapabilityCallResult, ProviderId as CapProviderId};
@@ -15028,6 +15407,19 @@ mod tests {
         TaskRecord, TaskStatus, TaskStore, TaskUiItem, UserId, WorkspaceId,
     };
     use std::collections::HashMap;
+
+    #[test]
+    fn project_path_jail_blocks_escapes() {
+        let root = std::env::temp_dir();
+        // Allowed: relative paths inside the project (existing or not yet created).
+        assert!(jail_in_root(&root, "src/main.rs").is_ok());
+        assert!(jail_in_root(&root, "a/b/c.txt").is_ok());
+        // Blocked: parent-dir escapes, absolute paths, empties.
+        assert!(jail_in_root(&root, "../secret").is_err());
+        assert!(jail_in_root(&root, "/etc/passwd").is_err());
+        assert!(jail_in_root(&root, "a/../../b").is_err());
+        assert!(jail_in_root(&root, "").is_err());
+    }
 
     #[test]
     fn adapt_skill_body_substitutes_base_dir() {
