@@ -3,6 +3,9 @@ pub enum GatewayTaskExecutorKind {
     CapabilityBrowser,
     CapabilityGeneric,
     Subagent,
+    /// Scheduled/recurring "do this and tell me" task: runs a full agent turn on
+    /// the goal and delivers the result (proactivity).
+    ProactivePrompt,
     LegacyShell,
     LegacyLocal,
 }
@@ -31,6 +34,7 @@ impl TaskExecutorRegistry {
         );
         registry.register("capability.*", GatewayTaskExecutorKind::CapabilityGeneric);
         registry.register("subagent.*", GatewayTaskExecutorKind::Subagent);
+        registry.register("proactive_prompt", GatewayTaskExecutorKind::ProactivePrompt);
         registry.register("local_shell_task", GatewayTaskExecutorKind::LegacyShell);
         registry.register("*", GatewayTaskExecutorKind::LegacyLocal);
         registry
@@ -80,6 +84,10 @@ mod tests {
         assert_eq!(
             registry.resolve("subagent.MemoryAgent"),
             Some(GatewayTaskExecutorKind::Subagent)
+        );
+        assert_eq!(
+            registry.resolve("proactive_prompt"),
+            Some(GatewayTaskExecutorKind::ProactivePrompt)
         );
         // The durable browser_task executor was retired (browser is driven inline
         // by chat now); the kind falls through to the `*` LegacyLocal fallback.
