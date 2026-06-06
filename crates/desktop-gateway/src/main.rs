@@ -1486,7 +1486,11 @@ una-tantum immediate (quelle falle ora).",
                     },
                     "every": {
                         "type": "string",
-                        "description": "Ogni quanto ripetere: \"every 30m\", \"every 6h\", \"every 1d\", \"every 1w\". La prima esecuzione avviene dopo un intervallo da ora."
+                        "description": "Quando/ogni quanto ripetere. INTERVALLO: \"every 30m\", \"every 6h\", \"every 1d\", \"every 1w\" (prima esecuzione dopo un intervallo da ora). Oppure ANCORATO a un orario: \"daily@08:00\" (ogni giorno alle 8), \"weekly@mon@09:30\" (ogni lunedì alle 9:30; giorni mon..sun o lun..dom)."
+                    },
+                    "timezone": {
+                        "type": "string",
+                        "description": "Fuso orario IANA per le regole ancorate a un orario (es. \"Europe/Rome\"). Opzionale: se assente uso il fuso del sistema. Irrilevante per gli intervalli."
                     }
                 },
                 "required": ["goal", "every"]
@@ -1498,10 +1502,10 @@ una-tantum immediate (quelle falle ora).",
 /// Creates a recurring `proactive_prompt` task from chat. Inserts it under the
 /// gateway scope so the executor worker (`run_next_task_once`) picks it up; the
 /// first occurrence fires one interval from now, then `next_recurrence` re-enqueues.
-fn schedule_proactive_task(state: &AppState, goal: &str, every: &str) -> String {
+fn schedule_proactive_task(state: &AppState, goal: &str, every: &str, tz: Option<&str>) -> String {
     let now = OffsetDateTime::now_utc();
-    let Some(next) = local_first_task_runtime::next_occurrence(every, None, now) else {
-        return format!("Intervallo '{every}' non valido. Usa \"every 30m\", \"every 6h\", \"every 1d\", \"every 1w\".");
+    let Some(next) = local_first_task_runtime::next_occurrence(every, tz, now) else {
+        return format!("Pianificazione '{every}' non valida. Usa un intervallo (\"every 6h\", \"every 1d\") o un orario (\"daily@08:00\", \"weekly@mon@09:30\").");
     };
     let id = format!("sched_{}", uuid::Uuid::new_v4().simple());
     let mut task = TaskRecord::new(
@@ -1514,6 +1518,7 @@ fn schedule_proactive_task(state: &AppState, goal: &str, every: &str) -> String 
     );
     task.not_before = Some(next);
     task.recurrence = Some(every.to_string());
+    task.recurrence_tz = tz.map(|value| value.to_string());
     match lock_task_store(state) {
         Ok(store) => match store.insert_task(&task) {
             Ok(()) => format!(
@@ -4120,9 +4125,14 @@ suoi argomenti):\n{}",
                             .unwrap_or("")
                             .trim()
                             .to_string();
+                        let timezone = args_val
+                            .get("timezone")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty());
                         if goal.is_empty() || every.is_empty() {
-                            "Per pianificare servono 'goal' (cosa fare) e 'every' (ogni quanto, \
-es. \"every 1d\", \"every 6h\").".to_string()
+                            "Per pianificare servono 'goal' (cosa fare) e 'every' (ogni quanto: \
+\"every 1d\", \"daily@08:00\", \"weekly@mon@09:30\").".to_string()
                         } else {
                             let _ = emit_stream_event(
                                 &tx,
@@ -4132,8 +4142,9 @@ es. \"every 1d\", \"every 6h\").".to_string()
                             )
                             .await;
                             let st = state_owned.clone();
+                            let tz = timezone.clone();
                             tokio::task::spawn_blocking(move || {
-                                schedule_proactive_task(&st, &goal, &every)
+                                schedule_proactive_task(&st, &goal, &every, tz.as_deref())
                             })
                             .await
                             .unwrap_or_else(|e| format!("Errore di pianificazione: {e}"))
