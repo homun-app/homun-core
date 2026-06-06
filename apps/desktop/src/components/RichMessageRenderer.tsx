@@ -200,14 +200,21 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
     window.setTimeout(() => setCopied(false), 1_400);
   }
 
-  // Highlight to React elements (no innerHTML): use the declared language when
-  // registered, otherwise auto-detect; fall back to plain text on any failure.
+  // Highlight to React elements (no innerHTML). Plain blocks ("text"/log/etc. —
+  // e.g. command output) are rendered RAW: running `highlightAuto` on non-code
+  // prose can yield an empty/near-empty tree (the "missing output" bug). Only
+  // genuinely language-tagged code is highlighted (declared lang when registered,
+  // else best-effort auto-detect). Any failure falls back to the raw `code`.
   const highlighted = useMemo(() => {
+    const plain =
+      !language || ["text", "txt", "plaintext", "log"].includes(language);
+    if (plain) {
+      return null;
+    }
     try {
-      const tree =
-        language && language !== "text" && lowlight.registered(language)
-          ? lowlight.highlight(language, code)
-          : lowlight.highlightAuto(code);
+      const tree = lowlight.registered(language)
+        ? lowlight.highlight(language, code)
+        : lowlight.highlightAuto(code);
       return toJsxRuntime(tree, { Fragment, jsx, jsxs });
     } catch {
       return null;
