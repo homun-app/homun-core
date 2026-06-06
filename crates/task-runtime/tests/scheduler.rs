@@ -207,6 +207,36 @@ fn scheduler_does_not_schedule_overdue_tasks() {
     assert_eq!(ready[0].task_id.as_str(), "ready");
 }
 
+#[test]
+fn scheduler_materializes_next_recurring_occurrence() {
+    let user = UserId::new("user_1");
+    let workspace = WorkspaceId::new("workspace_1");
+    let now = OffsetDateTime::now_utc();
+    let completed = task("daily", &user, &workspace).with_recurrence("every 1d", None);
+
+    let next = TaskScheduler::new()
+        .next_recurrence(&completed, now)
+        .expect("a recurring task yields a next occurrence");
+
+    assert_eq!(next.status, TaskStatus::Queued);
+    assert_ne!(next.task_id.as_str(), "daily");
+    assert!(next.task_id.as_str().starts_with("daily@occ@"));
+    assert_eq!(next.recurrence.as_deref(), Some("every 1d"));
+    assert!(next.not_before.expect("not_before set") > now);
+    assert_eq!(next.goal, completed.goal);
+
+    // A second materialization strips the prior "@occ@" suffix (ids stay bounded).
+    let third = TaskScheduler::new()
+        .next_recurrence(&next, now)
+        .expect("second occurrence");
+    assert!(third.task_id.as_str().starts_with("daily@occ@"));
+    assert_eq!(third.task_id.as_str().matches("@occ@").count(), 1);
+
+    // Non-recurring tasks produce nothing.
+    let one_shot = task("oneshot", &user, &workspace);
+    assert!(TaskScheduler::new().next_recurrence(&one_shot, now).is_none());
+}
+
 fn task(id: &str, user: &UserId, workspace: &WorkspaceId) -> TaskRecord {
     TaskRecord::new(
         id,

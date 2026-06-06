@@ -192,6 +192,14 @@ pub struct TaskRecord {
     pub not_before: Option<OffsetDateTime>,
     pub deadline: Option<OffsetDateTime>,
     pub expires_at: Option<OffsetDateTime>,
+    /// Optional recurrence rule. v1: interval specs ("every 6h", "every 1d").
+    /// When set, completing this task enqueues the next occurrence (proactivity).
+    #[serde(default)]
+    pub recurrence: Option<String>,
+    /// IANA timezone, reserved for calendar-anchored recurrence (interval rules
+    /// are timezone-independent). Defaults to UTC when absent.
+    #[serde(default)]
+    pub recurrence_tz: Option<String>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
     pub last_heartbeat_at: Option<OffsetDateTime>,
@@ -229,6 +237,8 @@ impl TaskRecord {
             not_before: None,
             deadline: None,
             expires_at: None,
+            recurrence: None,
+            recurrence_tz: None,
             created_at: now,
             updated_at: now,
             last_heartbeat_at: None,
@@ -236,6 +246,12 @@ impl TaskRecord {
             lease_expires_at: None,
             blocked_reason: None,
         }
+    }
+
+    pub fn with_recurrence(mut self, rule: impl Into<String>, tz: Option<String>) -> Self {
+        self.recurrence = Some(rule.into());
+        self.recurrence_tz = tz;
+        self
     }
 
     pub fn with_priority(mut self, priority: TaskPriority) -> Self {
