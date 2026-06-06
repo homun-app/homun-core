@@ -23,7 +23,7 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 time = { version = "0.3", features = ["serde"] }
-tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1", features = ["macros", "net", "process", "rt-multi-thread", "sync", "time"] }
 uuid = { version = "1", features = ["v4"] }
 tower-http = { version = "0.6", features = ["cors"] }
 # Extracting ClawHub skill ZIP packages on install.

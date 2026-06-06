@@ -1713,6 +1713,21 @@ fn list_files_tool_schema() -> serde_json::Value {
     })
 }
 
+fn run_in_project_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "run_in_project",
+            "description": "Esegue un comando di shell NELLA CARTELLA DI PROGETTO (sul tuo sistema, sui file reali). Usalo per build/test/lint sul codice vero (VERIFY-BY-EXECUTION: leggi l'output reale e itera fino al verde) e per git. Per lavoro isolato usa-e-getta usa invece run_in_sandbox. I comandi distruttivi sono bloccati da uno scan di sicurezza.",
+            "parameters": {
+                "type": "object",
+                "properties": { "command": { "type": "string", "description": "Comando shell, es. \"cargo test\", \"npm run build\", \"git status\"" } },
+                "required": ["command"]
+            }
+        }
+    })
+}
+
 // ─── Project files: in-place coding on the conversation's project folder ───
 // A "project" (workspace) maps to a real host folder. Unlike the isolated sandbox
 // (browser + throwaway scripts), these tools let the agent read/write/edit the
@@ -1916,6 +1931,70 @@ fn list_project_files(state: &AppState, thread_id: Option<&str>) -> String {
             text.push_str(&format!("\n[…elenco troncato a {PROJECT_LIST_MAX_ENTRIES} voci]"));
         }
         text
+    }
+}
+
+const PROJECT_CMD_TIMEOUT_SECS: u64 = 300;
+const PROJECT_CMD_MAX_OUTPUT_CHARS: usize = 16_000;
+
+/// Runs a shell command on the HOST with cwd = the project folder (build/test/lint
+/// on the user's real code — verify-by-execution, plus git). Gated by the same
+/// security scan as the sandbox + confined to a project that has a folder; killed
+/// on timeout via `kill_on_drop`. Returns combined stdout+stderr (capped) prefixed
+/// with the exit status. This is the host-execution counterpart to the isolated
+/// `run_in_sandbox` (which stays for throwaway/untrusted work).
+async fn run_in_project(state: &AppState, thread_id: Option<&str>, command: &str) -> String {
+    let command = command.trim();
+    if command.is_empty() {
+        return "Comando vuoto.".to_string();
+    }
+    let Some(root) = project_root_for_thread(state, thread_id) else {
+        return no_project_folder_msg();
+    };
+    let scan = skill_security::scan_blobs(&[("command".to_string(), command.to_string())]);
+    if scan.blocked {
+        return format!(
+            "Comando NON eseguito: bloccato dallo scan di sicurezza (rischio {}/100). \
+Riformula senza operazioni distruttive.",
+            scan.risk_score
+        );
+    }
+    let future = tokio::process::Command::new("bash")
+        .arg("-lc")
+        .arg(command)
+        .current_dir(&root)
+        .kill_on_drop(true)
+        .output();
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(PROJECT_CMD_TIMEOUT_SECS),
+        future,
+    )
+    .await
+    {
+        Ok(Ok(output)) => {
+            let mut combined = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if !stderr.trim().is_empty() {
+                combined.push_str("\n[stderr]\n");
+                combined.push_str(&stderr);
+            }
+            let code = output
+                .status
+                .code()
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "terminato da segnale".to_string());
+            let body: String = combined.chars().take(PROJECT_CMD_MAX_OUTPUT_CHARS).collect();
+            let body = if body.trim().is_empty() {
+                "(nessun output)"
+            } else {
+                body.as_str()
+            };
+            format!("[exit {code}]\n{body}")
+        }
+        Ok(Err(error)) => format!("Impossibile eseguire il comando: {error}"),
+        Err(_) => format!(
+            "Comando interrotto: superato il timeout di {PROJECT_CMD_TIMEOUT_SECS}s (processo terminato)."
+        ),
     }
 }
 
@@ -3212,6 +3291,7 @@ all'utente (tabella per riga + eventuale footer Fonti)."
         base_tools.push(write_file_tool_schema());
         base_tools.push(edit_file_tool_schema());
         base_tools.push(list_files_tool_schema());
+        base_tools.push(run_in_project_tool_schema());
     }
     if has_composio {
         base_tools.push(find_connected_tools_schema());
@@ -3460,6 +3540,7 @@ all'utente (tabella per riga + eventuale footer Fonti)."
                                 | "write_file"
                                 | "edit_file"
                                 | "list_files"
+                                | "run_in_project"
                                 | "schedule_task"
                                 | "cancel_scheduled_task"
                         )
@@ -4527,6 +4608,25 @@ suoi argomenti):\n{}",
                         tokio::task::spawn_blocking(move || list_project_files(&st, tid.as_deref()))
                             .await
                             .unwrap_or_else(|e| format!("Errore: {e}"))
+                    } else if name == "run_in_project" {
+                        let args_val: serde_json::Value =
+                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        let command = args_val
+                            .get("command")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let _ = emit_stream_event(
+                            &tx,
+                            GenerateStreamEvent::Delta {
+                                text: format!(
+                                    "‹‹ACT››🛠️ Eseguo nel progetto: {}‹‹/ACT››",
+                                    command.chars().take(120).collect::<String>()
+                                ),
+                            },
+                        )
+                        .await;
+                        run_in_project(&state_owned, thread_id.as_deref(), &command).await
                     } else if name == "list_scheduled_tasks" {
                         let st = state_owned.clone();
                         tokio::task::spawn_blocking(move || list_scheduled_tasks(&st))
