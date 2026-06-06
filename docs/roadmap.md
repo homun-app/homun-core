@@ -41,6 +41,45 @@ Direzione adottata (de-gemma / capable-first):
   guardrail di **sicurezza** hard-enforced via tool policy; via le 14 regole
   prescrittive.
 
+## Prodotto & business model: core agnostico + addon (ADR 0011)
+
+Direzione di prodotto (dettaglio in `docs/decisions/0011-agnostic-core-addon-ecosystem.md`):
+
+- **Core agnostico, valore negli addon.** Il core resta domain-neutral ed espone
+  primitivi (canali, browser, memoria, task runtime, approval, scheduler,
+  esecutore di procedure). Tutta la verticalita' vive negli **addon** fuori dal
+  core — prerequisito per un ecosistema.
+- **Land-and-expand.** Oggi: assistente personale (adozione). Domani: **addon**
+  (nostri o di partner) che lo trasformano in strumento di lavoro verticale.
+- **Addon = "process skill"**: trigger + passi (deterministici/agente) + dati &
+  config + punti di approvazione + binding canale. Tre origini, una forma:
+  installati / scritti dall'utente / **generati** (loop apprendista).
+- **La generazione emette CONFIG, non codice per-cliente.** Domini regolati
+  (fatturazione: SdI/IVA/numerazione) = **componenti vettati configurati**, non
+  generati da zero. La generazione brilla sul bespoke. Spettro: config dichiarativa
+  > script in sandbox > MAI app/codice per-cliente.
+- **Personalizzazione bounded, solo-prompt ("contratto di personalizzazione").**
+  Ogni addon dichiara zona **bloccata** (invarianti: contratto-dati, calcoli,
+  campi fiscali) e zona **aperta** (etichette, campi opzionali, layout, testo
+  documenti, default). La personalizzazione e' un **overlay-dato** autorato via
+  prompt, **validato** contro gli invarianti, in **anteprima + reversibile
+  (versionato)** e **upgrade-safe** (si riapplica quando il componente e'
+  aggiornato centralmente → niente fork-snowflake).
+- **Non-goal:** non SaaS multi-tenant (resta single-tenant/self-hostable); non
+  generare app/codice arbitrario per-cliente; non un flow-builder (n8n-style).
+
+### Definition of done — "core come addon-host"
+
+Il core e' "pronto agli addon" (NON serve tutta la visione) quando ha:
+1. il loop **assistente personale** solido (chat + browser + memoria + canali) — quasi fatto;
+2. i **primitivi che un addon compone** = passi 2-5 del gap audit (hardening
+   runtime, profondita' d'esecuzione, feedback loop, scheduling);
+3. l'**astrazione process-skill/addon + il meccanismo del contratto di
+   personalizzazione** (design nuovo), estratto da **UN addon vettato reale
+   (fatturazione)** end-to-end.
+
+Auto-apprendimento e cloud NON sono prerequisiti dell'addon-host: arrivano dopo.
+
 ## Stato attuale: fondamenta solide
 
 Pilastri completati e in esercizio (dettaglio task in work-memory):
