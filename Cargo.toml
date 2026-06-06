@@ -13,5 +13,6 @@ members = [
     "crates/context-compression",
     "crates/desktop-gateway",
     "crates/inference",
+    "crates/process-skill",
 ]
 resolver = "3"

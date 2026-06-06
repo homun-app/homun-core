@@ -3234,6 +3234,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "local-first-process-skill"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "local-first-secrets"
 version = "0.1.0"
 dependencies = [
