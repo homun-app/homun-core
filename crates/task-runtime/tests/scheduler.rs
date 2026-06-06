@@ -149,6 +149,64 @@ fn scheduler_marks_dependents_waiting_when_dependency_failed() {
     );
 }
 
+#[test]
+fn scheduler_expires_tasks_past_their_time_budget() {
+    let store = TaskStore::open_in_memory().unwrap();
+    let user = UserId::new("user_1");
+    let workspace = WorkspaceId::new("workspace_1");
+    let now = OffsetDateTime::now_utc();
+
+    let mut past_expires = task("past_expires", &user, &workspace);
+    past_expires.expires_at = Some(now - Duration::minutes(1));
+    store.insert_task(&past_expires).unwrap();
+
+    let mut past_deadline = task("past_deadline", &user, &workspace);
+    past_deadline.deadline = Some(now - Duration::seconds(1));
+    store.insert_task(&past_deadline).unwrap();
+
+    let mut healthy = task("healthy", &user, &workspace);
+    healthy.deadline = Some(now + Duration::hours(1));
+    store.insert_task(&healthy).unwrap();
+
+    let expired = TaskScheduler::new()
+        .expire_overdue_tasks(&store, &user, &workspace, now)
+        .unwrap();
+    assert_eq!(expired, 2);
+
+    for id in ["past_expires", "past_deadline"] {
+        let task = store
+            .get_task(&TaskId::new(id), &user, &workspace)
+            .unwrap()
+            .unwrap();
+        assert_eq!(task.status, TaskStatus::Expired, "{id} should be expired");
+        assert!(task.blocked_reason.is_some());
+    }
+    let healthy = store
+        .get_task(&TaskId::new("healthy"), &user, &workspace)
+        .unwrap()
+        .unwrap();
+    assert_eq!(healthy.status, TaskStatus::Queued);
+}
+
+#[test]
+fn scheduler_does_not_schedule_overdue_tasks() {
+    let store = TaskStore::open_in_memory().unwrap();
+    let user = UserId::new("user_1");
+    let workspace = WorkspaceId::new("workspace_1");
+    let now = OffsetDateTime::now_utc();
+
+    let mut overdue = task("overdue", &user, &workspace);
+    overdue.deadline = Some(now - Duration::minutes(5));
+    store.insert_task(&overdue).unwrap();
+    store.insert_task(&task("ready", &user, &workspace)).unwrap();
+
+    let ready = TaskScheduler::new()
+        .ready_tasks(&store, &user, &workspace, now, 10)
+        .unwrap();
+    assert_eq!(ready.len(), 1);
+    assert_eq!(ready[0].task_id.as_str(), "ready");
+}
+
 fn task(id: &str, user: &UserId, workspace: &WorkspaceId) -> TaskRecord {
     TaskRecord::new(
         id,

@@ -6759,6 +6759,9 @@ fn run_next_task_once(
             .mark_blocked_by_terminal_dependencies(&store, &user, &workspace)
             .map_err(GatewayError::task)?;
         scheduler
+            .expire_overdue_tasks(&store, &user, &workspace, now)
+            .map_err(GatewayError::task)?;
+        scheduler
             .ready_tasks(&store, &user, &workspace, now, 1)
             .map_err(GatewayError::task)?
             .into_iter()
