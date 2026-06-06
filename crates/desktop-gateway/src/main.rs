@@ -6891,6 +6891,11 @@ fn run_next_task_once(
     append_task_observation_to_session(state, &task, &outcome)?;
     if outcome.completed {
         mark_task_completed(state, &mut task)?;
+        // Proactivity: a recurring task enqueues its next occurrence on completion.
+        if let Some(next) = TaskScheduler::new().next_recurrence(&task, OffsetDateTime::now_utc()) {
+            let store = lock_task_store(state)?;
+            store.insert_task(&next).map_err(GatewayError::task)?;
+        }
         sync_session_for_task_run(state, &task, SessionStatus::Completed, 3, None)?;
     } else if let Some(approval) = outcome.pending_approval.as_ref() {
         request_task_executor_approval(state, &mut task, approval)?;

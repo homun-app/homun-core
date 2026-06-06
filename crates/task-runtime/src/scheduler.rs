@@ -1,4 +1,4 @@
-use crate::{TaskRecord, TaskRuntimeResult, TaskStatus, TaskStore, UserId, WorkspaceId};
+use crate::{TaskId, TaskRecord, TaskRuntimeResult, TaskStatus, TaskStore, UserId, WorkspaceId};
 use time::OffsetDateTime;
 
 pub struct TaskScheduler;
@@ -125,6 +125,39 @@ impl TaskScheduler {
             expired += 1;
         }
         Ok(expired)
+    }
+
+    /// Builds the next occurrence of a just-completed recurring task: a fresh
+    /// `Queued` clone (new id) with `not_before` at the next scheduled time.
+    /// `None` when the task isn't recurring or its rule can't be parsed (treated
+    /// as one-shot). Execution state and one-shot time bounds are reset so the
+    /// clone starts clean. The id appends "@occ@<unix>" to the recurrence root so
+    /// ids stay stable-length across occurrences and never collide.
+    pub fn next_recurrence(
+        &self,
+        completed: &TaskRecord,
+        now: OffsetDateTime,
+    ) -> Option<TaskRecord> {
+        let rule = completed.recurrence.as_deref()?;
+        let next = crate::recurrence::next_occurrence(rule, completed.recurrence_tz.as_deref(), now)?;
+        let id = completed.task_id.as_str();
+        let root = id.split("@occ@").next().unwrap_or(id);
+
+        let mut occurrence = completed.clone();
+        occurrence.task_id = TaskId::new(format!("{root}@occ@{}", next.unix_timestamp()));
+        occurrence.status = TaskStatus::Queued;
+        occurrence.not_before = Some(next);
+        occurrence.deadline = None;
+        occurrence.expires_at = None;
+        occurrence.attempt_count = 0;
+        occurrence.checkpoint_json = None;
+        occurrence.blocked_reason = None;
+        occurrence.lease_owner = None;
+        occurrence.lease_expires_at = None;
+        occurrence.last_heartbeat_at = None;
+        occurrence.created_at = now;
+        occurrence.updated_at = now;
+        Some(occurrence)
     }
 
     fn dependencies_completed(
