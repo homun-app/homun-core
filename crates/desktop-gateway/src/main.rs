@@ -3339,7 +3339,47 @@ non ripetere la stessa azione; prova un altro elemento, scrolla, oppure attendi 
                                         }
                                         Err(error) => {
                                             push_browser_step(format!("{kind}"), "error");
-                                            Err(format!("Azione non riuscita: {error}"))
+                                            // Stale-ref auto-recovery: the page changed under us
+                                            // so the [ref=eN] is gone. Instead of just erroring
+                                            // (forcing the model to spend a round re-snapshotting),
+                                            // take a fresh snapshot NOW and hand it back so it
+                                            // retries with new refs in the same round.
+                                            let stale = {
+                                                let e = error.to_lowercase();
+                                                e.contains("stale") || e.contains("detached")
+                                            };
+                                            match (stale, browser_session.take()) {
+                                                (true, Some(c)) => {
+                                                    let guard = browse_web_lock().lock().await;
+                                                    let (c_back, snap_res) = chat_browser_call(
+                                                        c,
+                                                        BrowserMethod::Snapshot,
+                                                        browser_chat_snapshot_params(
+                                                            current_target.as_str(),
+                                                        ),
+                                                    )
+                                                    .await;
+                                                    drop(guard);
+                                                    browser_session = c_back;
+                                                    let snap = snap_res
+                                                        .as_ref()
+                                                        .map(browser_snapshot_text)
+                                                        .unwrap_or_default();
+                                                    if snap.is_empty() {
+                                                        Err(format!("Azione non riuscita: {error}"))
+                                                    } else {
+                                                        last_snapshot = snap.clone();
+                                                        Ok(format!(
+                                                            "⚠ Il riferimento era scaduto (la pagina \
+è cambiata). Ho ripreso uno snapshot fresco — riprova l'azione con i NUOVI [ref=...]:\n{snap}"
+                                                        ))
+                                                    }
+                                                }
+                                                (_, restored) => {
+                                                    browser_session = restored;
+                                                    Err(format!("Azione non riuscita: {error}"))
+                                                }
+                                            }
                                         }
                                     }
                                 }
