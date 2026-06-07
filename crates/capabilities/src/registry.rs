@@ -379,6 +379,28 @@ impl CapabilityRegistryStore {
             .transpose()
     }
 
+    /// Removes a provider entirely — config, grants, connection configs and
+    /// cached tools — across all users/workspaces. Used to disconnect a connected
+    /// server (e.g. an MCP server). Returns how many provider configs were removed
+    /// (0 if it didn't exist).
+    pub fn remove_provider(&self, provider_id: &ProviderId) -> CapabilityResult<usize> {
+        let id = provider_id.as_str();
+        self.connection
+            .execute("DELETE FROM capability_tool_cache WHERE provider_id = ?1", params![id])
+            .map_err(to_store_error)?;
+        self.connection
+            .execute("DELETE FROM capability_connection_configs WHERE provider_id = ?1", params![id])
+            .map_err(to_store_error)?;
+        self.connection
+            .execute("DELETE FROM capability_provider_grants WHERE provider_id = ?1", params![id])
+            .map_err(to_store_error)?;
+        let removed = self
+            .connection
+            .execute("DELETE FROM capability_provider_configs WHERE provider_id = ?1", params![id])
+            .map_err(to_store_error)?;
+        Ok(removed)
+    }
+
     pub fn upsert_provider_grant(&self, grant: &CapabilityProviderGrant) -> CapabilityResult<()> {
         self.connection
             .execute(

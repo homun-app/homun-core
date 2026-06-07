@@ -533,6 +533,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/capabilities/mcp/connect", post(connect_mcp))
         .route("/api/capabilities/mcp/execute", post(mcp_execute))
         .route("/api/capabilities/mcp/registry", get(mcp_registry_search))
+        .route("/api/capabilities/mcp/connected", get(mcp_connected))
+        .route("/api/capabilities/mcp/disconnect", post(mcp_disconnect))
         .route("/api/capabilities/composio/connect", post(connect_composio))
         .route("/api/capabilities/composio/toolkits", get(composio_toolkits))
         .route("/api/capabilities/composio/link", post(composio_link))
@@ -10703,6 +10705,116 @@ async fn mcp_registry_search(
             message,
         })?;
     Ok(Json(serde_json::json!({ "servers": servers })))
+}
+
+#[derive(Debug, Serialize)]
+struct McpConnectedServer {
+    provider_id: String,
+    name: String,
+    tools: usize,
+}
+
+fn mcp_connected_list(state: &AppState) -> Result<Vec<McpConnectedServer>, GatewayError> {
+    let user = gateway_capability_user_id();
+    let workspace = gateway_capability_workspace_id();
+    let registry = lock_capability_registry(state)?;
+    let mut out: Vec<McpConnectedServer> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for conn in registry
+        .connection_configs(&user, &workspace)
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "mcp_connected",
+            message: e.to_string(),
+        })?
+    {
+        let kind_is_mcp = registry
+            .provider_config(&conn.provider_id)
+            .ok()
+            .flatten()
+            .map(|c| c.provider_kind == CapabilityProviderKind::Mcp)
+            .unwrap_or(false);
+        if !kind_is_mcp || !seen.insert(conn.provider_id.as_str().to_string()) {
+            continue;
+        }
+        let name = registry
+            .provider_config(&conn.provider_id)
+            .ok()
+            .flatten()
+            .map(|c| c.display_name)
+            .unwrap_or_else(|| conn.provider_id.as_str().to_string());
+        let tools = registry.cached_tools(&conn.provider_id).map(|t| t.len()).unwrap_or(0);
+        out.push(McpConnectedServer {
+            provider_id: conn.provider_id.as_str().to_string(),
+            name,
+            tools,
+        });
+    }
+    Ok(out)
+}
+
+/// Lists the connected MCP servers (for the catalog's "installed" section).
+async fn mcp_connected(State(state): State<AppState>) -> Result<Json<serde_json::Value>, GatewayError> {
+    let servers = tokio::task::spawn_blocking(move || mcp_connected_list(&state))
+        .await
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "mcp_connected_join",
+            message: e.to_string(),
+        })??;
+    Ok(Json(serde_json::json!({ "servers": servers })))
+}
+
+#[derive(Debug, Deserialize)]
+struct McpDisconnectRequest {
+    provider_id: String,
+}
+
+/// Disconnects an MCP server: removes its provider config, grant, connection and
+/// cached tools. Guarded to MCP providers so it can't nuke Composio/browser.
+async fn mcp_disconnect(
+    State(state): State<AppState>,
+    Json(request): Json<McpDisconnectRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let pid = request.provider_id.trim().to_string();
+    if !pid.starts_with("mcp:") {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "mcp_bad_provider",
+            message: "Qui si possono disconnettere solo i provider MCP.".to_string(),
+        });
+    }
+    let removed = tokio::task::spawn_blocking(move || -> Result<usize, GatewayError> {
+        let registry = lock_capability_registry(&state)?;
+        let provider = CapabilityProviderId::new(pid);
+        match registry.provider_config(&provider).map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "mcp_disconnect",
+            message: e.to_string(),
+        })? {
+            Some(cfg) if cfg.provider_kind == CapabilityProviderKind::Mcp => {}
+            Some(_) => {
+                return Err(GatewayError {
+                    status: StatusCode::BAD_REQUEST,
+                    code: "mcp_not_mcp",
+                    message: "Il provider indicato non è un server MCP.".to_string(),
+                });
+            }
+            None => return Ok(0),
+        }
+        registry.remove_provider(&provider).map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "mcp_disconnect",
+            message: e.to_string(),
+        })
+    })
+    .await
+    .map_err(|e| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "mcp_disconnect_join",
+        message: e.to_string(),
+    })??;
+    Ok(Json(serde_json::json!({ "removed": removed > 0 })))
 }
 
 const MCP_CONFIRM_OPEN: &str = "‹‹MCP_CONFIRM››";
