@@ -1365,13 +1365,16 @@ function AllowedToolsSection() {
 }
 
 /** Connection status of a toolkit, derived from Composio connected-account state. */
-type KitState = "connected" | "connecting" | "none";
+type KitState = "connected" | "connecting" | "expired" | "none";
 
 function kitStateFromStatus(status: string | undefined): KitState {
   if (!status) return "none";
   const s = status.toUpperCase();
   if (s === "ACTIVE") return "connected";
   if (s === "INITIATED" || s === "INITIALIZING" || s === "PENDING") return "connecting";
+  // Connected before but the authorization lapsed → distinct from "never connected"
+  // so the user knows to reconnect rather than thinking it's just unconfigured.
+  if (s === "EXPIRED" || s === "INACTIVE" || s === "FAILED") return "expired";
   return "none";
 }
 
@@ -1399,7 +1402,7 @@ function ComposioToolkitBrowser({
   const refreshConnections = async () => {
     try {
       const conns = await coreBridge.composioConnections();
-      const rank: Record<KitState, number> = { none: 0, connecting: 1, connected: 2 };
+      const rank: Record<KitState, number> = { none: 0, expired: 1, connecting: 2, connected: 3 };
       const next: Record<string, KitState> = {};
       for (const c of conns) {
         if (!c.toolkit_slug) continue;
@@ -1581,6 +1584,7 @@ function ComposioCard({
       <span className="cmp-card-name">{kit.name}</span>
       {state === "connected" && <span className="cmp-status connected">Connesso</span>}
       {state === "connecting" && <span className="cmp-status connecting">In corso…</span>}
+      {state === "expired" && <span className="cmp-status expired">Scaduto · Riconnetti</span>}
     </button>
   );
 }
