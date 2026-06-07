@@ -3302,7 +3302,40 @@ const COMPOSIO_FIELD_LABELS: Record<string, string> = {
   message: "Testo",
   is_html: "HTML",
   attachment: "Allegato",
+  // Calendar / events
+  summary: "Titolo",
+  title: "Titolo",
+  description: "Descrizione",
+  location: "Luogo",
+  start_datetime: "Inizio",
+  end_datetime: "Fine",
+  start_time: "Inizio",
+  end_time: "Fine",
+  start: "Inizio",
+  end: "Fine",
+  due_date: "Scadenza",
+  date: "Data",
+  attendees: "Partecipanti",
+  timezone: "Fuso orario",
 };
+
+/** Opaque machine identifiers: the model needs them, but showing them to the user
+ *  in a confirm card is noise (e.g. event_id) — they can't verify or edit them.
+ *  Hidden from the card (still SENT in the arguments). */
+const OPAQUE_FIELD_KEYS = new Set([
+  "id",
+  "event_id",
+  "calendar_id",
+  "message_id",
+  "thread_id",
+  "draft_id",
+  "user_id",
+  "connected_account_id",
+  "connection_id",
+  "entity_id",
+  "resource_id",
+  "file_id",
+]);
 
 /** "GMAIL_SEND_EMAIL" → "Send email · Gmail". */
 function humanizeToolName(slug: string): string {
@@ -3378,7 +3411,9 @@ function ComposioConfirmCard({
     );
   }
 
-  const keys = Object.keys(args);
+  // Show only meaningful fields; opaque ids (event_id…) are still SENT, just hidden.
+  const keys = Object.keys(args).filter((k) => !OPAQUE_FIELD_KEYS.has(k.toLowerCase()));
+  const hiddenIdCount = Object.keys(args).length - keys.length;
   // Flag destructive actions (delete/remove/cancel/…) so the user can't approve a
   // data-loss op blindly — the real "leggi le email" → it confirmed DELETE_EVENT
   // bug. Slugs are underscore-separated, so match by segment.
@@ -3401,7 +3436,13 @@ function ComposioConfirmCard({
         </p>
       )}
       <div className="cmp-confirm-fields">
-        {keys.length === 0 && <p className="cmp-confirm-empty">Nessun parametro.</p>}
+        {keys.length === 0 && (
+          <p className="cmp-confirm-empty">
+            {hiddenIdCount > 0
+              ? "L'azione agisce sull'elemento già individuato (nessun campo da modificare)."
+              : "Nessun parametro."}
+          </p>
+        )}
         {keys.map((key) => {
           const value = args[key];
           const label = humanizeFieldKey(key);
