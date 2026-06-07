@@ -1782,6 +1782,25 @@ fn customize_addon_tool_schema() -> serde_json::Value {
     })
 }
 
+fn create_skill_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "create_skill",
+            "description": "Crea una NUOVA skill personalizzata quando l'utente lo chiede (es. \"creami una skill che…\"). Una skill è un set di istruzioni RIUTILIZZABILI che seguirai quando serve. Fornisci: name (breve), description (QUANDO usarla — fa scattare la skill), instructions (i PASSI/regole in markdown). Per skill che eseguono comandi, scrivi nelle istruzioni i comandi da lanciare con run_in_sandbox/run_in_project.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "Nome breve, es. \"Riepilogo spese\"" },
+                    "description": { "type": "string", "description": "QUANDO usarla (condizioni di attivazione)" },
+                    "instructions": { "type": "string", "description": "I passi/regole da seguire (markdown)" }
+                },
+                "required": ["name", "description", "instructions"]
+            }
+        }
+    })
+}
+
 // ─── Project files: in-place coding on the conversation's project folder ───
 // A "project" (workspace) maps to a real host folder. Unlike the isolated sandbox
 // (browser + throwaway scripts), these tools let the agent read/write/edit the
@@ -2898,6 +2917,67 @@ fn browser_dialog_tool_schema() -> serde_json::Value {
     })
 }
 
+/// `"Riepilogo Spese Q1"` → `"riepilogo-spese-q1"`. Lowercase, alnum runs joined
+/// by single hyphens, trimmed, capped — a stable directory id for a new skill.
+fn slugify_skill_name(name: &str) -> String {
+    let mut out = String::new();
+    let mut last_hyphen = true; // suppress leading hyphen
+    for ch in name.to_lowercase().chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch);
+            last_hyphen = false;
+        } else if !last_hyphen {
+            out.push('-');
+            last_hyphen = true;
+        }
+    }
+    out.trim_matches('-').chars().take(48).collect()
+}
+
+/// Creates a user-authored skill from a prompt: writes `skills_root/<slug>/SKILL.md`
+/// (frontmatter + instructions), marks its origin "authored", and the scanner makes
+/// it available (enabled). Called by the `create_skill` tool when the user asks to
+/// create one. A skill is just instructions the agent follows; for skills that run
+/// commands, the instructions reference `run_in_sandbox`.
+fn create_skill(name: &str, description: &str, instructions: &str) -> String {
+    let name = name.trim();
+    let description = description.trim();
+    let instructions = instructions.trim();
+    if name.is_empty() || description.is_empty() || instructions.is_empty() {
+        return "Per creare una skill servono: nome, descrizione (QUANDO usarla) e istruzioni (cosa fare).".to_string();
+    }
+    let Ok(data_dir) = gateway_data_dir() else {
+        return "Cartella dati non disponibile.".to_string();
+    };
+    let dir = skills::skills_root(&data_dir);
+    let slug = slugify_skill_name(name);
+    if slug.is_empty() {
+        return "Il nome non genera un id valido: usa lettere o numeri.".to_string();
+    }
+    let skill_dir = dir.join(&slug);
+    if skill_dir.exists() {
+        return format!("Esiste già una skill con id '{slug}'. Scegli un altro nome.");
+    }
+    if let Err(error) = fs::create_dir_all(&skill_dir) {
+        return format!("Impossibile creare la cartella della skill: {error}");
+    }
+    let desc_yaml =
+        serde_json::to_string(description).unwrap_or_else(|_| format!("\"{description}\""));
+    let content =
+        format!("---\nname: {name}\nslug: {slug}\nversion: 1.0.0\ndescription: {desc_yaml}\n---\n\n{instructions}\n");
+    if let Err(error) = fs::write(skill_dir.join("SKILL.md"), &content) {
+        let _ = fs::remove_dir_all(&skill_dir);
+        return format!("Impossibile scrivere la skill: {error}");
+    }
+    let mut origins = load_skills_origins();
+    origins.insert(slug.clone(), "authored".to_string());
+    let _ = save_skills_origins(&origins);
+    format!(
+        "✅ Skill «{name}» creata (id={slug}) e attiva. Provala: dimmi \"usa la skill {name}\" \
+o chiedimi qualcosa che la attivi."
+    )
+}
+
 /// Enabled installed skills as (id, name, description) for prompt discovery (L1).
 fn enabled_skills_summary() -> Vec<(String, String, String)> {
     let Ok(dir) = skills_dir() else {
@@ -3390,6 +3470,7 @@ all'utente (tabella per riga + eventuale footer Fonti)."
     ];
     if !read_only {
         base_tools.push(create_artifact_tool_schema());
+        base_tools.push(create_skill_tool_schema());
         base_tools.push(schedule_task_tool_schema());
         base_tools.push(list_scheduled_tasks_tool_schema());
         base_tools.push(cancel_scheduled_task_tool_schema());
@@ -3685,6 +3766,7 @@ all'utente (tabella per riga + eventuale footer Fonti)."
                                 | "schedule_task"
                                 | "cancel_scheduled_task"
                                 | "customize_addon"
+                                | "create_skill"
                         )
                     {
                         // Defensive: these aren't offered in read-only mode, but if the
@@ -4805,6 +4887,33 @@ suoi argomenti):\n{}",
                         .await;
                         tokio::task::spawn_blocking(move || {
                             process_skills::addon_customize_text(&addon_id, &changes)
+                        })
+                        .await
+                        .unwrap_or_else(|e| format!("Errore: {e}"))
+                    } else if name == "create_skill" {
+                        let args_val: serde_json::Value =
+                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        let skill_name =
+                            args_val.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let skill_desc = args_val
+                            .get("description")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let skill_instr = args_val
+                            .get("instructions")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let _ = emit_stream_event(
+                            &tx,
+                            GenerateStreamEvent::Delta {
+                                text: format!("‹‹ACT››🧩 Creo la skill {skill_name}‹‹/ACT››"),
+                            },
+                        )
+                        .await;
+                        tokio::task::spawn_blocking(move || {
+                            create_skill(&skill_name, &skill_desc, &skill_instr)
                         })
                         .await
                         .unwrap_or_else(|e| format!("Errore: {e}"))
