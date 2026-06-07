@@ -1,5 +1,5 @@
 //! Skill execution sandbox — reuses the SAME contained-computer Docker container
-//! as the browser (`lfpa-cc`), which now ships a shell + curl/python/git/jq.
+//! as the browser (`homun-cc`), which now ships a shell + curl/python/git/jq.
 //!
 //! Lifecycle: ensure the Docker daemon is up (auto-starting the platform's Docker
 //! engine — Docker Desktop / Colima on macOS, Docker Desktop on Windows, the
@@ -13,7 +13,7 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 /// The contained-computer container name (matches the browser's).
-pub const CONTAINER: &str = "lfpa-cc";
+pub const CONTAINER: &str = "homun-cc";
 /// Where skills are copied inside the container.
 const CONTAINER_SKILLS_DIR: &str = "/home/agent/skills";
 
@@ -320,7 +320,7 @@ pub fn ensure_contained_computer() -> Result<(), String> {
             std::thread::sleep(Duration::from_secs(1));
         }
     }
-    Err("Il computer contenuto (lfpa-cc) non è attivo e non sono riuscito ad avviarlo. \
+    Err("Il computer contenuto (homun-cc) non è attivo e non sono riuscito ad avviarlo. \
 Avvialo con runtimes/contained-computer/up.sh."
         .to_string())
 }
