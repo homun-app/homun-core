@@ -1,13 +1,15 @@
 //! Skill execution sandbox — reuses the SAME contained-computer Docker container
 //! as the browser (`lfpa-cc`), which now ships a shell + curl/python/git/jq.
 //!
-//! Lifecycle: ensure the Docker daemon is up (auto-start Docker Desktop on macOS),
-//! ensure the container is running (via `up.sh`), then run skill commands in it
-//! with `docker exec`. The container is loopback-only and runs as a non-root
-//! `agent` user, so it doubles as an isolated sandbox for SKILL.md scripts.
+//! Lifecycle: ensure the Docker daemon is up (auto-starting the platform's Docker
+//! engine — Docker Desktop / Colima on macOS, Docker Desktop on Windows, the
+//! systemd service or Docker Desktop on Linux), ensure the container is running
+//! (via `up.sh`), then run skill commands in it with `docker exec`. The container
+//! is loopback-only and runs as a non-root `agent` user, so it doubles as an
+//! isolated sandbox for SKILL.md scripts.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 /// The contained-computer container name (matches the browser's).
@@ -71,41 +73,148 @@ pub fn container_up() -> bool {
         .unwrap_or(false)
 }
 
-/// Ensures the Docker daemon is reachable, starting Docker Desktop on macOS and
-/// polling up to ~60s. Returns a human-actionable error otherwise.
+/// How long to poll for the daemon after launching the engine. A cold start of
+/// Docker Desktop / Colima can take well over a minute, so default to ~150s.
+/// Overridable via `LFPA_DOCKER_START_TIMEOUT_SECS`.
+fn docker_start_timeout_secs() -> u64 {
+    std::env::var("LFPA_DOCKER_START_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|&v| v > 0)
+        .unwrap_or(150)
+}
+
+/// Spawns a long-running starter (e.g. `colima start`) detached, swallowing its
+/// stdio so it doesn't block us — the poll in `ensure_docker` detects readiness.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn launch_detached(program: &str, args: &[&str]) -> bool {
+    Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .is_ok()
+}
+
+/// Best-effort, OS-aware launch of a Docker engine. Returns a short diagnostic
+/// label of WHAT we tried to start (for logs and error messages), or `None` if
+/// no known mechanism applied on this platform.
+///
+/// Each platform knows several engine "flavors" and tries them in the order they
+/// are most likely to be the one installed.
+#[cfg(target_os = "macos")]
+fn start_docker_engine() -> Option<String> {
+    // 1) Docker Desktop. The app bundle is usually "Docker"; some installs name
+    //    it "Docker Desktop". `open -a` resolves via LaunchServices regardless of
+    //    install location and reports failure (non-zero) when the app is absent.
+    for app in ["Docker", "Docker Desktop"] {
+        let opened = Command::new("open")
+            .args(["-a", app])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if opened {
+            return Some(format!("Docker Desktop ({app})"));
+        }
+    }
+    // 2) Colima — popular CLI alternative. `colima start` blocks until the VM is
+    //    ready, so run it detached and let the poll detect readiness.
+    if cli_ok("colima", &["version"]) && launch_detached("colima", &["start"]) {
+        return Some("Colima".to_string());
+    }
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn start_docker_engine() -> Option<String> {
+    // Docker Desktop's launcher; honor a custom %ProgramFiles% before the default.
+    let mut candidates: Vec<String> = Vec::new();
+    if let Ok(pf) = std::env::var("ProgramFiles") {
+        candidates.push(format!(r"{pf}\Docker\Docker\Docker Desktop.exe"));
+    }
+    candidates.push(r"C:\Program Files\Docker\Docker\Docker Desktop.exe".to_string());
+    for exe in candidates {
+        if Path::new(&exe).is_file() && Command::new(&exe).spawn().is_ok() {
+            return Some("Docker Desktop".to_string());
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "linux")]
+fn start_docker_engine() -> Option<String> {
+    // 1) Docker Desktop for Linux runs as a per-user systemd service.
+    if cli_ok("systemctl", &["--user", "start", "docker-desktop"]) {
+        return Some("Docker Desktop (servizio utente)".to_string());
+    }
+    // 2) Native Docker Engine (system service). Usually already running; if not,
+    //    starting it needs privileges and may fail without an interactive polkit
+    //    agent — best effort.
+    if cli_ok("systemctl", &["start", "docker"]) {
+        return Some("Docker Engine (systemd)".to_string());
+    }
+    // 3) Colima.
+    if cli_ok("colima", &["version"]) && launch_detached("colima", &["start"]) {
+        return Some("Colima".to_string());
+    }
+    None
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+fn start_docker_engine() -> Option<String> {
+    None
+}
+
+fn docker_not_installed_msg() -> String {
+    #[cfg(target_os = "macos")]
+    return "Docker non è installato. Installa Docker Desktop (o Colima) per eseguire le skill.".to_string();
+    #[cfg(target_os = "windows")]
+    return "Docker non è installato. Installa Docker Desktop per Windows per eseguire le skill.".to_string();
+    #[cfg(target_os = "linux")]
+    return "Docker non è installato. Installa Docker Engine o Docker Desktop per eseguire le skill.".to_string();
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    return "Docker non è installato. Installalo per eseguire le skill.".to_string();
+}
+
+fn docker_start_failed_msg(attempted: Option<&str>) -> String {
+    let tail = match attempted {
+        Some(what) => format!(" Ho provato ad avviarlo ({what}) ma non è diventato pronto in tempo."),
+        None => " Non ho trovato un modo per avviarlo automaticamente su questo sistema.".to_string(),
+    };
+    #[cfg(target_os = "macos")]
+    return format!("Docker è installato ma non è pronto.{tail} Apri Docker Desktop (o avvia Colima) manualmente e riprova.");
+    #[cfg(target_os = "windows")]
+    return format!("Docker è installato ma non è pronto.{tail} Apri Docker Desktop manualmente e riprova.");
+    #[cfg(target_os = "linux")]
+    return format!("Docker è installato ma non è pronto.{tail} Avvia il servizio (es. `systemctl --user start docker-desktop` oppure `sudo systemctl start docker`) e riprova.");
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    return format!("Docker è installato ma non è pronto.{tail}");
+}
+
+/// Ensures the Docker daemon is reachable, auto-starting the platform's Docker
+/// engine (Docker Desktop / Colima / systemd, depending on the OS) and polling
+/// until it's ready. Returns a human-actionable, OS-specific error otherwise.
 pub fn ensure_docker() -> Result<(), String> {
     if docker_running() {
         return Ok(());
     }
     if !cli_ok("docker", &["--version"]) {
-        return Err("Docker non è installato. Installa Docker Desktop per eseguire le skill.".to_string());
+        return Err(docker_not_installed_msg());
     }
-    #[cfg(target_os = "macos")]
-    {
-        // The bundle is usually "Docker" (Docker Desktop); some installs name it
-        // "Docker Desktop". Try both so the auto-start is reliable.
-        let opened = Command::new("open")
-            .args(["-a", "Docker"])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if !opened {
-            let _ = Command::new("open").args(["-a", "Docker Desktop"]).status();
-        }
+    let started = start_docker_engine();
+    match &started {
+        Some(what) => eprintln!("sandbox: avvio motore Docker via {what}"),
+        None => eprintln!("sandbox: nessun metodo noto per avviare Docker su questo sistema"),
     }
-    #[cfg(target_os = "linux")]
-    {
-        let _ = Command::new("systemctl").args(["--user", "start", "docker-desktop"]).status();
-    }
-    // A cold start of Docker Desktop can take well over a minute — poll up to ~150s
-    // so we don't give up (and fall back to the browser) while it's still booting.
-    for _ in 0..150 {
+    let timeout = docker_start_timeout_secs();
+    for _ in 0..timeout {
         std::thread::sleep(Duration::from_secs(1));
         if docker_running() {
             return Ok(());
         }
     }
-    Err("Docker è installato ma non si è avviato in tempo. Apri Docker Desktop manualmente e riprova.".to_string())
+    Err(docker_start_failed_msg(started.as_deref()))
 }
 
 /// Locates `up.sh` for the contained computer (env override, else repo-relative).
