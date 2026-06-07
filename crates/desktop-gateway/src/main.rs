@@ -3092,7 +3092,39 @@ fn search_composio_catalog(
         .filter(|(score, _)| *score > 0)
         .collect();
     scored.sort_by(|a, b| b.0.cmp(&a.0));
-    scored.into_iter().take(k).map(|(_, e)| (e.0.clone(), e.2.clone())).collect()
+
+    // Toolkit-aware: return the FULL tool set of the best-matching toolkit (its
+    // CRUD), not just the few keyword hits — so the model sees update/create/
+    // delete/read together and picks the right verb. (The "I don't have an update
+    // event tool" bug: keyword search surfaced read/move but not update.)
+    const TOOLKIT_FULL_CAP: usize = 24;
+    let mut out: Vec<(String, serde_json::Value)> = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    let toolkit_of = |slug: &str| slug.split('_').next().unwrap_or("").to_string();
+    if let Some((_, top)) = scored.first() {
+        let prefix = toolkit_of(&top.0);
+        if !prefix.is_empty() {
+            for entry in index.iter() {
+                if out.len() >= TOOLKIT_FULL_CAP {
+                    break;
+                }
+                if toolkit_of(&entry.0) == prefix && seen.insert(entry.0.clone()) {
+                    out.push((entry.0.clone(), entry.2.clone()));
+                }
+            }
+        }
+    }
+    // Then fill with the next best matches from OTHER toolkits.
+    let total_cap = k.max(TOOLKIT_FULL_CAP);
+    for (_, entry) in scored {
+        if out.len() >= total_cap {
+            break;
+        }
+        if seen.insert(entry.0.clone()) {
+            out.push((entry.0.clone(), entry.2.clone()));
+        }
+    }
+    out
 }
 
 /// Capable (OpenAI-compatible) chat path with NATIVE TOOL-CALLING. The model is
@@ -3199,7 +3231,10 @@ sull'intento (es. \"unread emails\", \"send email\", \"calendar events today\") 
 strumento adatto, poi CHIAMA lo strumento trovato con gli argomenti completi.\n\
 SCELTA STRUMENTO: usa UN SOLO strumento che corrisponde ESATTAMENTE all'intento — per \
 AGGIUNGERE/CREARE usa create/add/quick_add, per LEGGERE usa fetch/list. NON chiamare MAI strumenti \
-distruttivi (delete/remove/cancel) se l'utente non lo chiede esplicitamente.\n\
+distruttivi (delete/remove/cancel) se l'utente non lo chiede esplicitamente. find_connected_tools \
+restituisce TUTTI gli strumenti del servizio: per MODIFICARE qualcosa di esistente (es. la data di \
+un evento) usa update/patch (NON 'move', che sposta tra calendari). NON concludere che manca uno \
+strumento dopo una sola ricerca.\n\
 DATE E ORE: calcola SEMPRE la data/ora ASSOLUTA partendo da 'Oggi è ...' sopra (es. domani = oggi \
 + 1 giorno) e passala allo strumento in formato ESPLICITO ISO 8601 con il fuso (es. \
 start_datetime: 2026-06-08T11:00:00+02:00, end_datetime un'ora dopo). NON passare parole relative \
