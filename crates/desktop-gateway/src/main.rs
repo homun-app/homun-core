@@ -12,6 +12,7 @@ mod skills_catalog;
 mod skill_security;
 // Skill execution sandbox (reuses the browser's contained-computer container).
 mod process_skills;
+mod mcp_registry;
 mod sandbox;
 mod task_registry;
 
@@ -531,6 +532,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/workspaces/{workspace_id}/delete", post(delete_workspace))
         .route("/api/capabilities/mcp/connect", post(connect_mcp))
         .route("/api/capabilities/mcp/execute", post(mcp_execute))
+        .route("/api/capabilities/mcp/registry", get(mcp_registry_search))
         .route("/api/capabilities/composio/connect", post(connect_composio))
         .route("/api/capabilities/composio/toolkits", get(composio_toolkits))
         .route("/api/capabilities/composio/link", post(composio_link))
@@ -10674,6 +10676,33 @@ async fn composio_execute(
 
     let summary = output.to_string().chars().take(2000).collect::<String>();
     Ok(Json(ComposioExecuteResponse { ok: true, summary }))
+}
+
+#[derive(Debug, Deserialize)]
+struct McpRegistryQuery {
+    #[serde(default)]
+    q: String,
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+/// Searches the OFFICIAL MCP registry for installable servers (normalized into
+/// presets with their required parameters/secrets). Read-only; the actual launch
+/// still goes through `/mcp/connect` with user confirmation.
+async fn mcp_registry_search(
+    State(state): State<AppState>,
+    Query(query): Query<McpRegistryQuery>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let search = Some(query.q.trim()).filter(|s| !s.is_empty());
+    let limit = query.limit.unwrap_or(30);
+    let servers = mcp_registry::fetch_servers(&state.http, search, limit)
+        .await
+        .map_err(|message| GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "mcp_registry_fetch",
+            message,
+        })?;
+    Ok(Json(serde_json::json!({ "servers": servers })))
 }
 
 const MCP_CONFIRM_OPEN: &str = "‹‹MCP_CONFIRM››";
