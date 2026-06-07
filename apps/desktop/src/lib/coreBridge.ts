@@ -922,6 +922,49 @@ async function electronDeleteWorkspace(id: string): Promise<WorkspacesSnapshot> 
   );
 }
 
+/** A parameter (env var or argument) a registry server needs to launch. */
+export interface McpRegistryInput {
+  key: string;
+  target: "arg" | "env";
+  label: string;
+  secret: boolean;
+  required: boolean;
+  default?: string | null;
+}
+
+/** A server from the official MCP registry, normalized for one-click connect. */
+export interface McpRegistryServer {
+  id: string;
+  name: string;
+  publisher: string;
+  description: string;
+  official: boolean;
+  version: string;
+  runtime: string;
+  command: string;
+  args: string[];
+  inputs: McpRegistryInput[];
+  installable: boolean;
+  note?: string | null;
+  homepage?: string | null;
+}
+
+async function electronMcpRegistry(q?: string): Promise<McpRegistryServer[]> {
+  const suffix = q && q.trim() ? `?q=${encodeURIComponent(q.trim())}` : "";
+  const payload = await gatewayGetJson<{ servers: McpRegistryServer[] }>(
+    `/api/capabilities/mcp/registry${suffix}`,
+  );
+  return payload.servers ?? [];
+}
+
+async function electronMcpDisconnect(providerId: string): Promise<boolean> {
+  const payload = await gatewayPostJson<{ removed: boolean }>(
+    "/api/capabilities/mcp/disconnect",
+    { provider_id: providerId },
+  );
+  return payload.removed;
+}
+
 async function electronMcpConnect(input: {
   name: string;
   command: string;
@@ -1197,6 +1240,8 @@ export const coreBridge = {
     args?: string[];
     env?: Record<string, string>;
   }) => electronMcpConnect(input),
+  mcpRegistry: (q?: string) => electronMcpRegistry(q),
+  mcpDisconnect: (providerId: string) => electronMcpDisconnect(providerId),
   composioConnect: (apiKey: string) => electronComposioConnect(apiKey),
   composioToolkits: () => electronComposioToolkits(),
   composioLink: (toolkitSlug: string, apiKey?: string) =>
