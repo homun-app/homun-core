@@ -1,6 +1,6 @@
 # Roadmap Operativa
 
-> Stato aggiornato al 2026-06-05.
+> Stato aggiornato al 2026-06-07.
 > - Cronologia dettagliata degli interventi: `docs/work-memory.md`.
 > - Roadmap strategica per fasi: `docs/architecture/final-roadmap.md`.
 > - Mappa componenti: `docs/architecture/system-map.md`.
@@ -138,6 +138,44 @@ sono; il lavoro vivo e' affidabilita' del browser su siti reali (form complessi,
 estrazione tabellare, recovery) con modelli capaci, e la coerenza del registry
 ruoli/modelli.
 
+## Test da fare — verifica manuale in sospeso (sessione MCP, 2026-06-07)
+
+Lavoro consegnato (build + test verdi; backend verificato headless dove
+deterministico) ma **da provare con le mani** nell'app — UI e chiamate
+model-driven non sono verificabili headless. Commit: `9853162`, `4c53edc`,
+`7a3d2c5`, `167b379`, `9a32256` (+ Docker/sandbox: `161973c`, `87aee68`,
+`992ebe8`, `efd15fa`).
+
+1. **MCP in chat** (`9853162`): collega un server MCP e in chat chiedi qualcosa
+   che usi i suoi tool. Atteso: il modello scopre i tool via `find_connected_tools`,
+   i **read** girano diretti (con timeout), i **write** mostrano la card di
+   conferma `‹‹MCP_CONFIRM››`. Da verificare anche `read_only` (canali) blocca le write.
+2. **Catalogo MCP** (`167b379`): Impostazioni → Connettori → **Catalogo MCP** →
+   cerca `playwright` → Connetti; poi `filesystem` (chiede una directory) e
+   `github` (chiede il token, campo segreto). Atteso: badge "Ufficiale" automatico,
+   comando mostrato, form parametri/segreti funzionante.
+3. **Disconnect** (`7a3d2c5`): dal dettaglio di un server MCP → "Disconnetti"
+   (con conferma) → sparisce dai collegati.
+4. **Meta-tool `suggest_capabilities`** (`9a32256`): in chat *"voglio automatizzare
+   un browser, cosa posso collegare?"* → atteso: il modello chiama il tool e
+   propone Playwright MCP + skill/Composio pertinenti, con come collegarli.
+5. **Docker OS-aware + igiene** (`161973c`/`efd15fa`): con Docker chiuso, avvia
+   una skill → atteso auto-start (no fallback immediato al browser); `/tmp` del
+   container è tmpfs; dopo ~30min idle il container `homun-cc` viene riciclato.
+
+Esito atteso: il pilastro **MCP** è "usabile in chat + sfogliabile + gestibile +
+suggerito". Annotare qui i difetti emersi dal test reale.
+
+### Follow-up MCP rimasti (non bloccanti)
+- **Connect-card in chat**: rendere i suggerimenti di `suggest_capabilities`
+  *cliccabili* (one-click connect dalla chat), non solo testuali.
+- **Secret-store** per i token MCP (oggi `env` raw nel registry — gap audit).
+- **Read-timeout** nel transport stdio (`mcp.rs`): oggi il timeout protegge il
+  turno, non il thread blocking su `read_line`.
+- **Allowlist "esegui sempre"** per le write MCP (oggi confermano sempre).
+- **Transport HTTP/SSE** (oltre stdio): i server remote-only sono marcati
+  "non supportato" nel catalogo.
+
 ## Debito tecnico / fronti aperti
 
 1. **Doppio motore browser.** RISOLTO (2026-06-05): rimosso il `browser_task`
@@ -188,8 +226,14 @@ Verso la prima release:
 2. **Errori azionabili + token.** Mappare gli errori Composio/MCP/skill in messaggi
    con recovery ("401 → chiave scaduta, ricollega"; "429 → rate limit"); rotazione
    e scoping del token gateway.
-3. **MCP: gestione server.** Disconnect/reload/health + timeout sulle call (oggi
-   add-only, nessun cleanup); poi transport **HTTP/SSE** oltre allo stdio.
+3. **MCP: usabile + sfogliabile + gestibile.** FATTO in gran parte (2026-06-07,
+   in attesa di test manuale — vedi "Test da fare"): MCP **cablato nel loop chat**
+   (discovery + dispatch, read auto / write con conferma, timeout sulle call);
+   **catalogo da registry ufficiale** (`registry.modelcontextprotocol.io`) con
+   connect-from-preset (parametri/segreti) in Settings; **connected-list +
+   disconnect** (chiude l'"add-only"); **meta-tool `suggest_capabilities`**
+   (scoperta unificata MCP+Skill+Composio). Restano: transport **HTTP/SSE** oltre
+   stdio, secret-store per i token, read-timeout nel transport (vedi follow-up).
 4. **Onboarding first-run.** Wizard connettori (Composio prima, poi MCP/skill) cosi'
    il nuovo utente non parte da schermate vuote.
 5. **Skill: gestione.** Install dal marketplace fluido, rilevamento update, override
