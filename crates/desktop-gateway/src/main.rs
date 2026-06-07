@@ -3507,6 +3507,9 @@ all'utente (tabella per riga + eventuale footer Fonti)."
         browser_tabs_tool_schema(),
         browser_dialog_tool_schema(),
         recall_memory_tool_schema(),
+        // Unified capability discovery — find what to connect (MCP/skill/Composio)
+        // for a need. Read-only (search), so offered to channels too.
+        suggest_capabilities_tool_schema(),
     ];
     if !read_only {
         base_tools.push(create_artifact_tool_schema());
@@ -4972,6 +4975,22 @@ suoi argomenti):\n{}",
                         })
                         .await
                         .unwrap_or_else(|e| format!("Errore: {e}"))
+                    } else if name == "suggest_capabilities" {
+                        let args_val: serde_json::Value =
+                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        let need = args_val
+                            .get("need")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let _ = emit_stream_event(
+                            &tx,
+                            GenerateStreamEvent::Delta {
+                                text: format!("‹‹ACT››🧭 Cerco connettori per: {need}‹‹/ACT››"),
+                            },
+                        )
+                        .await;
+                        suggest_capabilities(&state_owned, &need).await
                     } else if name == "list_scheduled_tasks" {
                         let st = state_owned.clone();
                         tokio::task::spawn_blocking(move || list_scheduled_tasks(&st))
@@ -10220,6 +10239,126 @@ fn run_mcp_chat_tool(
         .call_tool(&policy_context, call)
         .map(|result| result.output)
         .map_err(|error| error.to_string())
+}
+
+/// Meta-tool: unified capability discovery. Lets the model find what to CONNECT
+/// for a user need, searching across all three connector ecosystems at once.
+fn suggest_capabilities_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "suggest_capabilities",
+            "description": "Quando l'utente vuole fare qualcosa che potresti NON già poter fare \
+(automazione browser, accesso a un servizio/app, dati, ecc.), cerca tra i connettori disponibili — \
+server MCP (registry ufficiale), Skill (marketplace) e Composio (1000+ servizi cloud) — e proponi \
+cosa COLLEGARE. Usa una query breve sull'intento (es. 'browser automation', 'google calendar', \
+'excel', 'github'). Restituisce suggerimenti da presentare all'utente con come collegarli.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "need": {
+                        "type": "string",
+                        "description": "Cosa vuole fare l'utente, in poche parole/keyword (es. \
+'automatizzare il browser', 'inviare email', 'leggere file excel')."
+                    }
+                },
+                "required": ["need"]
+            }
+        }
+    })
+}
+
+/// Searches MCP registry + Skill marketplace + Composio toolkits for a need and
+/// returns a unified, human-readable suggestion list (with how to connect each).
+async fn suggest_capabilities(state: &AppState, need: &str) -> String {
+    let need = need.trim();
+    if need.is_empty() {
+        return "Specifica cosa vuoi fare, così cerco i connettori adatti.".to_string();
+    }
+    // MCP registry (async network).
+    let mcp = mcp_registry::fetch_servers(&state.http, Some(need), 4).await.unwrap_or_default();
+    // Refresh the skills catalog if stale, so the search below has data.
+    if let Some(path) = skills_catalog_path() {
+        if !skills_catalog::load_cache(&path).is_some_and(|c| skills_catalog::cache_is_fresh(&c)) {
+            let _ = skills_catalog::refresh_cache(&state.http, &path).await;
+        }
+    }
+    // Skills catalog + Composio toolkits (blocking work off the runtime).
+    let need_owned = need.to_string();
+    let st = state.clone();
+    let (skills, composio): (Vec<skills_catalog::CatalogEntry>, Vec<ComposioToolkit>) =
+        tokio::task::spawn_blocking(move || {
+            let skills = skills_catalog_path()
+                .and_then(|p| skills_catalog::load_cache(&p))
+                .map(|cache| skills_catalog::search(&cache, &need_owned, None, 4))
+                .unwrap_or_default();
+            let terms: Vec<String> =
+                need_owned.to_lowercase().split_whitespace().map(str::to_string).collect();
+            let composio = composio_toolkits_blocking(&st)
+                .map(|resp| {
+                    resp.toolkits
+                        .into_iter()
+                        .filter(|t| {
+                            let hay = format!(
+                                "{} {} {}",
+                                t.slug,
+                                t.name,
+                                t.description.clone().unwrap_or_default()
+                            )
+                            .to_lowercase();
+                            terms.iter().any(|term| hay.contains(term.as_str()))
+                        })
+                        .take(5)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            (skills, composio)
+        })
+        .await
+        .unwrap_or_default();
+
+    let mut out = format!("Connettori suggeriti per: \"{need}\"\n");
+    let installable: Vec<_> = mcp.iter().filter(|s| s.installable).take(4).collect();
+    if !installable.is_empty() {
+        out.push_str("\nSERVER MCP (Impostazioni → Catalogo MCP):\n");
+        for s in installable {
+            let badge = if s.official { " [ufficiale]" } else { "" };
+            out.push_str(&format!(
+                "- {}{} — {} (publisher: {})\n",
+                s.name,
+                badge,
+                s.description.chars().take(120).collect::<String>(),
+                s.publisher
+            ));
+        }
+    }
+    if !skills.is_empty() {
+        out.push_str("\nSKILL (Impostazioni → Skill → marketplace):\n");
+        for s in &skills {
+            out.push_str(&format!(
+                "- {} — {}\n",
+                s.name,
+                s.description.chars().take(120).collect::<String>()
+            ));
+        }
+    }
+    if !composio.is_empty() {
+        out.push_str("\nSERVIZI CLOUD via Composio (Impostazioni → Connettori → Composio):\n");
+        for t in &composio {
+            out.push_str(&format!("- {} ({})\n", t.name, t.slug));
+        }
+    }
+    if out.lines().count() <= 1 {
+        out.push_str(
+            "\nNessun connettore trovato. Prova parole chiave diverse, o aggiungi un server MCP manualmente.",
+        );
+    } else {
+        out.push_str(
+            "\nPresenta queste opzioni all'utente spiegando brevemente cosa fa ciascuna e come \
+collegarla (i percorsi tra parentesi). NON dichiarare di averle già collegate.",
+        );
+    }
+    out
 }
 
 /// Executes a Composio tool for the current entity and returns its raw output.
