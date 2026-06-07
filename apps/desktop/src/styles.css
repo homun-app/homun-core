@@ -6191,6 +6191,14 @@ body.resizing-drawer {
   flex-direction: column;
   gap: var(--s3);
 }
+.cmp-confirm.destructive { border-color: #c0392b; background: #fdecea; }
+.cmp-confirm.destructive .cmp-confirm-head svg { color: #c0392b; }
+.cmp-confirm-warn {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #a5281b;
+}
 .cmp-confirm-head { display: flex; align-items: center; gap: 8px; font-size: 13.5px; }
 .cmp-confirm-head svg { color: #b5851f; }
 .cmp-confirm-head code {
