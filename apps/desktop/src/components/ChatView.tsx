@@ -17,6 +17,7 @@ import {
   FileSpreadsheet,
   FileText,
   FolderOpen,
+  AlertTriangle,
   Globe2,
   HardDrive,
   ListTodo,
@@ -3369,13 +3370,27 @@ function ComposioConfirmCard({
   }
 
   const keys = Object.keys(args);
+  // Flag destructive actions (delete/remove/cancel/…) so the user can't approve a
+  // data-loss op blindly — the real "leggi le email" → it confirmed DELETE_EVENT
+  // bug. Slugs are underscore-separated, so match by segment.
+  const destructive = action.tool
+    .toUpperCase()
+    .split("_")
+    .some((part) =>
+      ["DELETE", "REMOVE", "TRASH", "CANCEL", "CLEAR", "DROP", "PURGE", "REVOKE", "UNSEND", "DESTROY"].includes(part),
+    );
   return (
-    <div className="cmp-confirm">
+    <div className={`cmp-confirm${destructive ? " destructive" : ""}`}>
       <div className="cmp-confirm-head">
-        <ShieldCheck size={15} />
-        <strong>Conferma azione</strong>
+        {destructive ? <AlertTriangle size={15} /> : <ShieldCheck size={15} />}
+        <strong>{destructive ? "Conferma: azione che ELIMINA dati" : "Conferma azione"}</strong>
         <span className="cmp-confirm-name">{title}</span>
       </div>
+      {destructive && (
+        <p className="cmp-confirm-warn">
+          ⚠ Azione DISTRUTTIVA su {humanizeToolName(action.tool).split(" · ")[1] ?? "un servizio collegato"}: elimina/rimuove dati. Procedi solo se è esattamente ciò che vuoi.
+        </p>
+      )}
       <div className="cmp-confirm-fields">
         {keys.length === 0 && <p className="cmp-confirm-empty">Nessun parametro.</p>}
         {keys.map((key) => {
