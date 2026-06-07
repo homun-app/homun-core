@@ -980,6 +980,20 @@ async function electronComposioExecute(
   });
 }
 
+/** Executes an MCP server tool on user confirmation (no "always allow" in v1). */
+async function electronMcpExecute(
+  tool: string,
+  args: unknown,
+  ctx?: { threadId?: string; messageId?: string },
+): Promise<ComposioExecuteResult> {
+  return gatewayPostJson<ComposioExecuteResult>("/api/capabilities/mcp/execute", {
+    tool,
+    arguments: args ?? {},
+    ...(ctx?.threadId ? { thread_id: ctx.threadId } : {}),
+    ...(ctx?.messageId ? { message_id: ctx.messageId } : {}),
+  });
+}
+
 export interface AllowedTool {
   slug: string;
   name: string;
@@ -1194,6 +1208,11 @@ export const coreBridge = {
     scope: "once" | "always",
     ctx?: { threadId?: string; messageId?: string },
   ) => electronComposioExecute(tool, args, scope, ctx),
+  mcpExecute: (
+    tool: string,
+    args: unknown,
+    ctx?: { threadId?: string; messageId?: string },
+  ) => electronMcpExecute(tool, args, ctx),
   composioAllowedTools: () => electronComposioAllowedTools(),
   composioRevokeTool: (slug: string) => electronComposioRevokeTool(slug),
   skills: () => electronSkills(),

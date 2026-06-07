@@ -341,13 +341,23 @@ impl<T: McpTransport> McpCapabilityProvider<T> {
             .tool_policies
             .iter()
             .find(|policy| policy.tool_name == name);
+        // Classify read vs write. An explicit per-tool policy wins. Otherwise we
+        // honor the MCP `annotations.readOnlyHint`: true → Read (safe to auto-run),
+        // anything else (false or ABSENT) → WriteWithConfirmation, so an unannotated
+        // side-effecting tool is never silently auto-executed.
+        let read_only_hint = tool
+            .get("annotations")
+            .and_then(|a| a.get("readOnlyHint"))
+            .and_then(|v| v.as_bool());
+        let inferred_action = match read_only_hint {
+            Some(true) => ActionClass::Read,
+            _ => ActionClass::WriteWithConfirmation,
+        };
         Ok(CapabilityTool {
             name: name.to_string(),
             provider_id: self.id.clone(),
             provider_kind: CapabilityProviderKind::Mcp,
-            action: policy
-                .map(|policy| policy.action)
-                .unwrap_or(ActionClass::Read),
+            action: policy.map(|policy| policy.action).unwrap_or(inferred_action),
             description: tool
                 .get("description")
                 .and_then(|value| value.as_str())
