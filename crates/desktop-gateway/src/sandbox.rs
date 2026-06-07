@@ -60,12 +60,69 @@ fn cli_ok(program: &str, args: &[&str]) -> bool {
         .unwrap_or(false)
 }
 
+/// Absolute paths where the `docker` CLI commonly lives, per OS. Probed so we
+/// keep working even when the gateway inherited a truncated GUI/launchd PATH (a
+/// macOS .app launched from Finder gets `/usr/bin:/bin:/usr/sbin:/sbin`, which
+/// omits `/usr/local/bin` — where Docker Desktop's `docker` symlink sits).
+#[cfg(target_os = "macos")]
+const DOCKER_CANDIDATES: &[&str] = &[
+    "/usr/local/bin/docker",
+    "/opt/homebrew/bin/docker",
+    "/Applications/Docker.app/Contents/Resources/bin/docker",
+];
+#[cfg(target_os = "linux")]
+const DOCKER_CANDIDATES: &[&str] =
+    &["/usr/bin/docker", "/usr/local/bin/docker", "/opt/homebrew/bin/docker"];
+#[cfg(target_os = "windows")]
+const DOCKER_CANDIDATES: &[&str] =
+    &[r"C:\Program Files\Docker\Docker\resources\bin\docker.exe"];
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+const DOCKER_CANDIDATES: &[&str] = &[];
+
+/// Resolves the `docker` executable, preferring an ABSOLUTE path so invocations
+/// succeed regardless of the inherited PATH. Honors `LFPA_DOCKER_BIN`; falls back
+/// to the bare name `"docker"` (PATH lookup) when no known location exists.
+fn docker_bin() -> String {
+    if let Ok(explicit) = std::env::var("LFPA_DOCKER_BIN") {
+        if !explicit.trim().is_empty() {
+            return explicit;
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let p = format!("{home}/.docker/bin/docker");
+        if Path::new(&p).is_file() {
+            return p;
+        }
+    }
+    for cand in DOCKER_CANDIDATES {
+        if Path::new(cand).is_file() {
+            return cand.to_string();
+        }
+    }
+    "docker".to_string()
+}
+
+/// The current PATH with the resolved docker binary's directory prepended, so a
+/// child process (e.g. `up.sh`, which calls `docker`/`curl` by name) finds them
+/// even if the gateway itself inherited a truncated PATH. Unix-only separator —
+/// the only consumer is the bash-launched `up.sh`.
+fn path_with_docker_dir() -> String {
+    let current = std::env::var("PATH").unwrap_or_default();
+    let docker = docker_bin();
+    if let Some(dir) = Path::new(&docker).parent().map(|d| d.to_string_lossy().into_owned()) {
+        if !dir.is_empty() && !current.split(':').any(|p| p == dir) {
+            return if current.is_empty() { dir } else { format!("{dir}:{current}") };
+        }
+    }
+    current
+}
+
 pub fn docker_running() -> bool {
-    cli_ok("docker", &["info", "--format", "{{.ServerVersion}}"])
+    cli_ok(&docker_bin(), &["info", "--format", "{{.ServerVersion}}"])
 }
 
 pub fn container_up() -> bool {
-    Command::new("docker")
+    Command::new(docker_bin())
         .args(["ps", "--filter", &format!("name={CONTAINER}"), "--format", "{{.Names}}"])
         .output()
         .ok()
@@ -192,6 +249,14 @@ fn docker_start_failed_msg(attempted: Option<&str>) -> String {
     return format!("Docker è installato ma non è pronto.{tail}");
 }
 
+/// True when a Docker CLI exists — either as a real file at a known absolute
+/// location (robust under a truncated PATH) or resolvable+runnable via PATH.
+/// Distinguishes "Docker isn't installed" from "Docker is installed but the
+/// daemon is down", so we don't bail before attempting `start_docker_engine()`.
+fn docker_installed() -> bool {
+    docker_bin() != "docker" || cli_ok("docker", &["--version"])
+}
+
 /// Ensures the Docker daemon is reachable, auto-starting the platform's Docker
 /// engine (Docker Desktop / Colima / systemd, depending on the OS) and polling
 /// until it's ready. Returns a human-actionable, OS-specific error otherwise.
@@ -199,7 +264,7 @@ pub fn ensure_docker() -> Result<(), String> {
     if docker_running() {
         return Ok(());
     }
-    if !cli_ok("docker", &["--version"]) {
+    if !docker_installed() {
         return Err(docker_not_installed_msg());
     }
     let started = start_docker_engine();
@@ -246,6 +311,7 @@ pub fn ensure_contained_computer() -> Result<(), String> {
         let _ = Command::new("bash")
             .arg(&script)
             .env("LFPA_ARTIFACTS_DIR", artifacts_dir())
+            .env("PATH", path_with_docker_dir())
             .output();
         for _ in 0..30 {
             if container_up() {
@@ -262,9 +328,10 @@ Avvialo con runtimes/contained-computer/up.sh."
 /// Copies an installed skill's files into the container so its scripts are
 /// runnable. Best-effort.
 pub fn sync_skill(skill_dir: &Path, skill_id: &str) {
+    let docker = docker_bin();
     let dest = format!("{CONTAINER_SKILLS_DIR}/{skill_id}");
-    let _ = Command::new("docker").args(["exec", CONTAINER, "mkdir", "-p", &dest]).output();
-    let _ = Command::new("docker")
+    let _ = Command::new(&docker).args(["exec", CONTAINER, "mkdir", "-p", &dest]).output();
+    let _ = Command::new(&docker)
         .args(["cp", &format!("{}/.", skill_dir.display()), &format!("{CONTAINER}:{dest}")])
         .output();
 }
@@ -279,7 +346,7 @@ pub fn run_command(command: &str, skill_id: Option<&str>) -> Result<String, Stri
     let workdir = skill_id
         .map(|id| format!("{CONTAINER_SKILLS_DIR}/{id}"))
         .unwrap_or_else(|| "/home/agent".to_string());
-    let output = Command::new("docker")
+    let output = Command::new(docker_bin())
         .args([
             "exec",
             "-w",

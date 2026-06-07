@@ -1,7 +1,8 @@
 const { app, BrowserWindow, shell, ipcMain, dialog, nativeImage } = require("electron");
-const { spawn, spawnSync } = require("node:child_process");
+const { spawn, spawnSync, execFileSync } = require("node:child_process");
 const { randomBytes } = require("node:crypto");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
@@ -110,6 +111,66 @@ function stopStaleGatewayOnPort() {
   }
 }
 
+// macOS/Linux GUI apps launched from Finder/Dock inherit launchd's minimal PATH
+// (typically /usr/bin:/bin:/usr/sbin:/sbin) — WITHOUT Homebrew (/opt/homebrew/bin),
+// /usr/local/bin (where Docker Desktop's `docker` symlink lives), ~/.cargo/bin, etc.
+// The gateway shells out to `docker`, `colima`, `cargo`, `git`, `python` by bare
+// name, so a truncated PATH makes them "not found" — the classic "works in dev,
+// broken in the packaged .app" bug. Reconstruct a full PATH before spawning, the
+// way the `fix-path` library does (login-shell query ∪ well-known bin dirs).
+let cachedGatewayPath = null;
+function resolveGatewayPath() {
+  if (cachedGatewayPath !== null) return cachedGatewayPath;
+  const sep = process.platform === "win32" ? ";" : ":";
+  const seen = new Set();
+  const parts = [];
+  const add = (entry) => {
+    if (typeof entry === "string" && entry && !seen.has(entry)) {
+      seen.add(entry);
+      parts.push(entry);
+    }
+  };
+
+  // 1) Whatever PATH we already have (full in dev, truncated in a GUI launch).
+  for (const entry of (process.env.PATH ?? "").split(sep)) add(entry);
+
+  if (process.platform !== "win32") {
+    // 2) The user's login shell PATH — captures custom locations (asdf, nvm,
+    //    pyenv, non-standard Homebrew prefixes). Bounded by a timeout so a slow
+    //    or misconfigured shell can't hang startup; stderr is discarded.
+    try {
+      const shellBin = process.env.SHELL || "/bin/zsh";
+      const shellPath = execFileSync(shellBin, ["-ilc", 'printf %s "$PATH"'], {
+        timeout: 3000,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      for (const entry of shellPath.split(sep)) add(entry);
+    } catch {
+      // Shell missing/misconfigured/slow — the well-known dirs below cover Docker.
+    }
+    // 3) Always union the common bin dirs, so `docker` resolves even when the
+    //    shell query failed or returned a minimal PATH.
+    const home = os.homedir();
+    for (const entry of [
+      "/opt/homebrew/bin",
+      "/usr/local/bin",
+      "/usr/bin",
+      "/bin",
+      "/usr/sbin",
+      "/sbin",
+      path.join(home, ".docker", "bin"),
+      path.join(home, ".cargo", "bin"),
+      path.join(home, ".local", "bin"),
+    ]) {
+      add(entry);
+    }
+  }
+
+  cachedGatewayPath = parts.join(sep);
+  return cachedGatewayPath;
+}
+
 function spawnGateway() {
   const gatewayBin = gatewayBinaryPath();
   const workspaceRoot = process.env.LOCAL_FIRST_WORKSPACE_ROOT ??
@@ -118,6 +179,7 @@ function spawnGateway() {
       : REPO_ROOT);
   const env = {
     ...process.env,
+    PATH: resolveGatewayPath(),
     LOCAL_FIRST_DESKTOP_GATEWAY_PORT: GATEWAY_PORT,
     LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN: GATEWAY_TOKEN,
     LOCAL_FIRST_WORKSPACE_ROOT: workspaceRoot,
