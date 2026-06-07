@@ -30,6 +30,7 @@ mkdir -p "${ARTIFACTS_DIR}"
 # download (~/.cache) across the --rm container lifecycle.
 docker run -d --rm --name "${NAME}" \
   --shm-size=512m \
+  --tmpfs /tmp:rw,exec,nosuid,nodev,size=512m,mode=1777 \
   -p 127.0.0.1:9222:9222 \
   -p 127.0.0.1:6080:6080 \
   -p 127.0.0.1:9100:9000 \
