@@ -43,6 +43,7 @@ import {
   type CoreTelegramStatus,
   type ProviderModelView,
   type ProviderView,
+  type McpRegistryServer,
   type CatalogPreview,
   type CatalogSkill,
   type SkillCatalogResponse,
@@ -1121,13 +1122,23 @@ function ConnectorsPane() {
         {mcpList.length === 0 && <p className="mdl-rail-empty">Nessun server</p>}
         <button
           type="button"
+          className={`mdl-rail-item add ${selected === "mcp-catalog" ? "active" : ""}`}
+          onClick={() => pick("mcp-catalog")}
+        >
+          <span className="conn-avatar add">
+            <Search size={14} />
+          </span>
+          <span className="mdl-rail-name">Catalogo MCP</span>
+        </button>
+        <button
+          type="button"
           className={`mdl-rail-item add ${selected === "add-mcp" ? "active" : ""}`}
           onClick={() => pick("add-mcp")}
         >
           <span className="conn-avatar add">
             <Plus size={14} />
           </span>
-          <span className="mdl-rail-name">Aggiungi MCP</span>
+          <span className="mdl-rail-name">Aggiungi manuale</span>
         </button>
       </aside>
 
@@ -1139,6 +1150,14 @@ function ConnectorsPane() {
             onNote={setNote}
           />
         )}
+        {selected === "mcp-catalog" && (
+          <McpCatalogDetail
+            connectedIds={new Set(mcpList.map(([id]) => id))}
+            onChanged={refresh}
+            onNote={setNote}
+            onConnected={pick}
+          />
+        )}
         {selected === "add-mcp" && (
           <McpAddDetail onChanged={refresh} onNote={setNote} onConnected={pick} />
         )}
@@ -1147,6 +1166,9 @@ function ConnectorsPane() {
             providerId={selected}
             info={mcpProviders.get(selected)!}
             snap={snap}
+            onChanged={refresh}
+            onNote={setNote}
+            onDisconnected={() => pick("composio")}
           />
         )}
         {note && (
@@ -1755,12 +1777,34 @@ function McpServerDetail({
   providerId,
   info,
   snap,
+  onChanged,
+  onNote,
+  onDisconnected,
 }: {
   providerId: string;
   info: { name: string; tools: number };
   snap: CoreCapabilitySnapshot | null;
+  onChanged: () => Promise<void>;
+  onNote: (note: string | null) => void;
+  onDisconnected: () => void;
 }) {
   const tools = (snap?.tools ?? []).filter((tool) => tool.provider_id === providerId);
+  const [busy, setBusy] = useState(false);
+  const disconnect = async () => {
+    if (!window.confirm(`Disconnettere ${info.name}? Verrà rimosso dai server collegati.`)) return;
+    setBusy(true);
+    onNote(null);
+    try {
+      await coreBridge.mcpDisconnect(providerId);
+      onNote(`${info.name} disconnesso.`);
+      await onChanged();
+      onDisconnected();
+    } catch (error) {
+      onNote(`Disconnessione non riuscita: ${(error as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <>
       <div className="mdl-detail-head">
@@ -1775,6 +1819,17 @@ function McpServerDetail({
             </p>
           </div>
           <span className="set-badge green">Connesso</span>
+          <button
+            className="set-btn"
+            type="button"
+            disabled={busy}
+            onClick={() => void disconnect()}
+            title="Disconnetti questo server MCP"
+            style={{ marginLeft: "auto" }}
+          >
+            <Trash2 size={14} />
+            <span style={{ marginLeft: 6 }}>{busy ? "…" : "Disconnetti"}</span>
+          </button>
         </div>
       </div>
       <div className="mdl-detail-section-label">Strumenti</div>
@@ -1791,6 +1846,254 @@ function McpServerDetail({
         {tools.length === 0 && <p className="set-hint">Nessuno strumento esposto.</p>}
       </div>
     </>
+  );
+}
+
+/** Browse the OFFICIAL MCP registry and connect a server in one click, filling
+ *  any required parameters/secrets. Provenance (publisher) + the exact command
+ *  are shown, and connect asks confirmation, because MCP servers run host code. */
+function McpCatalogDetail({
+  connectedIds,
+  onChanged,
+  onNote,
+  onConnected,
+}: {
+  connectedIds: Set<string>;
+  onChanged: () => Promise<void>;
+  onNote: (note: string | null) => void;
+  onConnected: (providerId: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [servers, setServers] = useState<McpRegistryServer[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  const search = async (q: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      setServers(await coreBridge.mcpRegistry(q));
+    } catch (e) {
+      setError(`Registry non raggiungibile: ${(e as Error).message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void search("");
+  }, []);
+
+  return (
+    <>
+      <div className="mdl-detail-head">
+        <h3 className="mdl-detail-title">Catalogo MCP</h3>
+        <p className="mdl-detail-sub">
+          Dal registry ufficiale Model Context Protocol — sempre aggiornato. I server eseguono
+          codice sul tuo computer: connetti solo publisher di cui ti fidi.
+        </p>
+      </div>
+      <form
+        className="mdl-field"
+        style={{ flexDirection: "row", gap: 8 }}
+        onSubmit={(e) => {
+          e.preventDefault();
+          void search(query);
+        }}
+      >
+        <input
+          className="set-input"
+          placeholder="Cerca (es. playwright, filesystem, fetch, github)…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <button className="set-btn" type="submit" disabled={loading}>
+          <Search size={14} />
+          <span style={{ marginLeft: 6 }}>{loading ? "Cerco…" : "Cerca"}</span>
+        </button>
+      </form>
+      {error && <p className="set-hint">{error}</p>}
+      <div className="conn-tool-list" style={{ marginTop: 8 }}>
+        {servers.map((srv) => (
+          <McpCatalogCard
+            key={srv.id}
+            server={srv}
+            connected={connectedIds.has(
+              `mcp:${srv.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-+|-+$)/g, "")}`,
+            )}
+            expanded={expanded === srv.id}
+            onToggle={() => setExpanded((cur) => (cur === srv.id ? null : srv.id))}
+            onChanged={onChanged}
+            onNote={onNote}
+            onConnected={onConnected}
+          />
+        ))}
+        {!loading && servers.length === 0 && !error && (
+          <p className="set-hint">Nessun risultato.</p>
+        )}
+      </div>
+    </>
+  );
+}
+
+/** One registry server card: provenance + command preview + a parameter form
+ *  (text / password for secrets) that assembles args+env and connects. */
+function McpCatalogCard({
+  server,
+  connected,
+  expanded,
+  onToggle,
+  onChanged,
+  onNote,
+  onConnected,
+}: {
+  server: McpRegistryServer;
+  connected: boolean;
+  expanded: boolean;
+  onToggle: () => void;
+  onChanged: () => Promise<void>;
+  onNote: (note: string | null) => void;
+  onConnected: (providerId: string) => void;
+}) {
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [reveal, setReveal] = useState<Record<string, boolean>>({});
+  const [busy, setBusy] = useState(false);
+
+  const missingRequired = server.inputs.some(
+    (i) => i.required && !(values[i.key] ?? i.default ?? "").trim(),
+  );
+
+  const connect = async () => {
+    setBusy(true);
+    onNote(null);
+    try {
+      // Assemble: env-inputs → env map; arg-inputs → appended to base args in order.
+      const env: Record<string, string> = {};
+      const extraArgs: string[] = [];
+      for (const input of server.inputs) {
+        const value = (values[input.key] ?? input.default ?? "").trim();
+        if (!value) continue;
+        if (input.target === "env") env[input.key] = value;
+        else extraArgs.push(value);
+      }
+      const result = await coreBridge.mcpConnect({
+        name: server.name,
+        command: server.command,
+        args: [...server.args, ...extraArgs],
+        env,
+      });
+      onNote(
+        result.discovery_error
+          ? `Connesso con avviso: ${result.discovery_error}`
+          : `Connesso: ${result.tools_cached} strumenti da ${server.name}.`,
+      );
+      await onChanged();
+      onConnected(result.provider_id);
+    } catch (error) {
+      onNote(`Connessione non riuscita: ${(error as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="conn-tool" style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div className="conn-tool-main">
+          <span className="conn-tool-name">
+            {server.name}
+            {server.official && (
+              <span className="set-badge green" style={{ marginLeft: 8 }} title="Server di riferimento ufficiale">
+                <ShieldCheck size={12} /> Ufficiale
+              </span>
+            )}
+            {connected && (
+              <span className="set-badge" style={{ marginLeft: 8 }}>
+                Collegato
+              </span>
+            )}
+          </span>
+          <span className="conn-tool-desc">{server.description}</span>
+          <span className="mdl-detail-sub" style={{ fontSize: 11, opacity: 0.7 }}>
+            {server.publisher} · {server.runtime}
+            {server.homepage && (
+              <>
+                {" · "}
+                <a href={server.homepage} target="_blank" rel="noreferrer">
+                  sito <ExternalLink size={10} />
+                </a>
+              </>
+            )}
+          </span>
+        </div>
+        {server.installable ? (
+          <button
+            className="set-btn primary"
+            type="button"
+            disabled={busy}
+            onClick={() => (server.inputs.length > 0 ? onToggle() : void connect())}
+            title="Connetti questo server"
+          >
+            <Download size={14} />
+            <span style={{ marginLeft: 6 }}>
+              {busy ? "…" : server.inputs.length > 0 ? "Configura" : "Connetti"}
+            </span>
+          </button>
+        ) : (
+          <span className="mdl-tag" title={server.note ?? ""}>
+            non supportato
+          </span>
+        )}
+      </div>
+      <code style={{ fontSize: 11, opacity: 0.7, wordBreak: "break-all" }}>
+        {server.command} {server.args.join(" ")}
+      </code>
+      {expanded && server.installable && (
+        <div className="mdl-field" style={{ gap: 8, marginTop: 4 }}>
+          {server.inputs.map((input) => (
+            <div key={input.key} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <label className="mdl-field-label">
+                {input.label}
+                {input.required ? " *" : " (opzionale)"}
+                {input.secret && " · segreto"}
+              </label>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input
+                  className="set-input"
+                  type={input.secret && !reveal[input.key] ? "password" : "text"}
+                  placeholder={input.default ?? input.key}
+                  value={values[input.key] ?? ""}
+                  onChange={(e) =>
+                    setValues((prev) => ({ ...prev, [input.key]: e.target.value }))
+                  }
+                />
+                {input.secret && (
+                  <button
+                    className="set-btn"
+                    type="button"
+                    onClick={() => setReveal((prev) => ({ ...prev, [input.key]: !prev[input.key] }))}
+                    title={reveal[input.key] ? "Nascondi" : "Mostra"}
+                  >
+                    {reveal[input.key] ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+          <button
+            className="set-btn primary"
+            type="button"
+            style={{ alignSelf: "flex-start" }}
+            disabled={busy || missingRequired}
+            onClick={() => void connect()}
+          >
+            <Download size={14} />
+            <span style={{ marginLeft: 6 }}>{busy ? "Connessione…" : "Connetti"}</span>
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
