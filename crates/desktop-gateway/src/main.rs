@@ -4479,6 +4479,21 @@ disponibili (per dati dal web usa il browser: browser_navigate sull'URL indicato
                                     },
                                 )
                                 .await;
+                                // If Docker is down we auto-start Docker Desktop (cold
+                                // start ~1 min) before running — tell the user so the
+                                // wait doesn't look like a hang.
+                                let docker_up = tokio::task::spawn_blocking(sandbox::docker_running)
+                                    .await
+                                    .unwrap_or(false);
+                                if !docker_up {
+                                    let _ = emit_stream_event(
+                                        &tx,
+                                        GenerateStreamEvent::Delta {
+                                            text: "‹‹ACT››🐳 Docker non è attivo: avvio Docker Desktop e attendo che sia pronto (~1 min)…‹‹/ACT››".to_string(),
+                                        },
+                                    )
+                                    .await;
+                                }
                                 // Publish the command to the computer terminal panel.
                                 sandbox_begin(command.clone());
                                 // Per-conversation output dir: skills save generated

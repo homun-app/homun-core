@@ -82,15 +82,30 @@ pub fn ensure_docker() -> Result<(), String> {
     }
     #[cfg(target_os = "macos")]
     {
-        let _ = Command::new("open").args(["-a", "Docker"]).status();
+        // The bundle is usually "Docker" (Docker Desktop); some installs name it
+        // "Docker Desktop". Try both so the auto-start is reliable.
+        let opened = Command::new("open")
+            .args(["-a", "Docker"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !opened {
+            let _ = Command::new("open").args(["-a", "Docker Desktop"]).status();
+        }
     }
-    for _ in 0..60 {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("systemctl").args(["--user", "start", "docker-desktop"]).status();
+    }
+    // A cold start of Docker Desktop can take well over a minute — poll up to ~150s
+    // so we don't give up (and fall back to the browser) while it's still booting.
+    for _ in 0..150 {
         std::thread::sleep(Duration::from_secs(1));
         if docker_running() {
             return Ok(());
         }
     }
-    Err("Docker è installato ma non si avvia. Avvia Docker Desktop e riprova.".to_string())
+    Err("Docker è installato ma non si è avviato in tempo. Apri Docker Desktop manualmente e riprova.".to_string())
 }
 
 /// Locates `up.sh` for the contained computer (env override, else repo-relative).
