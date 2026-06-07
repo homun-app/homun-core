@@ -41,7 +41,7 @@ use local_first_inference::{
     PrivacyPolicy, Requirements,
 };
 use local_first_capabilities::{
-    ActionClass, CachedCapabilityTool, CachedToolProvider, CapabilityConnectionConfig,
+    ActionClass, CachedCapabilityTool, CachedToolProvider, CapabilityCall, CapabilityConnectionConfig,
     CapabilityError, CapabilityFacade, CapabilityPolicy, CapabilityProvider, CapabilityProviderConfig,
     CapabilityProviderGrant, CapabilityProviderKind, CapabilityRegistryStore, CapabilityResult,
     CapabilityTaskPayload, ComposioCapabilityProvider, ComposioProviderConfig, ComposioTransport,
@@ -530,6 +530,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/workspaces/{workspace_id}/rename", post(rename_workspace))
         .route("/api/workspaces/{workspace_id}/delete", post(delete_workspace))
         .route("/api/capabilities/mcp/connect", post(connect_mcp))
+        .route("/api/capabilities/mcp/execute", post(mcp_execute))
         .route("/api/capabilities/composio/connect", post(connect_composio))
         .route("/api/capabilities/composio/toolkits", get(composio_toolkits))
         .route("/api/capabilities/composio/link", post(composio_link))
@@ -2788,6 +2789,20 @@ const COMPOSIO_CATALOG_CAP: usize = 200;
 const COMPOSIO_DISCOVERY_RESULTS: usize = 8;
 /// Cap on a Composio tool result fed back to the model (email bodies can be huge).
 const COMPOSIO_RESULT_CHARS: usize = 6000;
+/// How many MCP tools (across all connected servers) to pull into the searchable
+/// catalog. MCP tools are read from the local SQLite cache, so this is cheap.
+const MCP_CATALOG_CAP: usize = 100;
+/// Timeout for a single MCP `tools/call` from chat. The stdio transport's
+/// `read_line` is blocking and uncapped, so without this a hung server would
+/// freeze the turn forever. Overridable via `LOCAL_FIRST_MCP_CALL_TIMEOUT_SECS`.
+fn mcp_call_timeout() -> std::time::Duration {
+    let secs = std::env::var("LOCAL_FIRST_MCP_CALL_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|&v| v > 0)
+        .unwrap_or(30);
+    std::time::Duration::from_secs(secs)
+}
 
 /// Granular browser tool: navigate to a URL (and auto-snapshot the result).
 fn browser_navigate_tool_schema() -> serde_json::Value {
@@ -3288,9 +3303,9 @@ i titoli di sezione quando la risposta è lunga. Rispondi in italiano, chiaro e 
             .await
             .unwrap_or_default()
     };
-    let composio_writes = catalog.writes.clone();
-    // (slug, lowercased "slug + description" haystack, schema) for keyword search.
-    let catalog_index: Vec<(String, String, serde_json::Value)> = catalog
+    let mut composio_writes = catalog.writes.clone();
+    // (name, lowercased "name + description" haystack, schema) for keyword search.
+    let mut catalog_index: Vec<(String, String, serde_json::Value)> = catalog
         .schemas
         .iter()
         .filter_map(|s| {
@@ -3301,6 +3316,26 @@ i titoli di sezione quando la risposta è lunga. Rispondi in italiano, chiaro e 
             Some((name, haystack, s.clone()))
         })
         .collect();
+    // MCP server tools join the SAME discovery surface as Composio: they appear in
+    // `find_connected_tools` and their writes share the confirmation gate. Read
+    // from the local SQLite cache (cheap), still off the runtime to be safe.
+    let mcp_catalog = {
+        let st = state.clone();
+        tokio::task::spawn_blocking(move || mcp_chat_tools(&st, MCP_CATALOG_CAP))
+            .await
+            .unwrap_or_default()
+    };
+    composio_writes.extend(mcp_catalog.writes.iter().cloned());
+    for schema in &mcp_catalog.schemas {
+        if let Some(f) = schema.get("function") {
+            if let Some(name) = f.get("name").and_then(|n| n.as_str()) {
+                let desc = f.get("description").and_then(|d| d.as_str()).unwrap_or("");
+                let haystack = format!("{name} {desc}").to_lowercase();
+                catalog_index.push((name.to_string(), haystack, schema.clone()));
+            }
+        }
+    }
+    let composio_writes = composio_writes; // freeze: (Composio + MCP) write tools
     let has_composio = !catalog_index.is_empty();
     let system = if !has_composio {
         system
@@ -4965,6 +5000,57 @@ suoi argomenti):\n{}",
                         "Azione non disponibile dal canale: le operazioni con effetti \
 richiedono la tua conferma nell'app. Proponila e fermati."
                             .to_string()
+                    } else if let Some((mcp_provider, mcp_tool)) = parse_mcp_chat_name(name) {
+                        // Connected MCP server tool. Writes (per the cached ActionClass,
+                        // derived from the MCP readOnlyHint) need confirmation; reads run
+                        // with a timeout so a hung server can't freeze the turn. A
+                        // read_only channel + write was already rejected just above
+                        // (composio_writes now includes MCP writes).
+                        if composio_writes.contains(name) {
+                            let args_val: serde_json::Value = serde_json::from_str(args_raw)
+                                .unwrap_or_else(|_| serde_json::json!({}));
+                            let marker = serde_json::json!({ "tool": name, "arguments": args_val })
+                                .to_string();
+                            let card = format!(
+                                "\n\nServe la tua conferma per l'azione qui sotto.\n\
+‹‹MCP_CONFIRM››{marker}‹‹/MCP_CONFIRM››\n"
+                            );
+                            accumulated.push_str(&card);
+                            let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: card })
+                                .await;
+                            pending_confirm = true;
+                            "IN ATTESA DI CONFERMA UTENTE: l'azione è stata proposta tramite una \
+card di conferma nell'interfaccia. NON dire che è stata eseguita."
+                                .to_string()
+                        } else {
+                            let _ = emit_stream_event(
+                                &tx,
+                                GenerateStreamEvent::Delta {
+                                    text: format!("‹‹ACT››🔌 Uso {mcp_tool}‹‹/ACT››"),
+                                },
+                            )
+                            .await;
+                            let st = state_owned.clone();
+                            let prov = mcp_provider.clone();
+                            let tool = mcp_tool.clone();
+                            let args: serde_json::Value = serde_json::from_str(args_raw)
+                                .unwrap_or_else(|_| serde_json::json!({}));
+                            let exec = tokio::task::spawn_blocking(move || {
+                                run_mcp_chat_tool(&st, &prov, &tool, args)
+                            });
+                            match tokio::time::timeout(mcp_call_timeout(), exec).await {
+                                Ok(Ok(Ok(value))) => {
+                                    value.to_string().chars().take(COMPOSIO_RESULT_CHARS).collect()
+                                }
+                                Ok(Ok(Err(error))) => format!("Errore strumento MCP: {error}"),
+                                Ok(Err(_join)) => "Errore: esecuzione MCP interrotta.".to_string(),
+                                Err(_elapsed) => format!(
+                                    "Lo strumento MCP non ha risposto entro {}s (timeout). \
+Dillo all'utente, NON dichiarare che è fatto.",
+                                    mcp_call_timeout().as_secs()
+                                ),
+                            }
+                        }
                     } else if !name.is_empty() {
                         // A connected-service (Composio) tool. Writes need explicit
                         // confirmation unless the user marked this tool "always allow".
@@ -9991,6 +10077,147 @@ fn composio_chat_tools(state: &AppState, cap: usize) -> ComposioChatTools {
     out
 }
 
+// ---- MCP tools in chat (mirrors the Composio chat-tools path) --------------
+
+/// OpenAI tool name for an MCP tool, namespaced by provider so multiple MCP
+/// servers — and the Composio slugs — never collide: `mcp__{slug}__{tool}`.
+fn mcp_chat_tool_name(provider_id: &CapabilityProviderId, tool: &str) -> String {
+    let id = provider_id.as_str();
+    let slug = id.strip_prefix("mcp:").unwrap_or(id);
+    format!("mcp__{slug}__{tool}")
+}
+
+/// Inverse of `mcp_chat_tool_name`: `mcp__{slug}__{tool}` → (provider_id, tool).
+/// Returns `None` for any non-MCP name, so the chat dispatch can use it to route.
+fn parse_mcp_chat_name(name: &str) -> Option<(CapabilityProviderId, String)> {
+    let rest = name.strip_prefix("mcp__")?;
+    let (slug, tool) = rest.split_once("__")?;
+    if slug.is_empty() || tool.is_empty() {
+        return None;
+    }
+    Some((CapabilityProviderId::new(format!("mcp:{slug}")), tool.to_string()))
+}
+
+/// MCP function tools to expose to the chat model, plus the subset that are
+/// writes (need confirmation before running). Mirrors `ComposioChatTools`.
+#[derive(Debug, Default)]
+struct McpChatTools {
+    schemas: Vec<serde_json::Value>,
+    writes: std::collections::BTreeSet<String>,
+}
+
+/// Builds OpenAI function schemas for every cached tool of every connected MCP
+/// server. Read-only tools (per the cached `ActionClass`, derived from the MCP
+/// `readOnlyHint`) run directly; everything else is a write that needs
+/// confirmation. Reads from the local SQLite cache only (no network), but still
+/// best-effort: any error yields an empty set so chat keeps working.
+fn mcp_chat_tools(state: &AppState, cap: usize) -> McpChatTools {
+    let mut out = McpChatTools::default();
+    let user = gateway_capability_user_id();
+    let workspace = gateway_capability_workspace_id();
+    let Ok(registry) = lock_capability_registry(state) else {
+        return out;
+    };
+    let Ok(connections) = registry.connection_configs(&user, &workspace) else {
+        return out;
+    };
+    for conn in connections {
+        let is_mcp = registry
+            .provider_config(&conn.provider_id)
+            .ok()
+            .flatten()
+            .map(|config| config.provider_kind == CapabilityProviderKind::Mcp)
+            .unwrap_or(false);
+        if !is_mcp {
+            continue;
+        }
+        let Ok(tools) = registry.cached_tools(&conn.provider_id) else {
+            continue;
+        };
+        for cached in tools {
+            if out.schemas.len() >= cap {
+                return out;
+            }
+            let name = mcp_chat_tool_name(&conn.provider_id, &cached.tool.name);
+            if cached.tool.action != ActionClass::Read {
+                out.writes.insert(name.clone());
+            }
+            let description = cached.tool.description.chars().take(300).collect::<String>();
+            let parameters = if cached.tool.input_schema.is_null() {
+                serde_json::json!({ "type": "object", "properties": {} })
+            } else {
+                cached.tool.input_schema.clone()
+            };
+            out.schemas.push(serde_json::json!({
+                "type": "function",
+                "function": { "name": name, "description": description, "parameters": parameters },
+            }));
+        }
+    }
+    out
+}
+
+/// Executes a single MCP tool — shared by the chat dispatch and the confirm-card
+/// endpoint, so there is ONE connect↔execute path. Spawns the server, registers
+/// it in a one-shot facade and calls `tools/call`. Returns the raw output or a
+/// human-readable error. (The transport is dropped on return → child killed.)
+fn run_mcp_chat_tool(
+    state: &AppState,
+    provider_id: &CapabilityProviderId,
+    tool_name: &str,
+    arguments: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let user = gateway_capability_user_id();
+    let workspace = gateway_capability_workspace_id();
+    let (connection, tool_policies, policy_context) = {
+        let registry = lock_capability_registry(state).map_err(|e| e.message)?;
+        let connection = registry
+            .connection_configs(&user, &workspace)
+            .map_err(|e| format!("connection configs: {e}"))?
+            .into_iter()
+            .find(|config| &config.provider_id == provider_id)
+            .ok_or_else(|| format!("nessuna connessione per provider {}", provider_id.as_str()))?;
+        let tool_policies = registry
+            .cached_tools(provider_id)
+            .map_err(|e| format!("cached tools: {e}"))?
+            .into_iter()
+            .map(|cached| McpToolPolicy {
+                tool_name: cached.tool.name,
+                action: cached.tool.action,
+                privacy_domains: cached.tool.privacy_domains,
+                sensitivity: cached.tool.sensitivity,
+            })
+            .collect::<Vec<_>>();
+        let policy_context = registry
+            .policy_context(&user, &workspace)
+            .map_err(|e| format!("policy context: {e}"))?;
+        (connection, tool_policies, policy_context)
+    };
+    let config = mcp_stdio_config_from_metadata(&connection.metadata)
+        .map_err(|e| format!("config MCP: {}", e.message))?;
+    let transport =
+        McpStdioTransport::spawn(config).map_err(|e| format!("avvio MCP fallito: {e}"))?;
+    let provider =
+        McpCapabilityProvider::new(provider_id.clone(), true, transport, tool_policies);
+    // MCP requires the initialize handshake before tools/call (strict servers
+    // reject calls otherwise). Fresh transport per call → initialize exactly once.
+    provider
+        .initialize("2024-11-05")
+        .map_err(|error| format!("handshake MCP: {error}"))?;
+    let mut facade =
+        CapabilityFacade::new(CapabilityPolicy::default(), InMemoryCapabilityAudit::default());
+    facade.register_provider(provider);
+    let call = CapabilityCall {
+        provider_id: provider_id.clone(),
+        tool_name: tool_name.to_string(),
+        arguments,
+    };
+    facade
+        .call_tool(&policy_context, call)
+        .map(|result| result.output)
+        .map_err(|error| error.to_string())
+}
+
 /// Executes a Composio tool for the current entity and returns its raw output.
 fn composio_execute_tool(
     state: &AppState,
@@ -10447,6 +10674,116 @@ async fn composio_execute(
 
     let summary = output.to_string().chars().take(2000).collect::<String>();
     Ok(Json(ComposioExecuteResponse { ok: true, summary }))
+}
+
+const MCP_CONFIRM_OPEN: &str = "‹‹MCP_CONFIRM››";
+const MCP_CONFIRM_CLOSE: &str = "‹‹/MCP_CONFIRM››";
+
+/// Like `rewrite_confirm_to_done` but for the MCP confirm marker. Replaces the
+/// pending-confirmation card with a plain "executed" note so reopening the chat
+/// can't re-trigger the action (and needs no extra frontend marker handling).
+fn rewrite_mcp_confirm_to_done(text: &str, tool: &str) -> String {
+    let Some(open) = text.find(MCP_CONFIRM_OPEN) else {
+        return text.to_string();
+    };
+    let Some(close_rel) = text[open..].find(MCP_CONFIRM_CLOSE) else {
+        return text.to_string();
+    };
+    let close = open + close_rel + MCP_CONFIRM_CLOSE.len();
+    let head_end = text[..open].rfind("Serve la tua conferma").unwrap_or(open);
+    let mut out = text[..head_end].trim_end().to_string();
+    let tail = text[close..].trim();
+    if !tail.is_empty() {
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str(tail);
+    }
+    if !out.is_empty() {
+        out.push_str("\n\n");
+    }
+    out.push_str(&format!("✓ Strumento MCP eseguito: {tool}"));
+    out
+}
+
+#[derive(Debug, Deserialize)]
+struct McpExecuteRequest {
+    /// Namespaced tool name `mcp__{slug}__{tool}`.
+    tool: String,
+    #[serde(default)]
+    arguments: serde_json::Value,
+    #[serde(default)]
+    thread_id: Option<String>,
+    #[serde(default)]
+    message_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct McpExecuteResponse {
+    ok: bool,
+    summary: String,
+}
+
+/// Executes an MCP tool on explicit user confirmation (the chat MCP confirm card
+/// calls this). Mirrors `composio_execute`: bounded by the same call timeout, and
+/// on success rewrites the originating message so the card can't reopen.
+async fn mcp_execute(
+    State(state): State<AppState>,
+    Json(request): Json<McpExecuteRequest>,
+) -> Result<Json<McpExecuteResponse>, GatewayError> {
+    let Some((provider_id, tool_name)) = parse_mcp_chat_name(&request.tool) else {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "mcp_bad_tool",
+            message: format!("Nome strumento MCP non valido: {}", request.tool),
+        });
+    };
+    let args = if request.arguments.is_null() {
+        serde_json::json!({})
+    } else {
+        request.arguments.clone()
+    };
+    let handle = tokio::task::spawn_blocking({
+        let state = state.clone();
+        move || run_mcp_chat_tool(&state, &provider_id, &tool_name, args)
+    });
+    let outcome = match tokio::time::timeout(mcp_call_timeout(), handle).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(join)) => {
+            return Err(GatewayError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "mcp_execute_join",
+                message: join.to_string(),
+            });
+        }
+        Err(_elapsed) => {
+            return Ok(Json(McpExecuteResponse {
+                ok: false,
+                summary: format!(
+                    "Timeout: lo strumento MCP non ha risposto entro {}s.",
+                    mcp_call_timeout().as_secs()
+                ),
+            }));
+        }
+    };
+    match outcome {
+        Ok(output) => {
+            if let (Some(thread_id), Some(message_id)) = (&request.thread_id, &request.message_id) {
+                if let Ok(store) = lock_store(&state) {
+                    if let Ok(Some(message)) = store.message(thread_id, message_id) {
+                        let rewritten = rewrite_mcp_confirm_to_done(&message.text, &request.tool);
+                        let _ = store.set_message_text(thread_id, message_id, &rewritten);
+                    }
+                }
+            }
+            let summary = output.to_string().chars().take(2000).collect::<String>();
+            Ok(Json(McpExecuteResponse { ok: true, summary }))
+        }
+        Err(error) => Ok(Json(McpExecuteResponse {
+            ok: false,
+            summary: format!("Azione NON riuscita: {error}"),
+        })),
+    }
 }
 
 /// Resolves a Composio-managed auth_config id for a toolkit, reusing an existing
@@ -16578,6 +16915,26 @@ mod tests {
             assert_eq!(info.locality, "local", "backend: {backend}");
             assert_eq!(info.model, "gpt-4o-mini", "backend: {backend}");
         }
+    }
+
+    #[test]
+    fn mcp_chat_tool_name_round_trips_collision_safe() {
+        let provider =
+            local_first_capabilities::ProviderId::new("mcp:filesystem".to_string());
+        // Encode → namespaced, decode → original provider + tool.
+        let name = crate::mcp_chat_tool_name(&provider, "read_file");
+        assert_eq!(name, "mcp__filesystem__read_file");
+        let (back_provider, back_tool) = crate::parse_mcp_chat_name(&name).expect("parse");
+        assert_eq!(back_provider.as_str(), "mcp:filesystem");
+        assert_eq!(back_tool, "read_file");
+        // A tool name containing the separator stays intact (splitn(2)).
+        let name2 = crate::mcp_chat_tool_name(&provider, "weird__tool");
+        let (_, back_tool2) = crate::parse_mcp_chat_name(&name2).expect("parse2");
+        assert_eq!(back_tool2, "weird__tool");
+        // Non-MCP names (Composio slugs, plain tools) are NOT claimed by the parser.
+        assert!(crate::parse_mcp_chat_name("GMAIL_SEND_EMAIL").is_none());
+        assert!(crate::parse_mcp_chat_name("use_skill").is_none());
+        assert!(crate::parse_mcp_chat_name("mcp__only").is_none());
     }
 
     #[test]

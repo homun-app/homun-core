@@ -2410,17 +2410,20 @@ function InlineTimeline({
   );
 }
 
-/** A pending write action the model proposed, carried in the message text. */
+/** A pending write action the model proposed, carried in the message text.
+ *  `kind` routes execution to the right backend: Composio vs an MCP server tool. */
 interface ComposioPendingAction {
   tool: string;
   arguments: unknown;
+  kind?: "composio" | "mcp";
 }
 
 const COMPOSIO_CONFIRM_RE = /‹‹COMPOSIO_CONFIRM››([\s\S]*?)‹‹\/COMPOSIO_CONFIRM››/;
+const MCP_CONFIRM_RE = /‹‹MCP_CONFIRM››([\s\S]*?)‹‹\/MCP_CONFIRM››/;
 const COMPOSIO_DONE_RE = /‹‹COMPOSIO_DONE››([\s\S]*?)‹‹\/COMPOSIO_DONE››/;
 const COMPOSIO_RECONNECT_RE = /‹‹COMPOSIO_RECONNECT››([\s\S]*?)‹‹\/COMPOSIO_RECONNECT››/;
 const COMPOSIO_MARKERS_RE =
-  /‹‹COMPOSIO_(?:CONFIRM|DONE|RECONNECT)››[\s\S]*?‹‹\/COMPOSIO_(?:CONFIRM|DONE|RECONNECT)››/g;
+  /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM)››/g;
 
 // Tool-activity trace markers (browser / skill / sandbox / connected-tool steps).
 // They are extracted into a compact collapsible panel so the answer body stays
@@ -3174,7 +3177,17 @@ function parseComposioConfirm(text: string): {
   if (confirm) {
     try {
       const parsed = JSON.parse(confirm[1]) as ComposioPendingAction;
-      if (parsed && typeof parsed.tool === "string") action = parsed;
+      if (parsed && typeof parsed.tool === "string") action = { ...parsed, kind: "composio" };
+    } catch {
+      /* malformed → just hide it */
+    }
+  }
+  // MCP server tools use a dedicated marker → routed to /mcp/execute, not Composio.
+  const mcpConfirm = text.match(MCP_CONFIRM_RE);
+  if (!action && mcpConfirm) {
+    try {
+      const parsed = JSON.parse(mcpConfirm[1]) as ComposioPendingAction;
+      if (parsed && typeof parsed.tool === "string") action = { ...parsed, kind: "mcp" };
     } catch {
       /* malformed → just hide it */
     }
@@ -3337,8 +3350,18 @@ const OPAQUE_FIELD_KEYS = new Set([
   "file_id",
 ]);
 
-/** "GMAIL_SEND_EMAIL" → "Send email · Gmail". */
+/** "GMAIL_SEND_EMAIL" → "Send email · Gmail"; "mcp__fs__read_file" → "read file · fs". */
 function humanizeToolName(slug: string): string {
+  // MCP tools are namespaced `mcp__{server}__{tool}` → "tool · server".
+  if (slug.startsWith("mcp__")) {
+    const rest = slug.slice("mcp__".length);
+    const sep = rest.indexOf("__");
+    if (sep > 0) {
+      const server = rest.slice(0, sep);
+      const tool = rest.slice(sep + 2).replace(/[_-]+/g, " ").trim();
+      return `${tool || rest} · ${server}`;
+    }
+  }
   const parts = slug.split("_").filter(Boolean);
   if (parts.length === 0) return slug;
   const toolkit = parts[0].charAt(0) + parts[0].slice(1).toLowerCase();
@@ -3376,23 +3399,23 @@ function ComposioConfirmCard({
   const setField = (key: string, value: unknown) =>
     setArgs((prev) => ({ ...prev, [key]: value }));
 
+  const isMcp = action.kind === "mcp";
   const run = async (scope: "once" | "always") => {
     setStatus("running");
     setNote(null);
     try {
-      const result = await coreBridge.composioExecute(action.tool, args, scope, {
-        threadId,
-        messageId,
-      });
+      const result = isMcp
+        ? await coreBridge.mcpExecute(action.tool, args, { threadId, messageId })
+        : await coreBridge.composioExecute(action.tool, args, scope, { threadId, messageId });
       if (!result.ok) {
-        // Composio replied but the action failed — never show a green "done".
+        // The backend replied but the action failed — never show a green "done".
         setStatus("error");
         setNote(result.summary || "Azione non riuscita.");
         return;
       }
       setStatus("done");
       setNote(
-        scope === "always"
+        scope === "always" && !isMcp
           ? `Fatto. D'ora in poi «${title}» verrà eseguito senza chiedere.`
           : "Fatto.",
       );
@@ -3505,15 +3528,17 @@ function ComposioConfirmCard({
         >
           {status === "running" ? "Eseguo…" : "Esegui una volta"}
         </button>
-        <button
-          className="set-btn"
-          type="button"
-          disabled={status === "running"}
-          onClick={() => void run("always")}
-          title={`Non chiedere più per ${title}`}
-        >
-          Esegui sempre
-        </button>
+        {!isMcp && (
+          <button
+            className="set-btn"
+            type="button"
+            disabled={status === "running"}
+            onClick={() => void run("always")}
+            title={`Non chiedere più per ${title}`}
+          >
+            Esegui sempre
+          </button>
+        )}
       </div>
     </div>
   );
