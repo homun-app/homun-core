@@ -3200,6 +3200,11 @@ strumento adatto, poi CHIAMA lo strumento trovato con gli argomenti completi.\n\
 SCELTA STRUMENTO: usa UN SOLO strumento che corrisponde ESATTAMENTE all'intento — per \
 AGGIUNGERE/CREARE usa create/add/quick_add, per LEGGERE usa fetch/list. NON chiamare MAI strumenti \
 distruttivi (delete/remove/cancel) se l'utente non lo chiede esplicitamente.\n\
+DATE E ORE: calcola SEMPRE la data/ora ASSOLUTA partendo da 'Oggi è ...' sopra (es. domani = oggi \
++ 1 giorno) e passala allo strumento in formato ESPLICITO ISO 8601 con il fuso (es. \
+start_datetime: 2026-06-08T11:00:00+02:00, end_datetime un'ora dopo). NON passare parole relative \
+come \"domani\"/\"oggi\" negli argomenti: il parsing del servizio puo' sbagliare giorno. Preferisci \
+uno strumento con start/end espliciti rispetto al \"quick add\" testuale per gli orari.\n\
 AZIONI DI SCRITTURA (inviare/eliminare/modificare): CHIAMA comunque lo strumento con gli argomenti \
 completi — il sistema mostrerà AUTOMATICAMENTE all'utente una card di conferma prima di eseguire. \
 NON rifiutare, NON dire che non puoi inviare e NON chiedere all'utente di farlo manualmente: il tuo \
@@ -9736,6 +9741,12 @@ fn composio_execute_tool(
     arguments: &serde_json::Value,
 ) -> Result<serde_json::Value, GatewayError> {
     let transport = composio_transport_for(state)?;
+    // Diagnostic: surface exactly what we send so date/arg bugs are visible in the
+    // log (e.g. a calendar event that landed on the wrong day) instead of guessed.
+    eprintln!(
+        "composio/execute tool={tool} args={}",
+        arguments.to_string().chars().take(600).collect::<String>()
+    );
     transport
         .request(
             "POST",
