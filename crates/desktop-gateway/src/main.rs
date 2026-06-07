@@ -3503,39 +3503,60 @@ all'utente (tabella per riga + eventuale footer Fonti)."
                 payload["tools"] = serde_json::Value::Array(tool_schemas.clone());
                 payload["tool_choice"] = serde_json::Value::String("auto".to_string());
             }
-            let mut builder = http.post(&endpoint);
-            if let Some(key) = api_key.as_ref() {
-                builder = builder.bearer_auth(key);
-            }
-            let resp = builder.json(&payload).send().await;
-            let resp = match resp {
-                Ok(value) => value,
-                Err(error) => {
-                    let _ = emit_stream_event(
-                        &tx,
-                        GenerateStreamEvent::Delta {
-                            text: format!("Errore di rete verso il modello: {error}"),
-                        },
-                    )
-                    .await;
-                    break;
+            // Model proxies (e.g. ollama.com) occasionally return 502/timeout. Retry
+            // transient failures a couple of times with backoff + a 180s timeout, and
+            // surface a CLEAN message (not the raw upstream JSON) if it persists.
+            let resp = {
+                let mut attempt: u32 = 0;
+                loop {
+                    let mut builder =
+                        http.post(&endpoint).timeout(std::time::Duration::from_secs(180));
+                    if let Some(key) = api_key.as_ref() {
+                        builder = builder.bearer_auth(key);
+                    }
+                    match builder.json(&payload).send().await {
+                        Ok(value) if value.status().is_success() => break Some(value),
+                        Ok(value) => {
+                            let code = value.status();
+                            let transient = matches!(code.as_u16(), 408 | 429 | 500 | 502 | 503 | 504);
+                            if transient && attempt < 2 {
+                                attempt += 1;
+                                let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
+                                    text: format!("‹‹ACT››⏳ Il modello non risponde ({code}), riprovo ({attempt}/2)…‹‹/ACT››"),
+                                })
+                                .await;
+                                tokio::time::sleep(std::time::Duration::from_millis(800 * u64::from(attempt))).await;
+                                continue;
+                            }
+                            let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
+                                text: format!("Il modello ha risposto con un errore ({code}). Riprova tra poco; se persiste, controlla il provider in Impostazioni."),
+                            })
+                            .await;
+                            break None;
+                        }
+                        Err(error) => {
+                            let transient = error.is_timeout() || error.is_connect();
+                            if transient && attempt < 2 {
+                                attempt += 1;
+                                let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
+                                    text: format!("‹‹ACT››⏳ Rete verso il modello instabile, riprovo ({attempt}/2)…‹‹/ACT››"),
+                                })
+                                .await;
+                                tokio::time::sleep(std::time::Duration::from_millis(800 * u64::from(attempt))).await;
+                                continue;
+                            }
+                            let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
+                                text: "Il modello non ha risposto (timeout/rete). Riprova tra poco.".to_string(),
+                            })
+                            .await;
+                            break None;
+                        }
+                    }
                 }
             };
-            if !resp.status().is_success() {
-                let code = resp.status();
-                let detail = resp.text().await.unwrap_or_default();
-                let _ = emit_stream_event(
-                    &tx,
-                    GenerateStreamEvent::Delta {
-                        text: format!(
-                            "Errore modello {code}: {}",
-                            detail.chars().take(200).collect::<String>()
-                        ),
-                    },
-                )
-                .await;
+            let Some(resp) = resp else {
                 break;
-            }
+            };
             let body: serde_json::Value = match resp.json().await {
                 Ok(value) => value,
                 Err(error) => {
