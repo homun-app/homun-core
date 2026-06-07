@@ -4820,9 +4820,17 @@ card di conferma nell'interfaccia. NON dire che è stata eseguita."
                             })
                             .await;
                             match outcome {
-                                Ok(Ok(value)) => {
-                                    value.to_string().chars().take(COMPOSIO_RESULT_CHARS).collect()
-                                }
+                                Ok(Ok(value)) => match composio_execution_error(&value) {
+                                    // Composio returned 200 but the tool failed: tell the
+                                    // model so it reports the failure, not a false success.
+                                    Some(error) => format!(
+                                        "Lo strumento {name} NON ha eseguito l'azione: {error}. \
+Dillo all'utente in modo chiaro; NON dichiarare che è fatto."
+                                    ),
+                                    None => {
+                                        value.to_string().chars().take(COMPOSIO_RESULT_CHARS).collect()
+                                    }
+                                },
                                 Ok(Err(error)) => {
                                     format!("Errore dello strumento {name}: {}", error.message)
                                 }
@@ -9740,6 +9748,29 @@ fn composio_execute_tool(
         .map_err(GatewayError::capability)
 }
 
+/// Composio's `/tools/execute` returns HTTP 200 even when the tool FAILED,
+/// signalling via `successful: false` (+ an `error` message). Returns the error on
+/// a failed execution so we never report a non-action as "done" (the real bug: a
+/// calendar add/delete that silently failed but showed "Azione eseguita").
+fn composio_execution_error(output: &serde_json::Value) -> Option<String> {
+    if output.get("successful").and_then(|v| v.as_bool()) == Some(false) {
+        let message = output
+            .get("error")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .map(str::to_string)
+            .or_else(|| {
+                output
+                    .get("error")
+                    .filter(|v| !v.is_null())
+                    .map(|v| v.to_string())
+            })
+            .unwrap_or_else(|| "il servizio ha rifiutato l'azione".to_string());
+        return Some(message.chars().take(400).collect());
+    }
+    None
+}
+
 // ---- write-tool approval allow-list ("conferma sempre per questo tool") -------
 
 fn composio_tool_allow_path() -> Option<PathBuf> {
@@ -10125,6 +10156,15 @@ async fn composio_execute(
         code: "composio_execute_join",
         message: e.to_string(),
     })??;
+
+    // Composio replies HTTP 200 even when the tool itself failed. Never mark the
+    // action "done" nor claim success in that case — report the failure instead.
+    if let Some(error) = composio_execution_error(&output) {
+        return Ok(Json(ComposioExecuteResponse {
+            ok: false,
+            summary: format!("Azione NON riuscita: {error}"),
+        }));
+    }
 
     // Persist the executed state into the transcript so reopening the chat shows
     // a "done" note, not the editable card (prevents accidental re-execution).

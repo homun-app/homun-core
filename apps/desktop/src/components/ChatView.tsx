@@ -3347,7 +3347,16 @@ function ComposioConfirmCard({
     setStatus("running");
     setNote(null);
     try {
-      await coreBridge.composioExecute(action.tool, args, scope, { threadId, messageId });
+      const result = await coreBridge.composioExecute(action.tool, args, scope, {
+        threadId,
+        messageId,
+      });
+      if (!result.ok) {
+        // Composio replied but the action failed — never show a green "done".
+        setStatus("error");
+        setNote(result.summary || "Azione non riuscita.");
+        return;
+      }
       setStatus("done");
       setNote(
         scope === "always"
