@@ -384,6 +384,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_active_workspace_from_disk();
     start_task_executor_worker(state.clone());
     spawn_thread_browser_session_reaper(state.clone());
+    spawn_contained_computer_idle_reaper(state.clone());
     reconnect_channels_on_startup();
     let chat_routes = Router::new()
         .route(
@@ -5644,6 +5645,79 @@ fn spawn_thread_browser_session_reaper(state: AppState) {
     });
 }
 
+/// Tracks the last time the contained computer did anything (skill exec or live
+/// browser activity), feeding the idle-recycle reaper below.
+fn cc_last_activity_cell() -> &'static std::sync::Mutex<std::time::Instant> {
+    static CELL: std::sync::OnceLock<std::sync::Mutex<std::time::Instant>> =
+        std::sync::OnceLock::new();
+    CELL.get_or_init(|| std::sync::Mutex::new(std::time::Instant::now()))
+}
+
+/// Marks the contained computer as just-used, resetting its idle clock.
+fn touch_cc_activity() {
+    if let Ok(mut guard) = cc_last_activity_cell().lock() {
+        *guard = std::time::Instant::now();
+    }
+}
+
+fn cc_idle_for() -> std::time::Duration {
+    cc_last_activity_cell().lock().map(|g| g.elapsed()).unwrap_or_default()
+}
+
+/// How long the contained computer may sit idle before the reaper recycles it.
+/// Default 30 min — comfortably past the 5-min browser-session idle, so parked
+/// sessions are already reaped by then. Overridable via `LFPA_CC_IDLE_RECYCLE_SECS`.
+fn cc_idle_recycle_after() -> std::time::Duration {
+    let secs = std::env::var("LFPA_CC_IDLE_RECYCLE_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|&v| v >= 60)
+        .unwrap_or(1800);
+    std::time::Duration::from_secs(secs)
+}
+
+/// Background reaper: every 60s, recycle the contained computer (`docker rm -f`)
+/// once it has been idle past the threshold AND nothing is using it — no skill
+/// command in-flight, no live browser run, no parked per-thread browser session.
+/// The next skill/browser use re-creates it from the cached image (a clean
+/// slate), so scratch (/tmp, runtime installs, synced skills) can't accumulate
+/// across a long-running session.
+fn spawn_contained_computer_idle_reaper(state: AppState) {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            if cc_idle_for() < cc_idle_recycle_after() {
+                continue;
+            }
+            // Never recycle while the container is in use.
+            if current_sandbox_activity().iter().any(|entry| entry.running) {
+                continue; // a skill command is executing
+            }
+            if current_browser_activity().is_some() {
+                continue; // a live browser run is in progress
+            }
+            let has_browser_session = state
+                .browser_thread_sessions
+                .lock()
+                .map(|map| !map.is_empty())
+                .unwrap_or(true); // poisoned lock → be conservative, skip
+            if has_browser_session {
+                continue; // a parked session's CDP points at this container
+            }
+            // docker calls block — run off the async runtime.
+            let _ = tokio::task::spawn_blocking(|| {
+                if sandbox::container_up() && sandbox::recycle_container() {
+                    eprintln!(
+                        "contained-computer: idle oltre la soglia, riciclato ({} rimosso, si ricrea al prossimo uso)",
+                        sandbox::CONTAINER
+                    );
+                }
+            })
+            .await;
+        }
+    });
+}
+
 /// One step of the live activity checklist (Manus-style "Avanzamento attività").
 #[derive(Debug, Clone, Serialize)]
 struct BrowserStepView {
@@ -5667,6 +5741,7 @@ fn browser_activity_cell() -> &'static std::sync::RwLock<Option<BrowserActivityS
 }
 
 fn begin_browser_activity(goal: String) {
+    touch_cc_activity();
     if let Ok(mut guard) = browser_activity_cell().write() {
         *guard = Some(BrowserActivityState {
             goal,
@@ -5676,6 +5751,7 @@ fn begin_browser_activity(goal: String) {
 }
 
 fn push_browser_step(label: String, status: &str) {
+    touch_cc_activity();
     if let Ok(mut guard) = browser_activity_cell().write() {
         if let Some(state) = guard.as_mut() {
             // Cap the visible log so a long run can't grow unbounded.
@@ -5725,6 +5801,7 @@ fn sandbox_clear() {
 
 /// Records a command about to run (output filled in by `sandbox_end`).
 fn sandbox_begin(command: String) {
+    touch_cc_activity();
     if let Ok(mut guard) = sandbox_activity_cell().write() {
         if guard.len() >= 20 {
             guard.remove(0);

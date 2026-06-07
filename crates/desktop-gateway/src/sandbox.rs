@@ -130,6 +130,18 @@ pub fn container_up() -> bool {
         .unwrap_or(false)
 }
 
+/// Forcibly stops and removes the contained computer (`docker rm -f`). Since the
+/// container runs with `--rm`, this reclaims its writable layer entirely; the
+/// next `ensure_contained_computer()` re-creates it from the cached image — a
+/// clean slate. Used by the idle reaper so accumulated scratch can't pile up.
+pub fn recycle_container() -> bool {
+    Command::new(docker_bin())
+        .args(["rm", "-f", CONTAINER])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 /// How long to poll for the daemon after launching the engine. A cold start of
 /// Docker Desktop / Colima can take well over a minute, so default to ~150s.
 /// Overridable via `LFPA_DOCKER_START_TIMEOUT_SECS`.
