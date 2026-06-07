@@ -7,8 +7,8 @@
 # Requires the Docker daemon to be running (Docker Desktop started).
 set -euo pipefail
 
-IMAGE="lfpa-contained-computer"
-NAME="lfpa-cc"
+IMAGE="homun-contained-computer"
+NAME="homun-cc"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if ! docker version >/dev/null 2>&1; then
@@ -33,7 +33,7 @@ docker run -d --rm --name "${NAME}" \
   -p 127.0.0.1:9222:9222 \
   -p 127.0.0.1:6080:6080 \
   -p 127.0.0.1:9100:9000 \
-  -v lfpa-whisper-cache:/home/agent/.cache \
+  -v homun-whisper-cache:/home/agent/.cache \
   -v "${ARTIFACTS_DIR}":/home/agent/output \
   "${IMAGE}"
 

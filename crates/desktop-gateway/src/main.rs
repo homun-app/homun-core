@@ -14416,7 +14416,7 @@ async fn contained_computer_live() -> Json<ContainedComputerLiveResponse> {
     })
 }
 
-const CONTAINED_CONTAINER_NAME: &str = "lfpa-cc";
+const CONTAINED_CONTAINER_NAME: &str = "homun-cc";
 
 #[derive(Debug, Serialize)]
 struct DockerStatus {
