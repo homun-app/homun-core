@@ -166,6 +166,13 @@ model-driven non sono verificabili headless. Commit: `9853162`, `4c53edc`,
 4. **Meta-tool `suggest_capabilities`** (`9a32256`): in chat *"voglio automatizzare
    un browser, cosa posso collegare?"* → atteso: il modello chiama il tool e
    propone Playwright MCP + skill/Composio pertinenti, con come collegarli.
+   - **Connect-card cliccabili** (`715792e`): quegli stessi suggerimenti ora sono
+     una scheda con un pulsante per item. Atteso: **Skill** → "Installa" la mette
+     subito; **MCP** senza parametri → "Connetti" diretto, con parametri/segreti →
+     "Configura" apre il form inline (stdio: env/arg; http: header) → "Connetti";
+     **Composio** → "Collega" apre l'OAuth nel browser. Dopo il connect l'item
+     mostra "Collegato"; **ricaricando la chat resta "Collegato"** (no ri-offerta),
+     gli altri item restano attivi. Niente giro in Impostazioni.
 5. **Docker OS-aware + igiene** (`161973c`/`efd15fa`): con Docker chiuso, avvia
    una skill → atteso auto-start (no fallback immediato al browser); `/tmp` del
    container è tmpfs; dopo ~30min idle il container `homun-cc` viene riciclato.
@@ -186,8 +193,11 @@ col pulsante per fare la cosa. Pattern condiviso coi confirm-card Composio/MCP.
 - **Autorizza cartella**: FATTO (`1b86cb6`): cartella non autorizzata → scheda
   ‹‹FS_AUTHORIZE›› con [Autorizza ed elenca] → aggiunge la cartella + mostra il
   contenuto inline. (Completa la scelta "autorizzate + lettura altrove con conferma".)
-- **Connect-card in chat** (rimasto): rendere i suggerimenti di `suggest_capabilities`
-  *cliccabili* — install skill / connect MCP / link Composio dalla chat. Stesso pattern.
+- **Connect-card in chat**: FATTO (`715792e`): i suggerimenti di `suggest_capabilities`
+  ora sono *cliccabili* — scheda ‹‹CONNECT_SUGGEST›› con un pulsante per item
+  (Skill→installa, MCP→connetti con form parametri/segreti stdio|http, Composio→OAuth).
+  Persistenza via `/api/connect/mark` (riscrive il messaggio → item "Collegato" al
+  reload, gli altri restano attivi). In attesa di test manuale (vedi "Test da fare").
 - (write nativa su file con conferma: rimane.)
 - **Secret-store** per i token MCP (oggi `env` raw nel registry — gap audit).
 - **Read-timeout** nel transport stdio (`mcp.rs`): oggi il timeout protegge il
