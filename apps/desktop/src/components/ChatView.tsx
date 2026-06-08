@@ -57,6 +57,7 @@ import type {
   FormEvent,
   KeyboardEvent,
   MouseEvent as ReactMouseEvent,
+  WheelEvent as ReactWheelEvent,
 } from "react";
 import {
   coreBridge,
@@ -68,6 +69,9 @@ import {
   type FsEntry,
   type FsFilePayload,
   type McpRegistryServer,
+  type MemoryGraph,
+  type MemoryGraphEdge,
+  type MemoryGraphNode,
   type SkillSummary,
 } from "../lib/coreBridge";
 import {
@@ -2836,11 +2840,310 @@ function InlineArtifactPreview({ artifact }: { artifact: ParsedArtifact }) {
  *  project directory tree); "artifacts" = generated outputs; "activity" =
  *  background/scheduled tasks; "plan" = the orchestrator's operational plan.
  *  (Computer stays docked above the composer by design.) */
-type WorkbenchTab = "files" | "artifacts" | "activity" | "plan";
+type WorkbenchTab = "files" | "artifacts" | "memoria" | "activity" | "plan";
 
 /** The Workbench: one toggle → a docked right panel with tabs, consolidating the
  *  assistant's tools/outputs (Claude-Code / IDE inspector pattern). Replaces the
  *  scattered header affordances. */
+// Navigable visual graph of the project's memory: project at the centre, decisions
+// linked to the files they affect and the alternatives they rejected, plus facts and
+// preferences. Self-rendered SVG (no graph lib): a small deterministic force layout +
+// pan/zoom + click-to-inspect. Data from GET /api/memory/graph.
+const GRAPH_KIND_STYLE: Record<string, { fill: string; r: number; label: string }> = {
+  project: { fill: "#6366f1", r: 16, label: "Progetto" },
+  decision: { fill: "#0ea5e9", r: 11, label: "Decisione" },
+  file: { fill: "#10b981", r: 8, label: "File / entità" },
+  alternative: { fill: "#fb7185", r: 7, label: "Alternativa scartata" },
+  fact: { fill: "#f59e0b", r: 8, label: "Fatto" },
+  preference: { fill: "#a78bfa", r: 8, label: "Preferenza" },
+  entity: { fill: "#94a3b8", r: 8, label: "Entità" },
+};
+
+type LaidOutNode = MemoryGraphNode & { x: number; y: number };
+
+function layoutMemoryGraph(
+  nodes: MemoryGraphNode[],
+  edges: MemoryGraphEdge[],
+): LaidOutNode[] {
+  const n = nodes.length;
+  if (n === 0) return [];
+  const pos = new Map<string, { x: number; y: number; vx: number; vy: number }>();
+  nodes.forEach((node, i) => {
+    const angle = (i / n) * Math.PI * 2;
+    const radius = node.kind === "project" ? 0 : 140 + (i % 6) * 26;
+    pos.set(node.id, { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius, vx: 0, vy: 0 });
+  });
+  for (let iter = 0; iter < 220; iter++) {
+    for (let a = 0; a < n; a++) {
+      for (let b = a + 1; b < n; b++) {
+        const pa = pos.get(nodes[a].id)!;
+        const pb = pos.get(nodes[b].id)!;
+        let dx = pa.x - pb.x;
+        let dy = pa.y - pb.y;
+        const d2 = dx * dx + dy * dy + 0.01;
+        const d = Math.sqrt(d2);
+        const force = 5200 / d2;
+        pa.vx += (dx / d) * force;
+        pa.vy += (dy / d) * force;
+        pb.vx -= (dx / d) * force;
+        pb.vy -= (dy / d) * force;
+      }
+    }
+    for (const e of edges) {
+      const pa = pos.get(e.source);
+      const pb = pos.get(e.target);
+      if (!pa || !pb) continue;
+      const dx = pb.x - pa.x;
+      const dy = pb.y - pa.y;
+      const d = Math.sqrt(dx * dx + dy * dy) + 0.01;
+      const force = (d - 96) * 0.018;
+      pa.vx += (dx / d) * force;
+      pa.vy += (dy / d) * force;
+      pb.vx -= (dx / d) * force;
+      pb.vy -= (dy / d) * force;
+    }
+    for (const node of nodes) {
+      const p = pos.get(node.id)!;
+      if (node.kind === "project") {
+        p.x = 0;
+        p.y = 0;
+        p.vx = 0;
+        p.vy = 0;
+        continue;
+      }
+      p.vx -= p.x * 0.0024;
+      p.vy -= p.y * 0.0024;
+      p.vx *= 0.84;
+      p.vy *= 0.84;
+      p.x += p.vx;
+      p.y += p.vy;
+    }
+  }
+  return nodes.map((node) => {
+    const p = pos.get(node.id)!;
+    return { ...node, x: p.x, y: p.y };
+  });
+}
+
+function MemoryGraphPanel({ threadId }: { threadId: string }) {
+  const [graph, setGraph] = useState<MemoryGraph | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [view, setView] = useState({ x: 0, y: 0, k: 1 });
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const dragRef = useRef<{ x: number; y: number } | null>(null);
+
+  const reload = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    coreBridge
+      .memoryGraph(threadId)
+      .then((g) => setGraph(g))
+      .catch((e) => setError(String(e)))
+      .finally(() => setLoading(false));
+  }, [threadId]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  const laidOut = useMemo(
+    () => (graph ? layoutMemoryGraph(graph.nodes, graph.edges) : []),
+    [graph],
+  );
+  const posById = useMemo(() => {
+    const map = new Map<string, LaidOutNode>();
+    for (const node of laidOut) map.set(node.id, node);
+    return map;
+  }, [laidOut]);
+
+  const selectedNode = selected ? posById.get(selected) : null;
+  const selectedEdges = useMemo(() => {
+    if (!graph || !selected) return [];
+    return graph.edges
+      .filter((e) => e.source === selected || e.target === selected)
+      .map((e) => {
+        const otherId = e.source === selected ? e.target : e.source;
+        return { label: e.label, other: posById.get(otherId)?.label ?? otherId };
+      });
+  }, [graph, selected, posById]);
+
+  const onWheel = (event: ReactWheelEvent) => {
+    event.preventDefault();
+    setView((v) => {
+      const k = Math.min(Math.max(v.k * (event.deltaY < 0 ? 1.12 : 0.89), 0.3), 3);
+      return { ...v, k };
+    });
+  };
+  const onPointerDown = (event: ReactMouseEvent) => {
+    if ((event.target as Element).closest(".memory-graph-node")) return;
+    dragRef.current = { x: event.clientX, y: event.clientY };
+    setSelected(null);
+  };
+  const onPointerMove = (event: ReactMouseEvent) => {
+    if (!dragRef.current || !svgRef.current) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    const scale = 760 / Math.max(rect.width, 1); // viewBox units per px
+    setView((v) => ({
+      ...v,
+      x: v.x + (event.clientX - dragRef.current!.x) * scale,
+      y: v.y + (event.clientY - dragRef.current!.y) * scale,
+    }));
+    dragRef.current = { x: event.clientX, y: event.clientY };
+  };
+  const endDrag = () => {
+    dragRef.current = null;
+  };
+
+  if (loading) {
+    return (
+      <div className="workbench-empty">
+        <Share2 size={28} />
+        <p>Carico la memoria del progetto…</p>
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="workbench-empty">
+        <Share2 size={28} />
+        <p>Memoria non disponibile: {error}</p>
+        <button type="button" className="ghost-button" onClick={reload}>
+          Riprova
+        </button>
+      </div>
+    );
+  }
+  if (!graph || graph.nodes.length <= 1) {
+    return (
+      <div className="workbench-empty">
+        <Share2 size={28} />
+        <p>
+          Ancora nessuna memoria per questo progetto. Decisioni, file toccati e fatti
+          appariranno qui come grafo navigabile man mano che lavoriamo.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="memory-graph">
+      <div className="memory-graph-toolbar">
+        <span className="memory-graph-count">
+          {graph.nodes.length} nodi · {graph.edges.length} collegamenti
+        </span>
+        <div className="memory-graph-zoom">
+          <button type="button" onClick={() => setView((v) => ({ ...v, k: Math.min(v.k * 1.2, 3) }))} aria-label="Zoom +">
+            +
+          </button>
+          <button type="button" onClick={() => setView((v) => ({ ...v, k: Math.max(v.k * 0.83, 0.3) }))} aria-label="Zoom −">
+            −
+          </button>
+          <button type="button" onClick={() => setView({ x: 0, y: 0, k: 1 })} aria-label="Reimposta vista">
+            ⟲
+          </button>
+        </div>
+      </div>
+      <div className="memory-graph-canvas">
+        <svg
+          ref={svgRef}
+          viewBox="-380 -300 760 600"
+          preserveAspectRatio="xMidYMid meet"
+          onWheel={onWheel}
+          onMouseDown={onPointerDown}
+          onMouseMove={onPointerMove}
+          onMouseUp={endDrag}
+          onMouseLeave={endDrag}
+        >
+          <g transform={`translate(${view.x} ${view.y}) scale(${view.k})`}>
+            {graph.edges.map((edge, i) => {
+              const a = posById.get(edge.source);
+              const b = posById.get(edge.target);
+              if (!a || !b) return null;
+              const active = selected === edge.source || selected === edge.target;
+              const dashed = edge.label === "scartata";
+              return (
+                <g key={i}>
+                  <line
+                    x1={a.x}
+                    y1={a.y}
+                    x2={b.x}
+                    y2={b.y}
+                    stroke={active ? "#475569" : "#cbd5e1"}
+                    strokeWidth={active ? 1.6 : 0.9}
+                    strokeDasharray={dashed ? "4 3" : undefined}
+                  />
+                </g>
+              );
+            })}
+            {laidOut.map((node) => {
+              const style = GRAPH_KIND_STYLE[node.kind] ?? GRAPH_KIND_STYLE.entity;
+              const isSel = selected === node.id;
+              const short = node.label.length > 22 ? `${node.label.slice(0, 21)}…` : node.label;
+              return (
+                <g
+                  key={node.id}
+                  className="memory-graph-node"
+                  transform={`translate(${node.x} ${node.y})`}
+                  onClick={() => setSelected(node.id)}
+                  style={{ cursor: "pointer" }}
+                >
+                  <circle
+                    r={style.r + (isSel ? 3 : 0)}
+                    fill={style.fill}
+                    stroke={isSel ? "#0f172a" : "#fff"}
+                    strokeWidth={isSel ? 2 : 1}
+                  />
+                  {(node.kind === "project" || node.kind === "decision" || node.kind === "file" || isSel) && (
+                    <text
+                      x={style.r + 4}
+                      y={3}
+                      fontSize={node.kind === "project" ? 11 : 9}
+                      fill="#1e293b"
+                    >
+                      {short}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+          </g>
+        </svg>
+        {selectedNode && (
+          <div className="memory-graph-detail">
+            <div className="memory-graph-detail-kind" style={{ color: GRAPH_KIND_STYLE[selectedNode.kind]?.fill }}>
+              {GRAPH_KIND_STYLE[selectedNode.kind]?.label ?? selectedNode.kind}
+            </div>
+            <div className="memory-graph-detail-title">{selectedNode.label}</div>
+            {selectedNode.detail && <p className="memory-graph-detail-body">{selectedNode.detail}</p>}
+            {selectedEdges.length > 0 && (
+              <ul className="memory-graph-detail-links">
+                {selectedEdges.map((link, i) => (
+                  <li key={i}>
+                    <span className="memory-graph-link-label">{link.label}</span> {link.other}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <button type="button" className="ghost-button" onClick={() => setSelected(null)}>
+              Chiudi
+            </button>
+          </div>
+        )}
+      </div>
+      <div className="memory-graph-legend">
+        {["project", "decision", "file", "alternative", "fact", "preference"].map((kind) => (
+          <span key={kind}>
+            <i style={{ background: GRAPH_KIND_STYLE[kind].fill }} />
+            {GRAPH_KIND_STYLE[kind].label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Workbench({
   open,
   tab,
@@ -2990,6 +3293,11 @@ function Workbench({
       label: "Artefatti",
       icon: FileText,
       badge: artifacts.length || undefined,
+    },
+    {
+      key: "memoria",
+      label: "Memoria",
+      icon: Share2,
     },
     {
       key: "activity",
@@ -3194,6 +3502,7 @@ function Workbench({
               <p>Nessun artefatto ancora. I file generati o creati dall'assistente compaiono qui.</p>
             </div>
           ))}
+        {tab === "memoria" && <MemoryGraphPanel threadId={threadId} />}
         {tab === "activity" && (
           <div className="workbench-files">
             {tasksLoading && activeTasks.length === 0 ? (

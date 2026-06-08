@@ -625,6 +625,25 @@ async function electronSaveArtifactContent(
   await gatewayPostJson("/api/artifacts/content", { thread, name, content });
 }
 
+export type MemoryGraphNode = {
+  id: string;
+  kind: string; // project | decision | file | alternative | fact | preference | entity
+  label: string;
+  detail: string;
+  entity_type: string;
+};
+export type MemoryGraphEdge = { source: string; target: string; label: string };
+export type MemoryGraph = {
+  workspace: string;
+  nodes: MemoryGraphNode[];
+  edges: MemoryGraphEdge[];
+};
+
+async function electronMemoryGraph(thread?: string): Promise<MemoryGraph> {
+  const param = thread ? `?thread=${encodeURIComponent(thread)}` : "";
+  return gatewayGetJson<MemoryGraph>(`/api/memory/graph${param}`);
+}
+
 async function electronArtifactVersions(thread: string, name: string): Promise<number> {
   const { versions } = await gatewayGetJson<{ versions: number }>(
     `/api/artifacts/versions?thread=${encodeURIComponent(thread)}&name=${encodeURIComponent(name)}`,
@@ -1508,6 +1527,7 @@ export const coreBridge = {
   artifactVersions: (thread: string, name: string) => electronArtifactVersions(thread, name),
   saveArtifactContent: (thread: string, name: string, content: string) =>
     electronSaveArtifactContent(thread, name, content),
+  memoryGraph: (thread?: string) => electronMemoryGraph(thread),
   artifactFolder: (thread: string) => electronArtifactFolder(thread),
   artifactsUsage: () => electronArtifactsUsage(),
   artifactDestinations: () => electronArtifactDestinations(),
