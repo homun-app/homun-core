@@ -261,10 +261,12 @@ col pulsante per fare la cosa. Pattern condiviso coi confirm-card Composio/MCP.
    (content + tool_call dai frammenti) nella forma non-streaming → resto del loop,
    sanificazione e marker INVARIATI; fallback al JSON pieno se il provider ignora
    stream. Verificato end-to-end col modello reale (delta+done, no timeout) + unit su
-   reassemble. RESTA (polish UX): **token live nell'UI** — oggi il contenuto si vede a
-   fine generazione (nessun timeout, ma niente token in tempo reale); richiede rendere
-   il `Done` autorevole nel frontend (oggi `coreBridge.ts` usa `done.text` solo se i
-   delta sono vuoti) + emettere i delta di contenuto durante il consumo SSE.
+   reassemble. **Token live nell'UI: FATTO** (2026-06-08): `collect_openai_stream`
+   emette ogni `delta.content` live al sink mentre arriva; `coreBridge` rende il `Done`
+   autorevole (testo finale sanificato sostituisce l'anteprima grezza). Verificato:
+   risposta in 20 delta token-by-token + 1 done. Conseguenza UX: i marker ‹‹ACT›› di
+   attività sono ora transitori (collassano nel messaggio finale pulito, coerente col
+   reload).
 
 1. **Doppio motore browser.** RISOLTO (2026-06-05): rimosso il `browser_task`
    durevole e il planner legacy (`browser_loop_controller.rs`, `RuntimeBrowserLoopPlanner`,
