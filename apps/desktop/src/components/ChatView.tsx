@@ -2670,6 +2670,7 @@ async function triggerArtifactDownload(artifact: ParsedArtifact, version?: numbe
 
 type ArtifactPreview =
   | { kind: "image" | "pdf"; url: string; ext: string }
+  | { kind: "pdf-images"; pages: string[]; ext: string }
   | { kind: "markdown" | "code" | "csv" | "text"; text: string; ext: string }
   | { kind: "binary" | "error"; ext: string };
 
@@ -2682,7 +2683,17 @@ async function buildArtifactPreview(
   const ext = artifactExt(artifact.name);
   const blob = await coreBridge.downloadArtifact(artifact.thread, artifact.name, version);
   if (ARTIFACT_IMAGE_EXT.includes(ext)) return { kind: "image", url: URL.createObjectURL(blob), ext };
-  if (ext === "pdf") return { kind: "pdf", url: URL.createObjectURL(blob), ext };
+  if (ext === "pdf") {
+    // Prefer a clean document-style preview: render the pages to images server-side
+    // (pdfium). Fall back to the native PDF viewer iframe if that's unavailable.
+    try {
+      const pages = await coreBridge.artifactPdfPages(artifact.thread, artifact.name, version);
+      if (pages.length > 0) return { kind: "pdf-images", pages, ext };
+    } catch {
+      /* pdfium unavailable → native viewer */
+    }
+    return { kind: "pdf", url: URL.createObjectURL(blob), ext };
+  }
   if (ext === "md" || ext === "markdown") return { kind: "markdown", text: await blob.text(), ext };
   if (ext === "csv") return { kind: "csv", text: await blob.text(), ext };
   if (ARTIFACT_CODE_EXT.has(ext)) return { kind: "code", text: await blob.text(), ext };
@@ -3539,8 +3550,27 @@ function ArtifactPreviewBody({
   switch (preview.kind) {
     case "image":
       return <img className="artifact-preview-img" src={preview.url} alt="" />;
+    case "pdf-images":
+      return (
+        <div className="artifact-preview-pages">
+          {preview.pages.map((src, index) => (
+            <img
+              key={index}
+              className="artifact-preview-page"
+              src={src}
+              alt={`Pagina ${index + 1}`}
+            />
+          ))}
+        </div>
+      );
     case "pdf":
-      return <iframe className="artifact-preview-frame" src={preview.url} title="Anteprima PDF" />;
+      return (
+        <iframe
+          className="artifact-preview-frame"
+          src={`${preview.url}#toolbar=0&navpanes=0&view=FitH`}
+          title="Anteprima PDF"
+        />
+      );
     case "markdown":
       return (
         <div className="artifact-preview-doc">

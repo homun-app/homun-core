@@ -605,6 +605,18 @@ async function electronArtifactBlob(
   return response.blob();
 }
 
+async function electronArtifactPdfPages(
+  thread: string,
+  name: string,
+  version?: number,
+): Promise<string[]> {
+  const versionParam = version !== undefined ? `&version=${version}` : "";
+  const { pages } = await gatewayGetJson<{ pages: string[] }>(
+    `/api/artifacts/pdf-pages?thread=${encodeURIComponent(thread)}&name=${encodeURIComponent(name)}${versionParam}`,
+  );
+  return pages ?? [];
+}
+
 async function electronSaveArtifactContent(
   thread: string,
   name: string,
@@ -1491,6 +1503,8 @@ export const coreBridge = {
     electronTranscribe(audioBase64, language),
   downloadArtifact: (thread: string, name: string, version?: number) =>
     electronArtifactBlob(thread, name, version),
+  artifactPdfPages: (thread: string, name: string, version?: number) =>
+    electronArtifactPdfPages(thread, name, version),
   artifactVersions: (thread: string, name: string) => electronArtifactVersions(thread, name),
   saveArtifactContent: (thread: string, name: string, content: string) =>
     electronSaveArtifactContent(thread, name, content),
