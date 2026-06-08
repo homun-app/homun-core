@@ -8200,10 +8200,44 @@ async fn emit_stream_event(sink: &StreamSink, event: GenerateStreamEvent) -> Res
     Ok(())
 }
 
+#[derive(Debug, Deserialize)]
+struct TaskQueueQuery {
+    /// When set, restrict the queue to tasks owned by this chat thread (the
+    /// Workbench Attività tab is per-chat, like its File/Piano tabs). Omitted →
+    /// the full cross-thread queue (the top-level Tasks view).
+    #[serde(default)]
+    thread_id: Option<String>,
+}
+
 async fn task_queue(
     State(state): State<AppState>,
+    Query(query): Query<TaskQueueQuery>,
 ) -> Result<Json<TaskQueueResponse>, GatewayError> {
-    Ok(Json(task_queue_response_for_state(&state)?))
+    let mut response = task_queue_response_for_state(&state)?;
+    if let Some(thread_id) = query.thread_id.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+        // Tasks belonging to THIS chat = the thread's primary task + its member
+        // tasks (the Brain materializes N member tasks from one prompt).
+        let allowed: std::collections::HashSet<String> = {
+            let store = lock_store(&state)?;
+            let mut ids: std::collections::HashSet<String> = store
+                .member_task_ids_for_thread(thread_id)
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
+            if let Ok(Some(thread)) = store.thread(thread_id) {
+                ids.insert(thread.task_id);
+            }
+            ids
+        };
+        response.queued.retain(|t| allowed.contains(&t.task_id));
+        response.active.retain(|t| allowed.contains(&t.task_id));
+        response.blocked.retain(|t| allowed.contains(&t.task_id));
+        response.recent_failures.retain(|t| allowed.contains(&t.task_id));
+        response
+            .waiting_approvals
+            .retain(|a| allowed.contains(&a.task_id));
+    }
+    Ok(Json(response))
 }
 
 async fn task_detail(

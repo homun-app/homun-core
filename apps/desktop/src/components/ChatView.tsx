@@ -2856,7 +2856,7 @@ function Workbench({
     let cancelled = false;
     setTasksLoading(true);
     void coreBridge
-      .taskQueue()
+      .taskQueue(threadId)
       .then((snapshot) => {
         if (!cancelled) setTasks(snapshot);
       })
@@ -2869,7 +2869,7 @@ function Workbench({
     return () => {
       cancelled = true;
     };
-  }, [open, tab]);
+  }, [open, tab, threadId]);
 
   if (!open) return null;
   const planItems = parseOperationalPlanItems(operationalPlanMarkdown);
