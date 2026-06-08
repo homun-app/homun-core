@@ -3320,6 +3320,11 @@ body.resizing-drawer {
 }
 /* Clean, document-style PDF preview: pages as white sheets stacked top-to-bottom,
    fitting the panel width — no dark native-viewer chrome. */
+/* Artefatti panel = the chat artifact cards in a list (identical rendering). */
+.workbench-artifacts-list {
+  padding: 8px 10px 16px;
+  width: 100%;
+}
 .artifact-preview-pages {
   display: flex;
   flex-direction: column;
