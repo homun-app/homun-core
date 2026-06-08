@@ -133,10 +133,14 @@ Pilastri completati e in esercizio (dettaglio task in work-memory):
 
 ## Fase corrente
 
-**Consolidare il capability layer e il browser capable-first.** Le fondamenta ci
-sono; il lavoro vivo e' affidabilita' del browser su siti reali (form complessi,
-estrazione tabellare, recovery) con modelli capaci, e la coerenza del registry
-ruoli/modelli.
+**Consolidare il capability layer, il browser capable-first e la UX di chat.** Le
+fondamenta ci sono; il lavoro vivo e' affidabilita' del browser su siti reali (form
+complessi, estrazione tabellare, recovery) con modelli capaci, e la coerenza del
+registry ruoli/modelli. La **chat** e' ora matura: schede d'azione in-chat
+(autorizza cartella, connect-card), **allegati analizzabili** (immagini/testo/PDF
+testo+scansione via pdfium→vision, persistiti nel thread), **Workbench** (pannello
+destro a tab File/Artefatti/Attivita'/Piano) e routing modelli coerente
+(selettore = ruolo orchestratore, fallback su 401, provider Ollama Cloud).
 
 ## Test da fare — verifica manuale in sospeso (sessione MCP, 2026-06-07)
 
@@ -203,8 +207,23 @@ model-driven non sono verificabili headless. Commit: `9853162`, `4c53edc`,
      di frugare in sandbox/cartelle. NB: serve UN attach andato a buon fine (chip
      "patente.pdf" visibile) per innescare la persistenza.
 
+8. **Workbench** (`02fa31f`→`0d974ca`): icona in alto a destra → pannello a tab.
+   **File**: file caricati in chat + (in progetto) albero della cartella, click su un
+   file → viewer con syntax highlight + toggle **± Diff** (git working↔HEAD).
+   **Attivita'**: task del thread, **✕** annulla i bloccati. **Piano**: piano operativo.
+   Trascina il bordo per allargare / pulsante schermo intero. Computer resta sopra il
+   composer.
+9. **Routing modelli / 401** (`84432aa`→`c8bd089`): il selettore del composer mostra il
+   modello del **ruolo orchestratore**; aggiungi il provider **Ollama Cloud** (chiave da
+   ollama.com/settings/keys) e lega i ruoli a provider autenticati; un 401 si auto-ripara
+   sul binding orchestratore. Ruolo **Coding** per le chat di progetto.
+
+**Verificato dall'utente (2026-06-08):** allegati PDF (testo+scansione) + persistenza,
+routing modelli/401 + Ollama Cloud, Workbench/selettore → OK.
+
 Esito atteso: il pilastro **MCP** è "usabile in chat + sfogliabile + gestibile +
-suggerito". Annotare qui i difetti emersi dal test reale.
+suggerito"; la **chat** è "schede d'azione + allegati analizzabili + workbench". Annotare
+qui i difetti emersi dal test reale.
 
 ### Schede azione in-chat (direzione UX — richiesta utente)
 Le azioni vivono in chat, non in Impostazioni: l'assistente mostra una scheda inline
@@ -217,6 +236,11 @@ col pulsante per fare la cosa. Pattern condiviso coi confirm-card Composio/MCP.
   (Skill→installa, MCP→connetti con form parametri/segreti stdio|http, Composio→OAuth).
   Persistenza via `/api/connect/mark` (riscrive il messaggio → item "Collegato" al
   reload, gli altri restano attivi). In attesa di test manuale (vedi "Test da fare").
+- **Workbench (pannello destro a tab)**: FATTO (`02fa31f`→`0d974ca`): un'unica icona
+  apre File / Artefatti / Attivita' / Piano (vedi "Fatti — sessione 2026-06-08"). Tab
+  **File** = caricati in chat + albero progetto + viewer con **git diff**; **Attivita'**
+  con **annulla** task; ridimensionabile + schermo intero. Allegati **analizzabili e
+  persistiti** (PDF testo+scansione via pdfium→vision). Verificato dall'utente.
 - (write nativa su file con conferma: rimane.)
 - **Secret-store** per i token MCP (oggi `env` raw nel registry — gap audit).
 - **Read-timeout** nel transport stdio (`mcp.rs`): oggi il timeout protegge il
@@ -249,16 +273,36 @@ col pulsante per fare la cosa. Pattern condiviso coi confirm-card Composio/MCP.
 
 ## Next Action (priorita')
 
-Aggiornato 2026-06-06 dopo la sessione autonoma. Ordine consigliato, rivedibile.
+Aggiornato 2026-06-08. Ordine consigliato, rivedibile.
 
-**Fatti di recente (questa sessione):** affidabilita' browser (stale-ref
-auto-recovery); hardening runtime (deadline/expires enforced; governor gia'
-attivo); **proattivita' completa** (scheduling interval + calendar/tz DST-aware,
-esecutore `proactive_prompt`, gestione a voce list/cancel); **esecuzione+verifica
-sul repo reale** (file tools in-place path-jailed + `run_in_project` + direttiva
-verify-by-execution); **addon-host** (crate process-skill + contratto + store +
-tool `list/show/customize_addon`). Packaging/notarization e ruolo-browser-vision:
-gia' chiusi in precedenza.
+**Fatti — sessione 2026-06-08 (chat UX + allegati + routing modelli):**
+- **Allegati end-to-end** (`edbeba2`→`1d7e719`): cattura path via `webUtils.getPathForFile`
+  (Electron 42 ha rimosso `File.path`); trasporto allegati nel body `generate_stream`;
+  ingestione `attachments.rs` — immagini→vision, testo/codice, **PDF**: testo dal layer
+  pdfium e, per le scansioni, pagine **rese in immagini** (pdfium→vision). **Persistenza
+  nel thread** (`thread_attachments` + manifest re-iniettato): allega una volta, il file
+  resta nei turni successivi. Hardening (TOCTOU/SVG), smoke pdfium reale. Verificato
+  dall'utente: OK.
+- **Connect-card cliccabili** (`715792e`): i suggerimenti di `suggest_capabilities`
+  diventano schede d'azione (install skill / connect MCP con form / link Composio) con
+  persistenza `/api/connect/mark`.
+- **Workbench** (`02fa31f`→`0d974ca`): un'unica icona borderless apre un pannello destro
+  a tab — **File** (caricati in chat + albero cartella progetto navigabile + viewer con
+  syntax highlight e **git diff** working↔HEAD), **Artefatti**, **Attivita'** (task del
+  thread, con **annulla**), **Piano** (piano operativo). Ridimensionabile + schermo intero.
+  Computer resta dock sopra il composer.
+- **Routing modelli / 401** (`84432aa`→`c8bd089`): il selettore del composer ora rispecchia
+  il **ruolo orchestratore** (non l'`active_model` del provider); **fallback automatico
+  su 401** al binding manuale; **ruolo Coding** (chat di progetto); router "sicuro" che
+  evita i `:cloud` non autenticati; preset provider **Ollama Cloud** (chiave in-app, no
+  `ollama signin`); messaggio 401 azionabile. Verificato dall'utente: OK.
+
+**Fatti in precedenza:** affidabilita' browser (stale-ref auto-recovery); hardening
+runtime (deadline/expires; governor); **proattivita' completa** (scheduling + calendar/tz,
+esecutore `proactive_prompt`, list/cancel); **esecuzione+verifica sul repo reale**
+(file tools path-jailed + `run_in_project`); **addon-host** dormiente; **MCP nel loop
+chat** + catalogo registry + connect/disconnect + transport HTTP; **filesystem nativo**
+(`list_directory`/`read_text_file` + scheda autorizza-cartella).
 
 **DIREZIONE (decisione 2026-06-06):** prima una **release ufficiale come assistente
 personale solido** — skill, **Composio (1000+ connettori)**, MCP. Gli **addon
@@ -273,9 +317,11 @@ Verso la prima release:
    browser + polling stato) → la maggior parte dei 1000 connettori (managed OAuth)
    e' di fatto inusabile. Aprire l'URL + poll `connected_accounts` fino ad ACTIVE
    + esito chiaro in UI (auto-refresh toolkit).
-2. **Errori azionabili + token.** Mappare gli errori Composio/MCP/skill in messaggi
-   con recovery ("401 → chiave scaduta, ricollega"; "429 → rate limit"); rotazione
-   e scoping del token gateway.
+2. **Errori azionabili + token.** PARZIALE (2026-06-08): il **401 del modello** ora ha
+   messaggio azionabile (`:cloud` → `ollama signin`/chiave) + **fallback automatico**
+   al binding orchestratore + preset **Ollama Cloud** (`9d63b88`/`84432aa`/`c8bd089`).
+   Resta: mappare gli errori **Composio/MCP/skill** ("401 → ricollega", "429 → rate
+   limit") e rotazione/scoping del token gateway.
 3. **MCP: usabile + sfogliabile + gestibile.** FATTO in gran parte (2026-06-07,
    in attesa di test manuale — vedi "Test da fare"): MCP **cablato nel loop chat**
    (discovery + dispatch, read auto / write con conferma, timeout sulle call);
