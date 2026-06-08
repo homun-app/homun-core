@@ -2725,6 +2725,72 @@ fn decisions_for_path(state: &AppState, path: &str) -> Option<String> {
     Some(lines.join("\n"))
 }
 
+/// Retrieval-augmented context: memory RELEVANT to this turn's prompt (decisions,
+/// facts, preferences in the active project + personal scope), injected into the
+/// system prompt so the model answers "why did we…" from memory WITHOUT having to call
+/// recall_memory itself — and doesn't claim "I have nothing in memory" when it does.
+fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<String> {
+    let query = prompt.trim();
+    if query.chars().count() < 8 {
+        return None;
+    }
+    let facade = lock_memory_facade(state).ok()?;
+    let user = gateway_memory_user_id();
+    let active = gateway_memory_workspace_id();
+    let search = |workspace: MemoryWorkspaceId| -> Vec<String> {
+        let access = MemoryAccessRequest {
+            actor_id: "chat_rag".to_string(),
+            user_id: user.clone(),
+            workspace_id: workspace,
+            purpose: "chat_context".to_string(),
+            allowed_domains: vec![
+                PrivacyDomain::new("personal"),
+                PrivacyDomain::new("work"),
+                PrivacyDomain::new("general"),
+            ],
+            max_sensitivity: MemoryDataSensitivity::Private,
+            allow_raw_payload: false,
+            allow_export: true,
+            broad_query: false,
+        };
+        facade
+            .search_memories(MemorySearchRequest {
+                access,
+                query: query.to_string(),
+                statuses: vec![MemoryStatus::Confirmed, MemoryStatus::Candidate],
+                memory_types: vec![
+                    "decision".to_string(),
+                    "fact".to_string(),
+                    "preference".to_string(),
+                ],
+                limit: 5,
+                offset: 0,
+            })
+            .map(|page| {
+                page.items
+                    .into_iter()
+                    .map(|item| format_recall_entry(&item.summary, &item.metadata))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let mut lines: Vec<String> = search(active.clone()).into_iter().map(|t| format!("- {t}")).collect();
+    if active.as_str() != PERSONAL_WORKSPACE {
+        for t in search(MemoryWorkspaceId::new(PERSONAL_WORKSPACE)) {
+            lines.push(format!("- {t}"));
+        }
+    }
+    lines.truncate(8);
+    if lines.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "MEMORIA PERTINENTE ALLA RICHIESTA (è ciò che tu/l'utente avete GIÀ stabilito — \
+trattala come fatto acquisito; NON dire \"non ho una decisione in memoria\" se è qui sotto):\n{}",
+        lines.join("\n")
+    ))
+}
+
 fn recall_memory(state: &AppState, query: &str) -> String {
     let query = query.trim();
     if query.is_empty() {
@@ -4468,6 +4534,20 @@ async fn stream_chat_via_openai(
     mut model: String,
     mut api_key: Option<String>,
 ) -> Result<Response, GatewayError> {
+    // Scope memory to THIS conversation's project. The profile injection (M1),
+    // recall_memory, per-file recall AND the extractor all read the ACTIVE workspace;
+    // sync it from the thread so a chat opened in a project recalls/stores under THAT
+    // project — not a stale global workspace (the cause of "non ho la decisione in
+    // memoria" in a new project chat).
+    if let Some(tid) = request.thread_id.as_deref() {
+        if let Ok(store) = lock_store(state) {
+            if let Ok(ws) = store.workspace_for_thread(tid) {
+                if !ws.trim().is_empty() {
+                    set_active_workspace(&ws);
+                }
+            }
+        }
+    }
     let prompt = build_chat_runtime_prompt(&BuildPromptRequest {
         prompt: request.prompt.clone(),
         context: request.context.clone(),
@@ -4693,6 +4773,12 @@ salvare/esportare un file in una cartella, chiama save_artifact(file, destinatio
         &memory_project,
         CHAT_MEMORY_BUDGET_CHARS,
     ) {
+        Some(block) => format!("{system}\n\n{block}"),
+        None => system,
+    };
+    // RAG: inject memory relevant to THIS prompt (decisions/facts), so the model
+    // answers from what was already decided instead of saying it has nothing.
+    let system = match relevant_memory_for_prompt(state, &request.prompt) {
         Some(block) => format!("{system}\n\n{block}"),
         None => system,
     };
