@@ -1255,16 +1255,56 @@ fn persist_graph(
 /// DECISIONS (with the why), plus graph entities/relations — routing each to its
 /// scope (personal vs active project) and auto-confirming the low-risk ones.
 /// Fire-and-forget: best-effort, never blocks the response, swallows all errors.
+/// One-line summary of a CONSEQUENTIAL (mutating) tool action, for the decision
+/// memory; `None` for pure reads/queries (no "why" worth recording). Domain-agnostic
+/// (code, documents/artifacts, scheduling). Connector (Composio/MCP) writes are
+/// captured by the caller via the write allow-list, not here.
+fn summarize_tool_action(name: &str, args_raw: &str) -> Option<String> {
+    let value: serde_json::Value =
+        serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+    let field = |key: &str| {
+        value.get(key).and_then(|x| x.as_str()).unwrap_or("").trim().to_string()
+    };
+    let clip = |text: String, n: usize| text.chars().take(n).collect::<String>();
+    let line = match name {
+        "write_file" | "edit_file" => format!("modificato file {}", field("path")),
+        "create_artifact" => format!("creato artefatto {}", field("name")),
+        "save_artifact" => {
+            let target = if field("name").is_empty() { field("path") } else { field("name") };
+            format!("salvato {target}")
+        }
+        "run_in_project" => format!("eseguito nel progetto: {}", clip(field("command"), 120)),
+        "run_in_sandbox" => format!("eseguito in sandbox: {}", clip(field("command"), 120)),
+        "create_skill" => format!("creata skill {}", field("name")),
+        "customize_addon" => format!("personalizzato addon {}", field("addon_id")),
+        "schedule_task" => format!("pianificato task: {}", clip(field("prompt"), 80)),
+        "cancel_scheduled_task" => format!("annullato task {}", field("task_id")),
+        // Pure reads / discovery → nothing to remember.
+        "read_file" | "read_text_file" | "list_files" | "list_directory" | "recall_memory"
+        | "find_connected_tools" | "suggest_capabilities" => return None,
+        _ => return None,
+    };
+    Some(line)
+}
+
 async fn learn_from_exchange(
     state: &AppState,
     user_message: &str,
     assistant_message: &str,
+    // A compact, newline-joined trace of the consequential ACTIONS this turn
+    // performed (files edited, commands run, documents/artifacts changed, connector
+    // calls). Empty when the turn was pure conversation. Drives decision capture so
+    // the "why" of a mutation is remembered — for ANY domain, not just coding.
+    actions: &str,
     thread_id: Option<&str>,
     // When Some(name), the message comes from a channel CONTACT (not the user):
     // facts are attributed to them, not to person:self.
     speaker: Option<&str>,
 ) {
-    if !is_salient_exchange(user_message) {
+    // Learn when the exchange is salient OR when the turn DID something concrete —
+    // so a terse prompt ("sistemalo", "aggiorna il preventivo") that triggers real
+    // actions still records the decision + its rationale.
+    if actions.trim().is_empty() && !is_salient_exchange(user_message) {
         return;
     }
     let Some((base_url, model, api_key)) = extractor_openai_config() else {
@@ -1310,11 +1350,30 @@ vanno ricordati."
         ),
         None => base_system.to_string(),
     };
-    let user_content = match speaker {
+    // Generic decision capture: when the turn performed actions, tell the extractor
+    // to record the corresponding DECISIONS (what + why), in ANY domain — code,
+    // documents (e.g. a client's quote), data — not only technical ones.
+    let system = if actions.trim().is_empty() {
+        system
+    } else {
+        format!(
+            "{system}\n\nSe sotto trovi 'AZIONI ESEGUITE', estrai le DECISIONI corrispondenti \
+(memory_type \"decision\", scope \"project\"): COSA è stato fatto e PERCHÉ, includendo il perché \
+nella frase 'text' (es. «Modificato il preventivo di ACME perché il cliente ha chiesto uno sconto \
+del 10%»). Vale per QUALSIASI dominio — codice, documenti, dati — non solo tecnico. metadata.decision \
+con rationale e affects (gli oggetti toccati: file, documento, contatto…)."
+        )
+    };
+    let exchange = match speaker {
         Some(name) => {
             format!("MESSAGGIO da {name} (canale):\n{user_message}\n\nRISPOSTA: {assistant_message}")
         }
         None => format!("UTENTE: {user_message}\n\nASSISTENTE: {assistant_message}"),
+    };
+    let user_content = if actions.trim().is_empty() {
+        exchange
+    } else {
+        format!("{exchange}\n\nAZIONI ESEGUITE in questo turno:\n{actions}")
     };
     let payload = serde_json::json!({
         "model": model,
@@ -4159,6 +4218,9 @@ questo elenco, chiedi di allegarlo (non cercarlo nella sandbox o nelle cartelle)
         let mut accumulated = String::new();
         // Final answer text captured for post-turn memory extraction (M2).
         let mut memory_answer = String::new();
+        // Consequential actions performed this turn (any domain) → fed to the
+        // memory extractor so the "why" of each mutation is remembered.
+        let mut tool_trace: Vec<String> = Vec::new();
         let mut final_done = false;
         // Source URLs visited via browse_web this request, for the "Fonti" footer.
         let mut browse_sources: Vec<String> = Vec::new();
@@ -4399,6 +4461,16 @@ controlla/aggiorna la chiave in Impostazioni → Modello & Runtime.".to_string()
                         .and_then(|a| a.as_str())
                         .unwrap_or("{}");
                     let call_id = call.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
+
+                    // Record consequential actions (any domain) for decision memory.
+                    if tool_trace.len() < 20 {
+                        if let Some(line) = summarize_tool_action(name, args_raw) {
+                            tool_trace.push(line);
+                        } else if composio_writes.contains(name) {
+                            // A write on a connected service (Composio/MCP).
+                            tool_trace.push(format!("azione su servizio collegato: {name}"));
+                        }
+                    }
 
                     let result = if read_only
                         && matches!(
@@ -5992,11 +6064,13 @@ posso riprovare o puoi indicarmi una fonte preferita.".to_string()
             let learn_user = memory_user_message.clone();
             let learn_answer = memory_answer.clone();
             let learn_thread = thread_id.clone();
+            let learn_actions = tool_trace.join("\n");
             tokio::spawn(async move {
                 learn_from_exchange(
                     &learn_state,
                     &learn_user,
                     &learn_answer,
+                    &learn_actions,
                     learn_thread.as_deref(),
                     None,
                 )
@@ -7500,7 +7574,7 @@ async fn handle_channel_inbound(
         let content = message.content.clone();
         tokio::spawn(async move {
             // thread_id=None: record_channel_message already stored the episode.
-            learn_from_exchange(&st, &content, "", None, Some(&speaker)).await;
+            learn_from_exchange(&st, &content, "", "", None, Some(&speaker)).await;
         });
     }
     match action {
@@ -17715,6 +17789,26 @@ mod tests {
         assert!(!is_salient_exchange("ciao"));
         assert!(is_salient_exchange("preferisco risposte brevi e in italiano"));
         assert!(is_salient_exchange("ho due figli, Luca e Sara"));
+    }
+
+    #[test]
+    fn summarize_tool_action_captures_mutations_skips_reads() {
+        // Reads / discovery → nothing to remember.
+        for read in ["read_file", "list_directory", "list_files", "recall_memory", "suggest_capabilities"] {
+            assert!(crate::summarize_tool_action(read, "{}").is_none(), "{read} should be skipped");
+        }
+        // Mutations (any domain) → a one-line action with the target.
+        assert!(
+            crate::summarize_tool_action("edit_file", "{\"path\":\"src/x.rs\"}")
+                .unwrap()
+                .contains("src/x.rs")
+        );
+        assert!(
+            crate::summarize_tool_action("run_in_project", "{\"command\":\"cargo build\"}")
+                .unwrap()
+                .contains("cargo build")
+        );
+        assert!(crate::summarize_tool_action("save_artifact", "{\"name\":\"preventivo.pdf\"}").is_some());
     }
 
     #[test]
