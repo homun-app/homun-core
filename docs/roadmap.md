@@ -252,6 +252,17 @@ col pulsante per fare la cosa. Pattern condiviso coi confirm-card Composio/MCP.
 
 ## Debito tecnico / fronti aperti
 
+0. **Streaming dall'upstream del modello (SOTA, da fare).** Oggi la chat chiama il
+   modello con `"stream": false` + un timeout TOTALE: aspettiamo l'intera risposta,
+   quindi un modello lento/ragionatore (es. nemotron-3-ultra su Ollama cloud) sfora il
+   cap e va in timeout, e l'UI resta ferma fino a fine generazione. Editor come Zed non
+   hanno il problema perché STREAMano. Cerotto applicato (2026-06-08): timeout
+   configurabile `LOCAL_FIRST_MODEL_TIMEOUT_SECS` (default 600s) + self-heal su
+   timeout. Fix vero: `stream:true` + consumo SSE (`resp.bytes_stream`, reqwest ha già
+   la feature `stream`) con **ricomposizione dei tool_call dai delta** + **timeout di
+   inattività** (reset per-chunk) + token live nell'UI. Cambio delicato al loop con
+   tool: da fare con test su modello reale, non di fretta.
+
 1. **Doppio motore browser.** RISOLTO (2026-06-05): rimosso il `browser_task`
    durevole e il planner legacy (`browser_loop_controller.rs`, `RuntimeBrowserLoopPlanner`,
    `brain_adapter.rs`, `browse_web`). Il browser e' guidato SEMPRE inline

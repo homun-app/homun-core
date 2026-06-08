@@ -3308,6 +3308,19 @@ fn chat_openai_stream_config() -> Option<(String, String, Option<String>)> {
 /// Prefers a provider with a configured API KEY (e.g. Z.ai with a valid key), then
 /// a LOCAL provider with a non-`:cloud` model (no auth). `None` if nothing usable
 /// differs from the failing model.
+/// Total per-request timeout for a model completion (seconds). Default 600s (10 min):
+/// big reasoning models on slow proxies (e.g. nemotron on Ollama cloud) routinely
+/// need far more than the old fixed 180s — and editors like Zed don't cap total time
+/// at all because they STREAM (the proper fix; see roadmap). Override with
+/// LOCAL_FIRST_MODEL_TIMEOUT_SECS.
+fn model_request_timeout_secs() -> u64 {
+    std::env::var("LOCAL_FIRST_MODEL_TIMEOUT_SECS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(600)
+}
+
 fn auth_fallback_config(failing_model: &str) -> Option<(String, String, Option<String>)> {
     let registry = load_provider_registry();
     // 1) Any provider with a key + a usable model different from the failing one.
@@ -4438,13 +4451,14 @@ questo elenco, chiedi di allegarlo (non cercarlo nella sandbox o nelle cartelle)
                 payload["tool_choice"] = serde_json::Value::String("auto".to_string());
             }
             // Model proxies (e.g. ollama.com) occasionally return 502/timeout. Retry
-            // transient failures a couple of times with backoff + a 180s timeout, and
-            // surface a CLEAN message (not the raw upstream JSON) if it persists.
+            // transient failures a couple of times with backoff + a configurable
+            // timeout (default 600s — slow reasoning models need far more than the old
+            // 180s), and surface a CLEAN message (not raw upstream JSON) if it persists.
+            let request_timeout = std::time::Duration::from_secs(model_request_timeout_secs());
             let resp = {
                 let mut attempt: u32 = 0;
                 loop {
-                    let mut builder =
-                        http.post(&endpoint).timeout(std::time::Duration::from_secs(180));
+                    let mut builder = http.post(&endpoint).timeout(request_timeout);
                     if let Some(key) = api_key.as_ref() {
                         builder = builder.bearer_auth(key);
                     }
