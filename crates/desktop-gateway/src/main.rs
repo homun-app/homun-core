@@ -16165,6 +16165,7 @@ async fn memory_items(
 #[derive(Deserialize)]
 struct MemoryGraphQuery {
     workspace: Option<String>,
+    thread: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -16216,11 +16217,20 @@ async fn memory_graph(
 ) -> Result<Json<MemoryGraphResponse>, GatewayError> {
     let facade = lock_memory_facade(&state)?;
     let user = gateway_memory_user_id();
-    let ws = query
-        .workspace
-        .filter(|w| !w.trim().is_empty())
-        .map(MemoryWorkspaceId::new)
-        .unwrap_or_else(gateway_memory_workspace_id);
+    // Prefer the thread's project (so the Memoria tab shows the CONVERSATION's graph),
+    // then an explicit workspace, then the active workspace.
+    let ws = if let Some(tid) = query.thread.as_deref().filter(|t| !t.trim().is_empty()) {
+        lock_store(&state)
+            .ok()
+            .and_then(|store| store.workspace_for_thread(tid).ok())
+            .filter(|w| !w.trim().is_empty())
+            .map(MemoryWorkspaceId::new)
+            .unwrap_or_else(gateway_memory_workspace_id)
+    } else if let Some(workspace) = query.workspace.filter(|w| !w.trim().is_empty()) {
+        MemoryWorkspaceId::new(workspace)
+    } else {
+        gateway_memory_workspace_id()
+    };
 
     let project_label = {
         let file = load_workspaces_file();
