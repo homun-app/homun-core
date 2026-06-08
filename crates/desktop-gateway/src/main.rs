@@ -3621,11 +3621,54 @@ fn to_ollama_messages(messages: &[serde_json::Value]) -> Vec<serde_json::Value> 
         .collect()
 }
 
-/// Consumes Ollama's native `/api/chat` NDJSON stream (one JSON object per line:
-/// `{"message":{"content","tool_calls"},"done":bool}`) into the same non-streaming
-/// `body` shape used by the OpenAI path, so the agent loop is unchanged. Emits content
-/// live; normalizes native tool_calls (arguments OBJECT → JSON STRING, synthesizes an
-/// id). Salvages partial output on a mid-stream drop.
+/// Applies one Ollama native chat object (`{message:{content,tool_calls},done}`):
+/// streams the content fragment live, accumulates it, and appends any tool_calls
+/// (arguments OBJECT → JSON STRING, synthesized id). Returns whether `done` was set.
+async fn process_ollama_line(
+    json: &serde_json::Value,
+    content: &mut String,
+    tool_calls: &mut Vec<serde_json::Value>,
+    sink: &StreamSink,
+) -> bool {
+    if let Some(message) = json.get("message") {
+        if let Some(fragment) = message
+            .get("content")
+            .and_then(|c| c.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            content.push_str(fragment);
+            let _ = emit_stream_event(sink, GenerateStreamEvent::Delta { text: fragment.to_string() })
+                .await;
+        }
+        if let Some(calls) = message.get("tool_calls").and_then(|v| v.as_array()) {
+            for call in calls {
+                let name = call
+                    .get("function")
+                    .and_then(|f| f.get("name"))
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("");
+                let args_str = match call.get("function").and_then(|f| f.get("arguments")) {
+                    Some(serde_json::Value::String(s)) => s.clone(),
+                    Some(value) => serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string()),
+                    None => "{}".to_string(),
+                };
+                let id = format!("ollama_call_{}", tool_calls.len());
+                tool_calls.push(serde_json::json!({
+                    "id": id,
+                    "type": "function",
+                    "function": { "name": name, "arguments": args_str }
+                }));
+            }
+        }
+    }
+    json.get("done").and_then(|d| d.as_bool()).unwrap_or(false)
+}
+
+/// Consumes Ollama's native `/api/chat` response into the same non-streaming `body`
+/// shape used by the OpenAI path, so the agent loop is unchanged. Handles BOTH the
+/// streamed NDJSON form (one JSON object per line) AND a non-streamed single object
+/// (the trailing-buffer step, like ollama-rs) — so it works whether `stream` is true
+/// or false. Emits content live; normalizes tool_calls; salvages partial output.
 async fn collect_ollama_native_stream(
     resp: reqwest::Response,
     first_token: std::time::Duration,
@@ -3662,54 +3705,26 @@ async fn collect_ollama_native_stream(
                 pending.push_str(&String::from_utf8_lossy(&bytes));
                 while let Some(idx) = pending.find('\n') {
                     let line: String = pending.drain(..=idx).collect();
-                    let line = line.trim();
+                    let line = line.trim().to_string();
                     if line.is_empty() {
                         continue;
                     }
-                    let Ok(json) = serde_json::from_str::<serde_json::Value>(line) else {
-                        continue;
-                    };
-                    if let Some(message) = json.get("message") {
-                        if let Some(fragment) = message
-                            .get("content")
-                            .and_then(|c| c.as_str())
-                            .filter(|s| !s.is_empty())
-                        {
-                            content.push_str(fragment);
-                            let _ = emit_stream_event(
-                                sink,
-                                GenerateStreamEvent::Delta { text: fragment.to_string() },
-                            )
-                            .await;
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
+                        if process_ollama_line(&json, &mut content, &mut tool_calls, sink).await {
+                            done = true;
                         }
-                        if let Some(calls) = message.get("tool_calls").and_then(|v| v.as_array()) {
-                            for call in calls {
-                                let name = call
-                                    .get("function")
-                                    .and_then(|f| f.get("name"))
-                                    .and_then(|n| n.as_str())
-                                    .unwrap_or("");
-                                let args = call.get("function").and_then(|f| f.get("arguments"));
-                                let args_str = match args {
-                                    Some(serde_json::Value::String(s)) => s.clone(),
-                                    Some(value) => serde_json::to_string(value)
-                                        .unwrap_or_else(|_| "{}".to_string()),
-                                    None => "{}".to_string(),
-                                };
-                                let id = format!("ollama_call_{}", tool_calls.len());
-                                tool_calls.push(serde_json::json!({
-                                    "id": id,
-                                    "type": "function",
-                                    "function": { "name": name, "arguments": args_str }
-                                }));
-                            }
-                        }
-                    }
-                    if json.get("done").and_then(|d| d.as_bool()).unwrap_or(false) {
-                        done = true;
                     }
                 }
             }
+        }
+    }
+    // Process a final object NOT terminated by a newline: a non-streamed (`stream:false`)
+    // single response, or the last NDJSON line. Without this the whole non-streamed
+    // body (tool rounds) would be silently dropped.
+    let tail = pending.trim().to_string();
+    if !tail.is_empty() {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&tail) {
+            process_ollama_line(&json, &mut content, &mut tool_calls, sink).await;
         }
     }
     let mut message = serde_json::json!({ "role": "assistant", "content": content });
@@ -3734,10 +3749,17 @@ fn build_chat_payload(
     is_final_round: bool,
 ) -> serde_json::Value {
     if is_ollama_base(base_url) {
+        // ollama-rs rule: `stream` MUST be false when tools are provided (native
+        // tool_calls are reliable only non-streamed). So we stream ONLY on the
+        // no-tools final round (live tokens for the answer); tool rounds are a single
+        // reliable request. `keep_alive` keeps a LOCAL model warm between turns
+        // (fewer cold-starts → fewer first-token timeouts). The collector handles
+        // both the streamed (NDJSON) and non-streamed (single object) responses.
         let mut payload = serde_json::json!({
             "model": model,
             "messages": to_ollama_messages(messages),
-            "stream": true,
+            "stream": is_final_round,
+            "keep_alive": "10m",
             "options": { "temperature": temperature, "num_predict": 6000 },
         });
         if !is_final_round {
