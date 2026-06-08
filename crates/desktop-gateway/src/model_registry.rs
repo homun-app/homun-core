@@ -380,6 +380,11 @@ pub const ROLES: &[RoleInfo] = &[
         description: "Comprensione richieste, creazione e pianificazione dei task, sintesi.",
     },
     RoleInfo {
+        key: "coding",
+        label: "Coding",
+        description: "Analisi e modifica del codice nelle chat di progetto: serve un modello forte su codice, tool-use e contesto ampio. Se non impostato, usa il modello di Gestione generale.",
+    },
+    RoleInfo {
         key: "browser",
         label: "Modello del browser",
         description: "Pianificatore del loop osserva-agisci sul web: è il consumatore più pesante (una chiamata per ogni micro-azione). Spesso conviene un modello veloce qui e uno più capace per chat e sintesi.",
@@ -417,6 +422,14 @@ pub fn role_requirements(role: &str) -> RoleReq {
         },
         // The orchestrator does comprehension/planning → prefer the reasoning tier.
         "orchestrator" => RoleReq {
+            needs_tools: true,
+            needs_vision: false,
+            modality: "text",
+            preferred_tier: Some(ModelTier::Reasoning),
+        },
+        // Coding wants strong reasoning + tool-use (edits/build/test) on a wide
+        // context; same hard gate as the orchestrator.
+        "coding" => RoleReq {
             needs_tools: true,
             needs_vision: false,
             modality: "text",
