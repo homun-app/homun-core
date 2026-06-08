@@ -184,6 +184,18 @@ model-driven non sono verificabili headless. Commit: `9853162`, `4c53edc`,
    Prima dava una non-risposta ("Sono pronto") o cercava nella sandbox: il fix di
    prompt-routing dovrebbe averlo corretto (verifica anche un nome NUDO senza path).
 
+7. **Allegati analizzabili** (`edbeba2`): graffetta o trascina un file in chat e
+   chiedi di analizzarlo. Atteso: **immagini** → viste dal modello vision; **testo/
+   codice/csv/md** → contenuto iniettato nel prompt; **PDF nativi** → testo dal
+   layer pdfium; **PDF scansione** (es. patente) → pagine rese in immagini e passate
+   al vision. Prima: chip "path non disponibile" + invio bloccato ("Path locale non
+   disponibile in questa shell") perché Electron 42 ha rimosso `File.path` — ora si
+   usa `webUtils.getPathForFile`.
+   - **PREREQUISITO PDF**: serve la libreria nativa pdfium. Una volta sola, esegui
+     `bash scripts/fetch-pdfium.sh` (scarica il prebuilt bblanchon in
+     `~/.local-first-personal-assistant/pdfium/`). Senza, immagini/testo funzionano
+     ma i PDF rispondono con un messaggio chiaro "motore PDF non disponibile".
+
 Esito atteso: il pilastro **MCP** è "usabile in chat + sfogliabile + gestibile +
 suggerito". Annotare qui i difetti emersi dal test reale.
 
