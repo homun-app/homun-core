@@ -336,6 +336,45 @@ mod tests {
         assert!(out.images.is_empty());
     }
 
+    // Opt-in smoke against a REAL pdfium lib (resolved from the data dir) + a real
+    // PDF. Run with: LOCAL_FIRST_TEST_PDF=/path/to.pdf cargo test -p
+    // local-first-desktop-gateway pdfium_ingestion_smoke -- --ignored --nocapture
+    #[test]
+    #[ignore = "needs pdfium lib installed + LOCAL_FIRST_TEST_PDF set"]
+    fn pdfium_ingestion_smoke() {
+        let path = std::env::var("LOCAL_FIRST_TEST_PDF").expect("set LOCAL_FIRST_TEST_PDF");
+        let att = AttachmentInput {
+            local_path: path.clone(),
+            display_name: "test.pdf".into(),
+            mime_type: "application/pdf".into(),
+            size_bytes: 0,
+        };
+        let out = ingest_attachments(std::slice::from_ref(&att));
+        eprintln!(
+            "INGEST text_chars={} images={}",
+            out.text.chars().count(),
+            out.images.len()
+        );
+        eprintln!("INGEST text_head={}", out.text.chars().take(200).collect::<String>());
+        assert!(
+            !out.text.trim().is_empty() || !out.images.is_empty(),
+            "pdfium ingestion produced no text and no images"
+        );
+        // Exercise the render path directly (rasterizes any page, scan or not).
+        let pdfium = bind_pdfium().expect("bind pdfium");
+        let doc = pdfium
+            .load_pdf_from_file(Path::new(&path), None)
+            .expect("load pdf");
+        let images = render_pdf_pages(&doc).expect("render pages");
+        eprintln!(
+            "RENDER pages={} first_data_url_len={}",
+            images.len(),
+            images.first().map(|s| s.len()).unwrap_or(0)
+        );
+        assert!(!images.is_empty(), "render produced no page images");
+        assert!(images[0].starts_with("data:image/jpeg;base64,"));
+    }
+
     #[test]
     fn unsupported_type_is_noted() {
         let dir = std::env::temp_dir().join(format!("lfpa-att2-{}", std::process::id()));
