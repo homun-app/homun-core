@@ -507,6 +507,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/system/browser/close-all", post(close_all_browsers))
         .route("/api/memory/dashboard", get(memory_dashboard))
         .route("/api/memory/items", get(memory_items))
+        .route("/api/memory/graph", get(memory_graph))
         .route("/api/memory/decide", post(memory_decide))
         .route("/api/memory/contacts", get(contacts_list))
         .route("/api/memory/contacts/memories", post(contact_memories))
@@ -16153,6 +16154,170 @@ async fn memory_items(
         push_scope(&active, "project");
     }
     Ok(Json(out))
+}
+
+// -------------------------------------------------------------- memory graph
+// A navigable view of a project's memory: the project at the centre, its DECISIONS
+// linked to the files they affect and the alternatives they rejected, plus its facts
+// and preferences, plus any explicit entity↔entity relations. Built from existing data
+// (decision `affects_labels` + `decision.alternatives` metadata) — no migration.
+
+#[derive(Deserialize)]
+struct MemoryGraphQuery {
+    workspace: Option<String>,
+}
+
+#[derive(Serialize)]
+struct GraphNode {
+    id: String,
+    kind: String, // project | decision | file | alternative | fact | preference | entity
+    label: String,
+    detail: String,
+    entity_type: String,
+}
+
+#[derive(Serialize)]
+struct GraphEdge {
+    source: String,
+    target: String,
+    label: String,
+}
+
+#[derive(Serialize)]
+struct MemoryGraphResponse {
+    workspace: String,
+    nodes: Vec<GraphNode>,
+    edges: Vec<GraphEdge>,
+}
+
+fn graph_push_node(
+    nodes: &mut Vec<GraphNode>,
+    seen: &mut std::collections::HashSet<String>,
+    id: &str,
+    kind: &str,
+    label: String,
+    detail: String,
+    entity_type: &str,
+) {
+    if seen.insert(id.to_string()) {
+        nodes.push(GraphNode {
+            id: id.to_string(),
+            kind: kind.to_string(),
+            label,
+            detail,
+            entity_type: entity_type.to_string(),
+        });
+    }
+}
+
+async fn memory_graph(
+    State(state): State<AppState>,
+    Query(query): Query<MemoryGraphQuery>,
+) -> Result<Json<MemoryGraphResponse>, GatewayError> {
+    let facade = lock_memory_facade(&state)?;
+    let user = gateway_memory_user_id();
+    let ws = query
+        .workspace
+        .filter(|w| !w.trim().is_empty())
+        .map(MemoryWorkspaceId::new)
+        .unwrap_or_else(gateway_memory_workspace_id);
+
+    let project_label = {
+        let file = load_workspaces_file();
+        file.workspaces
+            .iter()
+            .find(|w| w.id == ws.as_str())
+            .map(|w| w.name.clone())
+            .unwrap_or_else(|| "Progetto".to_string())
+    };
+
+    let mut nodes: Vec<GraphNode> = Vec::new();
+    let mut edges: Vec<GraphEdge> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    let project_id = "project::root".to_string();
+    graph_push_node(&mut nodes, &mut seen, &project_id, "project", project_label, String::new(), "");
+
+    if let Ok(memories) = facade.list_memories_for_ui(&user, &ws) {
+        for memory in memories {
+            if matches!(memory.status, MemoryStatus::Deleted | MemoryStatus::Rejected) {
+                continue;
+            }
+            let kind = memory.memory_type.as_str();
+            if kind == "decision" {
+                let node_id = memory.reference.to_string();
+                let label: String = memory.text.chars().take(70).collect();
+                let mut detail = memory.text.clone();
+                // Rationale + rejected alternatives → detail, and a node per alternative.
+                if let Some(decision) = memory.metadata.get("decision") {
+                    if let Some(rationale) = decision.get("rationale").and_then(|r| r.as_str()) {
+                        if !rationale.is_empty() && !detail.contains(rationale) {
+                            detail.push_str(&format!("\n\nPerché: {rationale}"));
+                        }
+                    }
+                    if let Some(alts) = decision.get("alternatives").and_then(|a| a.as_array()) {
+                        for alt in alts {
+                            let Some(option) = alt.get("option").and_then(|o| o.as_str()) else {
+                                continue;
+                            };
+                            if option.is_empty() {
+                                continue;
+                            }
+                            let why = alt.get("rejected_because").and_then(|w| w.as_str()).unwrap_or("");
+                            let alt_id = format!("alt::{node_id}::{option}");
+                            graph_push_node(&mut nodes, &mut seen, &alt_id, "alternative", option.to_string(), why.to_string(), "");
+                            edges.push(GraphEdge { source: node_id.clone(), target: alt_id, label: "scartata".to_string() });
+                        }
+                    }
+                }
+                graph_push_node(&mut nodes, &mut seen, &node_id, "decision", label, detail, "");
+                edges.push(GraphEdge { source: project_id.clone(), target: node_id.clone(), label: "decisione".to_string() });
+                // Files / artifacts the decision affects.
+                if let Some(affected) = memory.metadata.get("affects_labels").and_then(|a| a.as_array()) {
+                    for item in affected {
+                        let Some(name) = item.as_str() else { continue };
+                        if name.is_empty() {
+                            continue;
+                        }
+                        let file_id = format!("file::{name}");
+                        let kind = if name.contains('.') { "file" } else { "entity" };
+                        graph_push_node(&mut nodes, &mut seen, &file_id, kind, name.to_string(), String::new(), "file");
+                        edges.push(GraphEdge { source: node_id.clone(), target: file_id, label: "tocca".to_string() });
+                    }
+                }
+            } else if kind == "fact" || kind == "preference" {
+                let node_id = memory.reference.to_string();
+                let label: String = memory.text.chars().take(70).collect();
+                graph_push_node(&mut nodes, &mut seen, &node_id, kind, label, memory.text.clone(), "");
+                edges.push(GraphEdge { source: project_id.clone(), target: node_id, label: kind.to_string() });
+            }
+        }
+    }
+
+    // Explicit entity↔entity relations recorded for this workspace.
+    if let Ok(entities) = facade.list_entities_for_ui(&user, &ws) {
+        let mut ref_label: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        for entity in &entities {
+            let id = entity.reference.to_string();
+            ref_label.insert(id.clone(), entity.name.clone());
+            graph_push_node(&mut nodes, &mut seen, &id, "entity", entity.name.clone(), String::new(), &entity.entity_type);
+        }
+        if let Ok(relations) = facade.list_relations_for_ui(&user, &ws) {
+            for relation in relations {
+                let source = relation.source_ref.to_string();
+                let target = relation.target_ref.to_string();
+                if seen.contains(&source) && seen.contains(&target) && source != target {
+                    edges.push(GraphEdge { source, target, label: relation.relation_type });
+                }
+            }
+        }
+    }
+
+    Ok(Json(MemoryGraphResponse {
+        workspace: ws.as_str().to_string(),
+        nodes,
+        edges,
+    }))
 }
 
 // ------------------------------------------------------------------ contacts
