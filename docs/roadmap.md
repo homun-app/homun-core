@@ -195,6 +195,13 @@ model-driven non sono verificabili headless. Commit: `9853162`, `4c53edc`,
      `bash scripts/fetch-pdfium.sh` (scarica il prebuilt bblanchon in
      `~/.local-first-personal-assistant/pdfium/`). Senza, immagini/testo funzionano
      ma i PDF rispondono con un messaggio chiaro "motore PDF non disponibile".
+   - **Persistenza nel thread** (`1d7e719`): l'allegato è ingerito UNA volta e
+     salvato sul thread (tabella `thread_attachments`); a ogni turno il contenuto
+     (testo + immagini, con cap) e un MANIFEST vengono re-iniettati. Atteso: alleghi
+     UNA volta, poi "il file"/"e la scadenza?" funzionano nei turni successivi SENZA
+     riallegare; se citi un file non allegato, il modello chiede di allegarlo invece
+     di frugare in sandbox/cartelle. NB: serve UN attach andato a buon fine (chip
+     "patente.pdf" visibile) per innescare la persistenza.
 
 Esito atteso: il pilastro **MCP** è "usabile in chat + sfogliabile + gestibile +
 suggerito". Annotare qui i difetti emersi dal test reale.
