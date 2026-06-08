@@ -3450,8 +3450,10 @@ chiarimento mirata (come al passo 3 del METODO) va bene; una non-risposta no.\n\
 FILE E CARTELLE DEL COMPUTER dell'utente: se l'utente vuole vedere/elencare/leggere \
 file o cartelle del suo computer — ANCHE se nomina la cartella SENZA percorso (es. \
 \"le cartelle in Project\", \"i file in Documenti\") — usa `list_directory` / \
-`read_text_file` sul percorso più probabile (es. ~/Projects, ~/Documents, una cartella \
-autorizzata). `list_files` / `read_file` sono SOLO per il codice DENTRO la cartella di \
+`read_text_file` sul percorso più probabile DENTRO la home dell'utente — la home è \
+{home} (es. {home}/Projects, {home}/Documents) — oppure scrivi `~/…` che risolvo io. \
+NON inventare un nome utente (es. /Users/<nome-a-caso>/…): usa {home} o `~/`. \
+`list_files` / `read_file` sono SOLO per il codice DENTRO la cartella di \
 progetto collegata (percorsi relativi), NON per il filesystem dell'utente. \
 `run_in_sandbox` è un container usa-e-getta che NON vede il computer dell'utente: non \
 usarlo MAI per ispezionare file/cartelle del Mac. Se non hai indizi sul percorso fai \
@@ -3484,7 +3486,8 @@ A SÉ con `- ` (trattino) — non incollare più voci sulla stessa riga. Per ele
 giorno/voce con etichetta usa `**Etichetta**: valore` con una riga vuota tra le voci, \
 o una tabella se i campi sono ≥3. Metti una riga vuota tra i paragrafi. Usa `### ` per \
 i titoli di sezione quando la risposta è lunga. Rispondi in italiano, chiaro e ordinato.",
-        today = today_iso()
+        today = today_iso(),
+        home = std::env::var("HOME").unwrap_or_else(|_| "~".to_string())
     );
     // Connected-service (Composio) tools are reached via a DISCOVERY meta-tool
     // (`find_connected_tools`), not dumped into the prompt: the model searches by
