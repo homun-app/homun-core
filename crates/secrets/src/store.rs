@@ -58,6 +58,16 @@ impl<K: SecretKeyProvider> EncryptedFileSecretStore<K> {
         })
     }
 
+    /// All stored references (any status). Lets callers find a secret saved under a
+    /// different scope than expected (e.g. a provider key saved while a project was
+    /// active, read back from another workspace).
+    pub fn references(&self) -> Vec<SecretRef> {
+        self.entries
+            .lock()
+            .map(|entries| entries.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+
     fn persist(&self, entries: &BTreeMap<SecretRef, EncryptedSecretRecord>) -> SecretResult<()> {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
