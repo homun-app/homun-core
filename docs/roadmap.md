@@ -180,13 +180,15 @@ model-driven non sono verificabili headless. Commit: `9853162`, `4c53edc`,
 Esito atteso: il pilastro **MCP** è "usabile in chat + sfogliabile + gestibile +
 suggerito". Annotare qui i difetti emersi dal test reale.
 
-### Follow-up MCP rimasti (non bloccanti)
-- **Filesystem nativo — conferma fuori-cartella**: la scelta utente è "autorizzate +
-  lettura altrove con conferma". Lo step 1 (cartelle autorizzate) è fatto (`d61c3ef`);
-  manca la **card di conferma puntuale** per leggere cartelle non autorizzate (stesso
-  pattern del confirm-card MCP). + write nativa con conferma.
-- **Connect-card in chat**: rendere i suggerimenti di `suggest_capabilities`
-  *cliccabili* (one-click connect dalla chat), non solo testuali.
+### Schede azione in-chat (direzione UX — richiesta utente)
+Le azioni vivono in chat, non in Impostazioni: l'assistente mostra una scheda inline
+col pulsante per fare la cosa. Pattern condiviso coi confirm-card Composio/MCP.
+- **Autorizza cartella**: FATTO (`1b86cb6`): cartella non autorizzata → scheda
+  ‹‹FS_AUTHORIZE›› con [Autorizza ed elenca] → aggiunge la cartella + mostra il
+  contenuto inline. (Completa la scelta "autorizzate + lettura altrove con conferma".)
+- **Connect-card in chat** (rimasto): rendere i suggerimenti di `suggest_capabilities`
+  *cliccabili* — install skill / connect MCP / link Composio dalla chat. Stesso pattern.
+- (write nativa su file con conferma: rimane.)
 - **Secret-store** per i token MCP (oggi `env` raw nel registry — gap audit).
 - **Read-timeout** nel transport stdio (`mcp.rs`): oggi il timeout protegge il
   turno, non il thread blocking su `read_line`.
