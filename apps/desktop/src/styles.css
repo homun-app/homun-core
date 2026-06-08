@@ -3012,16 +3012,75 @@ body.resizing-drawer {
   color: var(--muted);
   font-size: 11px;
 }
-.workbench-file-list .wf-dir {
+.workbench-file-list .wf-dir,
+.workbench-file-list .wf-file {
   background: transparent;
   border: none;
   padding: 0;
   color: var(--text);
   text-align: left;
   cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.workbench-file-list .wf-dir:hover {
+.workbench-file-list .wf-dir:hover,
+.workbench-file-list .wf-file:hover {
   text-decoration: underline;
+}
+.workbench-file-list .wf-cancel {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.workbench-file-list .wf-cancel:hover {
+  background: var(--red-soft, rgba(220, 70, 70, 0.14));
+  color: #c0392b;
+}
+/* File viewer (File tab → open a file): header + scrollable code/diff body. */
+.workbench-fileview {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.workbench-fileview .workbench-breadcrumb {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.workbench-fileview .workbench-breadcrumb .wf-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--text);
+}
+.workbench-diff-toggle {
+  border: none;
+  background: var(--surface-hover);
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.workbench-diff-toggle.active {
+  background: var(--green-soft);
+  color: #2f4d31;
+}
+.workbench-fileview-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 .workbench-file-list .wf-muted {
   color: var(--muted);

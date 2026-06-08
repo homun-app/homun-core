@@ -59,6 +59,7 @@ import {
   type CorePromptSubmissionResult,
   type CoreTaskQueueSnapshot,
   type FsEntry,
+  type FsFilePayload,
   type McpRegistryServer,
   type SkillSummary,
 } from "../lib/coreBridge";
@@ -2820,11 +2821,41 @@ function Workbench({
   // Background/scheduled tasks (Attività tab), fetched lazily when the tab opens.
   const [tasks, setTasks] = useState<CoreTaskQueueSnapshot | null>(null);
   const [tasksLoading, setTasksLoading] = useState(false);
+  // Open file viewer (File tab): content + git diff toggle.
+  const [openFile, setOpenFile] = useState<FsFilePayload | null>(null);
+  const [fileLoading, setFileLoading] = useState(false);
+  const [diffOn, setDiffOn] = useState(false);
+
+  const openFileAt = useCallback(
+    async (path: string) => {
+      setFileLoading(true);
+      setDiffOn(false);
+      setOpenFile({ authorized: true, path, text: "", old_text: "", in_git: false, modified: false, binary: false });
+      try {
+        const payload = await coreBridge.fsFile(path, threadId);
+        setOpenFile(payload);
+      } catch {
+        setOpenFile(null);
+      } finally {
+        setFileLoading(false);
+      }
+    },
+    [threadId],
+  );
+
+  const cancelTaskItem = useCallback(async (taskId: string) => {
+    try {
+      setTasks(await coreBridge.cancelTask(taskId));
+    } catch {
+      /* best-effort; the next tab open refetches */
+    }
+  }, []);
 
   const loadFs = useCallback(
     async (path: string | null) => {
       setFsLoading(true);
       setFsError(null);
+      setOpenFile(null);
       try {
         const result = await coreBridge.fsList(path, threadId);
         setFsRoot(result.root);
@@ -2846,6 +2877,7 @@ function Workbench({
     setFsRoot(null);
     setFsCwd(null);
     setFsEntries([]);
+    setOpenFile(null);
   }, [threadId]);
   useEffect(() => {
     if (open && tab === "files" && fsCwd === null) void loadFs(null);
@@ -2937,7 +2969,52 @@ function Workbench({
         </button>
       </div>
       <div className="workbench-body">
-        {tab === "files" && (
+        {tab === "files" && openFile && (
+          <div className="workbench-fileview">
+            <div className="workbench-breadcrumb">
+              <button
+                type="button"
+                aria-label="Indietro"
+                title="Torna ai file"
+                onClick={() => setOpenFile(null)}
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <span className="wf-name" title={openFile.path}>
+                {openFile.path.split("/").pop()}
+              </span>
+              {fileLoading && <Loader2 size={13} className="spin" />}
+              {openFile.modified && !fileLoading && (
+                <button
+                  type="button"
+                  className={`workbench-diff-toggle${diffOn ? " active" : ""}`}
+                  title="Mostra le modifiche rispetto a git"
+                  onClick={() => setDiffOn((value) => !value)}
+                >
+                  ± Diff
+                </button>
+              )}
+            </div>
+            <div className="workbench-fileview-body">
+              {openFile.error ? (
+                <div className="workbench-empty">
+                  <AlertCircle size={24} />
+                  <p>{openFile.error}</p>
+                </div>
+              ) : openFile.binary ? (
+                <div className="workbench-empty">
+                  <FileText size={24} />
+                  <p>File binario: anteprima non disponibile.</p>
+                </div>
+              ) : diffOn && openFile.modified ? (
+                <DiffView oldText={openFile.old_text} newText={openFile.text} />
+              ) : (
+                <CodeView code={openFile.text} language={languageForPath(openFile.path)} />
+              )}
+            </div>
+          </div>
+        )}
+        {tab === "files" && !openFile && (
           <div className="workbench-files">
             {uploadedFiles.length > 0 && (
               <>
@@ -2990,9 +3067,14 @@ function Workbench({
                           {entry.name}
                         </button>
                       ) : (
-                        <span className="wf-name" title={entry.name}>
+                        <button
+                          type="button"
+                          className="wf-name wf-file"
+                          title={entry.name}
+                          onClick={() => void openFileAt(entry.path)}
+                        >
                           {entry.name}
-                        </span>
+                        </button>
                       )}
                       {!entry.is_dir && <small>{formatFileSize(entry.size)}</small>}
                     </li>
@@ -3047,6 +3129,15 @@ function Workbench({
                         {item.goal || item.kind}
                       </span>
                       <small>{item.blocked_reason ? "bloccato" : item.status}</small>
+                      <button
+                        type="button"
+                        className="wf-cancel"
+                        title="Annulla questo task"
+                        aria-label="Annulla task"
+                        onClick={() => void cancelTaskItem(item.task_id)}
+                      >
+                        <X size={13} />
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -5678,6 +5769,19 @@ function formatContextTokens(n: number): string {
     return `~${Number.isInteger(m) ? m : m.toFixed(1)}M ctx`;
   }
   return `~${Math.round(n / 1000)}k ctx`;
+}
+
+/** Maps a file extension to a highlight.js language for the file viewer. */
+function languageForPath(path: string): string {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  const map: Record<string, string> = {
+    rs: "rust", ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript",
+    py: "python", go: "go", java: "java", c: "c", h: "c", cpp: "cpp", hpp: "cpp",
+    rb: "ruby", php: "php", sh: "bash", bash: "bash", zsh: "bash", json: "json",
+    yaml: "yaml", yml: "yaml", toml: "ini", ini: "ini", md: "markdown", markdown: "markdown",
+    html: "xml", xml: "xml", css: "css", scss: "scss", sql: "sql",
+  };
+  return map[ext] ?? "text";
 }
 
 function formatFileSize(size: number) {
