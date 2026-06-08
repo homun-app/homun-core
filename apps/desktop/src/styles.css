@@ -2969,6 +2969,10 @@ body.resizing-drawer {
   min-height: 0;
   overflow-y: auto;
   padding: 12px;
+  /* Flex column so an empty-state (.workbench-empty, flex:1) centers vertically —
+     matching the Artefatti/Piano tabs that render the empty directly in the body. */
+  display: flex;
+  flex-direction: column;
 }
 .workbench-section-label {
   font-size: 11px;
