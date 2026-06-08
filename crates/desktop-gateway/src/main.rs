@@ -3166,9 +3166,12 @@ fn provider_registry_path() -> Option<PathBuf> {
 
 /// Per-provider API-key reference in the encrypted secret store (keyed by id).
 fn provider_secret_ref(provider_id: &str) -> Option<SecretRef> {
+    // Provider API keys are GLOBAL (the provider registry is not per-project), so
+    // pin the ref to a fixed workspace instead of the active one — otherwise a key
+    // saved while a project was active is invisible from another workspace.
     SecretRef::new(
         gateway_user_id().as_str(),
-        gateway_workspace_id().as_str(),
+        PERSONAL_WORKSPACE,
         "inference",
         provider_id,
     )
@@ -3177,9 +3180,31 @@ fn provider_secret_ref(provider_id: &str) -> Option<SecretRef> {
 
 fn provider_api_key(provider_id: &str) -> Option<String> {
     let store = open_gateway_secret_store().ok()?;
-    let reference = provider_secret_ref(provider_id)?;
-    let material = store.get(&reference).ok()??;
-    material.expose_utf8().ok().filter(|value| !value.is_empty())
+    // Preferred global ref.
+    if let Some(reference) = provider_secret_ref(provider_id) {
+        if let Ok(Some(material)) = store.get(&reference) {
+            if let Ok(value) = material.expose_utf8() {
+                if !value.is_empty() {
+                    return Some(value);
+                }
+            }
+        }
+    }
+    // Legacy fallback: a key saved under a DIFFERENT workspace (the per-workspace
+    // scoping bug) — find it under any scope so existing keys aren't lost.
+    let suffix = format!("/inference/{provider_id}");
+    for reference in store.references() {
+        if reference.to_string().ends_with(&suffix) {
+            if let Ok(Some(material)) = store.get(&reference) {
+                if let Ok(value) = material.expose_utf8() {
+                    if !value.is_empty() {
+                        return Some(value);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 fn set_provider_api_key(provider_id: &str, key: &str) -> Result<(), String> {
