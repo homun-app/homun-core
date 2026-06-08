@@ -3749,16 +3749,17 @@ fn build_chat_payload(
     is_final_round: bool,
 ) -> serde_json::Value {
     if is_ollama_base(base_url) {
-        // ollama-rs rule: `stream` MUST be false when tools are provided (native
-        // tool_calls are reliable only non-streamed). So we stream ONLY on the
-        // no-tools final round (live tokens for the answer); tool rounds are a single
-        // reliable request. `keep_alive` keeps a LOCAL model warm between turns
-        // (fewer cold-starts → fewer first-token timeouts). The collector handles
-        // both the streamed (NDJSON) and non-streamed (single object) responses.
+        // Native /api/chat streams content + tool_calls together fine on current
+        // Ollama (verified on 0.30.6: `/v1` AND native both return tool_calls while
+        // streaming — the historical drop-bug ollama#12557 doesn't reproduce). So we
+        // STREAM always (live tokens) — the ollama-rs "stream:false with tools" rule
+        // is conservative/historical and not needed here. `keep_alive` keeps a LOCAL
+        // model warm between turns. The collector also handles a non-streamed single
+        // object, so this stays robust if a future model needs stream:false.
         let mut payload = serde_json::json!({
             "model": model,
             "messages": to_ollama_messages(messages),
-            "stream": is_final_round,
+            "stream": true,
             "keep_alive": "10m",
             "options": { "temperature": temperature, "num_predict": 6000 },
         });
