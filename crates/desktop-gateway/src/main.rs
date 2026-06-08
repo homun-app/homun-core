@@ -3321,6 +3321,133 @@ fn model_request_timeout_secs() -> u64 {
         .unwrap_or(600)
 }
 
+/// Idle (inter-token) timeout for streamed completions (seconds). With streaming the
+/// governor is INACTIVITY, not total time: a generation that keeps emitting tokens
+/// never dies, only a genuine stall (no token for this long) does. Default 180s;
+/// override with LOCAL_FIRST_MODEL_IDLE_TIMEOUT_SECS.
+fn model_idle_timeout_secs() -> u64 {
+    std::env::var("LOCAL_FIRST_MODEL_IDLE_TIMEOUT_SECS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(180)
+}
+
+/// Reassembles an OpenAI-compatible SSE stream body into a NON-streaming
+/// `{choices:[{message:{role,content,tool_calls}, finish_reason}]}` shape, so the
+/// rest of the agent loop is unchanged. Concatenates `delta.content` and rebuilds
+/// `tool_calls` from their per-index argument fragments. If the text isn't SSE at all
+/// (a provider that ignored `stream:true` and returned a plain JSON body), it parses
+/// and returns that verbatim — so this is safe for non-streaming providers too.
+fn reassemble_openai_stream(sse: &str) -> serde_json::Value {
+    let mut content = String::new();
+    let mut finish_reason: Option<String> = None;
+    let mut tool_calls: Vec<serde_json::Value> = Vec::new();
+    let mut saw_event = false;
+    for line in sse.lines() {
+        let line = line.trim();
+        let Some(data) = line.strip_prefix("data:") else {
+            continue;
+        };
+        let data = data.trim();
+        if data.is_empty() || data == "[DONE]" {
+            continue;
+        }
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(data) else {
+            continue;
+        };
+        let Some(choice) = json.get("choices").and_then(|c| c.get(0)) else {
+            continue;
+        };
+        saw_event = true;
+        if let Some(fr) = choice.get("finish_reason").and_then(|f| f.as_str()) {
+            if !fr.is_empty() {
+                finish_reason = Some(fr.to_string());
+            }
+        }
+        let Some(delta) = choice.get("delta") else {
+            continue;
+        };
+        if let Some(chunk) = delta.get("content").and_then(|v| v.as_str()) {
+            content.push_str(chunk);
+        }
+        if let Some(calls) = delta.get("tool_calls").and_then(|v| v.as_array()) {
+            for call in calls {
+                let index = call.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                while tool_calls.len() <= index {
+                    tool_calls.push(serde_json::json!({
+                        "id": "", "type": "function",
+                        "function": { "name": "", "arguments": "" }
+                    }));
+                }
+                let slot = &mut tool_calls[index];
+                if let Some(id) = call.get("id").and_then(|v| v.as_str()) {
+                    if !id.is_empty() {
+                        slot["id"] = serde_json::Value::String(id.to_string());
+                    }
+                }
+                if let Some(function) = call.get("function") {
+                    if let Some(name) = function.get("name").and_then(|v| v.as_str()) {
+                        if !name.is_empty() {
+                            slot["function"]["name"] = serde_json::Value::String(name.to_string());
+                        }
+                    }
+                    if let Some(args) = function.get("arguments").and_then(|v| v.as_str()) {
+                        if !args.is_empty() {
+                            let current =
+                                slot["function"]["arguments"].as_str().unwrap_or("").to_string();
+                            slot["function"]["arguments"] =
+                                serde_json::Value::String(current + args);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Provider ignored stream:true and sent a plain completion JSON → use it as-is.
+    if !saw_event {
+        if let Ok(full) = serde_json::from_str::<serde_json::Value>(sse.trim()) {
+            return full;
+        }
+    }
+    let mut message = serde_json::json!({ "role": "assistant", "content": content });
+    if !tool_calls.is_empty() {
+        message["tool_calls"] = serde_json::Value::Array(tool_calls);
+    }
+    serde_json::json!({
+        "choices": [ { "message": message, "finish_reason": finish_reason.unwrap_or_default() } ]
+    })
+}
+
+/// Consumes a streamed completion response with a PER-CHUNK idle timeout (reset on
+/// every chunk) instead of a total-time cap — the fix for slow reasoning models that
+/// used to blow the old 180s total timeout. Returns the reassembled non-streaming
+/// body, or an error string on a genuine stall / stream error.
+async fn collect_openai_stream(
+    resp: reqwest::Response,
+    idle: std::time::Duration,
+) -> Result<serde_json::Value, String> {
+    use futures_util::StreamExt;
+    let mut stream = resp.bytes_stream();
+    let mut raw = String::new();
+    loop {
+        match tokio::time::timeout(idle, stream.next()).await {
+            Err(_) => return Err("nessun token dal modello entro il tempo di inattività".to_string()),
+            Ok(None) => break,
+            Ok(Some(Ok(bytes))) => {
+                raw.push_str(&String::from_utf8_lossy(&bytes));
+                // OpenAI sentinel: response complete — stop even if the server keeps
+                // the connection open (otherwise we'd wait out the idle timeout).
+                if raw.contains("[DONE]") {
+                    break;
+                }
+            }
+            Ok(Some(Err(error))) => return Err(error.to_string()),
+        }
+    }
+    Ok(reassemble_openai_stream(&raw))
+}
+
 fn auth_fallback_config(failing_model: &str) -> Option<(String, String, Option<String>)> {
     let registry = load_provider_registry();
     // 1) Any provider with a key + a usable model different from the failing one.
@@ -4444,7 +4571,12 @@ questo elenco, chiedi di allegarlo (non cercarlo nella sandbox o nelle cartelle)
                 // a budget the synthesis came back empty (same starvation as the
                 // planner). Generous so the final table isn't cut off.
                 "max_tokens": 6000,
-                "stream": false,
+                // Stream from upstream: the connection stays alive as tokens flow, so
+                // the governor is INACTIVITY (idle timeout below) not total time —
+                // slow reasoning models (e.g. nemotron on Ollama cloud) no longer hit
+                // a total-time cap. The response is reassembled into the same
+                // non-streaming shape so the rest of the loop is unchanged.
+                "stream": true,
             });
             if !is_final_round {
                 payload["tools"] = serde_json::Value::Array(tool_schemas.clone());
@@ -4565,13 +4697,22 @@ controlla/aggiorna la chiave in Impostazioni → Modello & Runtime.".to_string()
             let Some(resp) = resp else {
                 break;
             };
-            let body: serde_json::Value = match resp.json().await {
+            // Consume the streamed completion with a PER-CHUNK idle timeout (not a
+            // total-time cap), then reassemble it into the non-streaming body shape.
+            let body: serde_json::Value = match collect_openai_stream(
+                resp,
+                std::time::Duration::from_secs(model_idle_timeout_secs()),
+            )
+            .await
+            {
                 Ok(value) => value,
                 Err(error) => {
                     let _ = emit_stream_event(
                         &tx,
                         GenerateStreamEvent::Delta {
-                            text: format!("Risposta del modello non valida: {error}"),
+                            text: format!(
+                                "Il modello ha interrotto la risposta ({error}). Riprova tra poco."
+                            ),
                         },
                     )
                     .await;
@@ -18005,6 +18146,32 @@ mod tests {
                 .contains("cargo build")
         );
         assert!(crate::summarize_tool_action("save_artifact", "{\"name\":\"preventivo.pdf\"}").is_some());
+    }
+
+    #[test]
+    fn reassemble_streamed_content_and_tool_calls() {
+        // Plain content split across two SSE deltas + a finish_reason.
+        let sse = "data: {\"choices\":[{\"delta\":{\"content\":\"Ciao \"}}]}\n\
+data: {\"choices\":[{\"delta\":{\"content\":\"mondo\"}}]}\n\
+data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\
+data: [DONE]\n";
+        let body = crate::reassemble_openai_stream(sse);
+        assert_eq!(body["choices"][0]["message"]["content"], "Ciao mondo");
+        assert_eq!(body["choices"][0]["finish_reason"], "stop");
+
+        // tool_calls whose JSON arguments arrive as fragments across chunks.
+        let sse2 = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\"}}]}}]}\n\
+data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"a.txt\\\"}\"}}]}}]}\n\
+data: [DONE]\n";
+        let body2 = crate::reassemble_openai_stream(sse2);
+        let call = &body2["choices"][0]["message"]["tool_calls"][0];
+        assert_eq!(call["function"]["name"], "read_file");
+        assert_eq!(call["function"]["arguments"], "{\"path\":\"a.txt\"}");
+
+        // A provider that ignored stream:true and returned a plain JSON body.
+        let plain = "{\"choices\":[{\"message\":{\"content\":\"hi\"}}]}";
+        let body3 = crate::reassemble_openai_stream(plain);
+        assert_eq!(body3["choices"][0]["message"]["content"], "hi");
     }
 
     #[test]
