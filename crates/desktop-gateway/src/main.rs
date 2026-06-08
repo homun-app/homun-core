@@ -3314,11 +3314,14 @@ fn chat_openai_stream_config() -> Option<(String, String, Option<String>)> {
 /// at all because they STREAM (the proper fix; see roadmap). Override with
 /// LOCAL_FIRST_MODEL_TIMEOUT_SECS.
 fn model_request_timeout_secs() -> u64 {
+    // High ceiling: with streaming the real governors are the first-token + idle
+    // timeouts (below). A total cap that fires mid-stream is reported by reqwest as
+    // "error decoding response body" (#2839), so keep it well above any real turn.
     std::env::var("LOCAL_FIRST_MODEL_TIMEOUT_SECS")
         .ok()
         .and_then(|value| value.trim().parse::<u64>().ok())
         .filter(|value| *value > 0)
-        .unwrap_or(600)
+        .unwrap_or(3600)
 }
 
 /// Idle (inter-token) timeout for streamed completions (seconds). With streaming the
@@ -3428,6 +3431,7 @@ fn reassemble_openai_stream(sse: &str) -> serde_json::Value {
 /// tool_calls), or an error string on a genuine stall / stream error.
 async fn collect_openai_stream(
     resp: reqwest::Response,
+    first_token: std::time::Duration,
     idle: std::time::Duration,
     sink: &StreamSink,
 ) -> Result<serde_json::Value, String> {
@@ -3436,8 +3440,12 @@ async fn collect_openai_stream(
     let mut raw = String::new();
     let mut pending = String::new();
     let mut done = false;
+    let mut got_any = false;
     while !done {
-        match tokio::time::timeout(idle, stream.next()).await {
+        // First chunk gets a generous budget (cold model load / connect latency);
+        // subsequent chunks use the tighter inter-token idle.
+        let wait = if got_any { idle } else { first_token };
+        match tokio::time::timeout(wait, stream.next()).await {
             Err(_) => {
                 // Idle stall: if tokens already arrived, SALVAGE the partial response
                 // rather than killing the turn (better a truncated answer than an
@@ -3449,6 +3457,7 @@ async fn collect_openai_stream(
             }
             Ok(None) => break,
             Ok(Some(Ok(bytes))) => {
+                got_any = true;
                 let text = String::from_utf8_lossy(&bytes);
                 raw.push_str(&text);
                 pending.push_str(&text);
@@ -3497,6 +3506,254 @@ async fn collect_openai_stream(
         }
     }
     Ok(reassemble_openai_stream(&raw))
+}
+
+/// Generous budget for the FIRST token (seconds): Ollama may cold-load a big model
+/// or the cloud may take a moment before the first byte. Inter-token gaps use the
+/// tighter idle. Override with LOCAL_FIRST_MODEL_FIRST_TOKEN_SECS.
+fn model_first_token_timeout_secs() -> u64 {
+    std::env::var("LOCAL_FIRST_MODEL_FIRST_TOKEN_SECS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(300)
+}
+
+/// True for an Ollama endpoint (local daemon or Ollama Cloud). Such providers must
+/// use the NATIVE `/api/chat` API: the OpenAI-compat `/v1` layer SILENTLY DROPS tool
+/// calls when streaming (ollama#12557) — the native API supports streaming + tools
+/// together (what Zed does).
+fn is_ollama_base(base_url: &str) -> bool {
+    let b = base_url.to_ascii_lowercase();
+    b.contains("ollama.com") || b.contains(":11434")
+}
+
+/// The chat completions endpoint for a provider: Ollama → native `/api/chat`
+/// (strip a trailing `/v1`); everyone else → OpenAI-compat `/chat/completions`.
+fn chat_endpoint(base_url: &str) -> String {
+    let trimmed = base_url.trim_end_matches('/');
+    if is_ollama_base(base_url) {
+        let root = trimmed.strip_suffix("/v1").unwrap_or(trimmed).trim_end_matches('/');
+        format!("{root}/api/chat")
+    } else {
+        format!("{trimmed}/chat/completions")
+    }
+}
+
+/// Converts OpenAI-style messages to Ollama native `/api/chat` shape: multimodal
+/// content-parts become `{content, images:[base64]}`; assistant `tool_calls`
+/// arguments are parsed from JSON STRING back to an OBJECT (native expects an object).
+fn to_ollama_messages(messages: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    messages
+        .iter()
+        .map(|m| {
+            let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("user");
+            let mut out = serde_json::Map::new();
+            out.insert("role".into(), serde_json::Value::String(role.to_string()));
+            match m.get("content") {
+                Some(serde_json::Value::Array(parts)) => {
+                    let mut text = String::new();
+                    let mut images: Vec<serde_json::Value> = Vec::new();
+                    for part in parts {
+                        match part.get("type").and_then(|t| t.as_str()) {
+                            Some("text") => {
+                                if let Some(t) = part.get("text").and_then(|x| x.as_str()) {
+                                    text.push_str(t);
+                                }
+                            }
+                            Some("image_url") => {
+                                if let Some(url) = part
+                                    .get("image_url")
+                                    .and_then(|u| u.get("url"))
+                                    .and_then(|x| x.as_str())
+                                {
+                                    // Native wants raw base64 (no data: prefix).
+                                    let b64 = url.rsplit("base64,").next().unwrap_or(url);
+                                    images.push(serde_json::Value::String(b64.to_string()));
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    out.insert("content".into(), serde_json::Value::String(text));
+                    if !images.is_empty() {
+                        out.insert("images".into(), serde_json::Value::Array(images));
+                    }
+                }
+                Some(serde_json::Value::String(s)) => {
+                    out.insert("content".into(), serde_json::Value::String(s.clone()));
+                }
+                Some(other) => {
+                    out.insert("content".into(), other.clone());
+                }
+                None => {
+                    out.insert("content".into(), serde_json::Value::String(String::new()));
+                }
+            }
+            if let Some(calls) = m.get("tool_calls").and_then(|v| v.as_array()) {
+                let converted: Vec<serde_json::Value> = calls
+                    .iter()
+                    .map(|tc| {
+                        let name = tc
+                            .get("function")
+                            .and_then(|f| f.get("name"))
+                            .and_then(|n| n.as_str())
+                            .unwrap_or("");
+                        let args = match tc.get("function").and_then(|f| f.get("arguments")) {
+                            Some(serde_json::Value::String(s)) => {
+                                serde_json::from_str::<serde_json::Value>(s)
+                                    .unwrap_or_else(|_| serde_json::json!({}))
+                            }
+                            Some(value) => value.clone(),
+                            None => serde_json::json!({}),
+                        };
+                        serde_json::json!({ "function": { "name": name, "arguments": args } })
+                    })
+                    .collect();
+                if !converted.is_empty() {
+                    out.insert("tool_calls".into(), serde_json::Value::Array(converted));
+                }
+            }
+            serde_json::Value::Object(out)
+        })
+        .collect()
+}
+
+/// Consumes Ollama's native `/api/chat` NDJSON stream (one JSON object per line:
+/// `{"message":{"content","tool_calls"},"done":bool}`) into the same non-streaming
+/// `body` shape used by the OpenAI path, so the agent loop is unchanged. Emits content
+/// live; normalizes native tool_calls (arguments OBJECT → JSON STRING, synthesizes an
+/// id). Salvages partial output on a mid-stream drop.
+async fn collect_ollama_native_stream(
+    resp: reqwest::Response,
+    first_token: std::time::Duration,
+    idle: std::time::Duration,
+    sink: &StreamSink,
+) -> Result<serde_json::Value, String> {
+    use futures_util::StreamExt;
+    let mut stream = resp.bytes_stream();
+    let mut pending = String::new();
+    let mut content = String::new();
+    let mut tool_calls: Vec<serde_json::Value> = Vec::new();
+    let mut got_any = false;
+    let mut done = false;
+    while !done {
+        let wait = if got_any { idle } else { first_token };
+        match tokio::time::timeout(wait, stream.next()).await {
+            Err(_) => {
+                if content.is_empty() && tool_calls.is_empty() {
+                    return Err("nessun token dal modello entro il tempo di inattività".to_string());
+                }
+                break;
+            }
+            Ok(None) => break,
+            Ok(Some(Err(error))) => {
+                if content.is_empty() && tool_calls.is_empty() {
+                    return Err(error.to_string());
+                }
+                break;
+            }
+            Ok(Some(Ok(bytes))) => {
+                got_any = true;
+                pending.push_str(&String::from_utf8_lossy(&bytes));
+                while let Some(idx) = pending.find('\n') {
+                    let line: String = pending.drain(..=idx).collect();
+                    let line = line.trim();
+                    if line.is_empty() {
+                        continue;
+                    }
+                    let Ok(json) = serde_json::from_str::<serde_json::Value>(line) else {
+                        continue;
+                    };
+                    if let Some(message) = json.get("message") {
+                        if let Some(fragment) = message
+                            .get("content")
+                            .and_then(|c| c.as_str())
+                            .filter(|s| !s.is_empty())
+                        {
+                            content.push_str(fragment);
+                            let _ = emit_stream_event(
+                                sink,
+                                GenerateStreamEvent::Delta { text: fragment.to_string() },
+                            )
+                            .await;
+                        }
+                        if let Some(calls) = message.get("tool_calls").and_then(|v| v.as_array()) {
+                            for call in calls {
+                                let name = call
+                                    .get("function")
+                                    .and_then(|f| f.get("name"))
+                                    .and_then(|n| n.as_str())
+                                    .unwrap_or("");
+                                let args = call.get("function").and_then(|f| f.get("arguments"));
+                                let args_str = match args {
+                                    Some(serde_json::Value::String(s)) => s.clone(),
+                                    Some(value) => serde_json::to_string(value)
+                                        .unwrap_or_else(|_| "{}".to_string()),
+                                    None => "{}".to_string(),
+                                };
+                                let id = format!("ollama_call_{}", tool_calls.len());
+                                tool_calls.push(serde_json::json!({
+                                    "id": id,
+                                    "type": "function",
+                                    "function": { "name": name, "arguments": args_str }
+                                }));
+                            }
+                        }
+                    }
+                    if json.get("done").and_then(|d| d.as_bool()).unwrap_or(false) {
+                        done = true;
+                    }
+                }
+            }
+        }
+    }
+    let mut message = serde_json::json!({ "role": "assistant", "content": content });
+    if !tool_calls.is_empty() {
+        message["tool_calls"] = serde_json::Value::Array(tool_calls);
+    }
+    Ok(serde_json::json!({
+        "choices": [ { "message": message, "finish_reason": "stop" } ]
+    }))
+}
+
+/// Builds the request body for a chat round, in the right shape for the provider:
+/// Ollama native (`/api/chat`: `options.num_predict`, native messages) vs OpenAI
+/// (`/v1`: `max_tokens`, `tool_choice`). Rebuilt on fallback so switching provider
+/// type mid-turn (e.g. Ollama → Z.ai) sends the correct shape.
+fn build_chat_payload(
+    model: &str,
+    base_url: &str,
+    messages: &[serde_json::Value],
+    tools: &[serde_json::Value],
+    temperature: f64,
+    is_final_round: bool,
+) -> serde_json::Value {
+    if is_ollama_base(base_url) {
+        let mut payload = serde_json::json!({
+            "model": model,
+            "messages": to_ollama_messages(messages),
+            "stream": true,
+            "options": { "temperature": temperature, "num_predict": 6000 },
+        });
+        if !is_final_round {
+            payload["tools"] = serde_json::Value::Array(tools.to_vec());
+        }
+        payload
+    } else {
+        let mut payload = serde_json::json!({
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": 6000,
+            "stream": true,
+        });
+        if !is_final_round {
+            payload["tools"] = serde_json::Value::Array(tools.to_vec());
+            payload["tool_choice"] = serde_json::Value::String("auto".to_string());
+        }
+        payload
+    }
 }
 
 fn auth_fallback_config(failing_model: &str) -> Option<(String, String, Option<String>)> {
@@ -4360,7 +4617,7 @@ all'utente cosa fare (non cliccare \"Acquista\"/\"Accedi\"/\"Prenota\").\n\
 all'utente (tabella per riga + eventuale footer Fonti)."
     );
     let system = system.as_str();
-    let mut endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let mut endpoint = chat_endpoint(&base_url);
     // Resilience: a 401 (the chosen model can't authenticate, e.g. an Ollama
     // `:cloud` model without `ollama signin`) self-heals ONCE to the orchestrator's
     // manual binding (a provider with a valid key) instead of dead-ending the turn.
@@ -4614,25 +4871,18 @@ questo elenco, chiedi di allegarlo (non cercarlo nella sandbox o nelle cartelle)
             // tools, so the loop never synthesizes and ends with "limite di passi").
             // Omitting the tools field forces a text answer.
             let is_final_round = round + 1 >= max_rounds;
-            let mut payload = serde_json::json!({
-                "model": model,
-                "messages": messages,
-                "temperature": temperature,
-                // Reasoning models need room for CoT + the final answer; without
-                // a budget the synthesis came back empty (same starvation as the
-                // planner). Generous so the final table isn't cut off.
-                "max_tokens": 6000,
-                // Stream from upstream: the connection stays alive as tokens flow, so
-                // the governor is INACTIVITY (idle timeout below) not total time —
-                // slow reasoning models (e.g. nemotron on Ollama cloud) no longer hit
-                // a total-time cap. The response is reassembled into the same
-                // non-streaming shape so the rest of the loop is unchanged.
-                "stream": true,
-            });
-            if !is_final_round {
-                payload["tools"] = serde_json::Value::Array(tool_schemas.clone());
-                payload["tool_choice"] = serde_json::Value::String("auto".to_string());
-            }
+            // Ollama (local or cloud) must use the NATIVE /api/chat: its OpenAI-compat
+            // /v1 layer drops tool calls when streaming (ollama#12557). The payload
+            // shape is provider-specific; both stream from upstream so the governor is
+            // INACTIVITY (idle timeout) not total time.
+            let mut payload = build_chat_payload(
+                &model,
+                &base_url,
+                &messages,
+                &tool_schemas,
+                temperature,
+                is_final_round,
+            );
             // Model proxies (e.g. ollama.com) occasionally return 502/timeout. Retry
             // transient failures a couple of times with backoff + a configurable
             // timeout (default 600s — slow reasoning models need far more than the old
@@ -4673,9 +4923,16 @@ questo elenco, chiedi di allegarlo (non cercarlo nella sandbox o nelle cartelle)
                                         .await;
                                         model = fb_model;
                                         base_url = fb_base;
-                                        endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+                                        endpoint = chat_endpoint(&base_url);
                                         api_key = fb_key;
-                                        payload["model"] = serde_json::Value::String(model.clone());
+                                        payload = build_chat_payload(
+                                            &model,
+                                            &base_url,
+                                            &messages,
+                                            &tool_schemas,
+                                            temperature,
+                                            is_final_round,
+                                        );
                                         attempt = 0;
                                         continue;
                                     }
@@ -4728,9 +4985,16 @@ controlla/aggiorna la chiave in Impostazioni → Modello & Runtime.".to_string()
                                         .await;
                                         model = fb_model;
                                         base_url = fb_base;
-                                        endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+                                        endpoint = chat_endpoint(&base_url);
                                         api_key = fb_key;
-                                        payload["model"] = serde_json::Value::String(model.clone());
+                                        payload = build_chat_payload(
+                                            &model,
+                                            &base_url,
+                                            &messages,
+                                            &tool_schemas,
+                                            temperature,
+                                            is_final_round,
+                                        );
                                         attempt = 0;
                                         continue;
                                     }
@@ -4748,15 +5012,21 @@ controlla/aggiorna la chiave in Impostazioni → Modello & Runtime.".to_string()
             let Some(resp) = resp else {
                 break;
             };
-            // Consume the streamed completion with a PER-CHUNK idle timeout (not a
-            // total-time cap), then reassemble it into the non-streaming body shape.
-            let body: serde_json::Value = match collect_openai_stream(
-                resp,
-                std::time::Duration::from_secs(model_idle_timeout_secs()),
-                &tx,
-            )
-            .await
-            {
+            // Consume the streamed completion with a generous FIRST-token budget +
+            // a tight inter-token idle timeout (not a total-time cap), then reassemble
+            // it into the non-streaming body shape. Ollama → NDJSON native parser;
+            // others → OpenAI SSE parser.
+            let first_token = std::time::Duration::from_secs(model_first_token_timeout_secs());
+            let idle = std::time::Duration::from_secs(model_idle_timeout_secs());
+            // Reflect the provider actually used (a 401/timeout fallback may have
+            // switched it) so we parse the right stream format.
+            let ollama = is_ollama_base(&base_url);
+            let collected = if ollama {
+                collect_ollama_native_stream(resp, first_token, idle, &tx).await
+            } else {
+                collect_openai_stream(resp, first_token, idle, &tx).await
+            };
+            let body: serde_json::Value = match collected {
                 Ok(value) => value,
                 Err(error) => {
                     let _ = emit_stream_event(
@@ -18227,6 +18497,36 @@ data: [DONE]\n";
         let plain = "{\"choices\":[{\"message\":{\"content\":\"hi\"}}]}";
         let body3 = crate::reassemble_openai_stream(plain);
         assert_eq!(body3["choices"][0]["message"]["content"], "hi");
+    }
+
+    #[test]
+    fn ollama_native_routing_and_message_conversion() {
+        // Detection: local daemon + cloud are Ollama; Z.ai / OpenAI are not.
+        assert!(crate::is_ollama_base("http://127.0.0.1:11434/v1"));
+        assert!(crate::is_ollama_base("https://ollama.com/v1"));
+        assert!(!crate::is_ollama_base("https://api.z.ai/api/coding/paas/v4"));
+        assert!(!crate::is_ollama_base("https://api.openai.com/v1"));
+        // Endpoint: Ollama strips /v1 → native /api/chat; others → /chat/completions.
+        assert_eq!(
+            crate::chat_endpoint("http://127.0.0.1:11434/v1"),
+            "http://127.0.0.1:11434/api/chat"
+        );
+        assert_eq!(crate::chat_endpoint("https://ollama.com/v1"), "https://ollama.com/api/chat");
+        assert_eq!(
+            crate::chat_endpoint("https://api.z.ai/api/coding/paas/v4"),
+            "https://api.z.ai/api/coding/paas/v4/chat/completions"
+        );
+        // Message conversion: assistant tool_calls arguments STRING → OBJECT (native).
+        let msgs = vec![serde_json::json!({
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "x", "type": "function",
+                "function": { "name": "read_file", "arguments": "{\"path\":\"a.txt\"}" }
+            }]
+        })];
+        let converted = crate::to_ollama_messages(&msgs);
+        assert_eq!(converted[0]["tool_calls"][0]["function"]["arguments"]["path"], "a.txt");
     }
 
     #[test]
