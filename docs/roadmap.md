@@ -264,8 +264,21 @@ col pulsante per fare la cosa. Pattern condiviso coi confirm-card Composio/MCP.
    converte multimodale/tool_calls. Timeout: first-token 300s + idle 180s, ceiling
    3600s (un total-timeout a metà stream = il "error decoding response body" di
    reqwest#2839). Verificato: 5 `recall_memory` dispatchati via streaming nativo, no
-   drop/errori. Resta da rifinire la sintesi finale in alcuni turni (stringa canned
-   "non riesco a estrarre dalle fonti").
+   drop/errori. **Disciplina ollama-rs (2026-06-08)**: confrontato con
+   `pepperoni21/ollama-rs` (riferimento) → allineati su endpoint/NDJSON/shape/options;
+   adottato il loro vincolo `stream` MUST be false coi tool (tool rounds = singola
+   richiesta non-streamata, affidabile; stream solo nel round finale senza tool per i
+   token live), `keep_alive "10m"` (modello locale caldo), e il "remaining buffer" per
+   la risposta single-object. **Browser = motore unico**: il ruolo `browser` era legato
+   a `ollama-locale/minimax-m3:cloud` (cloud-model-su-locale, rotto) → slegato (auto) →
+   `browser_openai_stream_config` ritorna None per auto → il browser usa l'orchestratore
+   (verificato: 0 "Passo al modello browser"). Per "error decoding response body"
+   intermittente: client streaming HTTP/1.1 + no-pool + diagnostica live.
+   **DA FIXARE (memoria!)**: il ruolo `memory` in auto risolve a
+   `ollama-locale/minimax-m3:cloud` (rotto) → l'estrazione memoria gira su un endpoint
+   che fallisce → **la memoria potrebbe non imparare**. Causa: l'auto-router accoppia un
+   modello `:cloud` col provider LOCALE invece che cloud. Fix: legare `memory` a
+   ollama-cloud, o correggere l'accoppiamento provider del router.
 
 0. **Streaming dall'upstream del modello.** RISOLTO (2026-06-08, `e87afc4`). Causa dei
    timeout: chat con `"stream": false` + cap sul tempo TOTALE → un modello lento/
