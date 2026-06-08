@@ -1,5 +1,6 @@
 // Shared browser high-risk safety gate (used by the main-agent-driven
 // browser_* tools).
+mod attachments;
 mod browser_safety;
 mod chat_store;
 // Multi-provider inference registry (Phase 1 of per-role model routing).
@@ -3744,14 +3745,34 @@ all'utente (tabella per riga + eventuale footer Fonti)."
     if !artifact_destinations.is_empty() && !read_only {
         base_tools.push(save_artifact_tool_schema(&artifact_destinations));
     }
-    // Vision: when the request carries images, the user message becomes
-    // multimodal content (text + image_url parts) per the OpenAI-compatible
-    // schema; otherwise it stays a plain string.
-    let user_content = if request.images.is_empty() {
-        serde_json::Value::String(prompt.clone())
+    // Attachments: read each attached file (off the runtime) and turn it into
+    // model-visible content — extracted text (PDF text layer / text files) appended
+    // to the prompt, plus images (photos, or scanned-PDF pages rasterized via
+    // pdfium) added to the vision parts. Attaching IS the access grant for that file.
+    let ingested = if request.attachments.is_empty() {
+        attachments::IngestedAttachments::default()
     } else {
-        let mut parts = vec![serde_json::json!({ "type": "text", "text": prompt })];
-        for url in &request.images {
+        let atts = request.attachments.clone();
+        tokio::task::spawn_blocking(move || attachments::ingest_attachments(&atts))
+            .await
+            .unwrap_or_default()
+    };
+    let mut model_text = prompt.clone();
+    if !ingested.text.trim().is_empty() {
+        model_text.push_str("\n\n--- Contenuto degli allegati ---");
+        model_text.push_str(&ingested.text);
+    }
+    let mut all_images = request.images.clone();
+    all_images.extend(ingested.images);
+
+    // Vision: when the turn carries images (request + rendered attachments), the
+    // user message becomes multimodal content (text + image_url parts) per the
+    // OpenAI-compatible schema; otherwise it stays a plain string.
+    let user_content = if all_images.is_empty() {
+        serde_json::Value::String(model_text.clone())
+    } else {
+        let mut parts = vec![serde_json::json!({ "type": "text", "text": model_text })];
+        for url in &all_images {
             parts.push(serde_json::json!({
                 "type": "image_url",
                 "image_url": { "url": url }
@@ -7369,6 +7390,7 @@ async fn run_agent_turn(
         max_context_chars: None,
         model: None,
         images: Vec::new(),
+        attachments: Vec::new(),
         max_tokens: 2000,
         temperature: 0.3,
         wait_if_busy: true,

@@ -3,6 +3,8 @@ interface LocalFirstDesktopConfig {
   gatewayToken?: string;
   pickFolder?: () => Promise<string | null>;
   revealPath?: (path: string) => Promise<boolean>;
+  /** Resolves a File to its absolute on-disk path (Electron webUtils). Sync. */
+  getPathForFile?: (file: File) => string;
 }
 
 declare global {
@@ -60,5 +62,19 @@ export async function revealWorkspacePath(path: string): Promise<boolean> {
     return await reveal(path);
   } catch {
     return false;
+  }
+}
+
+/** Resolves a File (picked or dropped) to its absolute on-disk path via Electron's
+ *  webUtils. Returns "" outside Electron or for files with no on-disk backing
+ *  (e.g. pasted/synthetic Files). Synchronous — must be called with the original
+ *  File object (don't clone/spread it, or the native backing is lost). */
+export function fileLocalPathFromBridge(file: File): string {
+  const resolve = desktopConfig?.getPathForFile;
+  if (!resolve) return "";
+  try {
+    return resolve(file) ?? "";
+  } catch {
+    return "";
   }
 }

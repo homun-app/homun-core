@@ -1411,6 +1411,7 @@ export const coreBridge = {
       undefined,
       model,
       images,
+      attachments,
     ),
   improvePrompt: (prompt: string) => electronImprovePrompt(prompt),
   chatSuggestions: (prompt: string, answer: string) =>
@@ -2020,6 +2021,7 @@ async function submitBrowserRuntimeChatPromptStream(
   previousAssistantText?: string,
   model?: string,
   images?: string[],
+  attachments?: ChatAttachmentInput[],
 ): Promise<CorePromptSubmissionResult> {
   const startedAt = performance.now();
   const maxTokens = browserChatMaxTokens(prompt);
@@ -2035,6 +2037,7 @@ async function submitBrowserRuntimeChatPromptStream(
     threadId,
     model,
     images,
+    attachments,
   );
   const promptBuildSeconds = roundedSeconds(
     (performance.now() - promptBuildStartedAt) / 1000,
@@ -2246,6 +2249,7 @@ async function openChatStreamWithGateway(
   threadId?: string,
   model?: string,
   images?: string[],
+  attachments?: ChatAttachmentInput[],
 ) {
   try {
     const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/chat/generate_stream`, {
@@ -2266,6 +2270,20 @@ async function openChatStreamWithGateway(
         ...(model ? { model } : {}),
         // Vision: base64 data-URL images for multimodal models.
         ...(images && images.length > 0 ? { images } : {}),
+        // Attachments: the gateway reads each by local_path (same host) and turns
+        // PDFs/text/images into model-visible content. snake_case wire shape.
+        ...(attachments && attachments.length > 0
+          ? {
+              attachments: attachments
+                .filter((a) => a.localPath)
+                .map((a) => ({
+                  local_path: a.localPath,
+                  display_name: a.displayName,
+                  mime_type: a.mimeType,
+                  size_bytes: a.sizeBytes,
+                })),
+            }
+          : {}),
       }),
     });
     if (response.ok) {

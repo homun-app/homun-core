@@ -64,6 +64,7 @@ import {
   createUnavailableComputerSession,
   mapCoreComputerSession,
 } from "../lib/localComputerViewModel";
+import { fileLocalPathFromBridge } from "../lib/gatewayConfig";
 import { RichMessage } from "./RichMessage";
 import { CodeView, DiffView, diffStats } from "./CodeView";
 import { ChatComputerPanel } from "./ChatComputerPanel";
@@ -4890,9 +4891,27 @@ function Composer({
 
   function handleComposerDrop(event: DragEvent<HTMLFormElement>) {
     const files = Array.from(event.dataTransfer?.files ?? []);
-    if (files.some((file) => file.type.startsWith("image/"))) {
-      event.preventDefault();
-      addImageFiles(files);
+    if (files.length === 0) {
+      setDragOver(false);
+      return;
+    }
+    event.preventDefault();
+    // Images → vision (base64 inline); everything else (PDF, docs, text) →
+    // attachment with its on-disk path, same as the paperclip picker.
+    const images = files.filter((file) => file.type.startsWith("image/"));
+    const others = files.filter((file) => !file.type.startsWith("image/"));
+    if (images.length > 0) addImageFiles(images);
+    if (others.length > 0) {
+      setAttachments((current) => [
+        ...current,
+        ...others.map((file) => ({
+          id: `${file.name}_${file.size}_${file.lastModified}`,
+          name: file.name,
+          size: file.size,
+          type: file.type || "file",
+          localPath: fileLocalPath(file),
+        })),
+      ]);
     }
     setDragOver(false);
   }
@@ -5363,6 +5382,10 @@ function formatFileSize(size: number) {
 }
 
 function fileLocalPath(file: File): string {
+  // Electron >= 32 removed File.path; resolve via webUtils.getPathForFile (preload
+  // bridge). Falls back to the legacy property for any older shell, then "".
+  const viaBridge = fileLocalPathFromBridge(file);
+  if (viaBridge) return viaBridge;
   const fileWithPath = file as File & { path?: string };
   return fileWithPath.path ?? "";
 }
