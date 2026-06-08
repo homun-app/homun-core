@@ -3977,9 +3977,21 @@ fn chat_context_budget_chars() -> usize {
 /// Max model↔tool round-trips. The LAST round forbids tools (tool_choice:none) so
 /// the model always synthesizes a final answer from what it gathered. With 3:
 /// up to 2 tool calls (search + optional follow-up), then a forced answer.
-/// Max model↔tool rounds. Allows discovery (find_connected_tools) → execute →
-/// synthesize without starving the final answer.
-const MAX_TOOL_ROUNDS: usize = 5;
+/// Max model↔tool rounds for a normal turn. An AGENTIC coding task (scaffold several
+/// files → record a decision → run/verify) routinely needs more than a handful of
+/// tool calls, so 5 was starving multi-step work into the forced synthesis. 16 is a
+/// safe default — it's a CAP, not a target (a simple chat still answers in round 0–1).
+/// Env-overridable via `LOCAL_FIRST_CHAT_MAX_ROUNDS`.
+const MAX_TOOL_ROUNDS: usize = 16;
+
+/// Round budget for a normal (non-browser) turn (env-overridable).
+fn chat_max_rounds() -> usize {
+    env::var("LOCAL_FIRST_CHAT_MAX_ROUNDS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(MAX_TOOL_ROUNDS)
+}
 /// Round budget once a browser tool is in play. Driving a browser one micro-action
 /// at a time (navigate → snapshot → act → re-snapshot …) needs many more
 /// model↔tool round-trips than a normal chat turn. Env-overridable via
@@ -4979,7 +4991,7 @@ questo elenco, chiedi di allegarlo (non cercarlo nella sandbox o nelle cartelle)
             let max_rounds = if browser_used {
                 chat_browser_max_rounds()
             } else {
-                MAX_TOOL_ROUNDS
+                chat_max_rounds()
             };
             // Hard stop once the effective budget is reached (the forced-synthesis
             // fallback below still runs because `final_done` is false).
