@@ -1968,21 +1968,31 @@ function McpCatalogCard({
     setBusy(true);
     onNote(null);
     try {
-      // Assemble: env-inputs → env map; arg-inputs → appended to base args in order.
+      // Assemble inputs by target: env → env map, header → headers map (remote),
+      // arg → appended to base args (stdio).
       const env: Record<string, string> = {};
+      const headers: Record<string, string> = {};
       const extraArgs: string[] = [];
       for (const input of server.inputs) {
         const value = (values[input.key] ?? input.default ?? "").trim();
         if (!value) continue;
         if (input.target === "env") env[input.key] = value;
+        else if (input.target === "header") headers[input.key] = value;
         else extraArgs.push(value);
       }
-      const result = await coreBridge.mcpConnect({
-        name: server.name,
-        command: server.command,
-        args: [...server.args, ...extraArgs],
-        env,
-      });
+      const result =
+        server.transport === "http"
+          ? await coreBridge.mcpConnect({
+              name: server.name,
+              url: server.url ?? undefined,
+              headers,
+            })
+          : await coreBridge.mcpConnect({
+              name: server.name,
+              command: server.command,
+              args: [...server.args, ...extraArgs],
+              env,
+            });
       onNote(
         result.discovery_error
           ? `Connesso con avviso: ${result.discovery_error}`
@@ -2061,7 +2071,9 @@ function McpCatalogCard({
                   .join(", ")}
           </div>
           <div>
-            <div className="mdl-detail-section-label">Comando</div>
+            <div className="mdl-detail-section-label">
+              {server.transport === "http" ? "Endpoint" : "Comando"}
+            </div>
             <code style={{ fontSize: 11, opacity: 0.75, wordBreak: "break-all" }}>
               {server.command} {server.args.join(" ")}
             </code>

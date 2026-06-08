@@ -12,6 +12,7 @@ mod skills_catalog;
 mod skill_security;
 // Skill execution sandbox (reuses the browser's contained-computer container).
 mod process_skills;
+mod mcp_http;
 mod mcp_registry;
 mod sandbox;
 mod task_registry;
@@ -47,6 +48,7 @@ use local_first_capabilities::{
     CapabilityProviderGrant, CapabilityProviderKind, CapabilityRegistryStore, CapabilityResult,
     CapabilityTaskPayload, ComposioCapabilityProvider, ComposioProviderConfig, ComposioTransport,
     InMemoryCapabilityAudit, McpCapabilityProvider, McpStdioConfig, McpStdioTransport, McpToolPolicy,
+    McpTransport,
     PolicyContext, ProviderId as CapabilityProviderId, UserId as CapabilityUserId,
     WorkspaceId as CapabilityWorkspaceId,
 };
@@ -9249,11 +9251,8 @@ fn execute_capability_generic(
             let connection = connection.ok_or_else(|| LocalTaskExecutionError {
                 message: format!("nessuna connessione per provider {}", provider_id.as_str()),
             })?;
-            let config = mcp_stdio_config_from_metadata(&connection.metadata)?;
-            let transport =
-                McpStdioTransport::spawn(config).map_err(|error| LocalTaskExecutionError {
-                    message: format!("avvio MCP fallito: {error}"),
-                })?;
+            let transport = build_mcp_transport(&connection.metadata)
+                .map_err(|message| LocalTaskExecutionError { message })?;
             let mut facade = CapabilityFacade::new(
                 CapabilityPolicy::default(),
                 InMemoryCapabilityAudit::default(),
@@ -9379,6 +9378,75 @@ fn mcp_stdio_config_to_metadata(config: &McpStdioConfig) -> Value {
     })
 }
 
+/// Serializes a remote (streamable-HTTP) MCP connection to metadata.
+fn mcp_http_config_to_metadata(
+    url: &str,
+    headers: &std::collections::HashMap<String, String>,
+) -> Value {
+    let headers_obj: serde_json::Map<String, Value> = headers
+        .iter()
+        .map(|(key, value)| (key.clone(), Value::String(value.clone())))
+        .collect();
+    serde_json::json!({
+        "transport": "http",
+        "url": url,
+        "headers": Value::Object(headers_obj),
+    })
+}
+
+/// One transport type covering both MCP flavors, so a single
+/// `McpCapabilityProvider<McpAnyTransport>` handles stdio AND remote servers.
+enum McpAnyTransport {
+    Stdio(McpStdioTransport),
+    Http(mcp_http::McpHttpTransport),
+}
+
+impl McpTransport for McpAnyTransport {
+    fn request(&self, method: &str, params: Option<Value>) -> CapabilityResult<Value> {
+        match self {
+            McpAnyTransport::Stdio(t) => t.request(method, params),
+            McpAnyTransport::Http(t) => t.request(method, params),
+        }
+    }
+    fn notify(&self, method: &str, params: Option<Value>) -> CapabilityResult<()> {
+        match self {
+            McpAnyTransport::Stdio(t) => t.notify(method, params),
+            McpAnyTransport::Http(t) => t.notify(method, params),
+        }
+    }
+}
+
+/// Builds the right transport from a connection's metadata `transport` field:
+/// `"http"` → remote streamable-HTTP, anything else → local stdio.
+fn build_mcp_transport(metadata: &Value) -> Result<McpAnyTransport, String> {
+    let kind = metadata.get("transport").and_then(Value::as_str).unwrap_or("stdio");
+    if kind == "http" {
+        let url = metadata
+            .get("url")
+            .and_then(Value::as_str)
+            .filter(|u| !u.trim().is_empty())
+            .ok_or_else(|| "metadata MCP http senza `url`".to_string())?
+            .to_string();
+        let headers = metadata
+            .get("headers")
+            .and_then(Value::as_object)
+            .map(|map| {
+                map.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_string())))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let transport = mcp_http::McpHttpTransport::connect(mcp_http::McpHttpConfig { url, headers })
+            .map_err(|e| format!("avvio MCP http fallito: {e}"))?;
+        Ok(McpAnyTransport::Http(transport))
+    } else {
+        let config = mcp_stdio_config_from_metadata(metadata).map_err(|e| e.message)?;
+        let transport =
+            McpStdioTransport::spawn(config).map_err(|e| format!("avvio MCP fallito: {e}"))?;
+        Ok(McpAnyTransport::Stdio(transport))
+    }
+}
+
 /// Slugifies a user-supplied MCP server name into a stable provider id segment:
 /// lowercase, ASCII alphanumerics and dashes only, collapsed, never empty.
 fn mcp_provider_slug(name: &str) -> String {
@@ -9404,11 +9472,19 @@ fn mcp_provider_slug(name: &str) -> String {
 #[derive(Debug, Deserialize)]
 struct ConnectMcpRequest {
     name: String,
+    /// Local stdio command. Empty when connecting a remote server (see `url`).
+    #[serde(default)]
     command: String,
     #[serde(default)]
     args: Vec<String>,
     #[serde(default)]
     env: std::collections::HashMap<String, String>,
+    /// Remote (streamable-HTTP) endpoint. When set, connects over HTTP not stdio.
+    #[serde(default)]
+    url: Option<String>,
+    /// Extra request headers (auth) for the remote endpoint.
+    #[serde(default)]
+    headers: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -9436,11 +9512,17 @@ fn connect_mcp_blocking(
 ) -> Result<ConnectMcpResponse, GatewayError> {
     let name = request.name.trim().to_string();
     let command = request.command.trim().to_string();
-    if name.is_empty() || command.is_empty() {
+    let url = request
+        .url
+        .as_ref()
+        .map(|u| u.trim().to_string())
+        .filter(|u| !u.is_empty());
+    if name.is_empty() || (url.is_none() && command.is_empty()) {
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "mcp_connect_invalid",
-            message: "MCP connect requires a non-empty name and command".to_string(),
+            message: "MCP connect richiede un nome e un comando (stdio) o un url (remoto)."
+                .to_string(),
         });
     }
 
@@ -9449,12 +9531,21 @@ fn connect_mcp_blocking(
     let connection_id = format!("mcp-{slug}");
     let user = gateway_capability_user_id();
     let workspace = gateway_capability_workspace_id();
-    let config = McpStdioConfig {
-        command,
-        args: request.args,
-        env: request.env.into_iter().collect(),
+    // Remote (http) when a url is given, else local stdio.
+    let (metadata, secret_label) = match &url {
+        Some(url) => (
+            mcp_http_config_to_metadata(url, &request.headers),
+            format!("http:{slug}"),
+        ),
+        None => {
+            let config = McpStdioConfig {
+                command,
+                args: request.args,
+                env: request.env.into_iter().collect(),
+            };
+            (mcp_stdio_config_to_metadata(&config), format!("stdio:{slug}"))
+        }
     };
-    let metadata = mcp_stdio_config_to_metadata(&config);
 
     {
         let registry = lock_capability_registry(state)?;
@@ -9485,18 +9576,18 @@ fn connect_mcp_blocking(
                     user.clone(),
                     workspace.clone(),
                     name.clone(),
-                    format!("stdio:{slug}"),
+                    secret_label,
                 )
                 .with_privacy_domains(vec!["local".to_string()])
-                .with_metadata(metadata),
+                .with_metadata(metadata.clone()),
             )
             .map_err(GatewayError::capability)?;
     }
 
-    // Best-effort discovery: spawn the server, MCP-initialize, list tools, cache
-    // them. Any failure is reported (not swallowed) and leaves the registration.
+    // Best-effort discovery: connect (spawn/HTTP), MCP-initialize, list tools,
+    // cache them. Any failure is reported (not swallowed) and leaves the registration.
     let (tools_cached, discovery_error) =
-        match mcp_discover_and_cache_tools(state, &provider_id, config) {
+        match mcp_discover_and_cache_tools(state, &provider_id, &metadata) {
             Ok(count) => (count, None),
             Err(message) => (0, Some(message)),
         };
@@ -9515,10 +9606,9 @@ fn connect_mcp_blocking(
 fn mcp_discover_and_cache_tools(
     state: &AppState,
     provider_id: &CapabilityProviderId,
-    config: McpStdioConfig,
+    metadata: &Value,
 ) -> Result<usize, String> {
-    let transport = McpStdioTransport::spawn(config)
-        .map_err(|error| format!("avvio MCP fallito: {error}"))?;
+    let transport = build_mcp_transport(metadata)?;
     let provider = McpCapabilityProvider::new(provider_id.clone(), true, transport, Vec::new());
     // Handshake first; some servers reject tools/list before initialize.
     provider
@@ -10216,10 +10306,7 @@ fn run_mcp_chat_tool(
             .map_err(|e| format!("policy context: {e}"))?;
         (connection, tool_policies, policy_context)
     };
-    let config = mcp_stdio_config_from_metadata(&connection.metadata)
-        .map_err(|e| format!("config MCP: {}", e.message))?;
-    let transport =
-        McpStdioTransport::spawn(config).map_err(|e| format!("avvio MCP fallito: {e}"))?;
+    let transport = build_mcp_transport(&connection.metadata)?;
     let provider =
         McpCapabilityProvider::new(provider_id.clone(), true, transport, tool_policies);
     // MCP requires the initialize handshake before tools/call (strict servers
