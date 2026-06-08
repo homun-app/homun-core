@@ -3495,6 +3495,8 @@ async fn collect_openai_stream(
                 }
             }
             Ok(Some(Err(error))) => {
+                // DIAGNOSTIC: full error chain (Display hides the real cause; #2839).
+                eprintln!("[stream-error openai] debug={error:?} source={:?}", std::error::Error::source(&error));
                 // Mid-stream drop ("error decoding response body" — common when a
                 // cloud proxy resets a long generation near the end): salvage the
                 // partial output instead of failing the whole turn.
@@ -3648,6 +3650,8 @@ async fn collect_ollama_native_stream(
             }
             Ok(None) => break,
             Ok(Some(Err(error))) => {
+                // DIAGNOSTIC: full error chain (Display hides the real cause; #2839).
+                eprintln!("[stream-error ollama] debug={error:?} source={:?}", std::error::Error::source(&error));
                 if content.is_empty() && tool_calls.is_empty() {
                     return Err(error.to_string());
                 }
@@ -4800,7 +4804,16 @@ questo elenco, chiedi di allegarlo (non cercarlo nella sandbox o nelle cartelle)
         map.insert(resume_id.clone(), stream_entry.clone());
     }
     let tx = StreamSink { mpsc: mpsc_tx, entry: stream_entry };
-    let http = state.http.clone();
+    // Dedicated STREAMING client: HTTP/1.1 (avoids HTTP/2 RST_STREAM that CDNs in
+    // front of cloud model hosts can throw on long streams) + no idle connection
+    // reuse (a stale pooled keep-alive connection is a classic cause of the
+    // intermittent "error decoding response body" mid/early stream). Falls back to the
+    // shared pooled client if the builder fails.
+    let http = reqwest::Client::builder()
+        .http1_only()
+        .pool_max_idle_per_host(0)
+        .build()
+        .unwrap_or_else(|_| state.http.clone());
     let state_owned = state.clone();
     let temperature = request.temperature;
     // Thread this chat belongs to: lets browser work reuse a persistent
