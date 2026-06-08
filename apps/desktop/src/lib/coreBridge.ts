@@ -1030,12 +1030,19 @@ async function electronComposioExecute(
   });
 }
 
-/** In-chat folder authorization: grant access + run the pending op (list/read). */
+/** In-chat folder authorization: grant access + run the pending op (list/read).
+ *  `ctx` lets the backend rewrite the originating message so the card can't reopen. */
 async function electronFsAuthorize(
   path: string,
   op: string,
+  ctx?: { threadId?: string; messageId?: string },
 ): Promise<{ ok: boolean; output?: string; summary?: string }> {
-  return gatewayPostJson("/api/fs/authorize", { path, op });
+  return gatewayPostJson("/api/fs/authorize", {
+    path,
+    op,
+    ...(ctx?.threadId ? { thread_id: ctx.threadId } : {}),
+    ...(ctx?.messageId ? { message_id: ctx.messageId } : {}),
+  });
 }
 
 /** Executes an MCP server tool on user confirmation (no "always allow" in v1). */
@@ -1275,7 +1282,11 @@ export const coreBridge = {
     args: unknown,
     ctx?: { threadId?: string; messageId?: string },
   ) => electronMcpExecute(tool, args, ctx),
-  fsAuthorize: (path: string, op: string) => electronFsAuthorize(path, op),
+  fsAuthorize: (
+    path: string,
+    op: string,
+    ctx?: { threadId?: string; messageId?: string },
+  ) => electronFsAuthorize(path, op, ctx),
   composioAllowedTools: () => electronComposioAllowedTools(),
   composioRevokeTool: (slug: string) => electronComposioRevokeTool(slug),
   skills: () => electronSkills(),

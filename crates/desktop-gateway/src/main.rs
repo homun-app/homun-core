@@ -11292,17 +11292,52 @@ async fn mcp_disconnect(
     Ok(Json(serde_json::json!({ "removed": removed > 0 })))
 }
 
+const FS_AUTHORIZE_OPEN: &str = "‹‹FS_AUTHORIZE››";
+const FS_AUTHORIZE_CLOSE: &str = "‹‹/FS_AUTHORIZE››";
+
+/// Rewrites the authorize-card marker into a plain "granted" note so reopening
+/// the chat doesn't re-show the actionable card (mirrors the Composio/MCP path).
+fn rewrite_fs_authorize_to_done(text: &str, path: &str) -> String {
+    let Some(open) = text.find(FS_AUTHORIZE_OPEN) else {
+        return text.to_string();
+    };
+    let Some(close_rel) = text[open..].find(FS_AUTHORIZE_CLOSE) else {
+        return text.to_string();
+    };
+    let close = open + close_rel + FS_AUTHORIZE_CLOSE.len();
+    let head_end = text[..open].rfind("Per accedere a questa cartella").unwrap_or(open);
+    let mut out = text[..head_end].trim_end().to_string();
+    let tail = text[close..].trim();
+    if !tail.is_empty() {
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str(tail);
+    }
+    if !out.is_empty() {
+        out.push_str("\n\n");
+    }
+    out.push_str(&format!("✓ Accesso concesso a {path}"));
+    out
+}
+
 #[derive(Debug, Deserialize)]
 struct FsAuthorizeRequest {
     path: String,
     #[serde(default)]
     op: String,
+    #[serde(default)]
+    thread_id: Option<String>,
+    #[serde(default)]
+    message_id: Option<String>,
 }
 
 /// In-chat folder authorization: grants native filesystem access to a folder
 /// (adds it to the authorized set) and runs the pending op (list/read), so the
-/// user authorizes AND sees the result without leaving the conversation.
+/// user authorizes AND sees the result without leaving the conversation. On
+/// success rewrites the originating message so the card can't reopen.
 async fn fs_authorize(
+    State(state): State<AppState>,
     Json(request): Json<FsAuthorizeRequest>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let Some(path) = fs_expand_abs(&request.path) else {
@@ -11312,13 +11347,14 @@ async fn fs_authorize(
             message: "Percorso non valido.".to_string(),
         });
     };
-    let op = request.op;
+    let op = request.op.clone();
+    let task_path = path.clone();
     let result = tokio::task::spawn_blocking(move || -> Result<String, String> {
-        fs_authorize_folder(&path)?;
+        fs_authorize_folder(&task_path)?;
         Ok(if op == "read" {
-            fs_read_text(&path)
+            fs_read_text(&task_path)
         } else {
-            fs_list_dir_contents(&path)
+            fs_list_dir_contents(&task_path)
         })
     })
     .await
@@ -11327,12 +11363,25 @@ async fn fs_authorize(
         code: "fs_authorize_join",
         message: e.to_string(),
     })?;
-    Ok(Json(match result {
+    match result {
         Ok(output) => {
-            serde_json::json!({ "ok": true, "output": output.chars().take(6000).collect::<String>() })
+            // Persist: rewrite the card marker to a "granted" note (no reopen on reload).
+            if let (Some(thread_id), Some(message_id)) = (&request.thread_id, &request.message_id) {
+                if let Ok(store) = lock_store(&state) {
+                    if let Ok(Some(message)) = store.message(thread_id, message_id) {
+                        let rewritten =
+                            rewrite_fs_authorize_to_done(&message.text, &path.display().to_string());
+                        let _ = store.set_message_text(thread_id, message_id, &rewritten);
+                    }
+                }
+            }
+            Ok(Json(serde_json::json!({
+                "ok": true,
+                "output": output.chars().take(6000).collect::<String>()
+            })))
         }
-        Err(message) => serde_json::json!({ "ok": false, "summary": message }),
-    }))
+        Err(message) => Ok(Json(serde_json::json!({ "ok": false, "summary": message }))),
+    }
 }
 
 const MCP_CONFIRM_OPEN: &str = "‹‹MCP_CONFIRM››";
@@ -17574,6 +17623,18 @@ mod tests {
             assert_eq!(info.locality, "local", "backend: {backend}");
             assert_eq!(info.model, "gpt-4o-mini", "backend: {backend}");
         }
+    }
+
+    #[test]
+    fn fs_authorize_rewrite_drops_card_marker() {
+        let text = "Per accedere a questa cartella mi serve la tua autorizzazione.\n\
+‹‹FS_AUTHORIZE››{\"path\":\"/Users/fabio/Projects\",\"op\":\"list\"}‹‹/FS_AUTHORIZE››\n";
+        let out = crate::rewrite_fs_authorize_to_done(text, "/Users/fabio/Projects");
+        assert!(!out.contains("FS_AUTHORIZE"), "marker removed");
+        assert!(!out.contains("mi serve la tua autorizzazione"), "prompt line removed");
+        assert!(out.contains("✓ Accesso concesso a /Users/fabio/Projects"));
+        // No-op when the marker is absent (idempotent on already-rewritten text).
+        assert_eq!(crate::rewrite_fs_authorize_to_done("ciao", "/x"), "ciao");
     }
 
     #[test]
