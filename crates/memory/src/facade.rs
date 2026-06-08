@@ -233,6 +233,36 @@ impl MemoryFacade {
         Ok(self.store.record_wiki_page(page)?)
     }
 
+    pub fn upsert_embedding(
+        &self,
+        reference: &MemoryRef,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        model: &str,
+        vector: &[f32],
+    ) -> MemoryResult<()> {
+        Ok(self
+            .store
+            .upsert_embedding(reference, user_id, workspace_id, model, vector)?)
+    }
+
+    pub fn list_embeddings(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> MemoryResult<Vec<(MemoryRef, Vec<f32>)>> {
+        Ok(self.store.list_embeddings(user_id, workspace_id)?)
+    }
+
+    pub fn refs_without_embeddings(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        limit: usize,
+    ) -> MemoryResult<Vec<MemoryRef>> {
+        Ok(self.store.refs_without_embeddings(user_id, workspace_id, limit)?)
+    }
+
     pub fn apply_extraction(
         &self,
         user_id: &UserId,

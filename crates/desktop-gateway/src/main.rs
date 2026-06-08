@@ -1084,6 +1084,106 @@ fn jaccard(a: &std::collections::HashSet<String>, b: &std::collections::HashSet<
 /// language-agnostic — no stopword list).
 const DEDUP_JACCARD: f32 = 0.55;
 
+// ---- Embeddings (multilingual semantic layer) -----------------------------------
+// A multilingual embedding model (nomic-embed-text-v2-moe by default, via the local
+// Ollama) gives language-agnostic SEMANTIC similarity — fuses paraphrases of the same
+// decision (and across languages) for dedup, and powers semantic recall. Vectors are
+// stored per memory; similarity is brute-force cosine (fine at local single-user scale).
+
+fn embed_model() -> String {
+    env::var("LOCAL_FIRST_EMBED_MODEL").unwrap_or_else(|_| "nomic-embed-text-v2-moe".to_string())
+}
+fn embed_base() -> String {
+    env::var("LOCAL_FIRST_EMBED_BASE").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string())
+}
+
+/// Embed one text via Ollama `/api/embed`. Best-effort: `None` on any failure (the
+/// caller falls back to lexical), so embeddings never break a turn.
+async fn embed_text(http: &reqwest::Client, text: &str) -> Option<Vec<f32>> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let url = format!("{}/api/embed", embed_base().trim_end_matches('/'));
+    let resp = http
+        .post(&url)
+        .timeout(std::time::Duration::from_secs(30))
+        .json(&serde_json::json!({ "model": embed_model(), "input": trimmed }))
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body: serde_json::Value = resp.json().await.ok()?;
+    let arr = body
+        .get("embeddings")
+        .and_then(|e| e.get(0))
+        .and_then(|v| v.as_array())
+        .cloned()
+        .or_else(|| body.get("embedding").and_then(|v| v.as_array()).cloned())?;
+    let vector: Vec<f32> = arr.iter().filter_map(|x| x.as_f64().map(|f| f as f32)).collect();
+    (!vector.is_empty()).then_some(vector)
+}
+
+fn cosine(a: &[f32], b: &[f32]) -> f32 {
+    if a.len() != b.len() || a.is_empty() {
+        return 0.0;
+    }
+    let mut dot = 0f32;
+    let mut na = 0f32;
+    let mut nb = 0f32;
+    for i in 0..a.len() {
+        dot += a[i] * b[i];
+        na += a[i] * a[i];
+        nb += b[i] * b[i];
+    }
+    if na == 0.0 || nb == 0.0 {
+        return 0.0;
+    }
+    dot / (na.sqrt() * nb.sqrt())
+}
+
+/// Cosine above which two memories are the same thing (semantic dedup / collapse).
+const DEDUP_COSINE: f32 = 0.88;
+
+/// Embed memories in a scope that don't yet have a vector (lazy backfill). Collects
+/// refs+texts under the lock, embeds OFF the lock (async HTTP), writes back. Bounded
+/// per call so it never stalls a turn.
+async fn backfill_embeddings(
+    state: &AppState,
+    user: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+    limit: usize,
+) {
+    let pending: Vec<(MemoryRef, String)> = {
+        let Ok(facade) = lock_memory_facade(state) else {
+            return;
+        };
+        let Ok(refs) = facade.refs_without_embeddings(user, workspace, limit) else {
+            return;
+        };
+        if refs.is_empty() {
+            return;
+        }
+        let text_by_ref: std::collections::HashMap<String, String> = facade
+            .list_memories_for_ui(user, workspace)
+            .map(|mems| mems.into_iter().map(|m| (m.reference.to_string(), m.text)).collect())
+            .unwrap_or_default();
+        refs.into_iter()
+            .filter_map(|r| text_by_ref.get(&r.to_string()).cloned().map(|t| (r, t)))
+            .collect()
+    };
+    let model = embed_model();
+    for (reference, text) in pending {
+        if let Some(vector) = embed_text(&state.http, &text).await {
+            if let Ok(facade) = lock_memory_facade(state) {
+                let _ = facade.upsert_embedding(&reference, user, workspace, &model, &vector);
+            }
+        }
+    }
+}
+
 /// Fills the required `privacy_domain`/`sensitivity` on an extracted item when the
 /// model omitted them, so deserialization (which requires both) doesn't silently
 /// drop otherwise-valid memories/entities/relations. The domain is re-pinned to
@@ -1533,29 +1633,39 @@ con rationale e affects (gli oggetti toccati: file, documento, contatto…)."
         }
     }
 
-    let Ok(facade) = lock_memory_facade(state) else {
-        return;
-    };
-    persist_scope_memories(
-        &facade,
-        &user_id,
-        &MemoryWorkspaceId::new(PERSONAL_WORKSPACE),
-        personal_mems,
-    );
-    if has_project {
-        persist_scope_memories(&facade, &user_id, &active, project_mems);
+    // Scoped block: the (non-Send) memory lock MUST be dropped before the awaits below,
+    // since this future is spawned on the runtime (Send-required).
+    {
+        let Ok(facade) = lock_memory_facade(state) else {
+            return;
+        };
+        persist_scope_memories(
+            &facade,
+            &user_id,
+            &MemoryWorkspaceId::new(PERSONAL_WORKSPACE),
+            personal_mems,
+        );
+        if has_project {
+            persist_scope_memories(&facade, &user_id, &active, project_mems);
+        }
+        // Graph (people + kinship/work relations) → personal scope.
+        persist_graph(
+            &facade,
+            &user_id,
+            &MemoryWorkspaceId::new(PERSONAL_WORKSPACE),
+            graph_entities,
+            graph_relations,
+        );
+        // Episodic memory (M4): one line per turn, in the thread scope.
+        if let Some(tid) = thread_id {
+            store_episode(&facade, &user_id, tid, &episode);
+        }
     }
-    // Graph (people + kinship/work relations) → personal scope.
-    persist_graph(
-        &facade,
-        &user_id,
-        &MemoryWorkspaceId::new(PERSONAL_WORKSPACE),
-        graph_entities,
-        graph_relations,
-    );
-    // Episodic memory (M4): one line per turn, in the thread scope.
-    if let Some(tid) = thread_id {
-        store_episode(&facade, &user_id, tid, &episode);
+    // Lock released — incrementally embed new memories (semantic layer) off the hot
+    // path: a bounded batch per turn so vectors accumulate in the background.
+    backfill_embeddings(state, &user_id, &MemoryWorkspaceId::new(PERSONAL_WORKSPACE), 12).await;
+    if has_project {
+        backfill_embeddings(state, &user_id, &active, 12).await;
     }
 }
 
@@ -16379,6 +16489,14 @@ async fn memory_graph(
         gateway_memory_workspace_id()
     };
 
+    // Embed this scope's memories in the background (no-op once all have vectors), so
+    // the semantic dedup/recall keeps improving. Non-blocking: this response uses the
+    // vectors already stored.
+    {
+        let (st, scope_user, scope_ws) = (state.clone(), user.clone(), ws.clone());
+        tokio::spawn(async move { backfill_embeddings(&st, &scope_user, &scope_ws, 80).await; });
+    }
+
     let project_label = {
         let file = load_workspaces_file();
         file.workspaces
@@ -16401,6 +16519,12 @@ async fn memory_graph(
         .into_iter()
         .filter(|m| !matches!(m.status, MemoryStatus::Deleted | MemoryStatus::Rejected))
         .collect();
+    // Embeddings for this scope (if any) → semantic collapse of paraphrases the lexical
+    // overlap misses ("JSON come formato" vs "JSON invece di SQLite", cross-language).
+    let embeddings: std::collections::HashMap<String, Vec<f32>> = facade
+        .list_embeddings(&user, &ws)
+        .map(|v| v.into_iter().map(|(r, vec)| (r.to_string(), vec)).collect())
+        .unwrap_or_default();
     // Read-time dedup: collapse near-duplicate decisions/facts/preferences (the
     // extractor re-phrases the same thing across turns) so the graph stays clean even
     // for memories stored before write-time dedup existed. Keep the richest (longest).
@@ -16408,7 +16532,7 @@ async fn memory_graph(
         let dedupe_kinds = ["decision", "fact", "preference"];
         let mut order: Vec<usize> = (0..live.len()).collect();
         order.sort_by_key(|&i| std::cmp::Reverse(live[i].text.chars().count()));
-        let mut kept: Vec<(String, std::collections::HashSet<String>)> = Vec::new();
+        let mut kept: Vec<(String, std::collections::HashSet<String>, Option<Vec<f32>>)> = Vec::new();
         let mut drops: std::collections::HashSet<String> = std::collections::HashSet::new();
         for &i in &order {
             let memory = &live[i];
@@ -16416,13 +16540,19 @@ async fn memory_graph(
                 continue;
             }
             let tokens = dedup_tokens(&memory.text);
-            if kept
-                .iter()
-                .any(|(ty, ex)| ty == &memory.memory_type && jaccard(&tokens, ex) >= DEDUP_JACCARD)
-            {
+            let vector = embeddings.get(&memory.reference.to_string()).cloned();
+            let duplicate = kept.iter().any(|(ty, ex_tokens, ex_vec)| {
+                ty == &memory.memory_type
+                    && (jaccard(&tokens, ex_tokens) >= DEDUP_JACCARD
+                        || match (vector.as_ref(), ex_vec.as_ref()) {
+                            (Some(a), Some(b)) => cosine(a, b) >= DEDUP_COSINE,
+                            _ => false,
+                        })
+            });
+            if duplicate {
                 drops.insert(memory.reference.to_string());
             } else {
-                kept.push((memory.memory_type.clone(), tokens));
+                kept.push((memory.memory_type.clone(), tokens, vector));
             }
         }
         drops
