@@ -329,6 +329,13 @@ const PROVIDER_PRESETS: Array<{
   { id: "moonshot", label: "Moonshot (Kimi)", baseUrl: "https://api.moonshot.ai/v1", kind: "openai_compat" },
   { id: "mistral", label: "Mistral", baseUrl: "https://api.mistral.ai/v1", kind: "openai_compat" },
   { id: "ollama", label: "Ollama (locale)", baseUrl: "http://127.0.0.1:11434/v1", kind: "ollama" },
+  {
+    id: "ollama-cloud",
+    label: "Ollama Cloud",
+    baseUrl: "https://ollama.com/v1",
+    kind: "openai_compat",
+    hint: "Modelli :cloud — chiave da ollama.com/settings/keys",
+  },
   { id: "custom", label: "Personalizzato", baseUrl: "", kind: "openai_compat" },
 ];
 
