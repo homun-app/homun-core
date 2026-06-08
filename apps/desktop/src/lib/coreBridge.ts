@@ -922,10 +922,10 @@ async function electronDeleteWorkspace(id: string): Promise<WorkspacesSnapshot> 
   );
 }
 
-/** A parameter (env var or argument) a registry server needs to launch. */
+/** A parameter (env var, argument, or HTTP header) a registry server needs. */
 export interface McpRegistryInput {
   key: string;
-  target: "arg" | "env";
+  target: "arg" | "env" | "header";
   label: string;
   secret: boolean;
   required: boolean;
@@ -940,6 +940,9 @@ export interface McpRegistryServer {
   description: string;
   official: boolean;
   version: string;
+  /** "stdio" (local process) | "http" (remote streamable-HTTP endpoint). */
+  transport: string;
+  url?: string | null;
   runtime: string;
   command: string;
   args: string[];
@@ -967,15 +970,19 @@ async function electronMcpDisconnect(providerId: string): Promise<boolean> {
 
 async function electronMcpConnect(input: {
   name: string;
-  command: string;
+  command?: string;
   args?: string[];
   env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
 }): Promise<McpConnectResult> {
   return gatewayPostJson<McpConnectResult>("/api/capabilities/mcp/connect", {
     name: input.name,
-    command: input.command,
+    command: input.command ?? "",
     args: input.args ?? [],
     env: input.env ?? {},
+    ...(input.url ? { url: input.url } : {}),
+    headers: input.headers ?? {},
   });
 }
 
@@ -1236,9 +1243,11 @@ export const coreBridge = {
   deleteWorkspace: (id: string) => electronDeleteWorkspace(id),
   mcpConnect: (input: {
     name: string;
-    command: string;
+    command?: string;
     args?: string[];
     env?: Record<string, string>;
+    url?: string;
+    headers?: Record<string, string>;
   }) => electronMcpConnect(input),
   mcpRegistry: (q?: string) => electronMcpRegistry(q),
   mcpDisconnect: (providerId: string) => electronMcpDisconnect(providerId),

@@ -36,9 +36,13 @@ pub struct McpRegistryServer {
     /// Reference server published under the canonical MCP namespace.
     pub official: bool,
     pub version: String,
-    /// "node" | "python" | "docker" | "other".
+    /// "stdio" (local process) | "http" (remote streamable-HTTP endpoint).
+    pub transport: String,
+    /// Remote endpoint URL — only for `transport == "http"`.
+    pub url: Option<String>,
+    /// "node" | "python" | "docker" | "remote" | "other".
     pub runtime: String,
-    /// Launch command + base args (placeholders for `arg` inputs are appended at connect).
+    /// Launch command + base args (stdio only; placeholders for `arg` inputs appended at connect).
     pub command: String,
     pub args: Vec<String>,
     pub inputs: Vec<McpRegistryInput>,
@@ -100,7 +104,35 @@ struct RawServer {
     #[serde(default)]
     packages: Vec<RawPackage>,
     #[serde(default)]
-    remotes: Vec<serde_json::Value>,
+    remotes: Vec<RawRemote>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawRemote {
+    #[serde(default, rename = "type")]
+    kind: String,
+    #[serde(default)]
+    url: String,
+    #[serde(default)]
+    headers: Vec<RawHeader>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawHeader {
+    name: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    is_required: bool,
+    #[serde(default)]
+    is_secret: bool,
+    #[serde(default)]
+    default: Option<String>,
+    /// Fixed value (goes straight into the header, not a user input).
+    #[serde(default)]
+    value: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -199,6 +231,8 @@ fn normalize(entry: RawEntry) -> Option<McpRegistryServer> {
         description: server.description.chars().take(400).collect(),
         official,
         version: version.clone(),
+        transport: "stdio".to_string(),
+        url: None,
         runtime: "other".to_string(),
         command: String::new(),
         args: Vec::new(),
@@ -213,11 +247,34 @@ fn normalize(entry: RawEntry) -> Option<McpRegistryServer> {
         .iter()
         .find(|p| is_stdio(p) && runtime_command(p).is_some());
     let Some(pkg) = pkg else {
-        base.note = Some(if !server.remotes.is_empty() {
-            "Server remoto (SSE/HTTP): non ancora supportato — il transport attuale è solo stdio.".to_string()
+        // No local stdio package — connect over a remote (streamable-HTTP) endpoint
+        // if one exists. Auth headers become user inputs (target "header").
+        let remote = server
+            .remotes
+            .iter()
+            .find(|r| matches!(r.kind.as_str(), "streamable-http" | "http" | "sse") && !r.url.trim().is_empty());
+        if let Some(remote) = remote {
+            base.transport = "http".to_string();
+            base.url = Some(remote.url.clone());
+            base.runtime = "remote".to_string();
+            base.command = remote.url.clone();
+            for header in &remote.headers {
+                if header.value.is_some() {
+                    continue; // fixed header value, not something the user supplies
+                }
+                base.inputs.push(McpRegistryInput {
+                    label: header.description.clone().unwrap_or_else(|| header.name.clone()),
+                    key: header.name.clone(),
+                    target: "header".to_string(),
+                    secret: header.is_secret,
+                    required: header.is_required,
+                    default: header.default.clone(),
+                });
+            }
+            base.installable = true;
         } else {
-            "Nessun pacchetto stdio installabile.".to_string()
-        });
+            base.note = Some("Nessun pacchetto stdio né endpoint remoto utilizzabile.".to_string());
+        }
         return Some(base);
     };
 
