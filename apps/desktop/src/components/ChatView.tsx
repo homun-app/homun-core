@@ -3260,7 +3260,12 @@ function AssistantMessageBody({
       )}
       {reconnectSlug && !streaming && <ComposioReconnectCard slug={reconnectSlug} />}
       {fsAuthorize && !streaming && (
-        <FsAuthorizeCard path={fsAuthorize.path} op={fsAuthorize.op} />
+        <FsAuthorizeCard
+          path={fsAuthorize.path}
+          op={fsAuthorize.op}
+          messageId={messageId}
+          threadId={threadId}
+        />
       )}
     </>
   );
@@ -3271,7 +3276,17 @@ function AssistantMessageBody({
  *  (security), so this opens the provider's consent and asks the user to retry. */
 /** In-chat card to grant the assistant access to a folder — so the user
  *  authorizes (and sees the result) without leaving the conversation. */
-function FsAuthorizeCard({ path, op }: { path: string; op: string }) {
+function FsAuthorizeCard({
+  path,
+  op,
+  messageId,
+  threadId,
+}: {
+  path: string;
+  op: string;
+  messageId?: string;
+  threadId?: string;
+}) {
   const [status, setStatus] = useState<"idle" | "running" | "done" | "error">("idle");
   const [output, setOutput] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -3280,7 +3295,7 @@ function FsAuthorizeCard({ path, op }: { path: string; op: string }) {
     setStatus("running");
     setNote(null);
     try {
-      const result = await coreBridge.fsAuthorize(path, op);
+      const result = await coreBridge.fsAuthorize(path, op, { threadId, messageId });
       if (!result.ok) {
         setStatus("error");
         setNote(result.summary || "Autorizzazione non riuscita.");
