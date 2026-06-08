@@ -84,6 +84,20 @@ nelle pagine aggregate (`Decisioni.md`, `Architettura.md`, per-entità). Endpoin
 elenco pagine wiki + ricerca: la rappresentazione navigabile di **tutta** la memoria
 del progetto.
 
+**5 · Pulizia / oblio.** Cancellare informazioni è un layer di prima classe.
+- *Item-level* (esiste): `delete_memory`/`reject_memory` + `tombstone` + endpoint
+  `memory_decide` (confirm/reject/delete/edit). La tab Memoria deve poter **eliminare un
+  nodo** (decisione/fatto/entità) → `memory_decide delete`.
+- *Agente* (da aggiungere): tool **`forget_memory(query|ref, reason)`** → trova e
+  soft-elimina le memorie che corrispondono ("dimentica che…", "questa decisione non
+  vale più").
+- *Cascade*: alla cancellazione di una memoria, **ri-proietta** la pagina wiki del topic
+  (la sezione sparisce) e il grafo la esclude (già filtra `Deleted`/`Rejected`); se
+  aveva archi persistiti, vanno rimossi.
+- *Dedup come pulizia preventiva*: vedi punto 1 — superseding evita l'accumulo.
+- *Bulk* (opzionale): "svuota la memoria di questo progetto" → tombstone di massa sullo
+  scope.
+
 ## Fuori dalla memoria, stessa sessione (collegati)
 
 - **Skill grouping**: le skill di metodologia portano `source="homuncoder"` → raggruppate
