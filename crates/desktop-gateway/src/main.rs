@@ -3438,7 +3438,15 @@ async fn collect_openai_stream(
     let mut done = false;
     while !done {
         match tokio::time::timeout(idle, stream.next()).await {
-            Err(_) => return Err("nessun token dal modello entro il tempo di inattività".to_string()),
+            Err(_) => {
+                // Idle stall: if tokens already arrived, SALVAGE the partial response
+                // rather than killing the turn (better a truncated answer than an
+                // error); only fail hard if nothing came through.
+                if raw.trim().is_empty() {
+                    return Err("nessun token dal modello entro il tempo di inattività".to_string());
+                }
+                break;
+            }
             Ok(None) => break,
             Ok(Some(Ok(bytes))) => {
                 let text = String::from_utf8_lossy(&bytes);
@@ -3477,7 +3485,15 @@ async fn collect_openai_stream(
                     }
                 }
             }
-            Ok(Some(Err(error))) => return Err(error.to_string()),
+            Ok(Some(Err(error))) => {
+                // Mid-stream drop ("error decoding response body" — common when a
+                // cloud proxy resets a long generation near the end): salvage the
+                // partial output instead of failing the whole turn.
+                if raw.trim().is_empty() {
+                    return Err(error.to_string());
+                }
+                break;
+            }
         }
     }
     Ok(reassemble_openai_stream(&raw))
