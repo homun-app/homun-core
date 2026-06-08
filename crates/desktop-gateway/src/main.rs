@@ -16399,9 +16399,41 @@ async fn memory_graph(
     let project_id = "project::root".to_string();
     graph_push_node(&mut nodes, &mut seen, &project_id, "project", project_label, String::new(), "");
 
-    if let Ok(memories) = facade.list_memories_for_ui(&user, &ws) {
-        for memory in memories {
-            if matches!(memory.status, MemoryStatus::Deleted | MemoryStatus::Rejected) {
+    let live: Vec<_> = facade
+        .list_memories_for_ui(&user, &ws)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|m| !matches!(m.status, MemoryStatus::Deleted | MemoryStatus::Rejected))
+        .collect();
+    // Read-time dedup: collapse near-duplicate decisions/facts/preferences (the
+    // extractor re-phrases the same thing across turns) so the graph stays clean even
+    // for memories stored before write-time dedup existed. Keep the richest (longest).
+    let drop_refs: std::collections::HashSet<String> = {
+        let dedupe_kinds = ["decision", "fact", "preference"];
+        let mut order: Vec<usize> = (0..live.len()).collect();
+        order.sort_by_key(|&i| std::cmp::Reverse(live[i].text.chars().count()));
+        let mut kept: Vec<(String, std::collections::HashSet<String>)> = Vec::new();
+        let mut drops: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for &i in &order {
+            let memory = &live[i];
+            if !dedupe_kinds.contains(&memory.memory_type.as_str()) {
+                continue;
+            }
+            let tokens = dedup_tokens(&memory.text);
+            if kept
+                .iter()
+                .any(|(ty, ex)| ty == &memory.memory_type && jaccard(&tokens, ex) >= DEDUP_JACCARD)
+            {
+                drops.insert(memory.reference.to_string());
+            } else {
+                kept.push((memory.memory_type.clone(), tokens));
+            }
+        }
+        drops
+    };
+    {
+        for memory in &live {
+            if drop_refs.contains(&memory.reference.to_string()) {
                 continue;
             }
             let kind = memory.memory_type.as_str();

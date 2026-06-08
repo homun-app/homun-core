@@ -2948,8 +2948,25 @@ function MemoryGraphPanel({ threadId }: { threadId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [view, setView] = useState({ x: 0, y: 0, k: 1 });
+  // viewBox tracks the container's pixel size (centred at origin) so the graph FILLS
+  // the panel and adapts when it's expanded/fullscreen — no fixed-aspect letterboxing.
+  const [size, setSize] = useState({ w: 760, h: 600 });
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (rect && rect.width > 0 && rect.height > 0) {
+        setSize({ w: Math.round(rect.width), h: Math.round(rect.height) });
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -3001,7 +3018,7 @@ function MemoryGraphPanel({ threadId }: { threadId: string }) {
   const onPointerMove = (event: ReactMouseEvent) => {
     if (!dragRef.current || !svgRef.current) return;
     const rect = svgRef.current.getBoundingClientRect();
-    const scale = 760 / Math.max(rect.width, 1); // viewBox units per px
+    const scale = size.w / Math.max(rect.width, 1); // viewBox units per px
     setView((v) => ({
       ...v,
       x: v.x + (event.clientX - dragRef.current!.x) * scale,
@@ -3062,10 +3079,10 @@ function MemoryGraphPanel({ threadId }: { threadId: string }) {
           </button>
         </div>
       </div>
-      <div className="memory-graph-canvas">
+      <div className="memory-graph-canvas" ref={canvasRef}>
         <svg
           ref={svgRef}
-          viewBox="-380 -300 760 600"
+          viewBox={`${-size.w / 2} ${-size.h / 2} ${size.w} ${size.h}`}
           preserveAspectRatio="xMidYMid meet"
           onWheel={onWheel}
           onMouseDown={onPointerDown}
