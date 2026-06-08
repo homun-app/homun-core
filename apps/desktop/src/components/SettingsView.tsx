@@ -2017,28 +2017,17 @@ function McpCatalogCard({
           <span className="conn-tool-desc">{server.description}</span>
           <span className="mdl-detail-sub" style={{ fontSize: 11, opacity: 0.7 }}>
             {server.publisher} · {server.runtime}
-            {server.homepage && (
-              <>
-                {" · "}
-                <a href={server.homepage} target="_blank" rel="noreferrer">
-                  sito <ExternalLink size={10} />
-                </a>
-              </>
-            )}
+            {server.version ? ` · v${server.version}` : ""}
           </span>
         </div>
         {server.installable ? (
           <button
-            className="set-btn primary"
+            className="set-btn"
             type="button"
-            disabled={busy}
-            onClick={() => (server.inputs.length > 0 ? onToggle() : void connect())}
-            title="Connetti questo server"
+            onClick={onToggle}
+            title="Mostra dettagli e connetti"
           >
-            <Download size={14} />
-            <span style={{ marginLeft: 6 }}>
-              {busy ? "…" : server.inputs.length > 0 ? "Configura" : "Connetti"}
-            </span>
+            <span>{expanded ? "Nascondi" : "Dettagli"}</span>
           </button>
         ) : (
           <span className="mdl-tag" title={server.note ?? ""}>
@@ -2046,11 +2035,40 @@ function McpCatalogCard({
           </span>
         )}
       </div>
-      <code style={{ fontSize: 11, opacity: 0.7, wordBreak: "break-all" }}>
-        {server.command} {server.args.join(" ")}
-      </code>
       {expanded && server.installable && (
-        <div className="mdl-field" style={{ gap: 8, marginTop: 4 }}>
+        <div className="mdl-field" style={{ gap: 10, marginTop: 4 }}>
+          <p style={{ margin: 0, fontSize: 13, lineHeight: 1.45 }}>{server.description}</p>
+          {server.homepage && (
+            <a
+              href={server.homepage}
+              target="_blank"
+              rel="noreferrer"
+              className="set-hint"
+              style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12 }}
+            >
+              Pagina del progetto <ExternalLink size={12} />
+            </a>
+          )}
+          <div className="set-hint" style={{ fontSize: 12 }}>
+            <strong>Cosa ti serve:</strong>{" "}
+            {server.inputs.length === 0
+              ? "niente, si collega subito."
+              : server.inputs
+                  .map(
+                    (i) =>
+                      `${i.label}${i.secret ? " (segreto)" : ""}${i.required ? "" : " (opzionale)"}`,
+                  )
+                  .join(", ")}
+          </div>
+          <div>
+            <div className="mdl-detail-section-label">Comando</div>
+            <code style={{ fontSize: 11, opacity: 0.75, wordBreak: "break-all" }}>
+              {server.command} {server.args.join(" ")}
+            </code>
+          </div>
+          <p className="set-hint" style={{ fontSize: 11, opacity: 0.65, margin: 0 }}>
+            Gli strumenti esposti dal server saranno visibili dopo la connessione.
+          </p>
           {server.inputs.map((input) => (
             <div key={input.key} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
               <label className="mdl-field-label">
