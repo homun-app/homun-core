@@ -4766,6 +4766,25 @@ fn enabled_skills_summary() -> Vec<(String, String, String)> {
         .collect()
 }
 
+/// The CoderSteroids/HomunCoder methodology skill ids (from the sync manifest). Used to
+/// scope the methodology to PROJECT chats (HomunCoder mode) instead of flooding every
+/// chat, and to group them in Settings.
+fn homuncoder_skill_ids() -> std::collections::HashSet<String> {
+    skills_dir()
+        .ok()
+        .map(|dir| dir.join("homuncoder-skills.txt"))
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .map(|content| {
+            content
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Loads an installed skill's SKILL.md body (instructions) by id.
 fn load_skill_body(id: &str) -> Option<String> {
     let dir = skills_dir().ok()?;
@@ -5189,9 +5208,18 @@ col solo slug del servizio interessato (es. gmail): l'interfaccia mostrera' un p
     // Installed skills (Anthropic Agent Skills, progressive disclosure L1): pre-load
     // name+description; the model calls `use_skill(<id>)` to pull the full SKILL.md
     // when a request matches, then follows it.
-    let enabled_skills = tokio::task::spawn_blocking(enabled_skills_summary)
+    let homuncoder = tokio::task::spawn_blocking(homuncoder_skill_ids)
         .await
         .unwrap_or_default();
+    // HomunCoder mode: the methodology skills surface only in PROJECT chats, so personal
+    // chats aren't flooded with ~30 dev-discipline skills.
+    let is_project = gateway_memory_workspace_id().as_str() != PERSONAL_WORKSPACE;
+    let mut enabled_skills = tokio::task::spawn_blocking(enabled_skills_summary)
+        .await
+        .unwrap_or_default();
+    if !is_project {
+        enabled_skills.retain(|(id, _, _)| !homuncoder.contains(id));
+    }
     let has_skills = !enabled_skills.is_empty();
     let system = if !has_skills {
         system
@@ -5201,6 +5229,15 @@ col solo slug del servizio interessato (es. gmail): l'interfaccia mostrera' un p
             .map(|(id, name, desc)| format!("- {id}: {name} — {desc}"))
             .collect::<Vec<_>>()
             .join("\n");
+        let methodology = if is_project && enabled_skills.iter().any(|(id, _, _)| homuncoder.contains(id)) {
+            "\nMETODOLOGIA (HomunCoder) — per il lavoro di SVILUPPO segui le abitudini evidence-first: \
+pianifica con update_plan, RICORDA/registra le decisioni col loro perché, e VERIFICA eseguendo \
+(build/test/lint) prima di dire \"fatto\". Carica con use_skill la skill di metodologia adatta \
+(roadmap-first-planning, systematic-debugging, test-first-development, verification-before-completion, \
+code-review-discipline) quando la situazione lo richiede."
+        } else {
+            ""
+        };
         format!(
             "{system}\n\nSKILL INSTALLATE — quando la richiesta corrisponde alla descrizione di una \
 di queste, PREFERISCILA al browser: chiama `use_skill` con il suo id per ricevere le istruzioni \
@@ -5208,12 +5245,7 @@ complete (SKILL.md). Poi ESEGUI i comandi che la skill indica (es. `curl …`, `
 strumento `run_in_sandbox`, che li lancia nel computer contenuto, e usa l'output per rispondere.\n\
 FILE GENERATI: se una skill o un comando produce file (xlsx, pdf, csv, immagini, …), SALVALI nella \
 cartella d'ambiente `$OUTPUT_DIR` (es. `... --output \"$OUTPUT_DIR/report.xlsx\"`): i file lì \
-diventano automaticamente artifact scaricabili dall'utente.\n\
-METODOLOGIA (HomunCoder) — per il lavoro di SVILUPPO segui le abitudini evidence-first: pianifica con \
-update_plan, RICORDA/registra le decisioni col loro perché, e VERIFICA eseguendo (build/test/lint) prima \
-di dire \"fatto\". Le skill di metodologia qui sotto (roadmap-first-planning, systematic-debugging, \
-test-first-development, verification-before-completion, code-review-discipline, context7-research) \
-approfondiscono ogni passo: caricale con use_skill quando la situazione lo richiede.\n{lines}"
+diventano automaticamente artifact scaricabili dall'utente.{methodology}\n{lines}"
         )
     };
     // Authorized write destinations: when present, the model can deliver
