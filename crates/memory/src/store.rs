@@ -555,6 +555,96 @@ impl SQLiteMemoryStore {
         Ok(evidence)
     }
 
+    /// Store (or replace) the embedding vector for a memory. Vectors are f32 little-
+    /// endian BLOBs; similarity is computed in-process (brute-force cosine is fine at
+    /// local single-user scale).
+    pub fn upsert_embedding(
+        &self,
+        reference: &MemoryRef,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        model: &str,
+        vector: &[f32],
+    ) -> Result<(), String> {
+        let bytes: Vec<u8> = vector.iter().flat_map(|v| v.to_le_bytes()).collect();
+        self.conn
+            .execute(
+                "insert into memory_embeddings(ref, user_id, workspace_id, model, dim, vector, updated_at)
+                 values(?1, ?2, ?3, ?4, ?5, ?6, current_timestamp)
+                 on conflict(ref) do update set
+                   model = ?4, dim = ?5, vector = ?6, updated_at = current_timestamp",
+                params![
+                    reference.to_string(),
+                    user_id.as_str(),
+                    workspace_id.as_str(),
+                    model,
+                    vector.len() as i64,
+                    bytes,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    /// All (ref, vector) pairs in a scope, for cosine similarity (dedup / recall).
+    pub fn list_embeddings(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Vec<(MemoryRef, Vec<f32>)>, String> {
+        let mut statement = self
+            .conn
+            .prepare(
+                "select ref, vector from memory_embeddings where user_id = ?1 and workspace_id = ?2",
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map((user_id.as_str(), workspace_id.as_str()), |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+            })
+            .map_err(|error| error.to_string())?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (ref_string, bytes) = row.map_err(|error| error.to_string())?;
+            let reference = parse_ref(ref_string)?;
+            let vector = bytes
+                .chunks_exact(4)
+                .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                .collect();
+            out.push((reference, vector));
+        }
+        Ok(out)
+    }
+
+    /// Memory refs in a scope that don't yet have an embedding (for lazy backfill).
+    pub fn refs_without_embeddings(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        limit: usize,
+    ) -> Result<Vec<MemoryRef>, String> {
+        let mut statement = self
+            .conn
+            .prepare(
+                "select m.ref from memories m
+                 left join memory_embeddings e on e.ref = m.ref
+                 where m.user_id = ?1 and m.workspace_id = ?2 and e.ref is null
+                 limit ?3",
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map(
+                (user_id.as_str(), workspace_id.as_str(), limit as i64),
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(|error| error.to_string())?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(parse_ref(row.map_err(|error| error.to_string())?)?);
+        }
+        Ok(out)
+    }
+
     pub fn record_wiki_page(&self, page: &WikiPage) -> Result<(), String> {
         self.conn
             .execute(
@@ -976,6 +1066,18 @@ impl SQLiteMemoryStore {
                     correction_of text
                 );
                 create index if not exists idx_memories_scope on memories(user_id, workspace_id);
+
+                create table if not exists memory_embeddings (
+                    ref text primary key,
+                    user_id text not null,
+                    workspace_id text not null,
+                    model text not null,
+                    dim integer not null,
+                    vector blob not null,
+                    updated_at text not null default current_timestamp
+                );
+                create index if not exists idx_memory_embeddings_scope
+                    on memory_embeddings(user_id, workspace_id);
 
                 create virtual table if not exists memory_search_fts using fts5(
                     ref unindexed,
