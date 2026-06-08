@@ -167,7 +167,6 @@ export function ChatView({
   const [variants, setVariants] = useState<
     Record<string, { texts: string[]; index: number }>
   >({});
-  const [shareOpen, setShareOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [activeModelInfo, setActiveModelInfo] = useState<ActiveModelInfo | null>(null);
   const [timelineCollapsed, setTimelineCollapsed] = useState(true);
@@ -180,7 +179,7 @@ export function ChatView({
   // open/closed flag; `workbenchTab` is the active tab. Phase 1 ships the
   // "Artefatti" tab; File / Computer / Attività / Piano land in later phases.
   const [artifactsOpen, setArtifactsOpen] = useState(false);
-  const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>("artifacts");
+  const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>("files");
   const [artifactsInitial, setArtifactsInitial] = useState<string | null>(null);
   const [followUps, setFollowUps] = useState<string[]>([]);
   const [followUpsFor, setFollowUpsFor] = useState<string | null>(null);
@@ -207,6 +206,21 @@ export function ChatView({
         if (!seen.has(artifact.name)) {
           seen.add(artifact.name);
           out.push(artifact);
+        }
+      }
+    }
+    return out;
+  }, [threadMessages]);
+  // Files the user uploaded in THIS conversation (e.g. the patente PDF), derived
+  // from message attachments — the chat-context "File" tab of the Workbench.
+  const uploadedFiles = useMemo(() => {
+    const seen = new Set<string>();
+    const out: ChatAttachment[] = [];
+    for (const message of threadMessages) {
+      for (const attachment of message.attachments ?? []) {
+        if (!seen.has(attachment.title)) {
+          seen.add(attachment.title);
+          out.push(attachment);
         }
       }
     }
@@ -1360,42 +1374,20 @@ export function ChatView({
         </div>
 
         <div className="task-top-actions">
-          {activeHealth.map((item) => (
-            <span className={`status-pill ${item.status}`} key={item.label}>
-              {item.label}
-            </span>
-          ))}
+          {/* Header stripped to a single affordance: the Workbench toggle. Model
+              lives in the composer selector; share/⋯ removed as clutter. */}
           <button
             className={`top-action${artifactsOpen ? " active" : ""}`}
             type="button"
-            title="Pannello di lavoro"
+            title="Pannello (file, artefatti)"
+            aria-label="Apri pannello"
             onClick={() => setArtifactsOpen((value) => !value)}
           >
-            <PanelRight size={15} />
-            Pannello
+            <PanelRight size={16} />
             {conversationArtifacts.length > 0 && (
               <span className="top-action-count">{conversationArtifacts.length}</span>
             )}
           </button>
-          <button
-            className="top-action"
-            type="button"
-            onClick={() => setShareOpen((value) => !value)}
-          >
-            <Share2 size={15} />
-            Condividi
-          </button>
-          <button className="icon-button" type="button" aria-label="Altre azioni">
-            <MoreHorizontal size={18} />
-          </button>
-          {shareOpen && (
-            <div className="floating-menu share-menu" role="menu">
-              <strong>Condivisione</strong>
-              <button type="button">Solo io</button>
-              <button type="button">Esporta riepilogo redatto</button>
-              <button type="button">Crea link locale</button>
-            </div>
-          )}
         </div>
       </header>
 
@@ -1720,6 +1712,7 @@ export function ChatView({
         onClose={() => setArtifactsOpen(false)}
         artifacts={conversationArtifacts}
         artifactsInitial={artifactsInitial}
+        uploadedFiles={uploadedFiles}
       />
 
       <ChatComputerPanel />
@@ -2784,14 +2777,14 @@ function InlineArtifactPreview({ artifact }: { artifact: ParsedArtifact }) {
 /** Artifacts workspace: a side panel listing the conversation's generated files
  *  and rendering each by type (markdown, code, csv table, image, pdf) — the
  *  "interactive workspace alongside the chat" model. */
-/** Tabs of the right-side Workbench panel. Phase 1 ships "artifacts"; the others
- *  (file browser, live computer, background activity, plan) land incrementally. */
-type WorkbenchTab = "artifacts";
+/** Tabs of the right-side Workbench panel. "files" = context-aware (chat uploads
+ *  now; project directory tree next); "artifacts" = generated/created outputs.
+ *  Computer / Attività / Piano land in later phases. */
+type WorkbenchTab = "files" | "artifacts";
 
 /** The Workbench: one toggle → a docked right panel with tabs, consolidating the
  *  assistant's tools/outputs (Claude-Code / IDE inspector pattern). Replaces the
- *  scattered header affordances. Phase 1: the Artefatti tab (project files/output),
- *  reusing ArtifactsPanel in embedded mode. */
+ *  scattered header affordances. */
 function Workbench({
   open,
   tab,
@@ -2799,6 +2792,7 @@ function Workbench({
   onClose,
   artifacts,
   artifactsInitial,
+  uploadedFiles,
 }: {
   open: boolean;
   tab: WorkbenchTab;
@@ -2806,9 +2800,16 @@ function Workbench({
   onClose: () => void;
   artifacts: ParsedArtifact[];
   artifactsInitial?: string | null;
+  uploadedFiles: ChatAttachment[];
 }) {
   if (!open) return null;
   const tabs: { key: WorkbenchTab; label: string; icon: typeof FileText; badge?: number }[] = [
+    {
+      key: "files",
+      label: "File",
+      icon: FolderOpen,
+      badge: uploadedFiles.length || undefined,
+    },
     {
       key: "artifacts",
       label: "Artefatti",
@@ -2848,6 +2849,31 @@ function Workbench({
         </button>
       </div>
       <div className="workbench-body">
+        {tab === "files" &&
+          (uploadedFiles.length > 0 ? (
+            <div className="workbench-files">
+              <div className="workbench-section-label">Caricati in questa chat</div>
+              <ul className="workbench-file-list">
+                {uploadedFiles.map((file) => (
+                  <li key={file.artifactId}>
+                    {file.kind === "image" ? <FileImage size={15} /> : <FileText size={15} />}
+                    <span className="wf-name" title={file.title}>
+                      {file.title}
+                    </span>
+                    <small>{formatFileSize(file.sizeBytes)}</small>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <div className="workbench-empty">
+              <FolderOpen size={28} />
+              <p>
+                Nessun file in questa chat. Allega un file (📎) e comparirà qui — resta
+                disponibile anche nei messaggi successivi.
+              </p>
+            </div>
+          ))}
         {tab === "artifacts" &&
           (artifacts.length > 0 ? (
             <ArtifactsPanel
