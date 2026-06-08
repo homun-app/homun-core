@@ -2420,10 +2420,11 @@ interface ComposioPendingAction {
 
 const COMPOSIO_CONFIRM_RE = /‹‹COMPOSIO_CONFIRM››([\s\S]*?)‹‹\/COMPOSIO_CONFIRM››/;
 const MCP_CONFIRM_RE = /‹‹MCP_CONFIRM››([\s\S]*?)‹‹\/MCP_CONFIRM››/;
+const FS_AUTHORIZE_RE = /‹‹FS_AUTHORIZE››([\s\S]*?)‹‹\/FS_AUTHORIZE››/;
 const COMPOSIO_DONE_RE = /‹‹COMPOSIO_DONE››([\s\S]*?)‹‹\/COMPOSIO_DONE››/;
 const COMPOSIO_RECONNECT_RE = /‹‹COMPOSIO_RECONNECT››([\s\S]*?)‹‹\/COMPOSIO_RECONNECT››/;
 const COMPOSIO_MARKERS_RE =
-  /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM)››/g;
+  /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE)››/g;
 
 // Tool-activity trace markers (browser / skill / sandbox / connected-tool steps).
 // They are extracted into a compact collapsible panel so the answer body stays
@@ -3171,6 +3172,7 @@ function parseComposioConfirm(text: string): {
   action: ComposioPendingAction | null;
   doneTool: string | null;
   reconnectSlug: string | null;
+  fsAuthorize: { path: string; op: string } | null;
 } {
   let action: ComposioPendingAction | null = null;
   const confirm = text.match(COMPOSIO_CONFIRM_RE);
@@ -3192,13 +3194,26 @@ function parseComposioConfirm(text: string): {
       /* malformed → just hide it */
     }
   }
+  // Native filesystem: in-chat "authorize this folder" card (no Settings trip).
+  let fsAuthorize: { path: string; op: string } | null = null;
+  const fsMatch = text.match(FS_AUTHORIZE_RE);
+  if (fsMatch) {
+    try {
+      const parsed = JSON.parse(fsMatch[1]) as { path?: string; op?: string };
+      if (parsed && typeof parsed.path === "string") {
+        fsAuthorize = { path: parsed.path, op: parsed.op === "read" ? "read" : "list" };
+      }
+    } catch {
+      /* malformed → just hide it */
+    }
+  }
   const done = text.match(COMPOSIO_DONE_RE);
   const doneTool = done ? done[1].trim() : null;
   const reconnectMatch = text.match(COMPOSIO_RECONNECT_RE);
   const reconnectSlug = reconnectMatch ? reconnectMatch[1].trim() : null;
   const visible = text.replace(COMPOSIO_MARKERS_RE, "").trim();
   // A persisted "done" marker wins: never reopen the editable card.
-  return { visible, action: doneTool ? null : action, doneTool, reconnectSlug };
+  return { visible, action: doneTool ? null : action, doneTool, reconnectSlug, fsAuthorize };
 }
 
 /** Replaces raw tool slugs (GMAIL_SEND_EMAIL) anywhere in assistant text with a
@@ -3224,7 +3239,7 @@ function AssistantMessageBody({
   threadId?: string;
   onOpenArtifact?: (artifact: ParsedArtifact) => void;
 }) {
-  const { visible, action, doneTool, reconnectSlug } = useMemo(
+  const { visible, action, doneTool, reconnectSlug, fsAuthorize } = useMemo(
     () => parseComposioConfirm(text),
     [text],
   );
@@ -3244,6 +3259,9 @@ function AssistantMessageBody({
         <ComposioConfirmCard action={action} messageId={messageId} threadId={threadId} />
       )}
       {reconnectSlug && !streaming && <ComposioReconnectCard slug={reconnectSlug} />}
+      {fsAuthorize && !streaming && (
+        <FsAuthorizeCard path={fsAuthorize.path} op={fsAuthorize.op} />
+      )}
     </>
   );
 }
@@ -3251,6 +3269,89 @@ function AssistantMessageBody({
 /** One-click reconnect for an EXPIRED Composio connector, surfaced in-chat so the
  *  user re-authorizes without hunting in Settings. OAuth re-consent is unavoidable
  *  (security), so this opens the provider's consent and asks the user to retry. */
+/** In-chat card to grant the assistant access to a folder — so the user
+ *  authorizes (and sees the result) without leaving the conversation. */
+function FsAuthorizeCard({ path, op }: { path: string; op: string }) {
+  const [status, setStatus] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [output, setOutput] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+
+  const run = async () => {
+    setStatus("running");
+    setNote(null);
+    try {
+      const result = await coreBridge.fsAuthorize(path, op);
+      if (!result.ok) {
+        setStatus("error");
+        setNote(result.summary || "Autorizzazione non riuscita.");
+        return;
+      }
+      setOutput(result.output ?? "");
+      setStatus("done");
+    } catch (error) {
+      setStatus("error");
+      setNote((error as Error).message);
+    }
+  };
+
+  if (status === "done") {
+    return (
+      <div className="cmp-confirm">
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <ShieldCheck size={15} />
+          <strong>Accesso concesso a {path}</strong>
+        </div>
+        {output && (
+          <pre
+            style={{
+              whiteSpace: "pre-wrap",
+              fontSize: 12,
+              marginTop: 8,
+              maxHeight: 300,
+              overflow: "auto",
+            }}
+          >
+            {output}
+          </pre>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="cmp-confirm">
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <ShieldCheck size={15} />
+        <strong>Dare accesso a questa cartella?</strong>
+      </div>
+      <code style={{ fontSize: 12, wordBreak: "break-all", display: "block", marginTop: 4 }}>
+        {path}
+      </code>
+      <p className="set-hint" style={{ fontSize: 12 }}>
+        Potrò leggere file e cartelle qui dentro. Lo gestisci anche da Impostazioni → Computer.
+      </p>
+      {status === "error" && <p className="cmp-confirm-err">Non riuscito: {note}</p>}
+      <div className="cmp-confirm-actions">
+        <button
+          className="set-btn primary"
+          type="button"
+          disabled={status === "running"}
+          onClick={() => void run()}
+        >
+          <ShieldCheck size={14} />
+          <span style={{ marginLeft: 6 }}>
+            {status === "running"
+              ? "Autorizzo…"
+              : op === "read"
+                ? "Autorizza e leggi"
+                : "Autorizza ed elenca"}
+          </span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ComposioReconnectCard({ slug }: { slug: string }) {
   const [status, setStatus] = useState<"idle" | "running" | "opened" | "error">("idle");
   const [note, setNote] = useState<string | null>(null);

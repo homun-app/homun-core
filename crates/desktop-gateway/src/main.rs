@@ -537,6 +537,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/capabilities/mcp/registry", get(mcp_registry_search))
         .route("/api/capabilities/mcp/connected", get(mcp_connected))
         .route("/api/capabilities/mcp/disconnect", post(mcp_disconnect))
+        .route("/api/fs/authorize", post(fs_authorize))
         .route("/api/capabilities/composio/connect", post(connect_composio))
         .route("/api/capabilities/composio/toolkits", get(composio_toolkits))
         .route("/api/capabilities/composio/link", post(composio_link))
@@ -1954,31 +1955,38 @@ fn fs_path_authorized(path: &std::path::Path, roots: &[PathBuf]) -> bool {
         .any(|root| root.canonicalize().map(|r| canon.starts_with(&r)).unwrap_or(false))
 }
 
-fn fs_not_authorized_msg(target: &str, roots: &[PathBuf]) -> String {
-    let list = if roots.is_empty() {
-        "(nessuna)".to_string()
-    } else {
-        roots.iter().map(|r| r.display().to_string()).collect::<Vec<_>>().join(", ")
-    };
-    format!(
-        "🔒 «{target}» non è tra le cartelle autorizzate, quindi non la leggo direttamente. \
-Aggiungila in Impostazioni → Destinazioni per darmi accesso (la conferma puntuale per cartelle \
-non autorizzate arriverà a breve). Cartelle autorizzate ora: {list}"
-    )
+/// Why a native filesystem op can't proceed immediately.
+enum FsAuthIssue {
+    /// Path is valid but outside the authorized roots → offer an in-chat
+    /// "authorize folder" card instead of a dead-end "go to Settings" message.
+    NeedsAuth(PathBuf),
+    /// Bad input (empty / not absolute).
+    Invalid(String),
 }
 
-/// Native `list_directory`: lists an ABSOLUTE path's entries when inside an
-/// authorized root — so the assistant browses the user's files without relying
-/// on a third-party filesystem MCP.
-fn native_list_directory(state: &AppState, thread_id: Option<&str>, path_str: &str) -> String {
+/// Resolves an absolute path and checks it's inside an authorized root.
+fn fs_resolve_authorized(
+    state: &AppState,
+    thread_id: Option<&str>,
+    path_str: &str,
+) -> Result<PathBuf, FsAuthIssue> {
     let Some(path) = fs_expand_abs(path_str) else {
-        return "Indica un percorso ASSOLUTO (es. /Users/tuo/Projects).".to_string();
+        return Err(FsAuthIssue::Invalid(
+            "Indica un percorso ASSOLUTO (es. /Users/tuo/Projects).".to_string(),
+        ));
     };
     let roots = fs_authorized_roots(state, thread_id);
-    if !fs_path_authorized(&path, &roots) {
-        return fs_not_authorized_msg(&path.display().to_string(), &roots);
+    if fs_path_authorized(&path, &roots) {
+        Ok(path)
+    } else {
+        Err(FsAuthIssue::NeedsAuth(path))
     }
-    let read = match std::fs::read_dir(&path) {
+}
+
+/// Lists a directory's entries (folders first), capped. Authorization is the
+/// caller's responsibility (via `fs_resolve_authorized` or post-authorize).
+fn fs_list_dir_contents(path: &std::path::Path) -> String {
+    let read = match std::fs::read_dir(path) {
         Ok(read) => read,
         Err(error) => return format!("Impossibile elencare «{}»: {error}", path.display()),
     };
@@ -2012,16 +2020,9 @@ fn native_list_directory(state: &AppState, thread_id: Option<&str>, path_str: &s
     out
 }
 
-/// Native `read_text_file`: reads an ABSOLUTE text file inside an authorized root.
-fn native_read_text_file(state: &AppState, thread_id: Option<&str>, path_str: &str) -> String {
-    let Some(path) = fs_expand_abs(path_str) else {
-        return "Indica un percorso ASSOLUTO al file.".to_string();
-    };
-    let roots = fs_authorized_roots(state, thread_id);
-    if !fs_path_authorized(&path, &roots) {
-        return fs_not_authorized_msg(&path.display().to_string(), &roots);
-    }
-    match std::fs::read_to_string(&path) {
+/// Reads a text file, capped. Authorization is the caller's responsibility.
+fn fs_read_text(path: &std::path::Path) -> String {
+    match std::fs::read_to_string(path) {
         Ok(content) if content.len() > PROJECT_READ_MAX_CHARS => {
             let head: String = content.chars().take(PROJECT_READ_MAX_CHARS).collect();
             format!("{head}\n[…troncato a {PROJECT_READ_MAX_CHARS} caratteri]")
@@ -2029,6 +2030,27 @@ fn native_read_text_file(state: &AppState, thread_id: Option<&str>, path_str: &s
         Ok(content) => content,
         Err(error) => format!("Impossibile leggere «{}»: {error}", path.display()),
     }
+}
+
+/// Authorizes a folder for native filesystem access by adding it to the shared
+/// "authorized folders" set (the destinations). Idempotent. Used by the in-chat
+/// authorize card so the user grants access WITHOUT leaving the conversation.
+fn fs_authorize_folder(path: &std::path::Path) -> Result<(), String> {
+    if !path.is_dir() {
+        return Err(format!("«{}» non è una cartella esistente.", path.display()));
+    }
+    let path_str = path.display().to_string();
+    let label = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| path_str.clone());
+    let mut list = load_artifact_destinations();
+    if list.iter().any(|d| d.path == path_str) {
+        return Ok(());
+    }
+    list.push(ArtifactDestination { label, path: path_str });
+    write_artifact_destinations(&list)
 }
 
 fn read_project_file(state: &AppState, thread_id: Option<&str>, rel: &str) -> String {
@@ -5062,34 +5084,60 @@ suoi argomenti):\n{}",
                         tokio::task::spawn_blocking(move || list_project_files(&st, tid.as_deref()))
                             .await
                             .unwrap_or_else(|e| format!("Errore: {e}"))
-                    } else if name == "list_directory" {
+                    } else if name == "list_directory" || name == "read_text_file" {
+                        let is_read = name == "read_text_file";
                         let args_val: serde_json::Value =
                             serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
                         let p = args_val.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                        let _ = emit_stream_event(
-                            &tx,
-                            GenerateStreamEvent::Delta { text: format!("‹‹ACT››📂 Elenco {p}‹‹/ACT››") },
-                        )
-                        .await;
                         let st = state_owned.clone();
                         let tid = thread_id.clone();
-                        tokio::task::spawn_blocking(move || native_list_directory(&st, tid.as_deref(), &p))
-                            .await
-                            .unwrap_or_else(|e| format!("Errore: {e}"))
-                    } else if name == "read_text_file" {
-                        let args_val: serde_json::Value =
-                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
-                        let p = args_val.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                        let _ = emit_stream_event(
-                            &tx,
-                            GenerateStreamEvent::Delta { text: format!("‹‹ACT››📄 Leggo {p}‹‹/ACT››") },
-                        )
-                        .await;
-                        let st = state_owned.clone();
-                        let tid = thread_id.clone();
-                        tokio::task::spawn_blocking(move || native_read_text_file(&st, tid.as_deref(), &p))
-                            .await
-                            .unwrap_or_else(|e| format!("Errore: {e}"))
+                        let pr = p.clone();
+                        let resolved = tokio::task::spawn_blocking(move || {
+                            fs_resolve_authorized(&st, tid.as_deref(), &pr)
+                        })
+                        .await
+                        .unwrap_or_else(|_| Err(FsAuthIssue::Invalid("errore interno".to_string())));
+                        match resolved {
+                            Ok(path) => {
+                                let icon = if is_read { "📄 Leggo" } else { "📂 Elenco" };
+                                let _ = emit_stream_event(
+                                    &tx,
+                                    GenerateStreamEvent::Delta {
+                                        text: format!("‹‹ACT››{icon} {p}‹‹/ACT››"),
+                                    },
+                                )
+                                .await;
+                                tokio::task::spawn_blocking(move || {
+                                    if is_read {
+                                        fs_read_text(&path)
+                                    } else {
+                                        fs_list_dir_contents(&path)
+                                    }
+                                })
+                                .await
+                                .unwrap_or_else(|e| format!("Errore: {e}"))
+                            }
+                            Err(FsAuthIssue::Invalid(msg)) => msg,
+                            Err(FsAuthIssue::NeedsAuth(path)) => {
+                                // In-chat authorize card: grant access WITHOUT going to Settings.
+                                let marker = serde_json::json!({
+                                    "path": path.display().to_string(),
+                                    "op": if is_read { "read" } else { "list" }
+                                })
+                                .to_string();
+                                let card = format!(
+                                    "\n\nPer accedere a questa cartella mi serve la tua autorizzazione.\n\
+‹‹FS_AUTHORIZE››{marker}‹‹/FS_AUTHORIZE››\n"
+                                );
+                                accumulated.push_str(&card);
+                                let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: card })
+                                    .await;
+                                pending_confirm = true;
+                                "IN ATTESA DI AUTORIZZAZIONE: ho mostrato all'utente una scheda con il \
+pulsante per autorizzare l'accesso alla cartella. NON dire che hai letto/elencato."
+                                    .to_string()
+                            }
+                        }
                     } else if name == "run_in_project" {
                         let args_val: serde_json::Value =
                             serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
@@ -11239,6 +11287,49 @@ async fn mcp_disconnect(
         message: e.to_string(),
     })??;
     Ok(Json(serde_json::json!({ "removed": removed > 0 })))
+}
+
+#[derive(Debug, Deserialize)]
+struct FsAuthorizeRequest {
+    path: String,
+    #[serde(default)]
+    op: String,
+}
+
+/// In-chat folder authorization: grants native filesystem access to a folder
+/// (adds it to the authorized set) and runs the pending op (list/read), so the
+/// user authorizes AND sees the result without leaving the conversation.
+async fn fs_authorize(
+    Json(request): Json<FsAuthorizeRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let Some(path) = fs_expand_abs(&request.path) else {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "fs_bad_path",
+            message: "Percorso non valido.".to_string(),
+        });
+    };
+    let op = request.op;
+    let result = tokio::task::spawn_blocking(move || -> Result<String, String> {
+        fs_authorize_folder(&path)?;
+        Ok(if op == "read" {
+            fs_read_text(&path)
+        } else {
+            fs_list_dir_contents(&path)
+        })
+    })
+    .await
+    .map_err(|e| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "fs_authorize_join",
+        message: e.to_string(),
+    })?;
+    Ok(Json(match result {
+        Ok(output) => {
+            serde_json::json!({ "ok": true, "output": output.chars().take(6000).collect::<String>() })
+        }
+        Err(message) => serde_json::json!({ "ok": false, "summary": message }),
+    }))
 }
 
 const MCP_CONFIRM_OPEN: &str = "‹‹MCP_CONFIRM››";

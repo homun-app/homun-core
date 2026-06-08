@@ -1030,6 +1030,14 @@ async function electronComposioExecute(
   });
 }
 
+/** In-chat folder authorization: grant access + run the pending op (list/read). */
+async function electronFsAuthorize(
+  path: string,
+  op: string,
+): Promise<{ ok: boolean; output?: string; summary?: string }> {
+  return gatewayPostJson("/api/fs/authorize", { path, op });
+}
+
 /** Executes an MCP server tool on user confirmation (no "always allow" in v1). */
 async function electronMcpExecute(
   tool: string,
@@ -1267,6 +1275,7 @@ export const coreBridge = {
     args: unknown,
     ctx?: { threadId?: string; messageId?: string },
   ) => electronMcpExecute(tool, args, ctx),
+  fsAuthorize: (path: string, op: string) => electronFsAuthorize(path, op),
   composioAllowedTools: () => electronComposioAllowedTools(),
   composioRevokeTool: (slug: string) => electronComposioRevokeTool(slug),
   skills: () => electronSkills(),
