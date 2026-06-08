@@ -1541,6 +1541,86 @@ prompt, PRIMA di dire che non lo sai.",
     })
 }
 
+fn record_decision_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "record_decision",
+            "description": "Registra in memoria una DECISIONE presa durante il lavoro — vale per \
+QUALSIASI dominio (codice, documenti es. un preventivo cliente, dati, configurazioni), non solo \
+tecnico. Chiamalo DOPO una scelta non banale, così il PERCHÉ resta ricordato e non va ricostruito \
+ri-leggendo i file. Salva: cosa è stato deciso, il perché, le alternative scartate e gli oggetti \
+toccati. La decisione è legata al progetto corrente.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": { "type": "string", "description": "Cosa è stato deciso/fatto, in una frase (es. \"Spostato il preventivo ACME a sconto 10%\")." },
+                    "rationale": { "type": "string", "description": "Il PERCHÉ della scelta." },
+                    "alternatives": {
+                        "type": "array",
+                        "items": { "type": "object", "properties": { "option": { "type": "string" }, "rejected_because": { "type": "string" } } },
+                        "description": "Alternative valutate e scartate, col motivo. Opzionale."
+                    },
+                    "affects": { "type": "array", "items": { "type": "string" }, "description": "Oggetti toccati: file, documento, contatto, ecc. Opzionale." }
+                },
+                "required": ["summary", "rationale"]
+            }
+        }
+    })
+}
+
+/// Records an explicit DECISION into project-scoped memory (the M3b decision layer):
+/// the agent calls this after a non-trivial choice so the "why" survives — for any
+/// domain (code, documents, data), not just coding.
+fn record_decision(state: &AppState, args: &serde_json::Value) -> String {
+    let summary = args.get("summary").and_then(|v| v.as_str()).unwrap_or("").trim();
+    let rationale = args.get("rationale").and_then(|v| v.as_str()).unwrap_or("").trim();
+    if summary.is_empty() || rationale.is_empty() {
+        return "Per registrare una decisione servono almeno 'summary' e 'rationale'.".to_string();
+    }
+    let alternatives = args.get("alternatives").cloned().unwrap_or_else(|| serde_json::json!([]));
+    let affects = args.get("affects").cloned().unwrap_or_else(|| serde_json::json!([]));
+    let user = gateway_memory_user_id();
+    let workspace = gateway_memory_workspace_id();
+    let lifecycle = MemoryLifecycleRequest {
+        actor_id: "desktop-chat".to_string(),
+        user_id: user.clone(),
+        workspace_id: workspace.clone(),
+        purpose: "record_decision".to_string(),
+    };
+    // The "why" lives in the text too, so the existing recall (which surfaces the
+    // record text) shows it without needing to render the structured fields.
+    let text = redact_sensitive_text(&format!("{summary} — perché: {rationale}"));
+    let Ok(facade) = lock_memory_facade(state) else {
+        return "Memoria non disponibile.".to_string();
+    };
+    let record = facade.create_memory_candidate(MemoryCreateRequest {
+        request: lifecycle.clone(),
+        memory_type: "decision".to_string(),
+        text,
+        aliases: Vec::new(),
+        language_hints: Vec::new(),
+        confidence: 1.0,
+        privacy_domain: PrivacyDomain::new("work"),
+        sensitivity: MemoryDataSensitivity::Internal,
+        evidence_refs: Vec::new(),
+        metadata: serde_json::json!({
+            "source": "record_decision",
+            "scope": "project",
+            "decision": { "rationale": rationale, "alternatives": alternatives },
+            "affects_labels": affects,
+        }),
+    });
+    match record {
+        Ok(rec) => {
+            let _ = facade.confirm_memory(&lifecycle, &rec.reference, "decision recorded by agent");
+            "✅ Decisione registrata in memoria (il perché resterà disponibile nei prossimi turni e \
+nelle prossime sessioni).".to_string()
+        }
+        Err(error) => format!("Non sono riuscito a registrare la decisione: {error}"),
+    }
+}
+
 fn schedule_task_tool_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "function",
@@ -3980,7 +4060,12 @@ salvare/esportare un file in una cartella, chiama save_artifact(file, destinatio
 personale o di progetto che potresti aver già appreso (un nome, una preferenza, un dato, una \
 decisione passata e il suo perché), OPPURE se l'utente chiede cosa è stato discusso o deciso in \
 conversazioni PRECEDENTI, e l'informazione NON è già nel profilo qui sopra, chiama SEMPRE lo \
-strumento recall_memory PRIMA di dire che non lo sai o non lo ricordi."
+strumento recall_memory PRIMA di dire che non lo sai o non lo ricordi. \
+DECISIONI: PRIMA di modificare codice/documenti di un progetto, chiama recall_memory per ricordare \
+perché le cose sono come sono (NON ri-scandagliare tutto da zero). DOPO una scelta non banale — in \
+QUALSIASI dominio: codice, un documento (es. un preventivo cliente), dati, configurazioni — chiama \
+record_decision con cosa hai deciso, il PERCHÉ, le alternative scartate e gli oggetti toccati, così \
+il razionale resta e non va ricostruito."
     );
     let system = format!(
         "{system}\n\nFRESCHEZZA / VERIFICA: la tua conoscenza interna può essere datata. Per QUALSIASI \
@@ -4053,6 +4138,7 @@ all'utente (tabella per riga + eventuale footer Fonti)."
     if !read_only {
         base_tools.push(create_artifact_tool_schema());
         base_tools.push(create_skill_tool_schema());
+        base_tools.push(record_decision_tool_schema());
         base_tools.push(schedule_task_tool_schema());
         base_tools.push(list_scheduled_tasks_tool_schema());
         base_tools.push(cancel_scheduled_task_tool_schema());
@@ -5379,6 +5465,20 @@ disponibili (per dati dal web usa il browser: browser_navigate sull'URL indicato
                         .await;
                         let st = state_owned.clone();
                         tokio::task::spawn_blocking(move || recall_memory(&st, &query))
+                            .await
+                            .unwrap_or_else(|e| format!("Errore di esecuzione: {e}"))
+                    } else if name == "record_decision" {
+                        let args_val: serde_json::Value =
+                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        let _ = emit_stream_event(
+                            &tx,
+                            GenerateStreamEvent::Delta {
+                                text: "‹‹ACT››🧠 Registro la decisione in memoria‹‹/ACT››".to_string(),
+                            },
+                        )
+                        .await;
+                        let st = state_owned.clone();
+                        tokio::task::spawn_blocking(move || record_decision(&st, &args_val))
                             .await
                             .unwrap_or_else(|e| format!("Errore di esecuzione: {e}"))
                     } else if name == "find_connected_tools" {
