@@ -49,7 +49,7 @@ import {
   WandSparkles,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, KeyboardEvent } from "react";
 import {
   coreBridge,
@@ -57,6 +57,7 @@ import {
   type ChatAttachmentInput,
   type CoreComputerSessionSnapshot,
   type CorePromptSubmissionResult,
+  type FsEntry,
   type McpRegistryServer,
   type SkillSummary,
 } from "../lib/coreBridge";
@@ -1713,6 +1714,7 @@ export function ChatView({
         artifacts={conversationArtifacts}
         artifactsInitial={artifactsInitial}
         uploadedFiles={uploadedFiles}
+        threadId={thread.threadId}
       />
 
       <ChatComputerPanel />
@@ -2793,6 +2795,7 @@ function Workbench({
   artifacts,
   artifactsInitial,
   uploadedFiles,
+  threadId,
 }: {
   open: boolean;
   tab: WorkbenchTab;
@@ -2801,8 +2804,49 @@ function Workbench({
   artifacts: ParsedArtifact[];
   artifactsInitial?: string | null;
   uploadedFiles: ChatAttachment[];
+  threadId: string;
 }) {
+  // Project-folder browser state (File tab): the thread's linked folder, navigable.
+  const [fsRoot, setFsRoot] = useState<string | null>(null);
+  const [fsCwd, setFsCwd] = useState<string | null>(null);
+  const [fsEntries, setFsEntries] = useState<FsEntry[]>([]);
+  const [fsLoading, setFsLoading] = useState(false);
+  const [fsError, setFsError] = useState<string | null>(null);
+
+  const loadFs = useCallback(
+    async (path: string | null) => {
+      setFsLoading(true);
+      setFsError(null);
+      try {
+        const result = await coreBridge.fsList(path, threadId);
+        setFsRoot(result.root);
+        setFsCwd(result.path);
+        setFsEntries(result.authorized ? result.entries : []);
+        if (!result.authorized) setFsError("Cartella non autorizzata.");
+      } catch (error) {
+        setFsError((error as Error).message);
+        setFsEntries([]);
+      } finally {
+        setFsLoading(false);
+      }
+    },
+    [threadId],
+  );
+
+  // Reset when the thread changes; (lazy) load when the File tab is shown.
+  useEffect(() => {
+    setFsRoot(null);
+    setFsCwd(null);
+    setFsEntries([]);
+  }, [threadId]);
+  useEffect(() => {
+    if (open && tab === "files" && fsCwd === null) void loadFs(null);
+  }, [open, tab, fsCwd, loadFs]);
+
   if (!open) return null;
+  const atRoot = !fsRoot || fsCwd === fsRoot;
+  const cwdLabel = fsCwd ? fsCwd.replace(/\/+$/, "").split("/").pop() || fsCwd : "";
+  const parentOf = (path: string) => path.replace(/\/+$/, "").split("/").slice(0, -1).join("/");
   const tabs: { key: WorkbenchTab; label: string; icon: typeof FileText; badge?: number }[] = [
     {
       key: "files",
@@ -2849,31 +2893,84 @@ function Workbench({
         </button>
       </div>
       <div className="workbench-body">
-        {tab === "files" &&
-          (uploadedFiles.length > 0 ? (
-            <div className="workbench-files">
-              <div className="workbench-section-label">Caricati in questa chat</div>
-              <ul className="workbench-file-list">
-                {uploadedFiles.map((file) => (
-                  <li key={file.artifactId}>
-                    {file.kind === "image" ? <FileImage size={15} /> : <FileText size={15} />}
-                    <span className="wf-name" title={file.title}>
-                      {file.title}
-                    </span>
-                    <small>{formatFileSize(file.sizeBytes)}</small>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : (
-            <div className="workbench-empty">
-              <FolderOpen size={28} />
-              <p>
-                Nessun file in questa chat. Allega un file (📎) e comparirà qui — resta
-                disponibile anche nei messaggi successivi.
-              </p>
-            </div>
-          ))}
+        {tab === "files" && (
+          <div className="workbench-files">
+            {uploadedFiles.length > 0 && (
+              <>
+                <div className="workbench-section-label">Caricati in questa chat</div>
+                <ul className="workbench-file-list">
+                  {uploadedFiles.map((file) => (
+                    <li key={file.artifactId}>
+                      {file.kind === "image" ? <FileImage size={15} /> : <FileText size={15} />}
+                      <span className="wf-name" title={file.title}>
+                        {file.title}
+                      </span>
+                      <small>{formatFileSize(file.sizeBytes)}</small>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+
+            {fsRoot ? (
+              <>
+                <div
+                  className="workbench-section-label"
+                  style={{ marginTop: uploadedFiles.length ? 14 : 4 }}
+                >
+                  Cartella di progetto
+                </div>
+                <div className="workbench-breadcrumb">
+                  <button
+                    type="button"
+                    aria-label="Cartella superiore"
+                    disabled={atRoot || fsLoading}
+                    onClick={() => fsCwd && void loadFs(parentOf(fsCwd))}
+                  >
+                    <ChevronLeft size={14} />
+                  </button>
+                  <span title={fsCwd ?? ""}>{cwdLabel}</span>
+                  {fsLoading && <Loader2 size={13} className="spin" />}
+                </div>
+                <ul className="workbench-file-list">
+                  {fsEntries.map((entry) => (
+                    <li key={entry.path}>
+                      {entry.is_dir ? <FolderOpen size={15} /> : <FileText size={15} />}
+                      {entry.is_dir ? (
+                        <button
+                          type="button"
+                          className="wf-name wf-dir"
+                          title={entry.name}
+                          onClick={() => void loadFs(entry.path)}
+                        >
+                          {entry.name}
+                        </button>
+                      ) : (
+                        <span className="wf-name" title={entry.name}>
+                          {entry.name}
+                        </span>
+                      )}
+                      {!entry.is_dir && <small>{formatFileSize(entry.size)}</small>}
+                    </li>
+                  ))}
+                  {fsEntries.length === 0 && !fsLoading && (
+                    <li className="wf-muted">(cartella vuota)</li>
+                  )}
+                </ul>
+              </>
+            ) : (
+              uploadedFiles.length === 0 && (
+                <div className="workbench-empty">
+                  <FolderOpen size={28} />
+                  <p>
+                    {fsError ??
+                      "Nessun file in questa chat e nessuna cartella di progetto collegata. Allega un file (📎) o collega una cartella al progetto."}
+                  </p>
+                </div>
+              )
+            )}
+          </div>
+        )}
         {tab === "artifacts" &&
           (artifacts.length > 0 ? (
             <ArtifactsPanel
