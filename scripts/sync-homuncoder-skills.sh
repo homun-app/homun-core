@@ -18,13 +18,16 @@ fi
 
 mkdir -p "$DEST"
 count=0
+: > "$DEST/homuncoder-skills.txt"
 for dir in "$SKILLS_SRC"/*/; do
   [[ -f "${dir}SKILL.md" ]] || continue
   id="$(basename "$dir")"
   rm -rf "${DEST:?}/$id"
   cp -R "$dir" "$DEST/$id"
+  echo "$id" >> "$DEST/homuncoder-skills.txt"
   count=$((count + 1))
 done
 
 echo "✓ HomunCoder: installate $count skill in $DEST"
+echo "  manifest: $DEST/homuncoder-skills.txt"
 ls "$DEST" | sed 's/^/  • /'
