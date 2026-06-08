@@ -252,6 +252,21 @@ col pulsante per fare la cosa. Pattern condiviso coi confirm-card Composio/MCP.
 
 ## Debito tecnico / fronti aperti
 
+0b. **Ollama: API NATIVA `/api/chat` (streaming + tool insieme).** RISOLTO
+   (2026-06-08, `674ab4f`). Causa radice dei fallimenti con Ollama (browser non
+   estrae, documenti falliti): il layer OpenAI-compat `/v1` **scarta i tool-call in
+   streaming** (ollama#12557, OpenClaw#11828, opencode#20995) — il mio passaggio a
+   `stream:true` su `/v1` aveva rotto i tool con Ollama. Fix provider-aware: i provider
+   Ollama (locale `:11434` e cloud `ollama.com`) ora usano la NATIVA `/api/chat`
+   (NDJSON, streaming + tool insieme, come Zed); gli altri restano su `/v1`.
+   `build_chat_payload` ricostruisce la shape giusta anche sul fallback;
+   `collect_ollama_native_stream` parsa NDJSON → stessa body shape; `to_ollama_messages`
+   converte multimodale/tool_calls. Timeout: first-token 300s + idle 180s, ceiling
+   3600s (un total-timeout a metà stream = il "error decoding response body" di
+   reqwest#2839). Verificato: 5 `recall_memory` dispatchati via streaming nativo, no
+   drop/errori. Resta da rifinire la sintesi finale in alcuni turni (stringa canned
+   "non riesco a estrarre dalle fonti").
+
 0. **Streaming dall'upstream del modello.** RISOLTO (2026-06-08, `e87afc4`). Causa dei
    timeout: chat con `"stream": false` + cap sul tempo TOTALE → un modello lento/
    ragionatore (es. nemotron-3-ultra su Ollama cloud) sforava (Zed non ha il problema
