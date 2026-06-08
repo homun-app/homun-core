@@ -50,7 +50,14 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, KeyboardEvent } from "react";
+import type {
+  ChangeEvent,
+  ClipboardEvent,
+  DragEvent,
+  FormEvent,
+  KeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+} from "react";
 import {
   coreBridge,
   type ActiveModelInfo,
@@ -2818,6 +2825,23 @@ function Workbench({
   const [fsEntries, setFsEntries] = useState<FsEntry[]>([]);
   const [fsLoading, setFsLoading] = useState(false);
   const [fsError, setFsError] = useState<string | null>(null);
+  // Panel sizing: draggable width + fullscreen toggle (so wide files/diffs read well).
+  const [expanded, setExpanded] = useState(false);
+  const [width, setWidth] = useState(520);
+  const startResize = useCallback((event: ReactMouseEvent) => {
+    event.preventDefault();
+    const onMove = (ev: MouseEvent) => {
+      // Panel is docked right: width grows as the cursor moves left.
+      const next = Math.min(Math.max(window.innerWidth - ev.clientX, 320), window.innerWidth - 120);
+      setWidth(next);
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, []);
   // Background/scheduled tasks (Attività tab), fetched lazily when the tab opens.
   const [tasks, setTasks] = useState<CoreTaskQueueSnapshot | null>(null);
   const [tasksLoading, setTasksLoading] = useState(false);
@@ -2938,7 +2962,19 @@ function Workbench({
     },
   ];
   return (
-    <aside className="workbench" aria-label="Pannello di lavoro">
+    <aside
+      className={`workbench${expanded ? " expanded" : ""}`}
+      aria-label="Pannello di lavoro"
+      style={expanded ? undefined : { width }}
+    >
+      {!expanded && (
+        <div
+          className="workbench-resize"
+          role="separator"
+          aria-label="Ridimensiona pannello"
+          onMouseDown={startResize}
+        />
+      )}
       <div className="workbench-tabs" role="tablist">
         {tabs.map((entry) => {
           const Icon = entry.icon;
@@ -2958,6 +2994,15 @@ function Workbench({
           );
         })}
         <span className="workbench-tabs-spacer" />
+        <button
+          className="workbench-close"
+          type="button"
+          aria-label={expanded ? "Riduci pannello" : "Schermo intero"}
+          title={expanded ? "Riduci" : "Schermo intero"}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+        </button>
         <button
           className="workbench-close"
           type="button"
