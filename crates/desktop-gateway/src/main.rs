@@ -437,6 +437,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/chat/improve_prompt", post(improve_prompt))
         .route("/api/chat/transcribe", post(transcribe_audio))
         .route("/api/artifacts/file", get(download_artifact).delete(delete_artifact_file))
+        .route("/api/artifacts/pdf-pages", get(artifact_pdf_pages))
         .route("/api/artifacts/path", get(artifact_folder_path))
         .route("/api/artifacts/versions", get(artifact_versions))
         .route("/api/artifacts/content", post(save_artifact_content))
@@ -7533,6 +7534,56 @@ async fn download_artifact(Query(reference): Query<ArtifactRef>) -> Result<Respo
         )
         .body(Body::from(bytes))
         .expect("valid artifact response"))
+}
+
+#[derive(serde::Serialize)]
+struct PdfPagesResponse {
+    pages: Vec<String>,
+}
+
+/// Renders a PDF artifact's pages to images for a clean, document-style preview
+/// (white pages, no dark native-viewer chrome). Falls back is the caller's job (the
+/// UI uses the iframe viewer if this errors, e.g. pdfium unavailable).
+async fn artifact_pdf_pages(
+    Query(reference): Query<ArtifactRef>,
+) -> Result<Json<PdfPagesResponse>, GatewayError> {
+    let forbidden = reference.name.contains('/')
+        || reference.name.contains('\\')
+        || reference.name.contains("..")
+        || reference.thread.contains('/')
+        || reference.thread.contains("..");
+    if forbidden {
+        return Err(GatewayError {
+            status: StatusCode::FORBIDDEN,
+            code: "bad_artifact_path",
+            message: "Percorso non valido.".to_string(),
+        });
+    }
+    let dir = sandbox::artifacts_dir().join(&reference.thread);
+    let path = match reference.version {
+        Some(version) => dir.join(".versions").join(&reference.name).join(version.to_string()),
+        None => dir.join(&reference.name),
+    };
+    if !path_within(&dir, &path) {
+        return Err(GatewayError {
+            status: StatusCode::FORBIDDEN,
+            code: "artifact_outside_dir",
+            message: "Percorso fuori dalla cartella artifact.".to_string(),
+        });
+    }
+    let pages = tokio::task::spawn_blocking(move || attachments::render_pdf_to_images(&path))
+        .await
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "pdf_render",
+            message: e.to_string(),
+        })?
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "pdf_render",
+            message: e,
+        })?;
+    Ok(Json(PdfPagesResponse { pages }))
 }
 
 // ---- authorized write destinations (file-ops boundary) ----------------------

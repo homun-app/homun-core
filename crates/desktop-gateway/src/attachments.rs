@@ -174,6 +174,18 @@ fn ingest_pdf(path: &Path) -> Result<One, String> {
     Ok(One { text: Some(note), images })
 }
 
+/// Renders a PDF FILE's pages to JPEG data-URL images, for a clean document-style
+/// preview in the artifact panel (white pages, no dark PDF-viewer chrome). Reuses the
+/// same pdfium path as scan ingestion; errors clearly if pdfium isn't available so the
+/// caller can fall back to the native iframe viewer.
+pub fn render_pdf_to_images(path: &Path) -> Result<Vec<String>, String> {
+    let pdfium = bind_pdfium()?;
+    let document = pdfium
+        .load_pdf_from_file(path, None)
+        .map_err(|e| format!("PDF illeggibile: {e}"))?;
+    render_pdf_pages(&document)
+}
+
 fn render_pdf_pages(document: &PdfDocument) -> Result<Vec<String>, String> {
     let config = PdfRenderConfig::new().set_target_width(PDF_RENDER_WIDTH);
     let mut urls = Vec::new();

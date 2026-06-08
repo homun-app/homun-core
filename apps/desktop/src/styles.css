@@ -3318,6 +3318,24 @@ body.resizing-drawer {
   min-height: 70vh;
   border: 0;
 }
+/* Clean, document-style PDF preview: pages as white sheets stacked top-to-bottom,
+   fitting the panel width — no dark native-viewer chrome. */
+.artifact-preview-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  align-items: center;
+}
+.artifact-preview-page {
+  width: 100%;
+  max-width: 720px;
+  height: auto;
+  background: #fff;
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.1));
+  border-radius: 6px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.12);
+}
 .artifact-preview-text {
   margin: 0;
   white-space: pre-wrap;
