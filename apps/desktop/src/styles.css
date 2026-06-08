@@ -1073,6 +1073,27 @@ body.resizing-drawer {
   box-shadow: inset 0 0 0 1px var(--line);
 }
 
+/* Borderless header icon: the lone Workbench toggle (no chrome, subtle hover). */
+.workbench-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 6px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.workbench-toggle:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+.workbench-toggle.active {
+  color: var(--text);
+}
+
 .floating-menu {
   position: absolute;
   top: calc(100% + 8px);
