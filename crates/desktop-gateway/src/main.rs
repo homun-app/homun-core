@@ -4518,6 +4518,27 @@ controlla/aggiorna la chiave in Impostazioni → Modello & Runtime.".to_string()
                                 tokio::time::sleep(std::time::Duration::from_millis(800 * u64::from(attempt))).await;
                                 continue;
                             }
+                            // Persistent timeout/connect (e.g. a huge/slow cloud model,
+                            // or a `:cloud` model on the local daemon): self-heal once
+                            // onto a provider that has a key — same as the 401 path.
+                            if transient && !fallback_tried {
+                                if let Some((fb_base, fb_model, fb_key)) = auth_fallback_config(&model) {
+                                    if fb_model != model {
+                                        fallback_tried = true;
+                                        let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
+                                            text: format!("‹‹ACT››↩ «{model}» non risponde (timeout): ripiego su «{fb_model}»…‹‹/ACT››"),
+                                        })
+                                        .await;
+                                        model = fb_model;
+                                        base_url = fb_base;
+                                        endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+                                        api_key = fb_key;
+                                        payload["model"] = serde_json::Value::String(model.clone());
+                                        attempt = 0;
+                                        continue;
+                                    }
+                                }
+                            }
                             let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
                                 text: "Il modello non ha risposto (timeout/rete). Riprova tra poco.".to_string(),
                             })
