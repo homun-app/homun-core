@@ -14214,8 +14214,21 @@ async fn runtime_models(State(state): State<AppState>) -> Json<RuntimeModelsResp
     {
         let registry = load_provider_registry();
         if let Some(provider) = registry.active() {
-            let active = provider.effective_model();
-            let mut available: Vec<String> = provider.models.iter().map(|m| m.id.clone()).collect();
+            // The composer default must mirror what CHAT actually uses = the
+            // orchestrator role binding (not the active provider's stray
+            // active_model) — otherwise changing the role default in Settings
+            // leaves the composer showing the old model.
+            let active = registry
+                .resolve_role("orchestrator")
+                .map(|r| r.model)
+                .or_else(|| provider.effective_model());
+            // List models from ALL providers so the per-message override can pick
+            // any configured model (e.g. a Z.ai model while Ollama is active).
+            let mut available: Vec<String> = registry
+                .providers
+                .iter()
+                .flat_map(|p| p.models.iter().map(|m| m.id.clone()))
+                .collect();
             if let Some(active) = active.as_ref()
                 && !available.iter().any(|m| m == active)
             {
