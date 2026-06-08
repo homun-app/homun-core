@@ -97,6 +97,40 @@ modificare codice/documenti → `recall_memory`; **dopo** una scelta non banale 
     come ALIAS (indicizzati FTS); leggendo un file (`read_file`) `decisions_for_path`
     cerca per basename e appende "📌 Decisioni passate su questo file" al risultato.
 
+## Recall affidabile (fix importanti)
+
+- **Scope per-thread**: a inizio turno l'active workspace è sincronizzato da
+  `workspace_for_thread(thread_id)` → profilo, recall, per-file ed estrazione usano il
+  progetto DELLA conversazione (non un global stale).
+- **Ricerca FTS in OR**: `search_memory_refs` passa i termini significativi in OR
+  (`fts_or_query`), non più la frase grezza in AND implicito (che dava 0 risultati alle
+  domande in linguaggio naturale). Vale per OGNI recall (tool, RAG, per-file).
+- **RAG**: a ogni turno `relevant_memory_for_prompt` cerca in memoria col prompt
+  dell'utente e inietta i match (decisioni/fatti) nel system prompt → risponde dalla
+  decisione senza dover chiamare il tool.
+
+## Grafo navigabile + tab Memoria
+
+- **Endpoint** `GET /api/memory/graph?thread=…` (o `?workspace=…`): assembla un grafo
+  decision-centric del progetto — nodo progetto → DECISIONI → file toccati
+  (`affects_labels`) + alternative scartate (`decision.alternatives`), più
+  fatti/preferenze e relazioni entità↔entità. Costruito dai dati esistenti.
+- **Tab "Memoria"** nel Workbench: SVG self-rendered (layout force deterministico,
+  pan/zoom, click→dettaglio con rationale/alternative). Identico per ogni progetto.
+
+## Piano operativo
+
+- Tool `update_plan(steps)` (pattern TodoWrite): l'agente emette/aggiorna gli step →
+  marker `‹‹PLAN››` → pannello "Piano". Direttiva: per compiti multi-step pianifica e
+  aggiorna gli stati.
+
+## HomunCoder (metodologia di coding)
+
+- Le skill CoderSteroids (evidence-first) sono installabili in Homun via
+  `scripts/sync-homuncoder-skills.sh` (stesso formato SKILL.md). L'agente le scopre
+  (L1) e le carica con `use_skill`. Le abitudini centrali sono già native qui:
+  memoria del perché, `update_plan`, recall-before-edit, verifica eseguendo.
+
 ## Come collaudarla
 
 1. In un progetto (o cartella cliente): compi un intervento ("aggiorna il preventivo /
