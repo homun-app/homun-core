@@ -5957,11 +5957,14 @@ disponibili (per dati dal web usa il browser: browser_navigate sull'URL indicato
                                         "thread": thread_slug,
                                         "size": size,
                                     });
+                                    let artifact_mark = format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
+                                    // Persist in the committed answer so the UI can
+                                    // render the download card + Artefatti panel (the
+                                    // Done payload is authoritative).
+                                    accumulated.push_str(&artifact_mark);
                                     let _ = emit_stream_event(
                                         &tx,
-                                        GenerateStreamEvent::Delta {
-                                            text: format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››"),
-                                        },
+                                        GenerateStreamEvent::Delta { text: artifact_mark },
                                     )
                                     .await;
                                     match delivered_to {
@@ -6016,11 +6019,15 @@ disponibili (per dati dal web usa il browser: browser_navigate sull'URL indicato
                                     "size": size,
                                     "updated": updated,
                                 });
+                                let artifact_mark = format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
+                                // Persist the marker in the committed answer (Done is
+                                // authoritative): the UI parses ‹‹ARTIFACT›› from the
+                                // saved message to render the download card + the
+                                // Artefatti panel. Without this the artifact vanishes.
+                                accumulated.push_str(&artifact_mark);
                                 let _ = emit_stream_event(
                                     &tx,
-                                    GenerateStreamEvent::Delta {
-                                        text: format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››"),
-                                    },
+                                    GenerateStreamEvent::Delta { text: artifact_mark },
                                 )
                                 .await;
                                 if updated {
