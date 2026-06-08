@@ -4814,7 +4814,12 @@ complete (SKILL.md). Poi ESEGUI i comandi che la skill indica (es. `curl …`, `
 strumento `run_in_sandbox`, che li lancia nel computer contenuto, e usa l'output per rispondere.\n\
 FILE GENERATI: se una skill o un comando produce file (xlsx, pdf, csv, immagini, …), SALVALI nella \
 cartella d'ambiente `$OUTPUT_DIR` (es. `... --output \"$OUTPUT_DIR/report.xlsx\"`): i file lì \
-diventano automaticamente artifact scaricabili dall'utente.\n{lines}"
+diventano automaticamente artifact scaricabili dall'utente.\n\
+METODOLOGIA (HomunCoder) — per il lavoro di SVILUPPO segui le abitudini evidence-first: pianifica con \
+update_plan, RICORDA/registra le decisioni col loro perché, e VERIFICA eseguendo (build/test/lint) prima \
+di dire \"fatto\". Le skill di metodologia qui sotto (roadmap-first-planning, systematic-debugging, \
+test-first-development, verification-before-completion, code-review-discipline, context7-research) \
+approfondiscono ogni passo: caricale con use_skill quando la situazione lo richiede.\n{lines}"
         )
     };
     // Authorized write destinations: when present, the model can deliver
