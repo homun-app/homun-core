@@ -252,16 +252,19 @@ col pulsante per fare la cosa. Pattern condiviso coi confirm-card Composio/MCP.
 
 ## Debito tecnico / fronti aperti
 
-0. **Streaming dall'upstream del modello (SOTA, da fare).** Oggi la chat chiama il
-   modello con `"stream": false` + un timeout TOTALE: aspettiamo l'intera risposta,
-   quindi un modello lento/ragionatore (es. nemotron-3-ultra su Ollama cloud) sfora il
-   cap e va in timeout, e l'UI resta ferma fino a fine generazione. Editor come Zed non
-   hanno il problema perché STREAMano. Cerotto applicato (2026-06-08): timeout
-   configurabile `LOCAL_FIRST_MODEL_TIMEOUT_SECS` (default 600s) + self-heal su
-   timeout. Fix vero: `stream:true` + consumo SSE (`resp.bytes_stream`, reqwest ha già
-   la feature `stream`) con **ricomposizione dei tool_call dai delta** + **timeout di
-   inattività** (reset per-chunk) + token live nell'UI. Cambio delicato al loop con
-   tool: da fare con test su modello reale, non di fretta.
+0. **Streaming dall'upstream del modello.** RISOLTO (2026-06-08, `e87afc4`). Causa dei
+   timeout: chat con `"stream": false` + cap sul tempo TOTALE → un modello lento/
+   ragionatore (es. nemotron-3-ultra su Ollama cloud) sforava (Zed non ha il problema
+   perché STREAMA). Fix: `stream:true` + consumo SSE (`resp.bytes_stream`) con
+   **timeout di INATTIVITÀ** per-chunk (`LOCAL_FIRST_MODEL_IDLE_TIMEOUT_SECS`, default
+   180s) invece del cap totale; `reassemble_openai_stream` ricompone i delta
+   (content + tool_call dai frammenti) nella forma non-streaming → resto del loop,
+   sanificazione e marker INVARIATI; fallback al JSON pieno se il provider ignora
+   stream. Verificato end-to-end col modello reale (delta+done, no timeout) + unit su
+   reassemble. RESTA (polish UX): **token live nell'UI** — oggi il contenuto si vede a
+   fine generazione (nessun timeout, ma niente token in tempo reale); richiede rendere
+   il `Done` autorevole nel frontend (oggi `coreBridge.ts` usa `done.text` solo se i
+   delta sono vuoti) + emettere i delta di contenuto durante il consumo SSE.
 
 1. **Doppio motore browser.** RISOLTO (2026-06-05): rimosso il `browser_task`
    durevole e il planner legacy (`browser_loop_controller.rs`, `RuntimeBrowserLoopPlanner`,
