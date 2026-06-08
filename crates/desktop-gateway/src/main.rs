@@ -3421,25 +3421,60 @@ fn reassemble_openai_stream(sse: &str) -> serde_json::Value {
 
 /// Consumes a streamed completion response with a PER-CHUNK idle timeout (reset on
 /// every chunk) instead of a total-time cap — the fix for slow reasoning models that
-/// used to blow the old 180s total timeout. Returns the reassembled non-streaming
-/// body, or an error string on a genuine stall / stream error.
+/// used to blow the old 180s total timeout. Also emits each `delta.content` fragment
+/// LIVE to `sink` as it arrives, so the UI streams tokens like an editor (the final
+/// committed text is the authoritative `Done` payload, so the raw live preview is
+/// cleanly replaced). Returns the reassembled non-streaming body (content +
+/// tool_calls), or an error string on a genuine stall / stream error.
 async fn collect_openai_stream(
     resp: reqwest::Response,
     idle: std::time::Duration,
+    sink: &StreamSink,
 ) -> Result<serde_json::Value, String> {
     use futures_util::StreamExt;
     let mut stream = resp.bytes_stream();
     let mut raw = String::new();
-    loop {
+    let mut pending = String::new();
+    let mut done = false;
+    while !done {
         match tokio::time::timeout(idle, stream.next()).await {
             Err(_) => return Err("nessun token dal modello entro il tempo di inattività".to_string()),
             Ok(None) => break,
             Ok(Some(Ok(bytes))) => {
-                raw.push_str(&String::from_utf8_lossy(&bytes));
-                // OpenAI sentinel: response complete — stop even if the server keeps
-                // the connection open (otherwise we'd wait out the idle timeout).
-                if raw.contains("[DONE]") {
-                    break;
+                let text = String::from_utf8_lossy(&bytes);
+                raw.push_str(&text);
+                pending.push_str(&text);
+                // Stream complete SSE lines live (token-by-token UX).
+                while let Some(idx) = pending.find('\n') {
+                    let line: String = pending.drain(..=idx).collect();
+                    let line = line.trim();
+                    let Some(data) = line.strip_prefix("data:") else {
+                        continue;
+                    };
+                    let data = data.trim();
+                    if data == "[DONE]" {
+                        done = true;
+                        continue;
+                    }
+                    if data.is_empty() {
+                        continue;
+                    }
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                        if let Some(fragment) = json
+                            .get("choices")
+                            .and_then(|c| c.get(0))
+                            .and_then(|c| c.get("delta"))
+                            .and_then(|d| d.get("content"))
+                            .and_then(|v| v.as_str())
+                            .filter(|s| !s.is_empty())
+                        {
+                            let _ = emit_stream_event(
+                                sink,
+                                GenerateStreamEvent::Delta { text: fragment.to_string() },
+                            )
+                            .await;
+                        }
+                    }
                 }
             }
             Ok(Some(Err(error))) => return Err(error.to_string()),
@@ -4702,6 +4737,7 @@ controlla/aggiorna la chiave in Impostazioni → Modello & Runtime.".to_string()
             let body: serde_json::Value = match collect_openai_stream(
                 resp,
                 std::time::Duration::from_secs(model_idle_timeout_secs()),
+                &tx,
             )
             .await
             {
@@ -6280,8 +6316,11 @@ Dillo all'utente in modo chiaro; NON dichiarare che è fatto."
             // the user never sees raw template markup.
             let content =
                 sanitize_model_text(message.get("content").and_then(|c| c.as_str()).unwrap_or(""));
+            // The content already streamed LIVE (raw) via collect_openai_stream; here we
+            // only accumulate the SANITIZED version, which becomes the authoritative
+            // `Done` payload that the frontend uses as the final text (replacing the
+            // raw live preview). No second content Delta — that would double it.
             accumulated.push_str(&content);
-            let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: content }).await;
             if let Some(fonti) = fonti_section(&browse_sources, &accumulated) {
                 accumulated.push_str(&fonti);
                 let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: fonti }).await;

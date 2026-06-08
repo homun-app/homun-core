@@ -2132,7 +2132,10 @@ async function submitBrowserRuntimeChatPromptStream(
         text += String(event.text ?? "");
         chatApi.notifyChatStreamDelta({ request_id: requestId, delta: String(event.text ?? "") });
       } else if (event.type === "done") {
-        if (!text && event.text) text = String(event.text);
+        // Done carries the AUTHORITATIVE final text (gateway-sanitized, markers/cards
+        // resolved). Use it to replace the raw live-streamed preview, so token
+        // streaming stays a preview and the committed message is the clean version.
+        if (event.text) text = String(event.text);
         metrics = event.metrics ?? {};
       } else if (event.type === "error") {
         throw new Error(String(event.message ?? "Errore runtime locale"));
@@ -2224,7 +2227,8 @@ async function resumeBrowserRuntimeChatPromptStream(
         text += String(event.text ?? "");
         chatApi.notifyChatStreamDelta({ request_id: requestId, delta: String(event.text ?? "") });
       } else if (event.type === "done") {
-        if (!text && event.text) text = String(event.text);
+        // Done is authoritative (sanitized final text) → replace the live preview.
+        if (event.text) text = String(event.text);
       } else if (event.type === "error") {
         throw new Error(String(event.message ?? "Errore runtime locale"));
       }
