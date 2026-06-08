@@ -34,30 +34,59 @@ pub struct IngestedAttachments {
     pub images: Vec<String>,
 }
 
+/// One attachment after ingestion — the unit we persist per-thread so a file stays
+/// available across turns. `text` is the extracted text (or a "scan → images" /
+/// "⚠️ error" note); `images` are `data:` URLs for the vision model.
+#[derive(Debug, Clone)]
+pub struct IngestedFile {
+    pub display_name: String,
+    pub mime_type: String,
+    pub text: Option<String>,
+    pub images: Vec<String>,
+}
+
+/// Ingests each attachment independently, one `IngestedFile` per input. A failure
+/// degrades to an `⚠️` note (never panics, never drops the entry) so the caller
+/// can still persist/surface that the file was seen.
+pub fn ingest_each(attachments: &[AttachmentInput]) -> Vec<IngestedFile> {
+    attachments
+        .iter()
+        .map(|att| {
+            let display_name = if att.display_name.trim().is_empty() {
+                att.local_path.clone()
+            } else {
+                att.display_name.clone()
+            };
+            match ingest_one(att) {
+                Ok(One { text, images }) => IngestedFile {
+                    display_name,
+                    mime_type: att.mime_type.clone(),
+                    text,
+                    images,
+                },
+                Err(note) => IngestedFile {
+                    display_name,
+                    mime_type: att.mime_type.clone(),
+                    text: Some(format!("⚠️ {note}")),
+                    images: Vec::new(),
+                },
+            }
+        })
+        .collect()
+}
+
 /// Reads every attachment and merges their extracted text + images. Per-attachment
 /// failures degrade to a short note in the text (never panic, never abort the turn).
 pub fn ingest_attachments(attachments: &[AttachmentInput]) -> IngestedAttachments {
     let mut out = IngestedAttachments::default();
-    for att in attachments {
-        let label = if att.display_name.trim().is_empty() {
-            att.local_path.clone()
-        } else {
-            att.display_name.clone()
-        };
-        match ingest_one(att) {
-            Ok(One { text, mut images }) => {
-                if let Some(text) = text {
-                    if !text.trim().is_empty() {
-                        out.text
-                            .push_str(&format!("\n\n[Allegato: {label}]\n{text}"));
-                    }
-                }
-                out.images.append(&mut images);
-            }
-            Err(note) => {
-                out.text.push_str(&format!("\n\n[Allegato: {label} — {note}]"));
+    for file in ingest_each(attachments) {
+        if let Some(text) = &file.text {
+            if !text.trim().is_empty() {
+                out.text
+                    .push_str(&format!("\n\n[Allegato: {}]\n{}", file.display_name, text));
             }
         }
+        out.images.extend(file.images);
     }
     out
 }
