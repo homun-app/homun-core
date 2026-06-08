@@ -312,11 +312,13 @@ stato dei 3 layer: i path discovery/esecuzione/approval sono cablati; i buchi so
 **completamento, gestione, onboarding**.
 
 Verso la prima release:
-1. **Composio OAuth end-to-end** (collo di bottiglia). Oggi `composio_link`
-   restituisce il `redirect_url` ma il flusso non si chiude (niente apertura
-   browser + polling stato) → la maggior parte dei 1000 connettori (managed OAuth)
-   e' di fatto inusabile. Aprire l'URL + poll `connected_accounts` fino ad ACTIVE
-   + esito chiaro in UI (auto-refresh toolkit).
+1. **Composio OAuth end-to-end** — PARZIALE (verificato 2026-06-08). In
+   **Impostazioni → Connettori → Composio** il flusso è COMPLETO:
+   `ComposioToolkitBrowser.connect` apre il browser + poll `connected_accounts`
+   ogni 3s fino ad ACTIVE + refresh toolkit (SettingsView.tsx:1492-1527). Buco: le
+   **connect-card in chat** (`linkComposio`, ComposioReconnectCard) aprono l'URL e
+   si fermano ("autorizza e riprova"), senza poll né refresh, con `markConnected`
+   ottimistico → da allineare al poll di Settings.
 2. **Errori azionabili + token.** PARZIALE (2026-06-08): il **401 del modello** ora ha
    messaggio azionabile (`:cloud` → `ollama signin`/chiave) + **fallback automatico**
    al binding orchestratore + preset **Ollama Cloud** (`9d63b88`/`84432aa`/`c8bd089`).
