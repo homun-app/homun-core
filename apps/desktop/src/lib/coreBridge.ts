@@ -1372,7 +1372,7 @@ export const coreBridge = {
   unarchiveChatThread: (threadId: string) =>
     chatApi.unarchiveChatThread(threadId),
   deleteChatThread: (threadId: string) => chatApi.deleteChatThread(threadId),
-  taskQueue: () => electronTaskQueue(),
+  taskQueue: (threadId?: string) => electronTaskQueue(threadId),
   taskExecutorStatus: () => electronTaskExecutorStatus(),
   taskDetail: (taskId: string) => electronTaskDetail(taskId),
   approveApproval: (approvalId: string, options?: ApprovalDecisionOptions) =>
@@ -1563,9 +1563,10 @@ function emptyTaskQueue(): CoreTaskQueueSnapshot {
   };
 }
 
-async function electronTaskQueue(): Promise<CoreTaskQueueSnapshot> {
+async function electronTaskQueue(threadId?: string): Promise<CoreTaskQueueSnapshot> {
   try {
-    const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/tasks/queue`, {
+    const suffix = threadId ? `?thread_id=${encodeURIComponent(threadId)}` : "";
+    const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/tasks/queue${suffix}`, {
       headers: gatewayHeaders(),
     });
     if (!response.ok) {
