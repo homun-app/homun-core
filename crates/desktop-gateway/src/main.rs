@@ -539,6 +539,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/capabilities/mcp/connected", get(mcp_connected))
         .route("/api/capabilities/mcp/disconnect", post(mcp_disconnect))
         .route("/api/fs/authorize", post(fs_authorize))
+        .route("/api/fs/list", get(fs_list))
         .route("/api/connect/mark", post(connect_mark))
         .route("/api/capabilities/composio/connect", post(connect_composio))
         .route("/api/capabilities/composio/toolkits", get(composio_toolkits))
@@ -2020,6 +2021,104 @@ fn fs_list_dir_contents(path: &std::path::Path) -> String {
         out.push_str(&format!("[…e altri {} elementi]\n", total - shown));
     }
     out
+}
+
+/// A directory entry for the Workbench File tab (structured, unlike the
+/// text-formatted `fs_list_dir_contents` the chat tool uses).
+#[derive(Debug, Serialize)]
+struct FsEntry {
+    name: String,
+    path: String,
+    is_dir: bool,
+    size: u64,
+}
+
+/// Lists a directory as structured entries (folders first, then alpha), hiding
+/// dotfiles, capped. Authorization is the caller's responsibility.
+fn fs_list_entries(path: &std::path::Path) -> Vec<FsEntry> {
+    let Ok(read) = std::fs::read_dir(path) else {
+        return Vec::new();
+    };
+    let mut entries: Vec<FsEntry> = read
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') {
+                return None;
+            }
+            let meta = entry.metadata().ok();
+            Some(FsEntry {
+                is_dir: meta.as_ref().map(|m| m.is_dir()).unwrap_or(false),
+                size: meta.as_ref().map(|m| m.len()).unwrap_or(0),
+                path: entry.path().display().to_string(),
+                name,
+            })
+        })
+        .collect();
+    entries.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    entries.truncate(FS_LIST_CAP);
+    entries
+}
+
+#[derive(Debug, Deserialize)]
+struct FsListQuery {
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    thread_id: Option<String>,
+}
+
+/// Structured directory listing for the Workbench "File" tab. Defaults to the
+/// thread's project folder; the path must resolve inside an authorized root (same
+/// jail as the chat `list_directory` tool). Unauthorized paths return
+/// `authorized: false` so the UI can offer to authorize instead of dead-ending.
+async fn fs_list(
+    State(state): State<AppState>,
+    Query(query): Query<FsListQuery>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let thread_id = query.thread_id.clone();
+    let target = match query.path.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+        Some(path) => path.to_string(),
+        None => match project_root_for_thread(&state, thread_id.as_deref()) {
+            Some(root) => root.display().to_string(),
+            None => {
+                return Ok(Json(serde_json::json!({
+                    "path": null, "entries": [], "authorized": true, "root": null
+                })));
+            }
+        },
+    };
+    let root = project_root_for_thread(&state, thread_id.as_deref())
+        .map(|p| p.display().to_string());
+    match fs_resolve_authorized(&state, thread_id.as_deref(), &target) {
+        Ok(path) => {
+            let listed = path.clone();
+            let entries = tokio::task::spawn_blocking(move || fs_list_entries(&listed))
+                .await
+                .unwrap_or_default();
+            Ok(Json(serde_json::json!({
+                "path": path.display().to_string(),
+                "entries": entries,
+                "authorized": true,
+                "root": root,
+            })))
+        }
+        Err(FsAuthIssue::Invalid(message)) => Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "fs_bad_path",
+            message,
+        }),
+        Err(FsAuthIssue::NeedsAuth(path)) => Ok(Json(serde_json::json!({
+            "path": path.display().to_string(),
+            "entries": [],
+            "authorized": false,
+            "root": root,
+        }))),
+    }
 }
 
 /// Reads a text file, capped. Authorization is the caller's responsibility.

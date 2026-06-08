@@ -267,6 +267,21 @@ export interface ChatAttachmentInput {
   sizeBytes: number;
 }
 
+/** A directory entry for the Workbench File tab (project folder browser). */
+export interface FsEntry {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  size: number;
+}
+
+export interface FsListResult {
+  path: string | null;
+  entries: FsEntry[];
+  authorized: boolean;
+  root: string | null;
+}
+
 export interface CoreChatStreamDelta {
   request_id: string;
   delta: string;
@@ -693,6 +708,19 @@ async function electronThreadFolder(threadId: string): Promise<ThreadFolder> {
   return gatewayGetJson<ThreadFolder>(
     `/api/chat/threads/${encodeURIComponent(threadId)}/folder`,
   );
+}
+
+/** Lists a directory (Workbench File tab). No path → the thread's project folder.
+ *  Jailed to authorized roots; `authorized: false` when outside them. */
+async function electronFsList(
+  path: string | null,
+  threadId?: string,
+): Promise<FsListResult> {
+  const params = new URLSearchParams();
+  if (path) params.set("path", path);
+  if (threadId) params.set("thread_id", threadId);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return gatewayGetJson<FsListResult>(`/api/fs/list${suffix}`);
 }
 
 async function electronSetThreadFolder(
@@ -1451,6 +1479,7 @@ export const coreBridge = {
   clearArtifacts: () => electronClearArtifacts(),
   revealPath: (path: string) => revealWorkspacePath(path),
   threadFolder: (threadId: string) => electronThreadFolder(threadId),
+  fsList: (path: string | null, threadId?: string) => electronFsList(path, threadId),
   setThreadFolder: (threadId: string, path: string | null) =>
     electronSetThreadFolder(threadId, path),
   searchThreadFiles: (threadId: string, query: string) =>

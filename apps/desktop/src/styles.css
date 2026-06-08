@@ -3008,6 +3008,49 @@ body.resizing-drawer {
   color: var(--muted);
   font-size: 11px;
 }
+.workbench-file-list .wf-dir {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.workbench-file-list .wf-dir:hover {
+  text-decoration: underline;
+}
+.workbench-file-list .wf-muted {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 8px 10px;
+}
+.workbench-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.workbench-breadcrumb button {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.workbench-breadcrumb button:not(:disabled):hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+.workbench-breadcrumb button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 .artifacts-panel-body.no-list {
   grid-template-columns: minmax(0, 1fr);
 }
