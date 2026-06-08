@@ -274,11 +274,16 @@ col pulsante per fare la cosa. Pattern condiviso coi confirm-card Composio/MCP.
    `browser_openai_stream_config` ritorna None per auto → il browser usa l'orchestratore
    (verificato: 0 "Passo al modello browser"). Per "error decoding response body"
    intermittente: client streaming HTTP/1.1 + no-pool + diagnostica live.
-   **DA FIXARE (memoria!)**: il ruolo `memory` in auto risolve a
-   `ollama-locale/minimax-m3:cloud` (rotto) → l'estrazione memoria gira su un endpoint
-   che fallisce → **la memoria potrebbe non imparare**. Causa: l'auto-router accoppia un
-   modello `:cloud` col provider LOCALE invece che cloud. Fix: legare `memory` a
-   ollama-cloud, o correggere l'accoppiamento provider del router.
+   **CORREZIONE (2026-06-08, verificato da shell)**: i modelli `:cloud` sul demone
+   LOCALE **NON sono rotti** — con `ollama signin` il locale serve i `:cloud` (proxy al
+   cloud). Verificato: `minimax-m3:cloud` su `127.0.0.1:11434` risponde (527 char in
+   streaming) e su Ollama 0.30.6 **anche `/v1` restituisce i tool_calls in streaming**
+   (il drop-bug ollama#12557 NON si riproduce). Quindi: (1) memoria NON era rotta;
+   (2) il path nativo è tenuto perché corretto/futuro-proof (Zed/ollama-rs), non perché
+   `/v1` fallisse; (3) **revocata** la disciplina `stream:false coi tool` (inutile qui,
+   toglieva i token live) → Ollama nativo STREAMA sempre coi tool. Resta aperto solo
+   l'"error decoding response body" INTERMITTENTE (non riproducibile da shell; hardening
+   HTTP/1.1+no-pool + diagnostica live per catturare la causa esatta).
 
 0. **Streaming dall'upstream del modello.** RISOLTO (2026-06-08, `e87afc4`). Causa dei
    timeout: chat con `"stream": false` + cap sul tempo TOTALE → un modello lento/
