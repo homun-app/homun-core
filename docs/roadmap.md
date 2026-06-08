@@ -291,6 +291,15 @@ Aggiornato 2026-06-08. Ordine consigliato, rivedibile.
   syntax highlight e **git diff** working↔HEAD), **Artefatti**, **Attivita'** (task del
   thread, con **annulla**), **Piano** (piano operativo). Ridimensionabile + schermo intero.
   Computer resta dock sopra il composer.
+- **Memoria del "perché" (decisioni, generica)** (`39f0db6`→`aad5d0c`): ogni azione
+  consequenziale di un turno (modifica file/documenti, comandi, azioni su connettori)
+  produce una traccia che alimenta l'estrattore → registra DECISIONI (cosa+perché,
+  scope progetto) riusando il layer M3b esistente; bypassa la salienza per i turni che
+  agiscono. + tool **`record_decision`** (perché intenzionale: rationale/alternative/
+  affects) + direttiva: PRIMA di editare codice/documenti richiama la memoria, DOPO una
+  scelta non banale registrala. Vale per QUALSIASI dominio (codice, preventivo cliente,
+  dati), non solo coding. Obiettivo: ricordare il perché di ogni scelta, non
+  ri-scandagliare i file.
 - **Routing modelli / 401** (`84432aa`→`c8bd089`): il selettore del composer ora rispecchia
   il **ruolo orchestratore** (non l'`active_model` del provider); **fallback automatico
   su 401** al binding manuale; **ruolo Coding** (chat di progetto); router "sicuro" che
