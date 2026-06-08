@@ -1722,6 +1722,36 @@ fn list_files_tool_schema() -> serde_json::Value {
     })
 }
 
+fn list_directory_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "list_directory",
+            "description": "Elenca file e cartelle di una directory ASSOLUTA sul computer dell'utente (es. /Users/tuo/Projects o ~/Documents). USALO quando l'utente chiede di vedere/elencare cartelle o file del suo computer. Funziona nelle cartelle AUTORIZZATE (Destinazioni + cartella di progetto). NON confonderlo con list_files (che elenca solo la cartella di progetto).",
+            "parameters": {
+                "type": "object",
+                "properties": { "path": { "type": "string", "description": "Percorso ASSOLUTO della cartella (es. /Users/tuo/Projects)" } },
+                "required": ["path"]
+            }
+        }
+    })
+}
+
+fn read_text_file_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "read_text_file",
+            "description": "Legge un file di testo da un percorso ASSOLUTO sul computer dell'utente, se in una cartella autorizzata. Per i file della cartella di progetto usa invece read_file (percorso relativo).",
+            "parameters": {
+                "type": "object",
+                "properties": { "path": { "type": "string", "description": "Percorso ASSOLUTO del file" } },
+                "required": ["path"]
+            }
+        }
+    })
+}
+
 fn run_in_project_tool_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "function",
@@ -1881,6 +1911,124 @@ fn jail_in_root(root: &std::path::Path, rel: &str) -> Result<PathBuf, String> {
 fn no_project_folder_msg() -> String {
     "Questo progetto non ha una cartella associata: aprine/creane uno con una cartella \
 (le destinazioni autorizzate), oppure usa run_in_sandbox per lavoro usa-e-getta.".to_string()
+}
+
+const FS_LIST_CAP: usize = 400;
+
+/// Folders the assistant may read/list natively: the user-authorized
+/// "destinations" + the conversation's project folder. (Reading OUTSIDE these
+/// will require explicit per-read confirmation — a follow-up; for now it's
+/// refused with guidance to authorize the folder.)
+fn fs_authorized_roots(state: &AppState, thread_id: Option<&str>) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = load_artifact_destinations()
+        .into_iter()
+        .map(|d| PathBuf::from(d.path))
+        .collect();
+    if let Some(root) = project_root_for_thread(state, thread_id) {
+        roots.push(root);
+    }
+    roots
+}
+
+/// Expands a leading `~` and returns the path only if absolute.
+fn fs_expand_abs(path: &str) -> Option<PathBuf> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let expanded = match trimmed.strip_prefix('~') {
+        Some(rest) => format!("{}{rest}", std::env::var("HOME").ok()?),
+        None => trimmed.to_string(),
+    };
+    let path = PathBuf::from(expanded);
+    path.is_absolute().then_some(path)
+}
+
+/// True when `path` resolves inside one of the authorized roots (symlink-safe).
+fn fs_path_authorized(path: &std::path::Path, roots: &[PathBuf]) -> bool {
+    let Ok(canon) = path.canonicalize() else {
+        return false;
+    };
+    roots
+        .iter()
+        .any(|root| root.canonicalize().map(|r| canon.starts_with(&r)).unwrap_or(false))
+}
+
+fn fs_not_authorized_msg(target: &str, roots: &[PathBuf]) -> String {
+    let list = if roots.is_empty() {
+        "(nessuna)".to_string()
+    } else {
+        roots.iter().map(|r| r.display().to_string()).collect::<Vec<_>>().join(", ")
+    };
+    format!(
+        "🔒 «{target}» non è tra le cartelle autorizzate, quindi non la leggo direttamente. \
+Aggiungila in Impostazioni → Destinazioni per darmi accesso (la conferma puntuale per cartelle \
+non autorizzate arriverà a breve). Cartelle autorizzate ora: {list}"
+    )
+}
+
+/// Native `list_directory`: lists an ABSOLUTE path's entries when inside an
+/// authorized root — so the assistant browses the user's files without relying
+/// on a third-party filesystem MCP.
+fn native_list_directory(state: &AppState, thread_id: Option<&str>, path_str: &str) -> String {
+    let Some(path) = fs_expand_abs(path_str) else {
+        return "Indica un percorso ASSOLUTO (es. /Users/tuo/Projects).".to_string();
+    };
+    let roots = fs_authorized_roots(state, thread_id);
+    if !fs_path_authorized(&path, &roots) {
+        return fs_not_authorized_msg(&path.display().to_string(), &roots);
+    }
+    let read = match std::fs::read_dir(&path) {
+        Ok(read) => read,
+        Err(error) => return format!("Impossibile elencare «{}»: {error}", path.display()),
+    };
+    let (mut dirs, mut files): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
+    for entry in read.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            dirs.push(name);
+        } else {
+            files.push(name);
+        }
+    }
+    dirs.sort();
+    files.sort();
+    let total = dirs.len() + files.len();
+    let mut out = format!("Contenuto di {}:\n", path.display());
+    let mut shown = 0usize;
+    for d in dirs.iter().take(FS_LIST_CAP) {
+        out.push_str(&format!("📁 {d}/\n"));
+        shown += 1;
+    }
+    for f in files.iter().take(FS_LIST_CAP.saturating_sub(shown)) {
+        out.push_str(&format!("📄 {f}\n"));
+        shown += 1;
+    }
+    if total == 0 {
+        out.push_str("(cartella vuota)\n");
+    } else if total > shown {
+        out.push_str(&format!("[…e altri {} elementi]\n", total - shown));
+    }
+    out
+}
+
+/// Native `read_text_file`: reads an ABSOLUTE text file inside an authorized root.
+fn native_read_text_file(state: &AppState, thread_id: Option<&str>, path_str: &str) -> String {
+    let Some(path) = fs_expand_abs(path_str) else {
+        return "Indica un percorso ASSOLUTO al file.".to_string();
+    };
+    let roots = fs_authorized_roots(state, thread_id);
+    if !fs_path_authorized(&path, &roots) {
+        return fs_not_authorized_msg(&path.display().to_string(), &roots);
+    }
+    match std::fs::read_to_string(&path) {
+        Ok(content) if content.len() > PROJECT_READ_MAX_CHARS => {
+            let head: String = content.chars().take(PROJECT_READ_MAX_CHARS).collect();
+            format!("{head}\n[…troncato a {PROJECT_READ_MAX_CHARS} caratteri]")
+        }
+        Ok(content) => content,
+        Err(error) => format!("Impossibile leggere «{}»: {error}", path.display()),
+    }
 }
 
 fn read_project_file(state: &AppState, thread_id: Option<&str>, rel: &str) -> String {
@@ -3530,6 +3678,10 @@ all'utente (tabella per riga + eventuale footer Fonti)."
         base_tools.push(write_file_tool_schema());
         base_tools.push(edit_file_tool_schema());
         base_tools.push(list_files_tool_schema());
+        // Native filesystem (browse/read the user's authorized folders), so this
+        // fundamental capability isn't outsourced to a third-party MCP.
+        base_tools.push(list_directory_tool_schema());
+        base_tools.push(read_text_file_tool_schema());
         base_tools.push(run_in_project_tool_schema());
         // Addons (process-skills, ADR 0011) stay DORMANT until the post-release
         // addon phase: foundation wired but off by default (LOCAL_FIRST_ADDONS=1).
@@ -4890,6 +5042,34 @@ suoi argomenti):\n{}",
                         let st = state_owned.clone();
                         let tid = thread_id.clone();
                         tokio::task::spawn_blocking(move || list_project_files(&st, tid.as_deref()))
+                            .await
+                            .unwrap_or_else(|e| format!("Errore: {e}"))
+                    } else if name == "list_directory" {
+                        let args_val: serde_json::Value =
+                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        let p = args_val.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let _ = emit_stream_event(
+                            &tx,
+                            GenerateStreamEvent::Delta { text: format!("‹‹ACT››📂 Elenco {p}‹‹/ACT››") },
+                        )
+                        .await;
+                        let st = state_owned.clone();
+                        let tid = thread_id.clone();
+                        tokio::task::spawn_blocking(move || native_list_directory(&st, tid.as_deref(), &p))
+                            .await
+                            .unwrap_or_else(|e| format!("Errore: {e}"))
+                    } else if name == "read_text_file" {
+                        let args_val: serde_json::Value =
+                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        let p = args_val.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let _ = emit_stream_event(
+                            &tx,
+                            GenerateStreamEvent::Delta { text: format!("‹‹ACT››📄 Leggo {p}‹‹/ACT››") },
+                        )
+                        .await;
+                        let st = state_owned.clone();
+                        let tid = thread_id.clone();
+                        tokio::task::spawn_blocking(move || native_read_text_file(&st, tid.as_deref(), &p))
                             .await
                             .unwrap_or_else(|e| format!("Errore: {e}"))
                     } else if name == "run_in_project" {
@@ -17282,6 +17462,28 @@ mod tests {
             assert_eq!(info.locality, "local", "backend: {backend}");
             assert_eq!(info.model, "gpt-4o-mini", "backend: {backend}");
         }
+    }
+
+    #[test]
+    fn fs_native_jail_and_path_expansion() {
+        // Path expansion: absolute kept, relative/empty rejected.
+        assert!(crate::fs_expand_abs("/abs/path").is_some());
+        assert!(crate::fs_expand_abs("relative/path").is_none());
+        assert!(crate::fs_expand_abs("   ").is_none());
+
+        // Authorization jail: inside the root OK, outside / non-existent rejected.
+        let base = std::env::temp_dir().join(format!("lfpa-fs-jail-{}", std::process::id()));
+        let inside = base.join("sub");
+        std::fs::create_dir_all(&inside).expect("mkdir");
+        let roots = vec![base.clone()];
+        assert!(crate::fs_path_authorized(&base, &roots), "root itself");
+        assert!(crate::fs_path_authorized(&inside, &roots), "subdir");
+        assert!(!crate::fs_path_authorized(std::path::Path::new("/"), &roots), "outside");
+        assert!(
+            !crate::fs_path_authorized(&base.join("does-not-exist"), &roots),
+            "non-existent can't be authorized"
+        );
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
