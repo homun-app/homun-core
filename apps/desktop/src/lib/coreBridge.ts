@@ -1045,6 +1045,21 @@ async function electronFsAuthorize(
   });
 }
 
+/** Persists that the user connected one suggestion from an in-chat connect-card,
+ *  so the item shows "Collegato" on reload instead of re-offering the action. */
+async function electronConnectMark(input: {
+  kind: string;
+  ref: string;
+  ctx?: { threadId?: string; messageId?: string };
+}): Promise<{ ok: boolean }> {
+  return gatewayPostJson("/api/connect/mark", {
+    kind: input.kind,
+    ref: input.ref,
+    ...(input.ctx?.threadId ? { thread_id: input.ctx.threadId } : {}),
+    ...(input.ctx?.messageId ? { message_id: input.ctx.messageId } : {}),
+  });
+}
+
 /** Executes an MCP server tool on user confirmation (no "always allow" in v1). */
 async function electronMcpExecute(
   tool: string,
@@ -1287,6 +1302,11 @@ export const coreBridge = {
     op: string,
     ctx?: { threadId?: string; messageId?: string },
   ) => electronFsAuthorize(path, op, ctx),
+  connectMark: (input: {
+    kind: string;
+    ref: string;
+    ctx?: { threadId?: string; messageId?: string };
+  }) => electronConnectMark(input),
   composioAllowedTools: () => electronComposioAllowedTools(),
   composioRevokeTool: (slug: string) => electronComposioRevokeTool(slug),
   skills: () => electronSkills(),
