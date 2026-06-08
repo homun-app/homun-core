@@ -157,6 +157,10 @@ model-driven non sono verificabili headless. Commit: `9853162`, `4c53edc`,
    (token, campo segreto). Atteso: badge "Ufficiale" automatico, anteprima leggibile,
    form parametri/segreti funzionante. NB: la tool-list reale appare DOPO il
    connect (limite registry — vedi nota nel commit).
+   - **Server REMOTI (http, `9d70e0c`)**: la maggior parte del catalogo è remota
+     (streamable-HTTP). Cercane uno con endpoint, "Dettagli" mostra "Endpoint" e
+     gli eventuali header/token richiesti → Connetti. Atteso: discovery dei tool
+     e uso in chat come per gli stdio.
 3. **Disconnect** (`7a3d2c5`): dal dettaglio di un server MCP → "Disconnetti"
    (con conferma) → sparisce dai collegati.
 4. **Meta-tool `suggest_capabilities`** (`9a32256`): in chat *"voglio automatizzare
@@ -176,8 +180,9 @@ suggerito". Annotare qui i difetti emersi dal test reale.
 - **Read-timeout** nel transport stdio (`mcp.rs`): oggi il timeout protegge il
   turno, non il thread blocking su `read_line`.
 - **Allowlist "esegui sempre"** per le write MCP (oggi confermano sempre).
-- **Transport HTTP/SSE** (oltre stdio): i server remote-only sono marcati
-  "non supportato" nel catalogo.
+- **Transport HTTP/SSE**: FATTO (streamable-HTTP, `9d70e0c`) — i server REMOTI
+  del registry (~75%) ora sono collegabili, auth via header/token mostrata nel
+  form. Resta: OAuth-remote (consenso, stile Composio) come follow-up.
 
 ## Debito tecnico / fronti aperti
 
@@ -235,8 +240,9 @@ Verso la prima release:
    **catalogo da registry ufficiale** (`registry.modelcontextprotocol.io`) con
    connect-from-preset (parametri/segreti) in Settings; **connected-list +
    disconnect** (chiude l'"add-only"); **meta-tool `suggest_capabilities`**
-   (scoperta unificata MCP+Skill+Composio). Restano: transport **HTTP/SSE** oltre
-   stdio, secret-store per i token, read-timeout nel transport (vedi follow-up).
+   (scoperta unificata MCP+Skill+Composio); transport **streamable-HTTP** (server
+   remoti del registry collegabili, `9d70e0c`). Restano: secret-store per i token,
+   read-timeout nel transport, OAuth-remote (vedi follow-up).
 4. **Onboarding first-run.** Wizard connettori (Composio prima, poi MCP/skill) cosi'
    il nuovo utente non parte da schermate vuote.
 5. **Skill: gestione.** Install dal marketplace fluido, rilevamento update, override
