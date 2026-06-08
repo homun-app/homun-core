@@ -3278,6 +3278,41 @@ fn chat_openai_stream_config() -> Option<(String, String, Option<String>)> {
     Some((base_url, active_inference_model(), resolve_inference_api_key()))
 }
 
+/// A fallback model for when the chosen one returns 401 (auth) — used when the
+/// failing model IS the orchestrator (so re-resolving the role wouldn't help).
+/// Prefers a provider with a configured API KEY (e.g. Z.ai with a valid key), then
+/// a LOCAL provider with a non-`:cloud` model (no auth). `None` if nothing usable
+/// differs from the failing model.
+fn auth_fallback_config(failing_model: &str) -> Option<(String, String, Option<String>)> {
+    let registry = load_provider_registry();
+    // 1) Any provider with a key + a usable model different from the failing one.
+    for provider in &registry.providers {
+        if let Some(key) = provider_api_key(&provider.id) {
+            if let Some(model) = provider.effective_model() {
+                if model != failing_model {
+                    return Some((provider.base_url.clone(), model, Some(key)));
+                }
+            }
+        }
+    }
+    // 2) A loopback provider with a non-cloud model (runs locally, no auth).
+    for provider in &registry.providers {
+        let local = provider.base_url.contains("127.0.0.1") || provider.base_url.contains("localhost");
+        if !local {
+            continue;
+        }
+        if let Some(model) = provider
+            .models
+            .iter()
+            .map(|m| m.id.clone())
+            .find(|id| !id.contains(":cloud") && id != failing_model)
+        {
+            return Some((provider.base_url.clone(), model, None));
+        }
+    }
+    None
+}
+
 /// Project-aware chat config: a chat in a PROJECT (thread with a linked folder)
 /// uses the "coding" role IF it has an explicit binding; otherwise — and for every
 /// personal chat — it uses the orchestrator. Keeps the coding role optional.
@@ -4402,11 +4437,12 @@ questo elenco, chiedi di allegarlo (non cercarlo nella sandbox o nelle cartelle)
                                 tokio::time::sleep(std::time::Duration::from_millis(800 * u64::from(attempt))).await;
                                 continue;
                             }
-                            // Self-heal on 401: retry once with the orchestrator's
-                            // manual binding (a provider with a valid key) so a
-                            // mis-routed/unauthenticated model doesn't break the turn.
+                            // Self-heal on 401: retry once with a provider that has a
+                            // valid key (or a local no-auth model) — even when the
+                            // FAILING model is the orchestrator itself, so an
+                            // unauthenticated binding doesn't break the turn.
                             if code.as_u16() == 401 && !fallback_tried {
-                                if let Some((fb_base, fb_model, fb_key)) = chat_openai_stream_config() {
+                                if let Some((fb_base, fb_model, fb_key)) = auth_fallback_config(&model) {
                                     if fb_model != model {
                                         fallback_tried = true;
                                         let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
