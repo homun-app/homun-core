@@ -4969,7 +4969,24 @@ function Composer({
   const [models, setModels] = useState<string[]>([]);
   const [activeModel, setActiveModel] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  // True once the user picks a model from the menu (a per-message override): then
+  // a refresh must NOT clobber their choice with the default.
+  const [userPickedModel, setUserPickedModel] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
+
+  // Refetches the model list + default (= orchestrator role). Called on mount and
+  // when the menu opens, so a Settings change to the default reflects without an
+  // app restart.
+  async function refreshModels() {
+    try {
+      const list = await coreBridge.runtimeModels();
+      setModels(list.available ?? []);
+      setActiveModel(list.active);
+      if (!userPickedModel) setSelectedModel(list.active);
+    } catch {
+      /* models unavailable → selector hidden */
+    }
+  }
   const [skills, setSkills] = useState<SkillSummary[]>([]);
   const [forcedSkill, setForcedSkill] = useState<SkillSummary | null>(null);
   const [skillMenuOpen, setSkillMenuOpen] = useState(false);
@@ -5008,15 +5025,7 @@ function Composer({
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      try {
-        const list = await coreBridge.runtimeModels();
-        if (cancelled) return;
-        setModels(list.available ?? []);
-        setActiveModel(list.active);
-        setSelectedModel(list.active);
-      } catch {
-        /* models unavailable → selector hidden */
-      }
+      if (!cancelled) await refreshModels();
       try {
         const response = await coreBridge.skills();
         if (cancelled) return;
@@ -5694,7 +5703,10 @@ function Composer({
                 aria-label="Scegli il modello"
                 aria-expanded={modelMenuOpen}
                 onClick={() => {
-                  setModelMenuOpen((open) => !open);
+                  setModelMenuOpen((open) => {
+                    if (!open) void refreshModels();
+                    return !open;
+                  });
                   setSkillMenuOpen(false);
                 }}
               >
@@ -5712,6 +5724,7 @@ function Composer({
                         className={selectedModel === modelId ? "active" : ""}
                         onClick={() => {
                           setSelectedModel(modelId);
+                          setUserPickedModel(true);
                           setModelMenuOpen(false);
                         }}
                       >
