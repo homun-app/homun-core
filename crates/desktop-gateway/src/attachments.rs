@@ -87,6 +87,10 @@ fn ingest_one(att: &AttachmentInput) -> Result<One, String> {
         .unwrap_or("")
         .to_lowercase();
 
+    if mime.contains("svg") || ext == "svg" {
+        // Vision models reject SVG; tell the user instead of silently sending it.
+        return Err("immagine SVG non supportata dai modelli vision; esporta in PNG/JPEG".to_string());
+    }
     if mime.starts_with("image/") || is_image_ext(&ext) {
         return Ok(One { text: None, images: vec![image_data_url(path, &mime, &ext)?] });
     }
@@ -94,7 +98,7 @@ fn ingest_one(att: &AttachmentInput) -> Result<One, String> {
         return ingest_pdf(path);
     }
     if is_text_like(&mime, &ext) {
-        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+        let bytes = read_file_capped(path)?;
         let mut text = String::from_utf8_lossy(&bytes).into_owned();
         truncate_chars(&mut text, MAX_TEXT_CHARS);
         return Ok(One { text: Some(text), images: Vec::new() });
@@ -202,8 +206,23 @@ fn pdfium_lib_dir() -> Option<std::path::PathBuf> {
     None
 }
 
+/// Reads a file with a hard byte cap, closing the stat→read TOCTOU window (a file
+/// that grows after the `metadata()` size check can't exceed the cap here).
+fn read_file_capped(path: &Path) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut buf = Vec::new();
+    file.take(MAX_ATTACHMENT_BYTES + 1)
+        .read_to_end(&mut buf)
+        .map_err(|e| e.to_string())?;
+    if buf.len() as u64 > MAX_ATTACHMENT_BYTES {
+        return Err(format!("troppo grande (max {} MB)", MAX_ATTACHMENT_BYTES / 1024 / 1024));
+    }
+    Ok(buf)
+}
+
 fn image_data_url(path: &Path, mime: &str, ext: &str) -> Result<String, String> {
-    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    let bytes = read_file_capped(path)?;
     let mime = if mime.starts_with("image/") {
         mime.to_string()
     } else {
