@@ -1377,13 +1377,13 @@ export function ChatView({
           {/* Header stripped to a single affordance: the Workbench toggle. Model
               lives in the composer selector; share/⋯ removed as clutter. */}
           <button
-            className={`top-action${artifactsOpen ? " active" : ""}`}
+            className={`workbench-toggle${artifactsOpen ? " active" : ""}`}
             type="button"
             title="Pannello (file, artefatti)"
             aria-label="Apri pannello"
             onClick={() => setArtifactsOpen((value) => !value)}
           >
-            <PanelRight size={16} />
+            <PanelRight size={18} />
             {conversationArtifacts.length > 0 && (
               <span className="top-action-count">{conversationArtifacts.length}</span>
             )}
