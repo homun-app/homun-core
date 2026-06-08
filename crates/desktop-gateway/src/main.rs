@@ -2584,8 +2584,11 @@ async fn generate_stream(
     Json(request): Json<ChatGenerateStreamRequest>,
 ) -> Result<Response, GatewayError> {
     // Chat runs through the configured OpenAI-compatible provider. The local
-    // MLX/Gemma fallback was removed: a provider is required.
-    if let Some((base_url, mut model, api_key)) = chat_openai_stream_config() {
+    // MLX/Gemma fallback was removed: a provider is required. Project chats use the
+    // "coding" role when bound (else the orchestrator).
+    if let Some((base_url, mut model, api_key)) =
+        chat_role_config_for_thread(&state, request.thread_id.as_deref())
+    {
         // Per-message model override (inline composer selector): use the chosen
         // model for THIS request only, keeping the same provider/base_url/api_key.
         if let Some(override_model) = request.model.as_ref().map(|m| m.trim()).filter(|m| !m.is_empty()) {
@@ -3134,6 +3137,33 @@ fn chat_openai_stream_config() -> Option<(String, String, Option<String>)> {
     }
     let base_url = effective_inference_base_url()?;
     Some((base_url, active_inference_model(), resolve_inference_api_key()))
+}
+
+/// Project-aware chat config: a chat in a PROJECT (thread with a linked folder)
+/// uses the "coding" role IF it has an explicit binding; otherwise — and for every
+/// personal chat — it uses the orchestrator. Keeps the coding role optional.
+fn chat_role_config_for_thread(
+    state: &AppState,
+    thread_id: Option<&str>,
+) -> Option<(String, String, Option<String>)> {
+    let in_project = thread_id
+        .and_then(|t| project_root_for_thread(state, Some(t)))
+        .is_some();
+    if in_project {
+        let registry = load_provider_registry();
+        let bound = registry.roles.get("coding").is_some_and(|b| {
+            b.provider_id.as_deref().is_some_and(|p| !p.is_empty())
+                && b.model.as_deref().is_some_and(|m| !m.is_empty())
+        });
+        if bound {
+            if let Some(resolved) = registry.resolve_role("coding") {
+                let api_key =
+                    provider_api_key(&resolved.provider_id).or_else(env_inference_api_key);
+                return Some((resolved.base_url, resolved.model, api_key));
+            }
+        }
+    }
+    chat_openai_stream_config()
 }
 
 /// Provider/model for the granular browser tools. With the OpenClaw-style rewrite
@@ -3936,6 +3966,10 @@ all'utente (tabella per riga + eventuale footer Fonti)."
     );
     let system = system.as_str();
     let mut endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    // Resilience: a 401 (the chosen model can't authenticate, e.g. an Ollama
+    // `:cloud` model without `ollama signin`) self-heals ONCE to the orchestrator's
+    // manual binding (a provider with a valid key) instead of dead-ending the turn.
+    let mut fallback_tried = false;
     // Channel turns run read-only: offer only tools without side effects (search,
     // recall, skill instructions, Composio reads). Side-effecting tools (write
     // files, run sandbox, Composio writes) are withheld → Phase 2 routes them to
@@ -4219,6 +4253,27 @@ questo elenco, chiedi di allegarlo (non cercarlo nella sandbox o nelle cartelle)
                                 .await;
                                 tokio::time::sleep(std::time::Duration::from_millis(800 * u64::from(attempt))).await;
                                 continue;
+                            }
+                            // Self-heal on 401: retry once with the orchestrator's
+                            // manual binding (a provider with a valid key) so a
+                            // mis-routed/unauthenticated model doesn't break the turn.
+                            if code.as_u16() == 401 && !fallback_tried {
+                                if let Some((fb_base, fb_model, fb_key)) = chat_openai_stream_config() {
+                                    if fb_model != model {
+                                        fallback_tried = true;
+                                        let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
+                                            text: format!("‹‹ACT››↩ «{model}» non autenticato (401): ripiego su «{fb_model}»…‹‹/ACT››"),
+                                        })
+                                        .await;
+                                        model = fb_model;
+                                        base_url = fb_base;
+                                        endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+                                        api_key = fb_key;
+                                        payload["model"] = serde_json::Value::String(model.clone());
+                                        attempt = 0;
+                                        continue;
+                                    }
+                                }
                             }
                             // 401 on a `:cloud` Ollama model = the cloud service
                             // needs auth (the local Ollama has no key). Make the
@@ -13890,6 +13945,17 @@ fn resolve_role_for_task(goal: &str, role: &str) -> Option<ResolvedRole> {
             )
         })
         .collect();
+    // Safe routing: drop models that will likely 401 — a `:cloud` model whose
+    // provider has no configured key (the auto-router shouldn't auto-pick something
+    // unauthenticated). Manual binding + the 401 self-heal still cover the rest.
+    // If filtering would leave <2 candidates the code below falls back to the
+    // heuristic/manual binding anyway, so this never strands a role.
+    let filtered: Vec<(String, String, String, String, ProviderKind, String)> = candidates
+        .iter()
+        .filter(|(pid, mid, ..)| !(mid.contains(":cloud") && provider_api_key(pid).is_none()))
+        .cloned()
+        .collect();
+    let candidates = if filtered.len() >= 2 { filtered } else { candidates };
     let candidate_ids: Vec<String> = candidates.iter().map(|c| c.1.clone()).collect();
 
     // Decide (and remember which stage produced the choice).
