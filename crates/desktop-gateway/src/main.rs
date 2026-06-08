@@ -15,6 +15,7 @@ mod skill_security;
 mod process_skills;
 mod mcp_http;
 mod mcp_registry;
+mod pdf_render;
 mod sandbox;
 mod task_registry;
 
@@ -4219,12 +4220,12 @@ fn create_artifact_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "create_artifact",
-            "description": "Crea un file 'artifact' (documento, codice, markdown, csv, html, json, testo) scrivendone il contenuto completo. Il file appare come artifact scaricabile e anteprimabile nella chat (pannello File). Usalo quando l'utente chiede di PRODURRE un documento o del codice da consegnare, invece di incollarlo solo nel messaggio.",
+            "description": "Crea un file 'artifact' (documento, codice, markdown, csv, html, json, testo, PDF) scrivendone il contenuto completo. Il file appare come artifact scaricabile e anteprimabile nella chat (pannello File). Usalo quando l'utente chiede di PRODURRE un documento/codice/PDF da consegnare, invece di incollarlo solo nel messaggio. PDF: se l'utente chiede un PDF, usa un name che finisce in \".pdf\" e scrivi il `content` in MARKDOWN (titoli #, elenchi -, tabelle, **grassetto**): viene impaginato in un vero PDF automaticamente. NON tentare di scrivere byte PDF a mano.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "name": { "type": "string", "description": "Nome file con estensione, es. \"report.md\", \"script.py\", \"dati.csv\"" },
-                    "content": { "type": "string", "description": "Contenuto testuale COMPLETO del file" }
+                    "name": { "type": "string", "description": "Nome file con estensione, es. \"report.md\", \"script.py\", \"dati.csv\", \"preventivo.pdf\"" },
+                    "content": { "type": "string", "description": "Contenuto COMPLETO del file. Per i .pdf: scrivilo in Markdown (verrà reso in PDF)." }
                 },
                 "required": ["name", "content"]
             }
@@ -5991,8 +5992,19 @@ disponibili (per dati dal web usa il browser: browser_navigate sull'URL indicato
                         .await;
                         let fname_w = fname.clone();
                         let slug_w = thread_slug.clone();
+                        // A `.pdf` artifact: the `content` is Markdown → render it to a
+                        // real paginated PDF (in-process, always works). Everything else
+                        // is written verbatim as text.
+                        let is_pdf = fname.to_ascii_lowercase().ends_with(".pdf");
                         let result = tokio::task::spawn_blocking(move || {
-                            write_text_artifact(&slug_w, &fname_w, &content)
+                            if is_pdf {
+                                let title = fname_w.trim_end_matches(".pdf").trim_end_matches(".PDF");
+                                let bytes = pdf_render::markdown_to_pdf(title, &content)
+                                    .map_err(|e| format!("Render PDF non riuscito: {e}"))?;
+                                write_artifact_bytes(&slug_w, &fname_w, &bytes)
+                            } else {
+                                write_text_artifact(&slug_w, &fname_w, &content)
+                            }
                         })
                         .await
                         .unwrap_or_else(|e| Err(format!("Errore: {e}")));
@@ -8879,6 +8891,12 @@ async fn clear_artifacts() -> Json<serde_json::Value> {
 /// dir (so it stays downloadable/previewable) and, if a project is active, also
 /// to the project folder. Returns the byte size on success.
 fn write_text_artifact(thread_slug: &str, name: &str, content: &str) -> Result<(u64, bool), String> {
+    write_artifact_bytes(thread_slug, name, content.as_bytes())
+}
+
+/// Writes an artifact from raw BYTES (same versioning + project mirror as the text
+/// path). Used for binary artifacts like rendered PDFs.
+fn write_artifact_bytes(thread_slug: &str, name: &str, bytes: &[u8]) -> Result<(u64, bool), String> {
     if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
         return Err("Nome file non valido.".to_string());
     }
@@ -8898,13 +8916,13 @@ fn write_text_artifact(thread_slug: &str, name: &str, content: &str) -> Result<(
             .unwrap_or(0);
         let _ = fs::copy(&managed_path, versions_dir.join(index.to_string()));
     }
-    if let Err(error) = fs::write(&managed_path, content) {
+    if let Err(error) = fs::write(&managed_path, bytes) {
         return Err(format!("Scrittura artifact non riuscita: {error}"));
     }
     if let Some(folder) = active_workspace_folder() {
         let _ = fs::copy(&managed_path, std::path::Path::new(&folder).join(name));
     }
-    Ok((content.len() as u64, updated))
+    Ok((bytes.len() as u64, updated))
 }
 
 /// Copies an artifact to an AUTHORIZED destination folder (host-side). Enforces:
