@@ -31,6 +31,7 @@ import {
   Minimize2,
   MoreHorizontal,
   Paperclip,
+  PanelRight,
   Pause,
   Pencil,
   Play,
@@ -175,7 +176,11 @@ export function ChatView({
   const [streamHasVisibleText, setStreamHasVisibleText] = useState(false);
   const [autoContinueMessageId, setAutoContinueMessageId] = useState<string | null>(null);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+  // Workbench (right-side panel, Claude-Code style): `artifactsOpen` is the
+  // open/closed flag; `workbenchTab` is the active tab. Phase 1 ships the
+  // "Artefatti" tab; File / Computer / Attività / Piano land in later phases.
   const [artifactsOpen, setArtifactsOpen] = useState(false);
+  const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>("artifacts");
   const [artifactsInitial, setArtifactsInitial] = useState<string | null>(null);
   const [followUps, setFollowUps] = useState<string[]>([]);
   const [followUpsFor, setFollowUpsFor] = useState<string | null>(null);
@@ -1360,17 +1365,18 @@ export function ChatView({
               {item.label}
             </span>
           ))}
-          {conversationArtifacts.length > 0 && (
-            <button
-              className={`top-action${artifactsOpen ? " active" : ""}`}
-              type="button"
-              onClick={() => setArtifactsOpen((value) => !value)}
-            >
-              <FileText size={15} />
-              File
+          <button
+            className={`top-action${artifactsOpen ? " active" : ""}`}
+            type="button"
+            title="Pannello di lavoro"
+            onClick={() => setArtifactsOpen((value) => !value)}
+          >
+            <PanelRight size={15} />
+            Pannello
+            {conversationArtifacts.length > 0 && (
               <span className="top-action-count">{conversationArtifacts.length}</span>
-            </button>
-          )}
+            )}
+          </button>
           <button
             className="top-action"
             type="button"
@@ -1472,6 +1478,7 @@ export function ChatView({
                   threadId={thread.threadId}
                   onOpenArtifact={(artifact) => {
                     setArtifactsInitial(artifact.name);
+                    setWorkbenchTab("artifacts");
                     setArtifactsOpen(true);
                   }}
                 />
@@ -1706,13 +1713,14 @@ export function ChatView({
         </button>
       )}
 
-      {artifactsOpen && conversationArtifacts.length > 0 && (
-        <ArtifactsPanel
-          artifacts={conversationArtifacts}
-          initialName={artifactsInitial}
-          onClose={() => setArtifactsOpen(false)}
-        />
-      )}
+      <Workbench
+        open={artifactsOpen}
+        tab={workbenchTab}
+        onTab={setWorkbenchTab}
+        onClose={() => setArtifactsOpen(false)}
+        artifacts={conversationArtifacts}
+        artifactsInitial={artifactsInitial}
+      />
 
       <ChatComputerPanel />
 
@@ -2776,14 +2784,101 @@ function InlineArtifactPreview({ artifact }: { artifact: ParsedArtifact }) {
 /** Artifacts workspace: a side panel listing the conversation's generated files
  *  and rendering each by type (markdown, code, csv table, image, pdf) — the
  *  "interactive workspace alongside the chat" model. */
+/** Tabs of the right-side Workbench panel. Phase 1 ships "artifacts"; the others
+ *  (file browser, live computer, background activity, plan) land incrementally. */
+type WorkbenchTab = "artifacts";
+
+/** The Workbench: one toggle → a docked right panel with tabs, consolidating the
+ *  assistant's tools/outputs (Claude-Code / IDE inspector pattern). Replaces the
+ *  scattered header affordances. Phase 1: the Artefatti tab (project files/output),
+ *  reusing ArtifactsPanel in embedded mode. */
+function Workbench({
+  open,
+  tab,
+  onTab,
+  onClose,
+  artifacts,
+  artifactsInitial,
+}: {
+  open: boolean;
+  tab: WorkbenchTab;
+  onTab: (tab: WorkbenchTab) => void;
+  onClose: () => void;
+  artifacts: ParsedArtifact[];
+  artifactsInitial?: string | null;
+}) {
+  if (!open) return null;
+  const tabs: { key: WorkbenchTab; label: string; icon: typeof FileText; badge?: number }[] = [
+    {
+      key: "artifacts",
+      label: "Artefatti",
+      icon: FileText,
+      badge: artifacts.length || undefined,
+    },
+  ];
+  return (
+    <aside className="workbench" aria-label="Pannello di lavoro">
+      <div className="workbench-tabs" role="tablist">
+        {tabs.map((entry) => {
+          const Icon = entry.icon;
+          return (
+            <button
+              key={entry.key}
+              role="tab"
+              type="button"
+              aria-selected={tab === entry.key}
+              className={`workbench-tab${tab === entry.key ? " active" : ""}`}
+              onClick={() => onTab(entry.key)}
+            >
+              <Icon size={15} />
+              <span>{entry.label}</span>
+              {entry.badge ? <span className="workbench-tab-count">{entry.badge}</span> : null}
+            </button>
+          );
+        })}
+        <span className="workbench-tabs-spacer" />
+        <button
+          className="workbench-close"
+          type="button"
+          aria-label="Chiudi pannello"
+          title="Chiudi pannello"
+          onClick={onClose}
+        >
+          <X size={16} />
+        </button>
+      </div>
+      <div className="workbench-body">
+        {tab === "artifacts" &&
+          (artifacts.length > 0 ? (
+            <ArtifactsPanel
+              embedded
+              artifacts={artifacts}
+              initialName={artifactsInitial}
+              onClose={onClose}
+            />
+          ) : (
+            <div className="workbench-empty">
+              <FileText size={28} />
+              <p>Nessun artefatto ancora. I file generati o creati dall'assistente compaiono qui.</p>
+            </div>
+          ))}
+      </div>
+    </aside>
+  );
+}
+
 function ArtifactsPanel({
   artifacts,
   initialName,
   onClose,
+  embedded = false,
 }: {
   artifacts: ParsedArtifact[];
   initialName?: string | null;
   onClose: () => void;
+  /** Rendered inside the Workbench tab: drop the standalone panel chrome
+   *  (fixed position, own close/expand) — the Workbench owns those. */
+  embedded?: boolean;
 }) {
   const [selectedName, setSelectedName] = useState<string | null>(
     initialName ?? artifacts[0]?.name ?? null,
@@ -2931,23 +3026,25 @@ function ArtifactsPanel({
 
   return (
     <aside
-      className={`artifacts-panel${expanded ? " expanded" : ""}`}
+      className={`artifacts-panel${expanded ? " expanded" : ""}${embedded ? " embedded" : ""}`}
       aria-label="File del progetto"
     >
-      <header className="artifacts-panel-head">
-        <strong>File del progetto</strong>
-        <button
-          type="button"
-          aria-label={expanded ? "Riduci" : "Schermo intero"}
-          title={expanded ? "Riduci" : "Schermo intero"}
-          onClick={() => setExpanded((value) => !value)}
-        >
-          {expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-        </button>
-        <button type="button" aria-label="Chiudi" onClick={onClose}>
-          <X size={16} />
-        </button>
-      </header>
+      {!embedded && (
+        <header className="artifacts-panel-head">
+          <strong>File del progetto</strong>
+          <button
+            type="button"
+            aria-label={expanded ? "Riduci" : "Schermo intero"}
+            title={expanded ? "Riduci" : "Schermo intero"}
+            onClick={() => setExpanded((value) => !value)}
+          >
+            {expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+          </button>
+          <button type="button" aria-label="Chiudi" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </header>
+      )}
       <div className={`artifacts-panel-body${showList ? "" : " no-list"}`}>
         {showList && (
           <ul className="artifacts-list">
