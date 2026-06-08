@@ -538,6 +538,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/capabilities/mcp/connected", get(mcp_connected))
         .route("/api/capabilities/mcp/disconnect", post(mcp_disconnect))
         .route("/api/fs/authorize", post(fs_authorize))
+        .route("/api/connect/mark", post(connect_mark))
         .route("/api/capabilities/composio/connect", post(connect_composio))
         .route("/api/capabilities/composio/toolkits", get(composio_toolkits))
         .route("/api/capabilities/composio/link", post(composio_link))
@@ -5241,7 +5242,31 @@ pulsante per autorizzare l'accesso alla cartella. NON dire che hai letto/elencat
                             },
                         )
                         .await;
-                        suggest_capabilities(&state_owned, &need).await
+                        let suggestions = suggest_capabilities(&state_owned, &need).await;
+                        match suggestions.card {
+                            Some(card) => {
+                                // In-chat connect-cards: render the suggestions as
+                                // clickable connect buttons (skill/MCP/Composio) so the
+                                // user acts from chat, no Settings trip. End the turn
+                                // here — the user must connect, then re-ask.
+                                let marker = card.to_string();
+                                let card_text = format!(
+                                    "\n\nEcco cosa posso collegare per questo. Scegli qui sotto.\n\
+‹‹CONNECT_SUGGEST››{marker}‹‹/CONNECT_SUGGEST››\n"
+                                );
+                                accumulated.push_str(&card_text);
+                                let _ = emit_stream_event(
+                                    &tx,
+                                    GenerateStreamEvent::Delta { text: card_text },
+                                )
+                                .await;
+                                pending_confirm = true;
+                                "IN ATTESA: ho mostrato all'utente delle schede cliccabili per \
+collegare i connettori suggeriti (skill/MCP/Composio). NON dire che hai già collegato qualcosa."
+                                    .to_string()
+                            }
+                            None => suggestions.model_text,
+                        }
                     } else if name == "list_scheduled_tasks" {
                         let st = state_owned.clone();
                         tokio::task::spawn_blocking(move || list_scheduled_tasks(&st))
@@ -10604,12 +10629,27 @@ cosa COLLEGARE. Usa una query breve sull'intento (es. 'browser automation', 'goo
     })
 }
 
+/// Result of a capability search: the human-readable text returned to the MODEL
+/// as the tool result, plus an optional structured `card` payload that the chat
+/// UI renders as clickable connect-cards (install skill / connect MCP / link
+/// Composio in-chat, no Settings trip).
+struct CapabilitySuggestions {
+    /// Text for the model/log (used when no card is shown).
+    model_text: String,
+    /// `{ need, items: [...] }` for the in-chat card, or None when nothing found.
+    card: Option<serde_json::Value>,
+}
+
 /// Searches MCP registry + Skill marketplace + Composio toolkits for a need and
-/// returns a unified, human-readable suggestion list (with how to connect each).
-async fn suggest_capabilities(state: &AppState, need: &str) -> String {
+/// returns a unified, human-readable suggestion list AND a structured card payload
+/// (with everything each in-chat connect button needs to act).
+async fn suggest_capabilities(state: &AppState, need: &str) -> CapabilitySuggestions {
     let need = need.trim();
     if need.is_empty() {
-        return "Specifica cosa vuoi fare, così cerco i connettori adatti.".to_string();
+        return CapabilitySuggestions {
+            model_text: "Specifica cosa vuoi fare, così cerco i connettori adatti.".to_string(),
+            card: None,
+        };
     }
     // MCP registry (async network).
     let mcp = mcp_registry::fetch_servers(&state.http, Some(need), 4).await.unwrap_or_default();
@@ -10654,6 +10694,8 @@ async fn suggest_capabilities(state: &AppState, need: &str) -> String {
         .unwrap_or_default();
 
     let mut out = format!("Connettori suggeriti per: \"{need}\"\n");
+    // Structured items for the clickable in-chat card (parallel to the text below).
+    let mut items: Vec<serde_json::Value> = Vec::new();
     let installable: Vec<_> = mcp.iter().filter(|s| s.installable).take(4).collect();
     if !installable.is_empty() {
         out.push_str("\nSERVER MCP (Impostazioni → Catalogo MCP):\n");
@@ -10666,6 +10708,17 @@ async fn suggest_capabilities(state: &AppState, need: &str) -> String {
                 s.description.chars().take(120).collect::<String>(),
                 s.publisher
             ));
+            // The full normalized server travels with the card so the connect
+            // button can call mcpConnect (params/secrets, stdio vs http) directly.
+            if let Ok(server) = serde_json::to_value(s) {
+                items.push(serde_json::json!({
+                    "kind": "mcp",
+                    "name": s.name,
+                    "description": s.description.chars().take(160).collect::<String>(),
+                    "official": s.official,
+                    "server": server,
+                }));
+            }
         }
     }
     if !skills.is_empty() {
@@ -10676,25 +10729,38 @@ async fn suggest_capabilities(state: &AppState, need: &str) -> String {
                 s.name,
                 s.description.chars().take(120).collect::<String>()
             ));
+            items.push(serde_json::json!({
+                "kind": "skill",
+                "name": s.name,
+                "description": s.description.chars().take(160).collect::<String>(),
+                "slug": s.slug,
+            }));
         }
     }
     if !composio.is_empty() {
         out.push_str("\nSERVIZI CLOUD via Composio (Impostazioni → Connettori → Composio):\n");
         for t in &composio {
             out.push_str(&format!("- {} ({})\n", t.name, t.slug));
+            items.push(serde_json::json!({
+                "kind": "composio",
+                "name": t.name,
+                "description": t.description.clone().unwrap_or_default().chars().take(160).collect::<String>(),
+                "slug": t.slug,
+            }));
         }
     }
-    if out.lines().count() <= 1 {
+    if items.is_empty() {
         out.push_str(
             "\nNessun connettore trovato. Prova parole chiave diverse, o aggiungi un server MCP manualmente.",
         );
-    } else {
-        out.push_str(
-            "\nPresenta queste opzioni all'utente spiegando brevemente cosa fa ciascuna e come \
-collegarla (i percorsi tra parentesi). NON dichiarare di averle già collegate.",
-        );
+        return CapabilitySuggestions { model_text: out, card: None };
     }
-    out
+    out.push_str(
+        "\nPresenta queste opzioni all'utente spiegando brevemente cosa fa ciascuna e come \
+collegarla (i percorsi tra parentesi). NON dichiarare di averle già collegate.",
+    );
+    let card = serde_json::json!({ "need": need, "items": items });
+    CapabilitySuggestions { model_text: out, card: Some(card) }
 }
 
 /// Executes a Composio tool for the current entity and returns its raw output.
@@ -11382,6 +11448,83 @@ async fn fs_authorize(
         }
         Err(message) => Ok(Json(serde_json::json!({ "ok": false, "summary": message }))),
     }
+}
+
+const CONNECT_SUGGEST_OPEN: &str = "‹‹CONNECT_SUGGEST››";
+const CONNECT_SUGGEST_CLOSE: &str = "‹‹/CONNECT_SUGGEST››";
+
+/// Marks one suggestion in a CONNECT_SUGGEST card as connected, so reopening the
+/// chat renders it as "Collegato ✓" instead of an actionable button (the other
+/// items stay actionable). Returns the text unchanged when the marker is
+/// missing/malformed. This is the "representation" half of the two-memories
+/// pattern: the data grant lives in the capability registry, this fixes the
+/// persisted message so the card doesn't offer to reconnect something already on.
+fn rewrite_connect_suggest_mark(text: &str, kind: &str, item_ref: &str) -> String {
+    let Some(open) = text.find(CONNECT_SUGGEST_OPEN) else {
+        return text.to_string();
+    };
+    let json_start = open + CONNECT_SUGGEST_OPEN.len();
+    let Some(close_rel) = text[json_start..].find(CONNECT_SUGGEST_CLOSE) else {
+        return text.to_string();
+    };
+    let json_end = json_start + close_rel;
+    let Ok(mut card) = serde_json::from_str::<serde_json::Value>(&text[json_start..json_end]) else {
+        return text.to_string();
+    };
+    if let Some(items) = card.get_mut("items").and_then(|v| v.as_array_mut()) {
+        for item in items.iter_mut() {
+            if item.get("kind").and_then(|v| v.as_str()) != Some(kind) {
+                continue;
+            }
+            // MCP items are keyed by the registry server id; skill/Composio by slug.
+            let matches = if kind == "mcp" {
+                item.get("server").and_then(|s| s.get("id")).and_then(|v| v.as_str())
+                    == Some(item_ref)
+            } else {
+                item.get("slug").and_then(|v| v.as_str()) == Some(item_ref)
+            };
+            if matches {
+                if let Some(obj) = item.as_object_mut() {
+                    obj.insert("connected".to_string(), serde_json::Value::Bool(true));
+                }
+            }
+        }
+    }
+    format!("{}{}{}", &text[..json_start], card, &text[json_end..])
+}
+
+#[derive(Debug, Deserialize)]
+struct ConnectMarkRequest {
+    kind: String,
+    #[serde(default, rename = "ref")]
+    item_ref: String,
+    #[serde(default)]
+    thread_id: Option<String>,
+    #[serde(default)]
+    message_id: Option<String>,
+}
+
+/// Persists that the user connected one suggestion from a CONNECT_SUGGEST card:
+/// the actual connect/install/link already happened client-side (mcpConnect /
+/// catalogInstall / composioLink); this rewrites the originating message so the
+/// item shows "Collegato" on reload instead of re-offering the action.
+async fn connect_mark(
+    State(state): State<AppState>,
+    Json(request): Json<ConnectMarkRequest>,
+) -> Json<serde_json::Value> {
+    if let (Some(thread_id), Some(message_id)) = (&request.thread_id, &request.message_id) {
+        if let Ok(store) = lock_store(&state) {
+            if let Ok(Some(message)) = store.message(thread_id, message_id) {
+                let rewritten = rewrite_connect_suggest_mark(
+                    &message.text,
+                    &request.kind,
+                    &request.item_ref,
+                );
+                let _ = store.set_message_text(thread_id, message_id, &rewritten);
+            }
+        }
+    }
+    Json(serde_json::json!({ "ok": true }))
 }
 
 const MCP_CONFIRM_OPEN: &str = "‹‹MCP_CONFIRM››";
@@ -17635,6 +17778,37 @@ mod tests {
         assert!(out.contains("✓ Accesso concesso a /Users/fabio/Projects"));
         // No-op when the marker is absent (idempotent on already-rewritten text).
         assert_eq!(crate::rewrite_fs_authorize_to_done("ciao", "/x"), "ciao");
+    }
+
+    #[test]
+    fn connect_suggest_mark_flags_only_the_matching_item() {
+        let text = "Ecco cosa posso collegare.\n\
+‹‹CONNECT_SUGGEST››{\"need\":\"browser\",\"items\":[\
+{\"kind\":\"mcp\",\"name\":\"Playwright\",\"server\":{\"id\":\"io.mcp/playwright\"}},\
+{\"kind\":\"skill\",\"name\":\"Pdf\",\"slug\":\"pdf-tools\"},\
+{\"kind\":\"composio\",\"name\":\"Gmail\",\"slug\":\"gmail\"}\
+]}‹‹/CONNECT_SUGGEST››\n";
+        // Mark the MCP server by its registry id.
+        let out = crate::rewrite_connect_suggest_mark(text, "mcp", "io.mcp/playwright");
+        let card = &out[out.find("‹‹CONNECT_SUGGEST››").unwrap()
+            + "‹‹CONNECT_SUGGEST››".len()
+            ..out.find("‹‹/CONNECT_SUGGEST››").unwrap()];
+        let parsed: serde_json::Value = serde_json::from_str(card).unwrap();
+        let items = parsed["items"].as_array().unwrap();
+        assert_eq!(items[0]["connected"], serde_json::json!(true), "mcp marked");
+        assert!(items[1].get("connected").is_none(), "skill untouched");
+        assert!(items[2].get("connected").is_none(), "composio untouched");
+        // Marker stays present (other items remain actionable) and is still valid.
+        assert!(out.contains("CONNECT_SUGGEST"));
+        // Skill/Composio keyed by slug.
+        let out2 = crate::rewrite_connect_suggest_mark(&out, "composio", "gmail");
+        let card2 = &out2[out2.find("‹‹CONNECT_SUGGEST››").unwrap()
+            + "‹‹CONNECT_SUGGEST››".len()
+            ..out2.find("‹‹/CONNECT_SUGGEST››").unwrap()];
+        let parsed2: serde_json::Value = serde_json::from_str(card2).unwrap();
+        assert_eq!(parsed2["items"][2]["connected"], serde_json::json!(true));
+        // No-op when the marker is absent.
+        assert_eq!(crate::rewrite_connect_suggest_mark("ciao", "mcp", "x"), "ciao");
     }
 
     #[test]

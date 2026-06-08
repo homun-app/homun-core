@@ -10,7 +10,11 @@ import {
   Copy,
   Braces,
   Clock3,
+  Cloud,
   Download,
+  ExternalLink,
+  Eye,
+  EyeOff,
   FileCode,
   FileCog,
   FileImage,
@@ -30,6 +34,7 @@ import {
   Pause,
   Pencil,
   Play,
+  Plug,
   Puzzle,
   Reply,
   RotateCcw,
@@ -51,6 +56,7 @@ import {
   type ChatAttachmentInput,
   type CoreComputerSessionSnapshot,
   type CorePromptSubmissionResult,
+  type McpRegistryServer,
   type SkillSummary,
 } from "../lib/coreBridge";
 import {
@@ -2421,10 +2427,30 @@ interface ComposioPendingAction {
 const COMPOSIO_CONFIRM_RE = /‹‹COMPOSIO_CONFIRM››([\s\S]*?)‹‹\/COMPOSIO_CONFIRM››/;
 const MCP_CONFIRM_RE = /‹‹MCP_CONFIRM››([\s\S]*?)‹‹\/MCP_CONFIRM››/;
 const FS_AUTHORIZE_RE = /‹‹FS_AUTHORIZE››([\s\S]*?)‹‹\/FS_AUTHORIZE››/;
+const CONNECT_SUGGEST_RE = /‹‹CONNECT_SUGGEST››([\s\S]*?)‹‹\/CONNECT_SUGGEST››/;
 const COMPOSIO_DONE_RE = /‹‹COMPOSIO_DONE››([\s\S]*?)‹‹\/COMPOSIO_DONE››/;
 const COMPOSIO_RECONNECT_RE = /‹‹COMPOSIO_RECONNECT››([\s\S]*?)‹‹\/COMPOSIO_RECONNECT››/;
 const COMPOSIO_MARKERS_RE =
-  /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE)››/g;
+  /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST)››/g;
+
+/** One clickable suggestion in an in-chat connect-card. */
+interface ConnectSuggestItem {
+  kind: "mcp" | "skill" | "composio";
+  name: string;
+  description?: string;
+  official?: boolean;
+  /** Present for kind==="mcp": the full normalized registry server to connect. */
+  server?: McpRegistryServer;
+  /** Present for kind==="skill"|"composio": catalog/toolkit slug. */
+  slug?: string;
+  /** Set by the backend rewrite once the user connected this item. */
+  connected?: boolean;
+}
+
+interface ConnectSuggest {
+  need: string;
+  items: ConnectSuggestItem[];
+}
 
 // Tool-activity trace markers (browser / skill / sandbox / connected-tool steps).
 // They are extracted into a compact collapsible panel so the answer body stays
@@ -3173,6 +3199,7 @@ function parseComposioConfirm(text: string): {
   doneTool: string | null;
   reconnectSlug: string | null;
   fsAuthorize: { path: string; op: string } | null;
+  connectSuggest: ConnectSuggest | null;
 } {
   let action: ComposioPendingAction | null = null;
   const confirm = text.match(COMPOSIO_CONFIRM_RE);
@@ -3207,13 +3234,34 @@ function parseComposioConfirm(text: string): {
       /* malformed → just hide it */
     }
   }
+  // Clickable connect-cards from suggest_capabilities (install skill / connect MCP
+  // / link Composio in-chat, no Settings trip).
+  let connectSuggest: ConnectSuggest | null = null;
+  const csMatch = text.match(CONNECT_SUGGEST_RE);
+  if (csMatch) {
+    try {
+      const parsed = JSON.parse(csMatch[1]) as ConnectSuggest;
+      if (parsed && Array.isArray(parsed.items) && parsed.items.length > 0) {
+        connectSuggest = parsed;
+      }
+    } catch {
+      /* malformed → just hide it */
+    }
+  }
   const done = text.match(COMPOSIO_DONE_RE);
   const doneTool = done ? done[1].trim() : null;
   const reconnectMatch = text.match(COMPOSIO_RECONNECT_RE);
   const reconnectSlug = reconnectMatch ? reconnectMatch[1].trim() : null;
   const visible = text.replace(COMPOSIO_MARKERS_RE, "").trim();
   // A persisted "done" marker wins: never reopen the editable card.
-  return { visible, action: doneTool ? null : action, doneTool, reconnectSlug, fsAuthorize };
+  return {
+    visible,
+    action: doneTool ? null : action,
+    doneTool,
+    reconnectSlug,
+    fsAuthorize,
+    connectSuggest,
+  };
 }
 
 /** Replaces raw tool slugs (GMAIL_SEND_EMAIL) anywhere in assistant text with a
@@ -3239,7 +3287,7 @@ function AssistantMessageBody({
   threadId?: string;
   onOpenArtifact?: (artifact: ParsedArtifact) => void;
 }) {
-  const { visible, action, doneTool, reconnectSlug, fsAuthorize } = useMemo(
+  const { visible, action, doneTool, reconnectSlug, fsAuthorize, connectSuggest } = useMemo(
     () => parseComposioConfirm(text),
     [text],
   );
@@ -3267,7 +3315,303 @@ function AssistantMessageBody({
           threadId={threadId}
         />
       )}
+      {connectSuggest && !streaming && (
+        <ConnectSuggestCard
+          suggest={connectSuggest}
+          messageId={messageId}
+          threadId={threadId}
+        />
+      )}
     </>
+  );
+}
+
+/** In-chat connect-cards: turns `suggest_capabilities` results into clickable
+ *  actions (install skill / connect MCP / link Composio) so the user adds a
+ *  capability from the conversation, never hunting in Settings. Each item tracks
+ *  its own status; on success we persist via /api/connect/mark so the item shows
+ *  "Collegato" on reload (the other items stay actionable). */
+function ConnectSuggestCard({
+  suggest,
+  messageId,
+  threadId,
+}: {
+  suggest: ConnectSuggest;
+  messageId?: string;
+  threadId?: string;
+}) {
+  return (
+    <div className="cmp-confirm" style={{ gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <Plug size={15} />
+        <strong>Collega una capacità per «{suggest.need}»</strong>
+      </div>
+      <p className="set-hint" style={{ fontSize: 12, margin: 0 }}>
+        Non ho ancora questo strumento. Scegli cosa collegare qui sotto — lo gestisci
+        anche da Impostazioni.
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {suggest.items.map((item, index) => (
+          <ConnectSuggestRow
+            key={`${item.kind}-${item.slug ?? item.server?.id ?? item.name}-${index}`}
+            item={item}
+            messageId={messageId}
+            threadId={threadId}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const CONNECT_KIND_META: Record<
+  ConnectSuggestItem["kind"],
+  { icon: typeof Plug; label: string; cta: string }
+> = {
+  mcp: { icon: Plug, label: "Server MCP", cta: "Connetti" },
+  skill: { icon: Puzzle, label: "Skill", cta: "Installa" },
+  composio: { icon: Cloud, label: "Servizio cloud", cta: "Collega" },
+};
+
+/** A single connectable suggestion. MCP servers with required params expand an
+ *  inline form (mirrors Settings → Catalogo MCP); skills install directly;
+ *  Composio opens the OAuth consent in the browser. */
+function ConnectSuggestRow({
+  item,
+  messageId,
+  threadId,
+}: {
+  item: ConnectSuggestItem;
+  messageId?: string;
+  threadId?: string;
+}) {
+  const [status, setStatus] = useState<"idle" | "running" | "done" | "opened" | "error">(
+    item.connected ? "done" : "idle",
+  );
+  const [note, setNote] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [reveal, setReveal] = useState<Record<string, boolean>>({});
+
+  const meta = CONNECT_KIND_META[item.kind];
+  const Icon = meta.icon;
+  const inputs = item.kind === "mcp" ? (item.server?.inputs ?? []) : [];
+  const hasInputs = inputs.length > 0;
+  const missingRequired = inputs.some(
+    (i) => i.required && !(values[i.key] ?? i.default ?? "").trim(),
+  );
+
+  const markConnected = async () => {
+    const ref = item.kind === "mcp" ? item.server?.id : item.slug;
+    if (!ref) return;
+    try {
+      await coreBridge.connectMark({ kind: item.kind, ref, ctx: { threadId, messageId } });
+    } catch {
+      /* persistence is best-effort; the connect itself already succeeded */
+    }
+  };
+
+  const connectMcp = async () => {
+    const server = item.server;
+    if (!server) return;
+    setStatus("running");
+    setNote(null);
+    try {
+      const env: Record<string, string> = {};
+      const headers: Record<string, string> = {};
+      const extraArgs: string[] = [];
+      for (const input of server.inputs) {
+        const value = (values[input.key] ?? input.default ?? "").trim();
+        if (!value) continue;
+        if (input.target === "env") env[input.key] = value;
+        else if (input.target === "header") headers[input.key] = value;
+        else extraArgs.push(value);
+      }
+      const result =
+        server.transport === "http"
+          ? await coreBridge.mcpConnect({
+              name: server.name,
+              url: server.url ?? undefined,
+              headers,
+            })
+          : await coreBridge.mcpConnect({
+              name: server.name,
+              command: server.command,
+              args: [...server.args, ...extraArgs],
+              env,
+            });
+      setNote(
+        result.discovery_error
+          ? `Connesso con avviso: ${result.discovery_error}`
+          : `${result.tools_cached} strumenti disponibili.`,
+      );
+      setStatus("done");
+      await markConnected();
+    } catch (error) {
+      setStatus("error");
+      setNote((error as Error).message);
+    }
+  };
+
+  const installSkill = async () => {
+    if (!item.slug) return;
+    setStatus("running");
+    setNote(null);
+    try {
+      await coreBridge.catalogInstall(item.slug);
+      setStatus("done");
+      setNote("Skill installata. Riprova la richiesta.");
+      await markConnected();
+    } catch (error) {
+      setStatus("error");
+      setNote((error as Error).message);
+    }
+  };
+
+  const linkComposio = async () => {
+    if (!item.slug) return;
+    setStatus("running");
+    setNote(null);
+    try {
+      const result = await coreBridge.composioLink(item.slug);
+      if (result.redirect_url) {
+        window.open(result.redirect_url, "_blank", "noopener,noreferrer");
+        setNote(`Autorizza ${item.name} nel browser, poi riprova la richiesta.`);
+      } else {
+        setNote("Collegamento avviato. Riprova la richiesta tra poco.");
+      }
+      setStatus("opened");
+      await markConnected();
+    } catch (error) {
+      setStatus("error");
+      setNote((error as Error).message);
+    }
+  };
+
+  // MCP with required params → expand the form first; otherwise act immediately.
+  const onPrimary = () => {
+    if (item.kind === "mcp") {
+      if (hasInputs && !expanded) {
+        setExpanded(true);
+        return;
+      }
+      void connectMcp();
+    } else if (item.kind === "skill") {
+      void installSkill();
+    } else {
+      void linkComposio();
+    }
+  };
+
+  const done = status === "done";
+  const opened = status === "opened";
+
+  return (
+    <div
+      className="conn-tool"
+      style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div className="conn-tool-main" style={{ minWidth: 0 }}>
+          <span className="conn-tool-name" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <Icon size={13} />
+            {item.name}
+            {item.official && (
+              <span className="set-badge green" style={{ marginLeft: 4 }} title="Server ufficiale">
+                <ShieldCheck size={11} /> Ufficiale
+              </span>
+            )}
+            <span className="mdl-tag" style={{ marginLeft: 2 }}>
+              {meta.label}
+            </span>
+          </span>
+          {item.description && <span className="conn-tool-desc">{item.description}</span>}
+        </div>
+        {done ? (
+          <span className="set-badge green" title="Collegato">
+            <Check size={12} /> Collegato
+          </span>
+        ) : (
+          <button
+            className="set-btn primary"
+            type="button"
+            disabled={status === "running"}
+            onClick={onPrimary}
+          >
+            {status === "running"
+              ? "…"
+              : item.kind === "mcp" && hasInputs && !expanded
+                ? "Configura"
+                : meta.cta}
+          </button>
+        )}
+      </div>
+
+      {expanded && item.kind === "mcp" && !done && (
+        <div className="mdl-field" style={{ gap: 8, marginTop: 2 }}>
+          {inputs.map((input) => (
+            <div key={input.key} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <label className="mdl-field-label">
+                {input.label}
+                {input.required ? " *" : " (opzionale)"}
+                {input.secret && " · segreto"}
+              </label>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input
+                  className="set-input"
+                  type={input.secret && !reveal[input.key] ? "password" : "text"}
+                  placeholder={input.default ?? input.key}
+                  value={values[input.key] ?? ""}
+                  onChange={(e) =>
+                    setValues((prev) => ({ ...prev, [input.key]: e.target.value }))
+                  }
+                />
+                {input.secret && (
+                  <button
+                    className="set-btn"
+                    type="button"
+                    title={reveal[input.key] ? "Nascondi" : "Mostra"}
+                    onClick={() =>
+                      setReveal((prev) => ({ ...prev, [input.key]: !prev[input.key] }))
+                    }
+                  >
+                    {reveal[input.key] ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+          <div className="cmp-confirm-actions">
+            <button
+              className="set-btn primary"
+              type="button"
+              disabled={status === "running" || missingRequired}
+              onClick={() => void connectMcp()}
+            >
+              {status === "running" ? "Connetto…" : "Connetti"}
+            </button>
+            {item.server?.homepage && (
+              <a
+                href={item.server.homepage}
+                target="_blank"
+                rel="noreferrer"
+                className="set-hint"
+                style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12 }}
+              >
+                Pagina del progetto <ExternalLink size={12} />
+              </a>
+            )}
+          </div>
+        </div>
+      )}
+
+      {note && (
+        <p className={`set-hint${status === "error" ? " error" : ""}`} style={{ fontSize: 12, margin: 0 }}>
+          {opened && <ExternalLink size={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />}
+          {note}
+        </p>
+      )}
+    </div>
   );
 }
 
