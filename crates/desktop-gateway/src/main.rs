@@ -1055,6 +1055,39 @@ fn normalize_for_dedup(text: &str) -> String {
     text.trim().to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// Common Italian function words dropped before similarity — they inflate overlap
+/// without carrying meaning, so two unrelated memories don't look similar just because
+/// both say "il/della/che…".
+const DEDUP_STOPWORDS: &[&str] = &[
+    "il", "lo", "la", "i", "gli", "le", "un", "uno", "una", "di", "del", "dello", "della",
+    "dei", "degli", "delle", "per", "con", "che", "non", "come", "sono", "stato", "stata",
+    "abbiamo", "del", "nel", "nella", "sul", "sulla", "una", "questo", "questa", "suo", "sua",
+    "and", "the", "for", "with",
+];
+
+/// Content tokens of a memory (lowercased, ≥3 chars, no stopwords) for similarity.
+fn dedup_tokens(text: &str) -> std::collections::HashSet<String> {
+    text.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|token| token.chars().count() >= 3 && !DEDUP_STOPWORDS.contains(token))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Jaccard overlap of two token sets (0..1). Used to fold near-duplicate memories
+/// (the extractor re-phrases the same decision across turns).
+fn jaccard(a: &std::collections::HashSet<String>, b: &std::collections::HashSet<String>) -> f32 {
+    if a.is_empty() || b.is_empty() {
+        return 0.0;
+    }
+    let intersection = a.intersection(b).count() as f32;
+    let union = a.union(b).count() as f32;
+    intersection / union
+}
+
+/// Threshold above which two same-type memories are considered the same thing.
+const DEDUP_JACCARD: f32 = 0.5;
+
 /// Fills the required `privacy_domain`/`sensitivity` on an extracted item when the
 /// model omitted them, so deserialization (which requires both) doesn't silently
 /// drop otherwise-valid memories/entities/relations. The domain is re-pinned to
@@ -1080,22 +1113,34 @@ fn persist_scope_memories(
     if memories.is_empty() {
         return;
     }
-    let dedup_request = MemoryAccessRequest {
-        actor_id: "memory-extractor".to_string(),
-        user_id: user_id.clone(),
-        workspace_id: workspace.clone(),
-        purpose: "dedup".to_string(),
-        allowed_domains: vec![PrivacyDomain::new("personal"), PrivacyDomain::new("general")],
-        max_sensitivity: MemoryDataSensitivity::Secret,
-        allow_raw_payload: true,
-        allow_export: true,
-        broad_query: false,
-    };
-    let existing: std::collections::HashSet<String> = facade
-        .context_pack(&dedup_request)
-        .map(|pack| pack.items.into_iter().map(|i| normalize_for_dedup(&i.summary)).collect())
+    // Dedup against the FULL set of existing memories in this scope (not the
+    // budget-limited profile) by content overlap — the extractor re-phrases the same
+    // decision across turns ("Scelto JSON…" / "taskline usa JSON…"), so exact-match
+    // alone let duplicates pile up in the store and the graph.
+    let existing: Vec<(String, std::collections::HashSet<String>)> = facade
+        .list_memories_for_ui(user_id, workspace)
+        .map(|mems| {
+            mems.into_iter()
+                .filter(|m| !matches!(m.status, MemoryStatus::Deleted | MemoryStatus::Rejected))
+                .map(|m| (m.memory_type, dedup_tokens(&m.text)))
+                .collect()
+        })
         .unwrap_or_default();
-    memories.retain(|m| !existing.contains(&normalize_for_dedup(&m.text)));
+    // Also fold duplicates WITHIN this batch.
+    let mut batch_seen: Vec<(String, std::collections::HashSet<String>)> = Vec::new();
+    memories.retain(|m| {
+        let tokens = dedup_tokens(&m.text);
+        let duplicate = existing
+            .iter()
+            .chain(batch_seen.iter())
+            .any(|(memory_type, other)| {
+                memory_type == &m.memory_type && jaccard(&tokens, other) >= DEDUP_JACCARD
+            });
+        if !duplicate {
+            batch_seen.push((m.memory_type.clone(), tokens));
+        }
+        !duplicate
+    });
     if memories.is_empty() {
         return;
     }
@@ -19113,6 +19158,16 @@ mod tests {
                 .contains("cargo build")
         );
         assert!(crate::summarize_tool_action("save_artifact", "{\"name\":\"preventivo.pdf\"}").is_some());
+    }
+
+    #[test]
+    fn dedup_folds_paraphrased_decisions() {
+        let a = crate::dedup_tokens("Scelto JSON come formato di salvataggio per taskline");
+        let b = crate::dedup_tokens("taskline usa JSON come formato di salvataggio");
+        assert!(crate::jaccard(&a, &b) >= crate::DEDUP_JACCARD, "paraphrase: {}", crate::jaccard(&a, &b));
+        // A genuinely different decision in the same project must NOT be folded.
+        let c = crate::dedup_tokens("Aggiunto supporto CLI con argparse e gestione errori");
+        assert!(crate::jaccard(&a, &c) < crate::DEDUP_JACCARD, "distinct: {}", crate::jaccard(&a, &c));
     }
 
     #[test]
