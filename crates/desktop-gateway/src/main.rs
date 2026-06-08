@@ -3405,6 +3405,12 @@ fn search_composio_catalog(
 /// given real tools and decides when to use them (no keyword routing). Tool
 /// rounds run non-streamed; the final assistant answer is emitted as Delta+Done
 /// to match the existing UI stream protocol.
+/// Max chars of attachment text re-injected per turn (across all stored files).
+const ATTACHMENT_TEXT_BUDGET_CHARS: usize = 120_000;
+/// Max attachment page-images re-injected per turn (bounds vision token cost);
+/// most-recent files win.
+const ATTACHMENT_CONTEXT_IMAGES: usize = 12;
+
 async fn stream_chat_via_openai(
     state: &AppState,
     request: ChatGenerateStreamRequest,
@@ -3460,6 +3466,11 @@ progetto collegata (percorsi relativi), NON per il filesystem dell'utente. \
 `run_in_sandbox` è un container usa-e-getta che NON vede il computer dell'utente: non \
 usarlo MAI per ispezionare file/cartelle del Mac. Se non hai indizi sul percorso fai \
 UNA domanda mirata; se l'utente NON parla di file/cartelle, non usare list_directory.\n\
+ALLEGATI: i file allegati in chat ti arrivano GIÀ come contenuto pronto (testo \
+estratto e/o immagini delle pagine) sotto la sezione \"[File allegati a questa \
+conversazione]\". Analizzali da lì direttamente. Se l'utente dice \"questo file/pdf/\
+allegato\" ma in quell'elenco NON c'è nulla, chiedi gentilmente di (ri)allegarlo: NON \
+usare list_directory, run_in_sandbox o link di download per cercarlo o decodificarlo.\n\
 SERVIZI ESTERNI (email, calendario, GitHub, …): chiama `find_connected_tools` per \
 scoprire lo strumento adatto e usalo; se non trova nulla di adatto, chiama \
 `suggest_capabilities` per proporre cosa collegare. Mai lasciare l'utente con una \
@@ -3745,25 +3756,88 @@ all'utente (tabella per riga + eventuale footer Fonti)."
     if !artifact_destinations.is_empty() && !read_only {
         base_tools.push(save_artifact_tool_schema(&artifact_destinations));
     }
-    // Attachments: read each attached file (off the runtime) and turn it into
-    // model-visible content — extracted text (PDF text layer / text files) appended
-    // to the prompt, plus images (photos, or scanned-PDF pages rasterized via
-    // pdfium) added to the vision parts. Attaching IS the access grant for that file.
-    let ingested = if request.attachments.is_empty() {
-        attachments::IngestedAttachments::default()
+    // Attachments (persistent): ingest NEW files off-runtime, PERSIST them on the
+    // thread, then load the thread's FULL set so a file stays usable across turns
+    // (no re-attach). A manifest lists the available files so the model uses their
+    // content instead of improvising (sandbox / list_directory / download links).
+    let new_files = if request.attachments.is_empty() {
+        Vec::new()
     } else {
         let atts = request.attachments.clone();
-        tokio::task::spawn_blocking(move || attachments::ingest_attachments(&atts))
+        tokio::task::spawn_blocking(move || attachments::ingest_each(&atts))
             .await
             .unwrap_or_default()
     };
-    let mut model_text = prompt.clone();
-    if !ingested.text.trim().is_empty() {
-        model_text.push_str("\n\n--- Contenuto degli allegati ---");
-        model_text.push_str(&ingested.text);
+    let mut working: Vec<chat_store::StoredAttachment> = Vec::new();
+    if let Some(thread_id) = request.thread_id.as_deref() {
+        // Persist new files + load the whole thread set (sync DB work, no await
+        // while the lock is held).
+        if let Ok(store) = lock_store(state) {
+            for file in &new_files {
+                let _ = store.upsert_thread_attachment(
+                    thread_id,
+                    &file.display_name,
+                    &file.mime_type,
+                    file.text.as_deref(),
+                    &file.images,
+                );
+            }
+            working = store.thread_attachments(thread_id).unwrap_or_default();
+        }
     }
+    // Guarantee THIS turn's files are present even if persistence failed / no thread.
+    for file in &new_files {
+        if !working.iter().any(|w| w.display_name == file.display_name) {
+            working.push(chat_store::StoredAttachment {
+                display_name: file.display_name.clone(),
+                mime_type: file.mime_type.clone(),
+                text: file.text.clone(),
+                images: file.images.clone(),
+            });
+        }
+    }
+
+    let mut model_text = prompt.clone();
     let mut all_images = request.images.clone();
-    all_images.extend(ingested.images);
+    if !working.is_empty() {
+        let manifest = working
+            .iter()
+            .map(|a| {
+                let kind = if a.images.is_empty() { "testo" } else { "immagini/scansione" };
+                format!("- {} ({kind})", a.display_name)
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        model_text.push_str(&format!(
+            "\n\n[File allegati a questa conversazione]\n{manifest}\n\
+Usa il loro contenuto qui sotto per rispondere. Se l'utente cita un file NON in \
+questo elenco, chiedi di allegarlo (non cercarlo nella sandbox o nelle cartelle).\n\
+--- Contenuto degli allegati ---"
+        ));
+        let mut text_budget = ATTACHMENT_TEXT_BUDGET_CHARS;
+        for a in &working {
+            let Some(text) = a.text.as_deref().map(str::trim).filter(|t| !t.is_empty()) else {
+                continue;
+            };
+            let slice: String = text.chars().take(text_budget).collect();
+            text_budget = text_budget.saturating_sub(slice.chars().count());
+            model_text.push_str(&format!("\n[{}]\n{}", a.display_name, slice));
+            if text_budget == 0 {
+                break;
+            }
+        }
+        // Images: most-recent files first, capped to bound vision token cost.
+        let mut imgs: Vec<String> = Vec::new();
+        'outer: for a in working.iter().rev() {
+            for url in &a.images {
+                if imgs.len() >= ATTACHMENT_CONTEXT_IMAGES {
+                    break 'outer;
+                }
+                imgs.push(url.clone());
+            }
+        }
+        all_images.extend(imgs);
+    }
 
     // Vision: when the turn carries images (request + rendered attachments), the
     // user message becomes multimodal content (text + image_url parts) per the

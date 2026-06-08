@@ -12,6 +12,15 @@ pub struct ChatStore {
     conn: Connection,
 }
 
+/// An ingested attachment persisted on a thread (text and/or page images).
+#[derive(Debug, Clone)]
+pub struct StoredAttachment {
+    pub display_name: String,
+    pub mime_type: String,
+    pub text: Option<String>,
+    pub images: Vec<String>,
+}
+
 impl ChatStore {
     pub fn open(path: impl AsRef<Path>) -> rusqlite::Result<Self> {
         let conn = Connection::open(path)?;
@@ -409,6 +418,27 @@ impl ChatStore {
                 dedup_key text primary key,
                 seen_at integer not null
             );
+
+            -- Attachment persistence: a file attached in chat is ingested ONCE
+            -- (text extraction / page rasterization) and its representation is
+            -- stored here, keyed by thread, so it stays available across turns
+            -- (no re-attach) and the model gets a manifest of available files.
+            -- One row per (thread, filename) — re-attaching the same name replaces
+            -- it. No FK: persistence must succeed for any thread_id, even one not
+            -- yet in chat_threads, and the working set always includes this turn's
+            -- files as a fallback.
+            create table if not exists thread_attachments (
+                id integer primary key autoincrement,
+                thread_id text not null,
+                display_name text not null,
+                mime_type text not null,
+                extracted_text text,
+                images_json text not null default '[]',
+                created_at integer not null
+            );
+
+            create index if not exists idx_thread_attachments_thread
+                on thread_attachments(thread_id);
             ",
         )?;
 
@@ -468,6 +498,59 @@ impl ChatStore {
             params![key, now],
         )?;
         Ok(inserted == 1)
+    }
+
+    /// Stores (or replaces) an ingested attachment for a thread. Keyed by filename:
+    /// re-attaching the same name overwrites the prior content. Empty thread_id is
+    /// rejected (no global bucket).
+    pub fn upsert_thread_attachment(
+        &self,
+        thread_id: &str,
+        display_name: &str,
+        mime_type: &str,
+        text: Option<&str>,
+        images: &[String],
+    ) -> rusqlite::Result<()> {
+        if thread_id.trim().is_empty() {
+            return Ok(());
+        }
+        self.conn.execute(
+            "delete from thread_attachments where thread_id = ?1 and display_name = ?2",
+            params![thread_id, display_name],
+        )?;
+        let images_json = serde_json::to_string(images).unwrap_or_else(|_| "[]".to_string());
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        self.conn.execute(
+            "insert into thread_attachments
+                (thread_id, display_name, mime_type, extracted_text, images_json, created_at)
+             values (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![thread_id, display_name, mime_type, text, images_json, now],
+        )?;
+        Ok(())
+    }
+
+    /// All attachments persisted for a thread, oldest first.
+    pub fn thread_attachments(&self, thread_id: &str) -> rusqlite::Result<Vec<StoredAttachment>> {
+        let mut stmt = self.conn.prepare(
+            "select display_name, mime_type, extracted_text, images_json
+               from thread_attachments
+              where thread_id = ?1
+              order by created_at asc, id asc",
+        )?;
+        let rows = stmt
+            .query_map(params![thread_id], |row| {
+                let display_name: String = row.get(0)?;
+                let mime_type: String = row.get(1)?;
+                let text: Option<String> = row.get(2)?;
+                let images_json: String = row.get(3)?;
+                let images: Vec<String> = serde_json::from_str(&images_json).unwrap_or_default();
+                Ok(StoredAttachment { display_name, mime_type, text, images })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
     }
 
     /// Prunes channel dedup entries older than `max_age_secs` (best-effort
@@ -860,6 +943,39 @@ mod tests {
                 .iter()
                 .any(|item| item.title == "dimmi una barzelletta")
         );
+    }
+
+    #[test]
+    fn thread_attachments_persist_and_replace_by_name() {
+        let store = ChatStore::in_memory().unwrap();
+        let tid = "thread_x";
+        store
+            .upsert_thread_attachment(tid, "patente.pdf", "application/pdf", Some("(scan)"), &[
+                "data:image/jpeg;base64,AAA".to_string(),
+            ])
+            .unwrap();
+        store
+            .upsert_thread_attachment(tid, "note.txt", "text/plain", Some("ciao"), &[])
+            .unwrap();
+        let all = store.thread_attachments(tid).unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].display_name, "patente.pdf");
+        assert_eq!(all[0].images.len(), 1);
+        assert_eq!(all[1].text.as_deref(), Some("ciao"));
+        // Re-attaching the same filename REPLACES (one row per name).
+        store
+            .upsert_thread_attachment(tid, "patente.pdf", "application/pdf", Some("(updated)"), &[])
+            .unwrap();
+        let all = store.thread_attachments(tid).unwrap();
+        assert_eq!(all.len(), 2, "still 2 files, patente.pdf replaced not duplicated");
+        let patente = all.iter().find(|a| a.display_name == "patente.pdf").unwrap();
+        assert_eq!(patente.text.as_deref(), Some("(updated)"));
+        assert!(patente.images.is_empty());
+        // Empty thread_id is a no-op (no global bucket).
+        store
+            .upsert_thread_attachment("", "x", "y", None, &[])
+            .unwrap();
+        assert!(store.thread_attachments("").unwrap().is_empty());
     }
 
     #[test]
