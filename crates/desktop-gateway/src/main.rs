@@ -6814,59 +6814,65 @@ Dillo all'utente in modo chiaro; NON dichiarare che è fatto."
 
         if !final_done {
             // Guaranteed synthesis: the model exhausted the tool rounds without a
-            // text answer (it kept calling tools). Force one final NO-TOOLS call so
-            // it synthesizes from the results already gathered, instead of dead-ending
-            // on "limite di passi".
+            // text answer (it kept calling tools). Force one final NO-TOOLS call so it
+            // synthesizes from what it did, instead of dead-ending on "limite di passi".
+            // GENERIC across domains (coding, documents, web), not travel-specific.
             messages.push(serde_json::json!({
                 "role": "user",
-                "content": "Non sono più disponibili strumenti. Scrivi ORA la risposta finale per \
-l'utente sintetizzando i risultati raccolti dai passi precedenti (sii esaustivo: orari, durata, \
-scali, compagnia, prezzo per ogni opzione). Riporta lo stato reale: di' \"bloccata/non \
-raggiungibile\" SOLO per fonti non apertesi o con captcha; se sei arrivato al sito ma non hai \
-completato il form, dillo così (non dire che è irraggiungibile) e proponi di riprovare."
+                "content": "Non sono più disponibili strumenti. Scrivi ORA la RISPOSTA FINALE per \
+l'utente, sintetizzando ciò che hai fatto e trovato nei passi precedenti: per un compito di coding \
+di' cosa hai creato/modificato e come si usa/esegue; per una ricerca riporta i risultati con i \
+dettagli. Sii completo e concreto. Se qualcosa non è riuscito, dillo chiaramente e proponi come \
+procedere."
             }));
-            let mut synth_text = String::new();
-            let mut builder = http.post(&endpoint);
+            // Use the SAME provider-aware path as the main loop (Ollama native /api/chat
+            // vs OpenAI /v1) and stream the synthesis live. Previously this posted an
+            // OpenAI-shaped body to the native endpoint → empty → canned fallback.
+            let synth_payload =
+                build_chat_payload(&model, &base_url, &messages, &[], temperature, true);
+            let first_token = std::time::Duration::from_secs(model_first_token_timeout_secs());
+            let idle = std::time::Duration::from_secs(model_idle_timeout_secs());
+            let request_timeout = std::time::Duration::from_secs(model_request_timeout_secs());
+            let ollama = is_ollama_base(&base_url);
+            let mut builder = http.post(&endpoint).timeout(request_timeout);
             if let Some(key) = api_key.as_ref() {
                 builder = builder.bearer_auth(key);
             }
-            let synth = builder
-                .json(&serde_json::json!({
-                    "model": model,
-                    "messages": messages,
-                    "temperature": temperature,
-                    "max_tokens": 6000,
-                    "stream": false,
-                }))
-                .send()
-                .await;
-            if let Ok(resp) = synth {
-                if let Ok(body) = resp.json::<serde_json::Value>().await {
-                    synth_text = body
-                        .get("choices")
-                        .and_then(|c| c.get(0))
-                        .and_then(|c| c.get("message"))
-                        .and_then(|m| m.get("content"))
-                        .and_then(|c| c.as_str())
-                        .unwrap_or("")
-                        .to_string();
+            let body = match builder.json(&synth_payload).send().await {
+                Ok(resp) if resp.status().is_success() => {
+                    let collected = if ollama {
+                        collect_ollama_native_stream(resp, first_token, idle, &tx).await
+                    } else {
+                        collect_openai_stream(resp, first_token, idle, &tx).await
+                    };
+                    collected.ok()
                 }
-            }
-            let synth_text = sanitize_model_text(&synth_text);
+                _ => None,
+            };
+            let synth_text = sanitize_model_text(
+                body.as_ref()
+                    .and_then(|b| b.get("choices"))
+                    .and_then(|c| c.get(0))
+                    .and_then(|c| c.get("message"))
+                    .and_then(|m| m.get("content"))
+                    .and_then(|c| c.as_str())
+                    .unwrap_or(""),
+            );
+            // synth_text was already streamed live by the collector; the committed text
+            // is the authoritative Done payload below.
             let mut final_text = if !synth_text.trim().is_empty() {
                 synth_text
             } else if !accumulated.trim().is_empty() {
-                accumulated
+                accumulated.clone()
             } else {
-                "Non sono riuscito a estrarre i risultati dalle fonti in questa sessione. \
-Se ho raggiunto i siti, il limite è stato completare il form di ricerca, non un blocco: \
-posso riprovare o puoi indicarmi una fonte preferita.".to_string()
+                "Ho completato i passi ma non sono riuscito a produrre una risposta finale. \
+Dimmi se vuoi che riprovi o riformuli."
+                    .to_string()
             };
             if let Some(fonti) = fonti_section(&browse_sources, &final_text) {
                 final_text.push_str(&fonti);
             }
             memory_answer = final_text.clone();
-            let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: final_text.clone() }).await;
             let _ = emit_stream_event(
                 &tx,
                 GenerateStreamEvent::Done {
