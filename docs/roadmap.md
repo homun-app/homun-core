@@ -252,6 +252,18 @@ col pulsante per fare la cosa. Pattern condiviso coi confirm-card Composio/MCP.
 
 ## Debito tecnico / fronti aperti
 
+-1. **PDF authoring (l'assistente PRODUCE un PDF).** FATTO (2026-06-08, `pdf_render.rs`).
+   SOTA: l'LLM scrive MARKDOWN, il gateway lo rende in PDF in-process — NON l'LLM che
+   emette byte PDF. Scelta "funziona sempre": puro Rust con `printpdf` (font base-14
+   built-in, nessun file font) + `pulldown-cmark`; nessun Docker/sidecar/UI/rete/font
+   esterno. `create_artifact` con name `.pdf` → rende il content Markdown (titoli,
+   paragrafi word-wrapped, elenchi, code, tabelle, paginazione A4) → artifact scaricabile
+   (`write_artifact_bytes`, stesso versioning del testo). Verificato end-to-end col
+   modello reale: `napoli.pdf` `%PDF-1.3` 4788B. RESTA (nice-to-have): anteprima PDF
+   in-app nel pannello File (oggi il PDF è scaricabile ma il viewer testuale non lo
+   renderizza); export DOCX.
+
+
 0b. **Ollama: API NATIVA `/api/chat` (streaming + tool insieme).** RISOLTO
    (2026-06-08, `674ab4f`). Causa radice dei fallimenti con Ollama (browser non
    estrae, documenti falliti): il layer OpenAI-compat `/v1` **scarta i tool-call in
