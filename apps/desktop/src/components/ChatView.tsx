@@ -225,6 +225,9 @@ export function ChatView({
     }
     return out;
   }, [threadMessages]);
+  // The agent's operational plan for this conversation (latest update_plan), shown
+  // in the Workbench "Piano" panel.
+  const conversationPlan = useMemo(() => latestPlanMarkdown(threadMessages), [threadMessages]);
   // Files the user uploaded in THIS conversation (e.g. the patente PDF), derived
   // from message attachments — the chat-context "File" tab of the Workbench.
   const uploadedFiles = useMemo(() => {
@@ -1728,7 +1731,7 @@ export function ChatView({
         artifactsInitial={artifactsInitial}
         uploadedFiles={uploadedFiles}
         threadId={thread.threadId}
-        operationalPlanMarkdown={visibleComputerSession.operationalPlanMarkdown}
+        operationalPlanMarkdown={conversationPlan ?? visibleComputerSession.operationalPlanMarkdown}
       />
 
       <ChatComputerPanel />
@@ -2509,6 +2512,20 @@ function parseArtifacts(text: string): ParsedArtifact[] {
     }
   }
   return out;
+}
+
+// Operational plan emitted by the agent via the update_plan tool (‹‹PLAN›› markers).
+// The latest one in the conversation drives the Workbench "Piano" panel.
+const PLAN_RE = /‹‹PLAN››([\s\S]*?)‹‹\/PLAN››/g;
+
+function latestPlanMarkdown(messages: { text?: string }[]): string | null {
+  let latest: string | null = null;
+  for (const message of messages) {
+    const text = message.text ?? "";
+    if (!text.includes("‹‹PLAN››")) continue;
+    for (const match of text.matchAll(PLAN_RE)) latest = match[1].trim();
+  }
+  return latest && latest.length > 0 ? latest : null;
 }
 
 /** File-type icon (colored) by extension — like Claude Code's file list. */

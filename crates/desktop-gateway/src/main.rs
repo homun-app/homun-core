@@ -1630,6 +1630,75 @@ nelle prossime sessioni).".to_string()
     }
 }
 
+fn update_plan_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "update_plan",
+            "description": "Crea o aggiorna il PIANO operativo a step di un compito NON banale (multi-step: \
+sviluppo, refactor, ricerca articolata). Compare nel pannello \"Piano\" e l'utente segue i progressi. \
+Chiamalo all'INIZIO con TUTTI gli step (status \"todo\", il primo \"doing\") e AGGIORNALO mentre procedi \
+(porta a \"done\" ciò che hai completato, metti \"doing\" lo step corrente). NON usarlo per richieste a un \
+solo passo.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "steps": {
+                        "type": "array",
+                        "description": "Gli step del piano, in ordine.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": { "type": "string", "description": "Cosa fa lo step (breve, imperativo)." },
+                                "status": { "type": "string", "enum": ["todo", "doing", "done", "blocked"], "description": "Stato corrente dello step." },
+                                "detail": { "type": "string", "description": "Dettaglio opzionale." }
+                            },
+                            "required": ["title", "status"]
+                        }
+                    }
+                },
+                "required": ["steps"]
+            }
+        }
+    })
+}
+
+fn plan_status_marker(status: &str) -> char {
+    match status {
+        "done" => 'x',
+        "doing" | "running" => '-',
+        "blocked" => '!',
+        _ => ' ',
+    }
+}
+
+/// Formats the agent's plan steps into the exact Markdown the Workbench "Piano" panel
+/// parses (`- [m] **Title** (\`id\`): detail`).
+fn build_plan_markdown(steps: &[serde_json::Value]) -> String {
+    let mut lines = Vec::new();
+    for (index, step) in steps.iter().enumerate() {
+        let title = step.get("title").and_then(|t| t.as_str()).unwrap_or("").trim();
+        if title.is_empty() {
+            continue;
+        }
+        let status = step.get("status").and_then(|s| s.as_str()).unwrap_or("todo");
+        let detail = step
+            .get("detail")
+            .and_then(|d| d.as_str())
+            .map(str::trim)
+            .filter(|d| !d.is_empty())
+            .unwrap_or("—");
+        lines.push(format!(
+            "- [{}] **{}** (`s{}`): {}",
+            plan_status_marker(status),
+            title,
+            index + 1,
+            detail
+        ));
+    }
+    lines.join("\n")
+}
+
 fn schedule_task_tool_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "function",
@@ -4793,7 +4862,10 @@ DECISIONI: PRIMA di modificare codice/documenti di un progetto, chiama recall_me
 perché le cose sono come sono (NON ri-scandagliare tutto da zero). DOPO una scelta non banale — in \
 QUALSIASI dominio: codice, un documento (es. un preventivo cliente), dati, configurazioni — chiama \
 record_decision con cosa hai deciso, il PERCHÉ, le alternative scartate e gli oggetti toccati, così \
-il razionale resta e non va ricostruito."
+il razionale resta e non va ricostruito. \
+PIANO: per un compito a PIÙ PASSI (sviluppo, refactor, ricerca articolata) chiama update_plan \
+all'INIZIO con tutti gli step, poi aggiornane lo stato mentre procedi (doing→done); l'utente segue i \
+progressi nel pannello \"Piano\". Per richieste a un solo passo NON serve."
     );
     let system = format!(
         "{system}\n\nFRESCHEZZA / VERIFICA: la tua conoscenza interna può essere datata. Per QUALSIASI \
@@ -4867,6 +4939,7 @@ all'utente (tabella per riga + eventuale footer Fonti)."
         base_tools.push(create_artifact_tool_schema());
         base_tools.push(create_skill_tool_schema());
         base_tools.push(record_decision_tool_schema());
+        base_tools.push(update_plan_tool_schema());
         base_tools.push(schedule_task_tool_schema());
         base_tools.push(list_scheduled_tasks_tool_schema());
         base_tools.push(cancel_scheduled_task_tool_schema());
@@ -6325,6 +6398,34 @@ disponibili (per dati dal web usa il browser: browser_navigate sull'URL indicato
                         tokio::task::spawn_blocking(move || record_decision(&st, &args_val))
                             .await
                             .unwrap_or_else(|e| format!("Errore di esecuzione: {e}"))
+                    } else if name == "update_plan" {
+                        let args_val: serde_json::Value =
+                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        let steps = args_val
+                            .get("steps")
+                            .and_then(|s| s.as_array())
+                            .cloned()
+                            .unwrap_or_default();
+                        let markdown = build_plan_markdown(&steps);
+                        if markdown.is_empty() {
+                            "Piano vuoto: fornisci almeno uno step con titolo.".to_string()
+                        } else {
+                            // Persistent marker (pushed to accumulated → survives the
+                            // authoritative Done): the UI parses ‹‹PLAN›› and renders it
+                            // in the "Piano" panel.
+                            let plan_mark = format!("‹‹PLAN››{markdown}‹‹/PLAN››");
+                            accumulated.push_str(&plan_mark);
+                            let _ = emit_stream_event(
+                                &tx,
+                                GenerateStreamEvent::Delta { text: plan_mark },
+                            )
+                            .await;
+                            let done = steps
+                                .iter()
+                                .filter(|s| s.get("status").and_then(|v| v.as_str()) == Some("done"))
+                                .count();
+                            format!("Piano aggiornato: {done}/{} step completati. Mostrato nel pannello Piano.", steps.len())
+                        }
                     } else if name == "find_connected_tools" {
                         // Discovery: search the catalog, inject the matching tool
                         // schemas so the model can call them next round.
