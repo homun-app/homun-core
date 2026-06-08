@@ -2642,6 +2642,38 @@ function ArtifactCardRow({
   );
 }
 
+/** The Artefatti panel, rendered IDENTICALLY to the chat: the same artifact cards
+ *  (icon · name · Modificato · +N −M diff · download · expand → inline preview), just
+ *  as a LIST of all the conversation's artifacts. */
+function ArtifactsList({
+  artifacts,
+  initialName,
+}: {
+  artifacts: ParsedArtifact[];
+  initialName?: string | null;
+}) {
+  const [expanded, setExpanded] = useState<string | null>(
+    initialName ?? artifacts[0]?.name ?? null,
+  );
+  return (
+    <div className="workbench-files">
+      <div className="msg-artifacts workbench-artifacts-list">
+        {artifacts.map((artifact) => (
+          <ArtifactCardRow
+            key={artifact.name}
+            artifact={artifact}
+            expanded={expanded === artifact.name}
+            onToggle={() =>
+              setExpanded((current) => (current === artifact.name ? null : artifact.name))
+            }
+            onOpen={() => setExpanded(artifact.name)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const ARTIFACT_CODE_EXT = new Set([
   "js", "jsx", "ts", "tsx", "py", "rs", "go", "java", "rb", "php", "c", "cpp", "h",
   "cs", "json", "yaml", "yml", "toml", "sh", "bash", "sql", "html", "css", "scss", "xml",
@@ -3155,12 +3187,7 @@ function Workbench({
         )}
         {tab === "artifacts" &&
           (artifacts.length > 0 ? (
-            <ArtifactsPanel
-              embedded
-              artifacts={artifacts}
-              initialName={artifactsInitial}
-              onClose={onClose}
-            />
+            <ArtifactsList artifacts={artifacts} initialName={artifactsInitial} />
           ) : (
             <div className="workbench-empty">
               <FileText size={28} />
