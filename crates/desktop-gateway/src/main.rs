@@ -1145,7 +1145,9 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
 }
 
 /// Cosine above which two memories are the same thing (semantic dedup / collapse).
-const DEDUP_COSINE: f32 = 0.88;
+/// Tuned on real nomic-embed-v2-moe vectors: clear paraphrases of one decision sit at
+/// 0.85–0.96, while genuinely distinct decisions on the same topic stay below ~0.80.
+const DEDUP_COSINE: f32 = 0.85;
 
 /// Embed memories in a scope that don't yet have a vector (lazy backfill). Collects
 /// refs+texts under the lock, embeds OFF the lock (async HTTP), writes back. Bounded
