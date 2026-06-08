@@ -282,6 +282,18 @@ export interface FsListResult {
   root: string | null;
 }
 
+/** File content + git HEAD version for the Workbench File-tab viewer/diff. */
+export interface FsFilePayload {
+  authorized: boolean;
+  path: string;
+  text: string;
+  old_text: string;
+  in_git: boolean;
+  modified: boolean;
+  binary: boolean;
+  error?: string;
+}
+
 export interface CoreChatStreamDelta {
   request_id: string;
   delta: string;
@@ -721,6 +733,21 @@ async function electronFsList(
   if (threadId) params.set("thread_id", threadId);
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return gatewayGetJson<FsListResult>(`/api/fs/list${suffix}`);
+}
+
+/** Reads a file (text + git HEAD version for the diff view). Jailed like fsList. */
+async function electronFsFile(path: string, threadId?: string): Promise<FsFilePayload> {
+  const params = new URLSearchParams({ path });
+  if (threadId) params.set("thread_id", threadId);
+  return gatewayGetJson<FsFilePayload>(`/api/fs/file?${params.toString()}`);
+}
+
+/** Cancels any non-terminal task (clears stuck/blocked ones); returns the queue. */
+async function electronCancelTask(taskId: string): Promise<CoreTaskQueueSnapshot> {
+  return gatewayPostJson<CoreTaskQueueSnapshot>(
+    `/api/tasks/${encodeURIComponent(taskId)}/cancel`,
+    {},
+  );
 }
 
 async function electronSetThreadFolder(
@@ -1480,6 +1507,8 @@ export const coreBridge = {
   revealPath: (path: string) => revealWorkspacePath(path),
   threadFolder: (threadId: string) => electronThreadFolder(threadId),
   fsList: (path: string | null, threadId?: string) => electronFsList(path, threadId),
+  fsFile: (path: string, threadId?: string) => electronFsFile(path, threadId),
+  cancelTask: (taskId: string) => electronCancelTask(taskId),
   setThreadFolder: (threadId: string, path: string | null) =>
     electronSetThreadFolder(threadId, path),
   searchThreadFiles: (threadId: string, query: string) =>

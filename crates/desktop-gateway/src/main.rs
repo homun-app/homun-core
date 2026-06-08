@@ -485,6 +485,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/tasks/queue", get(task_queue))
         .route("/api/tasks/executor", get(task_executor_status))
         .route("/api/tasks/run_next", post(run_next_task))
+        .route("/api/tasks/{task_id}/cancel", post(cancel_task))
         .route("/api/tasks/{task_id}", get(task_detail))
         .route(
             "/api/approvals/{approval_id}/approve",
@@ -540,6 +541,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/capabilities/mcp/disconnect", post(mcp_disconnect))
         .route("/api/fs/authorize", post(fs_authorize))
         .route("/api/fs/list", get(fs_list))
+        .route("/api/fs/file", get(fs_file))
         .route("/api/connect/mark", post(connect_mark))
         .route("/api/capabilities/composio/connect", post(connect_composio))
         .route("/api/capabilities/composio/toolkits", get(composio_toolkits))
@@ -2118,6 +2120,145 @@ async fn fs_list(
             "authorized": false,
             "root": root,
         }))),
+    }
+}
+
+/// File content + git diff payload for the Workbench File tab viewer.
+#[derive(Debug, Default, Serialize)]
+struct FsFilePayload {
+    authorized: bool,
+    path: String,
+    /// Current working-tree text (capped; empty for binary).
+    text: String,
+    /// Text at git HEAD (empty if untracked/new or not in git).
+    old_text: String,
+    in_git: bool,
+    /// Working tree differs from HEAD (→ the UI offers a diff view).
+    modified: bool,
+    binary: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+/// Resolves a file's HEAD version via git (for the diff view). Returns
+/// `(in_git, head_text)`; head_text is empty for an untracked/new file.
+fn git_head_version(path: &std::path::Path) -> (bool, String) {
+    let Some(parent) = path.parent() else {
+        return (false, String::new());
+    };
+    let root = std::process::Command::new("git")
+        .arg("-C")
+        .arg(parent)
+        .args(["rev-parse", "--show-toplevel"])
+        .output();
+    let root = match root {
+        Ok(out) if out.status.success() => {
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        }
+        _ => return (false, String::new()),
+    };
+    // Canonicalize both sides before strip_prefix: git's --show-toplevel returns
+    // the real path (e.g. /private/var/… on macOS), while the incoming path may be
+    // the symlinked form (/var/…) — a mismatch would drop the HEAD version.
+    let canon_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let canon_root = std::path::Path::new(&root)
+        .canonicalize()
+        .unwrap_or_else(|_| std::path::PathBuf::from(&root));
+    let Ok(rel) = canon_path.strip_prefix(&canon_root) else {
+        return (true, String::new());
+    };
+    let spec = format!("HEAD:{}", rel.to_string_lossy());
+    match std::process::Command::new("git")
+        .arg("-C")
+        .arg(&root)
+        .args(["show", &spec])
+        .output()
+    {
+        Ok(out) if out.status.success() => {
+            let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+            if text.chars().count() > PROJECT_READ_MAX_CHARS {
+                text = text.chars().take(PROJECT_READ_MAX_CHARS).collect();
+            }
+            (true, text)
+        }
+        // In a repo but the file is untracked/new (no HEAD version) → empty old.
+        _ => (true, String::new()),
+    }
+}
+
+/// Reads a file's text + its git HEAD version (for the File-tab viewer/diff).
+fn fs_read_file_with_git(path: &std::path::Path) -> FsFilePayload {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            return FsFilePayload {
+                authorized: true,
+                path: path.display().to_string(),
+                error: Some(error.to_string()),
+                ..Default::default()
+            };
+        }
+    };
+    // Binary heuristic: a NUL byte in the head → don't try to render as text.
+    if bytes.iter().take(8000).any(|b| *b == 0) {
+        return FsFilePayload {
+            authorized: true,
+            path: path.display().to_string(),
+            binary: true,
+            ..Default::default()
+        };
+    }
+    let mut text = String::from_utf8_lossy(&bytes).into_owned();
+    if text.chars().count() > PROJECT_READ_MAX_CHARS {
+        text = text.chars().take(PROJECT_READ_MAX_CHARS).collect();
+    }
+    let (in_git, old_text) = git_head_version(path);
+    let modified = in_git && old_text != text;
+    FsFilePayload {
+        authorized: true,
+        path: path.display().to_string(),
+        text,
+        old_text,
+        in_git,
+        modified,
+        binary: false,
+        error: None,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct FsFileQuery {
+    path: String,
+    #[serde(default)]
+    thread_id: Option<String>,
+}
+
+/// File content + git diff for the Workbench File tab. Same jail as fs_list.
+async fn fs_file(
+    State(state): State<AppState>,
+    Query(query): Query<FsFileQuery>,
+) -> Result<Json<FsFilePayload>, GatewayError> {
+    match fs_resolve_authorized(&state, query.thread_id.as_deref(), &query.path) {
+        Ok(path) => {
+            let payload = tokio::task::spawn_blocking(move || fs_read_file_with_git(&path))
+                .await
+                .unwrap_or_else(|_| FsFilePayload {
+                    authorized: true,
+                    error: Some("errore interno".to_string()),
+                    ..Default::default()
+                });
+            Ok(Json(payload))
+        }
+        Err(FsAuthIssue::Invalid(message)) => Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "fs_bad_path",
+            message,
+        }),
+        Err(FsAuthIssue::NeedsAuth(path)) => Ok(Json(FsFilePayload {
+            authorized: false,
+            path: path.display().to_string(),
+            ..Default::default()
+        })),
     }
 }
 
@@ -8253,6 +8394,43 @@ async fn task_detail(
         .map(task_detail_response)
         .transpose()?;
     Ok(Json(detail))
+}
+
+/// Cancels any non-terminal task (queued/active/blocked), so the user can clear
+/// stuck/blocked tasks from the Workbench Attività tab. Unlike the chat
+/// `cancel_scheduled_task` tool (proactive_prompt only), this works for any kind.
+/// Returns the refreshed queue. Cancelling an already-terminal task is a no-op.
+async fn cancel_task(
+    State(state): State<AppState>,
+    Path(task_id): Path<String>,
+) -> Result<Json<TaskQueueResponse>, GatewayError> {
+    let user = gateway_user_id();
+    let workspace = gateway_workspace_id();
+    {
+        let store = lock_task_store(&state)?;
+        let tid = local_first_task_runtime::TaskId::new(&task_id);
+        if let Some(task) = store.get_task(&tid, &user, &workspace).map_err(GatewayError::task)? {
+            let terminal = matches!(
+                task.status,
+                local_first_task_runtime::TaskStatus::Completed
+                    | local_first_task_runtime::TaskStatus::Cancelled
+                    | local_first_task_runtime::TaskStatus::Failed
+                    | local_first_task_runtime::TaskStatus::Expired
+            );
+            if !terminal {
+                store
+                    .update_task_status(
+                        &tid,
+                        &user,
+                        &workspace,
+                        local_first_task_runtime::TaskStatus::Cancelled,
+                        Some("annullato dall'utente"),
+                    )
+                    .map_err(GatewayError::task)?;
+            }
+        }
+    }
+    Ok(Json(task_queue_response_for_state(&state)?))
 }
 
 async fn run_next_task(
