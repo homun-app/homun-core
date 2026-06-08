@@ -3977,14 +3977,17 @@ fn chat_context_budget_chars() -> usize {
 /// Max model↔tool round-trips. The LAST round forbids tools (tool_choice:none) so
 /// the model always synthesizes a final answer from what it gathered. With 3:
 /// up to 2 tool calls (search + optional follow-up), then a forced answer.
-/// Max model↔tool rounds for a normal turn. An AGENTIC coding task (scaffold several
-/// files → record a decision → run/verify) routinely needs more than a handful of
-/// tool calls, so 5 was starving multi-step work into the forced synthesis. 16 is a
-/// safe default — it's a CAP, not a target (a simple chat still answers in round 0–1).
-/// Env-overridable via `LOCAL_FIRST_CHAT_MAX_ROUNDS`.
-const MAX_TOOL_ROUNDS: usize = 16;
+/// Soft round budget for a normal turn. NOT the primary control: the turn ends when
+/// the MODEL stops calling tools (natural termination) or the no-progress guard trips
+/// (it repeats the same calls). This is a generous backstop so a long agentic task
+/// (large refactor, multi-file scaffold) isn't truncated. Env: `LOCAL_FIRST_CHAT_MAX_ROUNDS`.
+const MAX_TOOL_ROUNDS: usize = 40;
 
-/// Round budget for a normal (non-browser) turn (env-overridable).
+/// Absolute hard ceiling on rounds in ONE turn — pure anti-runaway, far above any real
+/// task. Bounds the for-loop so a soft budget set higher than the browser one still works.
+const HARD_ROUND_CEILING: usize = 100;
+
+/// Soft round budget for a normal (non-browser) turn (env-overridable).
 fn chat_max_rounds() -> usize {
     env::var("LOCAL_FIRST_CHAT_MAX_ROUNDS")
         .ok()
@@ -4954,6 +4957,12 @@ questo elenco, chiedi di allegarlo (non cercarlo nella sandbox o nelle cartelle)
         // Consequential actions performed this turn (any domain) → fed to the
         // memory extractor so the "why" of each mutation is remembered.
         let mut tool_trace: Vec<String> = Vec::new();
+        // No-progress guard: if the model repeats the EXACT same tool calls round after
+        // round, it's stuck (not making progress) → stop and synthesize, instead of
+        // burning the whole round budget on a loop. This is what lets the budget be
+        // generous: real long tasks run, loops are caught fast.
+        let mut last_round_sig = String::new();
+        let mut repeat_count: u32 = 0;
         let mut final_done = false;
         // Source URLs visited via browse_web this request, for the "Fonti" footer.
         let mut browse_sources: Vec<String> = Vec::new();
@@ -4987,7 +4996,7 @@ questo elenco, chiedi di allegarlo (non cercarlo nella sandbox o nelle cartelle)
         // The outer ceiling is the BROWSER budget; the EFFECTIVE budget is dynamic
         // (the normal 5 rounds until a browser tool is actually used, then the
         // larger browser budget). This keeps non-browser turns identical to today.
-        for round in 0..MAX_TOOL_ROUNDS_BROWSER {
+        for round in 0..HARD_ROUND_CEILING {
             let max_rounds = if browser_used {
                 chat_browser_max_rounds()
             } else {
@@ -5222,6 +5231,38 @@ controlla/aggiorna la chiave in Impostazioni → Modello & Runtime.".to_string()
                 });
 
             if let Some(calls) = tool_calls {
+                // No-progress guard: if this round's tool calls are IDENTICAL to the
+                // previous round's, the agent is stuck repeating itself → stop after a
+                // couple of repeats and let the forced synthesis answer.
+                let round_sig = calls
+                    .iter()
+                    .map(|c| {
+                        let f = c.get("function");
+                        let name = f
+                            .and_then(|f| f.get("name"))
+                            .and_then(|n| n.as_str())
+                            .unwrap_or("");
+                        let args = f
+                            .and_then(|f| f.get("arguments"))
+                            .and_then(|a| a.as_str())
+                            .unwrap_or("");
+                        format!("{name}:{args}")
+                    })
+                    .collect::<Vec<_>>()
+                    .join("|");
+                if !round_sig.is_empty() && round_sig == last_round_sig {
+                    repeat_count += 1;
+                    if repeat_count >= 2 {
+                        let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
+                            text: "‹‹ACT››⏹️ Stesse azioni ripetute: mi fermo e sintetizzo‹‹/ACT››".to_string(),
+                        })
+                        .await;
+                        break;
+                    }
+                } else {
+                    repeat_count = 0;
+                    last_round_sig = round_sig;
+                }
                 // Echo the assistant's tool-call turn, then append each tool result.
                 // Content is sanitized so a leaked text tool-call doesn't pollute the
                 // conversation history.
