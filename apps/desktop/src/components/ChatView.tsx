@@ -72,6 +72,7 @@ import {
   type MemoryGraph,
   type MemoryGraphEdge,
   type MemoryGraphNode,
+  type MemoryWikiPage,
   type SkillSummary,
 } from "../lib/coreBridge";
 import {
@@ -2948,6 +2949,8 @@ function MemoryGraphPanel({ threadId }: { threadId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [view, setView] = useState({ x: 0, y: 0, k: 1 });
+  const [mode, setMode] = useState<"graph" | "wiki">("graph");
+  const [wiki, setWiki] = useState<MemoryWikiPage[] | null>(null);
   // viewBox tracks the container's pixel size (centred at origin) so the graph FILLS
   // the panel and adapts when it's expanded/fullscreen — no fixed-aspect letterboxing.
   const [size, setSize] = useState({ w: 760, h: 600 });
@@ -2967,6 +2970,15 @@ function MemoryGraphPanel({ threadId }: { threadId: string }) {
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    if (mode === "wiki" && wiki === null) {
+      coreBridge
+        .memoryWiki(threadId)
+        .then(setWiki)
+        .catch(() => setWiki([]));
+    }
+  }, [mode, wiki, threadId]);
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -3064,21 +3076,52 @@ function MemoryGraphPanel({ threadId }: { threadId: string }) {
   return (
     <div className="memory-graph">
       <div className="memory-graph-toolbar">
-        <span className="memory-graph-count">
-          {graph.nodes.length} nodi · {graph.edges.length} collegamenti
-        </span>
-        <div className="memory-graph-zoom">
-          <button type="button" onClick={() => setView((v) => ({ ...v, k: Math.min(v.k * 1.2, 3) }))} aria-label="Zoom +">
-            +
+        <div className="memory-graph-modes">
+          <button type="button" className={mode === "graph" ? "active" : ""} onClick={() => setMode("graph")}>
+            Grafo
           </button>
-          <button type="button" onClick={() => setView((v) => ({ ...v, k: Math.max(v.k * 0.83, 0.3) }))} aria-label="Zoom −">
-            −
-          </button>
-          <button type="button" onClick={() => setView({ x: 0, y: 0, k: 1 })} aria-label="Reimposta vista">
-            ⟲
+          <button type="button" className={mode === "wiki" ? "active" : ""} onClick={() => setMode("wiki")}>
+            Wiki
           </button>
         </div>
+        <span className="memory-graph-count">
+          {mode === "graph"
+            ? `${graph.nodes.length} nodi · ${graph.edges.length} collegamenti`
+            : `${wiki?.length ?? 0} pagine`}
+        </span>
+        {mode === "graph" && (
+          <div className="memory-graph-zoom">
+            <button type="button" onClick={() => setView((v) => ({ ...v, k: Math.min(v.k * 1.2, 3) }))} aria-label="Zoom +">
+              +
+            </button>
+            <button type="button" onClick={() => setView((v) => ({ ...v, k: Math.max(v.k * 0.83, 0.3) }))} aria-label="Zoom −">
+              −
+            </button>
+            <button type="button" onClick={() => setView({ x: 0, y: 0, k: 1 })} aria-label="Reimposta vista">
+              ⟲
+            </button>
+          </div>
+        )}
       </div>
+      {mode === "wiki" ? (
+        <div className="memory-wiki">
+          {wiki === null ? (
+            <p className="memory-wiki-empty">Carico la wiki…</p>
+          ) : wiki.length === 0 ? (
+            <p className="memory-wiki-empty">
+              Nessuna pagina wiki ancora. Le decisioni del progetto vengono proiettate qui in
+              markdown man mano che lavoriamo.
+            </p>
+          ) : (
+            wiki.map((page) => (
+              <article className="memory-wiki-page" key={page.path}>
+                <RichMessage text={page.body} />
+              </article>
+            ))
+          )}
+        </div>
+      ) : (
+        <>
       <div className="memory-graph-canvas" ref={canvasRef}>
         <svg
           ref={svgRef}
@@ -3174,6 +3217,8 @@ function MemoryGraphPanel({ threadId }: { threadId: string }) {
           </span>
         ))}
       </div>
+        </>
+      )}
     </div>
   );
 }

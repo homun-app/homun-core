@@ -644,6 +644,13 @@ async function electronMemoryGraph(thread?: string): Promise<MemoryGraph> {
   return gatewayGetJson<MemoryGraph>(`/api/memory/graph${param}`);
 }
 
+export type MemoryWikiPage = { path: string; title: string; body: string };
+
+async function electronMemoryWiki(thread?: string): Promise<MemoryWikiPage[]> {
+  const param = thread ? `?thread=${encodeURIComponent(thread)}` : "";
+  return gatewayGetJson<MemoryWikiPage[]>(`/api/memory/wiki${param}`);
+}
+
 async function electronArtifactVersions(thread: string, name: string): Promise<number> {
   const { versions } = await gatewayGetJson<{ versions: number }>(
     `/api/artifacts/versions?thread=${encodeURIComponent(thread)}&name=${encodeURIComponent(name)}`,
@@ -1528,6 +1535,7 @@ export const coreBridge = {
   saveArtifactContent: (thread: string, name: string, content: string) =>
     electronSaveArtifactContent(thread, name, content),
   memoryGraph: (thread?: string) => electronMemoryGraph(thread),
+  memoryWiki: (thread?: string) => electronMemoryWiki(thread),
   artifactFolder: (thread: string) => electronArtifactFolder(thread),
   artifactsUsage: () => electronArtifactsUsage(),
   artifactDestinations: () => electronArtifactDestinations(),

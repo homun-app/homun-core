@@ -508,6 +508,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/memory/dashboard", get(memory_dashboard))
         .route("/api/memory/items", get(memory_items))
         .route("/api/memory/graph", get(memory_graph))
+        .route("/api/memory/wiki", get(memory_wiki))
         .route("/api/memory/decide", post(memory_decide))
         .route("/api/memory/contacts", get(contacts_list))
         .route("/api/memory/contacts/memories", post(contact_memories))
@@ -1313,6 +1314,100 @@ fn store_episode(facade: &MemoryFacade, user_id: &MemoryUserId, thread_id: &str,
 /// canonical_key → ref map (seeded with existing entities so relations can link to
 /// already-known nodes); (2) upsert each relation only when BOTH endpoints resolve.
 /// The model gives source/target as canonical_keys in source_ref/target_ref.
+/// Wiki projection (markdown face of the memory): regenerate the project's "Decisioni"
+/// page from the confirmed decisions and persist it to SQL (wiki_pages). The structured
+/// rows stay canonical; this is the readable, human-editable projection (the hybrid
+/// model). Idempotent — one page per workspace, rebuilt in place.
+fn rebuild_decisions_wiki(
+    facade: &MemoryFacade,
+    user_id: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+) {
+    let Ok(memories) = facade.list_memories_for_ui(user_id, workspace) else {
+        return;
+    };
+    let mut decisions: Vec<_> = memories
+        .into_iter()
+        .filter(|m| {
+            m.memory_type == "decision"
+                && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+        })
+        .collect();
+    if decisions.is_empty() {
+        return;
+    }
+    // Lexical dedup for the page too (richest first), so it reads cleanly.
+    decisions.sort_by_key(|m| std::cmp::Reverse(m.text.chars().count()));
+    let mut kept_tokens: Vec<std::collections::HashSet<String>> = Vec::new();
+    decisions.retain(|m| {
+        let tokens = dedup_tokens(&m.text);
+        if kept_tokens.iter().any(|ex| jaccard(&tokens, ex) >= DEDUP_JACCARD) {
+            false
+        } else {
+            kept_tokens.push(tokens);
+            true
+        }
+    });
+
+    let mut body = String::from(
+        "# Decisioni del progetto\n\n> Pagina generata dalla memoria (modificabile a mano: le correzioni rientrano nello strutturato).\n\n",
+    );
+    let mut linked = Vec::new();
+    for memory in &decisions {
+        linked.push(memory.reference.clone());
+        let title = memory.text.lines().next().unwrap_or(&memory.text).trim();
+        body.push_str(&format!("## {title}\n\n"));
+        if let Some(decision) = memory.metadata.get("decision") {
+            if let Some(rationale) = decision.get("rationale").and_then(|r| r.as_str()) {
+                if !rationale.trim().is_empty() {
+                    body.push_str(&format!("{}\n\n", rationale.trim()));
+                }
+            }
+            if let Some(alts) = decision.get("alternatives").and_then(|a| a.as_array()) {
+                for alt in alts {
+                    let Some(option) = alt.get("option").and_then(|o| o.as_str()) else {
+                        continue;
+                    };
+                    if option.is_empty() {
+                        continue;
+                    }
+                    let why = alt.get("rejected_because").and_then(|w| w.as_str()).unwrap_or("");
+                    body.push_str(&format!("- Scartata **{option}**: {why}\n"));
+                }
+            }
+        }
+        if let Some(affected) = memory.metadata.get("affects_labels").and_then(|a| a.as_array()) {
+            let files: Vec<&str> = affected.iter().filter_map(|v| v.as_str()).collect();
+            if !files.is_empty() {
+                body.push_str(&format!("\n_File: {}_\n", files.join(", ")));
+            }
+        }
+        body.push('\n');
+    }
+
+    // Reuse the existing page's ref (update in place) or mint a new one.
+    let path = "decisioni.md";
+    let reference = facade
+        .list_wiki_pages_for_ui(user_id, workspace)
+        .ok()
+        .and_then(|pages| pages.into_iter().find(|p| p.path == path).map(|p| p.reference))
+        .unwrap_or_else(|| {
+            MemoryRef::generated(MemoryRefKind::Wiki, user_id.clone(), workspace.clone())
+        });
+    let page = WikiPage {
+        reference,
+        user_id: user_id.clone(),
+        workspace_id: workspace.clone(),
+        path: path.to_string(),
+        title: "Decisioni del progetto".to_string(),
+        body,
+        linked_refs: linked,
+        privacy_domain: PrivacyDomain::new("work"),
+        sensitivity: MemoryDataSensitivity::Internal,
+    };
+    let _ = facade.record_wiki_page_for_ui(&page);
+}
+
 fn persist_graph(
     facade: &MemoryFacade,
     user_id: &MemoryUserId,
@@ -1649,6 +1744,8 @@ con rationale e affects (gli oggetti toccati: file, documento, contatto…)."
         );
         if has_project {
             persist_scope_memories(&facade, &user_id, &active, project_mems);
+            // Markdown face: regenerate the project's "Decisioni" wiki page.
+            rebuild_decisions_wiki(&facade, &user_id, &active);
         }
         // Graph (people + kinship/work relations) → personal scope.
         persist_graph(
@@ -1776,6 +1873,7 @@ fn record_decision(state: &AppState, args: &serde_json::Value) -> String {
     match record {
         Ok(rec) => {
             let _ = facade.confirm_memory(&lifecycle, &rec.reference, "decision recorded by agent");
+            rebuild_decisions_wiki(&facade, &user, &workspace);
             "✅ Decisione registrata in memoria (il perché resterà disponibile nei prossimi turni e \
 nelle prossime sessioni).".to_string()
         }
@@ -16639,6 +16737,45 @@ async fn memory_graph(
         nodes,
         edges,
     }))
+}
+
+#[derive(Serialize)]
+struct WikiPageView {
+    path: String,
+    title: String,
+    body: String,
+}
+
+/// The markdown face of the project's memory (wiki pages persisted in SQL): the
+/// readable, human-editable projection. Same scope resolution as the graph.
+async fn memory_wiki(
+    State(state): State<AppState>,
+    Query(query): Query<MemoryGraphQuery>,
+) -> Result<Json<Vec<WikiPageView>>, GatewayError> {
+    let facade = lock_memory_facade(&state)?;
+    let user = gateway_memory_user_id();
+    let ws = if let Some(tid) = query.thread.as_deref().filter(|t| !t.trim().is_empty()) {
+        lock_store(&state)
+            .ok()
+            .and_then(|store| store.workspace_for_thread(tid).ok())
+            .filter(|w| !w.trim().is_empty())
+            .map(MemoryWorkspaceId::new)
+            .unwrap_or_else(gateway_memory_workspace_id)
+    } else if let Some(workspace) = query.workspace.filter(|w| !w.trim().is_empty()) {
+        MemoryWorkspaceId::new(workspace)
+    } else {
+        gateway_memory_workspace_id()
+    };
+    // Regenerate the "Decisioni" page from current decisions so existing projects show
+    // it without needing a fresh turn (idempotent).
+    rebuild_decisions_wiki(&facade, &user, &ws);
+    let pages = facade.list_wiki_pages_for_ui(&user, &ws).unwrap_or_default();
+    Ok(Json(
+        pages
+            .into_iter()
+            .map(|p| WikiPageView { path: p.path, title: p.title, body: p.body })
+            .collect(),
+    ))
 }
 
 // ------------------------------------------------------------------ contacts
