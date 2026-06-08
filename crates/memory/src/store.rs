@@ -305,6 +305,15 @@ impl SQLiteMemoryStore {
         workspace_id: &WorkspaceId,
         query: &str,
     ) -> Result<Vec<MemoryRef>, String> {
+        // A bare multi-word string given to FTS5 MATCH is an implicit AND of ALL tokens
+        // — so a natural-language question ("Perché abbiamo scelto JSON invece di
+        // SQLite?") only matches a record containing EVERY word, which almost never
+        // happens → no recall. Build an OR query over the significant terms instead;
+        // bm25 ranks the most relevant first.
+        let fts = fts_or_query(query);
+        if fts.is_empty() {
+            return Ok(Vec::new());
+        }
         let mut statement = self
             .conn
             .prepare(
@@ -317,7 +326,7 @@ impl SQLiteMemoryStore {
             )
             .map_err(|error| error.to_string())?;
         let mut rows = statement
-            .query((query, user_id.as_str(), workspace_id.as_str()))
+            .query((fts.as_str(), user_id.as_str(), workspace_id.as_str()))
             .map_err(|error| error.to_string())?;
         let mut refs = Vec::new();
         while let Some(row) = rows.next().map_err(|error| error.to_string())? {
@@ -1410,4 +1419,35 @@ fn enum_name<T: serde::Serialize>(value: &T) -> Result<String, String> {
 
 fn enum_from_name<T: serde::de::DeserializeOwned>(value: String) -> Result<T, String> {
     serde_json::from_value(serde_json::Value::String(value)).map_err(|error| error.to_string())
+}
+
+/// Builds an FTS5 OR query from the significant terms of a (possibly natural-language)
+/// string. Each term is double-quoted so punctuation/accents can't break the MATCH
+/// syntax, and joined with OR — recall should surface records matching ANY key term
+/// (ranked by bm25), not require every word. Terms shorter than 3 chars (articles,
+/// prepositions) are dropped; the term count is capped. Returns "" when nothing
+/// searchable remains.
+fn fts_or_query(raw: &str) -> String {
+    let terms: Vec<String> = raw
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|term| term.chars().count() >= 3)
+        .take(24)
+        .map(|term| format!("\"{}\"", term.to_lowercase()))
+        .collect();
+    terms.join(" OR ")
+}
+
+#[cfg(test)]
+mod fts_query_tests {
+    use super::fts_or_query;
+
+    #[test]
+    fn or_query_from_natural_language_question() {
+        let q = fts_or_query("Perché abbiamo scelto JSON invece di SQLite?");
+        assert!(q.contains("\"json\""), "manca json: {q}");
+        assert!(q.contains("\"sqlite\""), "manca sqlite: {q}");
+        assert!(q.contains(" OR "), "non è OR: {q}");
+        assert!(!q.contains("\"di\""), "non deve includere token <3: {q}");
+        assert_eq!(fts_or_query("?? !! a b"), "");
+    }
 }
