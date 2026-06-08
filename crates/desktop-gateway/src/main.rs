@@ -1881,6 +1881,112 @@ nelle prossime sessioni).".to_string()
     }
 }
 
+fn forget_memory_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "forget_memory",
+            "description": "Cancella dalla memoria a lungo termine ciò che corrisponde alla query. Usalo \
+quando l'utente chiede di DIMENTICARE/eliminare un'informazione, o quando una decisione/fatto non vale \
+più ed è meglio rimuoverla (non solo aggiornarla). Cerca nei suoi scope e soft-elimina i match migliori; \
+riporta sempre all'utente COSA hai dimenticato.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Cosa dimenticare (parole chiave o frase)." },
+                    "reason": { "type": "string", "description": "Perché (opzionale)." }
+                },
+                "required": ["query"]
+            }
+        }
+    })
+}
+
+/// Soft-deletes the best matches for `query` in a scope, returning their summaries.
+fn forget_in_scope(
+    facade: &MemoryFacade,
+    user: &MemoryUserId,
+    ws: &MemoryWorkspaceId,
+    query: &str,
+    reason: &str,
+) -> Vec<String> {
+    let access = MemoryAccessRequest {
+        actor_id: "forget".to_string(),
+        user_id: user.clone(),
+        workspace_id: ws.clone(),
+        purpose: "forget".to_string(),
+        allowed_domains: vec![
+            PrivacyDomain::new("personal"),
+            PrivacyDomain::new("work"),
+            PrivacyDomain::new("general"),
+        ],
+        max_sensitivity: MemoryDataSensitivity::Secret,
+        allow_raw_payload: true,
+        allow_export: true,
+        broad_query: false,
+    };
+    let mut out = Vec::new();
+    if let Ok(page) = facade.search_memories(MemorySearchRequest {
+        access,
+        query: query.to_string(),
+        statuses: vec![MemoryStatus::Confirmed, MemoryStatus::Candidate],
+        memory_types: Vec::new(),
+        limit: 3,
+        offset: 0,
+    }) {
+        let lifecycle = MemoryLifecycleRequest {
+            actor_id: "forget".to_string(),
+            user_id: user.clone(),
+            workspace_id: ws.clone(),
+            purpose: "forget".to_string(),
+        };
+        for item in page.items {
+            if facade.delete_memory(&lifecycle, &item.reference, reason).is_ok() {
+                out.push(item.summary);
+            }
+        }
+    }
+    out
+}
+
+fn forget_memory(state: &AppState, args: &serde_json::Value) -> String {
+    let query = args.get("query").and_then(|q| q.as_str()).unwrap_or("").trim().to_string();
+    if query.is_empty() {
+        return "Per dimenticare qualcosa indica cosa (query).".to_string();
+    }
+    let reason = args
+        .get("reason")
+        .and_then(|r| r.as_str())
+        .unwrap_or("oblio richiesto dall'utente");
+    let Ok(facade) = lock_memory_facade(state) else {
+        return "Memoria non disponibile.".to_string();
+    };
+    let user = gateway_memory_user_id();
+    let active = gateway_memory_workspace_id();
+    let mut deleted = forget_in_scope(&facade, &user, &active, &query, reason);
+    if active.as_str() != PERSONAL_WORKSPACE {
+        deleted.extend(forget_in_scope(
+            &facade,
+            &user,
+            &MemoryWorkspaceId::new(PERSONAL_WORKSPACE),
+            &query,
+            reason,
+        ));
+    }
+    // Cascade: the graph already hides Deleted; refresh the wiki projection too.
+    rebuild_decisions_wiki(&facade, &user, &active);
+    if deleted.is_empty() {
+        format!("Non ho trovato in memoria nulla che corrisponda a «{query}».")
+    } else {
+        let list = deleted
+            .iter()
+            .map(|d| format!("- {}", d.chars().take(90).collect::<String>()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("🗑️ Ho dimenticato {} elemento/i dalla memoria:\n{list}", deleted.len())
+    }
+}
+
 fn update_plan_tool_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "function",
@@ -5195,6 +5301,7 @@ all'utente (tabella per riga + eventuale footer Fonti)."
         base_tools.push(create_artifact_tool_schema());
         base_tools.push(create_skill_tool_schema());
         base_tools.push(record_decision_tool_schema());
+        base_tools.push(forget_memory_tool_schema());
         base_tools.push(update_plan_tool_schema());
         base_tools.push(schedule_task_tool_schema());
         base_tools.push(list_scheduled_tasks_tool_schema());
@@ -6652,6 +6759,20 @@ disponibili (per dati dal web usa il browser: browser_navigate sull'URL indicato
                         .await;
                         let st = state_owned.clone();
                         tokio::task::spawn_blocking(move || record_decision(&st, &args_val))
+                            .await
+                            .unwrap_or_else(|e| format!("Errore di esecuzione: {e}"))
+                    } else if name == "forget_memory" {
+                        let args_val: serde_json::Value =
+                            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                        let _ = emit_stream_event(
+                            &tx,
+                            GenerateStreamEvent::Delta {
+                                text: "‹‹ACT››🗑️ Dimentico dalla memoria‹‹/ACT››".to_string(),
+                            },
+                        )
+                        .await;
+                        let st = state_owned.clone();
+                        tokio::task::spawn_blocking(move || forget_memory(&st, &args_val))
                             .await
                             .unwrap_or_else(|e| format!("Errore di esecuzione: {e}"))
                     } else if name == "update_plan" {

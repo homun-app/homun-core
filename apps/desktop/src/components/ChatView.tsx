@@ -3203,9 +3203,29 @@ function MemoryGraphPanel({ threadId }: { threadId: string }) {
                 ))}
               </ul>
             )}
-            <button type="button" className="ghost-button" onClick={() => setSelected(null)}>
-              Chiudi
-            </button>
+            <div className="memory-graph-detail-actions">
+              {["decision", "fact", "preference", "entity"].includes(selectedNode.kind) && (
+                <button
+                  type="button"
+                  className="ghost-button danger"
+                  onClick={() => {
+                    coreBridge
+                      .decideMemory(selectedNode.id, "delete")
+                      .then(() => {
+                        setSelected(null);
+                        setWiki(null);
+                        reload();
+                      })
+                      .catch(() => {});
+                  }}
+                >
+                  Elimina dalla memoria
+                </button>
+              )}
+              <button type="button" className="ghost-button" onClick={() => setSelected(null)}>
+                Chiudi
+              </button>
+            </div>
           </div>
         )}
       </div>
