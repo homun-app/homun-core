@@ -42,6 +42,19 @@ pub struct BuildPromptResponse {
     pub compression: PromptCompressionSummary,
 }
 
+/// A file attached in the composer. The wire shape matches what the frontend
+/// sends (snake_case). `local_path` is an absolute host path the gateway opens.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AttachmentInput {
+    pub local_path: String,
+    #[serde(default)]
+    pub display_name: String,
+    #[serde(default)]
+    pub mime_type: String,
+    #[serde(default)]
+    pub size_bytes: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChatGenerateStreamRequest {
     pub request_id: String,
@@ -64,6 +77,13 @@ pub struct ChatGenerateStreamRequest {
     /// user message is sent as multimodal content (text + image_url parts).
     #[serde(default)]
     pub images: Vec<String>,
+    /// Files the user attached in the composer. The gateway reads each by its
+    /// absolute `local_path` (same host) and turns it into model-visible content:
+    /// extracted text (PDF text layer / text files) injected into the prompt, and
+    /// images (photos, or scanned-PDF pages rendered via pdfium) fed to the vision
+    /// model. Attaching IS the access grant — no folder authorization needed.
+    #[serde(default)]
+    pub attachments: Vec<AttachmentInput>,
     pub max_tokens: u32,
     pub temperature: f64,
     pub wait_if_busy: bool,

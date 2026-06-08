@@ -19,6 +19,13 @@ local-first-process-skill = { path = "../process-skill" }
 local-first-secrets = { path = "../secrets" }
 local-first-subagents = { path = "../subagents" }
 local-first-task-runtime = { path = "../task-runtime" }
+# PDF ingestion for chat attachments: pdfium-render binds (at runtime, via
+# libloading) to the pdfium native lib for BOTH text-layer extraction (born-digital
+# PDFs) and page rasterization (scanned PDFs → images for the vision model). image
+# (0.25, already in the tree) encodes the rendered pages to JPEG. thread_safe guards
+# the non-reentrant pdfium FFI when chat turns ingest concurrently.
+pdfium-render = { version = "0.8", features = ["image", "thread_safe"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "stream"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
