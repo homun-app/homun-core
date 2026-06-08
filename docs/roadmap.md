@@ -150,10 +150,13 @@ model-driven non sono verificabili headless. Commit: `9853162`, `4c53edc`,
    che usi i suoi tool. Atteso: il modello scopre i tool via `find_connected_tools`,
    i **read** girano diretti (con timeout), i **write** mostrano la card di
    conferma `‹‹MCP_CONFIRM››`. Da verificare anche `read_only` (canali) blocca le write.
-2. **Catalogo MCP** (`167b379`): Impostazioni → Connettori → **Catalogo MCP** →
-   cerca `playwright` → Connetti; poi `filesystem` (chiede una directory) e
-   `github` (chiede il token, campo segreto). Atteso: badge "Ufficiale" automatico,
-   comando mostrato, form parametri/segreti funzionante.
+2. **Catalogo MCP** (`167b379` + anteprima `d71fd40`): Impostazioni → Connettori
+   → **Catalogo MCP** → cerca `playwright`. Clic **"Dettagli"** → anteprima
+   (descrizione completa, versione, "Pagina del progetto", "cosa ti serve",
+   comando). Poi Connetti; prova `filesystem` (chiede una directory) e `github`
+   (token, campo segreto). Atteso: badge "Ufficiale" automatico, anteprima leggibile,
+   form parametri/segreti funzionante. NB: la tool-list reale appare DOPO il
+   connect (limite registry — vedi nota nel commit).
 3. **Disconnect** (`7a3d2c5`): dal dettaglio di un server MCP → "Disconnetti"
    (con conferma) → sparisce dai collegati.
 4. **Meta-tool `suggest_capabilities`** (`9a32256`): in chat *"voglio automatizzare
