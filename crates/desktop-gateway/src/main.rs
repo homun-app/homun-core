@@ -1582,6 +1582,12 @@ fn record_decision(state: &AppState, args: &serde_json::Value) -> String {
     }
     let alternatives = args.get("alternatives").cloned().unwrap_or_else(|| serde_json::json!([]));
     let affects = args.get("affects").cloned().unwrap_or_else(|| serde_json::json!([]));
+    // The touched objects (file names, etc.) become ALIASES — those are FTS-indexed,
+    // so a later "decisions affecting this file" lookup finds the decision by name.
+    let affect_aliases: Vec<String> = affects
+        .as_array()
+        .map(|items| items.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .unwrap_or_default();
     let user = gateway_memory_user_id();
     let workspace = gateway_memory_workspace_id();
     let lifecycle = MemoryLifecycleRequest {
@@ -1600,7 +1606,7 @@ fn record_decision(state: &AppState, args: &serde_json::Value) -> String {
         request: lifecycle.clone(),
         memory_type: "decision".to_string(),
         text,
-        aliases: Vec::new(),
+        aliases: affect_aliases,
         language_hints: Vec::new(),
         confidence: 1.0,
         privacy_domain: PrivacyDomain::new("work"),
@@ -2636,6 +2642,89 @@ Riformula senza operazioni distruttive.",
 /// and returns a compact, readable result for the model. Includes confirmed AND
 /// candidate items and all sensitivities: the model asked explicitly, and it is
 /// the user's own data answered back to the user.
+/// Renders a recalled memory for the model. For a DECISION it surfaces the STRUCTURED
+/// "why" — the rationale and the rejected alternatives from `metadata.decision` — not
+/// just the summary text (the strong reader). Other kinds return the summary as-is.
+fn format_recall_entry(summary: &str, metadata: &serde_json::Value) -> String {
+    let Some(decision) = metadata.get("decision") else {
+        return summary.to_string();
+    };
+    let mut out = summary.to_string();
+    if let Some(rationale) = decision.get("rationale").and_then(|r| r.as_str()) {
+        if !rationale.is_empty() && !summary.contains(rationale) {
+            out.push_str(&format!(" — perché: {rationale}"));
+        }
+    }
+    if let Some(alternatives) = decision.get("alternatives").and_then(|a| a.as_array()) {
+        let rejected: Vec<String> = alternatives
+            .iter()
+            .filter_map(|alt| {
+                let option = alt.get("option").and_then(|o| o.as_str())?;
+                if option.is_empty() {
+                    return None;
+                }
+                let why = alt.get("rejected_because").and_then(|w| w.as_str()).unwrap_or("");
+                Some(if why.is_empty() {
+                    option.to_string()
+                } else {
+                    format!("{option} (scartata: {why})")
+                })
+            })
+            .collect();
+        if !rejected.is_empty() {
+            out.push_str(&format!(" [alternative scartate: {}]", rejected.join("; ")));
+        }
+    }
+    out
+}
+
+/// Decisions in memory that AFFECT a given file (matched by basename via FTS — the
+/// touched objects are stored as aliases). Returns a note to append to a file read so
+/// the agent recalls WHY a file is the way it is, instead of re-deriving it from the
+/// code. `None` when nothing relevant.
+fn decisions_for_path(state: &AppState, path: &str) -> Option<String> {
+    let base = std::path::Path::new(path)
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .filter(|name| !name.is_empty())?;
+    let facade = lock_memory_facade(state).ok()?;
+    let access = MemoryAccessRequest {
+        actor_id: "recall_file".to_string(),
+        user_id: gateway_memory_user_id(),
+        workspace_id: gateway_memory_workspace_id(),
+        purpose: "recall".to_string(),
+        allowed_domains: vec![
+            PrivacyDomain::new("personal"),
+            PrivacyDomain::new("work"),
+            PrivacyDomain::new("general"),
+        ],
+        max_sensitivity: MemoryDataSensitivity::Private,
+        allow_raw_payload: true,
+        allow_export: true,
+        broad_query: true,
+    };
+    let page = facade
+        .search_memories(MemorySearchRequest {
+            access,
+            query: base.clone(),
+            statuses: vec![MemoryStatus::Confirmed, MemoryStatus::Candidate],
+            memory_types: vec!["decision".to_string()],
+            limit: 5,
+            offset: 0,
+        })
+        .ok()?;
+    if page.items.is_empty() {
+        return None;
+    }
+    let mut lines = vec![format!(
+        "📌 Decisioni passate su «{base}» (dalla memoria — tienile presenti, non ri-dedurle):"
+    )];
+    for item in page.items {
+        lines.push(format!("- {}", format_recall_entry(&item.summary, &item.metadata)));
+    }
+    Some(lines.join("\n"))
+}
+
 fn recall_memory(state: &AppState, query: &str) -> String {
     let query = query.trim();
     if query.is_empty() {
@@ -2674,7 +2763,7 @@ fn recall_memory(state: &AppState, query: &str) -> String {
             .map(|page| {
                 page.items
                     .into_iter()
-                    .map(|item| (item.memory_type, item.summary))
+                    .map(|item| (item.memory_type, format_recall_entry(&item.summary, &item.metadata)))
                     .collect()
             })
             .unwrap_or_default()
@@ -6207,9 +6296,24 @@ suoi argomenti):\n{}",
                         .await;
                         let st = state_owned.clone();
                         let tid = thread_id.clone();
-                        tokio::task::spawn_blocking(move || read_project_file(&st, tid.as_deref(), &path))
-                            .await
-                            .unwrap_or_else(|e| format!("Errore: {e}"))
+                        let recall_path = path.clone();
+                        let mut out =
+                            tokio::task::spawn_blocking(move || read_project_file(&st, tid.as_deref(), &path))
+                                .await
+                                .unwrap_or_else(|e| format!("Errore: {e}"));
+                        // Per-file recall: surface past DECISIONS about this file so the
+                        // agent remembers WHY it's like this instead of re-deriving it.
+                        let st2 = state_owned.clone();
+                        if let Some(note) =
+                            tokio::task::spawn_blocking(move || decisions_for_path(&st2, &recall_path))
+                                .await
+                                .ok()
+                                .flatten()
+                        {
+                            out.push_str("\n\n");
+                            out.push_str(&note);
+                        }
+                        out
                     } else if name == "write_file" {
                         let args_val: serde_json::Value =
                             serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
@@ -18583,6 +18687,26 @@ mod tests {
                 .contains("cargo build")
         );
         assert!(crate::summarize_tool_action("save_artifact", "{\"name\":\"preventivo.pdf\"}").is_some());
+    }
+
+    #[test]
+    fn format_recall_entry_surfaces_decision_why() {
+        let meta = serde_json::json!({
+            "decision": {
+                "rationale": "ACME è un cliente storico",
+                "alternatives": [{ "option": "sconto 5%", "rejected_because": "troppo basso" }]
+            }
+        });
+        let out = crate::format_recall_entry("Applicato sconto 10% ad ACME", &meta);
+        assert!(out.contains("perché: ACME è un cliente storico"), "rationale mancante: {out}");
+        assert!(out.contains("alternative scartate"), "alternative mancanti: {out}");
+        assert!(out.contains("sconto 5%") && out.contains("troppo basso"));
+        // Non-decision memory → summary returned unchanged.
+        assert_eq!(crate::format_recall_entry("ciao", &serde_json::json!({})), "ciao");
+        // Rationale already in the summary → not duplicated.
+        let meta2 = serde_json::json!({ "decision": { "rationale": "perché sì" } });
+        let out2 = crate::format_recall_entry("Scelta X perché sì", &meta2);
+        assert_eq!(out2.matches("perché sì").count(), 1);
     }
 
     #[test]
