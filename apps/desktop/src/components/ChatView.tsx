@@ -57,6 +57,7 @@ import {
   type ChatAttachmentInput,
   type CoreComputerSessionSnapshot,
   type CorePromptSubmissionResult,
+  type CoreTaskQueueSnapshot,
   type FsEntry,
   type McpRegistryServer,
   type SkillSummary,
@@ -1715,6 +1716,7 @@ export function ChatView({
         artifactsInitial={artifactsInitial}
         uploadedFiles={uploadedFiles}
         threadId={thread.threadId}
+        operationalPlanMarkdown={visibleComputerSession.operationalPlanMarkdown}
       />
 
       <ChatComputerPanel />
@@ -2779,10 +2781,11 @@ function InlineArtifactPreview({ artifact }: { artifact: ParsedArtifact }) {
 /** Artifacts workspace: a side panel listing the conversation's generated files
  *  and rendering each by type (markdown, code, csv table, image, pdf) — the
  *  "interactive workspace alongside the chat" model. */
-/** Tabs of the right-side Workbench panel. "files" = context-aware (chat uploads
- *  now; project directory tree next); "artifacts" = generated/created outputs.
- *  Computer / Attività / Piano land in later phases. */
-type WorkbenchTab = "files" | "artifacts";
+/** Tabs of the right-side Workbench panel. "files" = context-aware (chat uploads +
+ *  project directory tree); "artifacts" = generated outputs; "activity" =
+ *  background/scheduled tasks; "plan" = the orchestrator's operational plan.
+ *  (Computer stays docked above the composer by design.) */
+type WorkbenchTab = "files" | "artifacts" | "activity" | "plan";
 
 /** The Workbench: one toggle → a docked right panel with tabs, consolidating the
  *  assistant's tools/outputs (Claude-Code / IDE inspector pattern). Replaces the
@@ -2796,6 +2799,7 @@ function Workbench({
   artifactsInitial,
   uploadedFiles,
   threadId,
+  operationalPlanMarkdown,
 }: {
   open: boolean;
   tab: WorkbenchTab;
@@ -2805,6 +2809,7 @@ function Workbench({
   artifactsInitial?: string | null;
   uploadedFiles: ChatAttachment[];
   threadId: string;
+  operationalPlanMarkdown?: string;
 }) {
   // Project-folder browser state (File tab): the thread's linked folder, navigable.
   const [fsRoot, setFsRoot] = useState<string | null>(null);
@@ -2812,6 +2817,9 @@ function Workbench({
   const [fsEntries, setFsEntries] = useState<FsEntry[]>([]);
   const [fsLoading, setFsLoading] = useState(false);
   const [fsError, setFsError] = useState<string | null>(null);
+  // Background/scheduled tasks (Attività tab), fetched lazily when the tab opens.
+  const [tasks, setTasks] = useState<CoreTaskQueueSnapshot | null>(null);
+  const [tasksLoading, setTasksLoading] = useState(false);
 
   const loadFs = useCallback(
     async (path: string | null) => {
@@ -2842,8 +2850,32 @@ function Workbench({
   useEffect(() => {
     if (open && tab === "files" && fsCwd === null) void loadFs(null);
   }, [open, tab, fsCwd, loadFs]);
+  // Load the task queue when the Attività tab is shown (and refresh on re-open).
+  useEffect(() => {
+    if (!open || tab !== "activity") return;
+    let cancelled = false;
+    setTasksLoading(true);
+    void coreBridge
+      .taskQueue()
+      .then((snapshot) => {
+        if (!cancelled) setTasks(snapshot);
+      })
+      .catch(() => {
+        if (!cancelled) setTasks(null);
+      })
+      .finally(() => {
+        if (!cancelled) setTasksLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, tab]);
 
   if (!open) return null;
+  const planItems = parseOperationalPlanItems(operationalPlanMarkdown);
+  const activeTasks = tasks
+    ? [...tasks.active, ...tasks.queued, ...tasks.blocked]
+    : [];
   const atRoot = !fsRoot || fsCwd === fsRoot;
   const cwdLabel = fsCwd ? fsCwd.replace(/\/+$/, "").split("/").pop() || fsCwd : "";
   const parentOf = (path: string) => path.replace(/\/+$/, "").split("/").slice(0, -1).join("/");
@@ -2859,6 +2891,18 @@ function Workbench({
       label: "Artefatti",
       icon: FileText,
       badge: artifacts.length || undefined,
+    },
+    {
+      key: "activity",
+      label: "Attività",
+      icon: Clock3,
+      badge: activeTasks.length || undefined,
+    },
+    {
+      key: "plan",
+      label: "Piano",
+      icon: ListTodo,
+      badge: planItems.length || undefined,
     },
   ];
   return (
@@ -2983,6 +3027,47 @@ function Workbench({
             <div className="workbench-empty">
               <FileText size={28} />
               <p>Nessun artefatto ancora. I file generati o creati dall'assistente compaiono qui.</p>
+            </div>
+          ))}
+        {tab === "activity" && (
+          <div className="workbench-files">
+            {tasksLoading && activeTasks.length === 0 ? (
+              <div className="workbench-empty">
+                <Loader2 size={22} className="spin" />
+                <p>Carico le attività…</p>
+              </div>
+            ) : activeTasks.length > 0 ? (
+              <>
+                <div className="workbench-section-label">Attività in corso e pianificate</div>
+                <ul className="workbench-file-list">
+                  {activeTasks.map((item) => (
+                    <li key={item.task_id}>
+                      <Clock3 size={15} />
+                      <span className="wf-name" title={item.goal}>
+                        {item.goal || item.kind}
+                      </span>
+                      <small>{item.blocked_reason ? "bloccato" : item.status}</small>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <div className="workbench-empty">
+                <Clock3 size={28} />
+                <p>Nessuna attività in background. I task pianificati e ricorrenti compaiono qui.</p>
+              </div>
+            )}
+          </div>
+        )}
+        {tab === "plan" &&
+          (planItems.length > 0 ? (
+            <div className="workbench-files">
+              <OperationalPlanPreview collapsed={false} markdown={operationalPlanMarkdown} />
+            </div>
+          ) : (
+            <div className="workbench-empty">
+              <ListTodo size={28} />
+              <p>Nessun piano operativo attivo. Quando l'assistente pianifica un compito a più passi, gli step compaiono qui.</p>
             </div>
           ))}
       </div>
