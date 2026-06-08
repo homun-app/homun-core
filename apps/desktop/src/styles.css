@@ -2881,6 +2881,24 @@ body.resizing-drawer {
   border-left: 1px solid var(--line);
   box-shadow: -16px 0 46px rgba(18, 22, 30, 0.12);
 }
+.workbench.expanded {
+  width: 100% !important;
+  left: 0;
+}
+/* Drag handle on the left edge to resize the panel width. */
+.workbench-resize {
+  position: absolute;
+  top: 0;
+  left: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 41;
+}
+.workbench-resize:hover {
+  background: var(--accent, #3b82f6);
+  opacity: 0.35;
+}
 .workbench-tabs {
   display: flex;
   align-items: center;

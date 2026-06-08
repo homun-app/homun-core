@@ -4220,8 +4220,25 @@ questo elenco, chiedi di allegarlo (non cercarlo nella sandbox o nelle cartelle)
                                 tokio::time::sleep(std::time::Duration::from_millis(800 * u64::from(attempt))).await;
                                 continue;
                             }
+                            // 401 on a `:cloud` Ollama model = the cloud service
+                            // needs auth (the local Ollama has no key). Make the
+                            // fix actionable instead of a generic "check provider".
+                            let hint = if code.as_u16() == 401 {
+                                if model.contains(":cloud") {
+                                    format!(
+                                        " Il modello «{model}» è un modello CLOUD di Ollama che \
+richiede autenticazione: esegui `ollama signin` (o aggiungi la chiave del provider in Impostazioni → \
+Modello & Runtime), oppure seleziona un modello LOCALE."
+                                    )
+                                } else {
+                                    " Sembra un problema di autenticazione del provider: \
+controlla/aggiorna la chiave in Impostazioni → Modello & Runtime.".to_string()
+                                }
+                            } else {
+                                String::new()
+                            };
                             let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
-                                text: format!("Il modello ha risposto con un errore ({code}). Riprova tra poco; se persiste, controlla il provider in Impostazioni."),
+                                text: format!("Il modello ha risposto con un errore ({code}). Riprova tra poco; se persiste, controlla il provider in Impostazioni.{hint}"),
                             })
                             .await;
                             break None;
