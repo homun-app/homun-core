@@ -105,6 +105,25 @@ del progetto.
 - **HomunCoder mode**: nelle chat di **progetto** si attivano metodologia + skill di
   metodologia (niente flood nelle chat personali).
 
+## Stato implementazione (sessione notturna)
+
+- **1 · Dedup** — FATTO. Lessicale language-agnostic (Jaccard 0.55, no stopword) +
+  **semantico** (embeddings nomic-embed-text-v2-moe, coseno 0.85, tarato su dati reali),
+  in scrittura e a lettura nel grafo. Grafo taskline 39→29 nodi.
+- **2 · Grafo reale + responsive** — grafo navigabile + dedup a lettura; tab responsive
+  (ResizeObserver). Archi decisione→file **derivati** (persistenza degli archi = TODO).
+- **3 · Wiki viva (markdown↔SQL)** — FATTO in lettura/scrittura: `rebuild_decisions_wiki`
+  proietta le decisioni in `wiki_pages.decisioni.md` (verificato: 6601 char in SQL);
+  tab Memoria toggle Grafo/Wiki. Editing wiki→re-ingest (`import_wiki_correction`) =
+  TODO (la primitiva esiste, manca l'endpoint PUT + il bottone edit).
+- **4 · Tab Memoria** — grafo + wiki + elimina-nodo. FATTO.
+- **5 · Pulizia/oblio** — FATTO: tool `forget_memory` + elimina-nodo + cascade wiki.
+- **Recall semantico** — FATTO: embeddings nel recall (cross-lingua).
+- **HomunCoder mode** — FATTO: skill metodologia solo nelle chat di progetto (manifest).
+- **Multilingua** — embeddings multilingua + dedup/recall language-agnostic.
+- **TODO residui**: editing wiki + re-ingest; persistenza archi grafo; skill grouping
+  nella UI Settings (il tag manifest c'è già); soppressione duplicati alla fonte.
+
 ## Riferimenti codice
 
 - Spina/wiki: `crates/memory/src/{store.rs,facade.rs,wiki.rs,types.rs}`
