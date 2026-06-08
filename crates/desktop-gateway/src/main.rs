@@ -1055,21 +1055,15 @@ fn normalize_for_dedup(text: &str) -> String {
     text.trim().to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Common Italian function words dropped before similarity — they inflate overlap
-/// without carrying meaning, so two unrelated memories don't look similar just because
-/// both say "il/della/che…".
-const DEDUP_STOPWORDS: &[&str] = &[
-    "il", "lo", "la", "i", "gli", "le", "un", "uno", "una", "di", "del", "dello", "della",
-    "dei", "degli", "delle", "per", "con", "che", "non", "come", "sono", "stato", "stata",
-    "abbiamo", "del", "nel", "nella", "sul", "sulla", "una", "questo", "questa", "suo", "sua",
-    "and", "the", "for", "with",
-];
-
-/// Content tokens of a memory (lowercased, ≥3 chars, no stopwords) for similarity.
+/// Content tokens of a memory for similarity. LANGUAGE-AGNOSTIC by design (the system
+/// is multilingual): lowercase + alphanumeric tokens of ≥3 chars, NO per-language
+/// stopword list. Most function words are ≤2 chars (drop) or wash out equally across
+/// pairs; the threshold compensates for the rest. True cross-language / semantic
+/// dedup is the embeddings layer, not this lexical pre-filter.
 fn dedup_tokens(text: &str) -> std::collections::HashSet<String> {
     text.to_lowercase()
         .split(|c: char| !c.is_alphanumeric())
-        .filter(|token| token.chars().count() >= 3 && !DEDUP_STOPWORDS.contains(token))
+        .filter(|token| token.chars().count() >= 3)
         .map(str::to_string)
         .collect()
 }
@@ -1086,7 +1080,9 @@ fn jaccard(a: &std::collections::HashSet<String>, b: &std::collections::HashSet<
 }
 
 /// Threshold above which two same-type memories are considered the same thing.
-const DEDUP_JACCARD: f32 = 0.5;
+/// Slightly higher than 0.5 to compensate for not removing function words (kept
+/// language-agnostic — no stopword list).
+const DEDUP_JACCARD: f32 = 0.55;
 
 /// Fills the required `privacy_domain`/`sensitivity` on an extracted item when the
 /// model omitted them, so deserialization (which requires both) doesn't silently
