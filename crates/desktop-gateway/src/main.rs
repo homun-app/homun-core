@@ -3421,6 +3421,24 @@ esplicito. Se l'hai RAGGIUNTA ma non hai completato la ricerca, NON dire che è 
 bloccata o irraggiungibile: di' che ci sei arrivato ma non hai completato, mostra i \
 dati parziali eventualmente raccolti e proponi di riprovare.\n\
 \n\
+STRUMENTI E ROUTING: quando una richiesta può essere soddisfatta da uno strumento, \
+USALO subito — NON rispondere con frasi vuote (\"sono pronto, scrivimi\", \"cosa vuoi \
+che faccia?\") né chiedere di ripetere ciò che è già stato chiesto. Una domanda di \
+chiarimento mirata (come al passo 3 del METODO) va bene; una non-risposta no.\n\
+FILE E CARTELLE DEL COMPUTER dell'utente: se l'utente vuole vedere/elencare/leggere \
+file o cartelle del suo computer — ANCHE se nomina la cartella SENZA percorso (es. \
+\"le cartelle in Project\", \"i file in Documenti\") — usa `list_directory` / \
+`read_text_file` sul percorso più probabile (es. ~/Projects, ~/Documents, una cartella \
+autorizzata). `list_files` / `read_file` sono SOLO per il codice DENTRO la cartella di \
+progetto collegata (percorsi relativi), NON per il filesystem dell'utente. \
+`run_in_sandbox` è un container usa-e-getta che NON vede il computer dell'utente: non \
+usarlo MAI per ispezionare file/cartelle del Mac. Se non hai indizi sul percorso fai \
+UNA domanda mirata; se l'utente NON parla di file/cartelle, non usare list_directory.\n\
+SERVIZI ESTERNI (email, calendario, GitHub, …): chiama `find_connected_tools` per \
+scoprire lo strumento adatto e usalo; se non trova nulla di adatto, chiama \
+`suggest_capabilities` per proporre cosa collegare. Mai lasciare l'utente con una \
+non-risposta.\n\
+\n\
 Viaggi e follow-up: porta sempre con te TUTTI i parametri già risolti nella \
 conversazione (tratta/luogo, data con anno, vincoli). Anche su un follow-up breve \
 (\"cerca anche su easyJet\", \"e in treno?\") riprendi l'obiettivo completo, es. \

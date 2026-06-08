@@ -170,10 +170,21 @@ model-driven non sono verificabili headless. Commit: `9853162`, `4c53edc`,
    una skill → atteso auto-start (no fallback immediato al browser); `/tmp` del
    container è tmpfs; dopo ~30min idle il container `homun-cc` viene riciclato.
 
+6. **Filesystem nativo + routing (`d61c3ef` + fix prompt)**: in chat *"elenca le
+   cartelle in Projects"* (o un path assoluto). Atteso: l'assistente usa
+   `list_directory` (nativo) — non la sandbox, non `list_files` — e per cartelle
+   non ancora autorizzate invita ad aggiungerle in Impostazioni → Destinazioni.
+   Prima dava una non-risposta ("Sono pronto") o cercava nella sandbox: il fix di
+   prompt-routing dovrebbe averlo corretto (verifica anche un nome NUDO senza path).
+
 Esito atteso: il pilastro **MCP** è "usabile in chat + sfogliabile + gestibile +
 suggerito". Annotare qui i difetti emersi dal test reale.
 
 ### Follow-up MCP rimasti (non bloccanti)
+- **Filesystem nativo — conferma fuori-cartella**: la scelta utente è "autorizzate +
+  lettura altrove con conferma". Lo step 1 (cartelle autorizzate) è fatto (`d61c3ef`);
+  manca la **card di conferma puntuale** per leggere cartelle non autorizzate (stesso
+  pattern del confirm-card MCP). + write nativa con conferma.
 - **Connect-card in chat**: rendere i suggerimenti di `suggest_capabilities`
   *cliccabili* (one-click connect dalla chat), non solo testuali.
 - **Secret-store** per i token MCP (oggi `env` raw nel registry — gap audit).
