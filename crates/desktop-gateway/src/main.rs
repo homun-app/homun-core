@@ -3156,11 +3156,13 @@ fn decisions_for_path(state: &AppState, path: &str) -> Option<String> {
 /// facts, preferences in the active project + personal scope), injected into the
 /// system prompt so the model answers "why did we…" from memory WITHOUT having to call
 /// recall_memory itself — and doesn't claim "I have nothing in memory" when it does.
-fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<String> {
+async fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<String> {
     let query = prompt.trim();
     if query.chars().count() < 8 {
         return None;
     }
+    // Embed the query OFF the lock (the only await) for the semantic pass below.
+    let query_vec = embed_text(&state.http, query).await;
     let facade = lock_memory_facade(state).ok()?;
     let user = gateway_memory_user_id();
     let active = gateway_memory_workspace_id();
@@ -3207,7 +3209,42 @@ fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<String> 
             lines.push(format!("- {t}"));
         }
     }
-    lines.truncate(8);
+    // Semantic recall: nearest memories by embedding — catches paraphrases and OTHER
+    // LANGUAGES the keyword search misses. Best-effort (skipped if no query vector).
+    if let Some(query_vec) = query_vec.as_ref() {
+        let mut scored: Vec<(f32, String)> = Vec::new();
+        let mut consider = |workspace: MemoryWorkspaceId| {
+            let records: std::collections::HashMap<String, (String, serde_json::Value)> = facade
+                .list_memories_for_ui(&user, &workspace)
+                .map(|ms| {
+                    ms.into_iter()
+                        .map(|m| (m.reference.to_string(), (m.text, m.metadata)))
+                        .collect()
+                })
+                .unwrap_or_default();
+            if let Ok(embeddings) = facade.list_embeddings(&user, &workspace) {
+                for (reference, vector) in embeddings {
+                    if cosine(query_vec, &vector) >= 0.6 {
+                        if let Some((text, metadata)) = records.get(&reference.to_string()) {
+                            scored.push((cosine(query_vec, &vector), format_recall_entry(text, metadata)));
+                        }
+                    }
+                }
+            }
+        };
+        consider(active.clone());
+        if active.as_str() != PERSONAL_WORKSPACE {
+            consider(MemoryWorkspaceId::new(PERSONAL_WORKSPACE));
+        }
+        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        for (_, text) in scored.into_iter().take(5) {
+            let line = format!("- {text}");
+            if !lines.contains(&line) {
+                lines.push(line);
+            }
+        }
+    }
+    lines.truncate(10);
     if lines.is_empty() {
         return None;
     }
@@ -5210,7 +5247,7 @@ salvare/esportare un file in una cartella, chiama save_artifact(file, destinatio
     };
     // RAG: inject memory relevant to THIS prompt (decisions/facts), so the model
     // answers from what was already decided instead of saying it has nothing.
-    let system = match relevant_memory_for_prompt(state, &request.prompt) {
+    let system = match relevant_memory_for_prompt(state, &request.prompt).await {
         Some(block) => format!("{system}\n\n{block}"),
         None => system,
     };
