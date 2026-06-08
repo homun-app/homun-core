@@ -16,6 +16,10 @@ pub struct MemorySearchResult {
     pub reference: MemoryRef,
     pub memory_type: String,
     pub summary: String,
+    /// Raw record metadata — lets readers surface structured fields (e.g. a
+    /// decision's `metadata.decision` rationale/alternatives), not just the summary.
+    #[serde(default)]
+    pub metadata: serde_json::Value,
     pub status: MemoryStatus,
     pub privacy_domain: PrivacyDomain,
     pub sensitivity: DataSensitivity,

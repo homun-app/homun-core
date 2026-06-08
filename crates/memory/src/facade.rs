@@ -518,6 +518,7 @@ impl MemoryFacade {
                 reference: memory.reference,
                 memory_type: memory.memory_type,
                 summary: memory.text,
+                metadata: memory.metadata,
                 status: memory.status,
                 privacy_domain: memory.privacy_domain,
                 sensitivity: memory.sensitivity,
