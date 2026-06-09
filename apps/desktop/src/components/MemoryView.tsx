@@ -54,7 +54,9 @@ export function MemoryView() {
   const reload = () => {
     coreBridge.memoryItems().then(setItems).catch(() => setItems([]));
   };
-  useEffect(reload, []);
+  useEffect(() => {
+    reload();
+  }, []);
 
   const all = items ?? [];
   const workspaces = useMemo(() => {
