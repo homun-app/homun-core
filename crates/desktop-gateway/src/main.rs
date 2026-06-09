@@ -5912,7 +5912,9 @@ su una riga a sé `‹‹PLAN_PROPOSE››{{\"summary\":\"obiettivo in breve\",
 (JSON valido). L'utente vedrà i pulsanti Accetta/Modifica. ESEGUI il piano SOLO nel turno SUCCESSIVO, \
 dopo che l'utente l'ha approvato (es. «Approvo il piano…»); se chiede modifiche, rivedi e ri-proponi. \
 Una volta in esecuzione, usa update_plan per aggiornare lo stato degli step (doing→done), mostrato nel \
-pannello \"Piano\". Per richieste a un solo passo NON serve né piano né proposta."
+pannello \"Piano\". Il piano (PLAN_PROPOSE o update_plan) è GIÀ mostrato all'utente come SCHEDA: NON \
+ripeterlo anche nel testo della risposta — niente elenco o tabella degli step a parole (al massimo una \
+riga di contesto). Per richieste a un solo passo NON serve né piano né proposta."
     );
     let system = format!(
         "{system}\n\nFRESCHEZZA / VERIFICA: la tua conoscenza interna può essere datata. Per QUALSIASI \
