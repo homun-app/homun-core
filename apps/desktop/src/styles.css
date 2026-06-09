@@ -1334,7 +1334,7 @@ body.resizing-drawer {
 .message.system .rich-message {
   max-width: 680px;
   margin: 0;
-  color: #34363b;
+  color: var(--text);
   line-height: 1.62;
 }
 
