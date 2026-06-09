@@ -130,6 +130,14 @@ impl ChatStore {
     pub fn find_or_create_homun_thread(&self, workspace_id: &str) -> rusqlite::Result<ChatThread> {
         let thread_id = "homun".to_string();
         if let Some(thread) = self.thread(&thread_id)? {
+            // Ensure Homun lives in the requested (personal/base) workspace — migrate it
+            // if it was created elsewhere (e.g. under a project), otherwise it won't show
+            // in the personal thread list and navigation falls back to another thread.
+            self.conn.execute(
+                "update chat_threads set workspace_id = ?1 \
+                 where thread_id = 'homun' and workspace_id <> ?1",
+                params![workspace_id],
+            )?;
             return Ok(thread);
         }
         let timestamp = current_timestamp_seconds();

@@ -670,11 +670,13 @@ async fn create_chat_thread(
 /// Find-or-create the dedicated proactive "Homun" thread (personal scope).
 async fn homun_thread(
     State(state): State<AppState>,
-    Query(query): Query<ChatThreadsQuery>,
+    Query(_query): Query<ChatThreadsQuery>,
 ) -> Result<Json<ChatThread>, GatewayError> {
+    // Homun always lives in the base/personal workspace (not the active project), so it's
+    // reachable + listed in the personal scope regardless of where the user currently is.
     Ok(Json(
         lock_store(&state)?
-            .find_or_create_homun_thread(&resolve_threads_workspace(&query))
+            .find_or_create_homun_thread(&base_workspace_id())
             .map_err(GatewayError::store)?,
     ))
 }
