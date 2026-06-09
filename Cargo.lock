@@ -3175,6 +3175,7 @@ dependencies = [
  "bytes",
  "futures-util",
  "image",
+ "jiff",
  "local-first-browser-automation",
  "local-first-capabilities",
  "local-first-context-compression",
