@@ -509,6 +509,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/memory/items", get(memory_items))
         .route("/api/memory/graph", get(memory_graph))
         .route("/api/memory/wiki", get(memory_wiki).put(memory_wiki_save))
+        .route("/api/memory/consolidate", post(memory_consolidate))
         .route("/api/memory/decide", post(memory_decide))
         .route("/api/memory/contacts", get(contacts_list))
         .route("/api/memory/contacts/memories", post(contact_memories))
@@ -1432,6 +1433,155 @@ fn rebuild_decisions_wiki(
         sensitivity: MemoryDataSensitivity::Internal,
     };
     let _ = facade.record_wiki_page_for_ui(&page);
+}
+
+/// One-shot JSON call to the memory role model (same path as the extractor).
+async fn call_memory_json(
+    state: &AppState,
+    system: &str,
+    user_content: &str,
+) -> Option<serde_json::Value> {
+    let (base_url, model, api_key) = extractor_openai_config()?;
+    let payload = serde_json::json!({
+        "model": model,
+        "temperature": 0.0,
+        "max_tokens": 4000,
+        "response_format": { "type": "json_object" },
+        "messages": [
+            { "role": "system", "content": system },
+            { "role": "user", "content": user_content },
+        ],
+    });
+    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let mut builder = state.http.post(&endpoint).timeout(std::time::Duration::from_secs(150));
+    if let Some(key) = api_key.as_ref() {
+        builder = builder.bearer_auth(key);
+    }
+    let resp = builder.json(&payload).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body = resp.json::<serde_json::Value>().await.ok()?;
+    let content = body
+        .get("choices")
+        .and_then(|c| c.get(0))
+        .and_then(|c| c.get("message"))
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_str())?;
+    serde_json::from_str(strip_json_fences(content)).ok()
+}
+
+/// Memory consolidation ("reflection"): review a scope's durable memories, MERGE the
+/// fragments that say the same thing, and PRUNE noise (transient/trivial/irrelevant or
+/// redundant). Conservative — when in doubt the model keeps. Returns (merged, dropped).
+async fn consolidate_scope(
+    state: &AppState,
+    user: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+) -> (usize, usize) {
+    // 1. Read the durable memories (off-lock thereafter).
+    let mems: Vec<(MemoryRef, String, String)> = {
+        let Ok(facade) = lock_memory_facade(state) else {
+            return (0, 0);
+        };
+        facade
+            .list_memories_for_ui(user, workspace)
+            .map(|memories| {
+                memories
+                    .into_iter()
+                    .filter(|m| {
+                        matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+                            && matches!(m.memory_type.as_str(), "fact" | "preference" | "decision")
+                    })
+                    .map(|m| (m.reference, m.memory_type, m.text))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    if mems.len() < 3 {
+        return (0, 0);
+    }
+    let listing = mems
+        .iter()
+        .enumerate()
+        .map(|(i, (_, t, txt))| format!("[{i}] ({t}) {txt}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let system = "Sei un CURATORE di memoria. Ricevi le memorie durevoli di un progetto/utente, ognuna con \
+un indice [N]. Compiti: (1) FONDI in UNA frase chiara e completa i frammenti che dicono la STESSA cosa o \
+aspetti della stessa cosa; (2) ELIMINA il RUMORE: informazioni transitorie, banali, irrilevanti, senza \
+valore futuro, o rimaste ridondanti dopo la fusione. Tieni SOLO ciò che è davvero importante e \
+riutilizzabile. Nel dubbio MANTIENI (non eliminare). NON inventare: la frase fusa deve derivare solo \
+dalle memorie indicate. Rispondi SOLO con JSON: \
+{\"merges\":[{\"into\":\"frase consolidata\",\"memory_type\":\"fact|preference|decision\",\"importance\":0.0-1.0,\"from\":[indici]}],\
+\"drops\":[{\"index\":N,\"reason\":\"perché è rumore/ininfluente\"}]}. \
+Ogni \"from\" deve avere ALMENO 2 indici (è una fusione). \"importance\": 1=cruciale, 0=trascurabile. \
+Se non c'è nulla da fare: {\"merges\":[],\"drops\":[]}.";
+    let Some(root) = call_memory_json(state, system, &format!("MEMORIE ATTUALI:\n{listing}")).await
+    else {
+        return (0, 0);
+    };
+    let merges = root.get("merges").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let drops = root.get("drops").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+
+    // 2. Apply under a single lock (no awaits here → Send-safe).
+    let (mut merged, mut dropped) = (0usize, 0usize);
+    let Ok(facade) = lock_memory_facade(state) else {
+        return (0, 0);
+    };
+    let lifecycle = MemoryLifecycleRequest {
+        actor_id: "consolidation".to_string(),
+        user_id: user.clone(),
+        workspace_id: workspace.clone(),
+        purpose: "consolidate".to_string(),
+    };
+    for merge in &merges {
+        let into = merge.get("into").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let from: Vec<usize> = merge
+            .get("from")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_u64().map(|n| n as usize)).collect())
+            .unwrap_or_default();
+        if into.is_empty() || from.len() < 2 {
+            continue;
+        }
+        let memory_type = merge.get("memory_type").and_then(|v| v.as_str()).unwrap_or("fact").to_string();
+        let importance = merge.get("importance").and_then(|v| v.as_f64()).unwrap_or(0.7);
+        let created = facade.create_memory_candidate(MemoryCreateRequest {
+            request: lifecycle.clone(),
+            memory_type,
+            text: redact_sensitive_text(into),
+            aliases: Vec::new(),
+            language_hints: Vec::new(),
+            confidence: 1.0,
+            privacy_domain: PrivacyDomain::new("work"),
+            sensitivity: MemoryDataSensitivity::Internal,
+            evidence_refs: Vec::new(),
+            metadata: serde_json::json!({ "source": "consolidation", "importance": importance }),
+        });
+        if let Ok(record) = created {
+            let _ = facade.confirm_memory(&lifecycle, &record.reference, "consolidated");
+            for idx in &from {
+                if let Some((reference, _, _)) = mems.get(*idx) {
+                    let _ = facade.delete_memory(&lifecycle, reference, "fuso in consolidamento");
+                }
+            }
+            merged += 1;
+        }
+    }
+    for drop in &drops {
+        let Some(idx) = drop.get("index").and_then(|v| v.as_u64()).map(|n| n as usize) else {
+            continue;
+        };
+        let reason = drop.get("reason").and_then(|v| v.as_str()).unwrap_or("rumore/ininfluente");
+        if let Some((reference, _, _)) = mems.get(idx) {
+            if facade.delete_memory(&lifecycle, reference, reason).is_ok() {
+                dropped += 1;
+            }
+        }
+    }
+    rebuild_decisions_wiki(&facade, user, workspace);
+    (merged, dropped)
 }
 
 fn persist_graph(
@@ -17141,6 +17291,28 @@ async fn memory_wiki_save(
         .await;
     });
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// Consolidate a scope's memory: merge fragments + prune noise (user/agent triggered).
+async fn memory_consolidate(
+    State(state): State<AppState>,
+    Query(query): Query<MemoryGraphQuery>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let user = gateway_memory_user_id();
+    let ws = if let Some(tid) = query.thread.as_deref().filter(|t| !t.trim().is_empty()) {
+        lock_store(&state)
+            .ok()
+            .and_then(|store| store.workspace_for_thread(tid).ok())
+            .filter(|w| !w.trim().is_empty())
+            .map(MemoryWorkspaceId::new)
+            .unwrap_or_else(gateway_memory_workspace_id)
+    } else if let Some(workspace) = query.workspace.filter(|w| !w.trim().is_empty()) {
+        MemoryWorkspaceId::new(workspace)
+    } else {
+        gateway_memory_workspace_id()
+    };
+    let (merged, dropped) = consolidate_scope(&state, &user, &ws).await;
+    Ok(Json(serde_json::json!({ "merged": merged, "dropped": dropped })))
 }
 
 // ------------------------------------------------------------------ contacts

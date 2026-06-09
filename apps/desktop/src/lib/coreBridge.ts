@@ -657,6 +657,20 @@ async function electronMemoryWiki(thread?: string, workspace?: string): Promise<
   return gatewayGetJson<MemoryWikiPage[]>(`/api/memory/wiki${scopeQuery(thread, workspace)}`);
 }
 
+async function electronConsolidateMemory(
+  workspace?: string,
+): Promise<{ merged: number; dropped: number }> {
+  const qs = workspace ? `?workspace=${encodeURIComponent(workspace)}` : "";
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/memory/consolidate${qs}`, {
+    method: "POST",
+    headers: gatewayHeaders(),
+  });
+  if (!response.ok) {
+    throw new Error(`Desktop Gateway memory consolidate HTTP ${response.status}`);
+  }
+  return response.json() as Promise<{ merged: number; dropped: number }>;
+}
+
 async function electronSaveMemoryWiki(
   scope: { thread?: string; workspace?: string },
   path: string,
@@ -1559,6 +1573,7 @@ export const coreBridge = {
   memoryWiki: (thread?: string, workspace?: string) => electronMemoryWiki(thread, workspace),
   saveMemoryWiki: (scope: { thread?: string; workspace?: string }, path: string, body: string) =>
     electronSaveMemoryWiki(scope, path, body),
+  consolidateMemory: (workspace?: string) => electronConsolidateMemory(workspace),
   artifactFolder: (thread: string) => electronArtifactFolder(thread),
   artifactsUsage: () => electronArtifactsUsage(),
   artifactDestinations: () => electronArtifactDestinations(),

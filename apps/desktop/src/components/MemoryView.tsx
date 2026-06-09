@@ -50,6 +50,8 @@ export function MemoryView() {
   const [search, setSearch] = useState("");
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [consolidating, setConsolidating] = useState(false);
+  const [report, setReport] = useState<string | null>(null);
 
   const reload = () => {
     coreBridge.memoryItems().then(setItems).catch(() => setItems([]));
@@ -141,6 +143,29 @@ export function MemoryView() {
               placeholder="Cerca nella memoria…"
             />
           </label>
+          {workspaceFilter !== "all" && (
+            <button
+              type="button"
+              className="memview-consolidate"
+              disabled={consolidating}
+              title="Fonde i frammenti ed elimina il rumore per questo progetto"
+              onClick={() => {
+                setConsolidating(true);
+                setReport(null);
+                coreBridge
+                  .consolidateMemory(workspaceFilter)
+                  .then((r) => {
+                    setReport(`Fusi ${r.merged} · rimossi ${r.dropped}`);
+                    reload();
+                  })
+                  .catch(() => setReport("Consolidamento non riuscito"))
+                  .finally(() => setConsolidating(false));
+              }}
+            >
+              {consolidating ? "Consolido…" : "✨ Consolida"}
+            </button>
+          )}
+          {report && <span className="memview-report">{report}</span>}
         </div>
       </header>
 

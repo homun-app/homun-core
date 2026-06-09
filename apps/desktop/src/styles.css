@@ -3373,6 +3373,27 @@ body.resizing-drawer {
   background: transparent;
   min-width: 180px;
 }
+.memview-consolidate {
+  border: 1px solid #c7d2fe;
+  background: #eef2ff;
+  color: #4338ca;
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.memview-consolidate:hover {
+  background: #e0e7ff;
+}
+.memview-consolidate:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.memview-report {
+  font-size: 12px;
+  color: #16a34a;
+}
 .memview-timeline {
   display: flex;
   align-items: flex-end;
