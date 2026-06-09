@@ -73,6 +73,7 @@ import {
   type MemoryGraphEdge,
   type MemoryGraphNode,
   type MemoryWikiPage,
+  type ProviderModelsGroup,
   type SkillSummary,
 } from "../lib/coreBridge";
 import {
@@ -5636,22 +5637,24 @@ function Composer({
     Array<{ path: string; content: string; truncated: boolean }>
   >([]);
   const [models, setModels] = useState<string[]>([]);
+  const [modelGroups, setModelGroups] = useState<ProviderModelsGroup[]>([]);
   const [activeModel, setActiveModel] = useState<string | null>(null);
+  // Per-message model override. null = "Auto" (use the configured default = orchestrator
+  // role). A picked value is the composite "<provider_id>::<model>", so the same model
+  // id present in two providers resolves to the provider the user actually chose.
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
-  // True once the user picks a model from the menu (a per-message override): then
-  // a refresh must NOT clobber their choice with the default.
-  const [userPickedModel, setUserPickedModel] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [modelQuery, setModelQuery] = useState("");
 
-  // Refetches the model list + default (= orchestrator role). Called on mount and
-  // when the menu opens, so a Settings change to the default reflects without an
-  // app restart.
+  // Refetches the model list + default (= orchestrator role) + per-provider groups.
+  // Called on mount and when the menu opens, so a Settings change reflects without an
+  // app restart. Does NOT touch the user's selection (Auto stays Auto unless they pick).
   async function refreshModels() {
     try {
       const list = await coreBridge.runtimeModels();
       setModels(list.available ?? []);
+      setModelGroups(list.groups ?? []);
       setActiveModel(list.active);
-      if (!userPickedModel) setSelectedModel(list.active);
     } catch {
       /* models unavailable → selector hidden */
     }
@@ -5930,8 +5933,8 @@ function Composer({
     }));
     const images = composerImages.map((image) => image.dataUrl);
     const effectivePrompt = prompt || "Descrivi questa immagine.";
-    const modelOverride =
-      selectedModel && selectedModel !== activeModel ? selectedModel : undefined;
+    // null = Auto (no override → default role); else the composite "<provider>::<model>".
+    const modelOverride = selectedModel ?? undefined;
     const forcedSkillId = forcedSkill?.id;
     const contextText = buildContextText();
     setValue("");
@@ -6386,32 +6389,108 @@ function Composer({
                     if (!open) void refreshModels();
                     return !open;
                   });
+                  setModelQuery("");
                   setSkillMenuOpen(false);
                 }}
               >
-                <span>{shortModelName(selectedModel ?? activeModel ?? "modello")}</span>
+                <span>
+                  {selectedModel
+                    ? shortModelName(selectedModel.split("::").pop() ?? selectedModel)
+                    : "Auto"}
+                </span>
                 <ChevronDown size={14} />
               </button>
               {modelMenuOpen && (
                 <div className="composer-pop composer-model-pop" role="menu">
+                  <input
+                    className="composer-model-search"
+                    type="text"
+                    autoFocus
+                    placeholder="Cerca modelli…"
+                    value={modelQuery}
+                    onChange={(event) => setModelQuery(event.target.value)}
+                  />
                   <div className="composer-pop-list">
-                    {models.map((modelId) => (
-                      <button
-                        key={modelId}
-                        type="button"
-                        role="menuitem"
-                        className={selectedModel === modelId ? "active" : ""}
-                        onClick={() => {
-                          setSelectedModel(modelId);
-                          setUserPickedModel(true);
-                          setModelMenuOpen(false);
-                        }}
-                      >
-                        {selectedModel === modelId ? <Check size={14} /> : <span className="composer-model-dot" />}
-                        <span>{modelId}</span>
-                        {modelId === activeModel && <small>default</small>}
-                      </button>
-                    ))}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={`composer-model-auto ${selectedModel === null ? "active" : ""}`}
+                      onClick={() => {
+                        setSelectedModel(null);
+                        setModelMenuOpen(false);
+                        setModelQuery("");
+                      }}
+                    >
+                      {selectedModel === null ? (
+                        <Check size={14} />
+                      ) : (
+                        <span className="composer-model-dot" />
+                      )}
+                      <span className="composer-model-auto-text">
+                        <strong>Auto</strong>
+                        <small>
+                          Qualità e velocità bilanciate
+                          {activeModel ? ` · ${shortModelName(activeModel)}` : ""}
+                        </small>
+                      </span>
+                    </button>
+                    {(() => {
+                      const q = modelQuery.trim().toLowerCase();
+                      const source =
+                        modelGroups.length > 0
+                          ? modelGroups
+                          : [{ provider_id: "", label: "Modelli", models }];
+                      const groups = source
+                        .map((group) => ({
+                          ...group,
+                          models: q
+                            ? group.models.filter(
+                                (m) =>
+                                  m.toLowerCase().includes(q) ||
+                                  group.label.toLowerCase().includes(q),
+                              )
+                            : group.models,
+                        }))
+                        .filter((group) => group.models.length > 0);
+                      if (groups.length === 0) {
+                        return <p className="composer-pop-empty">Nessun modello</p>;
+                      }
+                      return groups.map((group) => (
+                        <div
+                          key={group.provider_id || group.label}
+                          className="composer-model-group"
+                        >
+                          <div className="composer-model-group-label">{group.label}</div>
+                          {group.models.map((modelId) => {
+                            const value = group.provider_id
+                              ? `${group.provider_id}::${modelId}`
+                              : modelId;
+                            const picked = selectedModel === value;
+                            return (
+                              <button
+                                key={value}
+                                type="button"
+                                role="menuitem"
+                                className={picked ? "active" : ""}
+                                onClick={() => {
+                                  setSelectedModel(value);
+                                  setModelMenuOpen(false);
+                                  setModelQuery("");
+                                }}
+                              >
+                                {picked ? (
+                                  <Check size={14} />
+                                ) : (
+                                  <span className="composer-model-dot" />
+                                )}
+                                <span>{modelId}</span>
+                                {modelId === activeModel && <small>default</small>}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ));
+                    })()}
                   </div>
                 </div>
               )}
