@@ -2206,9 +2206,6 @@ function SkillsPane() {
       className={`mdl-rail-item ${selected === s.id ? "active" : ""}`}
       onClick={() => setSelected(s.id)}
     >
-      <span className="conn-avatar">
-        <Sparkles size={13} />
-      </span>
       <span className="mdl-rail-name">{s.name}</span>
       <span
         className={`skl-state ${s.enabled ? "on" : "off"}`}
@@ -2240,7 +2237,7 @@ function SkillsPane() {
               onClick={() => setHomuncoderOpen((v) => !v)}
             >
               {homuncoderOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-              <span>HomunCoder · metodologia</span>
+              <span>HomunCoder</span>
               <span className="mdl-rail-group-count">{homuncoderSkills.length}</span>
             </button>
             {homuncoderOpen && homuncoderSkills.map(renderRailItem)}
