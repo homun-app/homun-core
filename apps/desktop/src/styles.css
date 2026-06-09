@@ -2742,8 +2742,8 @@ body.resizing-drawer {
   width: min(100%, 760px);
   margin: 8px auto 16px;
   border: 1px solid var(--line-strong);
-  border-radius: 22px;
-  background: rgba(255, 255, 255, 0.98);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
   box-shadow: var(--shadow-soft);
   /* visible (not hidden) so the skill/model popovers can open ABOVE the
    * composer without being clipped; rounded corners come from border-radius. */
@@ -2936,6 +2936,31 @@ body.resizing-drawer {
 .composer-actions {
   gap: 8px;
   min-width: 0;
+}
+
+/* Model selector as a discreet pill (was bare text). */
+.composer-model-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 170px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.composer-model-button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-model-button:hover {
+  background: var(--surface-hover);
+  color: var(--text);
 }
 
 .composer-error {
