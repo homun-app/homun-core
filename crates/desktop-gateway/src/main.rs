@@ -12643,7 +12643,10 @@ struct ComposioConnectionsResponse {
 /// The Composio "user" (entity) for connected accounts. We scope it to the
 /// active workspace so a project's connected accounts are isolated per project.
 fn composio_entity_id() -> String {
-    active_workspace_id()
+    // The Composio platform entity the accounts are linked under — global (base
+    // workspace), matching where the connection config lives, so it resolves in any
+    // project. (Was the active workspace → "non connesso" inside a project.)
+    base_workspace_id()
 }
 
 /// Composio function tools to expose to the chat model, plus the subset that are
@@ -19485,7 +19488,11 @@ fn gateway_capability_user_id() -> CapabilityUserId {
 }
 
 fn gateway_capability_workspace_id() -> CapabilityWorkspaceId {
-    CapabilityWorkspaceId::new(active_workspace_id())
+    // Capabilities (Composio/Gmail, browser, filesystem MCP) are the USER's, not a
+    // project's — a connected Gmail must work in EVERY project. Scope them to the stable
+    // base workspace, not the active project, so they don't "disappear" when a project
+    // is selected.
+    CapabilityWorkspaceId::new(base_workspace_id())
 }
 
 // ---- P4.1 Projects = Workspaces ----------------------------------------------
