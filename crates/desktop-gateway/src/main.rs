@@ -3709,13 +3709,26 @@ fn recall_memory(state: &AppState, query: &str) -> String {
             })
             .unwrap_or_default()
     };
+    // Scope-aware ordering. In a PROJECT, the project's own memory is the primary scope
+    // the user is asking about → list it FIRST; personal memory follows as secondary
+    // context (capped, so it can't drown out the project facts). This is the fix for
+    // "project memory isn't isolated": asking "cosa c'è in memoria" inside a project
+    // used to surface personal info first (LLM primacy bias) and bury the project.
+    let in_project = active.as_str() != PERSONAL_WORKSPACE;
     let mut lines = Vec::new();
-    for (kind, text) in search(MemoryWorkspaceId::new(PERSONAL_WORKSPACE)) {
-        lines.push(format!("- [{kind}] {text}"));
-    }
-    if active.as_str() != PERSONAL_WORKSPACE {
-        for (kind, text) in search(active) {
+    if in_project {
+        for (kind, text) in search(active.clone()) {
             lines.push(format!("- [{kind}, progetto] {text}"));
+        }
+        for (kind, text) in search(MemoryWorkspaceId::new(PERSONAL_WORKSPACE))
+            .into_iter()
+            .take(4)
+        {
+            lines.push(format!("- [{kind}, personale] {text}"));
+        }
+    } else {
+        for (kind, text) in search(MemoryWorkspaceId::new(PERSONAL_WORKSPACE)) {
+            lines.push(format!("- [{kind}] {text}"));
         }
     }
     // Episodic memory (M4): what we discussed in past conversations.
@@ -3745,6 +3758,11 @@ fn recall_memory(state: &AppState, query: &str) -> String {
     }
     if lines.is_empty() {
         format!("Nessun ricordo pertinente a «{query}».")
+    } else if in_project {
+        format!(
+            "Ricordi pertinenti (memoria di PROGETTO in evidenza; «personale» è solo contesto):\n{}",
+            lines.join("\n")
+        )
     } else {
         format!("Ricordi pertinenti dalla memoria:\n{}", lines.join("\n"))
     }
