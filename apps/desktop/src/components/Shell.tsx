@@ -12,6 +12,7 @@ interface ShellProps {
   activeThreadId: string;
   chatThreads: ChatThread[];
   drawerOpen: boolean;
+  homunUnread: boolean;
   onArchiveChatThread: (threadId: string) => void;
   onBackFromSettings: () => void;
   onCreateChatThread: () => void;
@@ -33,6 +34,7 @@ export function Shell({
   chatThreads,
   children,
   drawerOpen,
+  homunUnread,
   onArchiveChatThread,
   onBackFromSettings,
   onCreateChatThread,
@@ -101,6 +103,7 @@ export function Shell({
         <NavigationRail
           activeView={activeView}
           activeThreadId={activeThreadId}
+          homunUnread={homunUnread}
           onNavigate={onNavigate}
           onOpenHomun={onOpenHomun}
           onSearch={() => setSearchOpen(true)}
@@ -112,6 +115,7 @@ export function Shell({
           activeView={activeView}
           activeThreadId={activeThreadId}
           chatThreads={chatThreads}
+          homunUnread={homunUnread}
           onArchiveChatThread={onArchiveChatThread}
           onCreateChatThread={onCreateChatThread}
           onDeleteChatThread={onDeleteChatThread}

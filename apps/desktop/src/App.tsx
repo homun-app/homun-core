@@ -420,6 +420,9 @@ export default function App() {
   const [previousView, setPreviousView] = useState<ViewId>("chat");
   const [settingsSection, setSettingsSection] =
     useState<SettingsSectionId>("account");
+  // Badge on the Homun nav entry: set when a proactive message arrives while you're
+  // elsewhere, cleared when you open Homun.
+  const [homunUnread, setHomunUnread] = useState(false);
   const [chatThreads, setChatThreads] = useState<ChatThread[]>([
     defaultChatThread,
   ]);
@@ -505,8 +508,15 @@ export default function App() {
   // Open the dedicated proactive "Homun" thread from the top-level nav (ensure it
   // exists first; it lives in the personal scope with a fixed id).
   async function handleOpenHomun() {
+    setHomunUnread(false);
     try {
       await coreBridge.homunThread();
+      // Proactive by default: enable the daily check-in the first time Homun is opened.
+      // After that, respect whatever the user chose (we only auto-enable once).
+      if (!localStorage.getItem("homun.proactive.initialized")) {
+        localStorage.setItem("homun.proactive.initialized", "1");
+        await coreBridge.setHomunProactive(true);
+      }
     } catch {
       /* non-fatal */
     }
@@ -541,6 +551,13 @@ export default function App() {
   const appEventHandlerRef = useRef<(event: AppEvent) => void>(() => {});
   appEventHandlerRef.current = (event: AppEvent) => {
     if (!event.thread_id) return;
+    // Homun is the proactive assistant: a new message there flags a badge ("ho qualcosa
+    // da dirti") instead of yanking the user into the thread.
+    if (event.thread_id === "homun") {
+      if (activeThreadId === "homun") void refreshChatReadModels("homun");
+      else setHomunUnread(true);
+      return;
+    }
     if (event.type === "thread.upserted") {
       void navigateToThread(event.thread_id);
     } else if (event.type === "thread.updated" && event.thread_id === activeThreadId) {
@@ -958,6 +975,7 @@ export default function App() {
       onArchiveChatThread={handleArchiveChatThread}
       onBackFromSettings={() => setActiveView(previousView)}
       onDeleteChatThread={handleDeleteChatThread}
+      homunUnread={homunUnread}
       onNavigate={handleNavigate}
       onOpenHomun={handleOpenHomun}
       onSelectThread={handleSelectThread}

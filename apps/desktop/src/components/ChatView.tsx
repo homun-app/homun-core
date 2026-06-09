@@ -5615,6 +5615,8 @@ function Composer({
     if (seed && seed.text) setValue(seed.text);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed?.nonce]);
+  // Homun is the personal control interface, not a project workspace: no skill picker.
+  const isHomun = threadId === "homun";
   const [linkedFolder, setLinkedFolder] = useState<string | null>(null);
   const [folderBusy, setFolderBusy] = useState(false);
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
@@ -6272,7 +6274,7 @@ function Composer({
               </div>
             )}
           </div>
-          {skills.length > 0 && (
+          {skills.length > 0 && !isHomun && (
             <div className="composer-pop-wrap">
               <button
                 className={`icon-button${forcedSkill ? " active" : ""}`}
