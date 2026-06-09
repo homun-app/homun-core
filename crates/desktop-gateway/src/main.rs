@@ -24,7 +24,7 @@ use axum::{
     body::Body,
     extract::{Path, Query, Request, State},
     http::{
-        HeaderMap, HeaderValue, Method, StatusCode,
+        HeaderMap, HeaderName, HeaderValue, Method, StatusCode,
         header::{AUTHORIZATION, CONTENT_TYPE},
     },
     middleware::{self, Next},
@@ -20351,6 +20351,9 @@ fn cors_layer() -> CorsLayer {
         .allow_origin(AllowOrigin::list(origins))
         .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
         .allow_headers([CONTENT_TYPE, AUTHORIZATION])
+        // Custom response headers are hidden from browser `fetch` unless exposed —
+        // without this the UI reads `x-effective-model` as null (curl sees it fine).
+        .expose_headers([HeaderName::from_static("x-effective-model")])
 }
 
 impl IntoResponse for GatewayError {
