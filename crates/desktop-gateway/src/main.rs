@@ -3866,13 +3866,21 @@ async fn generate_stream(
     // Chat runs through the configured OpenAI-compatible provider. The local
     // MLX/Gemma fallback was removed: a provider is required. Project chats use the
     // "coding" role when bound (else the orchestrator).
-    if let Some((base_url, mut model, api_key)) =
+    if let Some((mut base_url, mut model, mut api_key)) =
         chat_role_config_for_thread(&state, request.thread_id.as_deref())
     {
-        // Per-message model override (inline composer selector): use the chosen
-        // model for THIS request only, keeping the same provider/base_url/api_key.
+        // Per-message model override (inline composer selector). The picker lists models
+        // from ALL providers, so switch to the chosen model's OWN provider (endpoint +
+        // key), not just its name on the role's provider — otherwise a cross-provider
+        // pick hits the wrong server and silently falls back to the settings model.
         if let Some(override_model) = request.model.as_ref().map(|m| m.trim()).filter(|m| !m.is_empty()) {
-            model = override_model.to_string();
+            if let Some((ov_base, ov_model, ov_key)) = provider_config_for_model(override_model) {
+                base_url = ov_base;
+                model = ov_model;
+                api_key = ov_key;
+            } else {
+                model = override_model.to_string();
+            }
         }
         return stream_chat_via_openai(&state, request, base_url, model, api_key).await;
     }
@@ -4979,6 +4987,22 @@ fn chat_role_config_for_thread(
         }
     }
     chat_openai_stream_config()
+}
+
+/// Full provider config (base_url, model, api_key) for an EXPLICITLY chosen model id,
+/// found by scanning every provider's catalog. The per-message override picker lists
+/// models from ALL providers, so picking one must switch the ENDPOINT + KEY too — not
+/// just rename the model on the role's provider (which would hit the wrong server with
+/// an unknown model, the bug where the inline pick "did nothing"). Returns None when no
+/// configured provider owns that model (caller then falls back to a bare name swap).
+fn provider_config_for_model(model_id: &str) -> Option<(String, String, Option<String>)> {
+    let registry = load_provider_registry();
+    let provider = registry
+        .providers
+        .iter()
+        .find(|p| p.models.iter().any(|m| m.id == model_id))?;
+    let api_key = provider_api_key(&provider.id).or_else(env_inference_api_key);
+    Some((provider.base_url.clone(), model_id.to_string(), api_key))
 }
 
 /// Provider/model for the granular browser tools. With the OpenClaw-style rewrite
