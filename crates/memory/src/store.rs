@@ -672,30 +672,17 @@ impl SQLiteMemoryStore {
     pub fn record_access_decision(
         &self,
         request: &MemoryAccessRequest,
-        decision: &MemoryAccessDecision,
+        _decision: &MemoryAccessDecision,
     ) -> Result<MemoryRef, String> {
-        let reference = MemoryRef::generated(
+        // Audit recording disabled (per product decision): the access log produced
+        // mostly opaque, low-value entries. The access DECISION is still computed and
+        // enforced by callers — this just stops persisting it to `access_audit`.
+        // Re-enable by restoring the INSERT below if a real audit viewer is built.
+        Ok(MemoryRef::generated(
             MemoryRefKind::Audit,
             request.user_id.clone(),
             request.workspace_id.clone(),
-        );
-        self.conn
-            .execute(
-                "insert into access_audit (
-                    ref, user_id, workspace_id, actor_id, purpose, decision, reasons_json
-                ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                (
-                    reference.to_string(),
-                    request.user_id.as_str(),
-                    request.workspace_id.as_str(),
-                    &request.actor_id,
-                    &request.purpose,
-                    enum_name(&decision.kind)?,
-                    serde_json::to_string(&decision.reasons).map_err(|error| error.to_string())?,
-                ),
-            )
-            .map_err(|error| error.to_string())?;
-        Ok(reference)
+        ))
     }
 
     pub fn raw_event_payload_for_test(&self, reference: &MemoryRef) -> Result<String, String> {
