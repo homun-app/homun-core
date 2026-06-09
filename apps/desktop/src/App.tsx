@@ -803,8 +803,25 @@ export default function App() {
   async function refreshChatReadModels(preferredThreadId = activeThreadId) {
     const snapshot = await coreBridge.chatThreads();
     const mappedThreads = snapshot.threads.map(mapCoreChatThread);
+    const preferred = mappedThreads.find((thread) => thread.threadId === preferredThreadId);
+    // The active thread (e.g. Homun, which lives in the personal scope) may not be in the
+    // active workspace's list. Don't yank the user to another thread — just refresh the
+    // sidebar list + that thread's messages, keeping it selected.
+    if (preferredThreadId && !preferred) {
+      setChatThreads(mappedThreads.length ? mappedThreads : [defaultChatThread]);
+      try {
+        const messages = await coreBridge.chatMessages(preferredThreadId);
+        setThreadMessages((current) => ({
+          ...current,
+          [preferredThreadId]: messages.messages.map(mapCoreChatMessage),
+        }));
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
     const selectedThread =
-      mappedThreads.find((thread) => thread.threadId === preferredThreadId) ??
+      preferred ??
       mappedThreads.find((thread) => thread.threadId === snapshot.active_thread_id) ??
       mappedThreads[0] ??
       defaultChatThread;
