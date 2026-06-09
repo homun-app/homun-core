@@ -1,30 +1,39 @@
 :root {
   color-scheme: light;
-  --bg: #ffffff;
-  --panel: #fbfbfc;
+  /* Warm light palette (Manus-like): off-white surfaces, warm grey lines. */
+  --bg: #fdfcfb;
+  --panel: #faf8f5;
   --surface: #ffffff;
-  --surface-muted: #f4f4f5;
-  --surface-hover: #eeeeef;
-  --line: #e5e5e7;
-  --line-strong: #d7d8dc;
-  --text: #222326;
-  --muted: #70757d;
-  --faint: #a5a8ae;
-  --blue: #0a84ff;
-  --blue-soft: #eaf4ff;
+  --surface-muted: #f4f2ee;
+  --surface-hover: #efece7;
+  --line: #e8e4dd;
+  --line-strong: #d8d3ca;
+  --text: #1f1d1a;
+  --muted: #6f6a62;
+  --faint: #a8a39a;
+  /* Brand accent — warm orange from the homün wordmark (replaces iOS blue as the
+     primary/brand colour). --blue kept as alias so existing rules don't break. */
+  --brand: #dd6b20;
+  --brand-strong: #c25e16;
+  --brand-soft: #fbeede;
+  --blue: #dd6b20;
+  --blue-soft: #fbeede;
   --green: #20a850;
   --green-soft: #eaf8ef;
   --amber: #c57900;
   --amber-soft: #fff4df;
   --red: #e5484d;
   --red-soft: #ffeded;
-  /* Alias used by error text and the recording button; was referenced in
-     several places without being defined (→ transparent/inherited color). */
   --danger: #e5484d;
-  --shadow-soft: 0 18px 60px rgba(18, 22, 30, 0.08);
-  --shadow-menu: 0 16px 46px rgba(18, 22, 30, 0.14);
+  --shadow-soft: 0 18px 60px rgba(28, 22, 14, 0.08);
+  --shadow-menu: 0 16px 46px rgba(28, 22, 14, 0.14);
+  /* Radii — differentiated by role (was a flat 8px everywhere → looked rigid). */
   --radius: 8px;
-  /* Spacing scale — one rhythm across the product (Settings and beyond). */
+  --radius-control: 8px;
+  --radius-card: 14px;
+  --radius-lg: 18px;
+  --radius-pill: 999px;
+  /* Spacing scale — one rhythm across the product. */
   --s1: 4px;
   --s2: 8px;
   --s3: 12px;
@@ -33,9 +42,19 @@
   --s6: 24px;
   --s7: 32px;
   --s8: 40px;
+  /* Type scale — one ladder instead of ad-hoc px (the core of a "designed" feel). */
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 16px;
+  --text-lg: 20px;
+  --text-xl: 28px;
+  --text-hero: 40px;
+  --font-serif: "Instrument Serif", "Iowan Old Style", Palatino, Georgia, serif;
   --window-drag-height: 42px;
   font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    "Inter Variable", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
