@@ -2951,6 +2951,9 @@ function MemoryGraphPanel({ threadId }: { threadId: string }) {
   const [view, setView] = useState({ x: 0, y: 0, k: 1 });
   const [mode, setMode] = useState<"graph" | "wiki">("graph");
   const [wiki, setWiki] = useState<MemoryWikiPage[] | null>(null);
+  const [editingPath, setEditingPath] = useState<string | null>(null);
+  const [editBody, setEditBody] = useState("");
+  const [savingWiki, setSavingWiki] = useState(false);
   // viewBox tracks the container's pixel size (centred at origin) so the graph FILLS
   // the panel and adapts when it's expanded/fullscreen — no fixed-aspect letterboxing.
   const [size, setSize] = useState({ w: 760, h: 600 });
@@ -3113,11 +3116,57 @@ function MemoryGraphPanel({ threadId }: { threadId: string }) {
               markdown man mano che lavoriamo.
             </p>
           ) : (
-            wiki.map((page) => (
-              <article className="memory-wiki-page" key={page.path}>
-                <RichMessage text={page.body} />
-              </article>
-            ))
+            wiki.map((page) =>
+              editingPath === page.path ? (
+                <article className="memory-wiki-page" key={page.path}>
+                  <textarea
+                    className="memory-wiki-editor"
+                    value={editBody}
+                    onChange={(e) => setEditBody(e.target.value)}
+                    rows={18}
+                  />
+                  <div className="memory-wiki-actions">
+                    <button
+                      type="button"
+                      className="ghost-button"
+                      disabled={savingWiki}
+                      onClick={() => {
+                        setSavingWiki(true);
+                        coreBridge
+                          .saveMemoryWiki(threadId, page.path, editBody)
+                          .then(() => {
+                            setEditingPath(null);
+                            setWiki(null);
+                          })
+                          .catch(() => {})
+                          .finally(() => setSavingWiki(false));
+                      }}
+                    >
+                      {savingWiki ? "Salvo…" : "Salva"}
+                    </button>
+                    <button type="button" className="ghost-button" onClick={() => setEditingPath(null)}>
+                      Annulla
+                    </button>
+                  </div>
+                </article>
+              ) : (
+                <article className="memory-wiki-page" key={page.path}>
+                  <div className="memory-wiki-actions">
+                    <button
+                      type="button"
+                      className="ghost-button"
+                      onClick={() => {
+                        setEditingPath(page.path);
+                        setEditBody(page.body);
+                      }}
+                    >
+                      Modifica
+                    </button>
+                  </div>
+                  <RichMessage text={page.body} />
+                </article>
+              ),
+            )
           )}
         </div>
       ) : (
