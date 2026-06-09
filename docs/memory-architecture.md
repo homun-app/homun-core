@@ -121,8 +121,16 @@ del progetto.
 - **Recall semantico** — FATTO: embeddings nel recall (cross-lingua).
 - **HomunCoder mode** — FATTO: skill metodologia solo nelle chat di progetto (manifest).
 - **Multilingua** — embeddings multilingua + dedup/recall language-agnostic.
-- **TODO residui**: editing wiki + re-ingest; persistenza archi grafo; skill grouping
-  nella UI Settings (il tag manifest c'è già); soppressione duplicati alla fonte.
+- **Residui — COMPLETATI**:
+  - *Editing wiki + re-ingest* — FATTO: PUT `/api/memory/wiki` salva il markdown editato,
+    marca la pagina (`wiki-edited.json`, niente auto-overwrite) e ri-ingesta via
+    estrattore (le correzioni rientrano nello strutturato). UI: Modifica/Salva nella tab.
+  - *Soppressione duplicati alla fonte* — FATTO: le decisioni note sono iniettate nel
+    prompt dell'estrattore ("estrai solo NUOVE/aggiornamenti").
+  - *Skill grouping Settings* — FATTO: gruppo "HomunCoder · metodologia" nella rail
+    (source="homuncoder" dal manifest).
+  - *Persistenza archi grafo* — SCELTA: restano **derivati a lettura** (più pulito: niente
+    archi stale o relazioni duplicate; il viz e la navigazione funzionano già). Non un TODO.
 
 ## Riferimenti codice
 
