@@ -2548,7 +2548,7 @@ const CHOICES_RE = /‹‹CHOICES››([\s\S]*?)‹‹\/CHOICES››/;
 // Accetta / Modifica (the answer becomes the next user message).
 const PLAN_PROPOSE_RE = /‹‹PLAN_PROPOSE››([\s\S]*?)‹‹\/PLAN_PROPOSE››/;
 const COMPOSIO_MARKERS_RE =
-  /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|CHOICES|PLAN_PROPOSE)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|CHOICES|PLAN_PROPOSE)››/g;
+  /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|CHOICES|PLAN_PROPOSE|PLAN)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|CHOICES|PLAN_PROPOSE|PLAN)››/g;
 
 /** One clickable suggestion in an in-chat connect-card. */
 interface ConnectSuggestItem {
@@ -2581,6 +2581,27 @@ interface ChoicePrompt {
 interface PlanProposal {
   summary: string;
   steps: string[];
+}
+
+/** One step of the live operational plan (update_plan), rendered inline with status. */
+interface PlanStep {
+  status: "todo" | "doing" | "done" | "blocked";
+  title: string;
+  detail: string;
+}
+
+/** Parses the ‹‹PLAN›› markdown (`- [x] **Title** (`s1`): detail`) into typed steps. */
+function parsePlanSteps(markdown: string): PlanStep[] {
+  const out: PlanStep[] = [];
+  for (const raw of markdown.split("\n")) {
+    const m = raw.match(/^-\s*\[(.)\]\s*\*\*(.+?)\*\*\s*(?:\(`[^`]*`\))?\s*:?\s*(.*)$/);
+    if (!m) continue;
+    const marker = m[1];
+    const status: PlanStep["status"] =
+      marker === "x" ? "done" : marker === "-" ? "doing" : marker === "!" ? "blocked" : "todo";
+    out.push({ status, title: m[2].trim(), detail: m[3].trim() });
+  }
+  return out;
 }
 
 // Tool-activity trace markers (browser / skill / sandbox / connected-tool steps).
@@ -4270,6 +4291,7 @@ function parseComposioConfirm(text: string): {
   connectSuggest: ConnectSuggest | null;
   choices: ChoicePrompt | null;
   planPropose: PlanProposal | null;
+  planSteps: PlanStep[];
 } {
   let action: ComposioPendingAction | null = null;
   const confirm = text.match(COMPOSIO_CONFIRM_RE);
@@ -4354,6 +4376,13 @@ function parseComposioConfirm(text: string): {
       /* malformed → just hide it */
     }
   }
+  // Live operational plan (update_plan): take the LATEST ‹‹PLAN›› in the message and
+  // render it inline with per-step status. PLAN_RE is global → matchAll gives all.
+  let planSteps: PlanStep[] = [];
+  const planMatches = [...text.matchAll(PLAN_RE)];
+  if (planMatches.length > 0) {
+    planSteps = parsePlanSteps(planMatches[planMatches.length - 1][1]);
+  }
   const done = text.match(COMPOSIO_DONE_RE);
   const doneTool = done ? done[1].trim() : null;
   const reconnectMatch = text.match(COMPOSIO_RECONNECT_RE);
@@ -4369,6 +4398,7 @@ function parseComposioConfirm(text: string): {
     connectSuggest,
     choices,
     planPropose,
+    planSteps,
   };
 }
 
@@ -4406,11 +4436,13 @@ function AssistantMessageBody({
     connectSuggest,
     choices,
     planPropose,
+    planSteps,
   } = useMemo(() => parseComposioConfirm(text), [text]);
   const readable = useMemo(() => humanizeToolSlugs(visible), [visible]);
   return (
     <>
       <MessageActivity text={text} />
+      {planSteps.length > 0 && <PlanProgressCard steps={planSteps} />}
       {readable && <RichMessage text={readable} streaming={streaming} />}
       {!streaming && onOpenArtifact && <MessageArtifacts text={text} onOpen={onOpenArtifact} />}
       {doneTool && !streaming && (
@@ -4526,6 +4558,46 @@ function PlanProposeCard({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Live operational plan rendered inline (Claude-Code todo style): a checklist with a
+ *  status icon per step, updated as the agent calls update_plan (doing→done). */
+function PlanProgressCard({ steps }: { steps: PlanStep[] }) {
+  const doneCount = steps.filter((s) => s.status === "done").length;
+  return (
+    <div className="plan-progress">
+      <div className="plan-progress-head">
+        <ListTodo size={14} />
+        <strong>Piano</strong>
+        <span className="plan-progress-count">
+          {doneCount}/{steps.length}
+        </span>
+      </div>
+      <ul className="plan-progress-steps">
+        {steps.map((step, i) => (
+          <li key={i} className={`plan-progress-step ${step.status}`}>
+            <span className="plan-progress-icon">
+              {step.status === "done" ? (
+                <Check size={14} />
+              ) : step.status === "doing" ? (
+                <Loader2 size={14} className="composer-spin" />
+              ) : step.status === "blocked" ? (
+                <AlertTriangle size={14} />
+              ) : (
+                <span className="plan-progress-dot" />
+              )}
+            </span>
+            <span className="plan-progress-text">
+              <span className="plan-progress-title">{step.title}</span>
+              {step.detail && step.detail !== "—" && (
+                <span className="plan-progress-detail">{step.detail}</span>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

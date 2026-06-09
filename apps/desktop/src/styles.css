@@ -7793,6 +7793,81 @@ body.resizing-drawer {
   color: var(--brand);
   flex: none;
 }
+/* Live operational plan rendered inline (todo-checklist with per-step status). */
+.plan-progress {
+  margin-top: var(--s3);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: var(--surface);
+}
+.plan-progress-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  margin-bottom: 7px;
+}
+.plan-progress-head svg {
+  color: var(--brand);
+  flex: none;
+}
+.plan-progress-count {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.plan-progress-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.plan-progress-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+}
+.plan-progress-icon {
+  flex: none;
+  width: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+}
+.plan-progress-step.done .plan-progress-icon svg {
+  color: var(--brand);
+}
+.plan-progress-step.doing .plan-progress-icon svg {
+  color: var(--brand);
+}
+.plan-progress-step.blocked .plan-progress-icon svg {
+  color: #c0392b;
+}
+.plan-progress-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-strong, #c9c2b8);
+}
+.plan-progress-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.plan-progress-step.done .plan-progress-title {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.plan-progress-detail {
+  font-size: 11.5px;
+  color: var(--muted);
+}
 .cmp-confirm.destructive { border-color: #c0392b; background: #fdecea; }
 .cmp-confirm.destructive .cmp-confirm-head svg { color: #c0392b; }
 .cmp-confirm-warn {
