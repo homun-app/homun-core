@@ -350,9 +350,16 @@ Aggiornato 2026-06-08. Ordine consigliato, rivedibile.
   attivo globale (`MEMORY_WORKSPACE` separato); **capability globali** (Composio/Gmail,
   browser, MCP) sul workspace base, non per-progetto → Composio resta connesso in ogni
   progetto.
-- **Verso la release (#1,#2,#6,#4)**: connect-card Composio **in chat con poll+auto-detect**
+- **Verso la release (#1,#2,#6)**: connect-card Composio **in chat con poll+auto-detect**
   (#1); **errori connettori azionabili** (auth→ricollega, 429→rate limit) (#2); **status
-  account + pulizia** connessioni EXPIRED (#6); **wizard onboarding** first-run (#4).
+  account + pulizia** connessioni EXPIRED (#6).
+- **Onboarding (#4) — RIPENSATO**: il wizard statico è stato **rimosso**. Problema di
+  bootstrap: un onboarding conversazionale richiede un modello, che al primo avvio non
+  c'è. Direzione: (a) **documentazione "primi passi"** chiara (unico bootstrap statico:
+  installa modello/chiave → connettori); (b) poi una **chat "Homun" dedicata e proattiva**
+  che intervista l'utente (chi è, cosa fa, cosa salvare, che uso vuole farne) → scrive in
+  **memoria personale**, dice "cosa ho appreso", analizza i pattern e propone automazioni
+  (consuma memoria + proattività già pronte). È la north star "apprendista".
 
 **Fatti — sessione 2026-06-08 (chat UX + allegati + routing modelli):**
 - **Allegati end-to-end** (`edbeba2`→`1d7e719`): cattura path via `webUtils.getPathForFile`
