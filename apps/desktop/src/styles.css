@@ -1080,11 +1080,11 @@ body.resizing-drawer {
 }
 
 .danger-button {
-  min-height: 34px;
-  border-radius: 999px;
-  padding: 0 14px;
-  color: #ffffff;
-  background: #d93d42;
+  color: #fff;
+  background: var(--red);
+}
+.danger-button:hover {
+  filter: brightness(0.94);
 }
 
 .danger-button:hover {
@@ -1147,12 +1147,15 @@ body.resizing-drawer {
 .suggestion-chip,
 .primary-button,
 .secondary-button,
+.danger-button,
 .risk-badge {
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   white-space: nowrap;
+  font-weight: 600;
 }
 
 .status-pill {
@@ -5034,19 +5037,34 @@ body.resizing-drawer {
 }
 
 .primary-button,
-.secondary-button {
+.secondary-button,
+.danger-button {
   min-height: 36px;
   padding: 0 14px;
+  cursor: pointer;
 }
 
 .primary-button {
-  color: white;
-  background: var(--blue);
+  color: #fff;
+  background: var(--brand);
+}
+.primary-button:hover {
+  background: var(--brand-strong);
 }
 
 .secondary-button {
   color: var(--text);
   background: var(--surface-muted);
+}
+.secondary-button:hover {
+  background: var(--surface-hover);
+}
+
+.primary-button:disabled,
+.secondary-button:disabled,
+.danger-button:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 .feature-strip {
