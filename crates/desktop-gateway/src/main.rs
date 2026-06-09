@@ -5619,9 +5619,11 @@ async fn stream_chat_via_openai(
         set_memory_workspace("");
     }
     // Channel turns are bound to a curated contact: persona/tone + isolation
-    // perimeter (what memory/tools/info this reply may use). Lock taken and
+    // perimeter (what memory/tools/info this reply may use). `channel_owner` = the
+    // sender is the user themselves (is_self card) → channel gates that protect the
+    // user from OTHERS (e.g. the browser click block) don't apply. Lock taken and
     // released inside; never held across the generation.
-    let contact_ctx = contact_turn_context(state, request.thread_id.as_deref());
+    let (contact_ctx, channel_owner) = contact_turn_context(state, request.thread_id.as_deref());
     let prompt = build_chat_runtime_prompt(&BuildPromptRequest {
         prompt: request.prompt.clone(),
         context: request.context.clone(),
@@ -6940,11 +6942,18 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                                     );
                                 }
                                 // SAFETY GATE: high-risk (buy/login/booking, or
-                                // evaluate) is refused. In read-only (channel) turns
-                                // ANY committing action is also refused.
+                                // evaluate) is refused for EVERYONE. In read-only
+                                // (channel) turns any committing action is also
+                                // refused — EXCEPT when the sender is the OWNER
+                                // (is_self card): that block protects the user from
+                                // other people, not from their own requests (e.g.
+                                // clicking "Cerca" on a train search they asked for).
                                 let blocked = browser_safety::high_risk_reason(&action, &last_snapshot)
                                     .or_else(|| {
-                                        if read_only && browser_safety::is_committing_action(&action) {
+                                        if read_only
+                                            && !channel_owner
+                                            && browser_safety::is_committing_action(&action)
+                                        {
                                             Some(
                                                 "azione che conferma/invia non consentita dal canale"
                                                     .to_string(),
@@ -10093,18 +10102,29 @@ struct ContactTurnContext {
     relationships: Vec<String>,
 }
 
-/// Resolve the curated contact bound to a channel thread. None for in-app threads,
-/// unknown senders, and the user's own card (`is_self` ⇒ owner bypass: no limits).
-/// Persona cascade: per-(contact, channel) profile → contact's default profile →
-/// the contact's inline fields (inline tone wins over profile tone when both set;
-/// instructions concatenate, profile first).
-fn contact_turn_context(state: &AppState, thread_id: Option<&str>) -> Option<ContactTurnContext> {
-    let (channel, sender) = thread_id.and_then(parse_channel_thread_id)?;
-    let store = lock_store(state).ok()?;
-    let id = store.contact_id_by_identity(&channel, &sender).ok().flatten()?;
-    let contact = store.contact_by_id(id).ok().flatten()?;
+/// Resolve the curated contact bound to a channel thread. Returns
+/// `(perimeter context, is_owner)`: context is None for in-app threads, unknown
+/// senders, and the user's own card; `is_owner` is true ONLY when the sender
+/// resolves to the `is_self` card — it relaxes channel gates (e.g. browser clicks)
+/// that exist to protect the user from OTHER people, not from themselves.
+fn contact_turn_context(
+    state: &AppState,
+    thread_id: Option<&str>,
+) -> (Option<ContactTurnContext>, bool) {
+    let Some((channel, sender)) = thread_id.and_then(parse_channel_thread_id) else {
+        return (None, false);
+    };
+    let Ok(store) = lock_store(state) else {
+        return (None, false);
+    };
+    let Some(id) = store.contact_id_by_identity(&channel, &sender).ok().flatten() else {
+        return (None, false);
+    };
+    let Some(contact) = store.contact_by_id(id).ok().flatten() else {
+        return (None, false);
+    };
     if contact.is_self {
-        return None;
+        return (None, true);
     }
     let handles = store.contact_handles(id).unwrap_or_default();
     let perimeter = store.perimeter_or_default(id);
@@ -10136,14 +10156,17 @@ fn contact_turn_context(state: &AppState, thread_id: Option<&str>) -> Option<Con
     } else {
         Vec::new()
     };
-    Some(ContactTurnContext {
-        name: contact.name,
-        tone_of_voice,
-        persona_instructions,
-        handles,
-        perimeter,
-        relationships,
-    })
+    (
+        Some(ContactTurnContext {
+            name: contact.name,
+            tone_of_voice,
+            persona_instructions,
+            handles,
+            perimeter,
+            relationships,
+        }),
+        false,
+    )
 }
 
 /// One-shot migration: seed the curated `contacts` table from existing `person`
