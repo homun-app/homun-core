@@ -258,6 +258,9 @@ export interface CorePromptSubmissionResult {
   assistant_message: CorePromptMessage;
   computer_session: CoreComputerSessionSnapshot;
   plan: CorePromptExecutionPlan | null;
+  /** Model that actually produced the answer (from the gateway's x-effective-model
+   *  header) — the per-message override or the role default for this turn. */
+  effective_model?: string | null;
 }
 
 export interface ChatAttachmentInput {
@@ -2286,6 +2289,7 @@ async function submitBrowserRuntimeChatPromptStream(
     ? joinContinuationText(previousAssistantText, text)
     : text.trim();
   const result: CorePromptSubmissionResult = {
+    effective_model: stream.effectiveModel ?? null,
     user_message: {
       id: `browser_user_${Date.now()}`,
       role: "user",
@@ -2487,10 +2491,18 @@ async function openChatStreamWithGateway(
       }),
     });
     if (response.ok) {
-      return { response, runtimeStatusBefore: "desktop_gateway" };
+      return {
+        response,
+        runtimeStatusBefore: "desktop_gateway",
+        effectiveModel: response.headers.get("x-effective-model") || undefined,
+      };
     }
     if (response.status !== 404) {
-      return { response, runtimeStatusBefore: "desktop_gateway" };
+      return {
+        response,
+        runtimeStatusBefore: "desktop_gateway",
+        effectiveModel: response.headers.get("x-effective-model") || undefined,
+      };
     }
   } catch {
     // Keep the chat usable when the Rust desktop gateway is not running yet.

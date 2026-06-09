@@ -3889,7 +3889,15 @@ async fn generate_stream(
                 model = override_model.rsplit("::").next().unwrap_or(override_model).to_string();
             }
         }
-        return stream_chat_via_openai(&state, request, base_url, model, api_key).await;
+        // Expose the EFFECTIVE model on the response so the UI can label the message
+        // with what actually ran (not the global default) and so the override is
+        // verifiable without log access.
+        let mut response =
+            stream_chat_via_openai(&state, request, base_url, model.clone(), api_key).await?;
+        if let Ok(value) = axum::http::HeaderValue::from_str(&model) {
+            response.headers_mut().insert("x-effective-model", value);
+        }
+        return Ok(response);
     }
     Err(GatewayError {
         status: StatusCode::SERVICE_UNAVAILABLE,
