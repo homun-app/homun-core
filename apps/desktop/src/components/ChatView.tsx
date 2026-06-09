@@ -680,6 +680,12 @@ export function ChatView({
     }
   }
 
+  // Seed text for the composer (empty-state quick-action chips prefill it; bump the
+  // nonce so the same chip re-applies).
+  const [composerSeed, setComposerSeed] = useState<{ text: string; nonce: number } | null>(
+    null,
+  );
+
   function submitComposerPrompt(
     prompt: string,
     attachments: ChatAttachmentInput[],
@@ -1414,6 +1420,9 @@ export function ChatView({
       <div className="thread-scroll" aria-label="Thread attivo" ref={conversationRef}>
         <div className="thread-content">
           <div className="thread-message-list">
+          {threadMessages.length === 0 && !promptSubmitting && (
+            <ChatEmptyHero onPick={(text) => setComposerSeed({ text, nonce: Date.now() })} />
+          )}
           {threadMessages.map((message) => {
             const isStreamingMessage = message.id === streamingAssistantId;
             const displayMessage = message;
@@ -1743,6 +1752,7 @@ export function ChatView({
         disabled={promptSubmitting}
         error={promptError}
         replyContext={replyContext}
+        seed={composerSeed}
         streaming={promptSubmitting}
         threadId={thread.threadId}
         onCancelStreaming={cancelActiveStreaming}
@@ -5448,10 +5458,40 @@ function ComputerDetailPanel({
   );
 }
 
+const EMPTY_HERO_CHIPS = [
+  "Pianifica la mia settimana",
+  "Trova informazioni su ",
+  "Riassumi un documento",
+  "Aiutami a scrivere ",
+];
+
+// Empty-chat hero (Manus-style): serif headline + quick-action chips that seed the composer.
+function ChatEmptyHero({ onPick }: { onPick: (text: string) => void }) {
+  return (
+    <div className="chat-hero">
+      <h1 className="chat-hero-title">Come posso aiutarti?</h1>
+      <p className="chat-hero-sub">Scrivi qui sotto, oppure parti da uno spunto.</p>
+      <div className="chat-hero-chips">
+        {EMPTY_HERO_CHIPS.map((chip) => (
+          <button
+            key={chip}
+            type="button"
+            className="chat-hero-chip"
+            onClick={() => onPick(chip)}
+          >
+            {chip.trim()}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Composer({
   disabled,
   error,
   replyContext,
+  seed,
   streaming,
   threadId,
   onCancelStreaming,
@@ -5461,6 +5501,7 @@ function Composer({
   disabled: boolean;
   error: string | null;
   replyContext: ReplyContext | null;
+  seed: { text: string; nonce: number } | null;
   streaming: boolean;
   threadId: string;
   onCancelStreaming: () => void;
@@ -5477,6 +5518,11 @@ function Composer({
   ) => void;
 }) {
   const [value, setValue] = useState("");
+  // Empty-state chips seed the composer; nonce lets the same chip re-apply.
+  useEffect(() => {
+    if (seed && seed.text) setValue(seed.text);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seed?.nonce]);
   const [linkedFolder, setLinkedFolder] = useState<string | null>(null);
   const [folderBusy, setFolderBusy] = useState(false);
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
