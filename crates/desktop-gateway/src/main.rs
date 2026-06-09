@@ -5624,6 +5624,14 @@ async fn stream_chat_via_openai(
     // user from OTHERS (e.g. the browser click block) don't apply. Lock taken and
     // released inside; never held across the generation.
     let (contact_ctx, channel_owner) = contact_turn_context(state, request.thread_id.as_deref());
+    if request.thread_id.as_deref().is_some_and(|t| t.starts_with("channel_")) {
+        eprintln!(
+            "channel-turn: thread={} owner={} contact={}",
+            request.thread_id.as_deref().unwrap_or("-"),
+            channel_owner,
+            contact_ctx.as_ref().map(|c| c.name.as_str()).unwrap_or("-"),
+        );
+    }
     let prompt = build_chat_runtime_prompt(&BuildPromptRequest {
         prompt: request.prompt.clone(),
         context: request.context.clone(),
@@ -6963,6 +6971,7 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                                         }
                                     });
                                 if let Some(reason) = blocked {
+                                    eprintln!("browser-gate: BLOCKED ({reason})");
                                     browser_session = Some(client);
                                     push_browser_step(
                                         format!(
@@ -8907,6 +8916,7 @@ fn begin_browser_activity(goal: String) {
 }
 
 fn push_browser_step(label: String, status: &str) {
+    eprintln!("browser-step[{status}]: {label}");
     touch_cc_activity();
     if let Ok(mut guard) = browser_activity_cell().write() {
         if let Some(state) = guard.as_mut() {
