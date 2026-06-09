@@ -1190,6 +1190,50 @@ function ConnectorsPane() {
   );
 }
 
+// Connected accounts list with status + remove — surfaces ACTIVE/EXPIRED and lets the
+// user prune stale OAuth connections (roadmap #6).
+function ComposioConnectionsList() {
+  type Conn = Awaited<ReturnType<typeof coreBridge.composioConnections>>[number];
+  const [conns, setConns] = useState<Conn[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const load = () => {
+    coreBridge.composioConnections().then(setConns).catch(() => setConns([]));
+  };
+  useEffect(() => {
+    load();
+  }, []);
+  if (!conns || conns.length === 0) return null;
+  const label = (s: string) =>
+    s === "ACTIVE" ? "attiva" : s === "EXPIRED" ? "scaduta" : s.toLowerCase();
+  return (
+    <div className="cmp-connlist">
+      <div className="cmp-connlist-head">Account collegati</div>
+      {conns.map((c) => (
+        <div className="cmp-connrow" key={c.id}>
+          <span className="cmp-connrow-kit">{c.toolkit_slug || c.id}</span>
+          <span className={`cmp-connrow-status ${c.status.toLowerCase()}`}>{label(c.status)}</span>
+          <button
+            type="button"
+            className="mdl-icon-btn"
+            title="Rimuovi account"
+            disabled={busy === c.id}
+            onClick={() => {
+              setBusy(c.id);
+              coreBridge
+                .composioDisconnect(c.id)
+                .then(load)
+                .catch(() => {})
+                .finally(() => setBusy(null));
+            }}
+          >
+            <Trash2 size={14} />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ComposioDetail({
   connected,
   onChanged,
@@ -1327,6 +1371,7 @@ function ComposioDetail({
         </div>
       ) : (
         <>
+          <ComposioConnectionsList />
           <AllowedToolsSection />
           <ComposioToolkitBrowser
             toolkits={toolkits}
