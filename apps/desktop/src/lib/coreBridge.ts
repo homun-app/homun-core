@@ -1851,6 +1851,7 @@ export type CoreMemoryItem = {
   confidence: number;
   text: string;
   created_at: string;
+  certainty: string;
 };
 
 async function electronMemoryItems(): Promise<CoreMemoryItem[]> {

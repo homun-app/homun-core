@@ -37,7 +37,7 @@ export const navItems: NavItem[] = [
   { id: "chat", label: "Nuovo compito", icon: MessageSquare },
   { id: "learning", label: "Apprendimento", icon: Brain },
   { id: "tasks", label: "Pianificato", icon: CalendarClock },
-  { id: "memory", label: "Libreria", icon: Database },
+  { id: "memory", label: "Memoria", icon: Brain },
 ];
 
 export const chatMessages: ChatMessage[] = [

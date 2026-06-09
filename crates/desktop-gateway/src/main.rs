@@ -1581,11 +1581,19 @@ async fn learn_from_exchange(
 RIUTILIZZABILE: (1) fatti e preferenze sull'UTENTE (chi è, persone della sua vita, come preferisce \
 lavorare); (2) DECISIONI prese durante il lavoro (scelte tecniche o di progetto) con il PERCHÉ e le \
 alternative scartate. NON estrarre il contenuto transitorio del compito, NON fatti generali del \
-mondo, NON ciò che l'assistente ha detto come semplice risposta. Rispondi SOLO con JSON valido, \
+mondo, NON ciò che l'assistente ha detto come semplice risposta. \
+STATO EPISTEMICO — DISTINGUI ciò che è VERO/ACCADUTO/DECISO da ciò che è solo CHIESTO, CERCATO, \
+IPOTETICO o IN VALUTAZIONE. Una domanda, una ricerca di prezzi/opzioni, un \"se/forse/sto valutando\" \
+NON sono fatti sulla vita dell'utente: NON registrarli come compiuti (es. se l'utente CHIEDE i prezzi \
+di un traghetto, NON scrivere \"ha un viaggio programmato\"). Registra un piano/evento come fatto SOLO \
+se l'utente lo afferma come reale/confermato (\"ho prenotato\", \"parto\", \"il mio viaggio è\"). Se una \
+valutazione è comunque utile, formulala con cautela (\"ha cercato/valutato …\"), confidence bassa, e \
+metti metadata.certainty: \"committed\" = confermato/accaduto, \"considered\" = solo cercato/valutato, \
+\"intended\" = intenzione dichiarata ma non confermata. Rispondi SOLO con JSON valido, \
 niente altro:\n\
 {\"memories\":[{\"memory_type\":\"fact|preference|decision\",\"text\":\"frase breve in 3a persona \
 nella lingua dell'utente\",\"sensitivity\":\"internal|private|confidential|secret\",\"confidence\":0.0-1.0,\
-\"metadata\":{\"scope\":\"personal|project\",\"decision\":{\"rationale\":\"il perché\",\
+\"metadata\":{\"scope\":\"personal|project\",\"certainty\":\"committed|considered|intended\",\"decision\":{\"rationale\":\"il perché\",\
 \"alternatives\":[{\"option\":\"alternativa\",\"rejected_because\":\"motivo\"}]}}}],\
 \"entities\":[{\"entity_type\":\"person|project|tool\",\"name\":\"Nome\",\"canonical_key\":\"person:nome-normalizzato\",\
 \"sensitivity\":\"internal|private\",\"privacy_domain\":\"personal\"}],\
@@ -16742,6 +16750,7 @@ struct MemoryItemView {
     confidence: f64,
     text: String,
     created_at: String,
+    certainty: String,
 }
 
 /// Lists individual memories from the PERSONAL + active PROJECT scopes so the user
@@ -16768,6 +16777,12 @@ async fn memory_items(
                     status: format!("{:?}", memory.status).to_lowercase(),
                     sensitivity: format!("{:?}", memory.sensitivity).to_lowercase(),
                     confidence: memory.confidence,
+                    certainty: memory
+                        .metadata
+                        .get("certainty")
+                        .and_then(|c| c.as_str())
+                        .unwrap_or("")
+                        .to_string(),
                     text: memory.text,
                     created_at: memory.created_at,
                 });

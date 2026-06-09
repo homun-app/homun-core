@@ -180,7 +180,15 @@ export function MemoryView() {
             <div className="memview-item" key={it.reference}>
               <span className="memview-dot" style={{ background: TYPE_COLORS[it.memory_type] ?? "#94a3b8" }} />
               <div className="memview-item-body">
-                <div className="memview-item-text">{it.text}</div>
+                <div className="memview-item-text">
+                  {it.text}
+                  {it.certainty === "considered" && (
+                    <span className="memview-chip considered">valutato</span>
+                  )}
+                  {it.certainty === "intended" && (
+                    <span className="memview-chip intended">intenzione</span>
+                  )}
+                </div>
                 <div className="memview-item-meta">
                   {TYPE_LABELS[it.memory_type] ?? it.memory_type} · {it.workspace_label} ·{" "}
                   {dayLabel(it.created_at)}
