@@ -6483,7 +6483,7 @@ function Composer({
                                 ) : (
                                   <span className="composer-model-dot" />
                                 )}
-                                <span>{modelId}</span>
+                                <span className="composer-model-name">{modelId}</span>
                                 {modelId === activeModel && <small>default</small>}
                               </button>
                             );

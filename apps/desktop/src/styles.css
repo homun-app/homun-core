@@ -4804,7 +4804,7 @@ body.resizing-drawer {
   border: 0;
   border-bottom: 1px solid var(--line);
   background: transparent;
-  padding: 10px 12px;
+  padding: 11px 13px;
   font-size: 13px;
   color: var(--text);
   outline: none;
@@ -4812,54 +4812,75 @@ body.resizing-drawer {
 .composer-model-search::placeholder {
   color: var(--muted);
 }
-/* Rows render horizontally (icon · name · tag), unlike the stacked skill list. */
+/* Rows: fixed icon column · name · trailing tag. A GRID keeps every row aligned
+   whether the leading slot holds a check or an empty dot placeholder. */
 .composer-model-pop .composer-pop-list button {
-  flex-direction: row;
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
+  padding: 7px 12px;
 }
-.composer-model-auto-text {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-  flex: 1;
+.composer-model-pop .composer-pop-list button > svg {
+  justify-self: center;
+  color: var(--brand);
 }
-.composer-model-group {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.composer-model-group + .composer-model-group {
-  margin-top: 4px;
-}
-.composer-model-group-label {
-  font-size: 10.5px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-  padding: 7px 9px 2px;
-}
-.composer-model-group button > span {
-  flex: 1;
+.composer-model-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
 }
-.composer-model-group button > small {
-  margin-left: auto;
-  flex: none;
+.composer-model-pop .composer-pop-list button small {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10.5px;
+  font-weight: 500;
 }
 .composer-model-dot {
-  width: 14px;
-  height: 14px;
-  flex: none;
-  display: inline-block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--line);
+  justify-self: center;
+}
+/* Auto: the emphasized default at the very top, set off by a divider. */
+.composer-model-auto {
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  margin-bottom: 4px;
+  padding-bottom: 9px;
+}
+.composer-model-auto-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.composer-model-auto-text strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+.composer-model-auto-text small {
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Provider sections. */
+.composer-model-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.composer-model-group-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  padding: 8px 12px 3px;
 }
 .composer-pop-search {
   display: flex;
@@ -4924,27 +4945,6 @@ body.resizing-drawer {
   font-size: 12.5px;
   color: var(--muted);
 }
-.composer-model-pop .composer-pop-list button {
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-}
-.composer-model-pop .composer-pop-list button > span:nth-child(2) {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.composer-model-pop .composer-pop-list button small {
-  color: var(--muted);
-  font-size: 11px;
-}
-.composer-model-dot {
-  width: 14px;
-  flex: none;
-}
-
 .composer-model-button {
   display: inline-flex;
   align-items: center;
