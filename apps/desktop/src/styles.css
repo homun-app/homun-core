@@ -1119,6 +1119,9 @@ body.resizing-drawer {
   justify-content: space-between;
   gap: 16px;
   border-bottom: 1px solid transparent;
+  /* Align the title row with the centered message column (same 760 column). */
+  width: min(100%, 760px);
+  margin: 0 auto;
 }
 
 .task-title-area,
@@ -1278,6 +1281,23 @@ body.resizing-drawer {
   min-height: 0;
   overflow: auto;
   scroll-behavior: smooth;
+  scrollbar-gutter: stable;
+}
+/* Thin, discreet scrollbar pinned to the far right of the scroll area. */
+.thread-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.thread-scroll::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: var(--radius-pill);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.thread-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--faint);
+}
+.thread-scroll::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .thread-content {
@@ -1536,7 +1556,7 @@ body.resizing-drawer {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--blue);
+  background: var(--faint);
   animation: msg-activity-pulse 1.1s ease-in-out infinite;
 }
 @keyframes msg-activity-pulse {
@@ -3620,6 +3640,16 @@ body.resizing-drawer {
   gap: var(--s2);
   margin-top: 6px;
   align-items: center;
+}
+/* Inline edit: keep the Salva button proportional to the small row. */
+.ctx-menu-edit-actions .primary-button {
+  min-height: 26px;
+  padding: 0 12px;
+  font-size: var(--text-sm);
+  margin-left: auto;
+}
+.ctx-menu-edit-actions .link-button {
+  font-size: var(--text-sm);
 }
 .ctx-menu-create {
   display: flex;
