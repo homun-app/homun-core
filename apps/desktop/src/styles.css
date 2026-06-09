@@ -3320,6 +3320,51 @@ body.resizing-drawer {
 }
 /* Clean, document-style PDF preview: pages as white sheets stacked top-to-bottom,
    fitting the panel width — no dark native-viewer chrome. */
+/* Composio: connected-accounts list with status + remove. */
+.cmp-connlist {
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+}
+.cmp-connlist-head {
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted, #64748b);
+  padding: 2px 4px 6px;
+}
+.cmp-connrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 4px;
+}
+.cmp-connrow-kit {
+  flex: 1;
+  font-size: 13px;
+  text-transform: capitalize;
+}
+.cmp-connrow-status {
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 1px 8px;
+  background: #e2e8f0;
+  color: #475569;
+}
+.cmp-connrow-status.active {
+  background: #dcfce7;
+  color: #166534;
+}
+.cmp-connrow-status.expired,
+.cmp-connrow-status.inactive,
+.cmp-connrow-status.failed {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
 /* Memoria (top-level explorer): filtri + timeline + lista + grafo/wiki. */
 .memview {
   display: flex;

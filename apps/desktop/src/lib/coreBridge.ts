@@ -1228,6 +1228,16 @@ async function electronComposioConnections(): Promise<ComposioConnection[]> {
   return payload.connections ?? [];
 }
 
+async function electronComposioDisconnect(id: string): Promise<void> {
+  const response = await fetch(
+    `${DESKTOP_GATEWAY_URL}/api/capabilities/composio/connections/${encodeURIComponent(id)}`,
+    { method: "DELETE", headers: gatewayHeaders() },
+  );
+  if (!response.ok) {
+    throw new Error(`Desktop Gateway composio disconnect HTTP ${response.status}`);
+  }
+}
+
 export interface SkillSummary {
   id: string;
   name: string;
@@ -1414,6 +1424,7 @@ export const coreBridge = {
   composioLink: (toolkitSlug: string, apiKey?: string) =>
     electronComposioLink(toolkitSlug, apiKey),
   composioConnections: () => electronComposioConnections(),
+  composioDisconnect: (id: string) => electronComposioDisconnect(id),
   composioExecute: (
     tool: string,
     args: unknown,

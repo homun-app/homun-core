@@ -552,6 +552,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/capabilities/composio/toolkits", get(composio_toolkits))
         .route("/api/capabilities/composio/link", post(composio_link))
         .route("/api/capabilities/composio/connections", get(composio_connections))
+        .route("/api/capabilities/composio/connections/{id}", delete(composio_disconnect))
         .route("/api/capabilities/composio/execute", post(composio_execute))
         .route("/api/capabilities/composio/allowed-tools", get(composio_allowed_tools))
         .route(
@@ -14165,6 +14166,29 @@ async fn composio_connections(
             message: error.to_string(),
         })?
         .map(Json)
+}
+
+fn composio_disconnect_blocking(state: &AppState, id: &str) -> Result<(), GatewayError> {
+    let transport = composio_transport_for(state)?;
+    transport
+        .request("DELETE", &format!("/connected_accounts/{id}"), None)
+        .map_err(GatewayError::capability)?;
+    Ok(())
+}
+
+/// Revoke/remove a Composio connected account (e.g. prune an EXPIRED one).
+async fn composio_disconnect(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    tokio::task::spawn_blocking(move || composio_disconnect_blocking(&state, &id))
+        .await
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "composio_disconnect_join",
+            message: error.to_string(),
+        })??;
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 async fn composio_toolkits(
