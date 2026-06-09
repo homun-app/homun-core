@@ -3904,10 +3904,8 @@ body.resizing-drawer {
 .memview-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--border, #e2e8f0);
+  gap: 10px;
+  padding: 0 0 4px;
   flex-wrap: wrap;
 }
 .memview-title {
@@ -3923,6 +3921,8 @@ body.resizing-drawer {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
 }
 .memview-filters select {
   border: 1px solid var(--border, #e2e8f0);
@@ -3948,9 +3948,10 @@ body.resizing-drawer {
   min-width: 180px;
 }
 .memview-consolidate {
-  border: 1px solid #c7d2fe;
-  background: #eef2ff;
-  color: #4338ca;
+  margin-left: auto;
+  border: 1px solid var(--line);
+  background: var(--brand-soft);
+  color: var(--brand-strong, var(--brand));
   border-radius: 8px;
   padding: 5px 10px;
   font-size: 13px;
@@ -3958,7 +3959,7 @@ body.resizing-drawer {
   cursor: pointer;
 }
 .memview-consolidate:hover {
-  background: #e0e7ff;
+  border-color: var(--brand);
 }
 .memview-consolidate:disabled {
   opacity: 0.6;
@@ -6133,11 +6134,13 @@ body.resizing-drawer {
 
 .settings-workspace {
   overflow: auto;
-  padding: 34px clamp(28px, 8vw, 116px);
+  /* Cursor-style: modest side margins so the content breathes instead of being
+     squeezed into a narrow column. */
+  padding: 28px clamp(20px, 4vw, 52px);
 }
 
 .settings-view {
-  max-width: 860px;
+  max-width: 1000px;
 }
 
 /* Master-detail panes (Models) need more room than the 700px form panes. */
