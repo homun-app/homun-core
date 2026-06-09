@@ -5580,8 +5580,8 @@ function HomunProactiveToggle() {
       <Sparkles size={14} />
       <span>
         {enabled
-          ? "Check-in proattivi attivi · ogni giorno"
-          : "Attiva check-in proattivi giornalieri"}
+          ? "Proattivo attivo · ti scrivo ogni tanto"
+          : "Attiva i check-in proattivi"}
       </span>
     </button>
   );

@@ -687,8 +687,9 @@ const HOMUN_CHECKIN_GOAL: &str = "Check-in proattivo e CURIOSO. Richiama la memo
 (recall_memory) e ragiona sulle IMPLICAZIONI dei fatti, non limitarti a riassumere: da un indizio \
 tira un filo e fai UNA domanda di approfondimento + UNA proposta concreta di aiuto. Esempio: da «ha \
 cercato traghetti per un viaggio in moto» → «che moto hai? vuoi che ti ricordi tagliando, \
-assicurazione e bollo?». In alternativa, uno spunto legato ai suoi interessi (qualcosa da esplorare/ \
-leggere/provare) per stimolarlo. Conciso e caldo. Sono SOLO proposte/domande: non compiere azioni \
+assicurazione e bollo?». GUARDA cosa hai GIÀ chiesto o detto in questa conversazione e NON \
+ripeterti: UNA sola cosa nuova per volta. In alternativa, uno spunto legato ai suoi interessi \
+(qualcosa da esplorare/leggere/provare) per stimolarlo. Conciso e caldo. Sono SOLO proposte/domande: non compiere azioni \
 esterne. Se non sai nulla di lui, fai una domanda per conoscerlo. NON inventare fatti o attività \
 non avvenute.";
 
@@ -808,12 +809,14 @@ async fn homun_proactive_set(
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     cancel_homun_checkins(&state);
     if req.enabled {
+        // Frequent pulse; the executor's hour+random gate makes it ASK only now and then
+        // (human cadence), within waking hours — not a fixed morning batch.
         let every = req
             .every
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty())
-            .unwrap_or("daily@09:00");
+            .unwrap_or("every 3h");
         let now = OffsetDateTime::now_utc();
         let Some(next) = local_first_task_runtime::next_occurrence(every, None, now) else {
             return Err(GatewayError {
@@ -11726,6 +11729,33 @@ fn execute_proactive_prompt_task(
             message: "impossibile creare il thread pianificato".to_string(),
         });
     };
+
+    // Human cadence for Homun: it analyses often (frequent schedule) but only ASKS now
+    // and then, within waking hours (local timezone). Outside 9–22, or on a "pause" roll,
+    // skip silently — complete the occurrence (so the recurrence re-enqueues) with no
+    // message and no surfaced event.
+    if deliver_thread == Some("homun") {
+        let now = jiff::Zoned::now(); // system local timezone
+        let hour = now.hour(); // i8, 0..23
+        let roll = now.subsec_nanosecond().rem_euclid(100);
+        if !(9..22).contains(&hour) || roll >= 45 {
+            return Ok(TaskExecutionOutcome {
+                completed: true,
+                blocked_reason: None,
+                pending_approval: None,
+                summary: "check-in Homun saltato (orario o pausa)".to_string(),
+                checkpoint_payload: serde_json::json!({ "kind": "proactive_prompt", "skipped": true }),
+                checkpoint_redacted: serde_json::json!({ "kind": "proactive_prompt" }),
+                chat_message: String::new(),
+                surface: SurfaceKind::Logs,
+                event_kind: "proactive_prompt_skipped".to_string(),
+                event_title: "Check-in saltato".to_string(),
+                event_subtitle: "Pausa proattiva.".to_string(),
+                event_payload: serde_json::json!({}),
+                artifacts: vec![],
+            });
+        }
+    }
 
     // Surface the (possibly new) thread immediately, like an inbound channel msg.
     publish_app_event(serde_json::json!({
