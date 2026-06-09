@@ -125,6 +125,30 @@ impl ChatStore {
         Ok(thread)
     }
 
+    /// The dedicated proactive "Homun" thread — the assistant's home (personal scope).
+    /// Fixed id so the persona injection can detect it; pinned to stay at the top.
+    pub fn find_or_create_homun_thread(&self, workspace_id: &str) -> rusqlite::Result<ChatThread> {
+        let thread_id = "homun".to_string();
+        if let Some(thread) = self.thread(&thread_id)? {
+            return Ok(thread);
+        }
+        let timestamp = current_timestamp_seconds();
+        let thread = ChatThread {
+            thread_id: thread_id.clone(),
+            title: "Homun".to_string(),
+            subtitle: "Il tuo assistente".to_string(),
+            status: "active".to_string(),
+            pinned: true,
+            computer_session_id: format!("computer_{thread_id}"),
+            task_id: format!("task_{thread_id}"),
+            updated_at: timestamp,
+            message_count: 0,
+            source: Some("homun".to_string()),
+        };
+        self.insert_thread(&thread, workspace_id)?;
+        Ok(thread)
+    }
+
     pub fn select_thread(&self, thread_id: &str) -> rusqlite::Result<ChatThreadSnapshot> {
         let workspace_id = self.workspace_for_thread(thread_id)?;
         self.set_active_thread(&workspace_id, thread_id)?;

@@ -904,6 +904,11 @@ export default function App() {
 
     async function loadChatThreads() {
       try {
+        try {
+          await coreBridge.homunThread(); // ensure the proactive "Homun" home thread exists
+        } catch {
+          /* non-fatal: gateway may be starting up */
+        }
         const snapshot = await coreBridge.chatThreads();
         if (cancelled) return;
         const mapped = snapshot.threads.map(mapCoreChatThread);

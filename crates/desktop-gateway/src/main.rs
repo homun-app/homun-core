@@ -412,6 +412,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/chat/threads/{thread_id}/unarchive",
             post(unarchive_chat_thread),
         )
+        .route("/api/chat/homun", get(homun_thread))
         .route("/api/chat/threads/{thread_id}", delete(delete_chat_thread))
         .route("/api/chat/threads/{thread_id}/messages", get(chat_messages))
         .route(
@@ -657,6 +658,18 @@ async fn create_chat_thread(
     Ok(Json(
         lock_store(&state)?
             .create_thread(&resolve_threads_workspace(&query))
+            .map_err(GatewayError::store)?,
+    ))
+}
+
+/// Find-or-create the dedicated proactive "Homun" thread (personal scope).
+async fn homun_thread(
+    State(state): State<AppState>,
+    Query(query): Query<ChatThreadsQuery>,
+) -> Result<Json<ChatThread>, GatewayError> {
+    Ok(Json(
+        lock_store(&state)?
+            .find_or_create_homun_thread(&resolve_threads_workspace(&query))
             .map_err(GatewayError::store)?,
     ))
 }
@@ -5444,6 +5457,26 @@ col solo slug del servizio interessato (es. gmail): l'interfaccia mostrera' un p
         enabled_skills.retain(|(id, _, _)| !homuncoder.contains(id));
     }
     let has_skills = !enabled_skills.is_empty();
+    // The dedicated "Homun" thread gets a proactive, get-to-know-you persona that
+    // populates personal memory through conversation (the apprentice north star).
+    let is_homun = request.thread_id.as_deref() == Some("homun");
+    let system = if is_homun {
+        format!(
+            "SEI HOMUN, e questa è la tua chat personale dedicata — la \"casa\" dell'assistente. \
+Sii PROATTIVO, caldo e conciso, mai invadente. \
+(1) Se sai ancora poco dell'utente (memoria personale scarsa), CONOSCILO con poche domande alla \
+volta — chi è, di cosa si occupa, come preferisce lavorare, quali informazioni vuole che ricordi, \
+che uso vuole fare di te: UNA o due domande per volta, conversando, non un interrogatorio. \
+(2) Quando l'utente condivide qualcosa di DUREVOLE su di sé, conferma cosa salvi ('ho salvato che…') \
+e sii ACCURATO: distingui ciò che è vero/deciso da ciò che è solo ipotizzato o cercato. \
+(3) Se chiede 'cosa sai di me / cosa hai appreso', usa recall_memory e riassumi ciò che hai in \
+memoria personale, invitandolo a correggere ciò che è sbagliato. \
+(4) Proponi attivamente come puoi aiutarlo (email, calendario, viaggi, ricerche, codice…) in base a \
+ciò che fa. All'inizio di una conversazione nuova, presentati brevemente e fai la prima domanda.\n\n{system}"
+        )
+    } else {
+        system
+    };
     let system = if !has_skills {
         system
     } else {

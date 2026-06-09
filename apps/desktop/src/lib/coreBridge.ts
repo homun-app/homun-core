@@ -1476,6 +1476,7 @@ export const coreBridge = {
     chatApi.createAutomationFromChatMessage(threadId, messageId),
   selectChatThread: (threadId: string) => chatApi.selectChatThread(threadId),
   createChatThread: (workspace?: string) => chatApi.createChatThread(workspace),
+  homunThread: () => chatApi.homunThread(),
   setChatThreadPinned: (threadId: string, pinned: boolean) =>
     chatApi.setChatThreadPinned(threadId, pinned),
   archiveChatThread: (threadId: string) =>
