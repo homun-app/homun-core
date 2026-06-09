@@ -121,16 +121,10 @@ function mapCoreChatAttachment(attachment: CoreChatAttachment): NonNullable<Chat
   };
 }
 
-function starterMessages(thread: ChatThread): ChatMessage[] {
-  return [
-    {
-      id: `${thread.threadId}_ready`,
-      role: "assistant",
-      text: "Sono pronto. Scrivimi pure: rispondo in locale.",
-      timestamp: currentTimestampSeconds(),
-      metadata: "Modello locale",
-    },
-  ];
+function starterMessages(_thread: ChatThread): ChatMessage[] {
+  // Empty: the chat empty-state hero ("Come posso aiutarti?") welcomes the user now,
+  // so we don't seed a canned assistant greeting.
+  return [];
 }
 
 function updateThreadPreview(

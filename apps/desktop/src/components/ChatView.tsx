@@ -1631,8 +1631,20 @@ export function ChatView({
               )}
               <footer>
                 <span>{formatMessageTimestamp(displayMessage.timestamp)}</span>
-                {visibleMessageMetadata(displayMessage.metadata) && (
-                  <span>{visibleMessageMetadata(displayMessage.metadata)}</span>
+                {displayMessage.role === "assistant" ? (
+                  <>
+                    {activeModelInfo && <span>{shortModelName(activeModelInfo.model)}</span>}
+                    {displayMessage.metrics && displayMessage.metrics.elapsedSeconds > 0 && (
+                      <span>
+                        {formatChatDuration(displayMessage.metrics.elapsedSeconds)} ·{" "}
+                        {displayMessage.metrics.generationTokens} token
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  visibleMessageMetadata(displayMessage.metadata) && (
+                    <span>{visibleMessageMetadata(displayMessage.metadata)}</span>
+                  )
                 )}
               </footer>
             </article>
@@ -1780,6 +1792,16 @@ function describeBridgeError(error: unknown): string {
   }
 
   return error.message;
+}
+
+// Claude-style duration label: "0.8s" / "12s" / "1m 46s".
+function formatChatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "0s";
+  if (seconds < 10) return `${seconds.toFixed(1)}s`;
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  return `${m}m ${s}s`;
 }
 
 function chatMessageFromAssistantResult(
