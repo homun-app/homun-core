@@ -639,27 +639,33 @@ export type MemoryGraph = {
   edges: MemoryGraphEdge[];
 };
 
-async function electronMemoryGraph(thread?: string): Promise<MemoryGraph> {
-  const param = thread ? `?thread=${encodeURIComponent(thread)}` : "";
-  return gatewayGetJson<MemoryGraph>(`/api/memory/graph${param}`);
+function scopeQuery(thread?: string, workspace?: string): string {
+  const qs = new URLSearchParams();
+  if (thread) qs.set("thread", thread);
+  else if (workspace) qs.set("workspace", workspace);
+  const s = qs.toString();
+  return s ? `?${s}` : "";
+}
+
+async function electronMemoryGraph(thread?: string, workspace?: string): Promise<MemoryGraph> {
+  return gatewayGetJson<MemoryGraph>(`/api/memory/graph${scopeQuery(thread, workspace)}`);
 }
 
 export type MemoryWikiPage = { path: string; title: string; body: string };
 
-async function electronMemoryWiki(thread?: string): Promise<MemoryWikiPage[]> {
-  const param = thread ? `?thread=${encodeURIComponent(thread)}` : "";
-  return gatewayGetJson<MemoryWikiPage[]>(`/api/memory/wiki${param}`);
+async function electronMemoryWiki(thread?: string, workspace?: string): Promise<MemoryWikiPage[]> {
+  return gatewayGetJson<MemoryWikiPage[]>(`/api/memory/wiki${scopeQuery(thread, workspace)}`);
 }
 
 async function electronSaveMemoryWiki(
-  thread: string | undefined,
+  scope: { thread?: string; workspace?: string },
   path: string,
   body: string,
 ): Promise<void> {
   const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/memory/wiki`, {
     method: "PUT",
     headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
-    body: JSON.stringify({ thread, path, body }),
+    body: JSON.stringify({ thread: scope.thread, workspace: scope.workspace, path, body }),
   });
   if (!response.ok) {
     throw new Error(`Desktop Gateway memory wiki save HTTP ${response.status}`);
@@ -1549,10 +1555,10 @@ export const coreBridge = {
   artifactVersions: (thread: string, name: string) => electronArtifactVersions(thread, name),
   saveArtifactContent: (thread: string, name: string, content: string) =>
     electronSaveArtifactContent(thread, name, content),
-  memoryGraph: (thread?: string) => electronMemoryGraph(thread),
-  memoryWiki: (thread?: string) => electronMemoryWiki(thread),
-  saveMemoryWiki: (thread: string | undefined, path: string, body: string) =>
-    electronSaveMemoryWiki(thread, path, body),
+  memoryGraph: (thread?: string, workspace?: string) => electronMemoryGraph(thread, workspace),
+  memoryWiki: (thread?: string, workspace?: string) => electronMemoryWiki(thread, workspace),
+  saveMemoryWiki: (scope: { thread?: string; workspace?: string }, path: string, body: string) =>
+    electronSaveMemoryWiki(scope, path, body),
   artifactFolder: (thread: string) => electronArtifactFolder(thread),
   artifactsUsage: () => electronArtifactsUsage(),
   artifactDestinations: () => electronArtifactDestinations(),
@@ -1837,11 +1843,14 @@ async function electronMemoryDashboard(): Promise<CoreMemoryDashboard> {
 export type CoreMemoryItem = {
   reference: string;
   scope: string;
+  workspace_id: string;
+  workspace_label: string;
   memory_type: string;
   status: string;
   sensitivity: string;
   confidence: number;
   text: string;
+  created_at: string;
 };
 
 async function electronMemoryItems(): Promise<CoreMemoryItem[]> {

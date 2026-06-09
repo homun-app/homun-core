@@ -16734,11 +16734,14 @@ async fn memory_dashboard(
 struct MemoryItemView {
     reference: String,
     scope: String,
+    workspace_id: String,
+    workspace_label: String,
     memory_type: String,
     status: String,
     sensitivity: String,
     confidence: f64,
     text: String,
+    created_at: String,
 }
 
 /// Lists individual memories from the PERSONAL + active PROJECT scopes so the user
@@ -16749,9 +16752,8 @@ async fn memory_items(
 ) -> Result<Json<Vec<MemoryItemView>>, GatewayError> {
     let facade = lock_memory_facade(&state)?;
     let user = gateway_memory_user_id();
-    let active = gateway_memory_workspace_id();
     let mut out: Vec<MemoryItemView> = Vec::new();
-    let mut push_scope = |workspace: &MemoryWorkspaceId, scope: &str| {
+    let mut push_scope = |workspace: &MemoryWorkspaceId, scope: &str, label: &str| {
         if let Ok(memories) = facade.list_memories_for_ui(&user, workspace) {
             for memory in memories {
                 if matches!(memory.status, MemoryStatus::Deleted | MemoryStatus::Rejected) {
@@ -16760,18 +16762,26 @@ async fn memory_items(
                 out.push(MemoryItemView {
                     reference: memory.reference.to_string(),
                     scope: scope.to_string(),
+                    workspace_id: workspace.as_str().to_string(),
+                    workspace_label: label.to_string(),
                     memory_type: memory.memory_type,
                     status: format!("{:?}", memory.status).to_lowercase(),
                     sensitivity: format!("{:?}", memory.sensitivity).to_lowercase(),
                     confidence: memory.confidence,
                     text: memory.text,
+                    created_at: memory.created_at,
                 });
             }
         }
     };
-    push_scope(&MemoryWorkspaceId::new(PERSONAL_WORKSPACE), "personal");
-    if active.as_str() != PERSONAL_WORKSPACE {
-        push_scope(&active, "project");
+    // Whole memory across scopes, so the explorer can filter by project / build a timeline.
+    push_scope(&MemoryWorkspaceId::new(PERSONAL_WORKSPACE), "personal", "Personale");
+    push_scope(&MemoryWorkspaceId::new(THREADS_WORKSPACE), "thread", "Conversazioni");
+    for workspace in load_workspaces_file().workspaces {
+        if workspace.id == PERSONAL_WORKSPACE || workspace.id == THREADS_WORKSPACE {
+            continue;
+        }
+        push_scope(&MemoryWorkspaceId::new(workspace.id.clone()), "project", &workspace.name);
     }
     Ok(Json(out))
 }

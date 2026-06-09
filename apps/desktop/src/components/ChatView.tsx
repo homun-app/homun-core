@@ -2943,7 +2943,13 @@ function layoutMemoryGraph(
   });
 }
 
-function MemoryGraphPanel({ threadId }: { threadId: string }) {
+export function MemoryGraphPanel({
+  threadId,
+  workspace,
+}: {
+  threadId?: string;
+  workspace?: string;
+}) {
   const [graph, setGraph] = useState<MemoryGraph | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -2977,21 +2983,21 @@ function MemoryGraphPanel({ threadId }: { threadId: string }) {
   useEffect(() => {
     if (mode === "wiki" && wiki === null) {
       coreBridge
-        .memoryWiki(threadId)
+        .memoryWiki(threadId, workspace)
         .then(setWiki)
         .catch(() => setWiki([]));
     }
-  }, [mode, wiki, threadId]);
+  }, [mode, wiki, threadId, workspace]);
 
   const reload = useCallback(() => {
     setLoading(true);
     setError(null);
     coreBridge
-      .memoryGraph(threadId)
+      .memoryGraph(threadId, workspace)
       .then((g) => setGraph(g))
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [threadId]);
+  }, [threadId, workspace]);
 
   useEffect(() => {
     reload();
@@ -3133,7 +3139,7 @@ function MemoryGraphPanel({ threadId }: { threadId: string }) {
                       onClick={() => {
                         setSavingWiki(true);
                         coreBridge
-                          .saveMemoryWiki(threadId, page.path, editBody)
+                          .saveMemoryWiki({ thread: threadId, workspace }, page.path, editBody)
                           .then(() => {
                             setEditingPath(null);
                             setWiki(null);
