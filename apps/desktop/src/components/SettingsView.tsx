@@ -221,12 +221,6 @@ function AccountPane({
       <div className="set-rows">
         <div className="set-trow">
           <div>
-            <div className="tt">Immagine profilo</div>
-          </div>
-          <span className="set-profile-avatar" aria-hidden />
-        </div>
-        <div className="set-trow">
-          <div>
             <div className="tt">Nome completo</div>
           </div>
           <input
