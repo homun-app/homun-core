@@ -3540,6 +3540,23 @@ body.resizing-drawer {
   cursor: default;
 }
 
+/* Homun "ho qualcosa da dirti" badge on the nav entry. */
+.nav-unread-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--brand);
+  flex: none;
+}
+.nav-unread-dot.rail {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+}
+.rail-button {
+  position: relative;
+}
+
 /* Sidebar: IDE-style context switcher + primary new-chat + channels group. */
 .ctx-switcher-wrap {
   position: relative;

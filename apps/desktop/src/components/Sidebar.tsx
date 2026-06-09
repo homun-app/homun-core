@@ -51,6 +51,7 @@ function toChatThread(thread: CoreChatThread): ChatThread {
 interface NavigationRailProps {
   activeView: ViewId;
   activeThreadId: string;
+  homunUnread: boolean;
   onNavigate: (view: ViewId) => void;
   onOpenHomun: () => void;
   onSearch: () => void;
@@ -60,6 +61,7 @@ interface NavigationRailProps {
 export function NavigationRail({
   activeView,
   activeThreadId,
+  homunUnread,
   onNavigate,
   onOpenHomun,
   onSearch,
@@ -85,6 +87,7 @@ export function NavigationRail({
           onClick={onOpenHomun}
         >
           <Sparkles size={18} />
+          {homunUnread && <span className="nav-unread-dot rail" aria-hidden="true" />}
         </button>
         <button
           className="rail-button"
@@ -552,6 +555,7 @@ interface NavDrawerProps {
   activeView: ViewId;
   activeThreadId: string;
   chatThreads: ChatThread[];
+  homunUnread: boolean;
   onArchiveChatThread: (threadId: string) => void;
   onCreateChatThread: () => void;
   onDeleteChatThread: (threadId: string) => void;
@@ -568,6 +572,7 @@ export function NavDrawer({
   activeView,
   activeThreadId,
   chatThreads,
+  homunUnread,
   onArchiveChatThread,
   onCreateChatThread,
   onDeleteChatThread,
@@ -637,6 +642,7 @@ export function NavDrawer({
         >
           <Sparkles size={17} />
           <span>Homun</span>
+          {homunUnread && <span className="nav-unread-dot" aria-label="Nuovo da Homun" />}
         </button>
         {navItems.map((item) => {
           const Icon = item.icon;
