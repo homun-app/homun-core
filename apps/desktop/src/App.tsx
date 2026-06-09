@@ -517,6 +517,8 @@ export default function App() {
         localStorage.setItem("homun.proactive.initialized", "1");
         await coreBridge.setHomunProactive(true);
       }
+      // Homun speaks first: if the thread is empty it greets + asks (no-op otherwise).
+      void coreBridge.homunGreet();
     } catch {
       /* non-fatal */
     }

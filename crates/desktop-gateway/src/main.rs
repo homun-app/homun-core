@@ -417,6 +417,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/homun/proactive",
             get(homun_proactive_status).post(homun_proactive_set),
         )
+        .route("/api/homun/greet", post(homun_greet))
         .route("/api/chat/threads/{thread_id}", delete(delete_chat_thread))
         .route("/api/chat/threads/{thread_id}/messages", get(chat_messages))
         .route(
@@ -733,6 +734,53 @@ fn cancel_homun_checkins(state: &AppState) {
             );
         }
     }
+}
+
+// Self-contained so it works even on the headless run_agent_turn path (no chat persona).
+const HOMUN_GREETING_GOAL: &str = "Sei HOMUN, l'assistente personale dell'utente, al PRIMO \
+incontro. Presentati in 1-2 frasi calde e brevi, di' in concreto come puoi aiutarlo (ricordare le \
+sue informazioni, organizzare, cercare, dargli una mano nei compiti) e fai UNA sola domanda per \
+iniziare a conoscerlo (es. di cosa si occupa, o cosa vuole che tu ricordi). Tono naturale, niente \
+elenchi lunghi, niente tecnicismi.";
+
+/// If the Homun thread is empty, have Homun speak first (background turn → delivered via
+/// the live event). Idempotent: a no-op once the thread has any message.
+async fn homun_greet(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let is_empty = match lock_store(&state) {
+        Ok(store) => store
+            .find_or_create_homun_thread(&base_workspace_id())
+            .map(|thread| thread.message_count == 0)
+            .unwrap_or(false),
+        Err(_) => false,
+    };
+    if !is_empty {
+        return Json(serde_json::json!({ "greeted": false }));
+    }
+    let st = state.clone();
+    tokio::spawn(async move {
+        let thread_id = match lock_store(&st) {
+            Ok(store) => store
+                .find_or_create_homun_thread(&base_workspace_id())
+                .ok()
+                .map(|thread| thread.thread_id),
+            Err(_) => None,
+        };
+        let Some(thread_id) = thread_id else { return };
+        if let Some(answer) =
+            run_agent_turn(&st, &thread_id, HOMUN_GREETING_GOAL, "read_only").await
+        {
+            if let Ok(store) = lock_store(&st) {
+                let _ = store
+                    .append_assistant_message(&thread_id, &channel_chat_message("assistant", &answer));
+            }
+            publish_app_event(serde_json::json!({
+                "type": "thread.updated",
+                "thread_id": thread_id,
+                "workspace": base_workspace_id(),
+            }));
+        }
+    });
+    Json(serde_json::json!({ "greeted": true }))
 }
 
 #[derive(serde::Deserialize)]

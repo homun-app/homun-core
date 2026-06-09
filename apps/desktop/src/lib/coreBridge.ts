@@ -657,6 +657,13 @@ async function electronMemoryWiki(thread?: string, workspace?: string): Promise<
   return gatewayGetJson<MemoryWikiPage[]>(`/api/memory/wiki${scopeQuery(thread, workspace)}`);
 }
 
+async function electronHomunGreet(): Promise<void> {
+  await fetch(`${DESKTOP_GATEWAY_URL}/api/homun/greet`, {
+    method: "POST",
+    headers: gatewayHeaders(),
+  }).catch(() => undefined);
+}
+
 async function electronHomunProactiveStatus(): Promise<{ enabled: boolean }> {
   const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/homun/proactive`, {
     headers: gatewayHeaders(),
@@ -1500,6 +1507,7 @@ export const coreBridge = {
   selectChatThread: (threadId: string) => chatApi.selectChatThread(threadId),
   createChatThread: (workspace?: string) => chatApi.createChatThread(workspace),
   homunThread: () => chatApi.homunThread(),
+  homunGreet: () => electronHomunGreet(),
   homunProactiveStatus: () => electronHomunProactiveStatus(),
   setHomunProactive: (enabled: boolean, every?: string) =>
     electronSetHomunProactive(enabled, every),
