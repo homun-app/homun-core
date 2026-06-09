@@ -41,8 +41,10 @@ import {
   RotateCcw,
   Search,
   Share2,
+  CheckSquare,
   ShieldCheck,
   Sparkles,
+  Square,
   SquareTerminal,
   ThumbsDown,
   ThumbsUp,
@@ -1512,6 +1514,7 @@ export function ChatView({
                     setWorkbenchTab("artifacts");
                     setArtifactsOpen(true);
                   }}
+                  onChoose={(answer) => void submitComposerPrompt(answer, [])}
                 />
               ) : (
                 <AssistantThinkingState
@@ -2537,8 +2540,11 @@ const FS_AUTHORIZE_RE = /‹‹FS_AUTHORIZE››([\s\S]*?)‹‹\/FS_AUTHORIZE�
 const CONNECT_SUGGEST_RE = /‹‹CONNECT_SUGGEST››([\s\S]*?)‹‹\/CONNECT_SUGGEST››/;
 const COMPOSIO_DONE_RE = /‹‹COMPOSIO_DONE››([\s\S]*?)‹‹\/COMPOSIO_DONE››/;
 const COMPOSIO_RECONNECT_RE = /‹‹COMPOSIO_RECONNECT››([\s\S]*?)‹‹\/COMPOSIO_RECONNECT››/;
+// Single/multi-choice question card (Claude-Code style): the model emits the choices
+// instead of listing them in prose, and the click sends the answer back.
+const CHOICES_RE = /‹‹CHOICES››([\s\S]*?)‹‹\/CHOICES››/;
 const COMPOSIO_MARKERS_RE =
-  /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST)››/g;
+  /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|CHOICES)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|CHOICES)››/g;
 
 /** One clickable suggestion in an in-chat connect-card. */
 interface ConnectSuggestItem {
@@ -2557,6 +2563,13 @@ interface ConnectSuggestItem {
 interface ConnectSuggest {
   need: string;
   items: ConnectSuggestItem[];
+}
+
+/** A single/multi-choice question the model asks the user (Claude-Code style). */
+interface ChoicePrompt {
+  question: string;
+  multi: boolean;
+  options: string[];
 }
 
 // Tool-activity trace markers (browser / skill / sandbox / connected-tool steps).
@@ -4244,6 +4257,7 @@ function parseComposioConfirm(text: string): {
   reconnectSlug: string | null;
   fsAuthorize: { path: string; op: string } | null;
   connectSuggest: ConnectSuggest | null;
+  choices: ChoicePrompt | null;
 } {
   let action: ComposioPendingAction | null = null;
   const confirm = text.match(COMPOSIO_CONFIRM_RE);
@@ -4292,6 +4306,23 @@ function parseComposioConfirm(text: string): {
       /* malformed → just hide it */
     }
   }
+  // Single/multi-choice question card.
+  let choices: ChoicePrompt | null = null;
+  const chMatch = text.match(CHOICES_RE);
+  if (chMatch) {
+    try {
+      const parsed = JSON.parse(chMatch[1]) as ChoicePrompt;
+      if (parsed && Array.isArray(parsed.options) && parsed.options.length > 0) {
+        choices = {
+          question: typeof parsed.question === "string" ? parsed.question : "",
+          multi: parsed.multi === true,
+          options: parsed.options.filter((o) => typeof o === "string" && o.trim().length > 0),
+        };
+      }
+    } catch {
+      /* malformed → just hide it */
+    }
+  }
   const done = text.match(COMPOSIO_DONE_RE);
   const doneTool = done ? done[1].trim() : null;
   const reconnectMatch = text.match(COMPOSIO_RECONNECT_RE);
@@ -4305,6 +4336,7 @@ function parseComposioConfirm(text: string): {
     reconnectSlug,
     fsAuthorize,
     connectSuggest,
+    choices,
   };
 }
 
@@ -4324,17 +4356,17 @@ function AssistantMessageBody({
   messageId,
   threadId,
   onOpenArtifact,
+  onChoose,
 }: {
   text: string;
   streaming?: boolean;
   messageId?: string;
   threadId?: string;
   onOpenArtifact?: (artifact: ParsedArtifact) => void;
+  onChoose?: (answer: string) => void;
 }) {
-  const { visible, action, doneTool, reconnectSlug, fsAuthorize, connectSuggest } = useMemo(
-    () => parseComposioConfirm(text),
-    [text],
-  );
+  const { visible, action, doneTool, reconnectSlug, fsAuthorize, connectSuggest, choices } =
+    useMemo(() => parseComposioConfirm(text), [text]);
   const readable = useMemo(() => humanizeToolSlugs(visible), [visible]);
   return (
     <>
@@ -4366,7 +4398,74 @@ function AssistantMessageBody({
           threadId={threadId}
         />
       )}
+      {choices && !streaming && onChoose && (
+        <ChoicesCard prompt={choices} onChoose={onChoose} />
+      )}
     </>
+  );
+}
+
+/** Single/multi-choice question card. Single: each option is a button that sends the
+ *  answer on click. Multi: toggle chips + a Conferma button that sends the joined
+ *  selection. The answer becomes the next user message (like Claude Code's choices). */
+function ChoicesCard({
+  prompt,
+  onChoose,
+}: {
+  prompt: ChoicePrompt;
+  onChoose: (answer: string) => void;
+}) {
+  const [picked, setPicked] = useState<string[]>([]);
+  const [sent, setSent] = useState(false);
+  if (sent) {
+    return (
+      <div className="choices-card done">
+        <Check size={14} />
+        <span>{picked.join(", ")}</span>
+      </div>
+    );
+  }
+  const toggle = (option: string) =>
+    setPicked((cur) =>
+      cur.includes(option) ? cur.filter((o) => o !== option) : [...cur, option],
+    );
+  const send = (answer: string[]) => {
+    if (answer.length === 0) return;
+    setPicked(answer);
+    setSent(true);
+    onChoose(answer.join(", "));
+  };
+  return (
+    <div className="choices-card">
+      {prompt.question && <p className="choices-question">{prompt.question}</p>}
+      <div className="choices-options">
+        {prompt.options.map((option) => {
+          const active = picked.includes(option);
+          return (
+            <button
+              key={option}
+              type="button"
+              className={`choices-option ${active ? "active" : ""}`}
+              onClick={() => (prompt.multi ? toggle(option) : send([option]))}
+            >
+              {prompt.multi &&
+                (active ? <CheckSquare size={15} /> : <Square size={15} />)}
+              <span>{option}</span>
+            </button>
+          );
+        })}
+      </div>
+      {prompt.multi && (
+        <button
+          type="button"
+          className="choices-confirm"
+          disabled={picked.length === 0}
+          onClick={() => send(picked)}
+        >
+          Conferma{picked.length > 0 ? ` (${picked.length})` : ""}
+        </button>
+      )}
+    </div>
   );
 }
 

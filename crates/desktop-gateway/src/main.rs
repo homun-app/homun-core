@@ -5850,6 +5850,16 @@ cartella d'ambiente `$OUTPUT_DIR` (es. `... --output \"$OUTPUT_DIR/report.xlsx\"
 diventano automaticamente artifact scaricabili dall'utente.{methodology}\n{lines}"
         )
     };
+    // Inline choice prompts (Claude-Code style): when the answer is a pick among a few
+    // discrete options, the model emits a CHOICES marker that the UI renders as clickable
+    // single/multi-select buttons, instead of listing the options in prose.
+    let system = format!(
+        "{system}\n\nSCELTE: quando chiedi all'utente di scegliere tra OPZIONI discrete \
+(circa 2-6 alternative), NON elencarle a parole — emetti su una riga a sé il marker \
+`‹‹CHOICES››{{\"question\":\"la domanda\",\"multi\":false,\"options\":[\"Opzione A\",\"Opzione B\"]}}‹‹/CHOICES››` \
+(JSON valido; \"multi\":true se può sceglierne più d'una). L'utente vedrà bottoni cliccabili e la \
+sua scelta tornerà come messaggio. Usalo SOLO per scelte chiuse, non per domande aperte."
+    );
     // Authorized write destinations: when present, the model can deliver
     // generated files to user-granted folders via `save_artifact`.
     let artifact_destinations = load_artifact_destinations();
