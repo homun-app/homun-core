@@ -663,8 +663,11 @@ impl ChatStore {
             name,
             nickname,
             notes,
+            // The owner card: honor BOTH the flag and the user-facing type "self"
+            // ("Sono io" set from the UI type select) — the owner bypass must never
+            // miss because only one of the two was set.
+            is_self: is_self != 0 || contact_type == "self",
             contact_type,
-            is_self: is_self != 0,
             preferred_channel,
             avatar,
             entity_ref,
@@ -716,9 +719,10 @@ impl ChatStore {
                 .execute("update contacts set notes = ?1, updated_at = ?2 where id = ?3", params![v, now, id])?;
         }
         if let Some(v) = contact_type {
+            // Keep the owner flag in sync with the user-facing type ("Sono io").
             self.conn.execute(
-                "update contacts set contact_type = ?1, updated_at = ?2 where id = ?3",
-                params![v, now, id],
+                "update contacts set contact_type = ?1, is_self = ?2, updated_at = ?3 where id = ?4",
+                params![v, (v == "self") as i64, now, id],
             )?;
         }
         Ok(())
