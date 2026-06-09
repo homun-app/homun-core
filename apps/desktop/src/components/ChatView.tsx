@@ -529,12 +529,13 @@ export function ChatView({
       setComputerSession(mapCoreComputerSession(result.computer_session));
       setComputerCardCollapsed(true);
       setTimelineCollapsed(!result.plan);
-      // Model that produced THIS turn: the picked override's model (the composite is
-      // "<provider>::<model>"), else the default the gateway used (activeModelInfo). So
-      // the footer shows the real per-message model, not the global default for all.
-      const turnModel = model
-        ? (model.split("::").pop() ?? model)
-        : activeModelInfo?.model ?? undefined;
+      // Model that produced THIS turn. Prefer the gateway's authoritative
+      // x-effective-model (via result.effective_model) — it reflects what ACTUALLY ran
+      // (the chat role default is NOT the global activeModelInfo). Fall back to the
+      // picked override's model, then the global default.
+      const turnModel =
+        result.effective_model ??
+        (model ? model.split("::").pop() ?? model : activeModelInfo?.model ?? undefined);
       const finalAssistantMessage: ChatMessage = {
         ...withChatMetrics(
           chatMessageFromAssistantResult(result, result.assistant_message.text || streamedText),
