@@ -1361,7 +1361,12 @@ async fn backfill_embeddings(
     workspace: &MemoryWorkspaceId,
     limit: usize,
 ) {
-    let pending: Vec<(MemoryRef, String)> = {
+    // (pending = new memories needing an embedding; seen = (ref, type, vector) of
+    // memories that ALREADY have an embedding — the seed for semantic dedup below).
+    let (pending, mut seen): (
+        Vec<(MemoryRef, String, String)>,
+        Vec<(String, String, Vec<f32>)>,
+    ) = {
         let Ok(facade) = lock_memory_facade(state) else {
             return;
         };
@@ -1371,20 +1376,56 @@ async fn backfill_embeddings(
         if refs.is_empty() {
             return;
         }
-        let text_by_ref: std::collections::HashMap<String, String> = facade
+        let meta: std::collections::HashMap<String, (String, String)> = facade
             .list_memories_for_ui(user, workspace)
-            .map(|mems| mems.into_iter().map(|m| (m.reference.to_string(), m.text)).collect())
+            .map(|mems| {
+                mems.into_iter()
+                    .map(|m| (m.reference.to_string(), (m.text, m.memory_type)))
+                    .collect()
+            })
             .unwrap_or_default();
-        refs.into_iter()
-            .filter_map(|r| text_by_ref.get(&r.to_string()).cloned().map(|t| (r, t)))
-            .collect()
+        let mut seen: Vec<(String, String, Vec<f32>)> = Vec::new();
+        if let Ok(embeddings) = facade.list_embeddings(user, workspace) {
+            for (reference, vector) in embeddings {
+                let rs = reference.to_string();
+                if let Some((_text, mtype)) = meta.get(&rs) {
+                    seen.push((rs, mtype.clone(), vector));
+                }
+            }
+        }
+        let pending = refs
+            .into_iter()
+            .filter_map(|r| {
+                meta.get(&r.to_string())
+                    .map(|(text, mtype)| (r, text.clone(), mtype.clone()))
+            })
+            .collect();
+        (pending, seen)
     };
     let model = embed_model();
-    for (reference, text) in pending {
+    for (reference, text, mtype) in pending {
         if let Some(vector) = embed_text(&state.http, &text).await {
+            // Semantic dedup on WRITE: if a near-identical memory of the SAME type
+            // already exists (a paraphrase the lexical Jaccard pre-filter missed),
+            // drop this one instead of letting duplicates pile up. Soft-delete →
+            // reversible. Same-type + high cosine keeps genuinely distinct facts safe.
+            let is_dup = seen.iter().any(|(rs, ty, v)| {
+                ty == &mtype && rs != &reference.to_string() && cosine(&vector, v) >= DEDUP_COSINE
+            });
             if let Ok(facade) = lock_memory_facade(state) {
+                if is_dup {
+                    let lifecycle = MemoryLifecycleRequest {
+                        actor_id: "memory-dedup".to_string(),
+                        user_id: user.clone(),
+                        workspace_id: workspace.clone(),
+                        purpose: "semantic_dedup".to_string(),
+                    };
+                    let _ = facade.delete_memory(&lifecycle, &reference, "duplicato semantico");
+                    continue;
+                }
                 let _ = facade.upsert_embedding(&reference, user, workspace, &model, &vector);
             }
+            seen.push((reference.to_string(), mtype, vector));
         }
     }
 }
@@ -2000,6 +2041,28 @@ nella frase 'text' (es. «Modificato il preventivo di ACME perché il cliente ha
 del 10%»). Vale per QUALSIASI dominio — codice, documenti, dati — non solo tecnico. metadata.decision \
 con rationale e affects (gli oggetti toccati: file, documento, contatto…)."
         )
+    };
+    // #5 scope discipline: NAME the current project so the extractor can tell THIS
+    // project's facts from another project/tool merely mentioned in passing (which must
+    // NOT be tagged scope=project — that's how dev facts leaked into a travel project).
+    let system = {
+        let active = gateway_memory_workspace_id();
+        if active.as_str() != PERSONAL_WORKSPACE {
+            let name = load_workspaces_file()
+                .workspaces
+                .into_iter()
+                .find(|w| w.id.as_str() == active.as_str())
+                .map(|w| w.name)
+                .unwrap_or_else(|| "(senza nome)".to_string());
+            format!(
+                "{system}\n\nPROGETTO CORRENTE: «{name}». Tagga scope=\"project\" SOLO per fatti o \
+decisioni che riguardano QUESTO progetto. Se l'utente parla di un ALTRO progetto/strumento non \
+pertinente a «{name}», NON salvarlo come memoria di questo progetto: usa scope \"personal\" se è un \
+fatto durevole sull'utente, altrimenti non salvarlo."
+            )
+        } else {
+            system
+        }
     };
     // Source-suppression: tell the extractor which decisions are ALREADY stored so it
     // doesn't re-emit them every turn (complements dedup — fewer near-duplicates born).
