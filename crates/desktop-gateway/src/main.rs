@@ -682,8 +682,10 @@ async fn homun_thread(
 // V2 Homun: a recurring proactive check-in delivered INTO the Homun thread (the persona
 // applies there). The goal doubles as the marker to find/cancel it.
 const HOMUN_CHECKIN_GOAL: &str = "Check-in proattivo: rivedi brevemente cosa è cambiato di \
-recente e cosa sai dell'utente, poi — in modo conciso e caldo — dì cosa hai notato e proponi 1-2 \
-cose utili. Se non c'è nulla di nuovo, un saluto breve. NON inventare attività non avvenute.";
+recente e cosa sai dell'utente (memoria personale), poi — in modo conciso e caldo — dì cosa hai \
+notato e proponi 1-2 cose utili OPPURE uno spunto legato ai suoi interessi (qualcosa da esplorare, \
+leggere o provare) per stimolarlo. Sono SOLO proposte/domande: non compiere azioni esterne. Se non \
+c'è nulla di nuovo, un saluto breve. NON inventare fatti o attività non avvenute.";
 
 fn homun_checkin_is_active(state: &AppState) -> bool {
     let Ok(store) = lock_task_store(state) else {
