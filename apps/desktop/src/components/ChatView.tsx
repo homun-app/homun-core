@@ -81,6 +81,7 @@ import {
   mapCoreComputerSession,
 } from "../lib/localComputerViewModel";
 import { fileLocalPathFromBridge } from "../lib/gatewayConfig";
+import { connectComposioToolkit } from "../lib/composioConnect";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { RichMessage } from "./RichMessage";
 import { CodeView, DiffView, diffStats } from "./CodeView";
@@ -4429,20 +4430,21 @@ function ConnectSuggestRow({
   const linkComposio = async () => {
     if (!item.slug) return;
     setStatus("running");
-    setNote(null);
-    try {
-      const result = await coreBridge.composioLink(item.slug);
-      if (result.redirect_url) {
-        window.open(result.redirect_url, "_blank", "noopener,noreferrer");
-        setNote(`Autorizza ${item.name} nel browser, poi riprova la richiesta.`);
-      } else {
-        setNote("Collegamento avviato. Riprova la richiesta tra poco.");
-      }
-      setStatus("opened");
+    setNote(`Apro l'autorizzazione di ${item.name}…`);
+    const ok = await connectComposioToolkit(item.slug, {
+      onStatus: (s) => {
+        if (s === "connecting") {
+          setNote(`Autorizza ${item.name} nel browser: rilevo automaticamente quando è fatto…`);
+        }
+      },
+    });
+    if (ok) {
+      setStatus("done");
+      setNote(`${item.name} connesso.`);
       await markConnected();
-    } catch (error) {
+    } else {
       setStatus("error");
-      setNote((error as Error).message);
+      setNote("Connessione non completata. Riprova, o collega da Impostazioni → Connettori.");
     }
   };
 
@@ -4670,29 +4672,30 @@ function FsAuthorizeCard({
 }
 
 function ComposioReconnectCard({ slug }: { slug: string }) {
-  const [status, setStatus] = useState<"idle" | "running" | "opened" | "error">("idle");
+  const [status, setStatus] = useState<"idle" | "running" | "done" | "error">("idle");
   const [note, setNote] = useState<string | null>(null);
   const name = slug.charAt(0).toUpperCase() + slug.slice(1);
 
   const reconnect = async () => {
     setStatus("running");
-    setNote(null);
-    try {
-      const result = await coreBridge.composioLink(slug);
-      if (result.redirect_url) {
-        window.open(result.redirect_url, "_blank", "noopener,noreferrer");
-        setNote(`Autorizza ${name} nel browser, poi ripeti la richiesta.`);
-      } else {
-        setNote("Riconnessione avviata. Ripeti la richiesta tra poco.");
-      }
-      setStatus("opened");
-    } catch (error) {
+    setNote(`Apro la riconnessione di ${name}…`);
+    const ok = await connectComposioToolkit(slug, {
+      onStatus: (s) => {
+        if (s === "connecting") {
+          setNote(`Autorizza ${name} nel browser: rilevo automaticamente quando è fatto…`);
+        }
+      },
+    });
+    if (ok) {
+      setStatus("done");
+      setNote(`${name} ricollegato.`);
+    } else {
       setStatus("error");
-      setNote((error as Error).message);
+      setNote("Riconnessione non completata. Riprova, o usa Impostazioni → Connettori.");
     }
   };
 
-  if (status === "opened") {
+  if (status === "done") {
     return (
       <div className="cmp-confirm done">
         <ShieldCheck size={15} />
@@ -4717,7 +4720,9 @@ function ComposioReconnectCard({ slug }: { slug: string }) {
           {status === "running" ? "Apro…" : `Riconnetti ${name}`}
         </button>
       </div>
-      {status === "error" && note && <p className="cmp-confirm-note error">{note}</p>}
+      {note && (status === "running" || status === "error") && (
+        <p className={`cmp-confirm-note ${status === "error" ? "error" : ""}`}>{note}</p>
+      )}
     </div>
   );
 }
