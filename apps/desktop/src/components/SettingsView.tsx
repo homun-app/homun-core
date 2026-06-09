@@ -59,6 +59,7 @@ import {
 } from "../lib/coreBridge";
 import { useSetting } from "../lib/settingsStore";
 import { ACCENT_PRESETS, DEFAULT_ACCENT, loadAccent, saveAccent } from "../lib/accent";
+import { copyText } from "../lib/clipboard";
 import type {
   ConnectionItem,
   SettingsSectionId,
@@ -151,7 +152,7 @@ function CopyButton({ value, label = "Copia" }: { value: string; label?: string 
       className="set-btn"
       type="button"
       onClick={async () => {
-        await navigator.clipboard.writeText(value);
+        if (!(await copyText(value))) return;
         setCopied(true);
         window.setTimeout(() => setCopied(false), 1400);
       }}

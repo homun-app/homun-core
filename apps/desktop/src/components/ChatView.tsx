@@ -81,6 +81,7 @@ import {
   mapCoreComputerSession,
 } from "../lib/localComputerViewModel";
 import { fileLocalPathFromBridge } from "../lib/gatewayConfig";
+import { copyText } from "../lib/clipboard";
 import { connectComposioToolkit } from "../lib/composioConnect";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { RichMessage } from "./RichMessage";
@@ -742,7 +743,8 @@ export function ChatView({
 
   async function copyMessageText(message: ChatMessage) {
     if (!message.text) return;
-    await navigator.clipboard.writeText(message.text);
+    const ok = await copyText(message.text);
+    if (!ok) return;
     setCopiedMessageId(message.id);
     window.setTimeout(() => setCopiedMessageId(null), 1_400);
   }
