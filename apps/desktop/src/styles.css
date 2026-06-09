@@ -3320,6 +3320,192 @@ body.resizing-drawer {
 }
 /* Clean, document-style PDF preview: pages as white sheets stacked top-to-bottom,
    fitting the panel width — no dark native-viewer chrome. */
+/* Memoria (top-level explorer): filtri + timeline + lista + grafo/wiki. */
+.memview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.memview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+  flex-wrap: wrap;
+}
+.memview-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 17px;
+  font-weight: 600;
+  color: #6366f1;
+}
+.memview-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.memview-filters select {
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+  padding: 5px 8px;
+  font-size: 13px;
+  background: var(--surface, #fff);
+}
+.memview-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+  padding: 4px 8px;
+  color: var(--muted, #64748b);
+}
+.memview-search input {
+  border: none;
+  outline: none;
+  font-size: 13px;
+  background: transparent;
+  min-width: 180px;
+}
+.memview-timeline {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 120px;
+  padding: 10px 18px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+}
+.memview-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  min-width: 46px;
+  height: 100%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 8px;
+  padding: 2px;
+}
+.memview-bar:hover {
+  background: var(--surface-hover, #f1f5f9);
+}
+.memview-bar.active {
+  background: rgba(99, 102, 241, 0.12);
+}
+.memview-bar-count {
+  font-size: 11px;
+  color: var(--muted, #64748b);
+}
+.memview-bar-fill {
+  width: 22px;
+  min-height: 6px;
+  background: linear-gradient(180deg, #6366f1, #818cf8);
+  border-radius: 4px;
+}
+.memview-bar.active .memview-bar-fill {
+  background: linear-gradient(180deg, #4f46e5, #6366f1);
+}
+.memview-bar-label {
+  font-size: 10px;
+  color: var(--muted, #94a3b8);
+  white-space: nowrap;
+}
+.memview-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.memview-list {
+  width: 42%;
+  min-width: 280px;
+  overflow-y: auto;
+  border-right: 1px solid var(--border, #e2e8f0);
+  padding: 8px 10px;
+}
+.memview-list-head {
+  font-size: 12px;
+  color: var(--muted, #64748b);
+  padding: 4px 6px 8px;
+}
+.memview-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 8px;
+}
+.memview-item:hover {
+  background: var(--surface-hover, #f8fafc);
+}
+.memview-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-top: 5px;
+  flex-shrink: 0;
+}
+.memview-item-body {
+  flex: 1;
+  min-width: 0;
+}
+.memview-item-text {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text, #1e293b);
+}
+.memview-item-meta {
+  font-size: 11px;
+  color: var(--muted, #94a3b8);
+  margin-top: 2px;
+}
+.memview-del {
+  border: none;
+  background: transparent;
+  color: #cbd5e1;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+.memview-del:hover {
+  color: #dc2626;
+  background: #fef2f2;
+}
+.memview-graph {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+.memview-graph > * {
+  flex: 1;
+  min-width: 0;
+}
+.memview-graph-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+  color: var(--muted, #64748b);
+  padding: 32px;
+}
+.memview-empty {
+  color: var(--muted, #94a3b8);
+  font-size: 13px;
+  padding: 16px;
+}
+
 /* Memoria tab: Grafo/Wiki toggle + wiki markdown view. */
 .memory-graph-modes {
   display: flex;
