@@ -5241,19 +5241,17 @@ async fn stream_chat_via_openai(
     mut model: String,
     mut api_key: Option<String>,
 ) -> Result<Response, GatewayError> {
-    // Scope memory to THIS conversation's project. The profile injection (M1),
-    // recall_memory, per-file recall AND the extractor all read the ACTIVE workspace;
-    // sync it from the thread so a chat opened in a project recalls/stores under THAT
-    // project — not a stale global workspace (the cause of "non ho la decisione in
-    // memoria" in a new project chat).
+    // Scope MEMORY to THIS conversation's project (profile injection, recall, per-file
+    // recall, extractor). Uses a dedicated memory scope — NOT the global active
+    // workspace — so Composio's entity and the user's selected workspace are untouched.
     if let Some(tid) = request.thread_id.as_deref() {
         if let Ok(store) = lock_store(state) {
             if let Ok(ws) = store.workspace_for_thread(tid) {
-                if !ws.trim().is_empty() {
-                    set_active_workspace(&ws);
-                }
+                set_memory_workspace(&ws);
             }
         }
+    } else {
+        set_memory_workspace("");
     }
     let prompt = build_chat_runtime_prompt(&BuildPromptRequest {
         prompt: request.prompt.clone(),
@@ -17273,10 +17271,11 @@ async fn memory_wiki_save(
             .map_err(|e| GatewayError::memory(e.to_string()))?;
     }
     mark_wiki_edited(&ws, &req.path);
-    // Re-ingest: scope the active workspace to this page, then extract decisions from
+    // Re-ingest: scope the MEMORY workspace to this page, then extract decisions from
     // the edited markdown into the structured store (non-empty `actions` bypasses the
-    // salience gate). Background — the save returns immediately.
-    set_active_workspace(ws.as_str());
+    // salience gate). Background — the save returns immediately. (Memory scope only —
+    // doesn't touch the global active workspace / Composio.)
+    set_memory_workspace(ws.as_str());
     let st = state.clone();
     let body = req.body.clone();
     tokio::spawn(async move {
@@ -19431,6 +19430,17 @@ fn set_active_workspace(id: &str) {
     }
 }
 
+// Per-turn MEMORY scope, set from the chat thread's project. Kept SEPARATE from
+// ACTIVE_WORKSPACE so scoping memory to a conversation's project does NOT hijack the
+// user's selected workspace — which other subsystems (Composio entity, etc.) rely on.
+static MEMORY_WORKSPACE: std::sync::RwLock<Option<String>> = std::sync::RwLock::new(None);
+
+fn set_memory_workspace(id: &str) {
+    if let Ok(mut guard) = MEMORY_WORKSPACE.write() {
+        *guard = if id.trim().is_empty() { None } else { Some(id.trim().to_string()) };
+    }
+}
+
 fn gateway_workspace_id() -> WorkspaceId {
     WorkspaceId::new(active_workspace_id())
 }
@@ -19455,6 +19465,13 @@ fn gateway_memory_user_id() -> MemoryUserId {
 }
 
 fn gateway_memory_workspace_id() -> MemoryWorkspaceId {
+    // Prefer the per-turn memory scope (the conversation's project) if set, else the
+    // user's selected workspace.
+    if let Ok(guard) = MEMORY_WORKSPACE.read() {
+        if let Some(id) = guard.as_ref().filter(|id| !id.trim().is_empty()) {
+            return MemoryWorkspaceId::new(id.clone());
+        }
+    }
     MemoryWorkspaceId::new(active_workspace_id())
 }
 
