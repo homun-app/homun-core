@@ -7081,9 +7081,9 @@ body.resizing-drawer {
   margin-bottom: var(--s6);
 }
 .set-profile-avatar {
-  width: 56px;
-  height: 56px;
-  border-radius: 14px;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
   background: linear-gradient(135deg, #cfe6ff, #bfe9cf);
   flex-shrink: 0;
 }
