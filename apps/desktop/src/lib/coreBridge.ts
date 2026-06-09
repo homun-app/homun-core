@@ -1561,7 +1561,13 @@ export const coreBridge = {
     contact_type?: string;
     notes?: string;
     soul_md?: string;
+    tone_of_voice?: string;
+    persona_instructions?: string;
+    response_mode?: string;
   }) => electronUpdateContact(update),
+  contactPerimeter: (reference: string) => electronContactPerimeter(reference),
+  setContactPerimeter: (reference: string, perimeter: CoreContactPerimeter) =>
+    electronSetContactPerimeter(reference, perimeter),
   mergeContacts: (from: string, into: string) => electronMergeContacts(from, into),
   createContact: (input: {
     name: string;
@@ -2097,6 +2103,20 @@ export type CoreContact = {
   notes: string;
   soul_md: string;
   memory_count: number;
+  /** '' = inherit channel/global default; automatic | draft | silent. */
+  response_mode: string;
+  tone_of_voice: string;
+  persona_instructions: string;
+};
+
+/** Per-contact isolation perimeter (what a channel reply may see/use). */
+export type CoreContactPerimeter = {
+  memory_scope: string;
+  knowledge_folders: string[];
+  tools_allowed: string[];
+  tools_denied: string[];
+  can_see_contacts: boolean;
+  can_see_calendar: boolean;
 };
 
 async function electronContacts(): Promise<CoreContact[]> {
@@ -2131,6 +2151,9 @@ async function electronUpdateContact(update: {
   contact_type?: string;
   notes?: string;
   soul_md?: string;
+  tone_of_voice?: string;
+  persona_instructions?: string;
+  response_mode?: string;
 }): Promise<CoreContact> {
   const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/memory/contacts/update`, {
     method: "POST",
@@ -2173,6 +2196,34 @@ async function electronCreateContact(input: {
     throw new Error(detail || `contact create HTTP ${response.status}`);
   }
   return response.json() as Promise<CoreContact>;
+}
+
+async function electronContactPerimeter(reference: string): Promise<CoreContactPerimeter> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/memory/contacts/perimeter`, {
+    method: "POST",
+    headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ reference }),
+  });
+  if (!response.ok) {
+    throw new Error(`contact perimeter HTTP ${response.status}`);
+  }
+  return response.json() as Promise<CoreContactPerimeter>;
+}
+
+async function electronSetContactPerimeter(
+  reference: string,
+  perimeter: CoreContactPerimeter,
+): Promise<CoreContactPerimeter> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/memory/contacts/perimeter/update`, {
+    method: "POST",
+    headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ reference, ...perimeter }),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(detail || `contact perimeter update HTTP ${response.status}`);
+  }
+  return response.json() as Promise<CoreContactPerimeter>;
 }
 
 async function electronDeleteContact(reference: string): Promise<void> {

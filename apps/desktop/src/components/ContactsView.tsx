@@ -1,7 +1,12 @@
 import { Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { coreBridge, type CoreContact, type CoreContactProfile } from "../lib/coreBridge";
+import {
+  coreBridge,
+  type CoreContact,
+  type CoreContactPerimeter,
+  type CoreContactProfile,
+} from "../lib/coreBridge";
 
 /* First-class Contacts manager (M7): a searchable master-detail of every person
    the assistant knows, with type/notes, per-channel handles, conversation memory,
@@ -127,7 +132,14 @@ export function ContactsView() {
     }
   };
 
-  const patch = async (update: { name?: string; contact_type?: string; notes?: string }) => {
+  const patch = async (update: {
+    name?: string;
+    contact_type?: string;
+    notes?: string;
+    tone_of_voice?: string;
+    persona_instructions?: string;
+    response_mode?: string;
+  }) => {
     if (!open) return;
     setBusy(true);
     try {
@@ -320,7 +332,14 @@ function ContactCard({
   contact: CoreContact;
   contacts: CoreContact[];
   busy: boolean;
-  onPatch: (u: { name?: string; contact_type?: string; notes?: string }) => void;
+  onPatch: (u: {
+    name?: string;
+    contact_type?: string;
+    notes?: string;
+    tone_of_voice?: string;
+    persona_instructions?: string;
+    response_mode?: string;
+  }) => void;
   onMerge: (target: CoreContact) => void;
   onDelete: () => void;
 }) {
@@ -331,10 +350,22 @@ function ContactCard({
   // side; we only trigger the (slow) extraction on explicit refresh.
   const [profile, setProfile] = useState<CoreContactProfile | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  // Isolation perimeter: what the assistant may see/use when replying to THIS
+  // contact on a channel. Defaults are the safe deny-by-default profile.
+  const [perimeter, setPerimeter] = useState<CoreContactPerimeter | null>(null);
   useEffect(() => {
     setProfile(null);
+    setPerimeter(null);
     void coreBridge.contactProfile(contact.reference).then(setProfile);
+    void coreBridge
+      .contactPerimeter(contact.reference)
+      .then(setPerimeter)
+      .catch(() => setPerimeter(null));
   }, [contact.reference]);
+  const savePerimeter = (next: CoreContactPerimeter) => {
+    setPerimeter(next); // optimistic
+    void coreBridge.setContactPerimeter(contact.reference, next).then(setPerimeter);
+  };
   const refreshProfile = async () => {
     setRefreshing(true);
     try {
@@ -424,6 +455,113 @@ function ContactCard({
           </div>
         ) : (
           <p className="set-hint">Nessun canale collegato.</p>
+        )}
+      </div>
+
+      <div className="contacts-section">
+        <div className="rk">Persona e risposta</div>
+        <div className="contacts-fields">
+          <label className="rk">
+            Modalità di risposta sui canali
+            <select
+              className="set-input"
+              value={contact.response_mode}
+              disabled={busy}
+              onChange={(e) => onPatch({ response_mode: e.target.value })}
+            >
+              <option value="">Eredita (impostazioni canali)</option>
+              <option value="automatic">Automatica — rispondi subito</option>
+              <option value="draft">Bozza — registra senza rispondere</option>
+              <option value="silent">Silenziosa — ignora i messaggi</option>
+            </select>
+          </label>
+          <label className="rk">
+            Tono di voce
+            <input
+              className="set-input"
+              defaultValue={contact.tone_of_voice}
+              placeholder="es. formale, amichevole, scherzoso…"
+              disabled={busy}
+              onBlur={(e) => {
+                if (e.target.value !== contact.tone_of_voice)
+                  onPatch({ tone_of_voice: e.target.value });
+              }}
+            />
+          </label>
+          <label className="rk" style={{ gridColumn: "1 / -1" }}>
+            Istruzioni persona
+            <input
+              className="set-input"
+              defaultValue={contact.persona_instructions}
+              placeholder="es. è un cliente: professionale, dagli del lei, niente dettagli privati"
+              disabled={busy}
+              onBlur={(e) => {
+                if (e.target.value !== contact.persona_instructions)
+                  onPatch({ persona_instructions: e.target.value });
+              }}
+            />
+          </label>
+        </div>
+      </div>
+
+      <div className="contacts-section">
+        <div className="rk">Perimetro (cosa può vedere l'assistente)</div>
+        {perimeter === null ? (
+          <p className="set-hint">Carico…</p>
+        ) : (
+          <div className="contacts-fields">
+            <label className="rk">
+              Memoria utilizzabile
+              <select
+                className="set-input"
+                value={perimeter.memory_scope}
+                disabled={busy}
+                onChange={(e) => savePerimeter({ ...perimeter, memory_scope: e.target.value })}
+              >
+                <option value="contact_only">Solo la storia con questo contatto</option>
+                <option value="personal">Anche la memoria personale (fidato)</option>
+              </select>
+            </label>
+            <label className="rk">
+              Strumenti vietati (separati da virgola)
+              <input
+                className="set-input"
+                defaultValue={perimeter.tools_denied.join(", ")}
+                placeholder="es. browser, recall_memory"
+                disabled={busy}
+                onBlur={(e) => {
+                  const list = e.target.value
+                    .split(",")
+                    .map((s) => s.trim())
+                    .filter(Boolean);
+                  if (list.join("|") !== perimeter.tools_denied.join("|"))
+                    savePerimeter({ ...perimeter, tools_denied: list });
+                }}
+              />
+            </label>
+            <label className="rk contacts-check">
+              <input
+                type="checkbox"
+                checked={perimeter.can_see_contacts}
+                disabled={busy}
+                onChange={(e) =>
+                  savePerimeter({ ...perimeter, can_see_contacts: e.target.checked })
+                }
+              />
+              Può sentir nominare altri contatti
+            </label>
+            <label className="rk contacts-check">
+              <input
+                type="checkbox"
+                checked={perimeter.can_see_calendar}
+                disabled={busy}
+                onChange={(e) =>
+                  savePerimeter({ ...perimeter, can_see_calendar: e.target.checked })
+                }
+              />
+              Può conoscere impegni e calendario
+            </label>
+          </div>
         )}
       </div>
 
