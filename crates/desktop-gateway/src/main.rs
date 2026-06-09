@@ -14976,10 +14976,17 @@ fn current_skills_response() -> SkillsResponse {
     let dir = skills_dir().ok();
     let disabled = load_skills_disabled();
     let origins = load_skills_origins();
-    let skills = dir
+    let mut skills = dir
         .as_deref()
         .map(|d| skills::scan_skills(d, &disabled, &origins))
         .unwrap_or_default();
+    // Tag the methodology skills so Settings can group them under "HomunCoder".
+    let homuncoder = homuncoder_skill_ids();
+    for skill in &mut skills {
+        if homuncoder.contains(&skill.id) {
+            skill.source = "homuncoder".to_string();
+        }
+    }
     SkillsResponse {
         skills,
         dir: dir.map(|d| d.to_string_lossy().to_string()).unwrap_or_default(),
