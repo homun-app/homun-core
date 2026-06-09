@@ -2306,11 +2306,14 @@ async function submitBrowserRuntimeChatPromptStream(
       metadata: "Modello locale",
       metrics: {
         prompt_tokens: metrics.prompt_tokens ?? 0,
-        generation_tokens: metrics.generation_tokens ?? 0,
+        // `||` not `??`: the cloud stream sends 0 (not null), so persist the real
+        // wall-clock / a text-length token estimate instead of a useless 0.
+        generation_tokens:
+          metrics.generation_tokens || Math.max(1, Math.round(assistantText.length / 4)),
         prompt_tps: metrics.prompt_tps ?? 0,
         generation_tps: metrics.generation_tps ?? 0,
         peak_memory_gb: metrics.peak_memory_gb ?? 0,
-        elapsed_seconds: metrics.elapsed_seconds ?? totalElapsedSeconds,
+        elapsed_seconds: metrics.elapsed_seconds || totalElapsedSeconds,
         max_tokens: maxTokens,
         prompt_build_seconds: promptBuildSeconds,
         time_to_first_token_seconds: firstTokenSeconds ?? null,

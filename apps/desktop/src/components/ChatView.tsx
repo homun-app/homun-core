@@ -1649,15 +1649,26 @@ export function ChatView({
                 <span>{formatMessageTimestamp(displayMessage.timestamp)}</span>
                 {displayMessage.role === "assistant" ? (
                   <>
-                    {/* Model label intentionally hidden: the override is verified to
-                        work (x-effective-model), so showing it added noise/confusion.
-                        The effective model is still tracked on the message if needed. */}
-                    {displayMessage.metrics && displayMessage.metrics.elapsedSeconds > 0 && (
-                      <span>
-                        {formatChatDuration(displayMessage.metrics.elapsedSeconds)} ·{" "}
-                        {displayMessage.metrics.generationTokens} token
-                      </span>
-                    )}
+                    {/* Model label intentionally hidden (override verified via
+                        x-effective-model). Duration+tokens are robust: the cloud path
+                        leaves elapsed_seconds=0 but total_elapsed_seconds is the real
+                        wall-clock; tokens are estimated from text when not provided. */}
+                    {(() => {
+                      const m = displayMessage.metrics;
+                      if (!m) return null;
+                      const secs =
+                        m.elapsedSeconds > 0 ? m.elapsedSeconds : m.totalElapsedSeconds ?? 0;
+                      if (secs <= 0) return null;
+                      const tokens =
+                        m.generationTokens > 0
+                          ? m.generationTokens
+                          : Math.max(1, Math.round((displayMessage.text?.length ?? 0) / 4));
+                      return (
+                        <span>
+                          {formatChatDuration(secs)} · {tokens} token
+                        </span>
+                      );
+                    })()}
                   </>
                 ) : (
                   visibleMessageMetadata(displayMessage.metadata) && (
