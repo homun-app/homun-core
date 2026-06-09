@@ -22,8 +22,7 @@ export type SettingsSectionId =
   | "channels"
   | "connections"
   | "skills"
-  | "computer"
-  | "audit";
+  | "computer";
 
 export type TaskStatus =
   | "queued"

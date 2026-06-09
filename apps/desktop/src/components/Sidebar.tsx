@@ -891,11 +891,7 @@ export function SettingsDrawer({
       </nav>
 
       <span className="set-nav-spacer" />
-      <button
-        className={`set-nav-item ${activeSection === "audit" ? "" : ""}`}
-        type="button"
-        onClick={onBack}
-      >
+      <button className="set-nav-item" type="button" onClick={onBack}>
         <Info size={16} />
         <span>Informazioni</span>
       </button>
