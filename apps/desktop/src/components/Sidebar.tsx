@@ -415,7 +415,7 @@ function ProjectsNav({
         <span>Nuova chat</span>
       </button>
 
-      <section className="drawer-section">
+      <section className="drawer-section drawer-chats">
         {contextChats.length === 0 && <p className="drawer-empty">Nessuna chat ancora.</p>}
         {contextChats.map((thread) => (
           <ThreadLink

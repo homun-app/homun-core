@@ -311,14 +311,13 @@ body.resizing-drawer {
   height: calc(100vh - var(--window-drag-height));
   min-height: 0;
   border-right: 1px solid var(--line);
-  background: #f7f7f8;
-  display: grid;
-  /* header · workspace · new-task · quick-nav · scroll(flex) · footer.
-     The scroll region is the only flexible row so the quick-nav keeps its
-     intrinsic height instead of collapsing to 0 and overlapping the list. */
-  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
-  gap: 12px;
-  padding: 16px 12px;
+  background: var(--panel);
+  /* Flex column: header / nav / switcher / new-chat are fixed; the chat list is the
+     only scroller; channels + footer stay pinned at the bottom. */
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px 10px;
   overflow: hidden;
 }
 
@@ -563,17 +562,53 @@ body.resizing-drawer {
   background: var(--blue-soft);
 }
 
+/* Flexible middle region: a column whose ONLY scroller is .drawer-chats. overflow is
+   visible so the switcher dropdown can overlay the list without being clipped. */
 .drawer-scroll {
+  flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: visible;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 8px;
   padding-right: 2px;
+}
+.drawer-chats {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Pinned footer: notifications + settings, anchored at the bottom of the sidebar. */
+.drawer-footer {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  margin-top: 2px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+.drawer-footer-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+.drawer-footer-action:hover {
+  background: var(--surface-hover);
+  color: var(--text);
 }
 
 .drawer-section-title {
-  justify-content: space-between;
+  justify-content: flex-start;
+  gap: 6px;
   min-height: 30px;
   width: 100%;
   border-radius: var(--radius);
@@ -582,6 +617,11 @@ body.resizing-drawer {
   background: transparent;
   font-size: 13px;
   text-align: left;
+}
+/* Trailing chevron (e.g. "Archiviati") pushed right; the channels count uses its own
+   margin-left:auto, and its leading chevron+icon stay tight together. */
+.drawer-section-title > svg:last-child {
+  margin-left: auto;
 }
 
 .drawer-section-title:hover {
@@ -3353,7 +3393,6 @@ body.resizing-drawer {
 /* Sidebar: IDE-style context switcher + primary new-chat + channels group. */
 .ctx-switcher-wrap {
   position: relative;
-  padding: 0 var(--s3);
 }
 .ctx-switcher {
   display: flex;
@@ -3388,8 +3427,8 @@ body.resizing-drawer {
   position: absolute;
   z-index: 41;
   top: calc(100% + 4px);
-  left: var(--s3);
-  right: var(--s3);
+  left: 0;
+  right: 0;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius-card);
@@ -3506,7 +3545,7 @@ body.resizing-drawer {
   align-items: center;
   justify-content: center;
   gap: var(--s2);
-  margin: var(--s3) var(--s3) var(--s2);
+  margin: var(--s1) 0 var(--s2);
   padding: 9px 12px;
   border: none;
   border-radius: var(--radius-control);
