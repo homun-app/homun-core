@@ -1440,17 +1440,11 @@ export function ChatView({
               key={displayMessage.id}
             >
             <article className={`message ${displayMessage.role}`}>
-              {displayMessage.role !== "user" && (
-                <header
-                  className={`assistant-label ${displayMessage.role === "system" ? "system-label" : ""}`}
-                >
-                  {displayMessage.role === "system" ? (
-                    <Clock3 size={15} />
-                  ) : (
-                    <Sparkles size={17} />
-                  )}
-                  <strong>{displayMessage.role === "system" ? "stato" : "assistant"}</strong>
-                  <span>{displayMessage.role === "system" ? "Sistema" : "Assistente"}</span>
+              {displayMessage.role === "system" && (
+                <header className="assistant-label system-label">
+                  <Clock3 size={15} />
+                  <strong>stato</strong>
+                  <span>Sistema</span>
                 </header>
               )}
               {isStreamingMessage ? (
@@ -4152,7 +4146,9 @@ function MessageActivity({ text, live = false }: { text: string; live?: boolean 
       {open && (
         <ol className="msg-activity-steps">
           {steps.map((step, index) => (
-            <li key={`${index}-${step.slice(0, 24)}`}>{step}</li>
+            <li key={`${index}-${step.slice(0, 24)}`}>
+              {step.replace(/^(?:\p{Extended_Pictographic}|️|‍|\s)+/u, "")}
+            </li>
           ))}
         </ol>
       )}
