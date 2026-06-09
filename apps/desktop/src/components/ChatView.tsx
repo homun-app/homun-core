@@ -3153,6 +3153,10 @@ export function MemoryGraphPanel({
   const reload = useCallback(() => {
     setLoading(true);
     setError(null);
+    // Reset the wiki too so it RE-loads for the new scope: its load is guarded by
+    // `wiki === null`, so without this, switching workspace kept the stale (often
+    // empty) wiki — the "0 pagine" bug even when the project has decisions.
+    setWiki(null);
     coreBridge
       .memoryGraph(threadId, workspace)
       .then((g) => setGraph(g))
