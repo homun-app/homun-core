@@ -40,6 +40,7 @@ import {
   type ArtifactsUsage,
   type ComposioToolkit,
   type ContainedComputerLive,
+  type CoreAuditEntry,
   type CoreCapabilitySnapshot,
   type CoreChannelSettings,
   type CoreMemoryDashboard,
@@ -3131,22 +3132,68 @@ function ArtifactsCard() {
 
 /* --------------------------------------------------------------------- audit */
 
+const AUDIT_DECISIONS: Record<string, { label: string; cls: string }> = {
+  allow: { label: "Consentito", cls: "green" },
+  redact: { label: "Oscurato", cls: "muted" },
+  deny: { label: "Negato", cls: "red" },
+};
+
+/** SQLite `current_timestamp` is "YYYY-MM-DD HH:MM:SS" in UTC. */
+function formatAuditTime(raw: string): string {
+  const iso = raw.includes("T") ? raw : `${raw.replace(" ", "T")}Z`;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? raw : d.toLocaleString();
+}
+
 function AuditPane() {
   const [memory, setMemory] = useState<CoreMemoryDashboard | null>(null);
+  const [audit, setAudit] = useState<CoreAuditEntry[] | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = async () => {
+    try {
+      const [dash, entries] = await Promise.all([
+        coreBridge.memoryDashboard(),
+        coreBridge.memoryAudit(200),
+      ]);
+      setMemory(dash);
+      setAudit(entries);
+    } catch {
+      setAudit([]);
+    }
+  };
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const value = await coreBridge.memoryDashboard();
-        if (!cancelled) setMemory(value);
-      } catch {
-        /* leave null */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    void load();
   }, []);
+
+  const exportData = async () => {
+    setBusy(true);
+    try {
+      const data = await coreBridge.exportLocalData();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `homun-export-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clearAudit = async () => {
+    if (!window.confirm("Svuotare il registro accessi? Non tocca memoria e task.")) return;
+    setBusy(true);
+    try {
+      await coreBridge.clearMemoryAudit();
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const stats: Array<{ k: string; v: number | undefined }> = [
     { k: "Memorie", v: memory?.total_memories },
@@ -3188,32 +3235,72 @@ function AuditPane() {
         )}
       </div>
 
-      <div className="set-section-label">Audit</div>
+      <div className="set-section-label">Registro accessi</div>
+      <p className="set-hint" style={{ marginTop: 0 }}>
+        Ogni volta che l'assistente legge o usa la tua memoria, la decisione (consentito,
+        oscurato, negato) e il motivo vengono registrati qui — solo sul tuo dispositivo.
+      </p>
       <div className="set-rows">
-        <div className="set-row">
-          <div>
-            <div className="rk">Azioni registrate</div>
-            <div className="rv">
-              {memory ? `${memory.access_audit_count} accessi tracciati sul dispositivo` : "—"}
+        {audit === null ? (
+          <div className="set-trow">
+            <div>
+              <div className="td">Carico…</div>
             </div>
           </div>
-        </div>
-        <div className="set-row">
-          <div>
-            <div className="rk">Esportazione</div>
-            <div className="rv">Scarica i tuoi dati locali (memoria, task, audit).</div>
+        ) : audit.length === 0 ? (
+          <div className="set-trow">
+            <div>
+              <div className="td">Nessun accesso registrato finora.</div>
+            </div>
           </div>
-          <button className="set-btn" type="button" disabled title="Disponibile a breve">
+        ) : (
+          audit.map((entry) => {
+            const dec =
+              AUDIT_DECISIONS[entry.decision] ?? { label: entry.decision, cls: "muted" };
+            return (
+              <div className="set-trow" key={entry.reference}>
+                <div>
+                  <div className="tt">{entry.purpose || "accesso memoria"}</div>
+                  <div className="td">
+                    {entry.actor_id || "assistente"} · {formatAuditTime(entry.created_at)}
+                    {entry.reasons.length > 0 ? ` · ${entry.reasons.join(", ")}` : ""}
+                  </div>
+                </div>
+                <span className={`set-badge ${dec.cls}`}>{dec.label}</span>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      <div className="set-section-label">Dati</div>
+      <div className="set-rows">
+        <div className="set-trow">
+          <div>
+            <div className="tt">Esporta dati locali</div>
+            <div className="td">Scarica memoria e registro accessi in un file JSON.</div>
+          </div>
+          <button
+            className="set-btn"
+            type="button"
+            onClick={() => void exportData()}
+            disabled={busy}
+          >
             Esporta
           </button>
         </div>
       </div>
       <div className="set-danger">
         <div>
-          <div className="dt">Svuota audit</div>
-          <div className="dd">Rimuove lo storico delle azioni. Non tocca memoria e task.</div>
+          <div className="dt">Svuota registro accessi</div>
+          <div className="dd">Rimuove lo storico degli accessi. Non tocca memoria e task.</div>
         </div>
-        <button className="set-btn danger" type="button" disabled title="Disponibile a breve">
+        <button
+          className="set-btn danger"
+          type="button"
+          onClick={() => void clearAudit()}
+          disabled={busy || (audit?.length ?? 0) === 0}
+        >
           Svuota
         </button>
       </div>

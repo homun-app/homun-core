@@ -73,7 +73,8 @@ use local_first_local_computer_session::{
 };
 use local_first_local_computer_session::{LocalComputerReadModel, LocalComputerSessionStore};
 use local_first_memory::{
-    DataSensitivity as MemoryDataSensitivity, ExtractedEntity, ExtractedMemory, ExtractedRelation,
+    AccessAuditEntry, DataSensitivity as MemoryDataSensitivity, ExtractedEntity, ExtractedMemory,
+    ExtractedRelation,
     MemoryAccessRequest, MemoryCreateRequest, MemoryDashboard, MemoryEntity, MemoryEvent,
     MemoryExtraction,
     MemoryFacade, MemoryLifecycleRequest, MemoryRef, MemoryRefKind, MemoryRelation,
@@ -512,6 +513,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/system/status", get(system_status))
         .route("/api/system/browser/close-all", post(close_all_browsers))
         .route("/api/memory/dashboard", get(memory_dashboard))
+        .route("/api/memory/audit", get(memory_audit).delete(memory_audit_clear))
+        .route("/api/memory/export", get(memory_export))
         .route("/api/memory/items", get(memory_items))
         .route("/api/memory/graph", get(memory_graph))
         .route("/api/memory/wiki", get(memory_wiki).put(memory_wiki_save))
@@ -17434,6 +17437,75 @@ async fn memory_dashboard(
         .dashboard(&request)
         .map_err(GatewayError::memory)?;
     Ok(Json(dashboard))
+}
+
+#[derive(Debug, Deserialize)]
+struct AuditQuery {
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+/// Recent access-audit entries (most recent first) for Settings → Dati & Audit.
+async fn memory_audit(
+    State(state): State<AppState>,
+    Query(query): Query<AuditQuery>,
+) -> Result<Json<Vec<AccessAuditEntry>>, GatewayError> {
+    let facade = lock_memory_facade(&state)?;
+    let limit = query.limit.unwrap_or(200).clamp(1, 1000);
+    let entries = facade
+        .list_access_audit(limit)
+        .map_err(|error| GatewayError::memory(error.to_string()))?;
+    Ok(Json(entries))
+}
+
+/// Clears the access-audit ledger (does NOT touch memory/tasks). Returns rows removed.
+async fn memory_audit_clear(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let facade = lock_memory_facade(&state)?;
+    let removed = facade
+        .clear_access_audit()
+        .map_err(|error| GatewayError::memory(error.to_string()))?;
+    Ok(Json(serde_json::json!({ "removed": removed })))
+}
+
+/// Exports local memory (personal scope) + the full audit ledger as a JSON bundle the
+/// frontend downloads. Tasks live in the chat store and are out of scope for v1.
+async fn memory_export(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let facade = lock_memory_facade(&state)?;
+    let request = gateway_memory_access_request();
+    let dashboard = MemoryUiReadModel::new(&facade)
+        .dashboard(&request)
+        .map_err(GatewayError::memory)?;
+    let audit = facade
+        .list_access_audit(1000)
+        .map_err(|error| GatewayError::memory(error.to_string()))?;
+    let user = gateway_memory_user_id();
+    let personal = gateway_memory_workspace_id();
+    let memories = facade.list_memories_for_ui(&user, &personal).unwrap_or_default();
+    let items: Vec<serde_json::Value> = memories
+        .into_iter()
+        .filter(|m| !matches!(m.status, MemoryStatus::Deleted | MemoryStatus::Rejected))
+        .map(|m| {
+            serde_json::json!({
+                "reference": m.reference.to_string(),
+                "memory_type": m.memory_type,
+                "text": m.text,
+                "status": format!("{:?}", m.status).to_lowercase(),
+                "sensitivity": format!("{:?}", m.sensitivity).to_lowercase(),
+                "confidence": m.confidence,
+                "created_at": m.created_at,
+            })
+        })
+        .collect();
+    Ok(Json(serde_json::json!({
+        "schema": "local-first-export/v1",
+        "dashboard": dashboard,
+        "memories": items,
+        "audit": audit,
+    })))
 }
 
 /// One memory in the management view (M5): UI-safe, with its scope and a string ref.
