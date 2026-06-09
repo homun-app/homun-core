@@ -3528,9 +3528,34 @@ function Workbench({
     setFsEntries([]);
     setOpenFile(null);
   }, [threadId]);
+  // Probe the filesystem when the panel opens (not only on the File tab) so we know
+  // upfront whether this thread has a project folder → drives File-tab visibility.
   useEffect(() => {
-    if (open && tab === "files" && fsCwd === null) void loadFs(null);
-  }, [open, tab, fsCwd, loadFs]);
+    if (open && fsCwd === null) void loadFs(null);
+  }, [open, fsCwd, loadFs]);
+  // Show only POPULATED tabs; if the active one becomes hidden, jump to the first
+  // populated tab (memoria is the always-available baseline so the panel is never empty).
+  useEffect(() => {
+    if (!open) return;
+    const populated = (key: WorkbenchTab): boolean => {
+      switch (key) {
+        case "files":
+          return uploadedFiles.length > 0 || fsRoot != null;
+        case "artifacts":
+          return artifacts.length > 0;
+        case "memoria":
+          return true;
+        case "activity":
+          return (tasks ? tasks.active.length + tasks.queued.length + tasks.blocked.length : 0) > 0;
+        case "plan":
+          return parseOperationalPlanItems(operationalPlanMarkdown).length > 0;
+      }
+    };
+    if (!populated(tab)) {
+      const order: WorkbenchTab[] = ["files", "artifacts", "plan", "activity", "memoria"];
+      onTab(order.find(populated) ?? "memoria");
+    }
+  }, [open, tab, uploadedFiles.length, fsRoot, artifacts.length, tasks, operationalPlanMarkdown, onTab]);
   // Load the task queue when the Attività tab is shown (and refresh on re-open).
   useEffect(() => {
     if (!open || tab !== "activity") return;
@@ -3591,6 +3616,15 @@ function Workbench({
       badge: planItems.length || undefined,
     },
   ];
+  // Only show tabs that have content (memoria is the always-available baseline).
+  const tabPopulated: Record<WorkbenchTab, boolean> = {
+    files: uploadedFiles.length > 0 || fsRoot != null,
+    artifacts: artifacts.length > 0,
+    memoria: true,
+    activity: activeTasks.length > 0,
+    plan: planItems.length > 0,
+  };
+  const visibleTabs = tabs.filter((entry) => tabPopulated[entry.key]);
   return (
     <aside
       className={`workbench${expanded ? " expanded" : ""}`}
@@ -3606,7 +3640,7 @@ function Workbench({
         />
       )}
       <div className="workbench-tabs" role="tablist">
-        {tabs.map((entry) => {
+        {visibleTabs.map((entry) => {
           const Icon = entry.icon;
           return (
             <button
