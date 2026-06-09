@@ -1563,6 +1563,13 @@ export const coreBridge = {
     soul_md?: string;
   }) => electronUpdateContact(update),
   mergeContacts: (from: string, into: string) => electronMergeContacts(from, into),
+  createContact: (input: {
+    name: string;
+    contact_type?: string;
+    channel?: string;
+    identifier?: string;
+  }) => electronCreateContact(input),
+  deleteContact: (reference: string) => electronDeleteContact(reference),
   capabilities: () => electronCapabilities(),
   localComputerSession: (sessionId: string) =>
     electronLocalComputerSession(sessionId),
@@ -2148,6 +2155,36 @@ async function electronMergeContacts(from: string, into: string): Promise<CoreCo
     throw new Error(detail || `contact merge HTTP ${response.status}`);
   }
   return response.json() as Promise<CoreContact>;
+}
+
+async function electronCreateContact(input: {
+  name: string;
+  contact_type?: string;
+  channel?: string;
+  identifier?: string;
+}): Promise<CoreContact> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/memory/contacts/create`, {
+    method: "POST",
+    headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(detail || `contact create HTTP ${response.status}`);
+  }
+  return response.json() as Promise<CoreContact>;
+}
+
+async function electronDeleteContact(reference: string): Promise<void> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/memory/contacts/delete`, {
+    method: "POST",
+    headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ reference }),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(detail || `contact delete HTTP ${response.status}`);
+  }
 }
 
 export type CoreContactFact = {
