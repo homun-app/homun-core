@@ -1134,6 +1134,9 @@ body.resizing-drawer {
   gap: 6px;
   border-radius: 999px;
   padding: 0 8px;
+  /* Cancel the button's left padding so the title TEXT lines up with the message
+     column's left edge (the button keeps its padded hover hit-area). */
+  margin-left: -8px;
   color: var(--text);
   background: transparent;
   font-size: 18px;

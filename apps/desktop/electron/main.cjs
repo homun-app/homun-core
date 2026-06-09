@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain, dialog, nativeImage } = require("electron");
+const { app, BrowserWindow, Menu, shell, ipcMain, dialog, nativeImage } = require("electron");
 const { spawn, spawnSync, execFileSync } = require("node:child_process");
 const { randomBytes } = require("node:crypto");
 const fs = require("node:fs");
@@ -38,7 +38,58 @@ process.env.LOCAL_FIRST_DESKTOP_GATEWAY_TOKEN = GATEWAY_TOKEN;
 // Product/display name (macOS menu bar, About panel, dock tooltip). Set early,
 // before the app is ready, so the menu reflects it. Technical identifiers
 // (crate/binary "local-first-desktop-gateway", LOCAL_FIRST_* env) are unchanged.
-app.setName("homun");
+app.setName("Homun");
+
+// In dev the macOS menu bar shows the bundle name ("Electron") unless we install a
+// custom application menu — its first submenu label follows app.getName() ("Homun").
+// Standard roles are kept so copy/paste/zoom/window shortcuts still work.
+function applyAppMenu() {
+  if (process.platform !== "darwin") return;
+  const template = [
+    {
+      label: app.name,
+      submenu: [
+        { role: "about" },
+        { type: "separator" },
+        { role: "services" },
+        { type: "separator" },
+        { role: "hide" },
+        { role: "hideOthers" },
+        { role: "unhide" },
+        { type: "separator" },
+        { role: "quit" },
+      ],
+    },
+    {
+      label: "Modifica",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "selectAll" },
+      ],
+    },
+    {
+      label: "Vista",
+      submenu: [
+        { role: "reload" },
+        { role: "forceReload" },
+        { role: "toggleDevTools" },
+        { type: "separator" },
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+      ],
+    },
+    { label: "Finestra", role: "windowMenu" },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
 
 function normalizeGatewayUrl(value) {
   return value.endsWith("/") ? value : `${value}/`;
@@ -233,7 +284,7 @@ function createWindow() {
     minWidth: 980,
     minHeight: 680,
     ...(iconPath ? { icon: iconPath } : {}),
-    title: "homun",
+    title: "Homun",
     backgroundColor: "#ffffff",
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 16, y: 16 },
@@ -290,6 +341,7 @@ ipcMain.handle("lfpa:reveal-path", async (_event, targetPath) => {
 });
 
 app.whenReady().then(async () => {
+  applyAppMenu();
   if (process.platform === "darwin" && app.dock) {
     const iconPath = brandIconPath();
     if (iconPath) {
