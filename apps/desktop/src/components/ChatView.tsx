@@ -5691,6 +5691,13 @@ function Composer({
     }
   }, [replyContext]);
 
+  // Cursor ready in the composer when you open or switch a chat — type right away,
+  // no extra click. rAF so it runs after the new thread's layout settles.
+  useEffect(() => {
+    const id = requestAnimationFrame(() => textareaRef.current?.focus());
+    return () => cancelAnimationFrame(id);
+  }, [threadId]);
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
