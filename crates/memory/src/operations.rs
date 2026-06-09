@@ -12,19 +12,6 @@ pub struct MemoryHealth {
     pub access_audit_count: u64,
 }
 
-/// One row of the access-audit ledger: a recorded decision about accessing memory
-/// (who/why/outcome/when). Surfaced in Settings → Dati & Audit.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AccessAuditEntry {
-    pub reference: String,
-    pub workspace_id: String,
-    pub actor_id: String,
-    pub purpose: String,
-    pub decision: String,
-    pub reasons: Vec<String>,
-    pub created_at: String,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryBackupReport {
     pub source_path: PathBuf,

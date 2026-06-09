@@ -1,6 +1,5 @@
 use crate::{
-    AccessAuditEntry, AutomationCandidateRecord, DataSensitivity, EncryptedJson, KeyProvider,
-    MemoryAccessDecision,
+    AutomationCandidateRecord, DataSensitivity, EncryptedJson, KeyProvider, MemoryAccessDecision,
     MemoryAccessRequest, MemoryBackupReport, MemoryEntity, MemoryEvent, MemoryEvidence,
     MemoryHealth, MemoryMaintenanceReport, MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation,
     MemoryRestoreMode, PrivacyDomain, RoutineRecord, UserId, WikiPage, WorkspaceId, decrypt_json,
@@ -701,54 +700,6 @@ impl SQLiteMemoryStore {
             .map_err(|error| error.to_string())
     }
 
-    /// Most-recent-first slice of the access-audit ledger for the UI.
-    pub fn list_access_audit(&self, limit: u32) -> Result<Vec<AccessAuditEntry>, String> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "select ref, workspace_id, actor_id, purpose, decision, reasons_json, created_at
-                 from access_audit order by created_at desc, rowid desc limit ?1",
-            )
-            .map_err(|error| error.to_string())?;
-        let rows = stmt
-            .query_map([limit], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, String>(6)?,
-                ))
-            })
-            .map_err(|error| error.to_string())?;
-        let mut out = Vec::new();
-        for row in rows {
-            let (reference, workspace_id, actor_id, purpose, decision, reasons_json, created_at) =
-                row.map_err(|error| error.to_string())?;
-            let reasons: Vec<String> = serde_json::from_str(&reasons_json).unwrap_or_default();
-            out.push(AccessAuditEntry {
-                reference,
-                workspace_id,
-                actor_id,
-                purpose,
-                decision,
-                reasons,
-                created_at,
-            });
-        }
-        Ok(out)
-    }
-
-    /// Wipe the access-audit ledger (does not touch memory/tasks). Returns rows removed.
-    pub fn clear_access_audit(&self) -> Result<u64, String> {
-        let removed = self
-            .conn
-            .execute("delete from access_audit", [])
-            .map_err(|error| error.to_string())?;
-        Ok(removed as u64)
-    }
 
     pub fn get_wiki_page(
         &self,

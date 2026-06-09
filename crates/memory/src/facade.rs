@@ -1,6 +1,5 @@
 use crate::{
-    AccessAuditEntry, AccessDecisionKind, AutomationCandidateCreateRequest,
-    AutomationCandidateRecord,
+    AccessDecisionKind, AutomationCandidateCreateRequest, AutomationCandidateRecord,
     DataSensitivity, GraphifyArtifacts, GraphifyCli, GraphifyImport, GraphifyImportSummary,
     GraphifyOperation, GraphifyQueryRequest, GraphifyQueryResult, MemoryAccessDecision,
     MemoryAccessRequest, MemoryBackupReport, MemoryContextItem, MemoryContextPack,
@@ -746,14 +745,6 @@ impl MemoryFacade {
 
     pub fn access_audit_count(&self) -> MemoryResult<u64> {
         Ok(self.store.access_audit_count()?)
-    }
-
-    pub fn list_access_audit(&self, limit: u32) -> MemoryResult<Vec<AccessAuditEntry>> {
-        Ok(self.store.list_access_audit(limit)?)
-    }
-
-    pub fn clear_access_audit(&self) -> MemoryResult<u64> {
-        Ok(self.store.clear_access_audit()?)
     }
 
     pub fn memory_health(&self) -> MemoryResult<MemoryHealth> {
