@@ -8094,13 +8094,22 @@ body.resizing-drawer {
 }
 .contacts-check input[type="checkbox"] { accent-color: var(--brand); }
 
-/* Address-book list: A–Z sections with sticky letter headers + jump index. */
-.contacts-rail-actions {
+/* Address-book toolbar: search + type filter + actions span the full width so the
+   left column is pure list (the old in-rail chips ate half the column). */
+.contacts-toolbar {
   display: flex;
-  gap: 6px;
-  margin-top: 8px;
+  align-items: center;
+  gap: 8px;
 }
-.contacts-rail-actions .set-btn { flex: 1; justify-content: center; }
+.contacts-toolbar .contacts-search { flex: 1; max-width: 380px; }
+.contacts-type-select {
+  width: auto;
+  padding: 7px 10px;
+  font-size: 13px;
+}
+.contacts-suggest-banner { margin: 0; }
+
+/* Address-book list: A–Z sections with sticky letter headers + jump index. */
 .contacts-list-wrap {
   display: flex;
   gap: 2px;
@@ -8111,7 +8120,7 @@ body.resizing-drawer {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: var(--bg);
+  background: var(--surface);
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.04em;

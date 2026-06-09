@@ -211,64 +211,64 @@ export function ContactsView() {
 
   return (
     <div className="contacts-view">
+      {/* Toolbar (Apple-Contacts style): search + type filter + actions span the
+          full width, so the left column is 100% list. */}
+      <div className="contacts-toolbar">
+        <label className="chat-search-input contacts-search">
+          <Search size={16} />
+          <input
+            placeholder="Cerca per nome o canale"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </label>
+        <select
+          className="set-input contacts-type-select"
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value)}
+        >
+          <option value="all">Tutti i tipi</option>
+          {CONTACT_TYPES.map((t) => (
+            <option key={t.value} value={t.value}>
+              {t.label}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          className="set-btn"
+          onClick={() => void newContact()}
+          disabled={busy}
+        >
+          + Nuovo contatto
+        </button>
+        <button type="button" className="set-btn" onClick={() => setShowProfiles(true)}>
+          Profili
+        </button>
+      </div>
+
+      {suggestions.length > 0 && (
+        <div className="contacts-suggest contacts-suggest-banner">
+          <div className="contacts-suggest-title">Possibili duplicati</div>
+          {suggestions.map((s) => (
+            <div key={s.name} className="contacts-suggest-row">
+              <span>
+                «{s.name}» in {s.refs.length} schede
+              </span>
+              <button
+                type="button"
+                className="set-btn"
+                onClick={() => openMerge(s.refs[1]!, s.refs[0]!)}
+              >
+                Unisci
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="mdl-layout">
         <aside className="mdl-rail">
-          <label className="chat-search-input">
-            <Search size={16} />
-            <input
-              placeholder="Cerca per nome o canale"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </label>
-
-          <div className="contacts-rail-actions">
-            <button
-              type="button"
-              className="set-btn"
-              onClick={() => void newContact()}
-              disabled={busy}
-            >
-              + Nuovo contatto
-            </button>
-            <button type="button" className="set-btn" onClick={() => setShowProfiles(true)}>
-              Profili
-            </button>
-          </div>
-
-          <div className="contacts-chips">
-            {[{ value: "all", label: "Tutti" }, ...CONTACT_TYPES].map((t) => (
-              <button
-                key={t.value}
-                type="button"
-                className={`contacts-chip ${typeFilter === t.value ? "active" : ""}`}
-                onClick={() => setTypeFilter(t.value)}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-
-          {suggestions.length > 0 && (
-            <div className="contacts-suggest">
-              <div className="contacts-suggest-title">Possibili duplicati</div>
-              {suggestions.map((s) => (
-                <div key={s.name} className="contacts-suggest-row">
-                  <span>
-                    «{s.name}» in {s.refs.length} schede
-                  </span>
-                  <button
-                    type="button"
-                    className="set-btn"
-                    onClick={() => openMerge(s.refs[1]!, s.refs[0]!)}
-                  >
-                    Unisci
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
           <div className="mdl-rail-group">
             {filtered.length} {filtered.length === 1 ? "contatto" : "contatti"}
           </div>
