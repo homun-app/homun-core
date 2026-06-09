@@ -336,6 +336,24 @@ col pulsante per fare la cosa. Pattern condiviso coi confirm-card Composio/MCP.
 
 Aggiornato 2026-06-08. Ordine consigliato, rivedibile.
 
+**Fatti — sessione 2026-06-09 (memoria unificata + connettori verso la release):**
+- **Memoria unificata (modello ibrido)**: dedup lessicale+**semantico** (embeddings
+  multilingua `nomic-embed-text-v2-moe`, coseno tarato) in scrittura e a lettura;
+  **wiki markdown↔SQL** (proiezione decisioni→`wiki_pages`, editabile con editor
+  markdown + re-ingest); **grafo navigabile** + tab **Memoria** (timeline per data,
+  filtri progetto, ricerca, grafo+wiki, elimina); **oblio** (`forget_memory` + elimina
+  nodo); **consolidamento** (fonde frammenti + elimina rumore + importanza);
+  **stato epistemico** (ricerca ≠ fatto: niente "viaggio programmato" da una ricerca
+  prezzi); doc `docs/memory-architecture.md`. **HomunCoder**: skill CoderSteroids
+  installate, mode nelle chat di progetto, raggruppate/collassabili nei Settings.
+- **Fix regressione + design capability**: lo scope memoria non muta più il workspace
+  attivo globale (`MEMORY_WORKSPACE` separato); **capability globali** (Composio/Gmail,
+  browser, MCP) sul workspace base, non per-progetto → Composio resta connesso in ogni
+  progetto.
+- **Verso la release (#1,#2,#6,#4)**: connect-card Composio **in chat con poll+auto-detect**
+  (#1); **errori connettori azionabili** (auth→ricollega, 429→rate limit) (#2); **status
+  account + pulizia** connessioni EXPIRED (#6); **wizard onboarding** first-run (#4).
+
 **Fatti — sessione 2026-06-08 (chat UX + allegati + routing modelli):**
 - **Allegati end-to-end** (`edbeba2`→`1d7e719`): cattura path via `webUtils.getPathForFile`
   (Electron 42 ha rimosso `File.path`); trasporto allegati nel body `generate_stream`;
