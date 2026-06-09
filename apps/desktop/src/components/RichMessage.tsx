@@ -35,10 +35,9 @@ export function RichMessage({ text, streaming = false }: RichMessageProps) {
           .trim()
       : text;
 
-  if (streaming) {
-    return <StreamingTextMessage text={clean} />;
-  }
-
+  // Render markdown LIVE while streaming (like Claude Code): the renderer is
+  // streaming-aware (tolerates an unclosed code fence, defers mermaid until complete),
+  // so we no longer fall back to plain text until the end.
   if (!needsRichRendering(clean)) {
     return <PlainTextMessage text={clean} />;
   }
@@ -47,14 +46,6 @@ export function RichMessage({ text, streaming = false }: RichMessageProps) {
     <Suspense fallback={<PlainTextMessage text={clean} />}>
       <RichMessageRenderer text={clean} streaming={streaming} />
     </Suspense>
-  );
-}
-
-function StreamingTextMessage({ text }: { text: string }) {
-  return (
-    <div className="rich-message streaming-rich-message" aria-live="polite">
-      {text}
-    </div>
   );
 }
 
