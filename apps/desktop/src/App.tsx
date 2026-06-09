@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ChatView } from "./components/ChatView";
 import { ContainedComputerView } from "./components/ContainedComputerView";
 import { LearningView } from "./components/LearningView";
-import { MemoryView } from "./components/MemoryView";
 import { Shell } from "./components/Shell";
 import { ShallowView } from "./components/ShallowView";
 import { SettingsView } from "./components/SettingsView";
@@ -1071,7 +1070,6 @@ export default function App() {
             section={settingsSection}
           />
         )}
-        {activeView === "memory" && <MemoryView />}
         {activeView === "automations" && (
           <ShallowView
             title="Automazioni"

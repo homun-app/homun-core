@@ -36,9 +36,9 @@ import type {
 
 export const navItems: NavItem[] = [
   { id: "chat", label: "Nuovo compito", icon: MessageSquare },
-  // "Apprendimento" è confluito in Homun (la sua casa: cosa ha appreso + controllo).
+  // "Apprendimento" è confluito in Homun. "Memoria" è stata unificata nelle
+  // Impostazioni → Memoria (un'unica superficie, fuori più pulito).
   { id: "tasks", label: "Pianificato", icon: CalendarClock },
-  { id: "memory", label: "Memoria", icon: Brain },
 ];
 
 export const chatMessages: ChatMessage[] = [

@@ -4080,7 +4080,15 @@ body.resizing-drawer {
   background: #e0e7ff;
   color: #3730a3;
 }
-.memview-del {
+.memview-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.memview-del,
+.memview-confirm,
+.memview-reject {
   border: none;
   background: transparent;
   color: #cbd5e1;
@@ -4089,9 +4097,14 @@ body.resizing-drawer {
   border-radius: 6px;
   flex-shrink: 0;
 }
-.memview-del:hover {
+.memview-del:hover,
+.memview-reject:hover {
   color: #dc2626;
   background: #fef2f2;
+}
+.memview-confirm:hover {
+  color: var(--brand);
+  background: var(--brand-soft);
 }
 .memview-graph {
   flex: 1;
