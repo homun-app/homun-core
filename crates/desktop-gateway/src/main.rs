@@ -17451,10 +17451,15 @@ async fn memory_audit(
     Query(query): Query<AuditQuery>,
 ) -> Result<Json<Vec<AccessAuditEntry>>, GatewayError> {
     let facade = lock_memory_facade(&state)?;
-    let limit = query.limit.unwrap_or(200).clamp(1, 1000);
-    let entries = facade
-        .list_access_audit(limit)
+    let limit = query.limit.unwrap_or(200).clamp(1, 1000) as usize;
+    // Hide internal/system accesses — the settings UI reading the dashboard, semantic
+    // dedup, consolidation. The user wants the ASSISTANT's memory use, not housekeeping.
+    const INTERNAL_ACTORS: [&str; 3] = ["desktop-ui", "memory-dedup", "consolidation"];
+    let mut entries = facade
+        .list_access_audit(2000)
         .map_err(|error| GatewayError::memory(error.to_string()))?;
+    entries.retain(|entry| !INTERNAL_ACTORS.contains(&entry.actor_id.as_str()));
+    entries.truncate(limit);
     Ok(Json(entries))
 }
 
