@@ -3443,6 +3443,50 @@ body.resizing-drawer {
 }
 /* Clean, document-style PDF preview: pages as white sheets stacked top-to-bottom,
    fitting the panel width — no dark native-viewer chrome. */
+/* Empty-chat hero: serif headline + quick-action chips. */
+.chat-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 12vh 24px 0;
+  gap: 8px;
+}
+.chat-hero-title {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: var(--text-hero);
+  line-height: 1.1;
+  color: var(--text);
+  margin: 0;
+}
+.chat-hero-sub {
+  font-size: var(--text-base);
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+.chat-hero-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  max-width: 520px;
+}
+.chat-hero-chip {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: var(--radius-pill);
+  padding: 7px 14px;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.chat-hero-chip:hover {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+}
+
 /* Sidebar: IDE-style context switcher + primary new-chat + channels group. */
 .ctx-switcher-wrap {
   position: relative;
