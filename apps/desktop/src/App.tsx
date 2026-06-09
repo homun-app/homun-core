@@ -502,6 +502,17 @@ export default function App() {
   // Navigate to a thread that may live in ANOTHER workspace (e.g. a channel
   // thread in Personale): select_thread is workspace-aware and returns that
   // workspace's snapshot, so applying it switches context for us.
+  // Open the dedicated proactive "Homun" thread from the top-level nav (ensure it
+  // exists first; it lives in the personal scope with a fixed id).
+  async function handleOpenHomun() {
+    try {
+      await coreBridge.homunThread();
+    } catch {
+      /* non-fatal */
+    }
+    await navigateToThread("homun");
+  }
+
   async function navigateToThread(threadId: string) {
     try {
       const snapshot = await coreBridge.selectChatThread(threadId);
@@ -948,6 +959,7 @@ export default function App() {
       onBackFromSettings={() => setActiveView(previousView)}
       onDeleteChatThread={handleDeleteChatThread}
       onNavigate={handleNavigate}
+      onOpenHomun={handleOpenHomun}
       onSelectThread={handleSelectThread}
       onSetChatThreadPinned={handleSetChatThreadPinned}
       onToggleDrawer={() => setDrawerOpen((value) => !value)}
