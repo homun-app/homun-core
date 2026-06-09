@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Brain, Check, Search, Trash2, X } from "lucide-react";
 
-import { coreBridge, type CoreMemoryItem } from "../lib/coreBridge";
+import { coreBridge, type CoreMemoryDashboard, type CoreMemoryItem } from "../lib/coreBridge";
 import { MemoryGraphPanel } from "./ChatView";
 
 // The memory "brain": filter by project, search, scrub a per-month timeline (height =
@@ -55,9 +55,34 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
   // Full-width tabs (Info list / Grafo / Wiki) so each gets the whole pane — the old
   // side-by-side list+graph squeezed the graph into a tiny column.
   const [memTab, setMemTab] = useState<"info" | "graph" | "wiki">("info");
+  // Memory at-a-glance counts + export (moved here from the old "Dati" section).
+  const [dashboard, setDashboard] = useState<CoreMemoryDashboard | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   const reload = () => {
     coreBridge.memoryItems().then(setItems).catch(() => setItems([]));
+  };
+  useEffect(() => {
+    coreBridge.memoryDashboard().then(setDashboard).catch(() => setDashboard(null));
+  }, []);
+
+  const exportMemory = () => {
+    setExporting(true);
+    coreBridge
+      .exportLocalData()
+      .then((data) => {
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `homun-memoria-${new Date().toISOString().slice(0, 10)}.json`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+      })
+      .catch(() => {})
+      .finally(() => setExporting(false));
   };
   useEffect(() => {
     reload();
@@ -171,8 +196,34 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
             </button>
           )}
           {report && <span className="memview-report">{report}</span>}
+          <button
+            type="button"
+            className="memview-consolidate"
+            disabled={exporting}
+            title="Scarica memorie, entità e relazioni in un file JSON"
+            onClick={exportMemory}
+          >
+            {exporting ? "Esporto…" : "⬇ Esporta"}
+          </button>
         </div>
       </header>
+
+      {dashboard && (
+        <div className="memview-stats">
+          <span>
+            <strong>{dashboard.total_memories}</strong> memorie
+          </span>
+          <span>
+            <strong>{dashboard.total_entities}</strong> entità
+          </span>
+          <span>
+            <strong>{dashboard.total_relations}</strong> relazioni
+          </span>
+          <span>
+            <strong>{dashboard.total_wiki_pages}</strong> pagine wiki
+          </span>
+        </div>
+      )}
 
       <div className="memview-tabs" role="tablist">
         {(

@@ -7,7 +7,6 @@ import {
   Database,
   GalleryVerticalEnd,
   Globe2,
-  History,
   KeyRound,
   MessageSquare,
   Monitor,
@@ -406,7 +405,6 @@ export const settingsSections: Array<{
   { id: "connections", label: "Connettori", icon: Plug, group: "capabilities" },
   { id: "skills", label: "Skill", icon: Sparkles, group: "capabilities" },
   { id: "computer", label: "Computer locale", icon: MonitorPlay, group: "capabilities" },
-  { id: "audit", label: "Dati", icon: History, group: "capabilities" },
 ];
 
 export const settingsGroupLabels: Record<"account" | "capabilities", string> = {

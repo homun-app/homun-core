@@ -42,7 +42,6 @@ import {
   type ContainedComputerLive,
   type CoreCapabilitySnapshot,
   type CoreChannelSettings,
-  type CoreMemoryDashboard,
   type CoreTelegramStatus,
   type ProviderModelView,
   type ProviderView,
@@ -83,7 +82,6 @@ const SECTION_TITLES: Record<SettingsSectionId, string> = {
   connections: "Connettori",
   skills: "Skill",
   computer: "Computer locale",
-  audit: "Dati",
 };
 
 export function SettingsView({ section }: SettingsViewProps) {
@@ -138,7 +136,6 @@ export function SettingsView({ section }: SettingsViewProps) {
         {section === "connections" && <ConnectorsPane />}
         {section === "skills" && <SkillsPane />}
         {section === "computer" && <ComputerPane computer={computer} />}
-        {section === "audit" && <AuditPane />}
       </div>
     </section>
   );
@@ -3129,105 +3126,6 @@ function ArtifactsCard() {
   );
 }
 
-/* --------------------------------------------------------------------- audit */
-
-function AuditPane() {
-  const [memory, setMemory] = useState<CoreMemoryDashboard | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const dash = await coreBridge.memoryDashboard();
-        if (!cancelled) setMemory(dash);
-      } catch {
-        /* leave null */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const exportData = async () => {
-    setBusy(true);
-    try {
-      const data = await coreBridge.exportLocalData();
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `homun-export-${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const stats: Array<{ k: string; v: number | undefined }> = [
-    { k: "Memorie", v: memory?.total_memories },
-    { k: "Entità", v: memory?.total_entities },
-    { k: "Relazioni", v: memory?.total_relations },
-    { k: "Pagine wiki", v: memory?.total_wiki_pages },
-  ];
-
-  return (
-    <>
-      <div className="set-section-label" style={{ marginTop: 0 }}>
-        Memoria del progetto
-      </div>
-      <div className="set-card">
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr 1fr 1fr",
-            gap: "var(--s3)",
-          }}
-        >
-          {stats.map((stat) => (
-            <div key={stat.k}>
-              <div className="set-card-name" style={{ fontSize: 22 }}>
-                {stat.v ?? "—"}
-              </div>
-              <div className="rk">{stat.k}</div>
-            </div>
-          ))}
-        </div>
-        {memory && memory.by_sensitivity.length > 0 && (
-          <>
-            <div className="set-card-divider" />
-            <p className="set-meter-sub" style={{ marginBottom: 0 }}>
-              Per sensibilità:{" "}
-              {memory.by_sensitivity.map((item) => `${item.key} ${item.count}`).join(" · ")}
-            </p>
-          </>
-        )}
-      </div>
-
-      <div className="set-section-label">Dati</div>
-      <div className="set-rows">
-        <div className="set-trow">
-          <div>
-            <div className="tt">Esporta la tua memoria</div>
-            <div className="td">Scarica memorie, entità e relazioni in un file JSON.</div>
-          </div>
-          <button
-            className="set-btn"
-            type="button"
-            onClick={() => void exportData()}
-            disabled={busy}
-          >
-            Esporta
-          </button>
-        </div>
-      </div>
-    </>
-  );
-}
 
 /* --------------------------------------------------------------- channels */
 
