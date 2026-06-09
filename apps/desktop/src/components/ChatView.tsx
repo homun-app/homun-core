@@ -3101,16 +3101,22 @@ function layoutMemoryGraph(
 export function MemoryGraphPanel({
   threadId,
   workspace,
+  controlledMode,
 }: {
   threadId?: string;
   workspace?: string;
+  /** When set, the parent drives graph/wiki (top-level tabs) and the internal
+   *  toggle is hidden. */
+  controlledMode?: "graph" | "wiki";
 }) {
   const [graph, setGraph] = useState<MemoryGraph | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [view, setView] = useState({ x: 0, y: 0, k: 1 });
-  const [mode, setMode] = useState<"graph" | "wiki">("graph");
+  const [internalMode, setInternalMode] = useState<"graph" | "wiki">("graph");
+  const mode = controlledMode ?? internalMode;
+  const setMode = setInternalMode;
   const [wiki, setWiki] = useState<MemoryWikiPage[] | null>(null);
   const [editingPath, setEditingPath] = useState<string | null>(null);
   const [editBody, setEditBody] = useState("");
@@ -3240,14 +3246,16 @@ export function MemoryGraphPanel({
   return (
     <div className="memory-graph">
       <div className="memory-graph-toolbar">
-        <div className="memory-graph-modes">
-          <button type="button" className={mode === "graph" ? "active" : ""} onClick={() => setMode("graph")}>
-            Grafo
-          </button>
-          <button type="button" className={mode === "wiki" ? "active" : ""} onClick={() => setMode("wiki")}>
-            Wiki
-          </button>
-        </div>
+        {!controlledMode && (
+          <div className="memory-graph-modes">
+            <button type="button" className={mode === "graph" ? "active" : ""} onClick={() => setMode("graph")}>
+              Grafo
+            </button>
+            <button type="button" className={mode === "wiki" ? "active" : ""} onClick={() => setMode("wiki")}>
+              Wiki
+            </button>
+          </div>
+        )}
         <span className="memory-graph-count">
           {mode === "graph"
             ? `${graph.nodes.length} nodi · ${graph.edges.length} collegamenti`
