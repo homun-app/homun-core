@@ -3,6 +3,7 @@ import { ChatView } from "./components/ChatView";
 import { ContainedComputerView } from "./components/ContainedComputerView";
 import { LearningView } from "./components/LearningView";
 import { MemoryView } from "./components/MemoryView";
+import { OnboardingWizard } from "./components/OnboardingWizard";
 import { Shell } from "./components/Shell";
 import { ShallowView } from "./components/ShallowView";
 import { SettingsView } from "./components/SettingsView";
@@ -426,6 +427,27 @@ export default function App() {
   const [previousView, setPreviousView] = useState<ViewId>("chat");
   const [settingsSection, setSettingsSection] =
     useState<SettingsSectionId>("account");
+  // First-run onboarding (shown once, until dismissed).
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    try {
+      return !localStorage.getItem("homun.onboarding.done");
+    } catch {
+      return false;
+    }
+  });
+  const dismissOnboarding = () => {
+    try {
+      localStorage.setItem("homun.onboarding.done", "1");
+    } catch {
+      /* ignore */
+    }
+    setShowOnboarding(false);
+  };
+  const onboardingGo = (section: SettingsSectionId) => {
+    setSettingsSection(section);
+    setActiveView("settings");
+    dismissOnboarding();
+  };
   const [chatThreads, setChatThreads] = useState<ChatThread[]>([
     defaultChatThread,
   ]);
@@ -939,6 +961,14 @@ export default function App() {
   }, []);
 
   return (
+    <>
+    {showOnboarding && (
+      <OnboardingWizard
+        onClose={dismissOnboarding}
+        onGoConnectors={() => onboardingGo("connections")}
+        onGoSkills={() => onboardingGo("skills")}
+      />
+    )}
     <Shell
       activeView={activeView}
       activeThreadId={activeThread.threadId}
@@ -1037,6 +1067,7 @@ export default function App() {
         )}
       </main>
     </Shell>
+    </>
   );
 }
 
