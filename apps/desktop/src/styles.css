@@ -4020,12 +4020,48 @@ body.resizing-drawer {
   flex: 1;
   min-height: 0;
 }
+/* Full-width tabbed memory views (Info / Grafo / Wiki). */
+.memview-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 0 0;
+}
+.memview-tab {
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill, 999px);
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.memview-tab:hover {
+  background: var(--surface-hover);
+}
+.memview-tab.active {
+  background: var(--brand-soft);
+  border-color: var(--brand);
+  color: var(--brand-strong, var(--brand));
+}
+.memview-info,
+.memview-explore {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-top: 10px;
+}
+.memview-explore {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
 .memview-list {
-  width: 42%;
-  min-width: 280px;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  border-right: 1px solid var(--border, #e2e8f0);
-  padding: 8px 10px;
+  padding: 8px 2px;
 }
 .memview-list-head {
   font-size: 12px;

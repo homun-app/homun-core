@@ -52,6 +52,9 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
   const [busy, setBusy] = useState(false);
   const [consolidating, setConsolidating] = useState(false);
   const [report, setReport] = useState<string | null>(null);
+  // Full-width tabs (Info list / Grafo / Wiki) so each gets the whole pane — the old
+  // side-by-side list+graph squeezed the graph into a tiny column.
+  const [memTab, setMemTab] = useState<"info" | "graph" | "wiki">("info");
 
   const reload = () => {
     coreBridge.memoryItems().then(setItems).catch(() => setItems([]));
@@ -171,6 +174,29 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
         </div>
       </header>
 
+      <div className="memview-tabs" role="tablist">
+        {(
+          [
+            ["info", "Info"],
+            ["graph", "Grafo"],
+            ["wiki", "Wiki"],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={memTab === key}
+            className={`memview-tab ${memTab === key ? "active" : ""}`}
+            onClick={() => setMemTab(key)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {memTab === "info" && (
+        <div className="memview-info">
       <div className="memview-timeline" role="group" aria-label="Timeline">
         {timeline.length === 0 ? (
           <span className="memview-empty">Nessuna informazione</span>
@@ -197,8 +223,6 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
           })
         )}
       </div>
-
-      <div className="memview-body">
         <div className="memview-list">
           <div className="memview-list-head">
             {visible.length} info{selectedMonth ? ` · ${selectedMonth}` : ""}
@@ -260,9 +284,16 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
             <p className="memview-empty">Nessuna informazione per i filtri scelti.</p>
           )}
         </div>
-        <div className="memview-graph">
+        </div>
+      )}
+
+      {(memTab === "graph" || memTab === "wiki") && (
+        <div className="memview-explore">
           {graphWorkspace ? (
-            <MemoryGraphPanel workspace={graphWorkspace} />
+            <MemoryGraphPanel
+              workspace={graphWorkspace}
+              controlledMode={memTab === "graph" ? "graph" : "wiki"}
+            />
           ) : (
             <div className="memview-graph-hint">
               <Brain size={30} />
@@ -273,7 +304,7 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
             </div>
           )}
         </div>
-      </div>
+      )}
     </div>
   );
 }
