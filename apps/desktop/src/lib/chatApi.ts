@@ -88,6 +88,11 @@ export const chatApi = {
     }
   },
 
+  async homunThread() {
+    // Ensure the dedicated proactive "Homun" thread exists; returns its metadata.
+    return gatewayJson<CoreChatThread>("/api/chat/homun");
+  },
+
   async createChatThread(workspace?: string) {
     const url = workspace
       ? `/api/chat/threads?workspace=${encodeURIComponent(workspace)}`
