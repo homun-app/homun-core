@@ -173,28 +173,30 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
               placeholder="Cerca nella memoria…"
             />
           </label>
-          {workspaceFilter !== "all" && (
-            <button
-              type="button"
-              className="memview-consolidate"
-              disabled={consolidating}
-              title="Fonde i frammenti ed elimina il rumore per questo progetto"
-              onClick={() => {
-                setConsolidating(true);
-                setReport(null);
-                coreBridge
-                  .consolidateMemory(workspaceFilter)
-                  .then((r) => {
-                    setReport(`Fusi ${r.merged} · rimossi ${r.dropped}`);
-                    reload();
-                  })
-                  .catch(() => setReport("Consolidamento non riuscito"))
-                  .finally(() => setConsolidating(false));
-              }}
-            >
-              {consolidating ? "Consolido…" : "✨ Consolida"}
-            </button>
-          )}
+          <button
+            type="button"
+            className="memview-consolidate"
+            disabled={consolidating}
+            title={
+              workspaceFilter === "all"
+                ? "Fonde i frammenti ed elimina il rumore della memoria personale"
+                : "Fonde i frammenti ed elimina il rumore per questo progetto"
+            }
+            onClick={() => {
+              setConsolidating(true);
+              setReport(null);
+              coreBridge
+                .consolidateMemory(workspaceFilter === "all" ? undefined : workspaceFilter)
+                .then((r) => {
+                  setReport(`Fusi ${r.merged} · rimossi ${r.dropped}`);
+                  reload();
+                })
+                .catch(() => setReport("Consolidamento non riuscito"))
+                .finally(() => setConsolidating(false));
+            }}
+          >
+            {consolidating ? "Consolido…" : "✨ Consolida"}
+          </button>
           {report && <span className="memview-report">{report}</span>}
           <button
             type="button"
