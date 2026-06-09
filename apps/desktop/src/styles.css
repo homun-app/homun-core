@@ -7105,20 +7105,19 @@ body.resizing-drawer {
   box-shadow: 0 0 0 3px var(--blue-soft);
 }
 
-/* Plan / summary card */
+/* Plan / summary card — same metrics as .set-rows so every pane matches (Cursor). */
 .set-card {
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 10px;
   background: var(--surface);
-  box-shadow: var(--shadow-soft);
-  padding: var(--s5);
+  padding: var(--s4);
 }
 .set-card-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
-.set-card-name { font-size: 18px; font-weight: 650; }
+.set-card-name { font-size: 13.5px; font-weight: 600; }
 .set-badge {
   display: inline-flex;
   align-items: center;
@@ -7131,10 +7130,10 @@ body.resizing-drawer {
 .set-badge.green { color: var(--green); background: var(--green-soft); }
 .set-badge.muted { color: var(--muted); background: var(--surface-muted); }
 .set-card-divider { height: 1px; background: var(--line); margin: var(--s4) 0; }
-.set-meter { display: flex; align-items: center; justify-content: space-between; font-size: 13.5px; padding: 6px 0; }
+.set-meter { display: flex; align-items: center; justify-content: space-between; font-size: 13px; padding: 6px 0; }
 .set-meter .k { display: flex; align-items: center; gap: 8px; color: var(--text); }
 .set-meter .k svg { color: var(--muted); flex-shrink: 0; }
-.set-meter .v { font-weight: 650; }
+.set-meter .v { font-weight: 550; }
 .set-meter-sub { font-size: 12px; color: var(--muted); margin: 0 0 2px; }
 
 /* Row group (identity, key/value with action) */
