@@ -3874,12 +3874,19 @@ async fn generate_stream(
         // key), not just its name on the role's provider — otherwise a cross-provider
         // pick hits the wrong server and silently falls back to the settings model.
         if let Some(override_model) = request.model.as_ref().map(|m| m.trim()).filter(|m| !m.is_empty()) {
-            if let Some((ov_base, ov_model, ov_key)) = provider_config_for_model(override_model) {
+            // The grouped picker sends "<provider_id>::<model>" (disambiguates a model id
+            // present in several providers); the plain form "<model>" is also accepted.
+            let resolved = match override_model.split_once("::") {
+                Some((pid, mid)) => provider_config_by_id(pid, mid)
+                    .or_else(|| provider_config_for_model(mid)),
+                None => provider_config_for_model(override_model),
+            };
+            if let Some((ov_base, ov_model, ov_key)) = resolved {
                 base_url = ov_base;
                 model = ov_model;
                 api_key = ov_key;
             } else {
-                model = override_model.to_string();
+                model = override_model.rsplit("::").next().unwrap_or(override_model).to_string();
             }
         }
         return stream_chat_via_openai(&state, request, base_url, model, api_key).await;
@@ -5001,6 +5008,20 @@ fn provider_config_for_model(model_id: &str) -> Option<(String, String, Option<S
         .providers
         .iter()
         .find(|p| p.models.iter().any(|m| m.id == model_id))?;
+    let api_key = provider_api_key(&provider.id).or_else(env_inference_api_key);
+    Some((provider.base_url.clone(), model_id.to_string(), api_key))
+}
+
+/// Full config for an EXPLICIT (provider_id, model) pair. The grouped composer picker
+/// sends "<provider_id>::<model>" so the SAME model id present in two providers (e.g.
+/// glm-4.6 on both Ollama and Z.ai) resolves to the provider the user actually chose,
+/// not just the first match. Returns None when the provider id is unknown.
+fn provider_config_by_id(
+    provider_id: &str,
+    model_id: &str,
+) -> Option<(String, String, Option<String>)> {
+    let registry = load_provider_registry();
+    let provider = registry.providers.iter().find(|p| p.id == provider_id)?;
     let api_key = provider_api_key(&provider.id).or_else(env_inference_api_key);
     Some((provider.base_url.clone(), model_id.to_string(), api_key))
 }
@@ -16530,10 +16551,20 @@ fn active_inference_model_info() -> ActiveModelResponse {
 }
 
 #[derive(Debug, Serialize)]
+struct ProviderModelsGroup {
+    provider_id: String,
+    label: String,
+    models: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
 struct RuntimeModelsResponse {
     active: Option<String>,
     backend: String,
     available: Vec<String>,
+    /// Models grouped by their provider, for the composer picker (search + sections).
+    /// Empty on the env-based fallback (the picker then uses the flat `available`).
+    groups: Vec<ProviderModelsGroup>,
 }
 
 /// Lists the models the configured backend exposes (OpenAI-compatible `/models`,
@@ -16567,11 +16598,23 @@ async fn runtime_models(State(state): State<AppState>) -> Json<RuntimeModelsResp
             }
             available.sort();
             available.dedup();
+            // Grouped by provider for the composer picker (one section per provider).
+            let groups: Vec<ProviderModelsGroup> = registry
+                .providers
+                .iter()
+                .filter(|p| !p.models.is_empty())
+                .map(|p| ProviderModelsGroup {
+                    provider_id: p.id.clone(),
+                    label: p.label.clone(),
+                    models: p.models.iter().map(|m| m.id.clone()).collect(),
+                })
+                .collect();
             if active.is_some() || !available.is_empty() {
                 return Json(RuntimeModelsResponse {
                     active,
                     backend: provider.kind.as_str().to_string(),
                     available,
+                    groups,
                 });
             }
         }
@@ -16607,6 +16650,7 @@ async fn runtime_models(State(state): State<AppState>) -> Json<RuntimeModelsResp
         active,
         backend,
         available,
+        groups: Vec::new(),
     })
 }
 

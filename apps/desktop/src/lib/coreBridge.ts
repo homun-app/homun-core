@@ -530,10 +530,17 @@ export interface CloseAllBrowsersResult {
   closed_tabs: number;
 }
 
+export interface ProviderModelsGroup {
+  provider_id: string;
+  label: string;
+  models: string[];
+}
+
 export interface RuntimeModelsList {
   active: string | null;
   backend: string;
   available: string[];
+  groups: ProviderModelsGroup[];
 }
 
 export interface InferenceProvider {
