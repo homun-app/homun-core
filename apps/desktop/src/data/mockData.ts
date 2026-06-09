@@ -12,6 +12,7 @@ import {
   MessageSquare,
   Monitor,
   MonitorPlay,
+  Palette,
   Plug,
   SlidersHorizontal,
   Sparkles,
@@ -396,6 +397,7 @@ export const settingsSections: Array<{
 }> = [
   { id: "account", label: "Account", icon: User, group: "account" },
   { id: "general", label: "Generale", icon: SlidersHorizontal, group: "account" },
+  { id: "appearance", label: "Aspetto", icon: Palette, group: "account" },
   { id: "runtime", label: "Modello & Runtime", icon: Cpu, group: "account" },
   { id: "privacy", label: "Privacy & Autonomia", icon: KeyRound, group: "account" },
   { id: "memory", label: "Memoria", icon: Brain, group: "account" },

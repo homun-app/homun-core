@@ -14,6 +14,7 @@ export type ViewId =
 export type SettingsSectionId =
   | "account"
   | "general"
+  | "appearance"
   | "runtime"
   | "privacy"
   | "memory"
