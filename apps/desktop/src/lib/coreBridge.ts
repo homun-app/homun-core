@@ -657,6 +657,29 @@ async function electronMemoryWiki(thread?: string, workspace?: string): Promise<
   return gatewayGetJson<MemoryWikiPage[]>(`/api/memory/wiki${scopeQuery(thread, workspace)}`);
 }
 
+async function electronHomunProactiveStatus(): Promise<{ enabled: boolean }> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/homun/proactive`, {
+    headers: gatewayHeaders(),
+  });
+  if (!response.ok) return { enabled: false };
+  return response.json() as Promise<{ enabled: boolean }>;
+}
+
+async function electronSetHomunProactive(
+  enabled: boolean,
+  every?: string,
+): Promise<{ enabled: boolean }> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/homun/proactive`, {
+    method: "POST",
+    headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled, every }),
+  });
+  if (!response.ok) {
+    throw new Error(`Desktop Gateway homun proactive HTTP ${response.status}`);
+  }
+  return response.json() as Promise<{ enabled: boolean }>;
+}
+
 async function electronConsolidateMemory(
   workspace?: string,
 ): Promise<{ merged: number; dropped: number }> {
@@ -1477,6 +1500,9 @@ export const coreBridge = {
   selectChatThread: (threadId: string) => chatApi.selectChatThread(threadId),
   createChatThread: (workspace?: string) => chatApi.createChatThread(workspace),
   homunThread: () => chatApi.homunThread(),
+  homunProactiveStatus: () => electronHomunProactiveStatus(),
+  setHomunProactive: (enabled: boolean, every?: string) =>
+    electronSetHomunProactive(enabled, every),
   setChatThreadPinned: (threadId: string, pinned: boolean) =>
     chatApi.setChatThreadPinned(threadId, pinned),
   archiveChatThread: (threadId: string) =>

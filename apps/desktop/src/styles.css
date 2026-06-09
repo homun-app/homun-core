@@ -3512,6 +3512,33 @@ body.resizing-drawer {
   background: var(--brand-soft);
   color: var(--brand-strong);
 }
+.homun-proactive {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 18px;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.homun-proactive:hover {
+  border-color: var(--brand);
+  color: var(--text);
+}
+.homun-proactive.on {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+  font-weight: 600;
+}
+.homun-proactive:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
 
 /* Sidebar: IDE-style context switcher + primary new-chat + channels group. */
 .ctx-switcher-wrap {

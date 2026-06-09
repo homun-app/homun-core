@@ -413,6 +413,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             post(unarchive_chat_thread),
         )
         .route("/api/chat/homun", get(homun_thread))
+        .route(
+            "/api/homun/proactive",
+            get(homun_proactive_status).post(homun_proactive_set),
+        )
         .route("/api/chat/threads/{thread_id}", delete(delete_chat_thread))
         .route("/api/chat/threads/{thread_id}/messages", get(chat_messages))
         .route(
@@ -672,6 +676,117 @@ async fn homun_thread(
             .find_or_create_homun_thread(&resolve_threads_workspace(&query))
             .map_err(GatewayError::store)?,
     ))
+}
+
+// V2 Homun: a recurring proactive check-in delivered INTO the Homun thread (the persona
+// applies there). The goal doubles as the marker to find/cancel it.
+const HOMUN_CHECKIN_GOAL: &str = "Check-in proattivo: rivedi brevemente cosa è cambiato di \
+recente e cosa sai dell'utente, poi — in modo conciso e caldo — dì cosa hai notato e proponi 1-2 \
+cose utili. Se non c'è nulla di nuovo, un saluto breve. NON inventare attività non avvenute.";
+
+fn homun_checkin_is_active(state: &AppState) -> bool {
+    let Ok(store) = lock_task_store(state) else {
+        return false;
+    };
+    let Ok(tasks) = store.list_tasks(&gateway_user_id(), &gateway_workspace_id()) else {
+        return false;
+    };
+    tasks.iter().any(|task| {
+        task.kind == "proactive_prompt"
+            && task.goal == HOMUN_CHECKIN_GOAL
+            && matches!(
+                task.status,
+                local_first_task_runtime::TaskStatus::Queued
+                    | local_first_task_runtime::TaskStatus::Pending
+                    | local_first_task_runtime::TaskStatus::WaitingTime
+                    | local_first_task_runtime::TaskStatus::Running
+            )
+    })
+}
+
+fn cancel_homun_checkins(state: &AppState) {
+    let Ok(store) = lock_task_store(state) else {
+        return;
+    };
+    let user = gateway_user_id();
+    let workspace = gateway_workspace_id();
+    let Ok(tasks) = store.list_tasks(&user, &workspace) else {
+        return;
+    };
+    for task in tasks {
+        if task.kind == "proactive_prompt"
+            && task.goal == HOMUN_CHECKIN_GOAL
+            && matches!(
+                task.status,
+                local_first_task_runtime::TaskStatus::Queued
+                    | local_first_task_runtime::TaskStatus::Pending
+                    | local_first_task_runtime::TaskStatus::WaitingTime
+                    | local_first_task_runtime::TaskStatus::Running
+            )
+        {
+            let _ = store.update_task_status(
+                &task.task_id,
+                &user,
+                &workspace,
+                local_first_task_runtime::TaskStatus::Cancelled,
+                Some("check-in Homun disattivato"),
+            );
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct HomunProactiveRequest {
+    enabled: bool,
+    every: Option<String>,
+}
+
+async fn homun_proactive_status(State(state): State<AppState>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "enabled": homun_checkin_is_active(&state) }))
+}
+
+/// Enable/disable the recurring Homun proactive check-in (idempotent: always clears the
+/// previous one first).
+async fn homun_proactive_set(
+    State(state): State<AppState>,
+    Json(req): Json<HomunProactiveRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    cancel_homun_checkins(&state);
+    if req.enabled {
+        let every = req
+            .every
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("daily@09:00");
+        let now = OffsetDateTime::now_utc();
+        let Some(next) = local_first_task_runtime::next_occurrence(every, None, now) else {
+            return Err(GatewayError {
+                status: StatusCode::BAD_REQUEST,
+                code: "schedule_invalid",
+                message: format!("Pianificazione '{every}' non valida."),
+            });
+        };
+        let id = format!("sched_homun_{}", uuid::Uuid::new_v4().simple());
+        let mut task = TaskRecord::new(
+            id,
+            gateway_user_id(),
+            gateway_workspace_id(),
+            "proactive_prompt",
+            HOMUN_CHECKIN_GOAL,
+            serde_json::json!({ "deliver_thread": "homun" }),
+        );
+        task.not_before = Some(next);
+        task.recurrence = Some(every.to_string());
+        if let Ok(store) = lock_task_store(&state) {
+            store.insert_task(&task).map_err(|error| GatewayError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "homun_checkin_insert",
+                message: error.to_string(),
+            })?;
+        }
+    }
+    Ok(Json(serde_json::json!({ "enabled": req.enabled })))
 }
 
 async fn select_chat_thread(
@@ -11519,11 +11634,25 @@ fn execute_proactive_prompt_task(
         format!("Pianificato · {trimmed}")
     };
 
+    // A proactive task can target a specific thread (e.g. the Homun home) via
+    // input_json.deliver_thread; otherwise it gets its own per-schedule "scheduled" thread.
+    let deliver_thread = task
+        .input_json
+        .get("deliver_thread")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty());
     let thread_id = match lock_store(state) {
-        Ok(store) => store
-            .find_or_create_channel_thread(&base_workspace_id(), "scheduled", &root, &title)
-            .ok()
-            .map(|thread| thread.thread_id),
+        Ok(store) => if deliver_thread == Some("homun") {
+            store
+                .find_or_create_homun_thread(&base_workspace_id())
+                .ok()
+                .map(|thread| thread.thread_id)
+        } else {
+            store
+                .find_or_create_channel_thread(&base_workspace_id(), "scheduled", &root, &title)
+                .ok()
+                .map(|thread| thread.thread_id)
+        },
         Err(_) => None,
     };
     let Some(thread_id) = thread_id else {

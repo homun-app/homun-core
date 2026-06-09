@@ -1423,7 +1423,10 @@ export function ChatView({
         <div className="thread-content">
           <div className="thread-message-list">
           {threadMessages.length === 0 && !promptSubmitting && (
-            <ChatEmptyHero onPick={(text) => setComposerSeed({ text, nonce: Date.now() })} />
+            <ChatEmptyHero
+              threadId={thread.threadId}
+              onPick={(text) => setComposerSeed({ text, nonce: Date.now() })}
+            />
           )}
           {threadMessages.map((message) => {
             const isStreamingMessage = message.id === streamingAssistantId;
@@ -5514,11 +5517,16 @@ const EMPTY_HERO_CHIPS = [
 ];
 
 // Empty-chat hero (Manus-style): serif headline + quick-action chips that seed the composer.
-function ChatEmptyHero({ onPick }: { onPick: (text: string) => void }) {
+function ChatEmptyHero({ onPick, threadId }: { onPick: (text: string) => void; threadId: string }) {
+  const isHomun = threadId === "homun";
   return (
     <div className="chat-hero">
-      <h1 className="chat-hero-title">Come posso aiutarti?</h1>
-      <p className="chat-hero-sub">Scrivi qui sotto, oppure parti da uno spunto.</p>
+      <h1 className="chat-hero-title">{isHomun ? "Ciao, sono Homun" : "Come posso aiutarti?"}</h1>
+      <p className="chat-hero-sub">
+        {isHomun
+          ? "Conosciamoci: raccontami di te, oppure chiedimi qualcosa."
+          : "Scrivi qui sotto, oppure parti da uno spunto."}
+      </p>
       <div className="chat-hero-chips">
         {EMPTY_HERO_CHIPS.map((chip) => (
           <button
@@ -5531,7 +5539,43 @@ function ChatEmptyHero({ onPick }: { onPick: (text: string) => void }) {
           </button>
         ))}
       </div>
+      {isHomun && <HomunProactiveToggle />}
     </div>
+  );
+}
+
+// V2 Homun: enable/disable a daily proactive check-in delivered into this thread.
+function HomunProactiveToggle() {
+  const [enabled, setEnabled] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    coreBridge
+      .homunProactiveStatus()
+      .then((s) => setEnabled(s.enabled))
+      .catch(() => {});
+  }, []);
+  const toggle = () => {
+    setBusy(true);
+    coreBridge
+      .setHomunProactive(!enabled)
+      .then((s) => setEnabled(s.enabled))
+      .catch(() => {})
+      .finally(() => setBusy(false));
+  };
+  return (
+    <button
+      type="button"
+      className={`homun-proactive ${enabled ? "on" : ""}`}
+      disabled={busy}
+      onClick={toggle}
+    >
+      <Sparkles size={14} />
+      <span>
+        {enabled
+          ? "Check-in proattivi attivi · ogni giorno"
+          : "Attiva check-in proattivi giornalieri"}
+      </span>
+    </button>
   );
 }
 
