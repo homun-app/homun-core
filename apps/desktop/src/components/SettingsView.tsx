@@ -58,6 +58,7 @@ import {
   type SystemStatus,
 } from "../lib/coreBridge";
 import { useSetting } from "../lib/settingsStore";
+import { ACCENT_PRESETS, DEFAULT_ACCENT, loadAccent, saveAccent } from "../lib/accent";
 import type {
   ConnectionItem,
   SettingsSectionId,
@@ -71,6 +72,7 @@ interface SettingsViewProps {
 const SECTION_TITLES: Record<SettingsSectionId, string> = {
   account: "Account",
   general: "Generale",
+  appearance: "Aspetto",
   runtime: "Modello & Runtime",
   privacy: "Privacy & Autonomia",
   memory: "Memoria",
@@ -125,6 +127,7 @@ export function SettingsView({ section }: SettingsViewProps) {
         </h2>
         {section === "account" && <AccountPane computer={computer} />}
         {section === "general" && <GeneralPane />}
+        {section === "appearance" && <AppearancePane />}
         {section === "runtime" && <RuntimePane model={model} />}
         {section === "privacy" && <PrivacyPane />}
         {section === "memory" && <MemoryPane />}
@@ -279,6 +282,56 @@ function AccountPane({
         </button>
       </div>
     </>
+  );
+}
+
+/* ---------------------------------------------------------------- appearance */
+
+function AppearancePane() {
+  const [accent, setAccent] = useState(loadAccent());
+  const pick = (hex: string) => {
+    setAccent(hex);
+    saveAccent(hex); // applies to :root + persists immediately
+  };
+  const norm = accent.toLowerCase();
+  return (
+    <div className="appearance-pane">
+      <p className="set-hint">
+        Scegli l'accento dell'interfaccia. Il default è l'arancione del brand, ma puoi renderlo
+        tuo — si applica subito a tutta l'app.
+      </p>
+      <div className="appearance-swatches">
+        {ACCENT_PRESETS.map((preset) => (
+          <button
+            key={preset.hex}
+            type="button"
+            title={preset.name}
+            aria-label={preset.name}
+            className={`appearance-swatch ${norm === preset.hex.toLowerCase() ? "active" : ""}`}
+            style={{ background: preset.hex }}
+            onClick={() => pick(preset.hex)}
+          >
+            {norm === preset.hex.toLowerCase() && <Check size={15} color="#fff" />}
+          </button>
+        ))}
+      </div>
+      <div className="appearance-custom">
+        <label className="appearance-color">
+          <input type="color" value={accent} onChange={(e) => pick(e.target.value)} />
+          <span>Personalizzato</span>
+        </label>
+        <code className="appearance-hex">{accent.toUpperCase()}</code>
+        <button type="button" className="ghost-button" onClick={() => pick(DEFAULT_ACCENT)}>
+          Ripristina
+        </button>
+      </div>
+      <div className="appearance-preview">
+        <button type="button" className="appearance-preview-btn">
+          Pulsante primario
+        </button>
+        <span className="appearance-preview-link">link colorato</span>
+      </div>
+    </div>
   );
 }
 
