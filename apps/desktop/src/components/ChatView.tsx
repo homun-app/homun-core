@@ -1649,13 +1649,9 @@ export function ChatView({
                 <span>{formatMessageTimestamp(displayMessage.timestamp)}</span>
                 {displayMessage.role === "assistant" ? (
                   <>
-                    {(displayMessage.model ?? activeModelInfo?.model) && (
-                      <span>
-                        {shortModelName(
-                          (displayMessage.model ?? activeModelInfo?.model) as string,
-                        )}
-                      </span>
-                    )}
+                    {/* Model label intentionally hidden: the override is verified to
+                        work (x-effective-model), so showing it added noise/confusion.
+                        The effective model is still tracked on the message if needed. */}
                     {displayMessage.metrics && displayMessage.metrics.elapsedSeconds > 0 && (
                       <span>
                         {formatChatDuration(displayMessage.metrics.elapsedSeconds)} ·{" "}
