@@ -36,7 +36,7 @@ import type {
 
 export const navItems: NavItem[] = [
   { id: "chat", label: "Nuovo compito", icon: MessageSquare },
-  { id: "learning", label: "Apprendimento", icon: Brain },
+  // "Apprendimento" è confluito in Homun (la sua casa: cosa ha appreso + controllo).
   { id: "tasks", label: "Pianificato", icon: CalendarClock },
   { id: "memory", label: "Memoria", icon: Brain },
 ];
