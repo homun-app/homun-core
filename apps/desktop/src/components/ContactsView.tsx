@@ -6,6 +6,8 @@ import {
   type CoreContact,
   type CoreContactPerimeter,
   type CoreContactProfile,
+  type CoreProfile,
+  type CoreRelationship,
 } from "../lib/coreBridge";
 
 /* First-class Contacts manager (M7): a searchable master-detail of every person
@@ -51,9 +53,14 @@ export function ContactsView() {
   const [pending, setPending] = useState<MergePair | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [profiles, setProfiles] = useState<CoreProfile[]>([]);
+  const [showProfiles, setShowProfiles] = useState(false);
+
   const reload = async () => setContacts(await coreBridge.contacts());
+  const reloadProfiles = async () => setProfiles(await coreBridge.profiles());
   useEffect(() => {
     void reload();
+    void reloadProfiles();
   }, []);
 
   // Manual add — the curated path that isn't a channel identity (the other source
@@ -107,6 +114,28 @@ export function ContactsView() {
     });
   }, [contacts, query, typeFilter]);
 
+  // Address-book grouping: sections by initial letter (accents folded, digits and
+  // symbols under '#') + an alphabet index to jump — a flat list doesn't scale.
+  const letterGroups = useMemo(() => {
+    const letterOf = (name: string) => {
+      const ch = (name.trim()[0] ?? "#")
+        .toUpperCase()
+        .normalize("NFD")
+        .replace(/[̀-ͯ]/g, "");
+      return /[A-Z]/.test(ch) ? ch : "#";
+    };
+    const map = new Map<string, CoreContact[]>();
+    for (const c of filtered) {
+      const letter = letterOf(c.name);
+      const group = map.get(letter);
+      if (group) group.push(c);
+      else map.set(letter, [c]);
+    }
+    return [...map.entries()].sort(([a], [b]) =>
+      a === "#" ? 1 : b === "#" ? -1 : a.localeCompare(b),
+    );
+  }, [filtered]);
+
   // Normalize a merge so the user's own card (self) always survives.
   const openMerge = (from: CoreContact, into: CoreContact) => {
     if (from.reference === into.reference) return;
@@ -139,11 +168,23 @@ export function ContactsView() {
     tone_of_voice?: string;
     persona_instructions?: string;
     response_mode?: string;
+    birthday?: string;
   }) => {
     if (!open) return;
     setBusy(true);
     try {
       await coreBridge.updateContact({ reference: open.reference, ...update });
+      await reload();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const assignProfile = async (profileId: number | null, channel?: string) => {
+    if (!open) return;
+    setBusy(true);
+    try {
+      await coreBridge.assignContactProfile(open.reference, profileId, channel);
       await reload();
     } finally {
       setBusy(false);
@@ -181,15 +222,19 @@ export function ContactsView() {
             />
           </label>
 
-          <button
-            type="button"
-            className="set-btn"
-            style={{ width: "100%", justifyContent: "center", marginTop: 8 }}
-            onClick={() => void newContact()}
-            disabled={busy}
-          >
-            + Nuovo contatto
-          </button>
+          <div className="contacts-rail-actions">
+            <button
+              type="button"
+              className="set-btn"
+              onClick={() => void newContact()}
+              disabled={busy}
+            >
+              + Nuovo contatto
+            </button>
+            <button type="button" className="set-btn" onClick={() => setShowProfiles(true)}>
+              Profili
+            </button>
+          </div>
 
           <div className="contacts-chips">
             {[{ value: "all", label: "Tutti" }, ...CONTACT_TYPES].map((t) => (
@@ -227,46 +272,76 @@ export function ContactsView() {
           <div className="mdl-rail-group">
             {filtered.length} {filtered.length === 1 ? "contatto" : "contatti"}
           </div>
-          {filtered.map((c) => (
-            <button
-              key={c.reference}
-              type="button"
-              draggable
-              className={`mdl-rail-item ${selected === c.reference ? "active" : ""} ${
-                dragOver === c.reference ? "drag-over" : ""
-              }`}
-              onClick={() => void selectContact(c.reference)}
-              onDragStart={() => setDragRef(c.reference)}
-              onDragEnd={() => {
-                setDragRef(null);
-                setDragOver(null);
-              }}
-              onDragOver={(e) => {
-                if (dragRef && dragRef !== c.reference) {
-                  e.preventDefault();
-                  setDragOver(c.reference);
-                }
-              }}
-              onDragLeave={() => setDragOver((r) => (r === c.reference ? null : r))}
-              onDrop={(e) => {
-                e.preventDefault();
-                const from = dragRef ? byRef(dragRef) : null;
-                setDragOver(null);
-                setDragRef(null);
-                if (from && from.reference !== c.reference) openMerge(from, c);
-              }}
-            >
-              <span className="mdl-rail-avatar">{initial(c.name)}</span>
-              <span className="mdl-rail-name">
-                {c.name || "(senza nome)"}
-                <small>
-                  {contactTypeLabel(c.contact_type)}
-                  {c.channels.length ? ` · ${c.channels.map((ch) => ch.channel).join(", ")}` : ""}
-                </small>
-              </span>
-              {c.memory_count > 0 && <span className="mdl-rail-badge">{c.memory_count}</span>}
-            </button>
-          ))}
+          <div className="contacts-list-wrap">
+            <div className="contacts-list">
+              {letterGroups.map(([letter, items]) => (
+                <div key={letter} id={`contacts-letter-${letter}`} className="contacts-letter-group">
+                  <div className="contacts-letter">{letter}</div>
+                  {items.map((c) => (
+                    <button
+                      key={c.reference}
+                      type="button"
+                      draggable
+                      className={`mdl-rail-item contacts-row ${
+                        selected === c.reference ? "active" : ""
+                      } ${dragOver === c.reference ? "drag-over" : ""}`}
+                      onClick={() => void selectContact(c.reference)}
+                      onDragStart={() => setDragRef(c.reference)}
+                      onDragEnd={() => {
+                        setDragRef(null);
+                        setDragOver(null);
+                      }}
+                      onDragOver={(e) => {
+                        if (dragRef && dragRef !== c.reference) {
+                          e.preventDefault();
+                          setDragOver(c.reference);
+                        }
+                      }}
+                      onDragLeave={() => setDragOver((r) => (r === c.reference ? null : r))}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const from = dragRef ? byRef(dragRef) : null;
+                        setDragOver(null);
+                        setDragRef(null);
+                        if (from && from.reference !== c.reference) openMerge(from, c);
+                      }}
+                    >
+                      <span className="mdl-rail-avatar">{initial(c.name)}</span>
+                      <span className="mdl-rail-name">
+                        {c.name || "(senza nome)"}
+                        <small>
+                          {contactTypeLabel(c.contact_type)}
+                          {c.channels.length
+                            ? ` · ${c.channels.map((ch) => ch.channel).join(", ")}`
+                            : ""}
+                        </small>
+                      </span>
+                      {c.memory_count > 0 && (
+                        <span className="mdl-rail-badge">{c.memory_count}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </div>
+            {letterGroups.length > 1 && (
+              <div className="contacts-alpha" aria-label="Indice alfabetico">
+                {letterGroups.map(([letter]) => (
+                  <button
+                    key={letter}
+                    type="button"
+                    onClick={() =>
+                      document
+                        .getElementById(`contacts-letter-${letter}`)
+                        ?.scrollIntoView({ behavior: "smooth", block: "start" })
+                    }
+                  >
+                    {letter}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           {contacts && filtered.length === 0 && (
             <p className="set-hint">
               Nessun contatto. Arrivano dai canali (WhatsApp/Telegram) o aggiungili a mano.
@@ -282,14 +357,24 @@ export function ContactsView() {
               key={open.reference}
               contact={open}
               contacts={contacts ?? []}
+              profiles={profiles}
               busy={busy}
               onPatch={patch}
               onMerge={(target) => openMerge(open, target)}
               onDelete={() => void removeContact()}
+              onAssignProfile={(profileId, channel) => void assignProfile(profileId, channel)}
             />
           )}
         </section>
       </div>
+
+      {showProfiles && (
+        <ProfilesModal
+          profiles={profiles}
+          onClose={() => setShowProfiles(false)}
+          onReload={() => void reloadProfiles()}
+        />
+      )}
 
       {pending && (
         <div className="contacts-modal-backdrop" onClick={() => !busy && setPending(null)}>
@@ -324,13 +409,16 @@ export function ContactsView() {
 function ContactCard({
   contact,
   contacts,
+  profiles,
   busy,
   onPatch,
   onMerge,
   onDelete,
+  onAssignProfile,
 }: {
   contact: CoreContact;
   contacts: CoreContact[];
+  profiles: CoreProfile[];
   busy: boolean;
   onPatch: (u: {
     name?: string;
@@ -339,9 +427,11 @@ function ContactCard({
     tone_of_voice?: string;
     persona_instructions?: string;
     response_mode?: string;
+    birthday?: string;
   }) => void;
   onMerge: (target: CoreContact) => void;
   onDelete: () => void;
+  onAssignProfile: (profileId: number | null, channel?: string) => void;
 }) {
   const [mergeTarget, setMergeTarget] = useState("");
   const others = contacts.filter((c) => c.reference !== contact.reference);
@@ -353,14 +443,28 @@ function ContactCard({
   // Isolation perimeter: what the assistant may see/use when replying to THIS
   // contact on a channel. Defaults are the safe deny-by-default profile.
   const [perimeter, setPerimeter] = useState<CoreContactPerimeter | null>(null);
+  // Social graph: who this contact is to the other people in the rubrica.
+  const [relations, setRelations] = useState<CoreRelationship[] | null>(null);
+  const [relOther, setRelOther] = useState("");
+  const [relType, setRelType] = useState("");
+  const loadRelations = () =>
+    void coreBridge
+      .contactRelationships(contact.reference)
+      .then(setRelations)
+      .catch(() => setRelations([]));
   useEffect(() => {
     setProfile(null);
     setPerimeter(null);
+    setRelations(null);
     void coreBridge.contactProfile(contact.reference).then(setProfile);
     void coreBridge
       .contactPerimeter(contact.reference)
       .then(setPerimeter)
       .catch(() => setPerimeter(null));
+    void coreBridge
+      .contactRelationships(contact.reference)
+      .then(setRelations)
+      .catch(() => setRelations([]));
   }, [contact.reference]);
   const savePerimeter = (next: CoreContactPerimeter) => {
     setPerimeter(next); // optimistic
@@ -429,7 +533,20 @@ function ContactCard({
             ))}
           </select>
         </label>
-        <label className="rk" style={{ gridColumn: "1 / -1" }}>
+        <label className="rk">
+          Compleanno
+          <input
+            type="date"
+            className="set-input"
+            defaultValue={contact.birthday ?? ""}
+            disabled={busy}
+            onBlur={(e) => {
+              if ((e.target.value || "") !== (contact.birthday ?? ""))
+                onPatch({ birthday: e.target.value });
+            }}
+          />
+        </label>
+        <label className="rk">
           Note
           <input
             className="set-input"
@@ -461,6 +578,49 @@ function ContactCard({
       <div className="contacts-section">
         <div className="rk">Persona e risposta</div>
         <div className="contacts-fields">
+          {profiles.length > 0 && (
+            <label className="rk">
+              Profilo
+              <select
+                className="set-input"
+                value={contact.profile_id ?? ""}
+                disabled={busy}
+                onChange={(e) =>
+                  onAssignProfile(e.target.value ? Number(e.target.value) : null)
+                }
+              >
+                <option value="">Nessuno (usa i campi qui sotto)</option>
+                {profiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {profiles.length > 0 &&
+            [...new Set(contact.channels.map((ch) => ch.channel))].map((channel) => (
+              <label className="rk" key={channel}>
+                Profilo su {channel}
+                <select
+                  className="set-input"
+                  value={
+                    contact.channel_profiles.find((cp) => cp.channel === channel)?.profile_id ?? ""
+                  }
+                  disabled={busy}
+                  onChange={(e) =>
+                    onAssignProfile(e.target.value ? Number(e.target.value) : null, channel)
+                  }
+                >
+                  <option value="">Come il profilo base</option>
+                  {profiles.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
           <label className="rk">
             Modalità di risposta sui canali
             <select
@@ -566,6 +726,72 @@ function ContactCard({
       </div>
 
       <div className="contacts-section">
+        <div className="rk">Relazioni</div>
+        {relations === null ? (
+          <p className="set-hint">Carico…</p>
+        ) : (
+          <>
+            {relations.length === 0 && (
+              <p className="set-hint">Nessuna relazione registrata.</p>
+            )}
+            {relations.map((r) => (
+              <div key={r.id} className="contacts-relation-row">
+                <span>
+                  {r.other_name} <small>({r.relationship_type})</small>
+                </span>
+                <button
+                  type="button"
+                  className="set-btn"
+                  disabled={busy}
+                  onClick={() => void coreBridge.removeRelationship(r.id).then(loadRelations)}
+                >
+                  Rimuovi
+                </button>
+              </div>
+            ))}
+            <div className="contacts-relation-add">
+              <select
+                className="set-input"
+                value={relOther}
+                disabled={busy}
+                onChange={(e) => setRelOther(e.target.value)}
+              >
+                <option value="">Contatto…</option>
+                {others.map((o) => (
+                  <option key={o.reference} value={o.reference}>
+                    {o.name}
+                  </option>
+                ))}
+              </select>
+              <input
+                className="set-input"
+                placeholder="relazione (es. moglie, collega, capo)"
+                value={relType}
+                disabled={busy}
+                onChange={(e) => setRelType(e.target.value)}
+              />
+              <button
+                type="button"
+                className="set-btn"
+                disabled={busy || !relOther || !relType.trim()}
+                onClick={() =>
+                  void coreBridge
+                    .addRelationship(contact.reference, relOther, relType.trim())
+                    .then(() => {
+                      setRelOther("");
+                      setRelType("");
+                      loadRelations();
+                    })
+                }
+              >
+                Aggiungi
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="contacts-section">
         <div className="contacts-section-head">
           <span className="rk">Cosa so di lui/lei</span>
           {profile && (profile.episode_count > 0 || profile.facts.length > 0) && (
@@ -647,5 +873,91 @@ function ContactCard({
         </p>
       </div>
     </>
+  );
+}
+
+/** Manage the reusable named profiles ("Personale", "Lavoro"): persona presets a
+ *  contact (or a single channel of a contact) adopts when the assistant replies. */
+function ProfilesModal({
+  profiles,
+  onClose,
+  onReload,
+}: {
+  profiles: CoreProfile[];
+  onClose: () => void;
+  onReload: () => void;
+}) {
+  const createNew = async () => {
+    const name = window.prompt("Nome del profilo (es. Lavoro, Personale)");
+    if (!name || !name.trim()) return;
+    await coreBridge.createProfile({ name: name.trim() });
+    onReload();
+  };
+  return (
+    <div className="contacts-modal-backdrop" onClick={onClose}>
+      <div className="contacts-modal contacts-profiles-modal" onClick={(e) => e.stopPropagation()}>
+        <h3>Profili di risposta</h3>
+        <p className="set-hint">
+          Persona riutilizzabili: tono e istruzioni che assegni ai contatti (anche per
+          singolo canale, es. «Marco su Telegram → Lavoro»).
+        </p>
+        {profiles.length === 0 && <p className="set-hint">Nessun profilo ancora.</p>}
+        {profiles.map((p) => (
+          <div key={p.id} className="contacts-profile-row">
+            <input
+              className="set-input"
+              defaultValue={p.name}
+              placeholder="nome"
+              onBlur={(e) => {
+                const v = e.target.value.trim();
+                if (v && v !== p.name)
+                  void coreBridge.updateProfile({ id: p.id, name: v }).then(onReload);
+              }}
+            />
+            <input
+              className="set-input"
+              defaultValue={p.tone_of_voice}
+              placeholder="tono (es. professionale)"
+              onBlur={(e) => {
+                if (e.target.value !== p.tone_of_voice)
+                  void coreBridge
+                    .updateProfile({ id: p.id, tone_of_voice: e.target.value })
+                    .then(onReload);
+              }}
+            />
+            <input
+              className="set-input"
+              defaultValue={p.instructions}
+              placeholder="istruzioni (es. dai del lei, niente dettagli privati)"
+              onBlur={(e) => {
+                if (e.target.value !== p.instructions)
+                  void coreBridge
+                    .updateProfile({ id: p.id, instructions: e.target.value })
+                    .then(onReload);
+              }}
+            />
+            <button
+              type="button"
+              className="set-btn danger"
+              title="Elimina profilo"
+              onClick={() => {
+                if (window.confirm(`Eliminare il profilo "${p.name}"?`))
+                  void coreBridge.deleteProfile(p.id).then(onReload);
+              }}
+            >
+              ×
+            </button>
+          </div>
+        ))}
+        <div className="contacts-modal-actions">
+          <button type="button" className="set-btn" onClick={() => void createNew()}>
+            + Nuovo profilo
+          </button>
+          <button type="button" className="set-btn" onClick={onClose}>
+            Chiudi
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

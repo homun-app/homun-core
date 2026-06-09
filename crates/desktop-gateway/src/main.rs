@@ -531,6 +531,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/memory/contacts/delete", post(contact_delete))
         .route("/api/memory/contacts/perimeter", post(contact_perimeter_get))
         .route("/api/memory/contacts/perimeter/update", post(contact_perimeter_set))
+        .route("/api/profiles", get(profiles_list))
+        .route("/api/profiles/create", post(profile_create))
+        .route("/api/profiles/update", post(profile_update))
+        .route("/api/profiles/delete", post(profile_delete))
+        .route("/api/memory/contacts/assign-profile", post(contact_assign_profile))
+        .route("/api/memory/contacts/relationships", post(contact_relationships))
+        .route("/api/memory/contacts/relationships/add", post(contact_relationship_add))
+        .route("/api/memory/contacts/relationships/remove", post(contact_relationship_remove))
         .route(
             "/api/channels/settings",
             get(get_channel_settings).post(set_channel_settings),
@@ -5853,6 +5861,13 @@ messaggistica, per conto dell'utente. Stile chat: naturale e conciso.",
                 cx.persona_instructions.trim()
             ));
         }
+        if !cx.relationships.is_empty() {
+            block.push_str(&format!(
+                "\nRELAZIONI NOTE di {}: {}.",
+                cx.name,
+                cx.relationships.join("; ")
+            ));
+        }
         if !cx.perimeter.can_see_contacts {
             block.push_str(
                 "\n[PRIVACY] NON menzionare MAI altri contatti, persone o relazioni \
@@ -10073,10 +10088,16 @@ struct ContactTurnContext {
     persona_instructions: String,
     handles: Vec<String>,
     perimeter: chat_store::StoredPerimeter,
+    /// Pre-formatted "Laura (moglie)" entries; populated ONLY when the perimeter
+    /// allows mentioning other contacts.
+    relationships: Vec<String>,
 }
 
 /// Resolve the curated contact bound to a channel thread. None for in-app threads,
 /// unknown senders, and the user's own card (`is_self` ⇒ owner bypass: no limits).
+/// Persona cascade: per-(contact, channel) profile → contact's default profile →
+/// the contact's inline fields (inline tone wins over profile tone when both set;
+/// instructions concatenate, profile first).
 fn contact_turn_context(state: &AppState, thread_id: Option<&str>) -> Option<ContactTurnContext> {
     let (channel, sender) = thread_id.and_then(parse_channel_thread_id)?;
     let store = lock_store(state).ok()?;
@@ -10087,12 +10108,41 @@ fn contact_turn_context(state: &AppState, thread_id: Option<&str>) -> Option<Con
     }
     let handles = store.contact_handles(id).unwrap_or_default();
     let perimeter = store.perimeter_or_default(id);
+    let profile = store.resolve_profile_for(id, &channel);
+    let tone_of_voice = if !contact.tone_of_voice.trim().is_empty() {
+        contact.tone_of_voice.clone()
+    } else {
+        profile.as_ref().map(|p| p.tone_of_voice.clone()).unwrap_or_default()
+    };
+    let persona_instructions = {
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(p) = &profile {
+            if !p.instructions.trim().is_empty() {
+                parts.push(p.instructions.trim().to_string());
+            }
+        }
+        if !contact.persona_instructions.trim().is_empty() {
+            parts.push(contact.persona_instructions.trim().to_string());
+        }
+        parts.join(" ")
+    };
+    let relationships = if perimeter.can_see_contacts {
+        store
+            .relationships_for(id)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|r| format!("{} ({})", r.other_name, r.relationship_type))
+            .collect()
+    } else {
+        Vec::new()
+    };
     Some(ContactTurnContext {
         name: contact.name,
-        tone_of_voice: contact.tone_of_voice,
-        persona_instructions: contact.persona_instructions,
+        tone_of_voice,
+        persona_instructions,
         handles,
         perimeter,
+        relationships,
     })
 }
 
@@ -18159,6 +18209,16 @@ struct ContactView {
     response_mode: String,
     tone_of_voice: String,
     persona_instructions: String,
+    /// Default named profile; per-channel overrides below win at reply time.
+    profile_id: Option<i64>,
+    birthday: Option<String>,
+    channel_profiles: Vec<ChannelProfileView>,
+}
+
+#[derive(Serialize)]
+struct ChannelProfileView {
+    channel: String,
+    profile_id: i64,
 }
 
 /// "contact_{id}" → id. Keeps the frontend's opaque-`reference` API contract while
@@ -18245,7 +18305,11 @@ fn episodes_dated_by_handles(
     out
 }
 
-fn contact_view_from_stored(c: &chat_store::StoredContact, memory_count: usize) -> ContactView {
+fn contact_view_from_stored(
+    store: &ChatStore,
+    c: &chat_store::StoredContact,
+    memory_count: usize,
+) -> ContactView {
     ContactView {
         reference: format!("contact_{}", c.id),
         name: c.name.clone(),
@@ -18269,6 +18333,14 @@ fn contact_view_from_stored(c: &chat_store::StoredContact, memory_count: usize) 
         response_mode: c.response_mode.clone(),
         tone_of_voice: c.tone_of_voice.clone(),
         persona_instructions: c.persona_instructions.clone(),
+        profile_id: c.profile_id,
+        birthday: c.birthday.clone(),
+        channel_profiles: store
+            .channel_profile_overrides(c.id)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(channel, profile_id)| ChannelProfileView { channel, profile_id })
+            .collect(),
     }
 }
 
@@ -18298,6 +18370,7 @@ async fn contacts_list(
         }
         map
     };
+    let store = lock_store(&state)?;
     let out = contacts
         .iter()
         .map(|c| {
@@ -18311,7 +18384,7 @@ async fn contacts_list(
                         .unwrap_or(0)
                 })
                 .sum();
-            contact_view_from_stored(c, count)
+            contact_view_from_stored(&store, c, count)
         })
         .collect();
     Ok(Json(out))
@@ -18364,6 +18437,9 @@ struct ContactUpdateRequest {
     persona_instructions: Option<String>,
     #[serde(default)]
     response_mode: Option<String>,
+    /// "" clears the birthday; absent leaves it unchanged.
+    #[serde(default)]
+    birthday: Option<String>,
 }
 
 async fn contact_update(
@@ -18401,6 +18477,16 @@ async fn contact_update(
             code: "contact_update",
             message: error.to_string(),
         })?;
+    if let Some(birthday) = request.birthday.as_deref() {
+        let value = birthday.trim();
+        store
+            .set_contact_birthday(id, if value.is_empty() { None } else { Some(value) })
+            .map_err(|error| GatewayError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "contact_update",
+                message: error.to_string(),
+            })?;
+    }
     // soul_md (legacy) is ignored — persona lives in tone/instructions now.
     let contact = store
         .contact_by_id(id)
@@ -18411,7 +18497,7 @@ async fn contact_update(
             code: "contact_not_found",
             message: "contatto non trovato".to_string(),
         })?;
-    Ok(Json(contact_view_from_stored(&contact, 0)))
+    Ok(Json(contact_view_from_stored(&store, &contact, 0)))
 }
 
 #[derive(Deserialize)]
@@ -18481,7 +18567,8 @@ async fn contacts_merge(
             }
         }
     }
-    Ok(Json(contact_view_from_stored(&survivor, 0)))
+    let store = lock_store(&state)?;
+    Ok(Json(contact_view_from_stored(&store, &survivor, 0)))
 }
 
 #[derive(Deserialize)]
@@ -18526,7 +18613,7 @@ async fn contact_create(
         code: "contact_create",
         message: "contatto non creato".to_string(),
     })?;
-    Ok(Json(contact_view_from_stored(&contact, 0)))
+    Ok(Json(contact_view_from_stored(&store, &contact, 0)))
 }
 
 #[derive(Deserialize)]
@@ -18559,7 +18646,7 @@ fn contact_after_identity_change(
         code: "contact_not_found",
         message: "contatto non trovato".to_string(),
     })?;
-    Ok(Json(contact_view_from_stored(&contact, 0)))
+    Ok(Json(contact_view_from_stored(&store, &contact, 0)))
 }
 
 async fn contact_identity_add(
@@ -18677,6 +18764,262 @@ async fn contact_perimeter_set(
         can_see_contacts: p.can_see_contacts,
         can_see_calendar: p.can_see_calendar,
     }))
+}
+
+// ---- Named profiles (P3): reusable personas + per-(contact, channel) binding ----
+
+#[derive(Serialize)]
+struct ProfileView {
+    id: i64,
+    name: String,
+    tone_of_voice: String,
+    instructions: String,
+}
+
+fn profile_view(p: chat_store::StoredProfile) -> ProfileView {
+    ProfileView {
+        id: p.id,
+        name: p.name,
+        tone_of_voice: p.tone_of_voice,
+        instructions: p.instructions,
+    }
+}
+
+async fn profiles_list(State(state): State<AppState>) -> Result<Json<Vec<ProfileView>>, GatewayError> {
+    let store = lock_store(&state)?;
+    let profiles = store.list_profiles().map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "profiles_list",
+        message: error.to_string(),
+    })?;
+    Ok(Json(profiles.into_iter().map(profile_view).collect()))
+}
+
+#[derive(Deserialize)]
+struct ProfileCreateRequest {
+    name: String,
+    #[serde(default)]
+    tone_of_voice: String,
+    #[serde(default)]
+    instructions: String,
+}
+
+async fn profile_create(
+    State(state): State<AppState>,
+    Json(request): Json<ProfileCreateRequest>,
+) -> Result<Json<ProfileView>, GatewayError> {
+    let name = request.name.trim();
+    if name.is_empty() {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "profile_name_required",
+            message: "nome richiesto".to_string(),
+        });
+    }
+    let store = lock_store(&state)?;
+    let id = store
+        .create_profile(name, request.tone_of_voice.trim(), request.instructions.trim())
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "profile_create",
+            message: error.to_string(),
+        })?;
+    let profile = store.profile_by_id(id).ok().flatten().ok_or_else(|| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "profile_create",
+        message: "profilo non creato".to_string(),
+    })?;
+    Ok(Json(profile_view(profile)))
+}
+
+#[derive(Deserialize)]
+struct ProfileUpdateRequest {
+    id: i64,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    tone_of_voice: Option<String>,
+    #[serde(default)]
+    instructions: Option<String>,
+}
+
+async fn profile_update(
+    State(state): State<AppState>,
+    Json(request): Json<ProfileUpdateRequest>,
+) -> Result<Json<ProfileView>, GatewayError> {
+    let store = lock_store(&state)?;
+    store
+        .update_profile(
+            request.id,
+            request.name.as_deref().filter(|s| !s.trim().is_empty()),
+            request.tone_of_voice.as_deref(),
+            request.instructions.as_deref(),
+        )
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "profile_update",
+            message: error.to_string(),
+        })?;
+    let profile = store
+        .profile_by_id(request.id)
+        .ok()
+        .flatten()
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "profile_not_found",
+            message: "profilo non trovato".to_string(),
+        })?;
+    Ok(Json(profile_view(profile)))
+}
+
+#[derive(Deserialize)]
+struct ProfileDeleteRequest {
+    id: i64,
+}
+
+async fn profile_delete(
+    State(state): State<AppState>,
+    Json(request): Json<ProfileDeleteRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let store = lock_store(&state)?;
+    store.delete_profile(request.id).map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "profile_delete",
+        message: error.to_string(),
+    })?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct ContactAssignProfileRequest {
+    reference: String,
+    /// Absent/null = clear (back to inline persona). For the channel variant the
+    /// override is removed instead.
+    #[serde(default)]
+    profile_id: Option<i64>,
+    /// When set, binds the profile for THIS channel only (override).
+    #[serde(default)]
+    channel: Option<String>,
+}
+
+async fn contact_assign_profile(
+    State(state): State<AppState>,
+    Json(request): Json<ContactAssignProfileRequest>,
+) -> Result<Json<ContactView>, GatewayError> {
+    let id = parse_contact_ref(&request.reference).ok_or_else(|| GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "contact_not_found",
+        message: "contatto non trovato".to_string(),
+    })?;
+    let store = lock_store(&state)?;
+    let result = match request.channel.as_deref().filter(|c| !c.trim().is_empty()) {
+        Some(channel) => store.set_channel_profile(id, channel.trim(), request.profile_id),
+        None => store.set_contact_profile(id, request.profile_id),
+    };
+    result.map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "contact_assign_profile",
+        message: error.to_string(),
+    })?;
+    let contact = store.contact_by_id(id).ok().flatten().ok_or_else(|| GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "contact_not_found",
+        message: "contatto non trovato".to_string(),
+    })?;
+    Ok(Json(contact_view_from_stored(&store, &contact, 0)))
+}
+
+// ---- Relationships (P3): the social graph between curated contacts ----
+
+#[derive(Serialize)]
+struct RelationshipView {
+    id: i64,
+    other_reference: String,
+    other_name: String,
+    relationship_type: String,
+    outgoing: bool,
+}
+
+async fn contact_relationships(
+    State(state): State<AppState>,
+    Json(request): Json<ContactRefRequest>,
+) -> Result<Json<Vec<RelationshipView>>, GatewayError> {
+    let id = parse_contact_ref(&request.reference).ok_or_else(|| GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "contact_not_found",
+        message: "contatto non trovato".to_string(),
+    })?;
+    let store = lock_store(&state)?;
+    let relations = store.relationships_for(id).map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "contact_relationships",
+        message: error.to_string(),
+    })?;
+    Ok(Json(
+        relations
+            .into_iter()
+            .map(|r| RelationshipView {
+                id: r.id,
+                other_reference: format!("contact_{}", r.other_contact_id),
+                other_name: r.other_name,
+                relationship_type: r.relationship_type,
+                outgoing: r.outgoing,
+            })
+            .collect(),
+    ))
+}
+
+#[derive(Deserialize)]
+struct RelationshipAddRequest {
+    reference: String,
+    other_reference: String,
+    relationship_type: String,
+}
+
+async fn contact_relationship_add(
+    State(state): State<AppState>,
+    Json(request): Json<RelationshipAddRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let not_found = || GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "contact_not_found",
+        message: "contatto non trovato".to_string(),
+    };
+    let from = parse_contact_ref(&request.reference).ok_or_else(not_found)?;
+    let to = parse_contact_ref(&request.other_reference).ok_or_else(not_found)?;
+    let kind = request.relationship_type.trim();
+    if from == to || kind.is_empty() {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "relationship_invalid",
+            message: "relazione non valida".to_string(),
+        });
+    }
+    let store = lock_store(&state)?;
+    store.add_relationship(from, to, kind).map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "relationship_add",
+        message: error.to_string(),
+    })?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct RelationshipRemoveRequest {
+    id: i64,
+}
+
+async fn contact_relationship_remove(
+    State(state): State<AppState>,
+    Json(request): Json<RelationshipRemoveRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let store = lock_store(&state)?;
+    store.remove_relationship(request.id).map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "relationship_remove",
+        message: error.to_string(),
+    })?;
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 /// A distilled fact about a contact, temporally grounded.
