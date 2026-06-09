@@ -375,6 +375,21 @@ Aggiornato 2026-06-08. Ordine consigliato, rivedibile.
      in un altro turno/attività.
 - **Fase 3 Homun (da fare)**: ricerca automatica sugli interessi (proattività d'AZIONE,
   gated) + gestione impostazioni via chat (tool dedicati).
+- **Memoria — qualità: FIX FATTI + DA RIVERIFICARE.** Audit della memoria viva (223
+  record pieni di falsi/rumore/duplicati). Fatto: (1) personale **rilevanza-gated** nei
+  progetti (`d5ee549`); (2) recall **scope-aware** (`943fc25`); (3) **forget completo**
+  (cap 3→25), estrattore **fedele** (anti-allucinazione) + **anti-rumore** (no task/
+  connessioni/dev-ops/richieste-di-oblio) (`395b928`); (4) **dedup semantico in
+  scrittura** + (5) **scope discipline** col nome progetto all'estrattore (`c21e60f`).
+  Pulizia: 19 record falsi/rumore soft-eliminati via `/api/memory/decide`.
+  **DA RIVERIFICARE (model-driven, prova nell'uso):**
+  - i 5 fix sono comportamentali → verificare LIVE che forget cancelli tutto il cluster,
+    che l'estrattore non crei più falsi/rumore, e che i nuovi duplicati non si accumulino;
+  - **consolidamento conservativo**: la passata (`/api/memory/consolidate`) ha fuso solo
+    in `taskline` (3 merge/1 drop) e **0 nel personale** → NON cattura i duplicati di
+    parafrasi già esistenti (es. "Trenitalia" ×4). Da rivedere la soglia/logica di merge
+    di `consolidate_scope` (oggi non usa il coseno come il dedup-on-write) e/o ripulire i
+    duplicati personali pregressi (manuale in UI o passata semantica dedicata).
 
 **Fatti — sessione 2026-06-08 (chat UX + allegati + routing modelli):**
 - **Allegati end-to-end** (`edbeba2`→`1d7e719`): cattura path via `webUtils.getPathForFile`
