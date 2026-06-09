@@ -3,11 +3,13 @@ import {
   Archive,
   ArchiveRestore,
   Bell,
+  Check,
   ChevronDown,
   ChevronRight,
   FolderOpen,
   FolderPlus,
   Info,
+  MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
@@ -17,6 +19,7 @@ import {
   Search,
   Settings,
   Trash2,
+  User,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -136,8 +139,9 @@ function ProjectsNav({
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(PERSONAL_WORKSPACE_ID);
   const [personalThreads, setPersonalThreads] = useState<ChatThread[]>([]);
   const [busy, setBusy] = useState(false);
-  const [showProjects, setShowProjects] = useState(true);
-  const [showPersonal, setShowPersonal] = useState(true);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [showChannels, setShowChannels] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -161,9 +165,21 @@ function ProjectsNav({
   const inProject = activeWorkspaceId !== PERSONAL_WORKSPACE_ID;
   const projects = workspaces.filter((w) => w.id !== PERSONAL_WORKSPACE_ID);
   const activeProjectName = projects.find((w) => w.id === activeWorkspaceId)?.name;
-  const personalList = (inProject ? personalThreads : activeThreads).filter(
+  const q = query.trim().toLowerCase();
+  const filteredProjects = q
+    ? projects.filter((p) => p.name.toLowerCase().includes(q))
+    : projects;
+  // Personal-scope threads (channels live here too); split channels into their own group.
+  const isChannel = (t: ChatThread) =>
+    t.source === "whatsapp" || t.source === "telegram";
+  const personalSource = (inProject ? personalThreads : activeThreads).filter(
     (t) => t.status === "active",
   );
+  const channelThreads = personalSource.filter(isChannel);
+  // Chats of the ACTIVE context: project chats when in a project, else personal (no channels).
+  const contextChats = inProject
+    ? activeThreads.filter((t) => t.status === "active")
+    : personalSource.filter((t) => !isChannel(t));
 
   // Context switches re-scope memory/capabilities/artifacts-folder → full reload.
   async function selectProject(id: string) {
@@ -184,21 +200,6 @@ function ProjectsNav({
     setBusy(true);
     try {
       await coreBridge.selectChatThread(threadId);
-      await coreBridge.selectWorkspace(PERSONAL_WORKSPACE_ID);
-      window.location.reload();
-    } catch (e) {
-      setError((e as Error).message);
-      setBusy(false);
-    }
-  }
-  async function createFreeTask() {
-    if (!inProject) {
-      onCreateChatThread();
-      return;
-    }
-    setBusy(true);
-    try {
-      await coreBridge.createChatThread(PERSONAL_WORKSPACE_ID);
       await coreBridge.selectWorkspace(PERSONAL_WORKSPACE_ID);
       window.location.reload();
     } catch (e) {
@@ -278,34 +279,52 @@ function ProjectsNav({
 
   return (
     <>
-      {inProject && (
-        <div className="drawer-context-chip" role="status">
-          <FolderOpen size={13} />
-          <span>
-            Sei in: <strong>{activeProjectName ?? "progetto"}</strong>
-          </span>
-        </div>
-      )}
-
-      <section className="drawer-section">
+      {/* Context switcher (IDE-style): scales to many projects via search + recents. */}
+      <div className="ctx-switcher-wrap">
         <button
-          className="drawer-section-title"
+          className="ctx-switcher"
           type="button"
-          onClick={() => setShowProjects((v) => !v)}
+          disabled={busy}
+          onClick={() => setSwitcherOpen((v) => !v)}
         >
-          <span>Progetti</span>
-          {showProjects ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+          {inProject ? <FolderOpen size={14} /> : <User size={14} />}
+          <span className="ctx-switcher-name">
+            {inProject ? (activeProjectName ?? "Progetto") : "Personale"}
+          </span>
+          <ChevronDown size={14} />
         </button>
-        {showProjects && (
+        {switcherOpen && (
           <>
-            {projects.length === 0 && (
-              <p className="drawer-empty">Nessun progetto: creane uno per lavorare in una cartella.</p>
-            )}
-            {projects.map((project) => {
-              const isActive = project.id === activeWorkspaceId;
-              if (editingId === project.id) {
-                return (
-                  <div key={project.id} className="drawer-project-edit">
+            <div
+              className="ctx-menu-backdrop"
+              role="presentation"
+              onClick={() => setSwitcherOpen(false)}
+            />
+            <div className="ctx-menu" role="menu">
+              <input
+                className="ctx-menu-search"
+                placeholder="Cerca progetto…"
+                value={query}
+                autoFocus
+                onChange={(e) => setQuery(e.target.value)}
+              />
+              <button
+                className={`ctx-menu-item ${!inProject ? "active" : ""}`}
+                type="button"
+                onClick={() => {
+                  setSwitcherOpen(false);
+                  if (inProject) void selectProject(PERSONAL_WORKSPACE_ID);
+                }}
+              >
+                <User size={14} />
+                <span>Personale</span>
+                {!inProject && <Check size={14} />}
+              </button>
+              <div className="ctx-menu-label">Progetti</div>
+              {filteredProjects.length === 0 && <p className="ctx-menu-empty">Nessun progetto</p>}
+              {filteredProjects.map((project) =>
+                editingId === project.id ? (
+                  <div key={project.id} className="ctx-menu-edit">
                     <input
                       autoFocus
                       value={editName}
@@ -315,7 +334,7 @@ function ProjectsNav({
                         if (e.key === "Escape") setEditingId(null);
                       }}
                     />
-                    <div className="drawer-project-edit-actions">
+                    <div className="ctx-menu-edit-actions">
                       <button
                         className="link-button"
                         type="button"
@@ -343,23 +362,22 @@ function ProjectsNav({
                       </button>
                     </div>
                   </div>
-                );
-              }
-              return (
-                <div key={project.id} className={`drawer-project ${isActive ? "active" : ""}`}>
-                  <div className="drawer-project-row">
+                ) : (
+                  <div key={project.id} className="ctx-menu-row">
                     <button
-                      className="drawer-link drawer-project-name"
+                      className={`ctx-menu-item ${project.id === activeWorkspaceId ? "active" : ""}`}
                       type="button"
                       onClick={() => {
-                        if (!isActive) void selectProject(project.id);
+                        setSwitcherOpen(false);
+                        if (project.id !== activeWorkspaceId) void selectProject(project.id);
                       }}
                     >
                       <FolderOpen size={14} />
                       <span>{project.name}</span>
+                      {project.id === activeWorkspaceId && <Check size={14} />}
                     </button>
                     <button
-                      className="drawer-edit-btn"
+                      className="ctx-menu-edit-btn"
                       type="button"
                       aria-label={`Modifica ${project.name}`}
                       disabled={busy}
@@ -371,61 +389,62 @@ function ProjectsNav({
                       <Pencil size={12} />
                     </button>
                   </div>
-                  {isActive && (
-                    <div className="drawer-project-chats">
-                      {activeThreads.filter((t) => t.status === "active").length === 0 && (
-                        <p className="drawer-empty">Nessuna chat ancora.</p>
-                      )}
-                      {activeThreads
-                        .filter((t) => t.status === "active")
-                        .map((thread) => (
-                          <ThreadLink
-                            key={thread.threadId}
-                            active={thread.threadId === activeThreadId && activeView === "chat"}
-                            thread={thread}
-                            onContextMenu={(e) => onThreadContextMenu(thread, e)}
-                            onSelect={() => onSelectThread(thread.threadId)}
-                          />
-                        ))}
-                      <button className="drawer-add-task" type="button" onClick={onCreateChatThread}>
-                        <Plus size={13} />
-                        <span>compito in questo progetto</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-            <button
-              className="drawer-new-project"
-              type="button"
-              onClick={() => {
-                setNewName("");
-                setNewFolder(null);
-                setError(null);
-                setCreating(true);
-              }}
-            >
-              <FolderPlus size={14} />
-              <span>Nuovo progetto</span>
-            </button>
+                ),
+              )}
+              <button
+                className="ctx-menu-create"
+                type="button"
+                onClick={() => {
+                  setSwitcherOpen(false);
+                  setNewName("");
+                  setNewFolder(null);
+                  setError(null);
+                  setCreating(true);
+                }}
+              >
+                <FolderPlus size={14} />
+                <span>Nuovo progetto</span>
+              </button>
+            </div>
           </>
         )}
-      </section>
+      </div>
+
+      <button className="drawer-new-chat" type="button" disabled={busy} onClick={onCreateChatThread}>
+        <Plus size={15} />
+        <span>Nuova chat</span>
+      </button>
 
       <section className="drawer-section">
-        <button
-          className="drawer-section-title"
-          type="button"
-          onClick={() => setShowPersonal((v) => !v)}
-        >
-          <span>Personale{inProject ? "" : " · attivo"}</span>
-          {showPersonal ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-        </button>
-        {showPersonal && (
-          <>
-            {personalList.length === 0 && <p className="drawer-empty">Nessun compito libero.</p>}
-            {personalList.map((thread) => (
+        {contextChats.length === 0 && <p className="drawer-empty">Nessuna chat ancora.</p>}
+        {contextChats.map((thread) => (
+          <ThreadLink
+            key={thread.threadId}
+            active={thread.threadId === activeThreadId && activeView === "chat"}
+            thread={thread}
+            onContextMenu={(e) => onThreadContextMenu(thread, e)}
+            onSelect={() => {
+              if (inProject) onSelectThread(thread.threadId);
+              else void openPersonalThread(thread.threadId);
+            }}
+          />
+        ))}
+      </section>
+
+      {channelThreads.length > 0 && (
+        <section className="drawer-section">
+          <button
+            className="drawer-section-title"
+            type="button"
+            onClick={() => setShowChannels((v) => !v)}
+          >
+            {showChannels ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+            <MessageSquare size={13} />
+            <span>Canali</span>
+            <span className="drawer-section-count">{channelThreads.length}</span>
+          </button>
+          {showChannels &&
+            channelThreads.map((thread) => (
               <ThreadLink
                 key={thread.threadId}
                 active={!inProject && thread.threadId === activeThreadId && activeView === "chat"}
@@ -434,13 +453,8 @@ function ProjectsNav({
                 onSelect={() => void openPersonalThread(thread.threadId)}
               />
             ))}
-            <button className="drawer-add-task" type="button" onClick={() => void createFreeTask()}>
-              <Plus size={13} />
-              <span>compito libero</span>
-            </button>
-          </>
-        )}
-      </section>
+        </section>
+      )}
 
       {error && (
         <p className="drawer-empty" style={{ color: "var(--danger)" }}>
