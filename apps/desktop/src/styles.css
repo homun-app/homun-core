@@ -3384,13 +3384,27 @@ body.resizing-drawer {
   color: var(--muted);
 }
 .appearance-color input[type="color"] {
-  width: 30px;
-  height: 30px;
+  width: 34px;
+  height: 34px;
   padding: 0;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
+  border: none;
+  border-radius: var(--radius-pill);
   background: none;
   cursor: pointer;
+  box-shadow: 0 0 0 1px var(--line) inset;
+  overflow: hidden;
+}
+/* The native swatch is square by default — round it via the webkit pseudo-elements. */
+.appearance-color input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.appearance-color input[type="color"]::-webkit-color-swatch {
+  border: none;
+  border-radius: var(--radius-pill);
+}
+.appearance-color input[type="color"]::-moz-color-swatch {
+  border: none;
+  border-radius: var(--radius-pill);
 }
 .appearance-hex {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
