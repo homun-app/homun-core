@@ -7129,6 +7129,7 @@ body.resizing-drawer {
 }
 .set-badge.green { color: var(--green); background: var(--green-soft); }
 .set-badge.muted { color: var(--muted); background: var(--surface-muted); }
+.set-badge.red { color: var(--red); background: var(--red-soft); }
 .set-card-divider { height: 1px; background: var(--line); margin: var(--s4) 0; }
 .set-meter { display: flex; align-items: center; justify-content: space-between; font-size: 13px; padding: 6px 0; }
 .set-meter .k { display: flex; align-items: center; gap: 8px; color: var(--text); }

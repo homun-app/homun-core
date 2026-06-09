@@ -159,6 +159,16 @@ export interface CoreMemoryDashboard {
   access_audit_count: number;
 }
 
+export interface CoreAuditEntry {
+  reference: string;
+  workspace_id: string;
+  actor_id: string;
+  purpose: string;
+  decision: string;
+  reasons: string[];
+  created_at: string;
+}
+
 export interface CoreCapabilitySnapshot {
   connections: Array<{
     id: string;
@@ -1536,6 +1546,9 @@ export const coreBridge = {
   rejectApproval: (approvalId: string, reason: string) =>
     electronRejectApproval(approvalId, reason),
   memoryDashboard: () => electronMemoryDashboard(),
+  memoryAudit: (limit?: number) => electronMemoryAudit(limit),
+  clearMemoryAudit: () => electronClearMemoryAudit(),
+  exportLocalData: () => electronExportLocalData(),
   memoryItems: () => electronMemoryItems(),
   decideMemory: (
     reference: string,
@@ -1911,6 +1924,30 @@ async function electronMemoryDashboard(): Promise<CoreMemoryDashboard> {
   } catch {
     return emptyMemoryDashboard();
   }
+}
+
+async function electronMemoryAudit(limit = 200): Promise<CoreAuditEntry[]> {
+  try {
+    return await gatewayGetJson<CoreAuditEntry[]>(`/api/memory/audit?limit=${limit}`);
+  } catch {
+    return [];
+  }
+}
+
+async function electronClearMemoryAudit(): Promise<number> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/memory/audit`, {
+    method: "DELETE",
+    headers: gatewayHeaders(),
+  });
+  if (!response.ok) {
+    throw new Error(`Desktop Gateway audit clear HTTP ${response.status}`);
+  }
+  const body = (await response.json()) as { removed?: number };
+  return body.removed ?? 0;
+}
+
+async function electronExportLocalData(): Promise<unknown> {
+  return gatewayGetJson<unknown>("/api/memory/export");
 }
 
 export type CoreMemoryItem = {
