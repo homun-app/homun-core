@@ -74,7 +74,7 @@ use local_first_local_computer_session::{
 use local_first_local_computer_session::{LocalComputerReadModel, LocalComputerSessionStore};
 use local_first_memory::{
     DataSensitivity as MemoryDataSensitivity, ExtractedEntity, ExtractedMemory, ExtractedRelation,
-    MemoryAccessRequest, MemoryCreateRequest, MemoryDashboard, MemoryEntity, MemoryEvent,
+    MemoryAccessRequest, MemoryCreateRequest, MemoryDashboard, MemoryEntity,
     MemoryExtraction,
     MemoryFacade, MemoryLifecycleRequest, MemoryRef, MemoryRefKind, MemoryRelation,
     MemorySearchRequest, MemoryStatus, MemoryUiReadModel, MemoryUpdatePatch, MemoryWikiProjection,
@@ -387,6 +387,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         auth_token: resolve_gateway_auth_token()?.into(),
     };
     init_active_workspace_from_disk();
+    backfill_contacts(&state);
     start_task_executor_worker(state.clone());
     spawn_thread_browser_session_reaper(state.clone());
     spawn_contained_computer_idle_reaper(state.clone());
@@ -524,6 +525,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/memory/contacts/profile/refresh", post(contact_profile_refresh))
         .route("/api/memory/contacts/update", post(contact_update))
         .route("/api/memory/contacts/merge", post(contacts_merge))
+        .route("/api/memory/contacts/create", post(contact_create))
+        .route("/api/memory/contacts/identity/add", post(contact_identity_add))
+        .route("/api/memory/contacts/identity/remove", post(contact_identity_remove))
+        .route("/api/memory/contacts/delete", post(contact_delete))
         .route(
             "/api/channels/settings",
             get(get_channel_settings).post(set_channel_settings),
@@ -9935,18 +9940,89 @@ fn contact_handle(channel: &str, sender: &str) -> String {
 /// contact for this channel handle and stores the message as an episodic memory.
 /// Resolution is alias-based: once two handles are merged onto one contact, future
 /// messages from either channel attach to the same person.
+/// One-shot migration: seed the curated `contacts` table from existing `person`
+/// memory entities that have a channel handle (real channel contacts). Mention-only
+/// persons (no handle, e.g. "Jannik Sinner") are NOT imported — that's the bug fix.
+/// Idempotent via a settings flag; read-only on the memory DB.
+fn backfill_contacts(state: &AppState) {
+    // Already done?
+    if let Ok(store) = lock_store(state) {
+        if store.flag("contacts_backfill_v1").ok().flatten().is_some() {
+            return;
+        }
+    } else {
+        return;
+    }
+    let user = gateway_memory_user_id();
+    let workspace = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
+    let entities = {
+        let Ok(facade) = lock_memory_facade(state) else {
+            return;
+        };
+        facade.list_entities_for_ui(&user, &workspace).unwrap_or_default()
+    };
+    let Ok(store) = lock_store(state) else {
+        return;
+    };
+    for entity in entities.into_iter().filter(|e| e.entity_type == "person") {
+        let handles: Vec<String> = contact_handles(&entity)
+            .into_iter()
+            .filter(|h| h.contains(':'))
+            .collect();
+        if handles.is_empty() {
+            continue; // mention-only person — not a contact
+        }
+        let contact_type = {
+            let t = contact_meta_str(&entity.metadata, "contact_type");
+            if t.is_empty() { "unknown".to_string() } else { t }
+        };
+        let notes = contact_meta_str(&entity.metadata, "notes");
+        let is_self = contact_is_self(&entity);
+        // Reuse a contact already owning one of these handles (idempotency); else create.
+        let existing = handles.iter().find_map(|h| {
+            h.split_once(':')
+                .and_then(|(ch, id)| store.contact_id_by_identity(ch, id).ok().flatten())
+        });
+        let contact_id = match existing {
+            Some(id) => id,
+            None => match store.create_contact(
+                &entity.name,
+                &contact_type,
+                is_self,
+                &notes,
+                Some(&entity.reference.to_string()),
+            ) {
+                Ok(id) => id,
+                Err(_) => continue,
+            },
+        };
+        for handle in &handles {
+            if let Some((ch, ident)) = handle.split_once(':') {
+                let _ = store.add_identity(contact_id, ch, ident, None);
+            }
+        }
+    }
+    let _ = store.set_flag("contacts_backfill_v1", "1");
+}
+
 fn record_channel_message(state: &AppState, channel: &str, message: &ChannelInbound) {
+    let display = if message.sender_name.is_empty() {
+        message.sender.clone()
+    } else {
+        message.sender_name.clone()
+    };
+    // Curated contact book (separate lock, released before the memory work below):
+    // someone who actually messages us IS a contact → ensure a row + channel identity.
+    // This is the curation boundary that keeps chat-mentioned people out of the rubrica.
+    if let Ok(store) = lock_store(state) {
+        let _ = store.ensure_contact_for_identity(channel, &message.sender, &display);
+    }
     let Ok(facade) = lock_memory_facade(state) else {
         return;
     };
     let user = gateway_memory_user_id();
     let workspace = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
     let handle = contact_handle(channel, &message.sender);
-    let display = if message.sender_name.is_empty() {
-        message.sender.clone()
-    } else {
-        message.sender_name.clone()
-    };
     let label = match channel {
         "whatsapp" => "WhatsApp",
         "telegram" => "Telegram",
@@ -17925,16 +18001,10 @@ struct ContactView {
     memory_count: usize,
 }
 
-fn parse_contact_channels(aliases: &[String]) -> Vec<ContactChannel> {
-    aliases
-        .iter()
-        .filter_map(|a| {
-            a.split_once(':').map(|(channel, address)| ContactChannel {
-                channel: channel.to_string(),
-                address: address.to_string(),
-            })
-        })
-        .collect()
+/// "contact_{id}" → id. Keeps the frontend's opaque-`reference` API contract while
+/// the source of truth moves to the curated `contacts` table.
+fn parse_contact_ref(reference: &str) -> Option<i64> {
+    reference.strip_prefix("contact_").and_then(|s| s.parse().ok())
 }
 
 fn contact_meta_str(meta: &serde_json::Value, key: &str) -> String {
@@ -17960,12 +18030,18 @@ fn contact_handles(entity: &MemoryEntity) -> Vec<String> {
     handles
 }
 
-/// Conversation history for a contact: thread episodes whose thread_id is one of
-/// the contact's handles (so a merged contact shows both channels' history).
-fn contact_episode_texts(facade: &MemoryFacade, user: &MemoryUserId, entity: &MemoryEntity) -> Vec<String> {
+/// Conversation history for a set of contact handles ("channel:identifier"): thread
+/// episodes whose thread_id is one of the handles (a merged contact = many handles).
+fn episode_texts_by_handles(
+    facade: &MemoryFacade,
+    user: &MemoryUserId,
+    handles: &[String],
+) -> Vec<String> {
+    if handles.is_empty() {
+        return Vec::new();
+    }
     let threads = MemoryWorkspaceId::new(THREADS_WORKSPACE);
-    let handle_list = contact_handles(entity);
-    let handles: std::collections::HashSet<&str> = handle_list.iter().map(|s| s.as_str()).collect();
+    let set: std::collections::HashSet<&str> = handles.iter().map(|s| s.as_str()).collect();
     facade
         .list_memories_for_ui(user, &threads)
         .unwrap_or_default()
@@ -17974,61 +18050,107 @@ fn contact_episode_texts(facade: &MemoryFacade, user: &MemoryUserId, entity: &Me
             m.metadata
                 .get("thread_id")
                 .and_then(|v| v.as_str())
-                .map(|t| handles.contains(t))
+                .map(|t| set.contains(t))
                 .unwrap_or(false)
         })
         .map(|m| m.text)
         .collect()
 }
 
-fn contact_view(entity: &MemoryEntity, memory_count: usize) -> ContactView {
-    let contact_type = {
-        let t = contact_meta_str(&entity.metadata, "contact_type");
-        if t.is_empty() { "unknown".to_string() } else { t }
-    };
-    ContactView {
-        reference: entity.reference.to_string(),
-        name: entity.name.clone(),
-        contact_type,
-        is_self: contact_is_self(entity),
-        channels: parse_contact_channels(&contact_handles(entity)),
-        notes: contact_meta_str(&entity.metadata, "notes"),
-        soul_md: contact_meta_str(&entity.metadata, "soul_md"),
-        memory_count,
-    }
-}
-
-fn find_contact_by_ref(
+/// Same, paired with each episode's ISO date (oldest first) for the fact extractor.
+fn episodes_dated_by_handles(
     facade: &MemoryFacade,
     user: &MemoryUserId,
-    workspace: &MemoryWorkspaceId,
-    reference: &str,
-) -> Option<MemoryEntity> {
-    facade
-        .list_entities_for_ui(user, workspace)
-        .ok()?
+    handles: &[String],
+) -> Vec<(String, String)> {
+    if handles.is_empty() {
+        return Vec::new();
+    }
+    let threads = MemoryWorkspaceId::new(THREADS_WORKSPACE);
+    let set: std::collections::HashSet<&str> = handles.iter().map(|s| s.as_str()).collect();
+    let mut out: Vec<(String, String)> = facade
+        .list_memories_for_ui(user, &threads)
+        .unwrap_or_default()
         .into_iter()
-        .find(|e| e.entity_type == "person" && e.reference.to_string() == reference)
+        .filter(|m| {
+            m.metadata
+                .get("thread_id")
+                .and_then(|v| v.as_str())
+                .map(|t| set.contains(t))
+                .unwrap_or(false)
+        })
+        .map(|m| (parse_memory_date(&m.created_at).unwrap_or_default(), m.text))
+        .collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+fn contact_view_from_stored(c: &chat_store::StoredContact, memory_count: usize) -> ContactView {
+    ContactView {
+        reference: format!("contact_{}", c.id),
+        name: c.name.clone(),
+        contact_type: if c.contact_type.is_empty() {
+            "unknown".to_string()
+        } else {
+            c.contact_type.clone()
+        },
+        is_self: c.is_self,
+        channels: c
+            .identities
+            .iter()
+            .map(|i| ContactChannel {
+                channel: i.channel.clone(),
+                address: i.identifier.clone(),
+            })
+            .collect(),
+        notes: c.notes.clone(),
+        soul_md: String::new(), // persona/soul moves to the Phase-2 perimeter editor
+        memory_count,
+    }
 }
 
 async fn contacts_list(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ContactView>>, GatewayError> {
-    let facade = lock_memory_facade(&state)?;
-    let user = gateway_memory_user_id();
-    let workspace = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
-    let entities = facade
-        .list_entities_for_ui(&user, &workspace)
-        .map_err(|message| GatewayError {
+    // Curated rubrica: the source of truth is the contacts table — NOT every
+    // `person` memory entity (which is why chat-mentioned people no longer leak in).
+    let contacts = {
+        let store = lock_store(&state)?;
+        store.list_contacts().map_err(|error| GatewayError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             code: "contacts_list",
-            message,
-        })?;
-    let mut out = Vec::new();
-    for entity in entities.into_iter().filter(|e| e.entity_type == "person") {
-        let count = contact_episode_texts(&facade, &user, &entity).len();
-        out.push(contact_view(&entity, count));
-    }
+            message: error.to_string(),
+        })?
+    };
+    // Episode count per thread handle, computed once (avoids O(contacts × episodes)).
+    let user = gateway_memory_user_id();
+    let counts: std::collections::HashMap<String, usize> = {
+        let facade = lock_memory_facade(&state)?;
+        let threads = MemoryWorkspaceId::new(THREADS_WORKSPACE);
+        let mut map: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for mem in facade.list_memories_for_ui(&user, &threads).unwrap_or_default() {
+            if let Some(t) = mem.metadata.get("thread_id").and_then(|v| v.as_str()) {
+                *map.entry(t.to_string()).or_insert(0) += 1;
+            }
+        }
+        map
+    };
+    let out = contacts
+        .iter()
+        .map(|c| {
+            let count: usize = c
+                .identities
+                .iter()
+                .map(|i| {
+                    counts
+                        .get(&format!("{}:{}", i.channel, i.identifier))
+                        .copied()
+                        .unwrap_or(0)
+                })
+                .sum();
+            contact_view_from_stored(c, count)
+        })
+        .collect();
     Ok(Json(out))
 }
 
@@ -18037,21 +18159,29 @@ struct ContactRefRequest {
     reference: String,
 }
 
+/// Handles ("channel:identifier") of a contact referenced as "contact_{id}".
+fn contact_handles_by_ref(state: &AppState, reference: &str) -> Result<Vec<String>, GatewayError> {
+    let id = parse_contact_ref(reference).ok_or_else(|| GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "contact_not_found",
+        message: "contatto non trovato".to_string(),
+    })?;
+    let store = lock_store(state)?;
+    store.contact_handles(id).map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "contact_handles",
+        message: error.to_string(),
+    })
+}
+
 async fn contact_memories(
     State(state): State<AppState>,
     Json(request): Json<ContactRefRequest>,
 ) -> Result<Json<Vec<String>>, GatewayError> {
+    let handles = contact_handles_by_ref(&state, &request.reference)?;
     let facade = lock_memory_facade(&state)?;
     let user = gateway_memory_user_id();
-    let workspace = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
-    let contact = find_contact_by_ref(&facade, &user, &workspace, &request.reference).ok_or_else(
-        || GatewayError {
-            status: StatusCode::NOT_FOUND,
-            code: "contact_not_found",
-            message: "contatto non trovato".to_string(),
-        },
-    )?;
-    Ok(Json(contact_episode_texts(&facade, &user, &contact)))
+    Ok(Json(episode_texts_by_handles(&facade, &user, &handles)))
 }
 
 #[derive(Deserialize)]
@@ -18071,41 +18201,36 @@ async fn contact_update(
     State(state): State<AppState>,
     Json(request): Json<ContactUpdateRequest>,
 ) -> Result<Json<ContactView>, GatewayError> {
-    let facade = lock_memory_facade(&state)?;
-    let user = gateway_memory_user_id();
-    let workspace = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
-    let mut contact = find_contact_by_ref(&facade, &user, &workspace, &request.reference)
+    let id = parse_contact_ref(&request.reference).ok_or_else(|| GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "contact_not_found",
+        message: "contatto non trovato".to_string(),
+    })?;
+    let store = lock_store(&state)?;
+    store
+        .update_contact(
+            id,
+            request.name.as_deref().filter(|s| !s.trim().is_empty()),
+            None,
+            request.notes.as_deref(),
+            request.contact_type.as_deref(),
+        )
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "contact_update",
+            message: error.to_string(),
+        })?;
+    // soul_md is ignored in Phase 1 (persona moves to the Phase-2 perimeter editor).
+    let contact = store
+        .contact_by_id(id)
+        .ok()
+        .flatten()
         .ok_or_else(|| GatewayError {
             status: StatusCode::NOT_FOUND,
             code: "contact_not_found",
             message: "contatto non trovato".to_string(),
         })?;
-    if let Some(name) = request.name {
-        if !name.trim().is_empty() {
-            contact.name = name.trim().to_string();
-        }
-    }
-    if !contact.metadata.is_object() {
-        contact.metadata = serde_json::json!({});
-    }
-    if let Some(object) = contact.metadata.as_object_mut() {
-        if let Some(contact_type) = request.contact_type {
-            object.insert("contact_type".to_string(), serde_json::json!(contact_type));
-        }
-        if let Some(notes) = request.notes {
-            object.insert("notes".to_string(), serde_json::json!(notes));
-        }
-        if let Some(soul_md) = request.soul_md {
-            object.insert("soul_md".to_string(), serde_json::json!(soul_md));
-        }
-    }
-    facade.upsert_entity(&contact).map_err(|error| GatewayError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        code: "contact_update",
-        message: error.to_string(),
-    })?;
-    let count = contact_episode_texts(&facade, &user, &contact).len();
-    Ok(Json(contact_view(&contact, count)))
+    Ok(Json(contact_view_from_stored(&contact, 0)))
 }
 
 #[derive(Deserialize)]
@@ -18120,9 +18245,6 @@ async fn contacts_merge(
     State(state): State<AppState>,
     Json(request): Json<ContactMergeRequest>,
 ) -> Result<Json<ContactView>, GatewayError> {
-    let facade = lock_memory_facade(&state)?;
-    let user = gateway_memory_user_id();
-    let workspace = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
     if request.from == request.into {
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
@@ -18130,105 +18252,170 @@ async fn contacts_merge(
             message: "impossibile unire un contatto con se stesso".to_string(),
         });
     }
-    let from = find_contact_by_ref(&facade, &user, &workspace, &request.from);
-    let into = find_contact_by_ref(&facade, &user, &workspace, &request.into);
-    let (mut from, mut into) = match (from, into) {
-        (Some(f), Some(i)) => (f, i),
-        _ => {
-            return Err(GatewayError {
-                status: StatusCode::NOT_FOUND,
-                code: "contact_not_found",
-                message: "contatto non trovato".to_string(),
-            });
-        }
+    let not_found = || GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "contact_not_found",
+        message: "contatto non trovato".to_string(),
     };
-    // Self protection: the user's own "person:self" card is never absorbed — if
-    // it's on either side it always survives (becomes `into`).
-    if contact_is_self(&from) {
-        std::mem::swap(&mut from, &mut into);
-    }
+    let from_id = parse_contact_ref(&request.from).ok_or_else(not_found)?;
+    let into_id = parse_contact_ref(&request.into).ok_or_else(not_found)?;
 
-    // (1) SQL (source of truth): move ALL of the absorbed contact's handles onto
-    // the survivor (dedup). Use `contact_handles` (not raw `aliases`) so a handle
-    // that lives only in the canonical_key — e.g. a legacy "person:wa:123" — is
-    // carried over too; otherwise it (and its episodes) would be orphaned.
-    let moved_handles = contact_handles(&from);
-    for handle in &moved_handles {
-        if !into.aliases.contains(handle) {
-            into.aliases.push(handle.clone());
-        }
-    }
-    if into.name.trim().is_empty() && !from.name.trim().is_empty() {
-        into.name = from.name.clone();
-    }
-    facade.upsert_entity(&into).map_err(|error| GatewayError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        code: "contact_merge",
-        message: error.to_string(),
-    })?;
+    let (survivor, absorbed_entity_ref) = {
+        let store = lock_store(&state)?;
+        let from = store.contact_by_id(from_id).ok().flatten().ok_or_else(not_found)?;
+        let into = store.contact_by_id(into_id).ok().flatten().ok_or_else(not_found)?;
+        // Self protection: the user's own card always survives.
+        let (survivor_id, absorbed) = if from.is_self {
+            (from.id, into)
+        } else {
+            (into.id, from)
+        };
+        let absorbed_entity_ref = absorbed.entity_ref.clone();
+        store
+            .merge_contacts(survivor_id, absorbed.id)
+            .map_err(|error| GatewayError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "contact_merge",
+                message: error.to_string(),
+            })?;
+        let survivor = store.contact_by_id(survivor_id).ok().flatten().ok_or_else(not_found)?;
+        (survivor, absorbed_entity_ref)
+    };
 
-    // (2) Graph: repoint every relation that referenced the absorbed entity to the
-    // survivor (in-place, same relation reference).
-    if let Ok(relations) = facade.list_relations_for_ui(&user, &workspace) {
-        for mut relation in relations {
-            let mut touched = false;
-            if relation.source_ref == from.reference {
-                relation.source_ref = into.reference.clone();
-                touched = true;
-            }
-            if relation.target_ref == from.reference {
-                relation.target_ref = into.reference.clone();
-                touched = true;
-            }
-            if touched {
-                let _ = facade.upsert_relation(&relation);
-            }
-        }
-    }
-
-    // (3) Markdown/wiki: repoint any page that linked the absorbed entity.
-    if let Ok(pages) = facade.list_wiki_pages_for_ui(&user, &workspace) {
-        for mut page in pages {
-            if page.linked_refs.iter().any(|r| *r == from.reference) {
-                for r in page.linked_refs.iter_mut() {
-                    if *r == from.reference {
-                        *r = into.reference.clone();
-                    }
+    // Best-effort: tombstone the absorbed contact's memory entity so the knowledge
+    // graph stays consistent (the contacts table is already merged above).
+    if let Some(eref) = absorbed_entity_ref {
+        if let Ok(facade) = lock_memory_facade(&state) {
+            let user = gateway_memory_user_id();
+            let workspace = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
+            if let Ok(entities) = facade.list_entities_for_ui(&user, &workspace) {
+                if let Some(entity) = entities.into_iter().find(|e| e.reference.to_string() == eref) {
+                    let _ = facade.tombstone_entity(
+                        &entity.reference,
+                        &user,
+                        &workspace,
+                        "merged into contact",
+                    );
                 }
-                let _ = facade.record_wiki_page_for_ui(&page);
             }
         }
     }
+    Ok(Json(contact_view_from_stored(&survivor, 0)))
+}
 
-    // (4) Event-log (sync spine + audit): record the merge.
-    let event = MemoryEvent {
-        reference: MemoryRef::generated(MemoryRefKind::Event, user.clone(), workspace.clone()),
-        user_id: user.clone(),
-        workspace_id: workspace.clone(),
-        timestamp: now_epoch_secs().to_string(),
-        source: "contacts".to_string(),
-        event_type: "contact_merge".to_string(),
-        payload: serde_json::json!({
-            "from": from.reference.to_string(),
-            "into": into.reference.to_string(),
-            "moved_aliases": moved_handles,
-        }),
-        privacy_domain: PrivacyDomain::new("personal"),
-        sensitivity: MemoryDataSensitivity::Internal,
-    };
-    let _ = facade.record_event(&event);
+#[derive(Deserialize)]
+struct ContactCreateRequest {
+    name: String,
+    #[serde(default)]
+    contact_type: Option<String>,
+    #[serde(default)]
+    channel: Option<String>,
+    #[serde(default)]
+    identifier: Option<String>,
+}
 
-    // (5) Tombstone the absorbed contact (hidden from listings/lookups).
-    facade
-        .tombstone_entity(&from.reference, &user, &workspace, "merged into contact")
+/// Add a contact by hand (the curated path that isn't a channel identity).
+async fn contact_create(
+    State(state): State<AppState>,
+    Json(request): Json<ContactCreateRequest>,
+) -> Result<Json<ContactView>, GatewayError> {
+    let name = request.name.trim();
+    if name.is_empty() {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "contact_name_required",
+            message: "nome richiesto".to_string(),
+        });
+    }
+    let store = lock_store(&state)?;
+    let id = store
+        .create_contact(name, request.contact_type.as_deref().unwrap_or("unknown"), false, "", None)
         .map_err(|error| GatewayError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "contact_merge_tombstone",
+            code: "contact_create",
             message: error.to_string(),
         })?;
+    if let (Some(ch), Some(ident)) = (request.channel.as_deref(), request.identifier.as_deref()) {
+        if !ch.trim().is_empty() && !ident.trim().is_empty() {
+            let _ = store.add_identity(id, ch.trim(), ident.trim(), None);
+        }
+    }
+    let contact = store.contact_by_id(id).ok().flatten().ok_or_else(|| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "contact_create",
+        message: "contatto non creato".to_string(),
+    })?;
+    Ok(Json(contact_view_from_stored(&contact, 0)))
+}
 
-    let count = contact_episode_texts(&facade, &user, &into).len();
-    Ok(Json(contact_view(&into, count)))
+#[derive(Deserialize)]
+struct ContactIdentityRequest {
+    reference: String,
+    channel: String,
+    identifier: String,
+    #[serde(default)]
+    label: Option<String>,
+}
+
+fn contact_after_identity_change(
+    state: &AppState,
+    reference: &str,
+    apply: impl FnOnce(&chat_store::ChatStore, i64) -> rusqlite::Result<()>,
+) -> Result<Json<ContactView>, GatewayError> {
+    let id = parse_contact_ref(reference).ok_or_else(|| GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "contact_not_found",
+        message: "contatto non trovato".to_string(),
+    })?;
+    let store = lock_store(state)?;
+    apply(&store, id).map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "contact_identity",
+        message: error.to_string(),
+    })?;
+    let contact = store.contact_by_id(id).ok().flatten().ok_or_else(|| GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "contact_not_found",
+        message: "contatto non trovato".to_string(),
+    })?;
+    Ok(Json(contact_view_from_stored(&contact, 0)))
+}
+
+async fn contact_identity_add(
+    State(state): State<AppState>,
+    Json(request): Json<ContactIdentityRequest>,
+) -> Result<Json<ContactView>, GatewayError> {
+    contact_after_identity_change(&state, &request.reference, |store, id| {
+        store.add_identity(id, request.channel.trim(), request.identifier.trim(), request.label.as_deref())
+    })
+}
+
+async fn contact_identity_remove(
+    State(state): State<AppState>,
+    Json(request): Json<ContactIdentityRequest>,
+) -> Result<Json<ContactView>, GatewayError> {
+    contact_after_identity_change(&state, &request.reference, |store, _id| {
+        store.remove_identity(request.channel.trim(), request.identifier.trim())
+    })
+}
+
+/// Remove a contact from the rubrica (its memory episodes/entity are NOT deleted).
+async fn contact_delete(
+    State(state): State<AppState>,
+    Json(request): Json<ContactRefRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let id = parse_contact_ref(&request.reference).ok_or_else(|| GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "contact_not_found",
+        message: "contatto non trovato".to_string(),
+    })?;
+    let store = lock_store(&state)?;
+    store.delete_contact(id).map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "contact_delete",
+        message: error.to_string(),
+    })?;
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 /// A distilled fact about a contact, temporally grounded.
@@ -18398,18 +18585,15 @@ struct ContactProfile {
     episode_count: usize,
 }
 
-fn read_cached_facts(entity: &MemoryEntity) -> (Vec<ContactFact>, usize) {
-    let facts = entity
-        .metadata
+/// Cached distilled facts stored on the contact row as `{"facts":[...],"count":N}`.
+fn read_cached_facts(facts_json: &str) -> (Vec<ContactFact>, usize) {
+    let root: serde_json::Value = serde_json::from_str(facts_json).unwrap_or_default();
+    let facts = root
         .get("facts")
         .cloned()
         .and_then(|v| serde_json::from_value::<Vec<ContactFact>>(v).ok())
         .unwrap_or_default();
-    let count = entity
-        .metadata
-        .get("facts_count")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as usize;
+    let count = root.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
     (facts, count)
 }
 
@@ -18418,18 +18602,27 @@ async fn contact_profile(
     State(state): State<AppState>,
     Json(request): Json<ContactRefRequest>,
 ) -> Result<Json<ContactProfile>, GatewayError> {
-    let facade = lock_memory_facade(&state)?;
+    let id = parse_contact_ref(&request.reference).ok_or_else(|| GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "contact_not_found",
+        message: "contatto non trovato".to_string(),
+    })?;
+    let (handles, facts_json) = {
+        let store = lock_store(&state)?;
+        let handles = store.contact_handles(id).unwrap_or_default();
+        let facts_json = store
+            .contact_facts_json(id)
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| "{}".to_string());
+        (handles, facts_json)
+    };
     let user = gateway_memory_user_id();
-    let workspace = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
-    let contact = find_contact_by_ref(&facade, &user, &workspace, &request.reference).ok_or_else(
-        || GatewayError {
-            status: StatusCode::NOT_FOUND,
-            code: "contact_not_found",
-            message: "contatto non trovato".to_string(),
-        },
-    )?;
-    let episode_count = contact_episode_texts(&facade, &user, &contact).len();
-    let (facts, facts_count) = read_cached_facts(&contact);
+    let episode_count = {
+        let facade = lock_memory_facade(&state)?;
+        episode_texts_by_handles(&facade, &user, &handles).len()
+    };
+    let (facts, facts_count) = read_cached_facts(&facts_json);
     Ok(Json(ContactProfile {
         stale: facts_count != episode_count,
         episode_count,
@@ -18438,44 +18631,37 @@ async fn contact_profile(
 }
 
 /// Re-distil the contact's facts via the extractor model and cache them on the
-/// entity. The facade lock is dropped around the (slow) LLM call.
+/// contact row. The locks are dropped around the (slow) LLM call.
 async fn contact_profile_refresh(
     State(state): State<AppState>,
     Json(request): Json<ContactRefRequest>,
 ) -> Result<Json<ContactProfile>, GatewayError> {
-    let user = gateway_memory_user_id();
-    let workspace = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
-    let not_found = || GatewayError {
+    let id = parse_contact_ref(&request.reference).ok_or_else(|| GatewayError {
         status: StatusCode::NOT_FOUND,
         code: "contact_not_found",
         message: "contatto non trovato".to_string(),
+    })?;
+    let (name, handles) = {
+        let store = lock_store(&state)?;
+        let contact = store.contact_by_id(id).ok().flatten().ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "contact_not_found",
+            message: "contatto non trovato".to_string(),
+        })?;
+        let handles = store.contact_handles(id).unwrap_or_default();
+        (contact.name, handles)
     };
-    // Phase 1 — read name + episodes (lock scoped, released before the await).
-    let (name, episodes) = {
+    let user = gateway_memory_user_id();
+    let episodes = {
         let facade = lock_memory_facade(&state)?;
-        let contact =
-            find_contact_by_ref(&facade, &user, &workspace, &request.reference).ok_or_else(not_found)?;
-        let episodes = contact_episodes_dated(&facade, &user, &contact);
-        (contact.name.clone(), episodes)
+        episodes_dated_by_handles(&facade, &user, &handles)
     };
     let episode_count = episodes.len();
-    // Phase 2 — LLM extraction (no lock held).
     let facts = extract_contact_facts(&state, &name, &episodes).await;
-    // Phase 3 — persist onto the contact metadata (lock scoped).
     {
-        let facade = lock_memory_facade(&state)?;
-        if let Some(mut contact) =
-            find_contact_by_ref(&facade, &user, &workspace, &request.reference)
-        {
-            if !contact.metadata.is_object() {
-                contact.metadata = serde_json::json!({});
-            }
-            if let Some(object) = contact.metadata.as_object_mut() {
-                object.insert("facts".to_string(), serde_json::json!(facts));
-                object.insert("facts_count".to_string(), serde_json::json!(episode_count));
-            }
-            let _ = facade.upsert_entity(&contact);
-        }
+        let store = lock_store(&state)?;
+        let json = serde_json::json!({ "facts": facts, "count": episode_count }).to_string();
+        let _ = store.set_contact_facts_json(id, &json);
     }
     Ok(Json(ContactProfile {
         facts,

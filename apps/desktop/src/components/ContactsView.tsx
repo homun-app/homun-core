@@ -51,6 +51,24 @@ export function ContactsView() {
     void reload();
   }, []);
 
+  // Manual add — the curated path that isn't a channel identity (the other source
+  // is inbound channel messages, which auto-create a contact).
+  const newContact = async () => {
+    const name = window.prompt("Nome del nuovo contatto");
+    if (!name || !name.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const created = await coreBridge.createContact({ name: name.trim() });
+      await reload();
+      setSelected(created.reference);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const byRef = (reference: string) => contacts?.find((c) => c.reference === reference) ?? null;
   const open = selected ? byRef(selected) : null;
 
@@ -120,6 +138,24 @@ export function ContactsView() {
     }
   };
 
+  const removeContact = async () => {
+    if (!open) return;
+    if (!window.confirm(`Eliminare il contatto "${open.name}"? La memoria delle conversazioni resta.`)) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await coreBridge.deleteContact(open.reference);
+      setSelected(null);
+      await reload();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="contacts-view">
       <div className="mdl-layout">
@@ -132,6 +168,16 @@ export function ContactsView() {
               onChange={(e) => setQuery(e.target.value)}
             />
           </label>
+
+          <button
+            type="button"
+            className="set-btn"
+            style={{ width: "100%", justifyContent: "center", marginTop: 8 }}
+            onClick={() => void newContact()}
+            disabled={busy}
+          >
+            + Nuovo contatto
+          </button>
 
           <div className="contacts-chips">
             {[{ value: "all", label: "Tutti" }, ...CONTACT_TYPES].map((t) => (
@@ -210,7 +256,9 @@ export function ContactsView() {
             </button>
           ))}
           {contacts && filtered.length === 0 && (
-            <p className="set-hint">Nessun contatto. Arrivano dai canali (WhatsApp/Telegram).</p>
+            <p className="set-hint">
+              Nessun contatto. Arrivano dai canali (WhatsApp/Telegram) o aggiungili a mano.
+            </p>
           )}
         </aside>
 
@@ -225,6 +273,7 @@ export function ContactsView() {
               busy={busy}
               onPatch={patch}
               onMerge={(target) => openMerge(open, target)}
+              onDelete={() => void removeContact()}
             />
           )}
         </section>
@@ -266,12 +315,14 @@ function ContactCard({
   busy,
   onPatch,
   onMerge,
+  onDelete,
 }: {
   contact: CoreContact;
   contacts: CoreContact[];
   busy: boolean;
   onPatch: (u: { name?: string; contact_type?: string; notes?: string }) => void;
   onMerge: (target: CoreContact) => void;
+  onDelete: () => void;
 }) {
   const [mergeTarget, setMergeTarget] = useState("");
   const others = contacts.filter((c) => c.reference !== contact.reference);
@@ -306,6 +357,17 @@ function ContactCard({
             {contactTypeLabel(contact.contact_type)} · {contact.memory_count} messaggi
           </p>
         </div>
+        {!contact.is_self && (
+          <button
+            type="button"
+            className="set-btn danger"
+            style={{ marginLeft: "auto" }}
+            disabled={busy}
+            onClick={onDelete}
+          >
+            Elimina
+          </button>
+        )}
       </div>
 
       <div className="contacts-fields">

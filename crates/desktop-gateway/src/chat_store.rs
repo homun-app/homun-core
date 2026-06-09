@@ -21,6 +21,29 @@ pub struct StoredAttachment {
     pub images: Vec<String>,
 }
 
+/// A curated contact (rubrica). Knowledge ABOUT them lives in the memory DB,
+/// linked by handle (`channel:identifier`); this row is just the address-book entry.
+#[derive(Debug, Clone)]
+pub struct StoredContact {
+    pub id: i64,
+    pub name: String,
+    pub nickname: Option<String>,
+    pub notes: String,
+    pub contact_type: String,
+    pub is_self: bool,
+    pub preferred_channel: Option<String>,
+    pub avatar: Option<String>,
+    pub entity_ref: Option<String>,
+    pub identities: Vec<StoredContactIdentity>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoredContactIdentity {
+    pub channel: String,
+    pub identifier: String,
+    pub label: Option<String>,
+}
+
 impl ChatStore {
     pub fn open(path: impl AsRef<Path>) -> rusqlite::Result<Self> {
         let conn = Connection::open(path)?;
@@ -388,6 +411,270 @@ impl ChatStore {
         self.messages(thread_id)
     }
 
+    // ---- Contact book (curated rubrica) -------------------------------------
+
+    fn now_secs() -> i64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0)
+    }
+
+    /// Read/write a plain settings flag (used e.g. for the one-shot backfill guard).
+    pub fn flag(&self, key: &str) -> rusqlite::Result<Option<String>> {
+        self.setting(key)
+    }
+    pub fn set_flag(&self, key: &str, value: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "insert into settings(key, value) values(?1, ?2)
+             on conflict(key) do update set value = excluded.value",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+
+    pub fn contact_id_by_identity(
+        &self,
+        channel: &str,
+        identifier: &str,
+    ) -> rusqlite::Result<Option<i64>> {
+        self.conn
+            .query_row(
+                "select contact_id from contact_identities where channel = ?1 and identifier = ?2",
+                params![channel, identifier],
+                |row| row.get(0),
+            )
+            .optional()
+    }
+
+    pub fn create_contact(
+        &self,
+        name: &str,
+        contact_type: &str,
+        is_self: bool,
+        notes: &str,
+        entity_ref: Option<&str>,
+    ) -> rusqlite::Result<i64> {
+        let now = Self::now_secs();
+        self.conn.execute(
+            "insert into contacts(name, contact_type, is_self, notes, entity_ref, created_at, updated_at)
+             values(?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+            params![name, contact_type, is_self as i64, notes, entity_ref, now],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn add_identity(
+        &self,
+        contact_id: i64,
+        channel: &str,
+        identifier: &str,
+        label: Option<&str>,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "insert or ignore into contact_identities(contact_id, channel, identifier, label)
+             values(?1, ?2, ?3, ?4)",
+            params![contact_id, channel, identifier, label],
+        )?;
+        Ok(())
+    }
+
+    pub fn remove_identity(&self, channel: &str, identifier: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "delete from contact_identities where channel = ?1 and identifier = ?2",
+            params![channel, identifier],
+        )?;
+        Ok(())
+    }
+
+    /// Resolve an inbound (channel, sender) to a contact, creating a curated row on
+    /// first contact. This is the curation boundary: only people who actually message
+    /// us (or are added by hand) become contacts — never chat-mentioned persons.
+    pub fn ensure_contact_for_identity(
+        &self,
+        channel: &str,
+        identifier: &str,
+        display: &str,
+    ) -> rusqlite::Result<i64> {
+        if let Some(id) = self.contact_id_by_identity(channel, identifier)? {
+            return Ok(id);
+        }
+        let name = if display.trim().is_empty() { identifier } else { display.trim() };
+        let id = self.create_contact(name, "unknown", false, "", None)?;
+        self.add_identity(id, channel, identifier, None)?;
+        Ok(id)
+    }
+
+    /// Handles ("channel:identifier") for a contact — used to read memory episodes/facts
+    /// from the memory DB, which keys conversation memory by handle.
+    pub fn contact_handles(&self, contact_id: i64) -> rusqlite::Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("select channel, identifier from contact_identities where contact_id = ?1")?;
+        let rows = stmt.query_map(params![contact_id], |row| {
+            Ok(format!(
+                "{}:{}",
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?
+            ))
+        })?;
+        rows.collect()
+    }
+
+    fn identities_for(&self, contact_id: i64) -> rusqlite::Result<Vec<StoredContactIdentity>> {
+        let mut stmt = self.conn.prepare(
+            "select channel, identifier, label from contact_identities where contact_id = ?1 order by id",
+        )?;
+        let rows = stmt.query_map(params![contact_id], |row| {
+            Ok(StoredContactIdentity {
+                channel: row.get(0)?,
+                identifier: row.get(1)?,
+                label: row.get(2)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn contact_by_id(&self, id: i64) -> rusqlite::Result<Option<StoredContact>> {
+        let row = self
+            .conn
+            .query_row(
+                "select name, nickname, notes, contact_type, is_self, preferred_channel, avatar, entity_ref
+                 from contacts where id = ?1",
+                params![id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, Option<String>>(7)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((name, nickname, notes, contact_type, is_self, preferred_channel, avatar, entity_ref)) =
+            row
+        else {
+            return Ok(None);
+        };
+        Ok(Some(StoredContact {
+            id,
+            name,
+            nickname,
+            notes,
+            contact_type,
+            is_self: is_self != 0,
+            preferred_channel,
+            avatar,
+            entity_ref,
+            identities: self.identities_for(id)?,
+        }))
+    }
+
+    pub fn list_contacts(&self) -> rusqlite::Result<Vec<StoredContact>> {
+        let mut stmt = self.conn.prepare("select id from contacts order by lower(name)")?;
+        let ids: Vec<i64> = stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        drop(stmt);
+        let mut out = Vec::with_capacity(ids.len());
+        for id in ids {
+            if let Some(contact) = self.contact_by_id(id)? {
+                out.push(contact);
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn update_contact(
+        &self,
+        id: i64,
+        name: Option<&str>,
+        nickname: Option<&str>,
+        notes: Option<&str>,
+        contact_type: Option<&str>,
+    ) -> rusqlite::Result<()> {
+        let now = Self::now_secs();
+        if let Some(v) = name {
+            self.conn
+                .execute("update contacts set name = ?1, updated_at = ?2 where id = ?3", params![v, now, id])?;
+        }
+        if let Some(v) = nickname {
+            self.conn.execute(
+                "update contacts set nickname = ?1, updated_at = ?2 where id = ?3",
+                params![v, now, id],
+            )?;
+        }
+        if let Some(v) = notes {
+            self.conn
+                .execute("update contacts set notes = ?1, updated_at = ?2 where id = ?3", params![v, now, id])?;
+        }
+        if let Some(v) = contact_type {
+            self.conn.execute(
+                "update contacts set contact_type = ?1, updated_at = ?2 where id = ?3",
+                params![v, now, id],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Merge `absorbed` into `survivor`: move its identities (drop UNIQUE collisions),
+    /// then delete it. Memory-side relinking is done by the caller via entity_ref.
+    pub fn merge_contacts(&self, survivor: i64, absorbed: i64) -> rusqlite::Result<()> {
+        if survivor == absorbed {
+            return Ok(());
+        }
+        let mut stmt = self
+            .conn
+            .prepare("select channel, identifier, label from contact_identities where contact_id = ?1")?;
+        let moved: Vec<(String, String, Option<String>)> = stmt
+            .query_map(params![absorbed], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        drop(stmt);
+        for (channel, identifier, label) in moved {
+            self.conn.execute(
+                "insert or ignore into contact_identities(contact_id, channel, identifier, label)
+                 values(?1, ?2, ?3, ?4)",
+                params![survivor, channel, identifier, label],
+            )?;
+        }
+        self.conn
+            .execute("delete from contacts where id = ?1", params![absorbed])?;
+        Ok(())
+    }
+
+    /// Remove a contact and its channel identities (explicit cascade — SQLite FK
+    /// enforcement isn't assumed to be on).
+    pub fn delete_contact(&self, id: i64) -> rusqlite::Result<()> {
+        self.conn
+            .execute("delete from contact_identities where contact_id = ?1", params![id])?;
+        self.conn
+            .execute("delete from contacts where id = ?1", params![id])?;
+        Ok(())
+    }
+
+    /// Cached distilled-profile JSON (`{"facts":[...],"count":N}`) for a contact.
+    pub fn contact_facts_json(&self, id: i64) -> rusqlite::Result<Option<String>> {
+        self.conn
+            .query_row("select facts_json from contacts where id = ?1", params![id], |row| {
+                row.get(0)
+            })
+            .optional()
+    }
+    pub fn set_contact_facts_json(&self, id: i64, json: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "update contacts set facts_json = ?1, updated_at = ?2 where id = ?3",
+            params![json, Self::now_secs(), id],
+        )?;
+        Ok(())
+    }
+
     fn migrate(&self) -> rusqlite::Result<()> {
         self.conn.execute_batch(
             "
@@ -471,6 +758,41 @@ impl ChatStore {
 
             create index if not exists idx_thread_attachments_thread
                 on thread_attachments(thread_id);
+
+            -- Contact book (curated rubrica). A contact is a person we communicate
+            -- with — created from a channel identity (someone messaged us) or added
+            -- by hand — NOT every person merely mentioned in chat. Knowledge ABOUT a
+            -- contact stays in the memory DB, linked by handle (channel:identifier).
+            create table if not exists contacts (
+                id integer primary key autoincrement,
+                name text not null,
+                nickname text,
+                notes text not null default '',
+                contact_type text not null default 'unknown',
+                is_self integer not null default 0,
+                preferred_channel text,
+                avatar text,
+                entity_ref text,
+                facts_json text not null default '{}',
+                created_at integer not null,
+                updated_at integer not null
+            );
+
+            -- Channel identities: the (channel, identifier) handles that route an
+            -- inbound message to a contact. UNIQUE is the dedup spine + O(1) lookup.
+            create table if not exists contact_identities (
+                id integer primary key autoincrement,
+                contact_id integer not null references contacts(id) on delete cascade,
+                channel text not null,
+                identifier text not null,
+                label text,
+                unique(channel, identifier)
+            );
+
+            create index if not exists idx_contact_identities_lookup
+                on contact_identities(channel, identifier);
+            create index if not exists idx_contact_identities_contact
+                on contact_identities(contact_id);
             ",
         )?;
 
