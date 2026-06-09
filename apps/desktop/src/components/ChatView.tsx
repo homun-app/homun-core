@@ -4,6 +4,7 @@ import {
   AtSign,
   BookMarked,
   Check,
+  CalendarClock,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -2543,8 +2544,11 @@ const COMPOSIO_RECONNECT_RE = /‹‹COMPOSIO_RECONNECT››([\s\S]*?)‹‹\/C
 // Single/multi-choice question card (Claude-Code style): the model emits the choices
 // instead of listing them in prose, and the click sends the answer back.
 const CHOICES_RE = /‹‹CHOICES››([\s\S]*?)‹‹\/CHOICES››/;
+// Plan-mode: the model proposes a plan and STOPS; the card gates execution behind
+// Accetta / Modifica (the answer becomes the next user message).
+const PLAN_PROPOSE_RE = /‹‹PLAN_PROPOSE››([\s\S]*?)‹‹\/PLAN_PROPOSE››/;
 const COMPOSIO_MARKERS_RE =
-  /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|CHOICES)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|CHOICES)››/g;
+  /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|CHOICES|PLAN_PROPOSE)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|CHOICES|PLAN_PROPOSE)››/g;
 
 /** One clickable suggestion in an in-chat connect-card. */
 interface ConnectSuggestItem {
@@ -2570,6 +2574,13 @@ interface ChoicePrompt {
   question: string;
   multi: boolean;
   options: string[];
+}
+
+/** A plan the model proposes BEFORE executing (plan-mode): the card gates execution
+ *  behind Accetta / Modifica. */
+interface PlanProposal {
+  summary: string;
+  steps: string[];
 }
 
 // Tool-activity trace markers (browser / skill / sandbox / connected-tool steps).
@@ -4258,6 +4269,7 @@ function parseComposioConfirm(text: string): {
   fsAuthorize: { path: string; op: string } | null;
   connectSuggest: ConnectSuggest | null;
   choices: ChoicePrompt | null;
+  planPropose: PlanProposal | null;
 } {
   let action: ComposioPendingAction | null = null;
   const confirm = text.match(COMPOSIO_CONFIRM_RE);
@@ -4323,6 +4335,25 @@ function parseComposioConfirm(text: string): {
       /* malformed → just hide it */
     }
   }
+  // Plan proposal (plan-mode): steps + Accetta/Modifica gate.
+  let planPropose: PlanProposal | null = null;
+  const ppMatch = text.match(PLAN_PROPOSE_RE);
+  if (ppMatch) {
+    try {
+      const parsed = JSON.parse(ppMatch[1]) as PlanProposal;
+      const steps = Array.isArray(parsed?.steps)
+        ? parsed.steps.filter((s) => typeof s === "string" && s.trim().length > 0)
+        : [];
+      if (steps.length > 0) {
+        planPropose = {
+          summary: typeof parsed.summary === "string" ? parsed.summary : "",
+          steps,
+        };
+      }
+    } catch {
+      /* malformed → just hide it */
+    }
+  }
   const done = text.match(COMPOSIO_DONE_RE);
   const doneTool = done ? done[1].trim() : null;
   const reconnectMatch = text.match(COMPOSIO_RECONNECT_RE);
@@ -4337,6 +4368,7 @@ function parseComposioConfirm(text: string): {
     fsAuthorize,
     connectSuggest,
     choices,
+    planPropose,
   };
 }
 
@@ -4365,8 +4397,16 @@ function AssistantMessageBody({
   onOpenArtifact?: (artifact: ParsedArtifact) => void;
   onChoose?: (answer: string) => void;
 }) {
-  const { visible, action, doneTool, reconnectSlug, fsAuthorize, connectSuggest, choices } =
-    useMemo(() => parseComposioConfirm(text), [text]);
+  const {
+    visible,
+    action,
+    doneTool,
+    reconnectSlug,
+    fsAuthorize,
+    connectSuggest,
+    choices,
+    planPropose,
+  } = useMemo(() => parseComposioConfirm(text), [text]);
   const readable = useMemo(() => humanizeToolSlugs(visible), [visible]);
   return (
     <>
@@ -4401,7 +4441,92 @@ function AssistantMessageBody({
       {choices && !streaming && onChoose && (
         <ChoicesCard prompt={choices} onChoose={onChoose} />
       )}
+      {planPropose && !streaming && onChoose && (
+        <PlanProposeCard plan={planPropose} onAnswer={onChoose} />
+      )}
     </>
+  );
+}
+
+/** Plan-mode card: the model proposed a plan and stopped. Accetta sends the approval
+ *  (the agent executes next turn); Modifica reveals a box to request changes. The
+ *  answer becomes the next user message. */
+function PlanProposeCard({
+  plan,
+  onAnswer,
+}: {
+  plan: PlanProposal;
+  onAnswer: (message: string) => void;
+}) {
+  const [phase, setPhase] = useState<"idle" | "editing" | "sent">("idle");
+  const [feedback, setFeedback] = useState("");
+  const [decision, setDecision] = useState("");
+  if (phase === "sent") {
+    return (
+      <div className="plan-card done">
+        <Check size={14} />
+        <span>{decision}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="plan-card">
+      <div className="plan-card-head">
+        <CalendarClock size={15} />
+        <strong>Piano proposto</strong>
+        <span className="plan-card-gate">in attesa di conferma</span>
+      </div>
+      {plan.summary && <p className="plan-card-summary">{plan.summary}</p>}
+      <ol className="plan-card-steps">
+        {plan.steps.map((step, i) => (
+          <li key={i}>{step}</li>
+        ))}
+      </ol>
+      {phase === "editing" ? (
+        <div className="plan-card-edit">
+          <textarea
+            autoFocus
+            placeholder="Cosa cambiare nel piano?"
+            value={feedback}
+            onChange={(e) => setFeedback(e.target.value)}
+          />
+          <div className="plan-card-actions">
+            <button type="button" className="plan-btn ghost" onClick={() => setPhase("idle")}>
+              Annulla
+            </button>
+            <button
+              type="button"
+              className="plan-btn primary"
+              disabled={!feedback.trim()}
+              onClick={() => {
+                setDecision("Modifica richiesta");
+                setPhase("sent");
+                onAnswer(`Rivedi il piano prima di procedere: ${feedback.trim()}`);
+              }}
+            >
+              Invia modifiche
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="plan-card-actions">
+          <button
+            type="button"
+            className="plan-btn primary"
+            onClick={() => {
+              setDecision("Piano accettato");
+              setPhase("sent");
+              onAnswer("Approvo il piano: procedi con l'esecuzione.");
+            }}
+          >
+            Accetta ed esegui
+          </button>
+          <button type="button" className="plan-btn ghost" onClick={() => setPhase("editing")}>
+            Modifica / Ridiscuti
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 

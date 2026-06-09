@@ -5906,9 +5906,13 @@ perché le cose sono come sono (NON ri-scandagliare tutto da zero). DOPO una sce
 QUALSIASI dominio: codice, un documento (es. un preventivo cliente), dati, configurazioni — chiama \
 record_decision con cosa hai deciso, il PERCHÉ, le alternative scartate e gli oggetti toccati, così \
 il razionale resta e non va ricostruito. \
-PIANO: per un compito a PIÙ PASSI (sviluppo, refactor, ricerca articolata) chiama update_plan \
-all'INIZIO con tutti gli step, poi aggiornane lo stato mentre procedi (doing→done); l'utente segue i \
-progressi nel pannello \"Piano\". Per richieste a un solo passo NON serve."
+PIANO (plan-mode): per un compito a PIÙ PASSI non banale (sviluppo, refactor, ricerca articolata, \
+azioni con effetti) PRIMA proponi il piano e FERMATI — NON iniziare a eseguire in questo turno. Emetti \
+su una riga a sé `‹‹PLAN_PROPOSE››{{\"summary\":\"obiettivo in breve\",\"steps\":[\"passo 1\",\"passo 2\"]}}‹‹/PLAN_PROPOSE››` \
+(JSON valido). L'utente vedrà i pulsanti Accetta/Modifica. ESEGUI il piano SOLO nel turno SUCCESSIVO, \
+dopo che l'utente l'ha approvato (es. «Approvo il piano…»); se chiede modifiche, rivedi e ri-proponi. \
+Una volta in esecuzione, usa update_plan per aggiornare lo stato degli step (doing→done), mostrato nel \
+pannello \"Piano\". Per richieste a un solo passo NON serve né piano né proposta."
     );
     let system = format!(
         "{system}\n\nFRESCHEZZA / VERIFICA: la tua conoscenza interna può essere datata. Per QUALSIASI \

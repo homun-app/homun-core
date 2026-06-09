@@ -7698,6 +7698,101 @@ body.resizing-drawer {
   color: var(--brand);
   flex: none;
 }
+/* Plan-mode proposal card (Accetta / Modifica gate). */
+.plan-card {
+  margin-top: var(--s3);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  background: var(--surface);
+}
+.plan-card-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13.5px;
+}
+.plan-card-head svg {
+  color: var(--brand);
+  flex: none;
+}
+.plan-card-gate {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+}
+.plan-card-summary {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text);
+}
+.plan-card-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--text);
+}
+.plan-card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.plan-card-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.plan-card-edit textarea {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+  outline: none;
+}
+.plan-btn {
+  padding: 7px 14px;
+  border-radius: var(--radius-pill, 999px);
+  font-size: 13px;
+  font-weight: 600;
+}
+.plan-btn.primary {
+  background: var(--brand);
+  color: #fff;
+}
+.plan-btn.primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.plan-btn.ghost {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+.plan-btn.ghost:hover {
+  background: var(--surface-hover);
+}
+.plan-card.done {
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.plan-card.done svg {
+  color: var(--brand);
+  flex: none;
+}
 .cmp-confirm.destructive { border-color: #c0392b; background: #fdecea; }
 .cmp-confirm.destructive .cmp-confirm-head svg { color: #c0392b; }
 .cmp-confirm-warn {
