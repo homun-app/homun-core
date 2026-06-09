@@ -9,7 +9,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Copy,
+  Bot,
   Braces,
+  Bug,
   Clock3,
   Cloud,
   Download,
@@ -28,6 +30,7 @@ import {
   ListTodo,
   Loader2,
   Maximize2,
+  MessageCircle,
   Mic,
   Minimize2,
   MoreHorizontal,
@@ -367,6 +370,7 @@ export function ChatView({
     model?: string,
     images?: string[],
     baseMessages?: ChatMessage[],
+    mode?: string,
   ) {
     const text = prompt.trim();
     if (!text) return;
@@ -519,6 +523,7 @@ export function ChatView({
         visiblePrompt,
         model,
         images,
+        mode,
       );
       if (cancelledStreamIdsRef.current.has(requestId)) {
         return;
@@ -706,6 +711,7 @@ export function ChatView({
     attachments: ChatAttachmentInput[],
     options?: {
       model?: string;
+      mode?: string;
       forcedSkillId?: string;
       contextText?: string;
       images?: string[];
@@ -714,6 +720,7 @@ export function ChatView({
     const activeReplyContext = replyContext;
     setReplyContext(null);
     const images = options?.images;
+    const mode = options?.mode;
 
     // Forcing a skill (🧩 picker) augments the MODEL-facing prompt while the
     // user still sees their clean text. The gateway honors "usa la skill X".
@@ -735,9 +742,11 @@ export function ChatView({
           prompt,
           model,
           images,
+          undefined,
+          mode,
         );
       } else {
-        void submitPrompt(prompt, attachments, undefined, undefined, model, images);
+        void submitPrompt(prompt, attachments, undefined, undefined, model, images, undefined, mode);
       }
       return;
     }
@@ -752,7 +761,7 @@ export function ChatView({
       "Richiesta dell'utente:",
       prompt,
     ].join("\n");
-    void submitPrompt(promptWithReplyContext, attachments, undefined, prompt, model, images);
+    void submitPrompt(promptWithReplyContext, attachments, undefined, prompt, model, images, undefined, mode);
   }
 
   async function copyMessageText(message: ChatMessage) {
@@ -2568,6 +2577,22 @@ interface ConnectSuggest {
   need: string;
   items: ConnectSuggestItem[];
 }
+
+/** Composer interaction modes (Cursor-style, adapted for a general assistant).
+ *  Debug is project-only (coding context); the others fit any chat. */
+type ChatMode = "agent" | "plan" | "ask" | "debug";
+const CHAT_MODES: {
+  key: ChatMode;
+  label: string;
+  desc: string;
+  icon: typeof Bot;
+  projectOnly?: boolean;
+}[] = [
+  { key: "agent", label: "Agente", desc: "Ragiona, usa strumenti e agisce", icon: Bot },
+  { key: "plan", label: "Piano", desc: "Propone un piano e aspetta l'OK prima di agire", icon: ListTodo },
+  { key: "ask", label: "Chiedi", desc: "Risponde e conversa, senza strumenti né azioni", icon: MessageCircle },
+  { key: "debug", label: "Debug", desc: "Debugging sistematico (progetti di codice)", icon: Bug, projectOnly: true },
+];
 
 /** A single/multi-choice question the model asks the user (Claude-Code style). */
 interface ChoicePrompt {
@@ -5965,6 +5990,7 @@ function Composer({
     attachments: ChatAttachmentInput[],
     options?: {
       model?: string;
+      mode?: string;
       forcedSkillId?: string;
       contextText?: string;
       images?: string[];
@@ -5997,6 +6023,10 @@ function Composer({
   // id present in two providers resolves to the provider the user actually chose.
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  // Interaction mode (composer pill, Cursor-style): agent | plan | ask | debug.
+  // Debug is offered only when a project folder is linked (coding context).
+  const [chatMode, setChatMode] = useState<ChatMode>("agent");
+  const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [modelQuery, setModelQuery] = useState("");
 
   // Refetches the model list + default (= orchestrator role) + per-provider groups.
@@ -6292,6 +6322,7 @@ function Composer({
     requestAnimationFrame(adjustComposerHeight);
     onSubmit(effectivePrompt, attachmentInputs, {
       model: modelOverride,
+      mode: chatMode === "agent" ? undefined : chatMode,
       forcedSkillId,
       contextText,
       images: images.length > 0 ? images : undefined,
@@ -6699,6 +6730,56 @@ function Composer({
               <Mic size={17} />
             )}
           </button>
+          {!isHomun && (
+            <div className="composer-pop-wrap">
+              <button
+                className="composer-model-button"
+                type="button"
+                aria-label="Scegli la modalità"
+                aria-expanded={modeMenuOpen}
+                onClick={() => {
+                  setModeMenuOpen((open) => !open);
+                  setModelMenuOpen(false);
+                  setSkillMenuOpen(false);
+                }}
+              >
+                {(() => {
+                  const M = CHAT_MODES.find((m) => m.key === chatMode) ?? CHAT_MODES[0];
+                  const I = M.icon;
+                  return <I size={14} />;
+                })()}
+                <span>{(CHAT_MODES.find((m) => m.key === chatMode) ?? CHAT_MODES[0]).label}</span>
+                <ChevronDown size={14} />
+              </button>
+              {modeMenuOpen && (
+                <div className="composer-pop composer-mode-pop" role="menu">
+                  {CHAT_MODES.filter((m) => !m.projectOnly || linkedFolder != null).map((m) => {
+                    const I = m.icon;
+                    const active = m.key === chatMode;
+                    return (
+                      <button
+                        key={m.key}
+                        type="button"
+                        role="menuitem"
+                        className={active ? "active" : ""}
+                        onClick={() => {
+                          setChatMode(m.key);
+                          setModeMenuOpen(false);
+                        }}
+                      >
+                        <I size={15} />
+                        <span className="composer-mode-text">
+                          <strong>{m.label}</strong>
+                          <small>{m.desc}</small>
+                        </span>
+                        {active && <Check size={14} />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
           {models.length > 0 && (
             <div className="composer-pop-wrap">
               <button

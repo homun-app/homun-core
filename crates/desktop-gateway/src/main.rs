@@ -5957,6 +5957,27 @@ all'utente cosa fare (non cliccare \"Acquista\"/\"Accedi\"/\"Prenota\").\n\
 - STOP: appena hai dati sufficienti, SMETTI di usare il browser e scrivi la risposta finale \
 all'utente (tabella per riga + eventuale footer Fonti)."
     );
+    // Composer interaction mode (agent = default). plan/ask/debug refine behavior;
+    // "ask" also drops the toolset below (pure conversation).
+    let mode = request.mode.as_deref().unwrap_or("agent").to_string();
+    let system = match mode.as_str() {
+        "plan" => format!(
+            "{system}\n\nMODALITÀ PIANO (scelta dall'utente): per QUALSIASI richiesta non banale \
+proponi PRIMA un piano con `‹‹PLAN_PROPOSE››…‹‹/PLAN_PROPOSE››` e FERMATI; esegui solo dopo l'approvazione."
+        ),
+        "ask" => format!(
+            "{system}\n\nMODALITÀ CHIEDI (scelta dall'utente): rispondi conversando dalla tua \
+conoscenza e dalla memoria. NON usare strumenti e NON compiere azioni esterne (niente browser, file, \
+invii, ricerche). Se per rispondere servisse uno strumento, dillo e suggerisci di passare alla \
+modalità Agente."
+        ),
+        "debug" => format!(
+            "{system}\n\nMODALITÀ DEBUG (scelta dall'utente): debugging SISTEMATICO — riproduci il \
+problema, isola la causa, forma un'ipotesi, verificala con un esperimento minimo, poi correggi e \
+RI-VERIFICA eseguendo. Una causa alla volta, niente tentativi alla cieca."
+        ),
+        _ => system,
+    };
     let system = system.as_str();
     let mut endpoint = chat_endpoint(&base_url);
     // Resilience: a 401 (the chosen model can't authenticate, e.g. an Ollama
@@ -6179,6 +6200,10 @@ questo elenco, chiedi di allegarlo (non cercarlo nella sandbox o nelle cartelle)
         // Tools offered to the model this run: the base set, plus any tools the
         // model discovers via `find_connected_tools` (injected on demand).
         let mut tool_schemas = base_tools;
+        // "Chiedi" mode: pure conversation — no tools, no actions.
+        if mode == "ask" {
+            tool_schemas.clear();
+        }
         let mut loaded_tools: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         // Turn-local browser state for the granular tools. The sidecar session is
         // held for the WHOLE turn (lock acquired only around each single call) and
@@ -10047,6 +10072,7 @@ async fn run_agent_turn(
         wait_if_busy: true,
         request_timeout_seconds: None,
         tool_policy: Some(tool_policy.to_string()),
+        mode: None,
     };
     let response = stream_chat_via_openai(state, request, base_url, model, api_key)
         .await
