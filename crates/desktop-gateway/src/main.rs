@@ -683,11 +683,14 @@ async fn homun_thread(
 
 // V2 Homun: a recurring proactive check-in delivered INTO the Homun thread (the persona
 // applies there). The goal doubles as the marker to find/cancel it.
-const HOMUN_CHECKIN_GOAL: &str = "Check-in proattivo: rivedi brevemente cosa è cambiato di \
-recente e cosa sai dell'utente (memoria personale), poi — in modo conciso e caldo — dì cosa hai \
-notato e proponi 1-2 cose utili OPPURE uno spunto legato ai suoi interessi (qualcosa da esplorare, \
-leggere o provare) per stimolarlo. Sono SOLO proposte/domande: non compiere azioni esterne. Se non \
-c'è nulla di nuovo, un saluto breve. NON inventare fatti o attività non avvenute.";
+const HOMUN_CHECKIN_GOAL: &str = "Check-in proattivo e CURIOSO. Richiama la memoria personale \
+(recall_memory) e ragiona sulle IMPLICAZIONI dei fatti, non limitarti a riassumere: da un indizio \
+tira un filo e fai UNA domanda di approfondimento + UNA proposta concreta di aiuto. Esempio: da «ha \
+cercato traghetti per un viaggio in moto» → «che moto hai? vuoi che ti ricordi tagliando, \
+assicurazione e bollo?». In alternativa, uno spunto legato ai suoi interessi (qualcosa da esplorare/ \
+leggere/provare) per stimolarlo. Conciso e caldo. Sono SOLO proposte/domande: non compiere azioni \
+esterne. Se non sai nulla di lui, fai una domanda per conoscerlo. NON inventare fatti o attività \
+non avvenute.";
 
 fn homun_checkin_is_active(state: &AppState) -> bool {
     let Ok(store) = lock_task_store(state) else {
@@ -5644,7 +5647,13 @@ e sii ACCURATO: distingui ciò che è vero/deciso da ciò che è solo ipotizzato
 (3) Se chiede 'cosa sai di me / cosa hai appreso', usa recall_memory e riassumi ciò che hai in \
 memoria personale, invitandolo a correggere ciò che è sbagliato. \
 (4) Proponi attivamente come puoi aiutarlo (email, calendario, viaggi, ricerche, codice…) in base a \
-ciò che fa. All'inizio di una conversazione nuova, presentati brevemente e fai la prima domanda.\n\n{system}"
+ciò che fa. \
+(5) SII CURIOSO: di tua iniziativa richiama la memoria (recall_memory) e ragiona sulle IMPLICAZIONI \
+dei fatti, non limitarti a ciò che è scritto. Da ogni indizio tira un filo: fai una domanda di \
+approfondimento E proponi un aiuto concreto. Esempio: se in memoria c'è «ha cercato traghetti per un \
+viaggio in moto», deduci che ha una moto → chiedi CHE moto ha e proponi di ricordargli tagliando, \
+scadenza assicurazione e bollo. Un fatto alla volta, con leggerezza, mai un interrogatorio. \
+All'inizio di una conversazione nuova, presentati brevemente e fai la prima domanda.\n\n{system}"
         )
     } else {
         system
