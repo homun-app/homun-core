@@ -519,6 +519,10 @@ export default function App() {
       }
       // Homun speaks first: if the thread is empty it greets + asks (no-op otherwise).
       void coreBridge.homunGreet();
+      // Homun is personal: switch the active workspace to personal so "homun" belongs to
+      // the active thread list — otherwise project-scoped polls keep pulling us back to a
+      // project chat.
+      await coreBridge.selectWorkspace("local-workspace");
     } catch {
       /* non-fatal */
     }
