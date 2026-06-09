@@ -360,6 +360,21 @@ Aggiornato 2026-06-08. Ordine consigliato, rivedibile.
   che intervista l'utente (chi è, cosa fa, cosa salvare, che uso vuole farne) → scrive in
   **memoria personale**, dice "cosa ho appreso", analizza i pattern e propone automazioni
   (consuma memoria + proattività già pronte). È la north star "apprendista".
+- **Homun FATTO (Fasi 1-2 + curiosità + cadenza umana)**: voce nav di primo livello,
+  scope personale, badge "ho qualcosa da dirti", greet al primo open, composer
+  semplificato (no skill), merge Apprendimento, persona CURIOSA (mina la memoria →
+  deduce → chiede+propone, es. moto→tagliando/assicurazione/bollo), check-in proattivo
+  con cadenza umana (every 3h + gate orario locale 9–22 via jiff + ~45% random,
+  no-repeat via cronologia thread).
+- **Homun — TODO proattività (segnati su richiesta utente)**:
+  1. **Backlog di curiosità persistente** — invece di basarsi solo sulla cronologia del
+     thread, Homun accumula una *coda* di domande/curiosità preparate analizzando la
+     memoria, e ne pesca UNA per volta nel tempo (centellinamento durevole, cross-sessione).
+  2. **Idle reale** — "non disturbarmi mentre lavoro": il check-in dovrebbe attivarsi nei
+     momenti di vera inattività (oggi approssimato da orario+caso), non mentre l'utente è
+     in un altro turno/attività.
+- **Fase 3 Homun (da fare)**: ricerca automatica sugli interessi (proattività d'AZIONE,
+  gated) + gestione impostazioni via chat (tool dedicati).
 
 **Fatti — sessione 2026-06-08 (chat UX + allegati + routing modelli):**
 - **Allegati end-to-end** (`edbeba2`→`1d7e719`): cattura path via `webUtils.getPathForFile`
