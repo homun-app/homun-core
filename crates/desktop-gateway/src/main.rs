@@ -1940,7 +1940,18 @@ di un traghetto, NON scrivere \"ha un viaggio programmato\"). Registra un piano/
 se l'utente lo afferma come reale/confermato (\"ho prenotato\", \"parto\", \"il mio viaggio è\"). Se una \
 valutazione è comunque utile, formulala con cautela (\"ha cercato/valutato …\"), confidence bassa, e \
 metti metadata.certainty: \"committed\" = confermato/accaduto, \"considered\" = solo cercato/valutato, \
-\"intended\" = intenzione dichiarata ma non confermata. Rispondi SOLO con JSON valido, \
+\"intended\" = intenzione dichiarata ma non confermata. \
+FEDELTÀ (niente allucinazioni): registra SOLO ciò che è esplicito nello scambio; NON dedurre né \
+abbellire ruoli, transazioni o relazioni non dichiarati — es. da «ho guardato un annuncio per un \
+accessorio della moto» NON dedurre «vende la sua moto» né «X è interessato a comprarla». Se un \
+ruolo/relazione/transazione non è detto a chiare lettere, non scriverlo. \
+NON REGISTRARE (è rumore, non memoria durevole): task o promemoria ricorrenti e pianificazioni che \
+l'utente imposta (vivono nel sistema dei task, non in memoria); connessioni/integrazioni di servizi \
+(es. «Gmail collegata», «ha collegato X»); dettagli operativi o di build (librerie/dipendenze \
+installate, comandi, nomi di file) a meno che non siano una vera DECISIONE di progetto col perché; e \
+MAI registrare come ricordo una richiesta di DIMENTICARE/eliminare qualcosa. Non salvare come memoria \
+di progetto fatti che riguardano un ALTRO progetto o strumento estraneo al lavoro corrente. \
+Rispondi SOLO con JSON valido, \
 niente altro:\n\
 {\"memories\":[{\"memory_type\":\"fact|preference|decision\",\"text\":\"frase breve in 3a persona \
 nella lingua dell'utente\",\"sensitivity\":\"internal|private|confidential|secret\",\"confidence\":0.0-1.0,\
@@ -2356,7 +2367,10 @@ fn forget_in_scope(
         query: query.to_string(),
         statuses: vec![MemoryStatus::Confirmed, MemoryStatus::Candidate],
         memory_types: Vec::new(),
-        limit: 3,
+        // Delete ALL matches, not just the top 3: search returns only genuine matches
+        // (it doesn't pad to the limit), so a generous cap forgets the whole cluster
+        // instead of leaving stragglers — the bug where "forget Gianluca" left records.
+        limit: 25,
         offset: 0,
     }) {
         let lifecycle = MemoryLifecycleRequest {
