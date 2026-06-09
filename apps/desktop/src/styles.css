@@ -3356,6 +3356,23 @@ body.resizing-drawer {
   font-size: 13px;
   padding: 16px;
 }
+.memory-wiki-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.memory-wiki-editor {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+  padding: 10px;
+  resize: vertical;
+}
 .memory-graph-detail-actions {
   display: flex;
   gap: 6px;

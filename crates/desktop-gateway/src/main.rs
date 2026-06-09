@@ -508,7 +508,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/memory/dashboard", get(memory_dashboard))
         .route("/api/memory/items", get(memory_items))
         .route("/api/memory/graph", get(memory_graph))
-        .route("/api/memory/wiki", get(memory_wiki))
+        .route("/api/memory/wiki", get(memory_wiki).put(memory_wiki_save))
         .route("/api/memory/decide", post(memory_decide))
         .route("/api/memory/contacts", get(contacts_list))
         .route("/api/memory/contacts/memories", post(contact_memories))
@@ -1314,15 +1314,41 @@ fn store_episode(facade: &MemoryFacade, user_id: &MemoryUserId, thread_id: &str,
 /// canonical_key → ref map (seeded with existing entities so relations can link to
 /// already-known nodes); (2) upsert each relation only when BOTH endpoints resolve.
 /// The model gives source/target as canonical_keys in source_ref/target_ref.
+/// Wiki pages the user edited by hand (`workspace|path`) — these are NOT auto-regenerated
+/// (the hybrid model: the human-curated version wins for that page).
+fn wiki_edited_path() -> Option<PathBuf> {
+    gateway_data_dir().ok().map(|dir| dir.join("wiki-edited.json"))
+}
+fn load_wiki_edited() -> std::collections::BTreeSet<String> {
+    wiki_edited_path()
+        .and_then(|path| fs::read_to_string(path).ok())
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+fn mark_wiki_edited(workspace: &MemoryWorkspaceId, path: &str) {
+    let mut set = load_wiki_edited();
+    set.insert(format!("{}|{}", workspace.as_str(), path));
+    if let Some(file) = wiki_edited_path() {
+        let _ = fs::write(file, serde_json::to_string(&set).unwrap_or_default());
+    }
+}
+fn wiki_is_edited(workspace: &MemoryWorkspaceId, path: &str) -> bool {
+    load_wiki_edited().contains(&format!("{}|{}", workspace.as_str(), path))
+}
+
 /// Wiki projection (markdown face of the memory): regenerate the project's "Decisioni"
 /// page from the confirmed decisions and persist it to SQL (wiki_pages). The structured
 /// rows stay canonical; this is the readable, human-editable projection (the hybrid
-/// model). Idempotent — one page per workspace, rebuilt in place.
+/// model). Idempotent — one page per workspace, rebuilt in place. Skipped if the user
+/// edited the page by hand (their version wins until they regenerate).
 fn rebuild_decisions_wiki(
     facade: &MemoryFacade,
     user_id: &MemoryUserId,
     workspace: &MemoryWorkspaceId,
 ) {
+    if wiki_is_edited(workspace, "decisioni.md") {
+        return;
+    }
     let Ok(memories) = facade.list_memories_for_ui(user_id, workspace) else {
         return;
     };
@@ -16966,6 +16992,83 @@ async fn memory_wiki(
             .map(|p| WikiPageView { path: p.path, title: p.title, body: p.body })
             .collect(),
     ))
+}
+
+#[derive(Deserialize)]
+struct WikiSaveRequest {
+    workspace: Option<String>,
+    thread: Option<String>,
+    path: String,
+    body: String,
+}
+
+/// Save a hand-edited wiki page (the editable face of the hybrid model): persist the
+/// new markdown, mark the page as user-edited (so it isn't auto-regenerated), and
+/// RE-INGEST it — run the extractor on the edited text so the corrections flow back
+/// into the canonical structured memory.
+async fn memory_wiki_save(
+    State(state): State<AppState>,
+    Json(req): Json<WikiSaveRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let user = gateway_memory_user_id();
+    let ws = if let Some(tid) = req.thread.as_deref().filter(|t| !t.trim().is_empty()) {
+        lock_store(&state)
+            .ok()
+            .and_then(|store| store.workspace_for_thread(tid).ok())
+            .filter(|w| !w.trim().is_empty())
+            .map(MemoryWorkspaceId::new)
+            .unwrap_or_else(gateway_memory_workspace_id)
+    } else if let Some(workspace) = req.workspace.clone().filter(|w| !w.trim().is_empty()) {
+        MemoryWorkspaceId::new(workspace)
+    } else {
+        gateway_memory_workspace_id()
+    };
+    {
+        let facade = lock_memory_facade(&state)?;
+        let existing = facade
+            .list_wiki_pages_for_ui(&user, &ws)
+            .ok()
+            .and_then(|pages| pages.into_iter().find(|p| p.path == req.path));
+        let reference = existing
+            .as_ref()
+            .map(|p| p.reference.clone())
+            .unwrap_or_else(|| MemoryRef::generated(MemoryRefKind::Wiki, user.clone(), ws.clone()));
+        let title = existing.as_ref().map(|p| p.title.clone()).unwrap_or_else(|| req.path.clone());
+        let linked_refs = existing.map(|p| p.linked_refs).unwrap_or_default();
+        let page = WikiPage {
+            reference,
+            user_id: user.clone(),
+            workspace_id: ws.clone(),
+            path: req.path.clone(),
+            title,
+            body: req.body.clone(),
+            linked_refs,
+            privacy_domain: PrivacyDomain::new("work"),
+            sensitivity: MemoryDataSensitivity::Internal,
+        };
+        facade
+            .record_wiki_page_for_ui(&page)
+            .map_err(|e| GatewayError::memory(e.to_string()))?;
+    }
+    mark_wiki_edited(&ws, &req.path);
+    // Re-ingest: scope the active workspace to this page, then extract decisions from
+    // the edited markdown into the structured store (non-empty `actions` bypasses the
+    // salience gate). Background — the save returns immediately.
+    set_active_workspace(ws.as_str());
+    let st = state.clone();
+    let body = req.body.clone();
+    tokio::spawn(async move {
+        learn_from_exchange(
+            &st,
+            "Correzione manuale della wiki delle decisioni del progetto",
+            &body,
+            "L'utente ha corretto a mano la wiki Decisioni",
+            None,
+            None,
+        )
+        .await;
+    });
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 // ------------------------------------------------------------------ contacts

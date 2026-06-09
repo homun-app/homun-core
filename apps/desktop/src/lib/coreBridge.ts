@@ -651,6 +651,21 @@ async function electronMemoryWiki(thread?: string): Promise<MemoryWikiPage[]> {
   return gatewayGetJson<MemoryWikiPage[]>(`/api/memory/wiki${param}`);
 }
 
+async function electronSaveMemoryWiki(
+  thread: string | undefined,
+  path: string,
+  body: string,
+): Promise<void> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/memory/wiki`, {
+    method: "PUT",
+    headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ thread, path, body }),
+  });
+  if (!response.ok) {
+    throw new Error(`Desktop Gateway memory wiki save HTTP ${response.status}`);
+  }
+}
+
 async function electronArtifactVersions(thread: string, name: string): Promise<number> {
   const { versions } = await gatewayGetJson<{ versions: number }>(
     `/api/artifacts/versions?thread=${encodeURIComponent(thread)}&name=${encodeURIComponent(name)}`,
@@ -1536,6 +1551,8 @@ export const coreBridge = {
     electronSaveArtifactContent(thread, name, content),
   memoryGraph: (thread?: string) => electronMemoryGraph(thread),
   memoryWiki: (thread?: string) => electronMemoryWiki(thread),
+  saveMemoryWiki: (thread: string | undefined, path: string, body: string) =>
+    electronSaveMemoryWiki(thread, path, body),
   artifactFolder: (thread: string) => electronArtifactFolder(thread),
   artifactsUsage: () => electronArtifactsUsage(),
   artifactDestinations: () => electronArtifactDestinations(),
