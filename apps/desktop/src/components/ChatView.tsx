@@ -6188,6 +6188,8 @@ function Composer({
           >
             <Paperclip size={17} />
           </button>
+          {/* Homun is the interface to the SYSTEM, not to a project folder — no @-context there. */}
+          {!isHomun && (
           <div className="composer-pop-wrap">
             <button
               className={`icon-button${contextFiles.length > 0 || linkedFolder ? " active" : ""}`}
@@ -6289,6 +6291,7 @@ function Composer({
               </div>
             )}
           </div>
+          )}
           {skills.length > 0 && !isHomun && (
             <div className="composer-pop-wrap">
               <button

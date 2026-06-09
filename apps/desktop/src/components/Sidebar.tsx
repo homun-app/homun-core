@@ -179,6 +179,15 @@ function ProjectsNav({
       .catch(() => {});
   }, []);
 
+  // Homun is project-agnostic: opening it re-scopes the backend to the personal
+  // workspace (without a full reload), so keep the switcher in sync — otherwise it
+  // would keep showing the previously active project while you're in Homun.
+  useEffect(() => {
+    if (activeView === "chat" && activeThreadId === "homun") {
+      setActiveWorkspaceId(PERSONAL_WORKSPACE_ID);
+    }
+  }, [activeView, activeThreadId]);
+
   const inProject = activeWorkspaceId !== PERSONAL_WORKSPACE_ID;
   const projects = workspaces.filter((w) => w.id !== PERSONAL_WORKSPACE_ID);
   const activeProjectName = projects.find((w) => w.id === activeWorkspaceId)?.name;
