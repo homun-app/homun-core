@@ -8,6 +8,8 @@ import { common, createLowlight } from "lowlight";
 import { toJsxRuntime } from "hast-util-to-jsx-runtime";
 import type { Components } from "react-markdown";
 import type { Mermaid } from "mermaid";
+
+import { copyText } from "../lib/clipboard";
 import "highlight.js/styles/github.css";
 
 // highlight.js (via lowlight) → hAST → real React elements (no innerHTML).
@@ -195,7 +197,8 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
   const [copied, setCopied] = useState(false);
 
   async function copyCode() {
-    await navigator.clipboard.writeText(code);
+    const ok = await copyText(code);
+    if (!ok) return;
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1_400);
   }
