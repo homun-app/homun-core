@@ -217,62 +217,64 @@ function AccountPane({
 
   return (
     <>
-      <div className="set-profile">
-        <span className="set-profile-avatar" aria-hidden />
-        <label className="set-field">
-          <span className="set-field-label">Nome completo</span>
+      <div className="set-section-label">Profilo</div>
+      <div className="set-rows">
+        <div className="set-trow">
+          <div>
+            <div className="tt">Immagine profilo</div>
+          </div>
+          <span className="set-profile-avatar" aria-hidden />
+        </div>
+        <div className="set-trow">
+          <div>
+            <div className="tt">Nome completo</div>
+          </div>
           <input
-            className="set-input"
+            className="set-input set-row-input"
             value={name}
             onChange={(event) => setName(event.target.value)}
             placeholder="Il tuo nome"
           />
-        </label>
-      </div>
-
-      <div className="set-card">
-        <div className="set-card-top">
-          <span className="set-card-name">Local-first</span>
-          <span className="set-badge green">
-            <Check size={13} /> Tutto sul dispositivo
-          </span>
         </div>
-        <div className="set-card-divider" />
-        <div className="set-meter">
-          <span className="k">
-            <MonitorPlay size={15} /> Computer locale
-          </span>
-          <span className="v">{computer?.enabled ? "Attivo" : "Spento"}</span>
-        </div>
-        <p className="set-meter-sub">
-          {computer?.enabled
-            ? "Browser reale contenuto · vista live noVNC"
-            : "Avvia il computer contenuto per browsing reale e non invasivo."}
-        </p>
-      </div>
-
-      <div className="set-section-label">Identità</div>
-      <div className="set-rows">
-        <div className="set-row">
-          <div style={{ flex: 1 }}>
-            <div className="rk">Email</div>
-            <input
-              className="set-input"
-              style={{ marginTop: 6, maxWidth: 320 }}
-              value={accountEmail}
-              onChange={(event) => setAccountEmail(event.target.value)}
-              placeholder="tu@esempio.com"
-            />
-          </div>
-        </div>
-        <div className="set-row">
+        <div className="set-trow">
           <div>
-            <div className="rk">Workspace</div>
-            <div className="rv">Personale</div>
+            <div className="tt">Email</div>
           </div>
-          <CopyButton value="Personale" />
+          <input
+            className="set-input set-row-input"
+            value={accountEmail}
+            onChange={(event) => setAccountEmail(event.target.value)}
+            placeholder="tu@esempio.com"
+          />
+        </div>
+        <div className="set-trow">
+          <div>
+            <div className="tt">Workspace</div>
+          </div>
+          <div className="set-row-value">
+            <span>Personale</span>
+            <CopyButton value="Personale" />
+          </div>
         </div>
       </div>
+
+      <div className="set-section-label">Local-first</div>
+      <div className="set-rows">
+        <div className="set-trow">
+          <div>
+            <div className="tt">Computer locale</div>
+            <div className="td">
+              {computer?.enabled
+                ? "Browser reale contenuto · vista live noVNC"
+                : "Avvia il computer contenuto per browsing reale e non invasivo."}
+            </div>
+          </div>
+          <span className={`set-badge ${computer?.enabled ? "green" : "muted"}`}>
+            {computer?.enabled ? "Attivo" : "Spento"}
+          </span>
+        </div>
+      </div>
+      <p className="set-hint">Tutto resta sul tuo dispositivo: memoria, task e audit non lasciano il computer.</p>
 
       <div className="set-danger">
         <div>
