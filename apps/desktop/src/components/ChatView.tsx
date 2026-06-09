@@ -527,9 +527,9 @@ export function ChatView({
       setComputerSession(mapCoreComputerSession(result.computer_session));
       setComputerCardCollapsed(true);
       setTimelineCollapsed(!result.plan);
-      const finalAssistantMessage = chatMessageFromAssistantResult(
-        result,
-        result.assistant_message.text || streamedText,
+      const finalAssistantMessage = withChatMetrics(
+        chatMessageFromAssistantResult(result, result.assistant_message.text || streamedText),
+        (performance.now() - streamStartedAt) / 1000,
       );
       let finalMessages = [
         ...promptMessages,
@@ -1792,6 +1792,34 @@ function describeBridgeError(error: unknown): string {
   }
 
   return error.message;
+}
+
+// Ensure an assistant message carries duration + token stats. The OpenAI-compat
+// streaming path (cloud models) doesn't return native metrics like the local runtime,
+// so we fill elapsed from the FRONTEND measurement and estimate generation tokens from
+// the text length (~4 chars/token) when the backend didn't provide a real count.
+function withChatMetrics(message: ChatMessage, measuredElapsedSeconds: number): ChatMessage {
+  if (message.role !== "assistant") return message;
+  const existing = message.metrics;
+  const elapsed =
+    existing && existing.elapsedSeconds > 0 ? existing.elapsedSeconds : measuredElapsedSeconds;
+  const tokens =
+    existing && existing.generationTokens > 0
+      ? existing.generationTokens
+      : Math.max(1, Math.round((message.text?.length ?? 0) / 4));
+  const base = existing ?? {
+    promptTokens: 0,
+    generationTokens: 0,
+    promptTps: 0,
+    generationTps: 0,
+    peakMemoryGb: 0,
+    elapsedSeconds: 0,
+    maxTokens: 0,
+  };
+  return {
+    ...message,
+    metrics: { ...base, elapsedSeconds: elapsed, generationTokens: tokens },
+  };
 }
 
 // Claude-style duration label: "0.8s" / "12s" / "1m 46s".
