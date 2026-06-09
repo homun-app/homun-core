@@ -556,8 +556,22 @@ export default function App() {
     // Homun is the proactive assistant: a new message there flags a badge ("ho qualcosa
     // da dirti") instead of yanking the user into the thread.
     if (event.thread_id === "homun") {
-      if (activeThreadId === "homun") void refreshChatReadModels("homun");
-      else setHomunUnread(true);
+      if (activeThreadId === "homun") {
+        // Reload ONLY Homun's messages — do NOT re-select via refreshChatReadModels:
+        // Homun lives in the personal scope, so if the active workspace is a project
+        // its thread list has no "homun" and we'd jump to the first project chat.
+        void coreBridge
+          .chatMessages("homun")
+          .then((messages) => {
+            setThreadMessages((current) => ({
+              ...current,
+              homun: messages.messages.map(mapCoreChatMessage),
+            }));
+          })
+          .catch(() => {});
+      } else {
+        setHomunUnread(true);
+      }
       return;
     }
     if (event.type === "thread.upserted") {
