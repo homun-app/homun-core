@@ -166,6 +166,9 @@ pub struct WikiPage {
 pub struct MemoryContextItem {
     pub reference: MemoryRef,
     pub summary: String,
+    /// e.g. "fact" | "preference" | "decision" — lets callers tier the profile
+    /// (always-on identity/preferences vs episodic facts) without a second query.
+    pub memory_type: String,
     pub sensitivity: DataSensitivity,
     pub privacy_domain: PrivacyDomain,
     pub evidence: Vec<MemoryRef>,

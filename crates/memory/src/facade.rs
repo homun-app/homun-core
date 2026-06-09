@@ -860,6 +860,7 @@ impl MemoryFacade {
         Ok(MemoryContextItem {
             reference: memory.reference.clone(),
             summary: memory.text.clone(),
+            memory_type: memory.memory_type.clone(),
             sensitivity: memory.sensitivity,
             privacy_domain: memory.privacy_domain.clone(),
             evidence,
