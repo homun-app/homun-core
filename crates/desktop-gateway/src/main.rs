@@ -1118,7 +1118,7 @@ fn gather_profile_memory(state: &AppState) -> (Vec<String>, Vec<String>) {
     };
     let user = gateway_memory_user_id();
     let active = gateway_memory_workspace_id();
-    let read = |workspace: MemoryWorkspaceId| -> Vec<String> {
+    let read = |workspace: MemoryWorkspaceId, preferences_only: bool| -> Vec<String> {
         let request = MemoryAccessRequest {
             actor_id: "desktop-chat".to_string(),
             user_id: user.clone(),
@@ -1136,14 +1136,28 @@ fn gather_profile_memory(state: &AppState) -> (Vec<String>, Vec<String>) {
         };
         facade
             .context_pack(&request)
-            .map(|pack| pack.items.into_iter().map(|item| item.summary).collect())
+            .map(|pack| {
+                pack.items
+                    .into_iter()
+                    // `preferences_only` keeps just the always-relevant tier (how the
+                    // user likes to be treated), dropping episodic facts.
+                    .filter(|item| !preferences_only || item.memory_type == "preference")
+                    .map(|item| item.summary)
+                    .collect()
+            })
             .unwrap_or_default()
     };
-    let personal = read(MemoryWorkspaceId::new(PERSONAL_WORKSPACE));
-    let project = if active.as_str() == PERSONAL_WORKSPACE {
-        Vec::new()
+    let in_project = active.as_str() != PERSONAL_WORKSPACE;
+    // Relevance-gated personal memory: in a PROJECT, the personal scope contributes only
+    // the always-relevant tier (preferences) to the always-on profile — episodic personal
+    // facts are NOT dumped here, they reach the project on-demand via query-gated RAG
+    // (relevant_memory_for_prompt) or explicit recall. Outside a project, the full
+    // personal profile is the point, so inject it all.
+    let personal = read(MemoryWorkspaceId::new(PERSONAL_WORKSPACE), in_project);
+    let project = if in_project {
+        read(active, false)
     } else {
-        read(active)
+        Vec::new()
     };
     (personal, project)
 }
