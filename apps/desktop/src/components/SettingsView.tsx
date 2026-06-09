@@ -3138,6 +3138,32 @@ const AUDIT_DECISIONS: Record<string, { label: string; cls: string }> = {
   deny: { label: "Negato", cls: "red" },
 };
 
+/** Tech purpose/actor/reason strings → plain Italian for the access log. */
+const AUDIT_PURPOSES: Record<string, string> = {
+  chat_context: "Lettura per rispondere",
+  recall: "Richiamo dalla memoria",
+  explicit_save_to_memory: "Salvataggio in memoria",
+  record_decision: "Decisione registrata",
+  forget: "Rimozione dalla memoria",
+  auto_extract: "Apprendimento automatico",
+  episode: "Episodio di conversazione",
+};
+const AUDIT_ACTORS: Record<string, string> = {
+  "desktop-chat": "Assistente",
+  chat_rag: "Assistente",
+  recall: "Assistente",
+  recall_file: "Assistente",
+  forget: "Assistente",
+  "memory-extractor": "Apprendimento",
+};
+const AUDIT_REASONS: Record<string, string> = {
+  raw_payload_not_allowed: "dati grezzi non esposti",
+  sensitivity_above_max: "sensibilità troppo alta",
+  domain_not_allowed: "ambito non consentito",
+};
+const humanizeAudit = (map: Record<string, string>, key: string): string =>
+  map[key] ?? key.replace(/_/g, " ");
+
 /** SQLite `current_timestamp` is "YYYY-MM-DD HH:MM:SS" in UTC. */
 function formatAuditTime(raw: string): string {
   const iso = raw.includes("T") ? raw : `${raw.replace(" ", "T")}Z`;
@@ -3202,6 +3228,24 @@ function AuditPane() {
     { k: "Pagine wiki", v: memory?.total_wiki_pages },
   ];
 
+  // Collapse consecutive identical accesses (same actor/purpose/decision/reasons) — one
+  // chat turn can read memory several times; show it once with a count.
+  const auditGroups: Array<{ entry: CoreAuditEntry; count: number }> = [];
+  for (const entry of audit ?? []) {
+    const last = auditGroups[auditGroups.length - 1];
+    if (
+      last &&
+      last.entry.actor_id === entry.actor_id &&
+      last.entry.purpose === entry.purpose &&
+      last.entry.decision === entry.decision &&
+      last.entry.reasons.join("|") === entry.reasons.join("|")
+    ) {
+      last.count += 1;
+    } else {
+      auditGroups.push({ entry, count: 1 });
+    }
+  }
+
   return (
     <>
       <div className="set-section-label" style={{ marginTop: 0 }}>
@@ -3254,16 +3298,22 @@ function AuditPane() {
             </div>
           </div>
         ) : (
-          audit.map((entry) => {
+          auditGroups.map(({ entry, count }) => {
             const dec =
               AUDIT_DECISIONS[entry.decision] ?? { label: entry.decision, cls: "muted" };
             return (
               <div className="set-trow" key={entry.reference}>
                 <div>
-                  <div className="tt">{entry.purpose || "accesso memoria"}</div>
+                  <div className="tt">
+                    {humanizeAudit(AUDIT_PURPOSES, entry.purpose)}
+                    {count > 1 ? ` · ${count}×` : ""}
+                  </div>
                   <div className="td">
-                    {entry.actor_id || "assistente"} · {formatAuditTime(entry.created_at)}
-                    {entry.reasons.length > 0 ? ` · ${entry.reasons.join(", ")}` : ""}
+                    {humanizeAudit(AUDIT_ACTORS, entry.actor_id)} ·{" "}
+                    {formatAuditTime(entry.created_at)}
+                    {entry.reasons.length > 0
+                      ? ` · ${entry.reasons.map((r) => humanizeAudit(AUDIT_REASONS, r)).join(", ")}`
+                      : ""}
                   </div>
                 </div>
                 <span className={`set-badge ${dec.cls}`}>{dec.label}</span>
