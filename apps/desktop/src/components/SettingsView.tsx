@@ -2192,30 +2192,40 @@ function SkillsPane() {
   };
 
   const skills = resp?.skills ?? [];
+  // Group the methodology (CoderSteroids) skills under "HomunCoder" in the rail.
+  const homuncoderSkills = skills.filter((s) => s.source === "homuncoder");
+  const personalSkills = skills.filter((s) => s.source !== "homuncoder");
+  const renderRailItem = (s: (typeof skills)[number]) => (
+    <button
+      key={s.id}
+      type="button"
+      className={`mdl-rail-item ${selected === s.id ? "active" : ""}`}
+      onClick={() => setSelected(s.id)}
+    >
+      <span className="conn-avatar">
+        <Sparkles size={13} />
+      </span>
+      <span className="mdl-rail-name">{s.name}</span>
+      <span
+        className={`skl-state ${s.enabled ? "on" : "off"}`}
+        title={s.enabled ? "Attiva" : "Disattivata"}
+      />
+    </button>
+  );
   const onMarket = selected === MARKET;
 
   return (
     <div className="mdl-layout">
       <aside className="mdl-rail" aria-label="Skill">
         <div className="mdl-rail-group">Skill personali</div>
-        {skills.map((s) => (
-          <button
-            key={s.id}
-            type="button"
-            className={`mdl-rail-item ${selected === s.id ? "active" : ""}`}
-            onClick={() => setSelected(s.id)}
-          >
-            <span className="conn-avatar">
-              <Sparkles size={13} />
-            </span>
-            <span className="mdl-rail-name">{s.name}</span>
-            <span
-              className={`skl-state ${s.enabled ? "on" : "off"}`}
-              title={s.enabled ? "Attiva" : "Disattivata"}
-            />
-          </button>
-        ))}
+        {personalSkills.map(renderRailItem)}
         {skills.length === 0 && <p className="mdl-rail-empty">Nessuna skill</p>}
+        {homuncoderSkills.length > 0 && (
+          <>
+            <div className="mdl-rail-group">HomunCoder · metodologia</div>
+            {homuncoderSkills.map(renderRailItem)}
+          </>
+        )}
         <button
           type="button"
           className={`mdl-rail-item add ${onMarket ? "active" : ""}`}
