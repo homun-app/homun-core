@@ -6145,6 +6145,7 @@ body.resizing-drawer {
 
 .settings-view {
   max-width: 1000px;
+  margin: 0 auto;
 }
 
 /* Master-detail panes (Models) need more room than the 700px form panes. */
@@ -7045,10 +7046,10 @@ body.resizing-drawer {
 /* Content pane */
 .set-pane {
   max-width: 820px;
-  /* No horizontal padding here: the workspace already provides the side gap. Centering
-     + 700px cap + big inner padding were what pushed the content into a narrow column. */
+  /* No horizontal padding here: the workspace provides the side gap. Centered so the
+     left and right margins are equal (the narrow-column look was the old 700px cap). */
   padding: var(--s2) 0;
-  margin: 0;
+  margin: 0 auto;
 }
 .set-title {
   font-size: 18px;
