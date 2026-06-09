@@ -38,7 +38,31 @@ pub struct StoredContact {
     pub response_mode: String,
     pub tone_of_voice: String,
     pub persona_instructions: String,
+    /// Default named profile (P3); per-channel overrides may replace it.
+    pub profile_id: Option<i64>,
+    /// ISO date (YYYY-MM-DD), year optional ("--MM-DD" not supported: keep simple).
+    pub birthday: Option<String>,
     pub identities: Vec<StoredContactIdentity>,
+}
+
+/// A reusable named persona ("Personale", "Lavoro") assignable to contacts.
+#[derive(Debug, Clone)]
+pub struct StoredProfile {
+    pub id: i64,
+    pub name: String,
+    pub tone_of_voice: String,
+    pub instructions: String,
+}
+
+/// One edge of the contact social graph, viewed from a specific contact.
+#[derive(Debug, Clone)]
+pub struct StoredRelationship {
+    pub id: i64,
+    pub other_contact_id: i64,
+    pub other_name: String,
+    pub relationship_type: String,
+    /// true: "<contact> ha <other> come <type>" (edge starts at the contact).
+    pub outgoing: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -586,12 +610,15 @@ impl ChatStore {
             String,
             String,
             String,
+            Option<i64>,
+            Option<String>,
         );
         let row: Option<ContactRow> = self
             .conn
             .query_row(
                 "select name, nickname, notes, contact_type, is_self, preferred_channel, avatar,
-                        entity_ref, response_mode, tone_of_voice, persona_instructions
+                        entity_ref, response_mode, tone_of_voice, persona_instructions,
+                        profile_id, birthday
                  from contacts where id = ?1",
                 params![id],
                 |row| {
@@ -607,6 +634,8 @@ impl ChatStore {
                         row.get(8)?,
                         row.get(9)?,
                         row.get(10)?,
+                        row.get(11)?,
+                        row.get(12)?,
                     ))
                 },
             )
@@ -623,6 +652,8 @@ impl ChatStore {
             response_mode,
             tone_of_voice,
             persona_instructions,
+            profile_id,
+            birthday,
         )) = row
         else {
             return Ok(None);
@@ -640,6 +671,8 @@ impl ChatStore {
             response_mode,
             tone_of_voice,
             persona_instructions,
+            profile_id,
+            birthday,
             identities: self.identities_for(id)?,
         }))
     }
@@ -843,6 +876,219 @@ impl ChatStore {
         Ok(())
     }
 
+    // ---- Named profiles (P3) ------------------------------------------------
+
+    pub fn list_profiles(&self) -> rusqlite::Result<Vec<StoredProfile>> {
+        let mut stmt = self.conn.prepare(
+            "select id, name, tone_of_voice, instructions from profiles order by lower(name)",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(StoredProfile {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                tone_of_voice: row.get(2)?,
+                instructions: row.get(3)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn profile_by_id(&self, id: i64) -> rusqlite::Result<Option<StoredProfile>> {
+        self.conn
+            .query_row(
+                "select id, name, tone_of_voice, instructions from profiles where id = ?1",
+                params![id],
+                |row| {
+                    Ok(StoredProfile {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        tone_of_voice: row.get(2)?,
+                        instructions: row.get(3)?,
+                    })
+                },
+            )
+            .optional()
+    }
+
+    pub fn create_profile(
+        &self,
+        name: &str,
+        tone_of_voice: &str,
+        instructions: &str,
+    ) -> rusqlite::Result<i64> {
+        let now = Self::now_secs();
+        self.conn.execute(
+            "insert into profiles(name, tone_of_voice, instructions, created_at, updated_at)
+             values(?1, ?2, ?3, ?4, ?4)",
+            params![name, tone_of_voice, instructions, now],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn update_profile(
+        &self,
+        id: i64,
+        name: Option<&str>,
+        tone_of_voice: Option<&str>,
+        instructions: Option<&str>,
+    ) -> rusqlite::Result<()> {
+        let now = Self::now_secs();
+        if let Some(v) = name {
+            self.conn
+                .execute("update profiles set name = ?1, updated_at = ?2 where id = ?3", params![v, now, id])?;
+        }
+        if let Some(v) = tone_of_voice {
+            self.conn.execute(
+                "update profiles set tone_of_voice = ?1, updated_at = ?2 where id = ?3",
+                params![v, now, id],
+            )?;
+        }
+        if let Some(v) = instructions {
+            self.conn.execute(
+                "update profiles set instructions = ?1, updated_at = ?2 where id = ?3",
+                params![v, now, id],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Delete a profile and detach it everywhere (no FK on the ALTERed column).
+    pub fn delete_profile(&self, id: i64) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "update contacts set profile_id = null where profile_id = ?1",
+            params![id],
+        )?;
+        self.conn.execute(
+            "delete from contact_channel_profiles where profile_id = ?1",
+            params![id],
+        )?;
+        self.conn.execute("delete from profiles where id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn set_contact_profile(&self, contact_id: i64, profile_id: Option<i64>) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "update contacts set profile_id = ?1, updated_at = ?2 where id = ?3",
+            params![profile_id, Self::now_secs(), contact_id],
+        )?;
+        Ok(())
+    }
+
+    /// None removes the override for that channel.
+    pub fn set_channel_profile(
+        &self,
+        contact_id: i64,
+        channel: &str,
+        profile_id: Option<i64>,
+    ) -> rusqlite::Result<()> {
+        match profile_id {
+            Some(pid) => {
+                self.conn.execute(
+                    "insert into contact_channel_profiles(contact_id, channel, profile_id)
+                     values(?1, ?2, ?3)
+                     on conflict(contact_id, channel) do update set profile_id = excluded.profile_id",
+                    params![contact_id, channel, pid],
+                )?;
+            }
+            None => {
+                self.conn.execute(
+                    "delete from contact_channel_profiles where contact_id = ?1 and channel = ?2",
+                    params![contact_id, channel],
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn channel_profile_overrides(&self, contact_id: i64) -> rusqlite::Result<Vec<(String, i64)>> {
+        let mut stmt = self.conn.prepare(
+            "select channel, profile_id from contact_channel_profiles where contact_id = ?1",
+        )?;
+        let rows = stmt.query_map(params![contact_id], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect()
+    }
+
+    /// Reply-time persona resolution: (contact, channel) override → the contact's
+    /// default profile → None (caller falls back to the inline fields).
+    pub fn resolve_profile_for(&self, contact_id: i64, channel: &str) -> Option<StoredProfile> {
+        let by_channel: Option<i64> = self
+            .conn
+            .query_row(
+                "select profile_id from contact_channel_profiles
+                 where contact_id = ?1 and channel = ?2",
+                params![contact_id, channel],
+                |row| row.get(0),
+            )
+            .optional()
+            .ok()
+            .flatten();
+        let pid = by_channel.or_else(|| {
+            self.conn
+                .query_row(
+                    "select profile_id from contacts where id = ?1",
+                    params![contact_id],
+                    |row| row.get::<_, Option<i64>>(0),
+                )
+                .optional()
+                .ok()
+                .flatten()
+                .flatten()
+        })?;
+        self.profile_by_id(pid).ok().flatten()
+    }
+
+    // ---- Relationships (P3) -------------------------------------------------
+
+    pub fn add_relationship(
+        &self,
+        from_contact_id: i64,
+        to_contact_id: i64,
+        relationship_type: &str,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "insert or ignore into contact_relationships(from_contact_id, to_contact_id, relationship_type)
+             values(?1, ?2, ?3)",
+            params![from_contact_id, to_contact_id, relationship_type],
+        )?;
+        Ok(())
+    }
+
+    pub fn remove_relationship(&self, id: i64) -> rusqlite::Result<()> {
+        self.conn
+            .execute("delete from contact_relationships where id = ?1", params![id])?;
+        Ok(())
+    }
+
+    /// Both directions, with the other side's display name resolved.
+    pub fn relationships_for(&self, contact_id: i64) -> rusqlite::Result<Vec<StoredRelationship>> {
+        let mut stmt = self.conn.prepare(
+            "select r.id, c.id, c.name, r.relationship_type, (r.from_contact_id = ?1) as outgoing
+             from contact_relationships r
+             join contacts c on c.id = case when r.from_contact_id = ?1
+                                            then r.to_contact_id else r.from_contact_id end
+             where r.from_contact_id = ?1 or r.to_contact_id = ?1
+             order by c.name",
+        )?;
+        let rows = stmt.query_map(params![contact_id], |row| {
+            Ok(StoredRelationship {
+                id: row.get(0)?,
+                other_contact_id: row.get(1)?,
+                other_name: row.get(2)?,
+                relationship_type: row.get(3)?,
+                outgoing: row.get::<_, i64>(4)? != 0,
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn set_contact_birthday(&self, contact_id: i64, birthday: Option<&str>) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "update contacts set birthday = ?1, updated_at = ?2 where id = ?3",
+            params![birthday, Self::now_secs(), contact_id],
+        )?;
+        Ok(())
+    }
+
     /// Cached distilled-profile JSON (`{"facts":[...],"count":N}`) for a contact.
     pub fn contact_facts_json(&self, id: i64) -> rusqlite::Result<Option<String>> {
         self.conn
@@ -991,6 +1237,36 @@ impl ChatStore {
                 can_see_calendar integer not null default 0,
                 updated_at integer not null
             );
+
+            -- Named profiles (P3): reusable personas ('Personale', 'Lavoro', …) a
+            -- contact can adopt instead of inline tone/instructions. Resolution
+            -- cascade at reply time: per-(contact, channel) override → the
+            -- contact's default profile → the contact's inline fields.
+            create table if not exists profiles (
+                id integer primary key autoincrement,
+                name text not null,
+                tone_of_voice text not null default '',
+                instructions text not null default '',
+                created_at integer not null,
+                updated_at integer not null
+            );
+
+            -- 'Marco su Telegram aziendale → profilo Lavoro': per-channel override.
+            create table if not exists contact_channel_profiles (
+                contact_id integer not null references contacts(id) on delete cascade,
+                channel text not null,
+                profile_id integer not null,
+                primary key(contact_id, channel)
+            );
+
+            -- Social graph between curated contacts ('Laura è la moglie di Marco').
+            create table if not exists contact_relationships (
+                id integer primary key autoincrement,
+                from_contact_id integer not null references contacts(id) on delete cascade,
+                to_contact_id integer not null references contacts(id) on delete cascade,
+                relationship_type text not null,
+                unique(from_contact_id, to_contact_id, relationship_type)
+            );
             ",
         )?;
 
@@ -1035,6 +1311,15 @@ impl ChatStore {
                 "alter table contacts add column persona_instructions text not null default ''",
                 [],
             )?;
+        }
+        // Contacts P3: default named profile + birthday (rubrica data).
+        if !self.column_exists("contacts", "profile_id")? {
+            self.conn
+                .execute("alter table contacts add column profile_id integer", [])?;
+        }
+        if !self.column_exists("contacts", "birthday")? {
+            self.conn
+                .execute("alter table contacts add column birthday text", [])?;
         }
         Ok(())
     }

@@ -1564,10 +1564,33 @@ export const coreBridge = {
     tone_of_voice?: string;
     persona_instructions?: string;
     response_mode?: string;
+    birthday?: string;
   }) => electronUpdateContact(update),
   contactPerimeter: (reference: string) => electronContactPerimeter(reference),
   setContactPerimeter: (reference: string, perimeter: CoreContactPerimeter) =>
     electronSetContactPerimeter(reference, perimeter),
+  profiles: () => electronProfiles(),
+  createProfile: (input: { name: string; tone_of_voice?: string; instructions?: string }) =>
+    contactsPost<CoreProfile>("/api/profiles/create", input),
+  updateProfile: (input: { id: number; name?: string; tone_of_voice?: string; instructions?: string }) =>
+    contactsPost<CoreProfile>("/api/profiles/update", input),
+  deleteProfile: (id: number) => contactsPost<{ ok: boolean }>("/api/profiles/delete", { id }),
+  assignContactProfile: (reference: string, profileId: number | null, channel?: string) =>
+    contactsPost<CoreContact>("/api/memory/contacts/assign-profile", {
+      reference,
+      ...(profileId !== null ? { profile_id: profileId } : {}),
+      ...(channel ? { channel } : {}),
+    }),
+  contactRelationships: (reference: string) =>
+    contactsPost<CoreRelationship[]>("/api/memory/contacts/relationships", { reference }),
+  addRelationship: (reference: string, otherReference: string, relationshipType: string) =>
+    contactsPost<{ ok: boolean }>("/api/memory/contacts/relationships/add", {
+      reference,
+      other_reference: otherReference,
+      relationship_type: relationshipType,
+    }),
+  removeRelationship: (id: number) =>
+    contactsPost<{ ok: boolean }>("/api/memory/contacts/relationships/remove", { id }),
   mergeContacts: (from: string, into: string) => electronMergeContacts(from, into),
   createContact: (input: {
     name: string;
@@ -2107,6 +2130,26 @@ export type CoreContact = {
   response_mode: string;
   tone_of_voice: string;
   persona_instructions: string;
+  /** Default named profile; channel_profiles override it per channel. */
+  profile_id: number | null;
+  birthday: string | null;
+  channel_profiles: { channel: string; profile_id: number }[];
+};
+
+/** A reusable named persona ("Personale", "Lavoro") assignable to contacts. */
+export type CoreProfile = {
+  id: number;
+  name: string;
+  tone_of_voice: string;
+  instructions: string;
+};
+
+export type CoreRelationship = {
+  id: number;
+  other_reference: string;
+  other_name: string;
+  relationship_type: string;
+  outgoing: boolean;
 };
 
 /** Per-contact isolation perimeter (what a channel reply may see/use). */
@@ -2154,6 +2197,7 @@ async function electronUpdateContact(update: {
   tone_of_voice?: string;
   persona_instructions?: string;
   response_mode?: string;
+  birthday?: string;
 }): Promise<CoreContact> {
   const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/memory/contacts/update`, {
     method: "POST",
@@ -2196,6 +2240,27 @@ async function electronCreateContact(input: {
     throw new Error(detail || `contact create HTTP ${response.status}`);
   }
   return response.json() as Promise<CoreContact>;
+}
+
+async function contactsPost<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}${path}`, {
+    method: "POST",
+    headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(detail || `${path} HTTP ${response.status}`);
+  }
+  return response.json() as Promise<T>;
+}
+
+async function electronProfiles(): Promise<CoreProfile[]> {
+  try {
+    return await gatewayGetJson<CoreProfile[]>("/api/profiles");
+  } catch {
+    return [];
+  }
 }
 
 async function electronContactPerimeter(reference: string): Promise<CoreContactPerimeter> {
