@@ -1,6 +1,8 @@
 import {
   Boxes,
   Check,
+  ChevronDown,
+  ChevronRight,
   Code2,
   Copy,
   Cpu,
@@ -2191,6 +2193,8 @@ function SkillsPane() {
     }
   };
 
+  const [personalOpen, setPersonalOpen] = useState(true);
+  const [homuncoderOpen, setHomuncoderOpen] = useState(false);
   const skills = resp?.skills ?? [];
   // Group the methodology (CoderSteroids) skills under "HomunCoder" in the rail.
   const homuncoderSkills = skills.filter((s) => s.source === "homuncoder");
@@ -2217,13 +2221,29 @@ function SkillsPane() {
   return (
     <div className="mdl-layout">
       <aside className="mdl-rail" aria-label="Skill">
-        <div className="mdl-rail-group">Skill personali</div>
-        {personalSkills.map(renderRailItem)}
+        <button
+          type="button"
+          className="mdl-rail-group toggle"
+          onClick={() => setPersonalOpen((v) => !v)}
+        >
+          {personalOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          <span>Skill personali</span>
+          <span className="mdl-rail-group-count">{personalSkills.length}</span>
+        </button>
+        {personalOpen && personalSkills.map(renderRailItem)}
         {skills.length === 0 && <p className="mdl-rail-empty">Nessuna skill</p>}
         {homuncoderSkills.length > 0 && (
           <>
-            <div className="mdl-rail-group">HomunCoder · metodologia</div>
-            {homuncoderSkills.map(renderRailItem)}
+            <button
+              type="button"
+              className="mdl-rail-group toggle"
+              onClick={() => setHomuncoderOpen((v) => !v)}
+            >
+              {homuncoderOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+              <span>HomunCoder · metodologia</span>
+              <span className="mdl-rail-group-count">{homuncoderSkills.length}</span>
+            </button>
+            {homuncoderOpen && homuncoderSkills.map(renderRailItem)}
           </>
         )}
         <button

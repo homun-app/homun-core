@@ -6489,6 +6489,27 @@ body.resizing-drawer {
   padding: var(--s3) var(--s2) 4px;
 }
 .mdl-rail-group:first-child { padding-top: 4px; }
+.mdl-rail-group.toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.mdl-rail-group.toggle:hover {
+  color: var(--text);
+}
+.mdl-rail-group-count {
+  margin-left: auto;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 10px;
+  background: var(--surface-hover, rgba(148, 163, 184, 0.2));
+  border-radius: 999px;
+  padding: 0 6px;
+}
 .mdl-rail-item {
   display: flex;
   align-items: center;
