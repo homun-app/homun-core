@@ -34,6 +34,10 @@ pub struct StoredContact {
     pub preferred_channel: Option<String>,
     pub avatar: Option<String>,
     pub entity_ref: Option<String>,
+    /// '' = inherit the channel/global default; else automatic|draft|silent.
+    pub response_mode: String,
+    pub tone_of_voice: String,
+    pub persona_instructions: String,
     pub identities: Vec<StoredContactIdentity>,
 }
 
@@ -42,6 +46,40 @@ pub struct StoredContactIdentity {
     pub channel: String,
     pub identifier: String,
     pub label: Option<String>,
+}
+
+/// Per-contact isolation perimeter. `Default` = the safe deny-by-default profile a
+/// contact gets when it has no explicit `contact_perimeters` row.
+#[derive(Debug, Clone)]
+pub struct StoredPerimeter {
+    pub memory_scope: String,
+    pub knowledge_folders: Vec<String>,
+    pub tools_allowed: Vec<String>,
+    pub tools_denied: Vec<String>,
+    pub can_see_contacts: bool,
+    pub can_see_calendar: bool,
+}
+
+impl Default for StoredPerimeter {
+    fn default() -> Self {
+        Self {
+            memory_scope: "contact_only".to_string(),
+            knowledge_folders: Vec::new(),
+            tools_allowed: Vec::new(),
+            tools_denied: Vec::new(),
+            can_see_contacts: false,
+            can_see_calendar: false,
+        }
+    }
+}
+
+fn json_string_list(raw: &str) -> Vec<String> {
+    serde_json::from_str::<Vec<String>>(raw)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 impl ChatStore {
@@ -536,28 +574,56 @@ impl ChatStore {
     }
 
     pub fn contact_by_id(&self, id: i64) -> rusqlite::Result<Option<StoredContact>> {
-        let row = self
+        type ContactRow = (
+            String,
+            Option<String>,
+            String,
+            String,
+            i64,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            String,
+            String,
+            String,
+        );
+        let row: Option<ContactRow> = self
             .conn
             .query_row(
-                "select name, nickname, notes, contact_type, is_self, preferred_channel, avatar, entity_ref
+                "select name, nickname, notes, contact_type, is_self, preferred_channel, avatar,
+                        entity_ref, response_mode, tone_of_voice, persona_instructions
                  from contacts where id = ?1",
                 params![id],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, Option<String>>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, i64>(4)?,
-                        row.get::<_, Option<String>>(5)?,
-                        row.get::<_, Option<String>>(6)?,
-                        row.get::<_, Option<String>>(7)?,
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                        row.get(8)?,
+                        row.get(9)?,
+                        row.get(10)?,
                     ))
                 },
             )
             .optional()?;
-        let Some((name, nickname, notes, contact_type, is_self, preferred_channel, avatar, entity_ref)) =
-            row
+        let Some((
+            name,
+            nickname,
+            notes,
+            contact_type,
+            is_self,
+            preferred_channel,
+            avatar,
+            entity_ref,
+            response_mode,
+            tone_of_voice,
+            persona_instructions,
+        )) = row
         else {
             return Ok(None);
         };
@@ -571,6 +637,9 @@ impl ChatStore {
             preferred_channel,
             avatar,
             entity_ref,
+            response_mode,
+            tone_of_voice,
+            persona_instructions,
             identities: self.identities_for(id)?,
         }))
     }
@@ -656,6 +725,121 @@ impl ChatStore {
             .execute("delete from contact_identities where contact_id = ?1", params![id])?;
         self.conn
             .execute("delete from contacts where id = ?1", params![id])?;
+        Ok(())
+    }
+
+    /// Update the persona/tone/response-mode fields (None = leave unchanged).
+    pub fn update_contact_persona(
+        &self,
+        id: i64,
+        tone_of_voice: Option<&str>,
+        persona_instructions: Option<&str>,
+        response_mode: Option<&str>,
+    ) -> rusqlite::Result<()> {
+        let now = Self::now_secs();
+        if let Some(v) = tone_of_voice {
+            self.conn.execute(
+                "update contacts set tone_of_voice = ?1, updated_at = ?2 where id = ?3",
+                params![v, now, id],
+            )?;
+        }
+        if let Some(v) = persona_instructions {
+            self.conn.execute(
+                "update contacts set persona_instructions = ?1, updated_at = ?2 where id = ?3",
+                params![v, now, id],
+            )?;
+        }
+        if let Some(v) = response_mode {
+            self.conn.execute(
+                "update contacts set response_mode = ?1, updated_at = ?2 where id = ?3",
+                params![v, now, id],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Per-contact response mode for an inbound (channel, sender). None = unknown
+    /// sender or inherit ('') → the caller falls back to the global policy.
+    pub fn contact_response_mode(
+        &self,
+        channel: &str,
+        identifier: &str,
+    ) -> rusqlite::Result<Option<String>> {
+        let mode: Option<String> = self
+            .conn
+            .query_row(
+                "select c.response_mode from contacts c
+                 join contact_identities i on i.contact_id = c.id
+                 where i.channel = ?1 and i.identifier = ?2",
+                params![channel, identifier],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(mode.filter(|m| !m.trim().is_empty()))
+    }
+
+    /// The contact's isolation perimeter; a missing row = the safe default.
+    pub fn perimeter_or_default(&self, contact_id: i64) -> StoredPerimeter {
+        let row: Option<(String, String, String, String, i64, i64)> = self
+            .conn
+            .query_row(
+                "select memory_scope, knowledge_folders, tools_allowed, tools_denied,
+                        can_see_contacts, can_see_calendar
+                 from contact_perimeters where contact_id = ?1",
+                params![contact_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .optional()
+            .ok()
+            .flatten();
+        let Some((memory_scope, folders, allowed, denied, see_contacts, see_calendar)) = row else {
+            return StoredPerimeter::default();
+        };
+        StoredPerimeter {
+            memory_scope,
+            knowledge_folders: json_string_list(&folders),
+            tools_allowed: json_string_list(&allowed),
+            tools_denied: json_string_list(&denied),
+            can_see_contacts: see_contacts != 0,
+            can_see_calendar: see_calendar != 0,
+        }
+    }
+
+    pub fn set_perimeter(&self, contact_id: i64, p: &StoredPerimeter) -> rusqlite::Result<()> {
+        let to_json = |list: &Vec<String>| serde_json::to_string(list).unwrap_or_else(|_| "[]".into());
+        self.conn.execute(
+            "insert into contact_perimeters(
+                contact_id, memory_scope, knowledge_folders, tools_allowed, tools_denied,
+                can_see_contacts, can_see_calendar, updated_at
+             ) values(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             on conflict(contact_id) do update set
+                memory_scope = excluded.memory_scope,
+                knowledge_folders = excluded.knowledge_folders,
+                tools_allowed = excluded.tools_allowed,
+                tools_denied = excluded.tools_denied,
+                can_see_contacts = excluded.can_see_contacts,
+                can_see_calendar = excluded.can_see_calendar,
+                updated_at = excluded.updated_at",
+            params![
+                contact_id,
+                p.memory_scope,
+                to_json(&p.knowledge_folders),
+                to_json(&p.tools_allowed),
+                to_json(&p.tools_denied),
+                p.can_see_contacts as i64,
+                p.can_see_calendar as i64,
+                Self::now_secs(),
+            ],
+        )?;
         Ok(())
     }
 
@@ -793,6 +977,20 @@ impl ChatStore {
                 on contact_identities(channel, identifier);
             create index if not exists idx_contact_identities_contact
                 on contact_identities(contact_id);
+
+            -- Per-contact isolation perimeter (deny-by-default). A contact WITHOUT a
+            -- row uses safe defaults: contact_only memory, no other contacts/calendar
+            -- mentioned, no tool restrictions beyond the channel read-only policy.
+            create table if not exists contact_perimeters (
+                contact_id integer primary key references contacts(id) on delete cascade,
+                memory_scope text not null default 'contact_only',
+                knowledge_folders text not null default '[]',
+                tools_allowed text not null default '[]',
+                tools_denied text not null default '[]',
+                can_see_contacts integer not null default 0,
+                can_see_calendar integer not null default 0,
+                updated_at integer not null
+            );
             ",
         )?;
 
@@ -816,6 +1014,27 @@ impl ChatStore {
         if !self.column_exists("chat_threads", "source")? {
             self.conn
                 .execute("alter table chat_threads add column source text", [])?;
+        }
+        // Contacts P2: per-contact persona/tone + response mode. response_mode '' =
+        // inherit the channel/global default (backward compatible: existing contacts
+        // keep today's allowlist behavior until the user customizes them).
+        if !self.column_exists("contacts", "response_mode")? {
+            self.conn.execute(
+                "alter table contacts add column response_mode text not null default ''",
+                [],
+            )?;
+        }
+        if !self.column_exists("contacts", "tone_of_voice")? {
+            self.conn.execute(
+                "alter table contacts add column tone_of_voice text not null default ''",
+                [],
+            )?;
+        }
+        if !self.column_exists("contacts", "persona_instructions")? {
+            self.conn.execute(
+                "alter table contacts add column persona_instructions text not null default ''",
+                [],
+            )?;
         }
         Ok(())
     }

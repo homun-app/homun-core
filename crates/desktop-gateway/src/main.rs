@@ -529,6 +529,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/memory/contacts/identity/add", post(contact_identity_add))
         .route("/api/memory/contacts/identity/remove", post(contact_identity_remove))
         .route("/api/memory/contacts/delete", post(contact_delete))
+        .route("/api/memory/contacts/perimeter", post(contact_perimeter_get))
+        .route("/api/memory/contacts/perimeter/update", post(contact_perimeter_set))
         .route(
             "/api/channels/settings",
             get(get_channel_settings).post(set_channel_settings),
@@ -5608,6 +5610,10 @@ async fn stream_chat_via_openai(
     } else {
         set_memory_workspace("");
     }
+    // Channel turns are bound to a curated contact: persona/tone + isolation
+    // perimeter (what memory/tools/info this reply may use). Lock taken and
+    // released inside; never held across the generation.
+    let contact_ctx = contact_turn_context(state, request.thread_id.as_deref());
     let prompt = build_chat_runtime_prompt(&BuildPromptRequest {
         prompt: request.prompt.clone(),
         context: request.context.clone(),
@@ -5829,6 +5835,40 @@ All'inizio di una conversazione nuova, presentati brevemente e fai la prima doma
     } else {
         system
     };
+    // Channel-contact persona + privacy perimeter. Prepended (like the Homun block,
+    // which is mutually exclusive: homun is never a channel_ thread) so the contact
+    // rules dominate the generic orchestrator voice.
+    let system = if let Some(cx) = &contact_ctx {
+        let mut block = format!(
+            "RISPOSTA A UN CONTATTO VIA CANALE: stai rispondendo a {} su un canale di \
+messaggistica, per conto dell'utente. Stile chat: naturale e conciso.",
+            cx.name
+        );
+        if !cx.tone_of_voice.trim().is_empty() {
+            block.push_str(&format!(" TONO RICHIESTO: {}.", cx.tone_of_voice.trim()));
+        }
+        if !cx.persona_instructions.trim().is_empty() {
+            block.push_str(&format!(
+                "\nISTRUZIONI PERSONA (seguile sempre): {}",
+                cx.persona_instructions.trim()
+            ));
+        }
+        if !cx.perimeter.can_see_contacts {
+            block.push_str(
+                "\n[PRIVACY] NON menzionare MAI altri contatti, persone o relazioni \
+dell'utente: con questa persona conosci SOLO lei.",
+            );
+        }
+        if !cx.perimeter.can_see_calendar {
+            block.push_str(
+                "\n[PRIVACY] NON menzionare MAI impegni, appuntamenti o eventi di \
+calendario dell'utente.",
+            );
+        }
+        format!("{block}\n\n{system}")
+    } else {
+        system
+    };
     let system = if !has_skills {
         system
     } else {
@@ -5883,23 +5923,55 @@ AUTORIZZATE dall'utente con lo strumento `save_artifact`: {labels}. Quando l'ute
 salvare/esportare un file in una cartella, chiama save_artifact(file, destination)."
         )
     };
-    // Always-on memory profile (M1): inject what we durably know about the user
-    // (personal scope) and the active project, so the chat is continuous instead
-    // of starting cold every turn. Sensitive items are excluded here by design.
-    let (memory_personal, memory_project) = gather_profile_memory(state);
-    let system = match format_memory_block(
-        &memory_personal,
-        &memory_project,
-        CHAT_MEMORY_BUDGET_CHARS,
-    ) {
-        Some(block) => format!("{system}\n\n{block}"),
-        None => system,
-    };
-    // RAG: inject memory relevant to THIS prompt (decisions/facts), so the model
-    // answers from what was already decided instead of saying it has nothing.
-    let system = match relevant_memory_for_prompt(state, &request.prompt).await {
-        Some(block) => format!("{system}\n\n{block}"),
-        None => system,
+    // Memory scope. Perimeter "contact_only" (the default for channel contacts) is a
+    // HARD gate: the user's personal profile + RAG are NOT injected — the turn only
+    // sees the conversation history with THIS contact. "personal" opts a trusted
+    // contact back into today's behavior.
+    let contact_only = contact_ctx
+        .as_ref()
+        .map(|c| c.perimeter.memory_scope == "contact_only")
+        .unwrap_or(false);
+    let system = if contact_only {
+        let cx = contact_ctx.as_ref().expect("contact_only implies contact_ctx");
+        let episodes = {
+            let facade = lock_memory_facade(state)?;
+            let user = gateway_memory_user_id();
+            episode_texts_by_handles(&facade, &user, &cx.handles)
+        };
+        if episodes.is_empty() {
+            system
+        } else {
+            let mut block = String::from("STORIA CON QUESTO CONTATTO (unica memoria disponibile):");
+            let mut used = 0usize;
+            for text in episodes.iter().rev().take(40).rev() {
+                if used + text.len() > CHAT_MEMORY_BUDGET_CHARS {
+                    break;
+                }
+                used += text.len();
+                block.push_str("\n- ");
+                block.push_str(text);
+            }
+            format!("{system}\n\n{block}")
+        }
+    } else {
+        // Always-on memory profile (M1): inject what we durably know about the user
+        // (personal scope) and the active project, so the chat is continuous instead
+        // of starting cold every turn. Sensitive items are excluded here by design.
+        let (memory_personal, memory_project) = gather_profile_memory(state);
+        let system = match format_memory_block(
+            &memory_personal,
+            &memory_project,
+            CHAT_MEMORY_BUDGET_CHARS,
+        ) {
+            Some(block) => format!("{system}\n\n{block}"),
+            None => system,
+        };
+        // RAG: inject memory relevant to THIS prompt (decisions/facts), so the model
+        // answers from what was already decided instead of saying it has nothing.
+        match relevant_memory_for_prompt(state, &request.prompt).await {
+            Some(block) => format!("{system}\n\n{block}"),
+            None => system,
+        }
     };
     let system = format!(
         "{system}\n\nMEMORIA: hai una memoria a lungo termine dell'utente. Se ti serve un dettaglio \
@@ -6209,6 +6281,28 @@ questo elenco, chiedi di allegarlo (non cercarlo nella sandbox o nelle cartelle)
         // "Chiedi" mode: pure conversation — no tools, no actions.
         if mode == "ask" {
             tool_schemas.clear();
+        }
+        // Contact perimeter tool filter (channel turns): denied wins, then the
+        // allowlist (if non-empty) narrows further. Substring match on the function
+        // name, composed ON TOP of the channel read-only policy.
+        if let Some(cx) = &contact_ctx {
+            let denied = &cx.perimeter.tools_denied;
+            let allowed = &cx.perimeter.tools_allowed;
+            if !denied.is_empty() || !allowed.is_empty() {
+                tool_schemas.retain(|schema| {
+                    let name = schema
+                        .pointer("/function/name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    if denied.iter().any(|d| name.contains(d.as_str())) {
+                        return false;
+                    }
+                    if !allowed.is_empty() && !allowed.iter().any(|a| name.contains(a.as_str())) {
+                        return false;
+                    }
+                    true
+                });
+            }
         }
         let mut loaded_tools: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         // Turn-local browser state for the granular tools. The sidecar session is
@@ -9682,7 +9776,27 @@ async fn handle_channel_inbound(
     port: u16,
     message: ChannelInbound,
 ) -> Json<serde_json::Value> {
-    let action = inbound_action(&load_channel_settings(), &message.sender);
+    // Global policy first (the kill-switch always wins via Ignore)…
+    let global_action = inbound_action(&load_channel_settings(), &message.sender);
+    // …then the curated contact's response_mode refines it: automatic → reply now,
+    // silent → drop, draft/assisted/on_demand → record without replying. '' or an
+    // unknown sender = inherit today's global behavior (backward compatible).
+    let action = if matches!(global_action, InboundAction::Ignore) {
+        InboundAction::Ignore
+    } else {
+        let contact_mode = lock_store(state).ok().and_then(|store| {
+            store
+                .contact_response_mode(channel, &message.sender)
+                .ok()
+                .flatten()
+        });
+        match contact_mode.as_deref() {
+            Some("automatic") => InboundAction::AutoReply,
+            Some("silent") => InboundAction::Ignore,
+            Some(_) => InboundAction::Draft,
+            None => global_action,
+        }
+    };
     // Privacy-safe trace: identifier + decision only, never the message content.
     eprintln!(
         "channel/{channel}: inbound from={} chat={} pn={} action={action:?}",
@@ -9940,6 +10054,48 @@ fn contact_handle(channel: &str, sender: &str) -> String {
 /// contact for this channel handle and stores the message as an episodic memory.
 /// Resolution is alias-based: once two handles are merged onto one contact, future
 /// messages from either channel attach to the same person.
+/// "channel_{source}_{sender}" → (source, sender). Channel thread ids are minted by
+/// find_or_create_channel_thread; sources ("whatsapp"/"telegram") never contain '_'.
+fn parse_channel_thread_id(thread_id: &str) -> Option<(String, String)> {
+    let rest = thread_id.strip_prefix("channel_")?;
+    let (channel, sender) = rest.split_once('_')?;
+    if channel.is_empty() || sender.is_empty() {
+        return None;
+    }
+    Some((channel.to_string(), sender.to_string()))
+}
+
+/// Everything a channel turn needs to answer AS the right persona INSIDE the right
+/// perimeter: who we're talking to, how to speak, and what we're allowed to use.
+struct ContactTurnContext {
+    name: String,
+    tone_of_voice: String,
+    persona_instructions: String,
+    handles: Vec<String>,
+    perimeter: chat_store::StoredPerimeter,
+}
+
+/// Resolve the curated contact bound to a channel thread. None for in-app threads,
+/// unknown senders, and the user's own card (`is_self` ⇒ owner bypass: no limits).
+fn contact_turn_context(state: &AppState, thread_id: Option<&str>) -> Option<ContactTurnContext> {
+    let (channel, sender) = thread_id.and_then(parse_channel_thread_id)?;
+    let store = lock_store(state).ok()?;
+    let id = store.contact_id_by_identity(&channel, &sender).ok().flatten()?;
+    let contact = store.contact_by_id(id).ok().flatten()?;
+    if contact.is_self {
+        return None;
+    }
+    let handles = store.contact_handles(id).unwrap_or_default();
+    let perimeter = store.perimeter_or_default(id);
+    Some(ContactTurnContext {
+        name: contact.name,
+        tone_of_voice: contact.tone_of_voice,
+        persona_instructions: contact.persona_instructions,
+        handles,
+        perimeter,
+    })
+}
+
 /// One-shot migration: seed the curated `contacts` table from existing `person`
 /// memory entities that have a channel handle (real channel contacts). Mention-only
 /// persons (no handle, e.g. "Jannik Sinner") are NOT imported — that's the bug fix.
@@ -17999,6 +18155,10 @@ struct ContactView {
     notes: String,
     soul_md: String,
     memory_count: usize,
+    /// '' = inherit channel/global default; automatic | draft | silent.
+    response_mode: String,
+    tone_of_voice: String,
+    persona_instructions: String,
 }
 
 /// "contact_{id}" → id. Keeps the frontend's opaque-`reference` API contract while
@@ -18104,8 +18264,11 @@ fn contact_view_from_stored(c: &chat_store::StoredContact, memory_count: usize) 
             })
             .collect(),
         notes: c.notes.clone(),
-        soul_md: String::new(), // persona/soul moves to the Phase-2 perimeter editor
+        soul_md: String::new(), // legacy field kept for the API shape; persona has its own fields
         memory_count,
+        response_mode: c.response_mode.clone(),
+        tone_of_voice: c.tone_of_voice.clone(),
+        persona_instructions: c.persona_instructions.clone(),
     }
 }
 
@@ -18195,6 +18358,12 @@ struct ContactUpdateRequest {
     notes: Option<String>,
     #[serde(default)]
     soul_md: Option<String>,
+    #[serde(default)]
+    tone_of_voice: Option<String>,
+    #[serde(default)]
+    persona_instructions: Option<String>,
+    #[serde(default)]
+    response_mode: Option<String>,
 }
 
 async fn contact_update(
@@ -18220,7 +18389,19 @@ async fn contact_update(
             code: "contact_update",
             message: error.to_string(),
         })?;
-    // soul_md is ignored in Phase 1 (persona moves to the Phase-2 perimeter editor).
+    store
+        .update_contact_persona(
+            id,
+            request.tone_of_voice.as_deref(),
+            request.persona_instructions.as_deref(),
+            request.response_mode.as_deref(),
+        )
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "contact_update",
+            message: error.to_string(),
+        })?;
+    // soul_md (legacy) is ignored — persona lives in tone/instructions now.
     let contact = store
         .contact_by_id(id)
         .ok()
@@ -18416,6 +18597,86 @@ async fn contact_delete(
         message: error.to_string(),
     })?;
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// Wire shape of a contact's isolation perimeter (GET returns defaults when no row).
+#[derive(Serialize, Deserialize)]
+struct PerimeterView {
+    memory_scope: String,
+    #[serde(default)]
+    knowledge_folders: Vec<String>,
+    #[serde(default)]
+    tools_allowed: Vec<String>,
+    #[serde(default)]
+    tools_denied: Vec<String>,
+    can_see_contacts: bool,
+    can_see_calendar: bool,
+}
+
+async fn contact_perimeter_get(
+    State(state): State<AppState>,
+    Json(request): Json<ContactRefRequest>,
+) -> Result<Json<PerimeterView>, GatewayError> {
+    let id = parse_contact_ref(&request.reference).ok_or_else(|| GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "contact_not_found",
+        message: "contatto non trovato".to_string(),
+    })?;
+    let store = lock_store(&state)?;
+    let p = store.perimeter_or_default(id);
+    Ok(Json(PerimeterView {
+        memory_scope: p.memory_scope,
+        knowledge_folders: p.knowledge_folders,
+        tools_allowed: p.tools_allowed,
+        tools_denied: p.tools_denied,
+        can_see_contacts: p.can_see_contacts,
+        can_see_calendar: p.can_see_calendar,
+    }))
+}
+
+#[derive(Deserialize)]
+struct PerimeterUpdateRequest {
+    reference: String,
+    #[serde(flatten)]
+    perimeter: PerimeterView,
+}
+
+async fn contact_perimeter_set(
+    State(state): State<AppState>,
+    Json(request): Json<PerimeterUpdateRequest>,
+) -> Result<Json<PerimeterView>, GatewayError> {
+    let id = parse_contact_ref(&request.reference).ok_or_else(|| GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "contact_not_found",
+        message: "contatto non trovato".to_string(),
+    })?;
+    let scope = match request.perimeter.memory_scope.as_str() {
+        "personal" => "personal",
+        _ => "contact_only",
+    };
+    let stored = chat_store::StoredPerimeter {
+        memory_scope: scope.to_string(),
+        knowledge_folders: request.perimeter.knowledge_folders.clone(),
+        tools_allowed: request.perimeter.tools_allowed.clone(),
+        tools_denied: request.perimeter.tools_denied.clone(),
+        can_see_contacts: request.perimeter.can_see_contacts,
+        can_see_calendar: request.perimeter.can_see_calendar,
+    };
+    let store = lock_store(&state)?;
+    store.set_perimeter(id, &stored).map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "contact_perimeter",
+        message: error.to_string(),
+    })?;
+    let p = store.perimeter_or_default(id);
+    Ok(Json(PerimeterView {
+        memory_scope: p.memory_scope,
+        knowledge_folders: p.knowledge_folders,
+        tools_allowed: p.tools_allowed,
+        tools_denied: p.tools_denied,
+        can_see_contacts: p.can_see_contacts,
+        can_see_calendar: p.can_see_calendar,
+    }))
 }
 
 /// A distilled fact about a contact, temporally grounded.
