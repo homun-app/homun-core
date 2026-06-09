@@ -1085,6 +1085,7 @@ function ProviderDetailView({
 function PrivacyPane() {
   return (
     <>
+      <div className="set-section-label">Privacy</div>
       <div className="set-rows">
         <ToggleRow
           title="Local-first per default"
