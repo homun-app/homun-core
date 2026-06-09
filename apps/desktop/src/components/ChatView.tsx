@@ -5704,12 +5704,6 @@ function Composer({
   const [dragOver, setDragOver] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const suggestions = [
-    "Rispondi in modo diretto",
-    "Mostra i passaggi essenziali",
-    "Trasforma in lista operativa",
-  ];
-  const showSuggestions = value.trim().length > 0 && !streaming;
 
   useEffect(() => {
     if (replyContext) {
@@ -6068,17 +6062,6 @@ function Composer({
     setDragOver(false);
   }
 
-  function applySuggestion(suggestion: string) {
-    setValue((current) => {
-      if (!current.trim()) return suggestion;
-      return `${current.trim()}\n${suggestion}`;
-    });
-    requestAnimationFrame(() => {
-      adjustComposerHeight();
-      textareaRef.current?.focus();
-    });
-  }
-
   return (
     <form
       className={`composer-surface${dragOver ? " drag-over" : ""}`}
@@ -6149,20 +6132,6 @@ function Composer({
                 <X size={13} />
               </button>
             </span>
-          ))}
-        </div>
-      )}
-      {showSuggestions && (
-        <div className="composer-suggestion-row" aria-label="Suggerimenti prompt">
-          {suggestions.map((suggestion) => (
-            <button
-              disabled={disabled}
-              key={suggestion}
-              type="button"
-              onClick={() => applySuggestion(suggestion)}
-            >
-              {suggestion}
-            </button>
           ))}
         </div>
       )}
