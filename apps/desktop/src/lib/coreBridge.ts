@@ -1584,6 +1584,7 @@ export const coreBridge = {
     visiblePrompt?: string,
     model?: string,
     images?: string[],
+    mode?: string,
   ) =>
     submitBrowserRuntimeChatPromptStream(
       requestId,
@@ -1596,6 +1597,7 @@ export const coreBridge = {
       model,
       images,
       attachments,
+      mode,
     ),
   improvePrompt: (prompt: string) => electronImprovePrompt(prompt),
   chatSuggestions: (prompt: string, answer: string) =>
@@ -2221,6 +2223,7 @@ async function submitBrowserRuntimeChatPromptStream(
   model?: string,
   images?: string[],
   attachments?: ChatAttachmentInput[],
+  mode?: string,
 ): Promise<CorePromptSubmissionResult> {
   const startedAt = performance.now();
   const maxTokens = browserChatMaxTokens(prompt);
@@ -2237,6 +2240,7 @@ async function submitBrowserRuntimeChatPromptStream(
     model,
     images,
     attachments,
+    mode,
   );
   const promptBuildSeconds = roundedSeconds(
     (performance.now() - promptBuildStartedAt) / 1000,
@@ -2457,6 +2461,7 @@ async function openChatStreamWithGateway(
   model?: string,
   images?: string[],
   attachments?: ChatAttachmentInput[],
+  mode?: string,
 ) {
   try {
     const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/chat/generate_stream`, {
@@ -2475,6 +2480,8 @@ async function openChatStreamWithGateway(
         request_timeout_seconds: 120,
         // Per-message model override (inline composer selector); omitted → default.
         ...(model ? { model } : {}),
+        // Interaction mode (agent/plan/ask/debug); omitted → agent.
+        ...(mode && mode !== "agent" ? { mode } : {}),
         // Vision: base64 data-URL images for multimodal models.
         ...(images && images.length > 0 ? { images } : {}),
         // Attachments: the gateway reads each by local_path (same host) and turns

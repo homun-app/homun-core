@@ -93,6 +93,11 @@ pub struct ChatGenerateStreamRequest {
     /// without side effects; None/other = full toolset (in-app chat). See M8.
     #[serde(default)]
     pub tool_policy: Option<String>,
+    /// Interaction mode chosen in the composer: "agent" (default, full tools),
+    /// "plan" (always propose a plan first), "ask" (no tools, pure conversation),
+    /// "debug" (debugging methodology, project chats). None = "agent".
+    #[serde(default)]
+    pub mode: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
