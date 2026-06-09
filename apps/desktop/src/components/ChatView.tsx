@@ -5516,6 +5516,14 @@ const EMPTY_HERO_CHIPS = [
   "Aiutami a scrivere ",
 ];
 
+// Homun is the control center (Apprendimento merged in): chips lean on what it knows + control.
+const HOMUN_HERO_CHIPS = [
+  "Cosa sai di me?",
+  "Cosa hai appreso ultimamente?",
+  "Ricorda che ",
+  "Cosa puoi fare per me?",
+];
+
 // Empty-chat hero (Manus-style): serif headline + quick-action chips that seed the composer.
 function ChatEmptyHero({ onPick, threadId }: { onPick: (text: string) => void; threadId: string }) {
   const isHomun = threadId === "homun";
@@ -5528,7 +5536,7 @@ function ChatEmptyHero({ onPick, threadId }: { onPick: (text: string) => void; t
           : "Scrivi qui sotto, oppure parti da uno spunto."}
       </p>
       <div className="chat-hero-chips">
-        {EMPTY_HERO_CHIPS.map((chip) => (
+        {(isHomun ? HOMUN_HERO_CHIPS : EMPTY_HERO_CHIPS).map((chip) => (
           <button
             key={chip}
             type="button"
