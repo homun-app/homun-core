@@ -48,6 +48,9 @@ export interface ChatMessage {
   text: string;
   timestamp: string;
   metadata?: string;
+  /** Model that actually produced THIS message (per-message override or the
+   *  default for that turn). Footer shows it instead of the global active model. */
+  model?: string;
   metrics?: ChatMessageMetrics;
   feedback?: "useful" | "not_useful";
   savedMemoryRef?: string;

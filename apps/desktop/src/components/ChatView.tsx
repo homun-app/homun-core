@@ -529,10 +529,19 @@ export function ChatView({
       setComputerSession(mapCoreComputerSession(result.computer_session));
       setComputerCardCollapsed(true);
       setTimelineCollapsed(!result.plan);
-      const finalAssistantMessage = withChatMetrics(
-        chatMessageFromAssistantResult(result, result.assistant_message.text || streamedText),
-        (performance.now() - streamStartedAt) / 1000,
-      );
+      // Model that produced THIS turn: the picked override's model (the composite is
+      // "<provider>::<model>"), else the default the gateway used (activeModelInfo). So
+      // the footer shows the real per-message model, not the global default for all.
+      const turnModel = model
+        ? (model.split("::").pop() ?? model)
+        : activeModelInfo?.model ?? undefined;
+      const finalAssistantMessage: ChatMessage = {
+        ...withChatMetrics(
+          chatMessageFromAssistantResult(result, result.assistant_message.text || streamedText),
+          (performance.now() - streamStartedAt) / 1000,
+        ),
+        model: turnModel,
+      };
       let finalMessages = [
         ...promptMessages,
         finalAssistantMessage,
@@ -1639,7 +1648,13 @@ export function ChatView({
                 <span>{formatMessageTimestamp(displayMessage.timestamp)}</span>
                 {displayMessage.role === "assistant" ? (
                   <>
-                    {activeModelInfo && <span>{shortModelName(activeModelInfo.model)}</span>}
+                    {(displayMessage.model ?? activeModelInfo?.model) && (
+                      <span>
+                        {shortModelName(
+                          (displayMessage.model ?? activeModelInfo?.model) as string,
+                        )}
+                      </span>
+                    )}
                     {displayMessage.metrics && displayMessage.metrics.elapsedSeconds > 0 && (
                       <span>
                         {formatChatDuration(displayMessage.metrics.elapsedSeconds)} ·{" "}
