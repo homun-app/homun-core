@@ -7058,6 +7058,9 @@ body.resizing-drawer {
   font-weight: 600;
   letter-spacing: -0.01em;
   margin-bottom: var(--s5);
+  /* Cursor: title/label indented ~12px so they nearly line up with the card CONTENT
+     (16px padding); the card border itself pokes out to the left. */
+  padding-left: var(--s3);
 }
 .set-section-label {
   font-size: 12px;
@@ -7066,6 +7069,7 @@ body.resizing-drawer {
   text-transform: none;
   color: var(--muted);
   margin: var(--s6) 0 var(--s2);
+  padding-left: var(--s3);
 }
 .set-section-label:first-of-type { margin-top: 0; }
 
@@ -7145,7 +7149,7 @@ body.resizing-drawer {
   align-items: center;
   justify-content: space-between;
   gap: var(--s4);
-  padding: var(--s4) var(--s5);
+  padding: var(--s4) var(--s4);
 }
 .set-row + .set-row { border-top: 1px solid var(--line); }
 .set-row .rk { font-size: 12px; color: var(--muted); }
@@ -7157,7 +7161,7 @@ body.resizing-drawer {
   align-items: center;
   justify-content: space-between;
   gap: var(--s4);
-  padding: var(--s4) var(--s5);
+  padding: var(--s4) var(--s4);
 }
 .set-trow + .set-trow { border-top: 1px solid var(--line); }
 .set-trow .tt { font-size: 13px; font-weight: 550; }
@@ -7226,21 +7230,21 @@ body.resizing-drawer {
 
 /* Danger zone */
 .set-danger {
-  margin-top: var(--s7);
+  margin-top: var(--s6);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--s4);
-  padding: var(--s4) var(--s5);
+  padding: var(--s4) var(--s4);
   border: 1px solid #f1c4c6;
-  border-radius: 14px;
+  border-radius: 10px;
   background: #fffafa;
 }
 .set-danger .dt { font-size: 13.5px; font-weight: 600; color: var(--text); }
 .set-danger .dd { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
 
 /* Empty / hint */
-.set-hint { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin-top: var(--s2); }
+.set-hint { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin-top: var(--s2); padding-left: var(--s3); }
 
 /* ── Models: master-detail layout ───────────────────────────────────────── */
 .mdl-layout {
