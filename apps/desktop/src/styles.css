@@ -3586,16 +3586,57 @@ body.resizing-drawer {
   gap: 6px;
   margin-bottom: 6px;
 }
-.memory-wiki-editor {
-  width: 100%;
-  box-sizing: border-box;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-  line-height: 1.5;
+/* Markdown editor (wiki edit): toolbar + Scrivi/Anteprima. */
+.md-editor {
   border: 1px solid var(--border, #e2e8f0);
   border-radius: 8px;
+  overflow: hidden;
+}
+.md-editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+  background: var(--surface-hover, #f8fafc);
+}
+.md-editor-toolbar button {
+  border: none;
+  background: transparent;
+  color: var(--muted, #475569);
+  border-radius: 6px;
+  padding: 4px 7px;
+  cursor: pointer;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+}
+.md-editor-toolbar button:hover {
+  background: var(--surface, #fff);
+}
+.md-editor-toolbar button.active {
+  background: #6366f1;
+  color: #fff;
+}
+.md-editor-spacer {
+  flex: 1;
+}
+.md-editor-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: none;
+  outline: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.55;
   padding: 10px;
   resize: vertical;
+  display: block;
+}
+.md-editor-preview {
+  padding: 10px 12px;
+  max-height: 420px;
+  overflow-y: auto;
 }
 .memory-graph-detail-actions {
   display: flex;

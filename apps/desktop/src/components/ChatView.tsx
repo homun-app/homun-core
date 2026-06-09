@@ -81,6 +81,7 @@ import {
   mapCoreComputerSession,
 } from "../lib/localComputerViewModel";
 import { fileLocalPathFromBridge } from "../lib/gatewayConfig";
+import { MarkdownEditor } from "./MarkdownEditor";
 import { RichMessage } from "./RichMessage";
 import { CodeView, DiffView, diffStats } from "./CodeView";
 import { ChatComputerPanel } from "./ChatComputerPanel";
@@ -3125,12 +3126,7 @@ export function MemoryGraphPanel({
             wiki.map((page) =>
               editingPath === page.path ? (
                 <article className="memory-wiki-page" key={page.path}>
-                  <textarea
-                    className="memory-wiki-editor"
-                    value={editBody}
-                    onChange={(e) => setEditBody(e.target.value)}
-                    rows={18}
-                  />
+                  <MarkdownEditor value={editBody} onChange={setEditBody} />
                   <div className="memory-wiki-actions">
                     <button
                       type="button"
