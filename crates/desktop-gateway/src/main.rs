@@ -7602,16 +7602,24 @@ card di conferma nell'interfaccia. NON dire che è stata eseguita."
                                 Ok(Ok(value)) => match composio_execution_error(&value) {
                                     // Composio returned 200 but the tool failed: tell the
                                     // model so it reports the failure, not a false success.
-                                    Some(error) => format!(
-                                        "Lo strumento {name} NON ha eseguito l'azione: {error}. \
+                                    Some(error) => {
+                                        let hint = connector_error_hint(&error)
+                                            .map(|h| format!(" {h}"))
+                                            .unwrap_or_default();
+                                        format!(
+                                            "Lo strumento {name} NON ha eseguito l'azione: {error}.{hint} \
 Dillo all'utente in modo chiaro; NON dichiarare che è fatto."
-                                    ),
+                                        )
+                                    }
                                     None => {
                                         value.to_string().chars().take(COMPOSIO_RESULT_CHARS).collect()
                                     }
                                 },
                                 Ok(Err(error)) => {
-                                    format!("Errore dello strumento {name}: {}", error.message)
+                                    let hint = connector_error_hint(&error.message)
+                                        .map(|h| format!(" {h}"))
+                                        .unwrap_or_default();
+                                    format!("Errore dello strumento {name}: {}.{hint}", error.message)
                                 }
                                 Err(error) => format!("Errore di esecuzione dello strumento: {error}"),
                             }
@@ -13142,6 +13150,37 @@ fn composio_execute_tool(
 /// signalling via `successful: false` (+ an `error` message). Returns the error on
 /// a failed execution so we never report a non-action as "done" (the real bug: a
 /// calendar add/delete that silently failed but showed "Azione eseguita").
+/// Maps a connector error message to an ACTIONABLE instruction for the model — so a
+/// broken integration becomes "reconnect"/"rate-limited", not a vague failure.
+fn connector_error_hint(error: &str) -> Option<&'static str> {
+    let e = error.to_lowercase();
+    if e.contains("401")
+        || e.contains("unauthorized")
+        || e.contains("expired")
+        || e.contains("invalid_grant")
+        || e.contains("not connected")
+        || e.contains("no connected account")
+    {
+        Some(
+            "La connessione è SCADUTA o non autorizzata: di' all'utente di RICOLLEGARE il servizio \
+ed emetti su una riga a sé il marker ‹‹COMPOSIO_RECONNECT››<slug>‹‹/COMPOSIO_RECONNECT›› con lo slug \
+del toolkit. NON ritentare la chiamata.",
+        )
+    } else if e.contains("429") || e.contains("rate limit") || e.contains("too many requests") {
+        Some(
+            "Limite di frequenza raggiunto (rate limit): dillo all'utente e proponi di riprovare tra \
+qualche minuto. NON ritentare subito.",
+        )
+    } else if e.contains("403") || e.contains("forbidden") || e.contains("permission") || e.contains("scope") {
+        Some(
+            "Permesso negato (scope insufficiente): l'account collegato non ha i permessi richiesti; \
+suggerisci di ricollegare il servizio concedendo gli scope necessari.",
+        )
+    } else {
+        None
+    }
+}
+
 fn composio_execution_error(output: &serde_json::Value) -> Option<String> {
     if output.get("successful").and_then(|v| v.as_bool()) == Some(false) {
         let message = output
