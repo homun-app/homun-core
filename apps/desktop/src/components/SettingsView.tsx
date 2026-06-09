@@ -40,7 +40,6 @@ import {
   type ArtifactsUsage,
   type ComposioToolkit,
   type ContainedComputerLive,
-  type CoreAuditEntry,
   type CoreCapabilitySnapshot,
   type CoreChannelSettings,
   type CoreMemoryDashboard,
@@ -84,7 +83,7 @@ const SECTION_TITLES: Record<SettingsSectionId, string> = {
   connections: "Connettori",
   skills: "Skill",
   computer: "Computer locale",
-  audit: "Dati & Audit",
+  audit: "Dati",
 };
 
 export function SettingsView({ section }: SettingsViewProps) {
@@ -3132,64 +3131,23 @@ function ArtifactsCard() {
 
 /* --------------------------------------------------------------------- audit */
 
-const AUDIT_DECISIONS: Record<string, { label: string; cls: string }> = {
-  allow: { label: "Consentito", cls: "green" },
-  redact: { label: "Oscurato", cls: "muted" },
-  deny: { label: "Negato", cls: "red" },
-};
-
-/** Tech purpose/actor/reason strings → plain Italian for the access log. */
-const AUDIT_PURPOSES: Record<string, string> = {
-  chat_context: "Lettura per rispondere",
-  recall: "Richiamo dalla memoria",
-  explicit_save_to_memory: "Salvataggio in memoria",
-  record_decision: "Decisione registrata",
-  forget: "Rimozione dalla memoria",
-  auto_extract: "Apprendimento automatico",
-  episode: "Episodio di conversazione",
-};
-const AUDIT_ACTORS: Record<string, string> = {
-  "desktop-chat": "Assistente",
-  chat_rag: "Assistente",
-  recall: "Assistente",
-  recall_file: "Assistente",
-  forget: "Assistente",
-  "memory-extractor": "Apprendimento",
-};
-const AUDIT_REASONS: Record<string, string> = {
-  raw_payload_not_allowed: "dati grezzi non esposti",
-  sensitivity_above_max: "sensibilità troppo alta",
-  domain_not_allowed: "ambito non consentito",
-};
-const humanizeAudit = (map: Record<string, string>, key: string): string =>
-  map[key] ?? key.replace(/_/g, " ");
-
-/** SQLite `current_timestamp` is "YYYY-MM-DD HH:MM:SS" in UTC. */
-function formatAuditTime(raw: string): string {
-  const iso = raw.includes("T") ? raw : `${raw.replace(" ", "T")}Z`;
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? raw : d.toLocaleString();
-}
-
 function AuditPane() {
   const [memory, setMemory] = useState<CoreMemoryDashboard | null>(null);
-  const [audit, setAudit] = useState<CoreAuditEntry[] | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const load = async () => {
-    try {
-      const [dash, entries] = await Promise.all([
-        coreBridge.memoryDashboard(),
-        coreBridge.memoryAudit(200),
-      ]);
-      setMemory(dash);
-      setAudit(entries);
-    } catch {
-      setAudit([]);
-    }
-  };
   useEffect(() => {
-    void load();
+    let cancelled = false;
+    void (async () => {
+      try {
+        const dash = await coreBridge.memoryDashboard();
+        if (!cancelled) setMemory(dash);
+      } catch {
+        /* leave null */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const exportData = async () => {
@@ -3210,41 +3168,12 @@ function AuditPane() {
     }
   };
 
-  const clearAudit = async () => {
-    if (!window.confirm("Svuotare il registro accessi? Non tocca memoria e task.")) return;
-    setBusy(true);
-    try {
-      await coreBridge.clearMemoryAudit();
-      await load();
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const stats: Array<{ k: string; v: number | undefined }> = [
     { k: "Memorie", v: memory?.total_memories },
     { k: "Entità", v: memory?.total_entities },
     { k: "Relazioni", v: memory?.total_relations },
     { k: "Pagine wiki", v: memory?.total_wiki_pages },
   ];
-
-  // Collapse consecutive identical accesses (same actor/purpose/decision/reasons) — one
-  // chat turn can read memory several times; show it once with a count.
-  const auditGroups: Array<{ entry: CoreAuditEntry; count: number }> = [];
-  for (const entry of audit ?? []) {
-    const last = auditGroups[auditGroups.length - 1];
-    if (
-      last &&
-      last.entry.actor_id === entry.actor_id &&
-      last.entry.purpose === entry.purpose &&
-      last.entry.decision === entry.decision &&
-      last.entry.reasons.join("|") === entry.reasons.join("|")
-    ) {
-      last.count += 1;
-    } else {
-      auditGroups.push({ entry, count: 1 });
-    }
-  }
 
   return (
     <>
@@ -3279,56 +3208,12 @@ function AuditPane() {
         )}
       </div>
 
-      <div className="set-section-label">Registro accessi</div>
-      <p className="set-hint" style={{ marginTop: 0 }}>
-        Ogni volta che l'assistente legge o usa la tua memoria, la decisione (consentito,
-        oscurato, negato) e il motivo vengono registrati qui — solo sul tuo dispositivo.
-      </p>
-      <div className="set-rows">
-        {audit === null ? (
-          <div className="set-trow">
-            <div>
-              <div className="td">Carico…</div>
-            </div>
-          </div>
-        ) : audit.length === 0 ? (
-          <div className="set-trow">
-            <div>
-              <div className="td">Nessun accesso registrato finora.</div>
-            </div>
-          </div>
-        ) : (
-          auditGroups.map(({ entry, count }) => {
-            const dec =
-              AUDIT_DECISIONS[entry.decision] ?? { label: entry.decision, cls: "muted" };
-            return (
-              <div className="set-trow" key={entry.reference}>
-                <div>
-                  <div className="tt">
-                    {humanizeAudit(AUDIT_PURPOSES, entry.purpose)}
-                    {count > 1 ? ` · ${count}×` : ""}
-                  </div>
-                  <div className="td">
-                    {humanizeAudit(AUDIT_ACTORS, entry.actor_id)} ·{" "}
-                    {formatAuditTime(entry.created_at)}
-                    {entry.reasons.length > 0
-                      ? ` · ${entry.reasons.map((r) => humanizeAudit(AUDIT_REASONS, r)).join(", ")}`
-                      : ""}
-                  </div>
-                </div>
-                <span className={`set-badge ${dec.cls}`}>{dec.label}</span>
-              </div>
-            );
-          })
-        )}
-      </div>
-
       <div className="set-section-label">Dati</div>
       <div className="set-rows">
         <div className="set-trow">
           <div>
-            <div className="tt">Esporta dati locali</div>
-            <div className="td">Scarica memoria e registro accessi in un file JSON.</div>
+            <div className="tt">Esporta la tua memoria</div>
+            <div className="td">Scarica memorie, entità e relazioni in un file JSON.</div>
           </div>
           <button
             className="set-btn"
@@ -3339,20 +3224,6 @@ function AuditPane() {
             Esporta
           </button>
         </div>
-      </div>
-      <div className="set-danger">
-        <div>
-          <div className="dt">Svuota registro accessi</div>
-          <div className="dd">Rimuove lo storico degli accessi. Non tocca memoria e task.</div>
-        </div>
-        <button
-          className="set-btn danger"
-          type="button"
-          onClick={() => void clearAudit()}
-          disabled={busy || (audit?.length ?? 0) === 0}
-        >
-          Svuota
-        </button>
       </div>
     </>
   );
