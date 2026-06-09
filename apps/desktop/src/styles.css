@@ -64,6 +64,17 @@
   box-sizing: border-box;
 }
 
+/* Focus policy: show a ring only for keyboard navigation (focus-visible), never on
+   mouse click — kills the stray accent outline that lingered after clicking. */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 html,
 body,
 #root {
