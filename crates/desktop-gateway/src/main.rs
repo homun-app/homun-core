@@ -1631,6 +1631,46 @@ del 10%»). Vale per QUALSIASI dominio — codice, documenti, dati — non solo 
 con rationale e affects (gli oggetti toccati: file, documento, contatto…)."
         )
     };
+    // Source-suppression: tell the extractor which decisions are ALREADY stored so it
+    // doesn't re-emit them every turn (complements dedup — fewer near-duplicates born).
+    // Lock is scoped to this block and dropped before the async model call below.
+    let known_decisions = {
+        let active = gateway_memory_workspace_id();
+        if active.as_str() == PERSONAL_WORKSPACE {
+            String::new()
+        } else if let Ok(facade) = lock_memory_facade(state) {
+            facade
+                .list_memories_for_ui(&gateway_memory_user_id(), &active)
+                .map(|memories| {
+                    memories
+                        .into_iter()
+                        .filter(|m| {
+                            m.memory_type == "decision"
+                                && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+                        })
+                        .take(40)
+                        .map(|m| {
+                            format!(
+                                "- {}",
+                                m.text.lines().next().unwrap_or(&m.text).chars().take(110).collect::<String>()
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+                .unwrap_or_default()
+        } else {
+            String::new()
+        }
+    };
+    let system = if known_decisions.trim().is_empty() {
+        system
+    } else {
+        format!(
+            "{system}\n\nDECISIONI GIÀ IN MEMORIA (NON ri-registrarle: estrai SOLO decisioni NUOVE o \
+aggiornamenti sostanziali rispetto a queste):\n{known_decisions}"
+        )
+    };
     let exchange = match speaker {
         Some(name) => {
             format!("MESSAGGIO da {name} (canale):\n{user_message}\n\nRISPOSTA: {assistant_message}")
