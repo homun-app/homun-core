@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Brain, Search, Trash2 } from "lucide-react";
+import { Brain, Check, Search, Trash2, X } from "lucide-react";
 
 import { coreBridge, type CoreMemoryItem } from "../lib/coreBridge";
 import { MemoryGraphPanel } from "./ChatView";
@@ -43,7 +43,7 @@ function dayLabel(raw: string): string {
     : "—";
 }
 
-export function MemoryView() {
+export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
   const [items, setItems] = useState<CoreMemoryItem[] | null>(null);
   const [workspaceFilter, setWorkspaceFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
@@ -96,10 +96,10 @@ export function MemoryView() {
     return [...base].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
   }, [filtered, selectedMonth]);
 
-  const del = (reference: string) => {
+  const decide = (reference: string, action: "confirm" | "reject" | "delete") => {
     setBusy(true);
     coreBridge
-      .decideMemory(reference, "delete")
+      .decideMemory(reference, action)
       .then(reload)
       .catch(() => {})
       .finally(() => setBusy(false));
@@ -109,9 +109,11 @@ export function MemoryView() {
   return (
     <div className="memview">
       <header className="memview-head">
-        <div className="memview-title">
-          <Brain size={20} /> Memoria
-        </div>
+        {!embedded && (
+          <div className="memview-title">
+            <Brain size={20} /> Memoria
+          </div>
+        )}
         <div className="memview-filters">
           <select
             value={workspaceFilter}
@@ -219,15 +221,39 @@ export function MemoryView() {
                   {dayLabel(it.created_at)}
                 </div>
               </div>
-              <button
-                type="button"
-                className="memview-del"
-                title="Elimina dalla memoria"
-                disabled={busy}
-                onClick={() => del(it.reference)}
-              >
-                <Trash2 size={14} />
-              </button>
+              <div className="memview-actions">
+                {it.status === "candidate" && (
+                  <>
+                    <button
+                      type="button"
+                      className="memview-confirm"
+                      title="Conferma (da usare)"
+                      disabled={busy}
+                      onClick={() => decide(it.reference, "confirm")}
+                    >
+                      <Check size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      className="memview-reject"
+                      title="Rifiuta"
+                      disabled={busy}
+                      onClick={() => decide(it.reference, "reject")}
+                    >
+                      <X size={14} />
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  className="memview-del"
+                  title="Elimina dalla memoria"
+                  disabled={busy}
+                  onClick={() => decide(it.reference, "delete")}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
             </div>
           ))}
           {visible.length === 0 && (

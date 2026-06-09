@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ContactsView } from "./ContactsView";
+import { MemoryView } from "./MemoryView";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize from "rehype-sanitize";
@@ -131,7 +132,7 @@ export function SettingsView({ section }: SettingsViewProps) {
         {section === "appearance" && <AppearancePane />}
         {section === "runtime" && <RuntimePane model={model} />}
         {section === "privacy" && <PrivacyPane />}
-        {section === "memory" && <MemoryPane />}
+        {section === "memory" && <MemoryView embedded />}
         {section === "contacts" && <ContactsView />}
         {section === "channels" && <ChannelsPane />}
         {section === "connections" && <ConnectorsPane />}
