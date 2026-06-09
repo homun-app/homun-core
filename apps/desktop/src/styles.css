@@ -312,13 +312,41 @@ body.resizing-drawer {
   min-height: 0;
   border-right: 1px solid var(--line);
   background: var(--panel);
-  /* Flex column: header / nav / switcher / new-chat are fixed; the chat list is the
-     only scroller; channels + footer stay pinned at the bottom. */
+  /* Flex column: nav / switcher / new-chat are fixed; the chat list is the only
+     scroller; channels + footer stay pinned at the bottom. Top padding clears the
+     macOS traffic lights; explicit margins (not gap) set the vertical rhythm. */
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px 12px 10px;
+  gap: 2px;
+  padding: 38px 12px 10px;
   overflow: hidden;
+  position: relative;
+}
+
+/* Collapse control: top-right, on the window-buttons line (out of the nav flow). */
+.drawer-collapse {
+  position: absolute;
+  top: 7px;
+  right: 10px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.drawer-collapse:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+.drawer-nav {
+  margin-bottom: 12px;
 }
 
 .settings-drawer {
@@ -3545,18 +3573,22 @@ body.resizing-drawer {
   align-items: center;
   justify-content: center;
   gap: var(--s2);
-  margin: var(--s1) 0 var(--s2);
-  padding: 9px 12px;
-  border: none;
+  margin: 16px 0 14px;
+  padding: 8px 12px;
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-control);
-  background: var(--brand);
-  color: #fff;
+  background: var(--surface);
+  color: var(--text);
   font-size: var(--text-base);
   font-weight: 600;
   cursor: pointer;
 }
 .drawer-new-chat:hover {
-  background: var(--brand-strong);
+  background: var(--surface-muted);
+}
+.drawer-new-chat:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 .drawer-new-chat:disabled {
   opacity: 0.6;

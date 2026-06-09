@@ -601,12 +601,14 @@ export function NavDrawer({
   const archivedThreads = chatThreads.filter((thread) => thread.status === "archived");
   return (
     <aside className="nav-drawer" aria-label="Menu principale">
-      <header className="drawer-header">
-        <span aria-hidden="true" />
-        <button className="icon-button" type="button" aria-label="Chiudi menu" onClick={onToggleDrawer}>
-          <PanelLeftClose size={18} />
-        </button>
-      </header>
+      <button
+        className="drawer-collapse"
+        type="button"
+        aria-label="Comprimi barra laterale"
+        onClick={onToggleDrawer}
+      >
+        <PanelLeftClose size={18} />
+      </button>
 
       <nav className="drawer-nav">
         {navItems.map((item) => {
