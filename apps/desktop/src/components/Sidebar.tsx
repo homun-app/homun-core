@@ -18,6 +18,7 @@ import {
   Plus,
   Search,
   Settings,
+  Sparkles,
   Trash2,
   User,
   X,
@@ -49,14 +50,18 @@ function toChatThread(thread: CoreChatThread): ChatThread {
 
 interface NavigationRailProps {
   activeView: ViewId;
+  activeThreadId: string;
   onNavigate: (view: ViewId) => void;
+  onOpenHomun: () => void;
   onSearch: () => void;
   onToggleDrawer: () => void;
 }
 
 export function NavigationRail({
   activeView,
+  activeThreadId,
   onNavigate,
+  onOpenHomun,
   onSearch,
   onToggleDrawer,
 }: NavigationRailProps) {
@@ -72,6 +77,15 @@ export function NavigationRail({
       </button>
 
       <nav className="rail-nav">
+        <button
+          className={`rail-button ${activeView === "chat" && activeThreadId === "homun" ? "active" : ""}`}
+          type="button"
+          aria-label="Homun"
+          title="Homun"
+          onClick={onOpenHomun}
+        >
+          <Sparkles size={18} />
+        </button>
         <button
           className="rail-button"
           type="button"
@@ -176,10 +190,11 @@ function ProjectsNav({
     (t) => t.status === "active",
   );
   const channelThreads = personalSource.filter(isChannel);
-  // Chats of the ACTIVE context: project chats when in a project, else personal (no channels).
+  // Chats of the ACTIVE context: project chats when in a project, else personal (no
+  // channels). The "homun" thread is excluded — it lives in the top-level nav.
   const contextChats = inProject
-    ? activeThreads.filter((t) => t.status === "active")
-    : personalSource.filter((t) => !isChannel(t));
+    ? activeThreads.filter((t) => t.status === "active" && t.threadId !== "homun")
+    : personalSource.filter((t) => !isChannel(t) && t.threadId !== "homun");
 
   // Context switches re-scope memory/capabilities/artifacts-folder → full reload.
   async function selectProject(id: string) {
@@ -541,6 +556,7 @@ interface NavDrawerProps {
   onCreateChatThread: () => void;
   onDeleteChatThread: (threadId: string) => void;
   onNavigate: (view: ViewId) => void;
+  onOpenHomun: () => void;
   onSearchChat: () => void;
   onSelectThread: (threadId: string) => void;
   onSetChatThreadPinned: (threadId: string, pinned: boolean) => void;
@@ -556,6 +572,7 @@ export function NavDrawer({
   onCreateChatThread,
   onDeleteChatThread,
   onNavigate,
+  onOpenHomun,
   onSearchChat,
   onSelectThread,
   onSetChatThreadPinned,
@@ -611,6 +628,16 @@ export function NavDrawer({
       </button>
 
       <nav className="drawer-nav">
+        <button
+          className={`drawer-nav-item ${
+            activeView === "chat" && activeThreadId === "homun" ? "active" : ""
+          }`}
+          type="button"
+          onClick={onOpenHomun}
+        >
+          <Sparkles size={17} />
+          <span>Homun</span>
+        </button>
         {navItems.map((item) => {
           const Icon = item.icon;
           const isSearch = item.id === "chat";

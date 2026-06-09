@@ -17,6 +17,7 @@ interface ShellProps {
   onCreateChatThread: () => void;
   onDeleteChatThread: (threadId: string) => void;
   onNavigate: (view: ViewId) => void;
+  onOpenHomun: () => void;
   onSelectThread: (threadId: string) => void;
   onSetChatThreadPinned: (threadId: string, pinned: boolean) => void;
   onSelectSettingsSection: (section: SettingsSectionId) => void;
@@ -37,6 +38,7 @@ export function Shell({
   onCreateChatThread,
   onDeleteChatThread,
   onNavigate,
+  onOpenHomun,
   onSelectThread,
   onSetChatThreadPinned,
   onSelectSettingsSection,
@@ -98,7 +100,9 @@ export function Shell({
       {!drawerOpen && (
         <NavigationRail
           activeView={activeView}
+          activeThreadId={activeThreadId}
           onNavigate={onNavigate}
+          onOpenHomun={onOpenHomun}
           onSearch={() => setSearchOpen(true)}
           onToggleDrawer={onToggleDrawer}
         />
@@ -112,6 +116,7 @@ export function Shell({
           onCreateChatThread={onCreateChatThread}
           onDeleteChatThread={onDeleteChatThread}
           onNavigate={onNavigate}
+          onOpenHomun={onOpenHomun}
           onSearchChat={() => setSearchOpen(true)}
           onSelectThread={onSelectThread}
           onSetChatThreadPinned={onSetChatThreadPinned}
