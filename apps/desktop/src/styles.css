@@ -3468,6 +3468,23 @@ body.resizing-drawer {
   color: var(--muted, #94a3b8);
   margin-top: 2px;
 }
+.memview-chip {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  vertical-align: middle;
+}
+.memview-chip.considered {
+  background: #fef3c7;
+  color: #92400e;
+}
+.memview-chip.intended {
+  background: #e0e7ff;
+  color: #3730a3;
+}
 .memview-del {
   border: none;
   background: transparent;
