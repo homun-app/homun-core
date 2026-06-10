@@ -299,6 +299,31 @@ impl SQLiteMemoryStore {
         Ok(memories)
     }
 
+    /// Texts of memories the user FORGOT (status deleted/rejected) in a scope.
+    /// Deliberately bypasses the tombstone filter `list_memories` applies — these
+    /// rows persist and are exactly the "suppression list" for a permanent forget
+    /// (so a still-live source can't resurrect a forgotten fact).
+    pub fn list_forgotten_texts(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Vec<String>, String> {
+        let mut statement = self
+            .conn
+            .prepare(
+                "select text from memories
+                 where user_id = ?1 and workspace_id = ?2
+                   and status in ('deleted', 'rejected')",
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map((user_id.as_str(), workspace_id.as_str()), |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(|error| error.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+    }
+
     pub fn search_memory_refs(
         &self,
         user_id: &UserId,

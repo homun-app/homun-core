@@ -785,6 +785,16 @@ impl MemoryFacade {
         self.store.list_memories(user_id, workspace_id)
     }
 
+    /// Texts of forgotten (deleted/rejected) memories in a scope — the suppression
+    /// list for a permanent forget. Bypasses the tombstone filter on purpose.
+    pub fn list_forgotten_texts(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Vec<String>, String> {
+        self.store.list_forgotten_texts(user_id, workspace_id)
+    }
+
     pub fn list_entities_for_ui(
         &self,
         user_id: &UserId,
