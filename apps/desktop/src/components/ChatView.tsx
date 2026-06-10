@@ -75,6 +75,7 @@ import {
   type FsEntry,
   type FsFilePayload,
   type McpRegistryServer,
+  type HomunCuriosity,
   type MemoryGraph,
   type MemoryGraphEdge,
   type MemoryGraphNode,
@@ -1450,6 +1451,9 @@ export function ChatView({
               threadId={thread.threadId}
               onPick={(text) => setComposerSeed({ text, nonce: Date.now() })}
             />
+          )}
+          {thread.threadId === "homun" && threadMessages.length > 0 && (
+            <HomunCuriosityQueue />
           )}
           {threadMessages.map((message) => {
             const isStreamingMessage = message.id === streamingAssistantId;
@@ -5971,6 +5975,63 @@ function ChatEmptyHero({ onPick, threadId }: { onPick: (text: string) => void; t
         ))}
       </div>
       {isHomun && <HomunProactiveToggle />}
+      {isHomun && <HomunCuriosityQueue />}
+    </div>
+  );
+}
+
+// Apprendista: the pending curiosity backlog — what Homun plans to ask, one per
+// check-in. Visible and manageable: × discards (never asked, never re-mined).
+function HomunCuriosityQueue() {
+  const [items, setItems] = useState<HomunCuriosity[]>([]);
+  const [busy, setBusy] = useState(false);
+  const reload = () =>
+    coreBridge
+      .homunCuriosities()
+      .then(setItems)
+      .catch(() => {});
+  useEffect(() => {
+    void reload();
+  }, []);
+  if (items.length === 0) return null;
+  return (
+    <div className="homun-curiosities">
+      <div className="homun-curiosities-head">
+        <span>Cose che vorrei chiederti</span>
+        <button
+          type="button"
+          className="ghost-button"
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            coreBridge
+              .mineHomunCuriosities()
+              .then(() => reload())
+              .catch(() => {})
+              .finally(() => setBusy(false));
+          }}
+        >
+          {busy ? "Genero…" : "Genera altre"}
+        </button>
+      </div>
+      <ul>
+        {items.map((c) => (
+          <li key={c.id} title={c.rationale}>
+            <span className="homun-curiosity-text">{c.text}</span>
+            <button
+              type="button"
+              className="fact-forget"
+              title="Scarta: non chiederla"
+              aria-label="Scarta"
+              onClick={() => {
+                void coreBridge.dismissHomunCuriosity(c.id).then(() => reload());
+              }}
+            >
+              ×
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

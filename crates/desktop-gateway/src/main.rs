@@ -391,6 +391,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     backfill_contacts(&state);
     backfill_mentions(&state);
     sweep_graph_on_startup(&state);
+    seed_homun_asked_questions(&state);
     start_task_executor_worker(state.clone());
     spawn_thread_browser_session_reaper(state.clone());
     spawn_contained_computer_idle_reaper(state.clone());
@@ -421,6 +422,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/homun/proactive",
             get(homun_proactive_status).post(homun_proactive_set),
         )
+        .route(
+            "/api/homun/curiosities",
+            get(homun_curiosities_list).post(homun_curiosities_mine),
+        )
+        .route("/api/homun/curiosities/dismiss", post(homun_curiosity_dismiss))
         .route("/api/homun/greet", post(homun_greet))
         .route("/api/chat/threads/{thread_id}", delete(delete_chat_thread))
         .route("/api/chat/threads/{thread_id}/messages", get(chat_messages))
@@ -716,6 +722,135 @@ ripeterti: UNA sola cosa nuova per volta. In alternativa, uno spunto legato ai s
 esterne. Se non sai nulla di lui, fai una domanda per conoscerlo. NON inventare fatti o attività \
 non avvenute.";
 
+/// Apprendista mining: distil the personal memory profile into a queue of
+/// concrete, non-trivial curiosities/proposals — FOLLOW-UP FIRST (deepen the
+/// newest facts: kids → ages/birthdays/school; birthdays → suggest saving them
+/// in the address book) — and persist them as 'pending' rows. Dedup against the
+/// WHOLE queue (pending+delivered+dismissed: asked or discarded = never again)
+/// by lexical overlap OR token containment. Returns how many were queued.
+async fn mine_curiosities(state: &AppState) -> usize {
+    // Memory profile (clean, post-consolidation) — newest last so the model sees
+    // recency; cap to keep the prompt bounded.
+    let (personal, _) = gather_profile_memory(state);
+    if personal.is_empty() {
+        return 0;
+    }
+    let listing = personal
+        .iter()
+        .rev()
+        .take(60)
+        .rev()
+        .map(|t| format!("- {t}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    // Durable dedup horizon: everything ever queued, asked in the past included.
+    let known: Vec<std::collections::HashSet<String>> = {
+        let Ok(store) = lock_store(state) else { return 0 };
+        store
+            .all_curiosity_texts()
+            .unwrap_or_default()
+            .iter()
+            .map(|t| dedup_tokens(t))
+            .collect()
+    };
+    let system = "Sei l'APPRENDISTA curioso dell'utente. Dalle sue memorie (le ULTIME sono le più \
+recenti) prepara un piccolo backlog di curiosità: domande di approfondimento o proposte concrete. \
+REGOLE: (1) FOLLOW-UP FIRST — parti dalle informazioni più NUOVE e approfondiscile (es. «ha due \
+figli, Claudio e Gaia» → che età hanno? quando sono i compleanni — proponi di salvarli in rubrica —? \
+cosa fanno?); (2) poi deduci IMPLICAZIONI dai fatti stabili (moto → tagliando/assicurazione; \
+viaggio → preparativi); (3) MAI domande-intervista generiche («che lavoro fai», «hai una regola \
+fissa», «come posso aiutarti»); (4) ogni voce è UNA domanda o UNA proposta, breve, concreta, in \
+italiano; (5) NON inventare fatti. Rispondi SOLO con JSON: \
+{\"curiosities\":[{\"text\":\"la domanda/proposta\",\"topic\":\"tema breve\",\"rationale\":\"da quale \
+fatto deriva\"}]} — al massimo 6 voci, anche 0 se non c'è nulla di non banale.";
+    let Some(root) =
+        call_memory_json(state, system, &format!("MEMORIE DELL'UTENTE:\n{listing}")).await
+    else {
+        return 0;
+    };
+    let items = root
+        .get("curiosities")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    if items.is_empty() {
+        return 0;
+    }
+    // Best-effort provenance: which memories the curiosity's rationale overlaps.
+    let memory_tokens: Vec<(String, std::collections::HashSet<String>)> = {
+        let Ok(facade) = lock_memory_facade(state) else { return 0 };
+        facade
+            .list_memories_for_ui(&gateway_memory_user_id(), &MemoryWorkspaceId::new(PERSONAL_WORKSPACE))
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|m| !matches!(m.status, MemoryStatus::Deleted | MemoryStatus::Rejected))
+            .map(|m| (m.reference.to_string(), dedup_tokens(&m.text)))
+            .collect()
+    };
+    let Ok(store) = lock_store(state) else { return 0 };
+    let mut queued = 0usize;
+    let mut seen_now: Vec<std::collections::HashSet<String>> = Vec::new();
+    for item in &items {
+        let text = item.get("text").and_then(|v| v.as_str()).unwrap_or("").trim();
+        if text.is_empty() {
+            continue;
+        }
+        let tokens = dedup_tokens(text);
+        let duplicate = known
+            .iter()
+            .chain(seen_now.iter())
+            .any(|k| jaccard(&tokens, k) >= DEDUP_JACCARD || (tokens.len() >= 3 && tokens.is_subset(k)));
+        if duplicate {
+            continue;
+        }
+        let topic = item.get("topic").and_then(|v| v.as_str()).unwrap_or("");
+        let rationale = item.get("rationale").and_then(|v| v.as_str()).unwrap_or("");
+        let basis = dedup_tokens(&format!("{text} {rationale}"));
+        let source_refs: Vec<&String> = memory_tokens
+            .iter()
+            .filter(|(_, mt)| jaccard(&basis, mt) >= 0.2)
+            .map(|(r, _)| r)
+            .take(4)
+            .collect();
+        let refs_json = serde_json::to_string(&source_refs).unwrap_or_else(|_| "[]".to_string());
+        if store.insert_curiosity(text, topic, rationale, &refs_json).is_ok() {
+            seen_now.push(tokens);
+            queued += 1;
+        }
+    }
+    queued
+}
+
+/// One-shot bootstrap: register the questions Homun ALREADY asked in the existing
+/// thread as 'delivered' queue rows, so the durable dedup blocks re-asking them
+/// (the empirical bug: "c'è una regola fissa…" was re-asked on every check-in).
+fn seed_homun_asked_questions(state: &AppState) {
+    let Ok(store) = lock_store(state) else { return };
+    if store.flag("homun_asked_seed_v1").ok().flatten().is_some() {
+        return;
+    }
+    if let Ok(snapshot) = store.messages("homun") {
+        let mut seeded = 0usize;
+        for message in snapshot
+            .messages
+            .iter()
+            .filter(|m| m.role == "assistant" && m.text.contains('?'))
+        {
+            if let Ok(id) =
+                store.insert_curiosity(&message.text, "storico", "già posta nel thread Homun", "[]")
+            {
+                // Inserted as pending — flip straight to delivered (it WAS asked).
+                let _ = store.mark_curiosity(id, "delivered");
+                seeded += 1;
+            }
+        }
+        if seeded > 0 {
+            eprintln!("homun-seed: registrate {seeded} domande già poste");
+        }
+    }
+    let _ = store.set_flag("homun_asked_seed_v1", "1");
+}
+
 fn homun_checkin_is_active(state: &AppState) -> bool {
     let Ok(store) = lock_task_store(state) else {
         return false;
@@ -822,6 +957,53 @@ struct HomunProactiveRequest {
 
 async fn homun_proactive_status(State(state): State<AppState>) -> Json<serde_json::Value> {
     Json(serde_json::json!({ "enabled": homun_checkin_is_active(&state) }))
+}
+
+/// The pending curiosity backlog (what Homun plans to ask, oldest first).
+async fn homun_curiosities_list(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let store = lock_store(&state)?;
+    let items: Vec<serde_json::Value> = store
+        .pending_curiosities()
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "curiosities_list",
+            message: e.to_string(),
+        })?
+        .into_iter()
+        .map(|(id, text, topic, rationale)| {
+            serde_json::json!({ "id": id, "text": text, "topic": topic, "rationale": rationale })
+        })
+        .collect();
+    Ok(Json(serde_json::json!({ "curiosities": items })))
+}
+
+/// Mine the memory for new curiosities NOW (manual refill / test).
+async fn homun_curiosities_mine(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let queued = mine_curiosities(&state).await;
+    Ok(Json(serde_json::json!({ "queued": queued })))
+}
+
+#[derive(Deserialize)]
+struct CuriosityDismissRequest {
+    id: i64,
+}
+
+/// Discard a queued curiosity: never delivered, never re-mined (durable dedup).
+async fn homun_curiosity_dismiss(
+    State(state): State<AppState>,
+    Json(req): Json<CuriosityDismissRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let store = lock_store(&state)?;
+    store.mark_curiosity(req.id, "dismissed").map_err(|e| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "curiosity_dismiss",
+        message: e.to_string(),
+    })?;
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 /// Enable/disable the recurring Homun proactive check-in (idempotent: always clears the
@@ -5997,6 +6179,17 @@ async fn stream_chat_via_openai(
             contact_ctx.as_ref().map(|c| c.name.as_str()).unwrap_or("-"),
         );
     }
+    // Real-idle signal (H3): only genuine user work counts — in-app turns and the
+    // OWNER writing via a channel. An inbound contact message or Homun's own
+    // headless check-in must NOT reset the idle clock.
+    {
+        let tid = request.thread_id.as_deref();
+        let is_channel = tid.is_some_and(|t| t.starts_with("channel_"));
+        let is_homun = tid == Some("homun");
+        if !is_homun && (!is_channel || channel_owner) {
+            note_user_activity();
+        }
+    }
     let prompt = build_chat_runtime_prompt(&BuildPromptRequest {
         prompt: request.prompt.clone(),
         context: request.context.clone(),
@@ -9603,6 +9796,38 @@ struct BrowserActivityState {
     steps: Vec<BrowserStepView>,
 }
 
+/// Last REAL user activity (epoch secs). Stamped only by turns that mean "the
+/// user is at work": in-app chats and OWNER channel turns — never inbound
+/// contact messages or Homun's own headless check-ins. In-memory: after a boot
+/// no activity is recorded yet (= idle), the hour/random gates still protect.
+fn user_activity_cell() -> &'static std::sync::RwLock<Option<i64>> {
+    static CELL: std::sync::OnceLock<std::sync::RwLock<Option<i64>>> = std::sync::OnceLock::new();
+    CELL.get_or_init(|| std::sync::RwLock::new(None))
+}
+
+fn note_user_activity() {
+    if let Ok(mut guard) = user_activity_cell().write() {
+        *guard = Some(now_epoch_secs() as i64);
+    }
+}
+
+/// None = nothing seen since boot (counts as idle).
+fn seconds_since_user_activity() -> Option<i64> {
+    user_activity_cell()
+        .read()
+        .ok()
+        .and_then(|guard| guard.map(|t| (now_epoch_secs() as i64).saturating_sub(t)))
+}
+
+/// How long the user must be quiet before a Homun check-in may interrupt.
+fn homun_idle_threshold_secs() -> i64 {
+    env::var("LOCAL_FIRST_HOMUN_IDLE_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<i64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(20 * 60)
+}
+
 fn browser_activity_cell() -> &'static std::sync::RwLock<Option<BrowserActivityState>> {
     static CELL: std::sync::OnceLock<std::sync::RwLock<Option<BrowserActivityState>>> =
         std::sync::OnceLock::new();
@@ -12991,7 +13216,7 @@ fn execute_proactive_prompt_task(
     state: &AppState,
     task: &TaskRecord,
 ) -> Result<TaskExecutionOutcome, LocalTaskExecutionError> {
-    let goal = task.goal.clone();
+    let mut goal = task.goal.clone();
     let root = task
         .task_id
         .as_str()
@@ -13032,19 +13257,17 @@ fn execute_proactive_prompt_task(
     };
 
     // Human cadence for Homun: it analyses often (frequent schedule) but only ASKS now
-    // and then, within waking hours (local timezone). Outside 9–22, or on a "pause" roll,
-    // skip silently — complete the occurrence (so the recurrence re-enqueues) with no
-    // message and no surfaced event.
+    // and then, within waking hours (local timezone). Outside 9–22, on a "pause" roll,
+    // or while the user is ACTIVELY working (real-idle gate), skip silently — complete
+    // the occurrence (so the recurrence re-enqueues) with no message and no event.
+    let mut homun_curiosity: Option<(i64, String)> = None;
     if deliver_thread == Some("homun") {
-        let now = jiff::Zoned::now(); // system local timezone
-        let hour = now.hour(); // i8, 0..23
-        let roll = now.subsec_nanosecond().rem_euclid(100);
-        if !(9..22).contains(&hour) || roll >= 45 {
-            return Ok(TaskExecutionOutcome {
+        let skip = |reason: &str| {
+            Ok(TaskExecutionOutcome {
                 completed: true,
                 blocked_reason: None,
                 pending_approval: None,
-                summary: "check-in Homun saltato (orario o pausa)".to_string(),
+                summary: format!("check-in Homun saltato ({reason})"),
                 checkpoint_payload: serde_json::json!({ "kind": "proactive_prompt", "skipped": true }),
                 checkpoint_redacted: serde_json::json!({ "kind": "proactive_prompt" }),
                 chat_message: String::new(),
@@ -13054,8 +13277,58 @@ fn execute_proactive_prompt_task(
                 event_subtitle: "Pausa proattiva.".to_string(),
                 event_payload: serde_json::json!({}),
                 artifacts: vec![],
-            });
+            })
+        };
+        let now = now_local(); // user timezone (Now & Dates layer)
+        let hour = now.hour(); // i8, 0..23
+        let roll = now.subsec_nanosecond().rem_euclid(100);
+        if !(9..22).contains(&hour) || roll >= 45 {
+            return skip("orario o pausa");
         }
+        // Real idle (H3): don't interrupt while the user is actively working —
+        // a check-in lands when they've been quiet for a while.
+        if let Some(secs) = seconds_since_user_activity() {
+            if secs < homun_idle_threshold_secs() {
+                return skip("utente attivo");
+            }
+        }
+        // Apprendista (H2): the question comes from the durable curiosity queue —
+        // never from a free-form generator (that's what caused the repetitions).
+        let handle = tokio::runtime::Handle::current();
+        let pending = lock_store(state)
+            .ok()
+            .and_then(|s| s.pending_curiosity_count().ok())
+            .unwrap_or(0);
+        if pending < 3 {
+            let queued = handle.block_on(mine_curiosities(state));
+            if queued > 0 {
+                eprintln!("homun-mining: {queued} nuove curiosità in coda");
+            }
+        }
+        // Forget-coherent dequeue: a curiosity touching FORGOTTEN content is
+        // dismissed on the spot, never asked.
+        let forgotten = lock_memory_facade(state)
+            .ok()
+            .map(|facade| forgotten_token_sets(&facade, &gateway_memory_user_id()))
+            .unwrap_or_default();
+        if let Ok(store) = lock_store(state) {
+            while let Ok(Some((id, text))) = store.next_pending_curiosity() {
+                if is_suppressed(&text, &forgotten) {
+                    let _ = store.mark_curiosity(id, "dismissed");
+                    continue;
+                }
+                homun_curiosity = Some((id, text));
+                break;
+            }
+        }
+        let Some((_, ref text)) = homun_curiosity else {
+            return skip("nessuna curiosità in coda");
+        };
+        goal = format!(
+            "Proponi all'utente SOLO questa curiosità, in modo naturale, caldo e ancorato a ciò \
+che sai di lui: «{text}». UNA sola domanda o proposta: non aggiungerne altre, non ripetere \
+domande passate, non sollecitare risposte a domande precedenti. Conciso. NON compiere azioni."
+        );
     }
 
     // Surface the (possibly new) thread immediately, like an inbound channel msg.
@@ -13075,6 +13348,10 @@ fn execute_proactive_prompt_task(
         let _ = store.append_assistant_message(&thread_id, &channel_chat_message("user", &goal));
         let _ =
             store.append_assistant_message(&thread_id, &channel_chat_message("assistant", &answer));
+        // The curiosity was asked: durable no-repeat (never re-delivered nor re-mined).
+        if let Some((id, _)) = homun_curiosity {
+            let _ = store.mark_curiosity(id, "delivered");
+        }
     }
     publish_app_event(serde_json::json!({
         "type": "thread.updated",

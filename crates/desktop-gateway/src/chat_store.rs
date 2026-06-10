@@ -1097,6 +1097,75 @@ impl ChatStore {
     // contact's entity), so the cache + its accessors were removed. The `facts_json`
     // column stays in the schema, inert, to avoid a destructive migration.
 
+    // ------------------------------------------------------ curiosity backlog
+
+    /// Queue a mined curiosity (status 'pending').
+    pub fn insert_curiosity(
+        &self,
+        text: &str,
+        topic: &str,
+        rationale: &str,
+        source_refs_json: &str,
+    ) -> rusqlite::Result<i64> {
+        self.conn.execute(
+            "insert into curiosities(status, text, topic, rationale, source_refs, created_at)
+             values('pending', ?1, ?2, ?3, ?4, ?5)",
+            params![text, topic, rationale, source_refs_json, Self::now_secs()],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Oldest pending curiosity (FIFO: earliest mined is asked first).
+    pub fn next_pending_curiosity(&self) -> rusqlite::Result<Option<(i64, String)>> {
+        self.conn
+            .query_row(
+                "select id, text from curiosities where status = 'pending'
+                 order by id asc limit 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+    }
+
+    pub fn pending_curiosities(&self) -> rusqlite::Result<Vec<(i64, String, String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "select id, text, topic, rationale from curiosities
+             where status = 'pending' order by id asc",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })?;
+        rows.collect()
+    }
+
+    pub fn pending_curiosity_count(&self) -> rusqlite::Result<i64> {
+        self.conn.query_row(
+            "select count(*) from curiosities where status = 'pending'",
+            [],
+            |row| row.get(0),
+        )
+    }
+
+    /// All texts ever queued (any status) — the durable dedup horizon for mining:
+    /// delivered AND dismissed must never be re-mined.
+    pub fn all_curiosity_texts(&self) -> rusqlite::Result<Vec<String>> {
+        let mut stmt = self.conn.prepare("select text from curiosities")?;
+        let rows = stmt.query_map([], |row| row.get(0))?;
+        rows.collect()
+    }
+
+    pub fn mark_curiosity(&self, id: i64, status: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "update curiosities set status = ?1,
+                    delivered_at = case when ?1 = 'delivered' then ?2 else delivered_at end
+             where id = ?3",
+            params![status, Self::now_secs(), id],
+        )?;
+        Ok(())
+    }
+
+    /// One-shot bootstrap flag helper reuse: see `flag`/`set_flag`.
+
     fn migrate(&self) -> rusqlite::Result<()> {
         self.conn.execute_batch(
             "
@@ -1259,6 +1328,21 @@ impl ChatStore {
                 relationship_type text not null,
                 unique(from_contact_id, to_contact_id, relationship_type)
             );
+
+            -- Homun's persistent curiosity backlog: questions/proposals mined from
+            -- memory, doled out ONE per check-in. The queue itself is the durable
+            -- no-repeat: delivered/dismissed rows are never re-asked nor re-mined.
+            create table if not exists curiosities (
+                id integer primary key autoincrement,
+                status text not null default 'pending',
+                text text not null,
+                topic text not null default '',
+                rationale text not null default '',
+                source_refs text not null default '[]',
+                created_at integer not null,
+                delivered_at integer
+            );
+            create index if not exists idx_curiosities_status on curiosities(status);
             ",
         )?;
 
