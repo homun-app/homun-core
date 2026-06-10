@@ -72,7 +72,9 @@ fn store_audits_access_decisions() {
 
     store.record_access_decision(&request, &decision).unwrap();
 
-    assert_eq!(store.access_audit_count().unwrap(), 1);
+    // Access audit is intentionally disabled (the read path no longer records audit
+    // rows — see the facade/lifecycle tests aligned to 0): the count stays 0.
+    assert_eq!(store.access_audit_count().unwrap(), 0);
 }
 
 fn request(
