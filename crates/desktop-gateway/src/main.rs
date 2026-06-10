@@ -2201,6 +2201,96 @@ fn rebuild_decisions_wiki(
     let _ = facade.record_wiki_page_for_ui(&page);
 }
 
+/// F6 — the third leg: a human-readable VIEW of the personal memory, generated from
+/// the live facts grouped by the entity they're about (via the graph's mentions
+/// edges). Derived & rebuildable like the graph — the truth stays in SQL, this is the
+/// Karpathy-style "compiled knowledge" page, navigable and linked back to the records.
+/// One page ("profilo.md"); respects manual edits.
+fn rebuild_profile_wiki(
+    facade: &MemoryFacade,
+    user_id: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+) {
+    if wiki_is_edited(workspace, "profilo.md") {
+        return;
+    }
+    let memories = facade.list_memories_for_ui(user_id, workspace).unwrap_or_default();
+    let facts: Vec<_> = memories
+        .into_iter()
+        .filter(|m| {
+            matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+                && matches!(m.memory_type.as_str(), "fact" | "preference")
+        })
+        .collect();
+    if facts.is_empty() {
+        return;
+    }
+    // memory_ref → entity names it mentions (via the graph).
+    let entity_name: std::collections::HashMap<String, String> = facade
+        .list_entities_for_ui(user_id, workspace)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|e| (e.reference.to_string(), e.name))
+        .collect();
+    let mut mem_entities: std::collections::HashMap<String, Vec<String>> = Default::default();
+    for rel in facade.list_relations_for_ui(user_id, workspace).unwrap_or_default() {
+        if rel.relation_type == "mentions" {
+            if let Some(name) = entity_name.get(&rel.target_ref.to_string()) {
+                mem_entities
+                    .entry(rel.source_ref.to_string())
+                    .or_default()
+                    .push(name.clone());
+            }
+        }
+    }
+    // Group facts under each entity they mention; entity-less facts → "Generale".
+    let mut sections: std::collections::BTreeMap<String, Vec<&str>> = Default::default();
+    let mut linked: Vec<MemoryRef> = Vec::new();
+    for fact in &facts {
+        linked.push(fact.reference.clone());
+        let names = mem_entities.get(&fact.reference.to_string());
+        match names {
+            Some(ns) if !ns.is_empty() => {
+                for n in ns {
+                    sections.entry(n.clone()).or_default().push(fact.text.as_str());
+                }
+            }
+            _ => sections.entry("Generale".to_string()).or_default().push(fact.text.as_str()),
+        }
+    }
+    let mut body = String::from(
+        "# Profilo personale\n\n> Pagina generata dalla memoria (modificabile a mano: le correzioni rientrano nello strutturato).\n\n",
+    );
+    // "Generale" last; entities alphabetical.
+    let mut keys: Vec<&String> = sections.keys().collect();
+    keys.sort_by_key(|k| (*k == "Generale", (*k).clone()));
+    for key in keys {
+        body.push_str(&format!("## {key}\n\n"));
+        for text in &sections[key] {
+            body.push_str(&format!("- {}\n", text.trim()));
+        }
+        body.push('\n');
+    }
+    let path = "profilo.md";
+    let reference = facade
+        .list_wiki_pages_for_ui(user_id, workspace)
+        .ok()
+        .and_then(|pages| pages.into_iter().find(|p| p.path == path).map(|p| p.reference))
+        .unwrap_or_else(|| MemoryRef::generated(MemoryRefKind::Wiki, user_id.clone(), workspace.clone()));
+    let page = WikiPage {
+        reference,
+        user_id: user_id.clone(),
+        workspace_id: workspace.clone(),
+        path: path.to_string(),
+        title: "Profilo personale".to_string(),
+        body,
+        linked_refs: linked,
+        privacy_domain: PrivacyDomain::new("personal"),
+        sensitivity: MemoryDataSensitivity::Internal,
+    };
+    let _ = facade.record_wiki_page_for_ui(&page);
+}
+
 /// One-shot JSON call to the memory role model (same path as the extractor).
 async fn call_memory_json(
     state: &AppState,
@@ -2756,6 +2846,10 @@ fn sweep_graph_orphans(state: &AppState, workspace: &MemoryWorkspaceId) {
             workspace,
             "orfana: nessuna memoria viva la riguarda",
         );
+    }
+    // F6: refresh the human-readable profile view from the (now-consistent) graph.
+    if workspace.as_str() == PERSONAL_WORKSPACE {
+        rebuild_profile_wiki(&facade, &user, workspace);
     }
 }
 
