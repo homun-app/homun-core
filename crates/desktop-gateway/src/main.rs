@@ -19017,6 +19017,9 @@ fn episode_texts_by_handles(
         .list_memories_for_ui(user, &threads)
         .unwrap_or_default()
         .into_iter()
+        // Exclude deleted/rejected: list_memories_for_ui returns ALL statuses, so
+        // without this a deleted episode kept showing in a contact's "Cosa so…".
+        .filter(|m| !matches!(m.status, MemoryStatus::Deleted | MemoryStatus::Rejected))
         .filter(|m| {
             m.metadata
                 .get("thread_id")
@@ -19043,6 +19046,8 @@ fn episodes_dated_by_handles(
         .list_memories_for_ui(user, &threads)
         .unwrap_or_default()
         .into_iter()
+        // A deleted episode must not be re-mined into facts on profile refresh.
+        .filter(|m| !matches!(m.status, MemoryStatus::Deleted | MemoryStatus::Rejected))
         .filter(|m| {
             m.metadata
                 .get("thread_id")
@@ -19978,6 +19983,12 @@ async fn contact_profile(
         episode_texts_by_handles(&facade, &user, &handles).len()
     };
     let (facts, facts_count) = read_cached_facts(&facts_json);
+    // Cached facts are a distilled SNAPSHOT of the episodes at refresh time. If the
+    // live episode count has DROPPED below it, episodes were deleted since — the
+    // cached facts may describe removed information, so don't show them (the user
+    // regenerates from the current, deletion-aware episodes). Additions only (count
+    // grew) keep the facts visible — still valid, just incomplete — flagged stale.
+    let facts = if episode_count < facts_count { Vec::new() } else { facts };
     Ok(Json(ContactProfile {
         stale: facts_count != episode_count,
         episode_count,
