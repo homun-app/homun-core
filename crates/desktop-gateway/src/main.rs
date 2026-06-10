@@ -19102,6 +19102,34 @@ fn episodes_dated_by_handles(
     out
 }
 
+/// Episode (date, ref) by handles — for provenance: linking a distilled fact to
+/// the source messages of the same day via `memory_evidence`.
+fn episode_refs_by_date(
+    facade: &MemoryFacade,
+    user: &MemoryUserId,
+    handles: &[String],
+) -> Vec<(String, MemoryRef)> {
+    if handles.is_empty() {
+        return Vec::new();
+    }
+    let threads = MemoryWorkspaceId::new(THREADS_WORKSPACE);
+    let set: std::collections::HashSet<&str> = handles.iter().map(|s| s.as_str()).collect();
+    facade
+        .list_memories_for_ui(user, &threads)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|m| !matches!(m.status, MemoryStatus::Deleted | MemoryStatus::Rejected))
+        .filter(|m| {
+            m.metadata
+                .get("thread_id")
+                .and_then(|v| v.as_str())
+                .map(|t| set.contains(t))
+                .unwrap_or(false)
+        })
+        .map(|m| (parse_memory_date(&m.created_at).unwrap_or_default(), m.reference))
+        .collect()
+}
+
 fn contact_view_from_stored(
     store: &ChatStore,
     c: &chat_store::StoredContact,
@@ -19819,9 +19847,14 @@ async fn contact_relationship_remove(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
-/// A distilled fact about a contact, temporally grounded.
+/// A fact about a contact, read from the memory GRAPH (a first-class memory
+/// record linked to the contact's entity via a `mentions` edge).
 #[derive(Serialize, Deserialize, Clone)]
 struct ContactFact {
+    /// The memory record ref — lets the UI delete this single fact structurally.
+    /// `default` so the LLM distillation JSON (which has no ref) still deserializes.
+    #[serde(default)]
+    reference: String,
     text: String,
     /// "durable" (always true), "transient" (a current state), "event" (happened once).
     #[serde(default)]
@@ -19959,6 +19992,8 @@ italiano. Se nulla di importante, {\"facts\":[]}.";
                         return None;
                     }
                     Some(ContactFact {
+                        // Freshly distilled — no memory ref yet (assigned on persist).
+                        reference: String::new(),
                         text,
                         temporality: v
                             .get("temporality")
@@ -19980,25 +20015,98 @@ italiano. Se nulla di importante, {\"facts\":[]}.";
 
 #[derive(Serialize)]
 struct ContactProfile {
+    /// Facts about the contact, read live from the memory graph (always fresh:
+    /// a deleted memory simply isn't returned — no `stale` flag needed).
     facts: Vec<ContactFact>,
-    /// True when new messages arrived since the last extraction (offer refresh).
-    stale: bool,
+    /// How many of the contact's messages have been recorded (context for the UI).
     episode_count: usize,
 }
 
-/// Cached distilled facts stored on the contact row as `{"facts":[...],"count":N}`.
-fn read_cached_facts(facts_json: &str) -> (Vec<ContactFact>, usize) {
-    let root: serde_json::Value = serde_json::from_str(facts_json).unwrap_or_default();
-    let facts = root
-        .get("facts")
-        .cloned()
-        .and_then(|v| serde_json::from_value::<Vec<ContactFact>>(v).ok())
-        .unwrap_or_default();
-    let count = root.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-    (facts, count)
+/// All memory-graph entity refs that represent this contact, in the personal scope.
+/// A contact can map to several entities (one per channel identity + a name-based
+/// one + the back-linked `entity_ref`), and the `mentions` edges point at whichever
+/// matched — so we gather the union. Owner case (person:self) is included but is
+/// never a `mentions` target (the linker skips it), so it's harmless.
+fn contact_entity_refs(
+    facade: &MemoryFacade,
+    user: &MemoryUserId,
+    handles: &[String],
+    contact: Option<&chat_store::StoredContact>,
+) -> std::collections::HashSet<String> {
+    let mut refs: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // Stable keys derived from the contact's channel handles ("whatsapp:123").
+    let handle_keys: std::collections::HashSet<String> =
+        handles.iter().map(|h| format!("person:{h}")).collect();
+    let name_lc = contact.map(|c| c.name.trim().to_lowercase()).filter(|n| !n.is_empty());
+    if let Some(eref) = contact.and_then(|c| c.entity_ref.clone()) {
+        refs.insert(eref);
+    }
+    if let Ok(entities) =
+        facade.list_entities_for_ui(user, &MemoryWorkspaceId::new(PERSONAL_WORKSPACE))
+    {
+        for e in entities {
+            let matched = handle_keys.contains(&e.canonical_key)
+                || handles.iter().any(|h| e.aliases.iter().any(|a| a == h))
+                || name_lc
+                    .as_deref()
+                    .map(|n| e.name.trim().to_lowercase() == n)
+                    .unwrap_or(false);
+            if matched {
+                refs.insert(e.reference.to_string());
+            }
+        }
+    }
+    refs
 }
 
-/// Cached read: returns the stored distilled facts (no LLM call), flagging stale.
+/// "Cosa so": the memory FACTS structurally linked to the contact's entities via
+/// `mentions` edges. Read straight from the graph — `list_memories_for_ui` already
+/// excludes tombstoned/deleted, so a forgotten fact simply isn't here (no Jaccard).
+fn facts_from_graph(
+    facade: &MemoryFacade,
+    user: &MemoryUserId,
+    entity_refs: &std::collections::HashSet<String>,
+) -> Vec<ContactFact> {
+    if entity_refs.is_empty() {
+        return Vec::new();
+    }
+    let ws = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
+    let mem_refs: std::collections::HashSet<String> = facade
+        .list_relations_for_ui(user, &ws)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|r| r.relation_type == "mentions" && entity_refs.contains(&r.target_ref.to_string()))
+        .map(|r| r.source_ref.to_string())
+        .collect();
+    if mem_refs.is_empty() {
+        return Vec::new();
+    }
+    let mut out: Vec<ContactFact> = facade
+        .list_memories_for_ui(user, &ws)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|m| !matches!(m.status, MemoryStatus::Deleted | MemoryStatus::Rejected))
+        .filter(|m| mem_refs.contains(&m.reference.to_string()))
+        .filter(|m| matches!(m.memory_type.as_str(), "fact" | "preference" | "decision"))
+        .map(|m| {
+            let temporality = match m.metadata.get("certainty").and_then(|c| c.as_str()) {
+                Some("committed") => "event",
+                _ => "durable",
+            }
+            .to_string();
+            ContactFact {
+                reference: m.reference.to_string(),
+                text: m.text,
+                temporality,
+                date: parse_memory_date(&m.created_at).unwrap_or_default(),
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| a.date.cmp(&b.date));
+    out
+}
+
+/// "Cosa so di lui/lei": facts read live from the memory graph (no cache, no LLM).
 async fn contact_profile(
     State(state): State<AppState>,
     Json(request): Json<ContactRefRequest>,
@@ -20008,36 +20116,26 @@ async fn contact_profile(
         code: "contact_not_found",
         message: "contatto non trovato".to_string(),
     })?;
-    let (handles, facts_json) = {
+    let (handles, contact) = {
         let store = lock_store(&state)?;
-        let handles = store.contact_handles(id).unwrap_or_default();
-        let facts_json = store
-            .contact_facts_json(id)
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| "{}".to_string());
-        (handles, facts_json)
+        (
+            store.contact_handles(id).unwrap_or_default(),
+            store.contact_by_id(id).ok().flatten(),
+        )
     };
     let user = gateway_memory_user_id();
-    let (episode_count, forgotten) = {
-        let facade = lock_memory_facade(&state)?;
-        let count = episode_texts_by_handles(&facade, &user, &handles).len();
-        (count, forgotten_token_sets(&facade, &user))
-    };
-    let (mut facts, facts_count) = read_cached_facts(&facts_json);
-    // Permanent forget: drop any cached fact that overlaps something the user
-    // deleted — even though the raw source message survives. Applied at READ time
-    // so it takes effect immediately, with no regeneration.
-    facts.retain(|f| !is_suppressed(&f.text, &forgotten));
-    Ok(Json(ContactProfile {
-        stale: facts_count != episode_count,
-        episode_count,
-        facts,
-    }))
+    let facade = lock_memory_facade(&state)?;
+    let episode_count = episode_texts_by_handles(&facade, &user, &handles).len();
+    let entity_refs = contact_entity_refs(&facade, &user, &handles, contact.as_ref());
+    let facts = facts_from_graph(&facade, &user, &entity_refs);
+    Ok(Json(ContactProfile { facts, episode_count }))
 }
 
-/// Re-distil the contact's facts via the extractor model and cache them on the
-/// contact row. The locks are dropped around the (slow) LLM call.
+/// "Genera/Aggiorna dai messaggi": distil the contact's episode history into clean
+/// facts and persist them as FIRST-CLASS memory records (not a JSON blob) — linked
+/// to the contact's entity (so they appear in "Cosa so" read from the graph) and to
+/// the source episodes (`memory_evidence` provenance). Idempotent: forgotten and
+/// duplicate facts are skipped. The slow LLM call runs with no lock held.
 async fn contact_profile_refresh(
     State(state): State<AppState>,
     Json(request): Json<ContactRefRequest>,
@@ -20047,7 +20145,7 @@ async fn contact_profile_refresh(
         code: "contact_not_found",
         message: "contatto non trovato".to_string(),
     })?;
-    let (name, handles) = {
+    let (name, handles, contact) = {
         let store = lock_store(&state)?;
         let contact = store.contact_by_id(id).ok().flatten().ok_or_else(|| GatewayError {
             status: StatusCode::NOT_FOUND,
@@ -20055,31 +20153,87 @@ async fn contact_profile_refresh(
             message: "contatto non trovato".to_string(),
         })?;
         let handles = store.contact_handles(id).unwrap_or_default();
-        (contact.name, handles)
+        (contact.name.clone(), handles, contact)
     };
     let user = gateway_memory_user_id();
-    let (episodes, forgotten) = {
+    let personal = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
+
+    // Distillation input + provenance map + forget/dedup context (one lock).
+    let (episodes, ep_refs, forgotten, mut seen) = {
         let facade = lock_memory_facade(&state)?;
-        (
-            episodes_dated_by_handles(&facade, &user, &handles),
-            forgotten_token_sets(&facade, &user),
-        )
+        let episodes = episodes_dated_by_handles(&facade, &user, &handles);
+        let ep_refs = episode_refs_by_date(&facade, &user, &handles);
+        let forgotten = forgotten_token_sets(&facade, &user);
+        let entity_refs = contact_entity_refs(&facade, &user, &handles, Some(&contact));
+        let existing: Vec<std::collections::HashSet<String>> =
+            facts_from_graph(&facade, &user, &entity_refs)
+                .into_iter()
+                .map(|f| dedup_tokens(&f.text))
+                .collect();
+        (episodes, ep_refs, forgotten, existing)
     };
     let episode_count = episodes.len();
-    let mut facts = extract_contact_facts(&state, &name, &episodes).await;
-    // Permanent forget: never re-cache a fact the user has deleted, even though it
-    // was just re-distilled from a still-live source message.
-    facts.retain(|f| !is_suppressed(&f.text, &forgotten));
-    {
-        let store = lock_store(&state)?;
-        let json = serde_json::json!({ "facts": facts, "count": episode_count }).to_string();
-        let _ = store.set_contact_facts_json(id, &json);
+    if episode_count == 0 {
+        return Ok(Json(ContactProfile { facts: Vec::new(), episode_count: 0 }));
     }
-    Ok(Json(ContactProfile {
-        facts,
-        stale: false,
-        episode_count,
-    }))
+
+    // Slow LLM distillation — NO lock held.
+    let distilled = extract_contact_facts(&state, &name, &episodes).await;
+
+    // Persist new facts as graph records (forget + dedup applied), with provenance.
+    {
+        let facade = lock_memory_facade(&state)?;
+        let lifecycle = MemoryLifecycleRequest {
+            actor_id: "contact-distill".to_string(),
+            user_id: user.clone(),
+            workspace_id: personal.clone(),
+            purpose: "contact_profile".to_string(),
+        };
+        let mut new_items: Vec<(MemoryRef, String)> = Vec::new();
+        for f in &distilled {
+            if is_suppressed(&f.text, &forgotten) {
+                continue;
+            }
+            let tokens = dedup_tokens(&f.text);
+            if seen.iter().any(|t| jaccard(&tokens, t) >= DEDUP_JACCARD) {
+                continue;
+            }
+            // Provenance: the episodes of the same day as the fact.
+            let evidence_refs: Vec<MemoryRef> = ep_refs
+                .iter()
+                .filter(|(d, _)| !f.date.is_empty() && d == &f.date)
+                .map(|(_, r)| r.clone())
+                .collect();
+            let certainty = if f.temporality == "event" { "committed" } else { "considered" };
+            let create = MemoryCreateRequest {
+                request: lifecycle.clone(),
+                memory_type: "fact".to_string(),
+                text: f.text.clone(),
+                aliases: Vec::new(),
+                language_hints: Vec::new(),
+                confidence: 0.7,
+                privacy_domain: PrivacyDomain::new("personal"),
+                sensitivity: MemoryDataSensitivity::Internal,
+                evidence_refs,
+                metadata: serde_json::json!({
+                    "scope": "personal", "certainty": certainty, "source": "contact-distill"
+                }),
+            };
+            if let Ok(record) = facade.create_memory_candidate(create) {
+                let _ = facade.confirm_memory(&lifecycle, &record.reference, "contact distill");
+                new_items.push((record.reference.clone(), f.text.clone()));
+                seen.push(tokens);
+            }
+        }
+        // Link new facts to the contact's entity (mentions) so they surface in "Cosa so".
+        link_memory_mentions(&facade, &user, &personal, &new_items);
+    }
+
+    // Return the LIVE graph view (pre-existing + newly added).
+    let facade = lock_memory_facade(&state)?;
+    let entity_refs = contact_entity_refs(&facade, &user, &handles, Some(&contact));
+    let facts = facts_from_graph(&facade, &user, &entity_refs);
+    Ok(Json(ContactProfile { facts, episode_count }))
 }
 
 #[derive(Debug, Deserialize)]

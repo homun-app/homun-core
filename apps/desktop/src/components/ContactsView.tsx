@@ -479,6 +479,17 @@ function ContactCard({
     }
   };
 
+  // Delete a single fact structurally from the memory graph (cascade + reload).
+  const forgetFact = async (reference: string) => {
+    if (!reference) return;
+    try {
+      await coreBridge.decideMemory(reference, "delete");
+      setProfile(await coreBridge.contactProfile(contact.reference));
+    } catch {
+      /* ignore */
+    }
+  };
+
   return (
     <>
       <div className="mdl-detail-head">
@@ -821,20 +832,26 @@ function ContactCard({
           <>
             <ul className="contacts-facts">
               {profile.facts.map((f, i) => (
-                <li key={i}>
+                <li key={f.reference || i}>
                   <span className={`fact-tag ${f.temporality || "durable"}`}>
                     {factTag(f.temporality)}
                   </span>
                   <span className="fact-text">{f.text}</span>
                   {f.date && <span className="fact-date">{f.date}</span>}
+                  {f.reference && (
+                    <button
+                      type="button"
+                      className="fact-forget"
+                      title="Dimentica questa informazione"
+                      aria-label="Dimentica"
+                      onClick={() => void forgetFact(f.reference)}
+                    >
+                      ×
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
-            {profile.stale && (
-              <p className="set-hint" style={{ marginBottom: 0 }}>
-                Ci sono nuovi messaggi: «Aggiorna» per rigenerare il profilo.
-              </p>
-            )}
           </>
         )}
       </div>

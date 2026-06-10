@@ -1092,22 +1092,10 @@ impl ChatStore {
         )?;
         Ok(())
     }
-
-    /// Cached distilled-profile JSON (`{"facts":[...],"count":N}`) for a contact.
-    pub fn contact_facts_json(&self, id: i64) -> rusqlite::Result<Option<String>> {
-        self.conn
-            .query_row("select facts_json from contacts where id = ?1", params![id], |row| {
-                row.get(0)
-            })
-            .optional()
-    }
-    pub fn set_contact_facts_json(&self, id: i64, json: &str) -> rusqlite::Result<()> {
-        self.conn.execute(
-            "update contacts set facts_json = ?1, updated_at = ?2 where id = ?3",
-            params![json, Self::now_secs(), id],
-        )?;
-        Ok(())
-    }
+    // The contact "Cosa so" facts used to be a distilled JSON cache here
+    // (`facts_json`). It now lives in the memory GRAPH (facts linked to the
+    // contact's entity), so the cache + its accessors were removed. The `facts_json`
+    // column stays in the schema, inert, to avoid a destructive migration.
 
     fn migrate(&self) -> rusqlite::Result<()> {
         self.conn.execute_batch(
