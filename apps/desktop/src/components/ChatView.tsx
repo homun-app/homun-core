@@ -82,6 +82,7 @@ import {
   type MemoryGraphEdge,
   type MemoryGraphNode,
   type MemoryWikiPage,
+  type ProjectSubdir,
   type ProviderModelsGroup,
   type SkillSummary,
 } from "../lib/coreBridge";
@@ -3079,6 +3080,8 @@ export function MemoryGraphPanel({
   const [selected, setSelected] = useState<string | null>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [buildingGraph, setBuildingGraph] = useState(false);
+  const [tooLarge, setTooLarge] = useState(false);
+  const [subdirs, setSubdirs] = useState<ProjectSubdir[]>([]);
   const [internalMode, setInternalMode] = useState<"graph" | "wiki">("graph");
   const mode = controlledMode ?? internalMode;
   const setMode = setInternalMode;
@@ -3144,6 +3147,8 @@ export function MemoryGraphPanel({
   useEffect(() => {
     if (!workspace) return;
     let active = true;
+    setTooLarge(false);
+    setSubdirs([]);
     coreBridge
       .ensureProjectGraph(workspace)
       .then((building) => {
@@ -3151,9 +3156,18 @@ export function MemoryGraphPanel({
       })
       .catch(() => {});
     const unsubscribe = subscribeAppEvents((event) => {
-      if (event.type === "project_graph.ready" && event.workspace === workspace) {
+      if (event.workspace !== workspace) return;
+      if (event.type === "project_graph.ready") {
         setBuildingGraph(false);
+        setTooLarge(false);
         reload();
+      } else if (event.type === "project_graph.too_large") {
+        // Huge repo: don't auto-map — offer to map a subfolder instead.
+        setBuildingGraph(false);
+        setTooLarge(true);
+        coreBridge.projectGraphSubdirs(workspace).then((s) => {
+          if (active) setSubdirs(s);
+        });
       }
     });
     return () => {
@@ -3161,6 +3175,14 @@ export function MemoryGraphPanel({
       unsubscribe();
     };
   }, [workspace, reload]);
+
+  // Map a chosen subtree of a huge repo, then show the building state.
+  const mapSubdir = (name: string) => {
+    if (!workspace) return;
+    setTooLarge(false);
+    setBuildingGraph(true);
+    coreBridge.ensureProjectGraph(workspace, name).catch(() => {});
+  };
 
   // Lookups + force-graph data. react-force-graph owns the layout (continuous
   // d3-force): we hand it nodes (colour/size by ontology) and links, and it settles
@@ -3235,6 +3257,29 @@ export function MemoryGraphPanel({
         <button type="button" className="ghost-button" onClick={reload}>
           Riprova
         </button>
+      </div>
+    );
+  }
+  if (tooLarge && (!graph || graph.nodes.length <= 1)) {
+    return (
+      <div className="workbench-empty project-map-picker">
+        <Share2 size={28} />
+        <p>
+          Progetto grande: scegli una cartella da mappare (così la mappa resta leggibile
+          e veloce).
+        </p>
+        {subdirs.length === 0 ? (
+          <p className="muted">Nessuna sottocartella di codice trovata.</p>
+        ) : (
+          <div className="project-map-subdirs">
+            {subdirs.slice(0, 24).map((s) => (
+              <button key={s.name} className="project-map-subdir" onClick={() => mapSubdir(s.name)}>
+                <span className="name">{s.name}</span>
+                <span className="count">{s.code_files} file</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     );
   }

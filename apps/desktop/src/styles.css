@@ -3124,6 +3124,35 @@ body.resizing-drawer {
   text-align: center;
   font-size: 13px;
 }
+
+/* Huge-repo escape hatch: pick a subfolder to map. */
+.project-map-subdirs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  max-width: 560px;
+  margin-top: 6px;
+}
+.project-map-subdir {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface, transparent);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.project-map-subdir:hover {
+  border-color: var(--accent, #6366f1);
+}
+.project-map-subdir .count {
+  color: var(--muted);
+  font-size: 11px;
+}
 /* Artifacts rendered inside a workbench tab: fill the body, drop standalone chrome. */
 .artifacts-panel.embedded {
   position: static;
