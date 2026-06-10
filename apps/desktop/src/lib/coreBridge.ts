@@ -714,6 +714,40 @@ async function electronSetHomunProactive(
   return response.json() as Promise<{ enabled: boolean }>;
 }
 
+export type HomunCuriosity = {
+  id: number;
+  text: string;
+  topic: string;
+  rationale: string;
+};
+
+async function electronHomunCuriosities(): Promise<HomunCuriosity[]> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/homun/curiosities`, {
+    headers: gatewayHeaders(),
+  });
+  if (!response.ok) return [];
+  const body = (await response.json()) as { curiosities: HomunCuriosity[] };
+  return body.curiosities ?? [];
+}
+
+async function electronMineHomunCuriosities(): Promise<number> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/homun/curiosities`, {
+    method: "POST",
+    headers: gatewayHeaders(),
+  });
+  if (!response.ok) return 0;
+  const body = (await response.json()) as { queued: number };
+  return body.queued ?? 0;
+}
+
+async function electronDismissHomunCuriosity(id: number): Promise<void> {
+  await fetch(`${DESKTOP_GATEWAY_URL}/api/homun/curiosities/dismiss`, {
+    method: "POST",
+    headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  }).catch(() => undefined);
+}
+
 async function electronConsolidateMemory(
   workspace?: string,
 ): Promise<{ merged: number; dropped: number }> {
@@ -1540,6 +1574,9 @@ export const coreBridge = {
   homunProactiveStatus: () => electronHomunProactiveStatus(),
   setHomunProactive: (enabled: boolean, every?: string) =>
     electronSetHomunProactive(enabled, every),
+  homunCuriosities: () => electronHomunCuriosities(),
+  mineHomunCuriosities: () => electronMineHomunCuriosities(),
+  dismissHomunCuriosity: (id: number) => electronDismissHomunCuriosity(id),
   setChatThreadPinned: (threadId: string, pinned: boolean) =>
     chatApi.setChatThreadPinned(threadId, pinned),
   archiveChatThread: (threadId: string) =>
