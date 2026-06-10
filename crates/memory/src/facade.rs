@@ -469,6 +469,19 @@ impl MemoryFacade {
             .list_entities_including_tombstoned(user_id, workspace_id)?)
     }
 
+    /// Re-point every relation of one entity onto another (entity merge).
+    pub fn repoint_relations(
+        &self,
+        from_ref: &MemoryRef,
+        to_ref: &MemoryRef,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> MemoryResult<()> {
+        Ok(self
+            .store
+            .repoint_relations(from_ref, to_ref, user_id, workspace_id)?)
+    }
+
     /// Resurrect an entity (drop its tombstone) — used when a live memory references it.
     pub fn untombstone_entity(
         &self,

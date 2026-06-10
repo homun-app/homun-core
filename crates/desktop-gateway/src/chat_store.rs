@@ -728,6 +728,16 @@ impl ChatStore {
         Ok(())
     }
 
+    /// Re-point a contact's graph entity_ref (used when the owner's fragmented
+    /// identities are unified into person:self — the self-contact must follow).
+    pub fn set_contact_entity_ref(&self, id: i64, entity_ref: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "update contacts set entity_ref = ?1, updated_at = ?2 where id = ?3",
+            params![entity_ref, Self::now_secs(), id],
+        )?;
+        Ok(())
+    }
+
     /// Merge `absorbed` into `survivor`: move its identities (drop UNIQUE collisions),
     /// then delete it. Memory-side relinking is done by the caller via entity_ref.
     pub fn merge_contacts(&self, survivor: i64, absorbed: i64) -> rusqlite::Result<()> {
