@@ -20089,11 +20089,16 @@ fn facts_from_graph(
         .filter(|m| mem_refs.contains(&m.reference.to_string()))
         .filter(|m| matches!(m.memory_type.as_str(), "fact" | "preference" | "decision"))
         .map(|m| {
-            let temporality = match m.metadata.get("certainty").and_then(|c| c.as_str()) {
-                Some("committed") => "event",
-                _ => "durable",
-            }
-            .to_string();
+            // Temporality is a PROPERTY of the fact (durable/transient/event), not its
+            // epistemic certainty — read it from metadata when the distiller set it,
+            // else default to durable (most extracted facts are stable truths).
+            let temporality = m
+                .metadata
+                .get("temporality")
+                .and_then(|t| t.as_str())
+                .filter(|t| matches!(*t, "durable" | "transient" | "event"))
+                .unwrap_or("durable")
+                .to_string();
             ContactFact {
                 reference: m.reference.to_string(),
                 text: m.text,
@@ -20102,8 +20107,39 @@ fn facts_from_graph(
             }
         })
         .collect();
-    out.sort_by(|a, b| a.date.cmp(&b.date));
-    out
+    // Read-time dedup: collapse near-duplicate facts (e.g. "si chiama Fabio" /
+    // "si chiama Fabio Cantone (desumibile…)"), keeping the richest (longest) — the
+    // store may hold paraphrases until consolidation merges them. Lexical Jaccard
+    // OR semantic cosine (embeddings), mirroring the graph projection, so a
+    // parenthetical that adds tokens doesn't defeat the merge.
+    let embeddings: std::collections::HashMap<String, Vec<f32>> = facade
+        .list_embeddings(user, &ws)
+        .map(|v| v.into_iter().map(|(r, vec)| (r.to_string(), vec)).collect())
+        .unwrap_or_default();
+    out.sort_by(|a, b| b.text.chars().count().cmp(&a.text.chars().count()));
+    let mut kept: Vec<ContactFact> = Vec::new();
+    let mut seen: Vec<(std::collections::HashSet<String>, Option<Vec<f32>>)> = Vec::new();
+    for fact in out {
+        let tokens = dedup_tokens(&fact.text);
+        let vector = embeddings.get(&fact.reference).cloned();
+        let duplicate = seen.iter().any(|(ex_tokens, ex_vec)| {
+            jaccard(&tokens, ex_tokens) >= DEDUP_JACCARD
+                // Containment: a less-complete restatement ("si chiama Fabio" ⊂
+                // "si chiama Fabio Cantone …") — since we keep longest-first, drop it.
+                || (tokens.len() >= 2 && tokens.is_subset(ex_tokens))
+                || match (vector.as_ref(), ex_vec.as_ref()) {
+                    (Some(a), Some(b)) => cosine(a, b) >= DEDUP_COSINE,
+                    _ => false,
+                }
+        });
+        if duplicate {
+            continue;
+        }
+        seen.push((tokens, vector));
+        kept.push(fact);
+    }
+    kept.sort_by(|a, b| a.date.cmp(&b.date));
+    kept
 }
 
 /// "Cosa so di lui/lei": facts read live from the memory graph (no cache, no LLM).
@@ -20216,7 +20252,8 @@ async fn contact_profile_refresh(
                 sensitivity: MemoryDataSensitivity::Internal,
                 evidence_refs,
                 metadata: serde_json::json!({
-                    "scope": "personal", "certainty": certainty, "source": "contact-distill"
+                    "scope": "personal", "certainty": certainty,
+                    "temporality": f.temporality, "source": "contact-distill"
                 }),
             };
             if let Ok(record) = facade.create_memory_candidate(create) {
