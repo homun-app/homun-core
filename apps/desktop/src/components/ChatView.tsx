@@ -3023,14 +3023,33 @@ type WorkbenchTab = "files" | "artifacts" | "memoria" | "activity" | "plan";
 // preferences. Self-rendered SVG (no graph lib): a small deterministic force layout +
 // pan/zoom + click-to-inspect. Data from GET /api/memory/graph.
 const GRAPH_KIND_STYLE: Record<string, { fill: string; r: number; label: string }> = {
-  project: { fill: "#6366f1", r: 16, label: "Progetto" },
+  project: { fill: "#6366f1", r: 16, label: "Spazio" },
   decision: { fill: "#0ea5e9", r: 11, label: "Decisione" },
-  file: { fill: "#10b981", r: 8, label: "File / entità" },
+  file: { fill: "#10b981", r: 8, label: "File" },
   alternative: { fill: "#fb7185", r: 7, label: "Alternativa scartata" },
   fact: { fill: "#f59e0b", r: 8, label: "Fatto" },
   preference: { fill: "#a78bfa", r: 8, label: "Preferenza" },
+  wiki: { fill: "#0d9488", r: 10, label: "Pagina wiki" },
   entity: { fill: "#94a3b8", r: 8, label: "Entità" },
+  // Entity ontology (G1): one colour per type so the personal graph reads at a
+  // glance — people pink, organizations teal, events orange, places green…
+  "entity:person": { fill: "#ec4899", r: 9, label: "Persona" },
+  "entity:organization": { fill: "#14b8a6", r: 8, label: "Organizzazione" },
+  "entity:place": { fill: "#84cc16", r: 8, label: "Luogo" },
+  "entity:event": { fill: "#f97316", r: 9, label: "Evento" },
+  "entity:topic": { fill: "#eab308", r: 8, label: "Interesse" },
+  "entity:tool": { fill: "#64748b", r: 7, label: "Strumento" },
+  "entity:project": { fill: "#818cf8", r: 8, label: "Progetto" },
 };
+
+/// Entity nodes get a per-type style when the ontology knows the type.
+function graphStyleKey(node: { kind: string; entity_type?: string }): string {
+  if (node.kind === "entity" && node.entity_type) {
+    const key = `entity:${node.entity_type}`;
+    if (GRAPH_KIND_STYLE[key]) return key;
+  }
+  return node.kind;
+}
 
 type LaidOutNode = MemoryGraphNode & { x: number; y: number };
 
@@ -3372,7 +3391,7 @@ export function MemoryGraphPanel({
               );
             })}
             {laidOut.map((node) => {
-              const style = GRAPH_KIND_STYLE[node.kind] ?? GRAPH_KIND_STYLE.entity;
+              const style = GRAPH_KIND_STYLE[graphStyleKey(node)] ?? GRAPH_KIND_STYLE.entity;
               const isSel = selected === node.id;
               const short = node.label.length > 22 ? `${node.label.slice(0, 21)}…` : node.label;
               return (
@@ -3406,8 +3425,11 @@ export function MemoryGraphPanel({
         </svg>
         {selectedNode && (
           <div className="memory-graph-detail">
-            <div className="memory-graph-detail-kind" style={{ color: GRAPH_KIND_STYLE[selectedNode.kind]?.fill }}>
-              {GRAPH_KIND_STYLE[selectedNode.kind]?.label ?? selectedNode.kind}
+            <div
+              className="memory-graph-detail-kind"
+              style={{ color: GRAPH_KIND_STYLE[graphStyleKey(selectedNode)]?.fill }}
+            >
+              {GRAPH_KIND_STYLE[graphStyleKey(selectedNode)]?.label ?? selectedNode.kind}
             </div>
             <div className="memory-graph-detail-title">{selectedNode.label}</div>
             {selectedNode.detail && <p className="memory-graph-detail-body">{selectedNode.detail}</p>}
@@ -3447,7 +3469,17 @@ export function MemoryGraphPanel({
         )}
       </div>
       <div className="memory-graph-legend">
-        {["project", "decision", "file", "alternative", "fact", "preference"].map((kind) => (
+        {[
+          "decision",
+          "fact",
+          "preference",
+          "wiki",
+          "entity:person",
+          "entity:organization",
+          "entity:place",
+          "entity:event",
+          "entity:topic",
+        ].map((kind) => (
           <span key={kind}>
             <i style={{ background: GRAPH_KIND_STYLE[kind].fill }} />
             {GRAPH_KIND_STYLE[kind].label}

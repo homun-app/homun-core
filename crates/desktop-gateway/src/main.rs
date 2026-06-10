@@ -389,6 +389,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     init_active_workspace_from_disk();
     backfill_contacts(&state);
+    backfill_mentions(&state);
     start_task_executor_worker(state.clone());
     spawn_thread_browser_session_reaper(state.clone());
     spawn_contained_computer_idle_reaper(state.clone());
@@ -1527,6 +1528,14 @@ fn persist_scope_memories(
             let _ = facade.confirm_memory(&lifecycle, reference, "auto-confirmed (low risk)");
         }
     }
+    // G2: connect each new memory to the entities it talks about — the edge that
+    // turns "facts cloud + entities cloud" into an actual graph.
+    let items: Vec<(MemoryRef, String)> = kept
+        .iter()
+        .zip(summary.memory_refs.iter())
+        .map(|(memory, reference)| (reference.clone(), memory.text.clone()))
+        .collect();
+    link_memory_mentions(facade, user_id, workspace, &items);
 }
 
 /// Reserved workspace for THREAD (episodic) memory — "what we discussed". Kept
@@ -1851,9 +1860,55 @@ fn persist_graph(
     facade: &MemoryFacade,
     user_id: &MemoryUserId,
     workspace: &MemoryWorkspaceId,
-    entities: Vec<ExtractedEntity>,
+    mut entities: Vec<ExtractedEntity>,
     relations: Vec<ExtractedRelation>,
+    project_ws: Option<&MemoryWorkspaceId>,
 ) {
+    // Scope routing (G1): entities tagged scope=project (files, libraries, tools of
+    // the current work) belong to the PROJECT's graph, not the personal one — this
+    // is how `main.py`/`pytest` stopped leaking into the personal entity list.
+    if let Some(project) = project_ws {
+        let project_entities: Vec<ExtractedEntity> = {
+            let (to_project, to_personal): (Vec<_>, Vec<_>) = entities.drain(..).partition(|e| {
+                e.metadata.get("scope").and_then(|s| s.as_str()) == Some("project")
+            });
+            entities = to_personal;
+            to_project
+        };
+        // Resolve existing refs by canonical_key (the UNIQUE spine) so re-seeing an
+        // entity updates it instead of colliding on the index.
+        let mut project_keys: std::collections::HashMap<String, MemoryRef> =
+            std::collections::HashMap::new();
+        if let Ok(existing) = facade.list_entities_for_ui(user_id, project) {
+            for entity in existing {
+                project_keys.insert(entity.canonical_key.clone(), entity.reference);
+            }
+        }
+        for extracted in project_entities {
+            if extracted.canonical_key.trim().is_empty() {
+                continue;
+            }
+            let reference = project_keys
+                .get(&extracted.canonical_key)
+                .cloned()
+                .unwrap_or_else(|| {
+                    MemoryRef::generated(MemoryRefKind::Entity, user_id.clone(), project.clone())
+                });
+            let entity = MemoryEntity {
+                reference,
+                user_id: user_id.clone(),
+                workspace_id: project.clone(),
+                entity_type: extracted.entity_type,
+                name: extracted.name,
+                canonical_key: extracted.canonical_key,
+                aliases: extracted.aliases,
+                privacy_domain: PrivacyDomain::new("personal"),
+                sensitivity: extracted.sensitivity,
+                metadata: extracted.metadata,
+            };
+            let _ = facade.upsert_entity(&entity);
+        }
+    }
     if entities.is_empty() && relations.is_empty() {
         return;
     }
@@ -1928,6 +1983,73 @@ fn persist_graph(
             metadata: extracted.metadata,
         };
         let _ = facade.upsert_relation(&relation);
+    }
+}
+
+/// G2 — the missing link of the graph: deterministic memory→entity "mentions"
+/// edges within ONE workspace. An entity is linked to a memory when its name (or
+/// an alias, ≥3 chars) appears in the memory text, case-insensitively. The LLM
+/// never computes these (it already extracted both sides); plain code does.
+/// Idempotent: existing (source→target) pairs are skipped.
+fn link_memory_mentions(
+    facade: &MemoryFacade,
+    user_id: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+    items: &[(MemoryRef, String)],
+) {
+    if items.is_empty() {
+        return;
+    }
+    let Ok(entities) = facade.list_entities_for_ui(user_id, workspace) else {
+        return;
+    };
+    if entities.is_empty() {
+        return;
+    }
+    let mut existing: std::collections::HashSet<(String, String)> = facade
+        .list_relations_for_ui(user_id, workspace)
+        .map(|rels| {
+            rels.into_iter()
+                .map(|r| (r.source_ref.to_string(), r.target_ref.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    for (memory_ref, text) in items {
+        let hay = text.to_lowercase();
+        for entity in &entities {
+            // "Tu" (person:self) would match nothing useful and every memory is
+            // about the user anyway — skip.
+            if entity.canonical_key == "person:self" {
+                continue;
+            }
+            let mentioned = std::iter::once(&entity.name)
+                .chain(entity.aliases.iter())
+                .any(|name| {
+                    let needle = name.trim().to_lowercase();
+                    needle.chars().count() >= 3 && hay.contains(&needle)
+                });
+            if !mentioned {
+                continue;
+            }
+            let pair = (memory_ref.to_string(), entity.reference.to_string());
+            if !existing.insert(pair) {
+                continue;
+            }
+            let relation = MemoryRelation {
+                reference: MemoryRef::generated(MemoryRefKind::Relation, user_id.clone(), workspace.clone()),
+                user_id: user_id.clone(),
+                workspace_id: workspace.clone(),
+                source_ref: memory_ref.clone(),
+                relation_type: "mentions".to_string(),
+                target_ref: entity.reference.clone(),
+                confidence: 0.7,
+                privacy_domain: PrivacyDomain::new("personal"),
+                sensitivity: MemoryDataSensitivity::Internal,
+                evidence: Vec::new(),
+                metadata: serde_json::json!({ "source": "mention-linker" }),
+            };
+            let _ = facade.upsert_relation(&relation);
+        }
     }
 }
 
@@ -2019,17 +2141,25 @@ niente altro:\n\
 nella lingua dell'utente\",\"sensitivity\":\"internal|private|confidential|secret\",\"confidence\":0.0-1.0,\
 \"metadata\":{\"scope\":\"personal|project\",\"certainty\":\"committed|considered|intended\",\"decision\":{\"rationale\":\"il perché\",\
 \"alternatives\":[{\"option\":\"alternativa\",\"rejected_because\":\"motivo\"}]}}}],\
-\"entities\":[{\"entity_type\":\"person|project|tool\",\"name\":\"Nome\",\"canonical_key\":\"person:nome-normalizzato\",\
-\"sensitivity\":\"internal|private\",\"privacy_domain\":\"personal\"}],\
+\"entities\":[{\"entity_type\":\"person|organization|place|event|project|tool|topic\",\"name\":\"Nome\",\
+\"canonical_key\":\"person:nome-normalizzato\",\"aliases\":[\"forma breve\"],\
+\"sensitivity\":\"internal|private\",\"privacy_domain\":\"personal\",\"metadata\":{\"scope\":\"personal|project\"}}],\
 \"relations\":[{\"source_ref\":\"person:fabio\",\"relation_type\":\"child_of|parent_of|partner_of|sibling_of|works_as|relates_to\",\
 \"target_ref\":\"person:sara\",\"sensitivity\":\"internal\",\"privacy_domain\":\"personal\"}],\
 \"episode\":\"riassunto in UNA frase di cosa si è discusso o deciso in questo scambio\"}\n\
 REGOLE: scope \"personal\" = vale ovunque (preferenze, persone, dati personali); scope \"project\" \
 = specifico del progetto/lavoro corrente (decisioni tecniche, file, scelte). Per memory_type \
 \"decision\" metadata.decision è OBBLIGATORIO (rationale, e alternatives se citate) e lo scope è di \
-norma \"project\". ENTITÀ = persone/progetti/strumenti citati, con canonical_key STABILE (es. \
-\"person:sara\"). Per l'UTENTE stesso usa SEMPRE canonical_key \"person:self\" (sia nelle entità \
-sia nelle relazioni), es. per \"ho una figlia Sara\": relation parent_of person:self → person:sara. \
+norma \"project\". ENTITÀ = le cose citate, TIPIZZATE bene: person = persone; organization = aziende, \
+servizi, enti (Trenitalia, Gmail, una banca); place = luoghi (città, paesi, indirizzi); event = \
+viaggi, acquisti, appuntamenti, scadenze (es. \"Viaggio a Barcellona a settembre\"); project = \
+progetti di lavoro; tool = software, file, librerie (SEMPRE metadata.scope \"project\" — mai \
+entità personali); topic = interessi/argomenti ricorrenti (es. \"tennis\"). canonical_key STABILE \
+\"tipo:nome-normalizzato\" (es. \"organization:trenitalia\", \"event:viaggio-barcellona-2026\"). \
+metadata.scope dell'entità: \"personal\" per persone/luoghi/eventi/organizzazioni della vita \
+dell'utente, \"project\" per file/librerie/strumenti del lavoro corrente. Per l'UTENTE stesso usa \
+SEMPRE canonical_key \"person:self\" (sia nelle entità sia nelle relazioni), es. per \"ho una figlia \
+Sara\": relation parent_of person:self → person:sara. \
 RELAZIONI = usa gli STESSI canonical_key in source_ref/target_ref. Inserisci entità e relazioni \
 SOLO se esplicite, altrimenti lascia gli array vuoti. sensitivity: PII (codice \
 fiscale, indirizzo, salute, documenti) = \"secret\"; fatti personali (figli, partner, città) = \
@@ -2267,13 +2397,15 @@ aggiornamenti sostanziali rispetto a queste):\n{known_decisions}"
             // Markdown face: regenerate the project's "Decisioni" wiki page.
             rebuild_decisions_wiki(&facade, &user_id, &active);
         }
-        // Graph (people + kinship/work relations) → personal scope.
+        // Graph: people/places/events/orgs → personal; tools/files (scope=project)
+        // → the active project's graph.
         persist_graph(
             &facade,
             &user_id,
             &MemoryWorkspaceId::new(PERSONAL_WORKSPACE),
             graph_entities,
             graph_relations,
+            has_project.then_some(&active),
         );
         // Episodic memory (M4): one line per turn, in the thread scope.
         if let Some(tid) = thread_id {
@@ -10581,6 +10713,54 @@ fn contact_turn_context(
     )
 }
 
+/// One-shot backfill (G2): retro-link existing memories to the entities they
+/// mention, per workspace — the stored graph was born with two disconnected
+/// layers (facts/preferences vs entities) because the write path never emitted
+/// memory→entity edges. Idempotent twice over: the settings flag skips the pass,
+/// and link_memory_mentions itself skips already-linked pairs.
+fn backfill_mentions(state: &AppState) {
+    if let Ok(store) = lock_store(state) {
+        if store.flag("mentions_backfill_v1").ok().flatten().is_some() {
+            return;
+        }
+    } else {
+        return;
+    }
+    let user = gateway_memory_user_id();
+    let mut workspaces: Vec<String> = vec![PERSONAL_WORKSPACE.to_string()];
+    workspaces.extend(
+        load_workspaces_file()
+            .workspaces
+            .into_iter()
+            .map(|w| w.id)
+            .filter(|id| id != PERSONAL_WORKSPACE),
+    );
+    let Ok(facade) = lock_memory_facade(state) else {
+        return;
+    };
+    let mut linked_scopes = 0usize;
+    for id in workspaces {
+        let workspace = MemoryWorkspaceId::new(id);
+        let items: Vec<(MemoryRef, String)> = facade
+            .list_memories_for_ui(&user, &workspace)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|m| !matches!(m.status, MemoryStatus::Deleted | MemoryStatus::Rejected))
+            .filter(|m| matches!(m.memory_type.as_str(), "fact" | "preference" | "decision"))
+            .map(|m| (m.reference, m.text))
+            .collect();
+        if items.is_empty() {
+            continue;
+        }
+        link_memory_mentions(&facade, &user, &workspace, &items);
+        linked_scopes += 1;
+    }
+    eprintln!("mentions-backfill: completato su {linked_scopes} scope");
+    if let Ok(store) = lock_store(state) {
+        let _ = store.set_flag("mentions_backfill_v1", "1");
+    }
+}
+
 /// One-shot migration: seed the curated `contacts` table from existing `person`
 /// memory entities that have a channel handle (real channel contacts). Mention-only
 /// persons (no handle, e.g. "Jannik Sinner") are NOT imported — that's the bug fix.
@@ -10706,6 +10886,7 @@ fn record_channel_message(state: &AppState, channel: &str, message: &ChannelInbo
                     metadata: serde_json::json!({ "contact_type": "unknown" }),
                 }],
                 Vec::new(),
+                None,
             );
         }
     }
@@ -18337,13 +18518,16 @@ async fn memory_graph(
         tokio::spawn(async move { backfill_embeddings(&st, &scope_user, &scope_ws, 80).await; });
     }
 
-    let project_label = {
-        let file = load_workspaces_file();
-        file.workspaces
+    // Root label per scope: the personal graph is "Personale", not "Progetto".
+    let project_label = match ws.as_str() {
+        PERSONAL_WORKSPACE => "Personale".to_string(),
+        THREADS_WORKSPACE => "Conversazioni".to_string(),
+        other => load_workspaces_file()
+            .workspaces
             .iter()
-            .find(|w| w.id == ws.as_str())
+            .find(|w| w.id == other)
             .map(|w| w.name.clone())
-            .unwrap_or_else(|| "Progetto".to_string())
+            .unwrap_or_else(|| "Progetto".to_string()),
     };
 
     let mut nodes: Vec<GraphNode> = Vec::new();
@@ -18466,7 +18650,49 @@ async fn memory_graph(
                 let source = relation.source_ref.to_string();
                 let target = relation.target_ref.to_string();
                 if seen.contains(&source) && seen.contains(&target) && source != target {
-                    edges.push(GraphEdge { source, target, label: relation.relation_type });
+                    // "mentions" edges (G2, memory→entity) read better in Italian.
+                    let label = if relation.relation_type == "mentions" {
+                        "riguarda".to_string()
+                    } else {
+                        relation.relation_type
+                    };
+                    edges.push(GraphEdge { source, target, label });
+                }
+            }
+        }
+    }
+
+    // Wiki pages (the markdown face) join the graph through their linked_refs —
+    // they were ALREADY stored linked to the memories they cite, just never shown.
+    if let Ok(pages) = facade.list_wiki_pages_for_ui(&user, &ws) {
+        for page in pages {
+            let page_id = format!("wiki::{}", page.path);
+            let mut linked_any = false;
+            for linked in &page.linked_refs {
+                let target = linked.to_string();
+                if seen.contains(&target) {
+                    if !linked_any {
+                        graph_push_node(
+                            &mut nodes,
+                            &mut seen,
+                            &page_id,
+                            "wiki",
+                            page.title.clone(),
+                            format!("Pagina wiki · {}", page.path),
+                            "",
+                        );
+                        edges.push(GraphEdge {
+                            source: project_id.clone(),
+                            target: page_id.clone(),
+                            label: "wiki".to_string(),
+                        });
+                        linked_any = true;
+                    }
+                    edges.push(GraphEdge {
+                        source: page_id.clone(),
+                        target,
+                        label: "cita".to_string(),
+                    });
                 }
             }
         }
