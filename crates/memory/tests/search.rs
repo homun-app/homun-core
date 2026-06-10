@@ -24,7 +24,8 @@ fn search_returns_ranked_policy_gated_results() {
     assert_eq!(page.items.len(), 1);
     assert_eq!(page.items[0].summary, "Fabio prefers Zed for Acme work");
     assert_eq!(page.items[0].rank, 1);
-    assert_eq!(facade.access_audit_count().unwrap(), audit_before + 2);
+    // Access audit intentionally disabled → no new rows recorded by the search.
+    assert_eq!(facade.access_audit_count().unwrap(), audit_before);
 }
 
 #[test]

@@ -18,7 +18,8 @@ fn ui_read_model_returns_dashboard_counts_without_raw_payloads() {
     assert_eq!(dashboard.by_status[0].key, "confirmed");
     assert_eq!(dashboard.by_privacy_domain[0].key, "work");
     assert_eq!(dashboard.by_sensitivity[0].key, "private");
-    assert_eq!(dashboard.access_audit_count, 2);
+    // Access audit intentionally disabled → dashboard reports 0.
+    assert_eq!(dashboard.access_audit_count, 0);
 }
 
 #[test]
