@@ -431,6 +431,35 @@ impl SQLiteMemoryStore {
         Ok(out)
     }
 
+    /// Re-point every relation of `from_ref` onto `to_ref` (entity merge): both the
+    /// source and target sides. Mention edges get rebuilt by regeneration anyway, but
+    /// re-pointing preserves hand-authored entity↔entity edges through the merge.
+    pub fn repoint_relations(
+        &self,
+        from_ref: &MemoryRef,
+        to_ref: &MemoryRef,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<(), String> {
+        for col in ["source_ref", "target_ref"] {
+            self.conn
+                .execute(
+                    &format!(
+                        "update relations set {col} = ?1
+                         where {col} = ?2 and user_id = ?3 and workspace_id = ?4"
+                    ),
+                    params![
+                        to_ref.to_string(),
+                        from_ref.to_string(),
+                        user_id.as_str(),
+                        workspace_id.as_str(),
+                    ],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    }
+
     /// Resurrect an entity: drop its tombstone so it reappears in the graph. Used by
     /// regeneration when a live memory references a wrongly-orphaned entity.
     pub fn untombstone_entity(

@@ -391,6 +391,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_active_workspace_from_disk();
     backfill_contacts(&state);
     backfill_mentions(&state);
+    unify_owner_identity(&state);
     sweep_graph_on_startup(&state);
     seed_homun_asked_questions(&state);
     start_task_executor_worker(state.clone());
@@ -2551,6 +2552,16 @@ fn persist_graph(
 /// an alias, ≥3 chars) appears in the memory text, case-insensitively. The LLM
 /// never computes these (it already extracted both sides); plain code does.
 /// Idempotent: existing (source→target) pairs are skipped.
+/// Generic words that denote "the user" abstractly — every personal fact starts with
+/// one ("l'utente preferisce…"), so person:self must NOT be linked by these or it
+/// would absorb the whole scope. Self is linked only by its SPECIFIC aliases (a name).
+fn is_generic_self_word(needle: &str) -> bool {
+    matches!(
+        needle,
+        "utente" | "l'utente" | "l’utente" | "user" | "self" | "tu" | "io" | "me" | "mi"
+    )
+}
+
 fn link_memory_mentions(
     facade: &MemoryFacade,
     user_id: &MemoryUserId,
@@ -2589,16 +2600,23 @@ fn link_mentions_core(
     for (memory_ref, text) in items {
         let hay = text.to_lowercase();
         for entity in entities {
-            // "Tu" (person:self) would match nothing useful and every memory is
-            // about the user anyway — skip.
-            if entity.canonical_key == "person:self" {
+            // Entities folded into another by an identity merge are permanently dead.
+            if entity.metadata.get("merged_into").is_some() {
                 continue;
             }
+            // person:self IS linkable (so the unified "you" node collects memories that
+            // name you, e.g. "Fabio"), but it must NOT match the generic self-words
+            // that prefix nearly every personal fact ("l'utente…") — that would link
+            // everything to self. So for self we match only its specific aliases.
+            let is_self = entity.canonical_key == "person:self";
             let mentioned = std::iter::once(&entity.name)
                 .chain(entity.aliases.iter())
                 .any(|name| {
                     let needle = name.trim().to_lowercase();
-                    needle.chars().count() >= 3 && hay.contains(&needle)
+                    if needle.chars().count() < 3 || (is_self && is_generic_self_word(&needle)) {
+                        return false;
+                    }
+                    hay.contains(&needle)
                 });
             if !mentioned {
                 continue;
@@ -11464,6 +11482,145 @@ fn backfill_mentions(state: &AppState) {
     if let Ok(store) = lock_store(state) {
         let _ = store.set_flag("mentions_backfill_v1", "1");
     }
+}
+
+/// One-shot: unify the user's own fragmented identity into `person:self`. The user
+/// shows up as several person nodes — a bare `person:<name>` plus the owner's channel
+/// identities (`person:telegram:HANDLE`, `person:whatsapp:HANDLE`) that are NOT backed
+/// by a curated contact (contacts are OTHER people; the owner isn't one). We fold them
+/// all into self: their names + channel handles become self's aliases (so the channel
+/// resolver maps inbound owner handles → self, no re-fragmentation), their edges are
+/// re-pointed, and they're marked `merged_into` + tombstoned so regeneration's resurrect
+/// never brings them back. Idempotent via a flag; runs before the startup regeneration.
+fn unify_owner_identity(state: &AppState) {
+    if let Ok(store) = lock_store(state) {
+        if store.flag("owner_identity_unified_v1").ok().flatten().is_some() {
+            return;
+        }
+    } else {
+        return;
+    }
+    let user = gateway_memory_user_id();
+    let workspace = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
+    // OTHER contacts' entity refs = real other people; never fold those into self.
+    // The SELF contact (is_self) is the exception: its entity IS the owner and must
+    // be unified too — collect its id so we can re-point it to person:self after.
+    let mut other_contact_refs: std::collections::HashSet<String> = Default::default();
+    let mut self_contact_ids: Vec<i64> = Vec::new();
+    if let Ok(store) = lock_store(state) {
+        if let Ok(contacts) = store.list_contacts() {
+            for c in contacts {
+                if c.is_self {
+                    self_contact_ids.push(c.id);
+                } else if let Some(r) = c.entity_ref {
+                    other_contact_refs.insert(r);
+                }
+            }
+        }
+    }
+    let contact_refs = other_contact_refs; // self-contact entities are mergeable
+    let Ok(facade) = lock_memory_facade(state) else {
+        return;
+    };
+    let all = facade
+        .list_entities_including_tombstoned(&user, &workspace)
+        .unwrap_or_default();
+    let Some(mut self_entity) = all
+        .iter()
+        .find(|(e, _)| e.canonical_key == "person:self")
+        .map(|(e, _)| e.clone())
+    else {
+        if let Ok(store) = lock_store(state) {
+            let _ = store.set_flag("owner_identity_unified_v1", "1");
+        }
+        return;
+    };
+    // Owner channel identities: channel-handle person entities NOT backing a contact.
+    let owner_channel: Vec<MemoryEntity> = all
+        .iter()
+        .map(|(e, _)| e)
+        .filter(|e| {
+            (e.canonical_key.starts_with("person:telegram:")
+                || e.canonical_key.starts_with("person:whatsapp:"))
+                && !contact_refs.contains(&e.reference.to_string())
+        })
+        .cloned()
+        .collect();
+    let owner_names: std::collections::HashSet<String> = owner_channel
+        .iter()
+        .map(|e| e.name.trim().to_lowercase())
+        .filter(|n| !n.is_empty())
+        .collect();
+    // Bare person nodes that share a name with an owner channel identity (e.g. the
+    // plain "Fabio" node next to the channel "Fabio"s) — also the owner.
+    let losers: Vec<MemoryEntity> = all
+        .into_iter()
+        .map(|(e, _)| e)
+        .filter(|e| e.canonical_key != "person:self")
+        .filter(|e| {
+            owner_channel.iter().any(|o| o.reference == e.reference)
+                || (e.entity_type == "person"
+                    && !contact_refs.contains(&e.reference.to_string())
+                    && owner_names.contains(&e.name.trim().to_lowercase()))
+        })
+        .collect();
+    if losers.is_empty() {
+        if let Ok(store) = lock_store(state) {
+            let _ = store.set_flag("owner_identity_unified_v1", "1");
+        }
+        return;
+    }
+    // Build self's new alias set: every loser name + alias + channel handle.
+    let mut aliases: std::collections::BTreeSet<String> =
+        self_entity.aliases.iter().cloned().collect();
+    let mut owner_name: Option<String> = None;
+    for loser in &losers {
+        if !loser.name.trim().is_empty() {
+            aliases.insert(loser.name.trim().to_string());
+            if owner_name.is_none() && !owner_names.is_empty() {
+                owner_name = Some(loser.name.trim().to_string());
+            }
+        }
+        for a in &loser.aliases {
+            if !a.trim().is_empty() {
+                aliases.insert(a.trim().to_string());
+            }
+        }
+        if let Some(handle) = loser.canonical_key.strip_prefix("person:") {
+            aliases.insert(handle.to_string());
+        }
+    }
+    // Name the unified node after the owner (e.g. "Fabio") instead of the generic "Utente".
+    if let Some(name) = owner_name {
+        self_entity.name = name;
+    }
+    self_entity.aliases = aliases.into_iter().collect();
+    let _ = facade.upsert_entity(&self_entity);
+    let self_ref = self_entity.reference.clone();
+    let mut merged = 0usize;
+    for mut loser in losers {
+        let _ = facade.repoint_relations(&loser.reference, &self_ref, &user, &workspace);
+        if let serde_json::Value::Object(map) = &mut loser.metadata {
+            map.insert(
+                "merged_into".to_string(),
+                serde_json::Value::String(self_ref.to_string()),
+            );
+        } else {
+            loser.metadata = serde_json::json!({ "merged_into": self_ref.to_string() });
+        }
+        let _ = facade.upsert_entity(&loser);
+        let _ = facade.tombstone_entity(&loser.reference, &user, &workspace, "fuso nel self (owner)");
+        merged += 1;
+    }
+    // The self-contact pointed at one of the merged entities — re-point it to the
+    // unified person:self so the address book's "you" card resolves to one node.
+    if let Ok(store) = lock_store(state) {
+        for id in &self_contact_ids {
+            let _ = store.set_contact_entity_ref(*id, &self_ref.to_string());
+        }
+        let _ = store.set_flag("owner_identity_unified_v1", "1");
+    }
+    eprintln!("owner-unify: {merged} identità del proprietario fuse in person:self");
 }
 
 /// Startup graph regeneration (the completeness INVARIANT): on EVERY launch,
