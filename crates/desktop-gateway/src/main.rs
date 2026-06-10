@@ -3324,6 +3324,71 @@ fn forget_in_scope(
     out
 }
 
+/// Topic/entity forget: resolve the entities named by `query` (by name/alias),
+/// delete every memory linked to them via `mentions`, then tombstone the entities
+/// themselves — "dimentica TUTTO su X". This is the structural complement to the
+/// text-based forget: it catches memories about X even when their wording differs.
+/// Protected: person:self (never "forget me") and contact-backed entities (people
+/// with a card — those are removed via the contacts flow, not topic-forget).
+fn forget_topic_in_scope(
+    facade: &MemoryFacade,
+    user: &MemoryUserId,
+    ws: &MemoryWorkspaceId,
+    query: &str,
+    reason: &str,
+    protected: &std::collections::HashSet<String>,
+) -> Vec<String> {
+    let needle = query.trim().to_lowercase();
+    if needle.chars().count() < 3 {
+        return Vec::new();
+    }
+    let entities = facade.list_entities_for_ui(user, ws).unwrap_or_default();
+    let matched: Vec<MemoryRef> = entities
+        .into_iter()
+        .filter(|e| e.canonical_key != "person:self")
+        .filter(|e| !protected.contains(&e.reference.to_string()))
+        .filter(|e| {
+            std::iter::once(&e.name).chain(e.aliases.iter()).any(|n| {
+                let t = n.trim().to_lowercase();
+                t.chars().count() >= 3 && (needle.contains(&t) || t.contains(&needle))
+            })
+        })
+        .map(|e| e.reference)
+        .collect();
+    if matched.is_empty() {
+        return Vec::new();
+    }
+    let matched_set: std::collections::HashSet<String> =
+        matched.iter().map(|r| r.to_string()).collect();
+    let to_delete: std::collections::HashSet<String> = facade
+        .list_relations_for_ui(user, ws)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|r| r.relation_type == "mentions" && matched_set.contains(&r.target_ref.to_string()))
+        .map(|r| r.source_ref.to_string())
+        .collect();
+    let lifecycle = MemoryLifecycleRequest {
+        actor_id: "forget".to_string(),
+        user_id: user.clone(),
+        workspace_id: ws.clone(),
+        purpose: "forget".to_string(),
+    };
+    let mut out = Vec::new();
+    for m in facade.list_memories_for_ui(user, ws).unwrap_or_default() {
+        if matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+            && to_delete.contains(&m.reference.to_string())
+            && facade.delete_memory(&lifecycle, &m.reference, reason).is_ok()
+        {
+            out.push(m.text);
+        }
+    }
+    // The topic itself goes away (no live memory references it anymore).
+    for entity_ref in &matched {
+        let _ = facade.tombstone_entity(entity_ref, user, ws, reason);
+    }
+    out
+}
+
 fn forget_memory(state: &AppState, args: &serde_json::Value) -> String {
     let query = args.get("query").and_then(|q| q.as_str()).unwrap_or("").trim().to_string();
     if query.is_empty() {
@@ -3333,21 +3398,27 @@ fn forget_memory(state: &AppState, args: &serde_json::Value) -> String {
         .get("reason")
         .and_then(|r| r.as_str())
         .unwrap_or("oblio richiesto dall'utente");
+    // Contact-backed entities are people with a card — never topic-forget those
+    // (the address book has its own delete). Gathered before the facade lock.
+    let protected: std::collections::HashSet<String> = lock_store(state)
+        .ok()
+        .and_then(|store| store.list_contacts().ok())
+        .map(|cs| cs.into_iter().filter_map(|c| c.entity_ref).collect())
+        .unwrap_or_default();
     let Ok(facade) = lock_memory_facade(state) else {
         return "Memoria non disponibile.".to_string();
     };
     let user = gateway_memory_user_id();
     let active = gateway_memory_workspace_id();
     let mut deleted = forget_in_scope(&facade, &user, &active, &query, reason);
+    deleted.extend(forget_topic_in_scope(&facade, &user, &active, &query, reason, &protected));
     if active.as_str() != PERSONAL_WORKSPACE {
-        deleted.extend(forget_in_scope(
-            &facade,
-            &user,
-            &MemoryWorkspaceId::new(PERSONAL_WORKSPACE),
-            &query,
-            reason,
-        ));
+        let personal = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
+        deleted.extend(forget_in_scope(&facade, &user, &personal, &query, reason));
+        deleted.extend(forget_topic_in_scope(&facade, &user, &personal, &query, reason, &protected));
     }
+    deleted.sort();
+    deleted.dedup();
     // Cascade: the graph already hides Deleted; refresh the wiki projection too.
     rebuild_decisions_wiki(&facade, &user, &active);
     // G5: deletions can orphan entities — re-optimize the touched scopes (the
