@@ -2009,13 +2009,25 @@ fn persist_scope_memories(
             let _ = facade.confirm_memory(&lifecycle, reference, "auto-confirmed (low risk)");
         }
     }
-    // G2: connect each new memory to the entities it talks about — the edge that
-    // turns "facts cloud + entities cloud" into an actual graph.
-    let items: Vec<(MemoryRef, String)> = kept
-        .iter()
-        .zip(summary.memory_refs.iter())
-        .map(|(memory, reference)| (reference.clone(), memory.text.clone()))
+    // G2/regeneration invariant: connect memories to the entities they mention.
+    // We re-link the WHOLE live set of this scope (not just the new items) so that
+    // entities created in THIS extraction retroactively pick up older memories that
+    // name them — the forward-only gap that left "Jannik Sinner" unlinked. Idempotent
+    // (link_memory_mentions dedups against existing edges); cheap at personal scale.
+    let mut items: Vec<(MemoryRef, String)> = facade
+        .list_memories_for_ui(user_id, workspace)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|m| !matches!(m.status, MemoryStatus::Deleted | MemoryStatus::Rejected))
+        .filter(|m| matches!(m.memory_type.as_str(), "fact" | "preference" | "decision"))
+        .map(|m| (m.reference, m.text))
         .collect();
+    // include the just-extracted refs even if not yet listable
+    for (memory, reference) in kept.iter().zip(summary.memory_refs.iter()) {
+        if !items.iter().any(|(r, _)| r == reference) {
+            items.push((reference.clone(), memory.text.clone()));
+        }
+    }
     link_memory_mentions(facade, user_id, workspace, &items);
 }
 
@@ -2545,13 +2557,25 @@ fn link_memory_mentions(
     workspace: &MemoryWorkspaceId,
     items: &[(MemoryRef, String)],
 ) {
-    if items.is_empty() {
-        return;
-    }
     let Ok(entities) = facade.list_entities_for_ui(user_id, workspace) else {
         return;
     };
-    if entities.is_empty() {
+    link_mentions_core(facade, user_id, workspace, items, &entities, false);
+}
+
+/// Core of the mention-linker: connect each memory to the entities it names
+/// (name/alias substring, ≥3 chars). When `resurrect` is set, a tombstoned entity
+/// matched by a live memory is un-tombstoned — this is how regeneration heals
+/// entities a previous orphan-sweep wrongly killed (e.g. "Jannik Sinner").
+fn link_mentions_core(
+    facade: &MemoryFacade,
+    user_id: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+    items: &[(MemoryRef, String)],
+    entities: &[MemoryEntity],
+    resurrect: bool,
+) {
+    if items.is_empty() || entities.is_empty() {
         return;
     }
     let mut existing: std::collections::HashSet<(String, String)> = facade
@@ -2564,7 +2588,7 @@ fn link_memory_mentions(
         .unwrap_or_default();
     for (memory_ref, text) in items {
         let hay = text.to_lowercase();
-        for entity in &entities {
+        for entity in entities {
             // "Tu" (person:self) would match nothing useful and every memory is
             // about the user anyway — skip.
             if entity.canonical_key == "person:self" {
@@ -2578,6 +2602,12 @@ fn link_memory_mentions(
                 });
             if !mentioned {
                 continue;
+            }
+            // A live memory names this entity → it is NOT an orphan. If a previous
+            // orphan-sweep tombstoned it (because the forward-only linker had missed
+            // the edge), resurrect it now.
+            if resurrect {
+                let _ = facade.untombstone_entity(&entity.reference, user_id, workspace);
             }
             let pair = (memory_ref.to_string(), entity.reference.to_string());
             if !existing.insert(pair) {
@@ -2626,7 +2656,16 @@ fn sweep_graph_orphans(state: &AppState, workspace: &MemoryWorkspaceId) {
         .filter(|m| matches!(m.memory_type.as_str(), "fact" | "preference" | "decision"))
         .map(|m| (m.reference, m.text))
         .collect();
-    link_memory_mentions(&facade, &user, workspace, &items);
+    // Re-link against ALL entities INCLUDING tombstoned ones, resurrecting any that a
+    // live memory still names (heals entities a prior orphan-sweep wrongly killed —
+    // they had 0 edges only because the forward-only linker never connected them).
+    let all_entities: Vec<MemoryEntity> = facade
+        .list_entities_including_tombstoned(&user, workspace)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(entity, _dead)| entity)
+        .collect();
+    link_mentions_core(&facade, &user, workspace, &items, &all_entities, true);
     let touched: std::collections::HashSet<String> = facade
         .list_relations_for_ui(&user, workspace)
         .unwrap_or_default()
@@ -2651,6 +2690,20 @@ fn sweep_graph_orphans(state: &AppState, workspace: &MemoryWorkspaceId) {
             "orfana: nessuna memoria viva la riguarda",
         );
     }
+}
+
+/// The graph-completeness INVARIANT: regenerate the auto-derived `mentions` edges
+/// for a scope from scratch — wipe the old mention-linker edges (drops stale ones),
+/// then re-derive from the live facts and tombstone any entity left orphan. This is
+/// the "rebuild, don't patch" principle: run it on startup, after writes, and after
+/// delete/forget so the structural layer is always complete and consistent
+/// (no forward-only gaps, no orphans, no stale edges). Cheap at personal scale.
+fn regenerate_graph_links(state: &AppState, workspace: &MemoryWorkspaceId) {
+    if let Ok(facade) = lock_memory_facade(state) {
+        let _ = facade.clear_mention_links(&gateway_memory_user_id(), workspace);
+    }
+    // sweep_graph_orphans re-links ALL live facts + tombstones zero-edge entities.
+    sweep_graph_orphans(state, workspace);
 }
 
 /// M2/M3: after a chat turn, mine the exchange for durable facts, preferences and
@@ -3234,9 +3287,9 @@ fn forget_memory(state: &AppState, args: &serde_json::Value) -> String {
     // facade lock must be released first; sweep re-locks).
     drop(facade);
     if !deleted.is_empty() {
-        sweep_graph_orphans(state, &active);
+        regenerate_graph_links(state, &active);
         if active.as_str() != PERSONAL_WORKSPACE {
-            sweep_graph_orphans(state, &MemoryWorkspaceId::new(PERSONAL_WORKSPACE));
+            regenerate_graph_links(state, &MemoryWorkspaceId::new(PERSONAL_WORKSPACE));
         }
     }
     if deleted.is_empty() {
@@ -11413,17 +11466,13 @@ fn backfill_mentions(state: &AppState) {
     }
 }
 
-/// One-shot startup sweep (G5): clears entities orphaned by deletions that
-/// happened BEFORE the cascade existed. Ongoing hygiene is handled by the
-/// sweeps triggered on each delete (decide endpoint + forget tool).
+/// Startup graph regeneration (the completeness INVARIANT): on EVERY launch,
+/// rebuild the auto-derived `mentions` edges of each scope from the live facts and
+/// drop orphan entities. Ungated on purpose — the old one-shot `graph_sweep_v1`
+/// flag left the graph stale whenever new entities/memories appeared after the
+/// single run (e.g. "Jannik Sinner" created later → never linked). Running it every
+/// boot is cheap at this scale and guarantees the structural layer is always whole.
 fn sweep_graph_on_startup(state: &AppState) {
-    if let Ok(store) = lock_store(state) {
-        if store.flag("graph_sweep_v1").ok().flatten().is_some() {
-            return;
-        }
-    } else {
-        return;
-    }
     let mut workspaces: Vec<String> = vec![PERSONAL_WORKSPACE.to_string()];
     workspaces.extend(
         load_workspaces_file()
@@ -11433,12 +11482,9 @@ fn sweep_graph_on_startup(state: &AppState) {
             .filter(|id| id != PERSONAL_WORKSPACE),
     );
     for id in workspaces {
-        sweep_graph_orphans(state, &MemoryWorkspaceId::new(id));
+        regenerate_graph_links(state, &MemoryWorkspaceId::new(id));
     }
-    eprintln!("graph-sweep: passata iniziale completata");
-    if let Ok(store) = lock_store(state) {
-        let _ = store.set_flag("graph_sweep_v1", "1");
-    }
+    eprintln!("graph-regen: rigenerazione all'avvio completata");
 }
 
 /// One-shot migration: seed the curated `contacts` table from existing `person`
@@ -20950,7 +20996,7 @@ async fn memory_decide(
     // the graph of the touched scope. Facade lock released first (non-reentrant).
     drop(facade);
     if matches!(request.action.as_str(), "delete" | "reject") {
-        sweep_graph_orphans(&state, &reference.workspace_id);
+        regenerate_graph_links(&state, &reference.workspace_id);
     }
     Ok(Json(serde_json::json!({ "ok": true })))
 }
