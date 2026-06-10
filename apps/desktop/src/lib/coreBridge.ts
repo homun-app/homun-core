@@ -1643,6 +1643,7 @@ export const coreBridge = {
   memoryDashboard: () => electronMemoryDashboard(),
   exportLocalData: () => electronExportLocalData(),
   memoryItems: () => electronMemoryItems(),
+  ensureProjectGraph: (workspace: string) => electronEnsureProjectGraph(workspace),
   decideMemory: (
     reference: string,
     action: "confirm" | "reject" | "delete" | "edit",
@@ -2073,7 +2074,14 @@ export type CoreMemoryItem = {
   certainty: string;
 };
 
-async function electronMemoryItems(): Promise<CoreMemoryItem[]> {
+export type CoreMemoryScope = {
+  workspace_id: string;
+  workspace_label: string;
+  scope: string;
+  has_folder: boolean;
+};
+
+async function electronMemoryItems(): Promise<{ items: CoreMemoryItem[]; scopes: CoreMemoryScope[] }> {
   try {
     const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/memory/items`, {
       headers: gatewayHeaders(),
@@ -2081,9 +2089,29 @@ async function electronMemoryItems(): Promise<CoreMemoryItem[]> {
     if (!response.ok) {
       throw new Error(`Desktop Gateway memory items HTTP ${response.status}`);
     }
-    return response.json() as Promise<CoreMemoryItem[]>;
+    const body = await response.json();
+    // Back-compat: the old shape was a bare array of items.
+    if (Array.isArray(body)) return { items: body as CoreMemoryItem[], scopes: [] };
+    return { items: body.items ?? [], scopes: body.scopes ?? [] };
   } catch {
-    return [];
+    return { items: [], scopes: [] };
+  }
+}
+
+/// Ensure a project's code graph is fresh (builds it transparently on open).
+/// Returns true if a build was kicked off; UI reloads on the project_graph.ready event.
+async function electronEnsureProjectGraph(workspace: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/memory/project-graph/ensure`, {
+      method: "POST",
+      headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ workspace }),
+    });
+    if (!response.ok) return false;
+    const body = (await response.json()) as { building?: boolean };
+    return body.building ?? false;
+  } catch {
+    return false;
   }
 }
 

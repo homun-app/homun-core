@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Brain, Check, Search, Trash2, X } from "lucide-react";
 
-import { coreBridge, type CoreMemoryDashboard, type CoreMemoryItem } from "../lib/coreBridge";
+import {
+  coreBridge,
+  type CoreMemoryDashboard,
+  type CoreMemoryItem,
+  type CoreMemoryScope,
+} from "../lib/coreBridge";
 import { MemoryGraphPanel } from "./ChatView";
 
 // The memory "brain": filter by project, search, scrub a per-month timeline (height =
@@ -45,6 +50,7 @@ function dayLabel(raw: string): string {
 
 export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
   const [items, setItems] = useState<CoreMemoryItem[] | null>(null);
+  const [scopes, setScopes] = useState<CoreMemoryScope[]>([]);
   const [workspaceFilter, setWorkspaceFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -60,7 +66,16 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
   const [exporting, setExporting] = useState(false);
 
   const reload = () => {
-    coreBridge.memoryItems().then(setItems).catch(() => setItems([]));
+    coreBridge
+      .memoryItems()
+      .then(({ items, scopes }) => {
+        setItems(items);
+        setScopes(scopes);
+      })
+      .catch(() => {
+        setItems([]);
+        setScopes([]);
+      });
   };
   useEffect(() => {
     coreBridge.memoryDashboard().then(setDashboard).catch(() => setDashboard(null));
@@ -89,11 +104,14 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
   }, []);
 
   const all = items ?? [];
+  // Selector from the server's scope list (includes folder-backed projects even
+  // with zero memory, e.g. a code project), falling back to scopes seen in items.
   const workspaces = useMemo(() => {
     const map = new Map<string, string>();
     for (const it of all) map.set(it.workspace_id, it.workspace_label);
+    for (const s of scopes) map.set(s.workspace_id, s.workspace_label);
     return Array.from(map, ([id, label]) => ({ id, label }));
-  }, [all]);
+  }, [all, scopes]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();

@@ -482,6 +482,12 @@ impl MemoryFacade {
             .repoint_relations(from_ref, to_ref, user_id, workspace_id)?)
     }
 
+    /// Drop a scope's imported code-graph (entities/relations source="graphify"),
+    /// before a re-import (idempotent project-graph rebuild).
+    pub fn clear_graphify(&self, user_id: &UserId, workspace_id: &WorkspaceId) -> MemoryResult<()> {
+        Ok(self.store.clear_graphify(user_id, workspace_id)?)
+    }
+
     /// Resurrect an entity (drop its tombstone) — used when a live memory references it.
     pub fn untombstone_entity(
         &self,

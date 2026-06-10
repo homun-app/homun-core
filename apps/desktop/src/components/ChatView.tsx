@@ -67,6 +67,7 @@ import type {
 } from "react";
 import {
   coreBridge,
+  subscribeAppEvents,
   type ActiveModelInfo,
   type ChatAttachmentInput,
   type CoreComputerSessionSnapshot,
@@ -3072,6 +3073,7 @@ export function MemoryGraphPanel({
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
+  const [buildingGraph, setBuildingGraph] = useState(false);
   const [internalMode, setInternalMode] = useState<"graph" | "wiki">("graph");
   const mode = controlledMode ?? internalMode;
   const setMode = setInternalMode;
@@ -3130,6 +3132,30 @@ export function MemoryGraphPanel({
   useEffect(() => {
     reload();
   }, [reload]);
+
+  // Transparent project map: on opening a project graph, ensure its code map is
+  // fresh (built behind the scenes if missing/stale). Show a neutral "building"
+  // state and reload when the gateway signals the graph is ready. Never "Graphify".
+  useEffect(() => {
+    if (!workspace) return;
+    let active = true;
+    coreBridge
+      .ensureProjectGraph(workspace)
+      .then((building) => {
+        if (active) setBuildingGraph(building);
+      })
+      .catch(() => {});
+    const unsubscribe = subscribeAppEvents((event) => {
+      if (event.type === "project_graph.ready" && event.workspace === workspace) {
+        setBuildingGraph(false);
+        reload();
+      }
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [workspace, reload]);
 
   // Lookups + force-graph data. react-force-graph owns the layout (continuous
   // d3-force): we hand it nodes (colour/size by ontology) and links, and it settles
@@ -3210,10 +3236,11 @@ export function MemoryGraphPanel({
   if (!graph || graph.nodes.length <= 1) {
     return (
       <div className="workbench-empty">
-        <Share2 size={28} />
+        <Share2 size={28} className={buildingGraph ? "spin" : undefined} />
         <p>
-          Ancora nessuna memoria per questo progetto. Decisioni, file toccati e fatti
-          appariranno qui come grafo navigabile man mano che lavoriamo.
+          {buildingGraph
+            ? "Sto mappando il progetto… ci vuole un istante la prima volta."
+            : "Ancora nessuna memoria per questo progetto. Decisioni, file toccati e fatti appariranno qui come grafo navigabile man mano che lavoriamo."}
         </p>
       </div>
     );

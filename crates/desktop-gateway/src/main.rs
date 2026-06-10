@@ -538,6 +538,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/memory/items", get(memory_items))
         .route("/api/memory/graph", get(memory_graph))
         .route("/api/memory/graphify/import", post(memory_graphify_import))
+        .route("/api/memory/project-graph/ensure", post(project_graph_ensure))
         .route("/api/memory/wiki", get(memory_wiki).put(memory_wiki_save))
         .route("/api/memory/consolidate", post(memory_consolidate))
         .route("/api/memory/decide", post(memory_decide))
@@ -19547,7 +19548,7 @@ struct MemoryItemView {
 /// hidden; candidates are shown so they can be confirmed.
 async fn memory_items(
     State(state): State<AppState>,
-) -> Result<Json<Vec<MemoryItemView>>, GatewayError> {
+) -> Result<Json<serde_json::Value>, GatewayError> {
     let facade = lock_memory_facade(&state)?;
     let user = gateway_memory_user_id();
     let mut out: Vec<MemoryItemView> = Vec::new();
@@ -19587,7 +19588,32 @@ async fn memory_items(
         }
         push_scope(&MemoryWorkspaceId::new(workspace.id.clone()), "project", &workspace.name);
     }
-    Ok(Json(out))
+    // Selectable scopes for the graph view: the memory scopes above PLUS every
+    // folder-backed project even with zero memory — so a code project (e.g. "idra")
+    // is reachable and its code graph gets built on open. Without this it'd be
+    // invisible (the selector is derived only from items that have memory).
+    let mut scopes: Vec<serde_json::Value> = Vec::new();
+    let mut seen_ws: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut add_scope = |id: &str, label: &str, kind: &str, has_folder: bool| {
+        if seen_ws.insert(id.to_string()) {
+            scopes.push(serde_json::json!({
+                "workspace_id": id, "workspace_label": label, "scope": kind, "has_folder": has_folder
+            }));
+        }
+    };
+    add_scope(PERSONAL_WORKSPACE, "Personale", "personal", false);
+    add_scope(THREADS_WORKSPACE, "Conversazioni", "thread", false);
+    for it in &out {
+        add_scope(&it.workspace_id, &it.workspace_label, &it.scope, false);
+    }
+    for workspace in load_workspaces_file().workspaces {
+        if workspace.id == PERSONAL_WORKSPACE || workspace.id == THREADS_WORKSPACE {
+            continue;
+        }
+        let has_folder = workspace.folder.as_deref().map(|f| !f.trim().is_empty()).unwrap_or(false);
+        add_scope(&workspace.id, &workspace.name, "project", has_folder);
+    }
+    Ok(Json(serde_json::json!({ "items": out, "scopes": scopes })))
 }
 
 // -------------------------------------------------------------- memory graph
@@ -19680,6 +19706,21 @@ async fn memory_graphify_import(
     })?;
     let user = gateway_memory_user_id();
     let ws = MemoryWorkspaceId::new(&req.workspace_id);
+    let facade = lock_memory_facade(&state)?;
+    let (entities, rels) = import_graphify_value(&facade, &user, &ws, &graph);
+    Ok(Json(serde_json::json!({ "entities": entities, "relations": rels })))
+}
+
+/// Shared import: a Graphify `graph.json` value → entities + entity↔entity relations
+/// in `ws`, tagged `metadata.source="graphify"`. Idempotent: clears the prior code
+/// graph for the scope first, so a rebuild replaces rather than accumulates.
+fn import_graphify_value(
+    facade: &MemoryFacade,
+    user: &MemoryUserId,
+    ws: &MemoryWorkspaceId,
+    graph: &serde_json::Value,
+) -> (usize, usize) {
+    let _ = facade.clear_graphify(user, ws);
     let nodes = graph.get("nodes").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     let links = graph
         .get("links")
@@ -19687,7 +19728,6 @@ async fn memory_graphify_import(
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default();
-    let facade = lock_memory_facade(&state)?;
     let mut id_to_ref: std::collections::HashMap<String, MemoryRef> = std::collections::HashMap::new();
     let mut entities = 0usize;
     for node in &nodes {
@@ -19717,9 +19757,12 @@ async fn memory_graphify_import(
     }
     let mut rels = 0usize;
     for link in &links {
-        let s = link.get("source").and_then(|v| v.as_str());
-        let t = link.get("target").and_then(|v| v.as_str());
-        let (Some(s), Some(t)) = (s, t) else { continue };
+        let (Some(s), Some(t)) = (
+            link.get("source").and_then(|v| v.as_str()),
+            link.get("target").and_then(|v| v.as_str()),
+        ) else {
+            continue;
+        };
         let (Some(src), Some(tgt)) = (id_to_ref.get(s), id_to_ref.get(t)) else { continue };
         let relation = MemoryRelation {
             reference: MemoryRef::generated(MemoryRefKind::Relation, user.clone(), ws.clone()),
@@ -19738,7 +19781,150 @@ async fn memory_graphify_import(
             rels += 1;
         }
     }
-    Ok(Json(serde_json::json!({ "entities": entities, "relations": rels })))
+    (entities, rels)
+}
+
+/// Newest mtime among a project's SOURCE files (excludes .git/node_modules/target/…),
+/// for staleness: rebuild the code graph only when the project changed since last build.
+fn project_newest_mtime(root: &std::path::Path) -> Option<std::time::SystemTime> {
+    fn walk(dir: &std::path::Path, newest: &mut Option<std::time::SystemTime>, depth: usize) {
+        if depth > 12 {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if matches!(
+                name.as_ref(),
+                ".git" | "node_modules" | "target" | ".venv" | "venv" | "dist" | "build" | "__pycache__" | "graphify-out"
+            ) {
+                continue;
+            }
+            let path = entry.path();
+            if let Ok(ft) = entry.file_type() {
+                if ft.is_dir() {
+                    walk(&path, newest, depth + 1);
+                } else if let Ok(m) = entry.metadata().and_then(|md| md.modified()) {
+                    if newest.map(|n| m > n).unwrap_or(true) {
+                        *newest = Some(m);
+                    }
+                }
+            }
+        }
+    }
+    let mut newest = None;
+    walk(root, &mut newest, 0);
+    newest
+}
+
+/// Count source files under a project, stopping early at `cap` (cheap guard). Same
+/// exclusions as the extraction; used to skip auto-mapping of pathologically large
+/// trees that would make the on-open build take minutes (transparent degradation).
+fn project_file_count_capped(root: &std::path::Path, cap: usize) -> usize {
+    fn walk(dir: &std::path::Path, n: &mut usize, cap: usize, depth: usize) {
+        if *n >= cap || depth > 12 {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            if *n >= cap {
+                return;
+            }
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if matches!(
+                name.as_ref(),
+                ".git" | "node_modules" | "target" | ".venv" | "venv" | "dist" | "build" | "__pycache__" | "graphify-out"
+            ) {
+                continue;
+            }
+            match entry.file_type() {
+                Ok(ft) if ft.is_dir() => walk(&entry.path(), n, cap, depth + 1),
+                Ok(_) => *n += 1,
+                _ => {}
+            }
+        }
+    }
+    let mut n = 0;
+    walk(root, &mut n, cap, 0);
+    n
+}
+
+/// The gateway-managed output dir for a workspace's code graph (outside the user's repo).
+fn graphify_out_dir(workspace_id: &str) -> std::path::PathBuf {
+    let base = gateway_data_dir().unwrap_or_else(|_| std::env::temp_dir());
+    base.join("graphify-out").join(workspace_id)
+}
+
+/// Transparent "project map": (re)build a project's code graph via the isolated
+/// Graphify container and import it. Skips the rebuild when the project is unchanged
+/// since the last build (staleness via newest source mtime). Best-effort, blocking
+/// (callers run it on a spawned task). Emits `project_graph.ready` on success.
+fn build_project_graph(state: &AppState, workspace_id: &str, folder: &str) {
+    let root = std::path::PathBuf::from(folder);
+    if !root.is_dir() {
+        return;
+    }
+    // Guard: pathologically large trees (e.g. 57k files) would make the on-open build
+    // take minutes. Skip the auto-map (transparent degradation) above the cap; the
+    // project is still usable, just without an automatic code graph.
+    const MAX_FILES: usize = 8000;
+    if project_file_count_capped(&root, MAX_FILES) >= MAX_FILES {
+        eprintln!("project-graph: {workspace_id} troppo grande (>{MAX_FILES} file) — auto-map saltato");
+        return;
+    }
+    let out = graphify_out_dir(workspace_id);
+    let graph_path = out.join("graph.json");
+    // Staleness: skip if a graph exists and no source file is newer than it.
+    if let (Ok(built), Some(newest)) = (
+        std::fs::metadata(&graph_path).and_then(|m| m.modified()),
+        project_newest_mtime(&root),
+    ) {
+        if built >= newest {
+            return; // fresh — nothing changed
+        }
+    }
+    if let Err(err) = crate::sandbox::run_graphify(&root, &out) {
+        eprintln!("project-graph: build fallito per {workspace_id}: {err}");
+        return;
+    }
+    let Ok(raw) = std::fs::read_to_string(&graph_path) else { return };
+    let Ok(graph) = serde_json::from_str::<serde_json::Value>(&raw) else { return };
+    let user = gateway_memory_user_id();
+    let ws = MemoryWorkspaceId::new(workspace_id);
+    if let Ok(facade) = lock_memory_facade(state) {
+        let (n, e) = import_graphify_value(&facade, &user, &ws, &graph);
+        eprintln!("project-graph: {workspace_id} → {n} nodi, {e} archi");
+    }
+    publish_app_event(serde_json::json!({ "type": "project_graph.ready", "workspace": workspace_id }));
+}
+
+#[derive(Deserialize)]
+struct ProjectGraphEnsureRequest {
+    workspace: String,
+}
+
+/// Transparent entry point: ensure a project's code graph is fresh. Resolves the
+/// workspace's folder; if it has one, kicks off an async (stale-gated) build and
+/// returns immediately. The UI shows a neutral "mapping the project…" state and
+/// reloads on the `project_graph.ready` event. The user never sees "Graphify".
+async fn project_graph_ensure(
+    State(state): State<AppState>,
+    Json(req): Json<ProjectGraphEnsureRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let folder = load_workspaces_file()
+        .workspaces
+        .into_iter()
+        .find(|w| w.id == req.workspace)
+        .and_then(|w| w.folder);
+    let Some(folder) = folder.filter(|f| !f.trim().is_empty()) else {
+        return Ok(Json(serde_json::json!({ "building": false, "reason": "no_folder" })));
+    };
+    let st = state.clone();
+    let ws = req.workspace.clone();
+    tokio::task::spawn_blocking(move || build_project_graph(&st, &ws, &folder));
+    Ok(Json(serde_json::json!({ "building": true })))
 }
 
 async fn memory_graph(

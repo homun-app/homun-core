@@ -343,6 +343,46 @@ Avvialo con runtimes/contained-computer/up.sh."
         .to_string())
 }
 
+/// Locates `runtimes/graphify/up.sh` (env override, else repo-relative).
+fn graphify_up_script() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("LOCAL_FIRST_GRAPHIFY_UP") {
+        let path = PathBuf::from(p);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    for base in ["runtimes/graphify/up.sh", "../runtimes/graphify/up.sh"] {
+        let path = PathBuf::from(base);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    None
+}
+
+/// One-shot: build the code knowledge graph of `project` into `out/graph.json` using
+/// the isolated Graphify container (read-only project mount, no network). Blocks until
+/// the container exits. The user never sees Python/Graphify — invisible infrastructure.
+pub fn run_graphify(project: &Path, out: &Path) -> Result<(), String> {
+    ensure_docker()?;
+    let script = graphify_up_script().ok_or_else(|| "runtimes/graphify/up.sh non trovato".to_string())?;
+    let output = Command::new("bash")
+        .arg(&script)
+        .arg(project)
+        .arg(out)
+        .env("PATH", path_with_docker_dir())
+        .output()
+        .map_err(|e| format!("graphify: avvio fallito: {e}"))?;
+    if !out.join("graph.json").is_file() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "graphify: nessun graph.json prodotto. {}",
+            stderr.lines().rev().take(3).collect::<Vec<_>>().join(" | ")
+        ));
+    }
+    Ok(())
+}
+
 /// Copies an installed skill's files into the container so its scripts are
 /// runnable. Best-effort.
 pub fn sync_skill(skill_dir: &Path, skill_id: &str) {
