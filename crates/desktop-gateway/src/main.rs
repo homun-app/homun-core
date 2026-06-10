@@ -1793,12 +1793,12 @@ async fn consolidate_scope(
     user: &MemoryUserId,
     workspace: &MemoryWorkspaceId,
 ) -> (usize, usize) {
-    // 1. Read the durable memories (off-lock thereafter).
-    let mems: Vec<(MemoryRef, String, String)> = {
+    // 1. Read the durable memories + their embeddings (off-lock thereafter).
+    let (mems, embeddings) = {
         let Ok(facade) = lock_memory_facade(state) else {
             return (0, 0);
         };
-        facade
+        let mems: Vec<(MemoryRef, String, String)> = facade
             .list_memories_for_ui(user, workspace)
             .map(|memories| {
                 memories
@@ -1810,10 +1810,72 @@ async fn consolidate_scope(
                     .map(|m| (m.reference, m.memory_type, m.text))
                     .collect()
             })
-            .unwrap_or_default()
+            .unwrap_or_default();
+        let embeddings: std::collections::HashMap<String, Vec<f32>> = facade
+            .list_embeddings(user, workspace)
+            .map(|v| v.into_iter().map(|(r, vec)| (r.to_string(), vec)).collect())
+            .unwrap_or_default();
+        (mems, embeddings)
     };
-    if mems.len() < 3 {
+    if mems.len() < 2 {
         return (0, 0);
+    }
+
+    // 1b. DETERMINISTIC pre-pass: collapse obvious paraphrase/subset duplicates
+    // (the LLM curator alone was too conservative — "Trenitalia ×4" survived). Same
+    // criterion as the read-time dedup: same type AND (lexical Jaccard ∨ token
+    // containment ∨ semantic cosine). Keep the RICHEST (longest) — no rephrasing, so
+    // no hallucination — and tombstone the rest.
+    let mut order: Vec<usize> = (0..mems.len()).collect();
+    order.sort_by_key(|&i| std::cmp::Reverse(mems[i].2.chars().count()));
+    let mut survivor_idx: Vec<usize> = Vec::new();
+    let mut kept_meta: Vec<(String, std::collections::HashSet<String>, Option<Vec<f32>>)> = Vec::new();
+    let mut redundant: Vec<MemoryRef> = Vec::new();
+    for &i in &order {
+        let (reference, mtype, text) = &mems[i];
+        let tokens = dedup_tokens(text);
+        let vector = embeddings.get(&reference.to_string()).cloned();
+        let duplicate = kept_meta.iter().any(|(kt, ktok, kvec)| {
+            kt == mtype
+                && (jaccard(&tokens, ktok) >= DEDUP_JACCARD
+                    || (tokens.len() >= 2 && tokens.is_subset(ktok))
+                    || matches!((vector.as_ref(), kvec.as_ref()),
+                        (Some(a), Some(b)) if cosine(a, b) >= DEDUP_COSINE))
+        });
+        if duplicate {
+            redundant.push(reference.clone());
+        } else {
+            survivor_idx.push(i);
+            kept_meta.push((mtype.clone(), tokens, vector));
+        }
+    }
+    let mut merged = 0usize;
+    if !redundant.is_empty() {
+        if let Ok(facade) = lock_memory_facade(state) {
+            let lifecycle = MemoryLifecycleRequest {
+                actor_id: "consolidation".to_string(),
+                user_id: user.clone(),
+                workspace_id: workspace.clone(),
+                purpose: "consolidate".to_string(),
+            };
+            for reference in &redundant {
+                if facade
+                    .delete_memory(&lifecycle, reference, "duplicato fuso (consolidamento)")
+                    .is_ok()
+                {
+                    merged += 1;
+                }
+            }
+        }
+    }
+    // Survivors (original order) feed the LLM curator for the nuanced merges/drops.
+    let mems: Vec<(MemoryRef, String, String)> =
+        survivor_idx.into_iter().map(|i| mems[i].clone()).collect();
+    if mems.len() < 3 {
+        if let Ok(facade) = lock_memory_facade(state) {
+            rebuild_decisions_wiki(&facade, user, workspace);
+        }
+        return (merged, 0);
     }
     let listing = mems
         .iter()
@@ -1833,15 +1895,20 @@ Ogni \"from\" deve avere ALMENO 2 indici (è una fusione). \"importance\": 1=cru
 Se non c'è nulla da fare: {\"merges\":[],\"drops\":[]}.";
     let Some(root) = call_memory_json(state, system, &format!("MEMORIE ATTUALI:\n{listing}")).await
     else {
-        return (0, 0);
+        // LLM curator unavailable: keep the deterministic merges already applied.
+        if let Ok(facade) = lock_memory_facade(state) {
+            rebuild_decisions_wiki(&facade, user, workspace);
+        }
+        return (merged, 0);
     };
     let merges = root.get("merges").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     let drops = root.get("drops").and_then(|v| v.as_array()).cloned().unwrap_or_default();
 
-    // 2. Apply under a single lock (no awaits here → Send-safe).
-    let (mut merged, mut dropped) = (0usize, 0usize);
+    // 2. Apply the LLM curator's merges/drops under a single lock (no awaits here →
+    //    Send-safe). `merged` already counts the deterministic pre-pass — keep adding.
+    let mut dropped = 0usize;
     let Ok(facade) = lock_memory_facade(state) else {
-        return (0, 0);
+        return (merged, 0);
     };
     let lifecycle = MemoryLifecycleRequest {
         actor_id: "consolidation".to_string(),
