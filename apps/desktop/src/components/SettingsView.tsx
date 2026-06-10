@@ -3646,7 +3646,7 @@ function MemoryItemsList() {
 
   const load = async () => {
     try {
-      setItems(await coreBridge.memoryItems());
+      setItems((await coreBridge.memoryItems()).items);
     } catch {
       setItems([]);
     }

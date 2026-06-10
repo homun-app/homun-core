@@ -460,6 +460,27 @@ impl SQLiteMemoryStore {
         Ok(())
     }
 
+    /// Drop all imported code-graph data for a scope (entities + relations tagged
+    /// `metadata.source = "graphify"`). Called before a re-import so a rebuilt project
+    /// graph replaces the old one instead of accumulating. Derived data → hard delete.
+    pub fn clear_graphify(&self, user_id: &UserId, workspace_id: &WorkspaceId) -> Result<(), String> {
+        self.conn
+            .execute(
+                "delete from relations where user_id = ?1 and workspace_id = ?2
+                 and json_extract(metadata_json, '$.source') = 'graphify'",
+                params![user_id.as_str(), workspace_id.as_str()],
+            )
+            .map_err(|error| error.to_string())?;
+        self.conn
+            .execute(
+                "delete from entities where user_id = ?1 and workspace_id = ?2
+                 and json_extract(metadata_json, '$.source') = 'graphify'",
+                params![user_id.as_str(), workspace_id.as_str()],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
     /// Resurrect an entity: drop its tombstone so it reappears in the graph. Used by
     /// regeneration when a live memory references a wrongly-orphaned entity.
     pub fn untombstone_entity(
