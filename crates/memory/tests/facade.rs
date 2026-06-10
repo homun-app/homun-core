@@ -28,7 +28,9 @@ fn facade_builds_policy_gated_context_pack_with_refs_and_evidence() {
     assert_eq!(pack.items.len(), 1);
     assert_eq!(pack.items[0].reference, memory.reference);
     assert_eq!(pack.items[0].evidence, vec![event.reference]);
-    assert_eq!(facade.access_audit_count().unwrap(), 1);
+    // Access-audit recording is intentionally a no-op (the audit log was removed;
+    // record_access_decision no longer INSERTs) — the policy gate still applies.
+    assert_eq!(facade.access_audit_count().unwrap(), 0);
 }
 
 #[test]
@@ -42,7 +44,8 @@ fn facade_excludes_denied_domains_and_audits_the_decision() {
     let pack = facade.context_pack(&request(vec!["work"])).unwrap();
 
     assert!(pack.items.is_empty());
-    assert_eq!(facade.access_audit_count().unwrap(), 1);
+    // Audit recording disabled on purpose (see above) — the DENY itself is what matters.
+    assert_eq!(facade.access_audit_count().unwrap(), 0);
 }
 
 #[test]
