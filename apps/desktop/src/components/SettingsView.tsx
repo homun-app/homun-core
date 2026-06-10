@@ -51,6 +51,7 @@ import {
   type SkillCatalogResponse,
   type RoleView,
   type RoutingDecision,
+  type TimezoneInfo,
   type SkillDetail,
   type SkillFileNode,
   type SkillSecurityReport,
@@ -202,6 +203,93 @@ function formatK(value: number): string {
   return String(value);
 }
 
+/* ------------------------------------------------------------------ timezone */
+
+// Curated IANA zones; the detected system zone and any saved choice are merged in.
+const COMMON_ZONES = [
+  "Europe/Rome",
+  "Europe/London",
+  "Europe/Paris",
+  "Europe/Berlin",
+  "Europe/Madrid",
+  "Europe/Athens",
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "America/Sao_Paulo",
+  "Asia/Dubai",
+  "Asia/Kolkata",
+  "Asia/Shanghai",
+  "Asia/Tokyo",
+  "Australia/Sydney",
+  "UTC",
+];
+
+function TimezoneRow() {
+  const [info, setInfo] = useState<TimezoneInfo | null>(null);
+  const [busy, setBusy] = useState(false);
+  const detected = (() => {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+    } catch {
+      return "";
+    }
+  })();
+
+  useEffect(() => {
+    void coreBridge
+      .timezone()
+      .then(setInfo)
+      .catch(() => setInfo(null));
+  }, []);
+
+  const change = async (value: string) => {
+    setBusy(true);
+    try {
+      // "" = follow system (selected:null); otherwise an explicit IANA zone.
+      setInfo(await coreBridge.setTimezone(value === "" ? null : value));
+    } catch {
+      /* keep prior */
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Merge curated + detected + current selection, de-duplicated, stable order.
+  const zones = Array.from(
+    new Set([detected, ...COMMON_ZONES, info?.selected ?? ""].filter(Boolean)),
+  ) as string[];
+
+  return (
+    <div className="set-trow">
+      <div>
+        <div className="tt">Fuso orario</div>
+        <div className="td">
+          {info
+            ? `In uso: ${info.effective} — ${info.now}`
+            : "Caricamento…"}
+        </div>
+      </div>
+      <select
+        className="set-input set-row-input"
+        disabled={busy}
+        value={info?.selected ?? ""}
+        onChange={(event) => void change(event.target.value)}
+      >
+        <option value="">
+          Segui il sistema{detected ? ` (${detected})` : ""}
+        </option>
+        {zones.map((z) => (
+          <option key={z} value={z}>
+            {z}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------- account */
 
 function AccountPane({
@@ -271,6 +359,16 @@ function AccountPane({
           </span>
         </div>
       </div>
+
+      <div className="set-section-label">Data e ora</div>
+      <div className="set-rows">
+        <TimezoneRow />
+      </div>
+      <p className="set-hint">
+        Il fuso decide come l'assistente interpreta "oggi", "domani" e gli orari — e viene
+        applicato anche al browser contenuto, così le ricerche con date prendono il giorno giusto.
+      </p>
+
       <p className="set-hint">Tutto resta sul tuo dispositivo: memoria, task e audit non lasciano il computer.</p>
 
       <div className="set-danger">

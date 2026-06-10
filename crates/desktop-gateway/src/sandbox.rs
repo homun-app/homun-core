@@ -323,6 +323,12 @@ pub fn ensure_contained_computer() -> Result<(), String> {
         let _ = Command::new("bash")
             .arg(&script)
             .env("LFPA_ARTIFACTS_DIR", artifacts_dir())
+            // Layer D: the container defaults to UTC (debian-slim ships no
+            // /etc/localtime). Pass the user's effective IANA zone so `date`,
+            // Python AND Chromium's clock inside the container match the user —
+            // otherwise date-defaulting web forms pick the wrong day near the
+            // UTC midnight boundary.
+            .env("LFPA_TZ", crate::effective_user_tz_name())
             .env("PATH", path_with_docker_dir())
             .output();
         for _ in 0..30 {

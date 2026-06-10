@@ -29,6 +29,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
       fonts-liberation \
       procps \
+      # Timezone database (Layer D, defensive): bookworm-slim happens to ship
+      # zoneinfo today, but pin tzdata so a future base-image slimming can't
+      # silently revert the container to UTC. The ESSENTIAL part is `-e TZ=...`
+      # in up.sh — without it the container is UTC (host-2h here), so `date`,
+      # Python and Chromium would pick the wrong day near midnight.
+      tzdata \
       # Skill execution toolchain (same contained computer doubles as the skill
       # sandbox): a real shell needs curl/python/git/jq for SKILL.md scripts.
       bash \

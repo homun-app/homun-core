@@ -18,6 +18,7 @@ mod mcp_registry;
 mod pdf_render;
 mod sandbox;
 mod task_registry;
+mod temporal;
 
 use axum::{
     Json, Router,
@@ -467,6 +468,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/chat/threads/{thread_id}/file", get(read_thread_file))
         .route("/api/runtime/model", get(runtime_model).post(set_runtime_model))
         .route("/api/runtime/models", get(runtime_models))
+        .route(
+            "/api/prefs/timezone",
+            get(get_user_timezone).post(set_user_timezone),
+        )
         .route(
             "/api/runtime/provider",
             get(runtime_provider).post(set_runtime_provider),
@@ -2572,6 +2577,64 @@ fn build_plan_markdown(steps: &[serde_json::Value]) -> String {
         ));
     }
     lines.join("\n")
+}
+
+fn resolve_datetime_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "resolve_datetime",
+            "description": "Converte un riferimento temporale dell'utente (in QUALSIASI lingua: \
+\"domani mattina\", \"next Monday at 9\", \"pasado mañana\", \"tra 3 giorni\", \"il 15\") nella \
+data/ora ASSOLUTA corretta, calcolata rispetto ad ADESSO e al fuso dell'utente. CHIAMALO PRIMA di \
+usare qualunque data — non calcolare tu le date (sbagli facilmente \"oggi\"). Tu CLASSIFICHI il \
+riferimento compilando i campi qui sotto; il calcolo lo faccio io. Restituisce il valore ISO da \
+scrivere nei form o passare ad altri strumenti.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "enum": ["relative_day", "weekday", "relative_unit", "absolute"],
+                        "description": "relative_day: oggi/domani/ieri/dopodomani (usa offset_days). \
+weekday: un giorno della settimana (usa weekday + which). relative_unit: \"tra N giorni/settimane/mesi\" \
+(usa n + unit). absolute: data esplicita (usa date)."
+                    },
+                    "offset_days": {
+                        "type": "integer",
+                        "description": "Per kind=relative_day: 0=oggi, 1=domani, -1=ieri, 2=dopodomani, ecc."
+                    },
+                    "weekday": {
+                        "type": "string",
+                        "description": "Per kind=weekday: lunedì..domenica (o monday..sunday, qualsiasi lingua)."
+                    },
+                    "which": {
+                        "type": "string",
+                        "enum": ["upcoming", "this", "next"],
+                        "description": "Per kind=weekday: upcoming=il più vicino futuro (default), this=questa settimana, next=settimana prossima."
+                    },
+                    "n": { "type": "integer", "description": "Per kind=relative_unit: quante unità (es. 3)." },
+                    "unit": {
+                        "type": "string",
+                        "enum": ["day", "week", "month"],
+                        "description": "Per kind=relative_unit: l'unità (giorno/settimana/mese)."
+                    },
+                    "date": { "type": "string", "description": "Per kind=absolute: data ISO YYYY-MM-DD." },
+                    "time": { "type": "string", "description": "Orario \"HH:MM\" se l'utente lo indica (es. \"07:00\"). Opzionale." },
+                    "part": {
+                        "type": "string",
+                        "enum": ["morning", "afternoon", "evening", "night"],
+                        "description": "Parte del giorno se non c'è un orario preciso (es. \"di mattina\"). Opzionale."
+                    },
+                    "must_be_future": {
+                        "type": "boolean",
+                        "description": "Default true: rifiuta una data/ora già passata (per prenotazioni/ricerche). Metti false solo se serve una data passata."
+                    }
+                },
+                "required": ["kind"]
+            }
+        }
+    })
 }
 
 fn schedule_task_tool_schema() -> serde_json::Value {
@@ -5640,9 +5703,13 @@ async fn stream_chat_via_openai(
     .runtime_prompt;
 
     let system = format!(
-        "Sei l'assistente locale e agisci come ORCHESTRATORE. Oggi è {today}: usa \
-SEMPRE questa data per risolvere richieste temporali (es. \"10 giugno\" = il 10 \
-giugno dell'anno corretto rispetto a oggi, sempre nel futuro). Hai accesso a un \
+        "Sei l'assistente locale e agisci come ORCHESTRATORE. Adesso {now}: usa \
+SEMPRE questa data/ora per risolvere richieste temporali — NON fidarti della tua \
+conoscenza interna della data (è quasi sempre errata). \"domani\" = il giorno DOPO \
+questa data; \"10 giugno\" = il 10 giugno dell'anno corretto rispetto a questa data; \
+scegli SEMPRE un orario nel FUTURO. Per qualunque slot temporale (date/orari) chiama \
+PRIMA lo strumento resolve_datetime, che ti restituisce la data assoluta corretta da \
+usare (es. da scrivere in un form): non calcolare le date a mano. Hai accesso a un \
 browser reale che PILOTI TU con gli strumenti granulari (browser_navigate / \
 browser_snapshot / browser_act / browser_screenshot).\n\
 \n\
@@ -5713,7 +5780,7 @@ A SÉ con `- ` (trattino) — non incollare più voci sulla stessa riga. Per ele
 giorno/voce con etichetta usa `**Etichetta**: valore` con una riga vuota tra le voci, \
 o una tabella se i campi sono ≥3. Metti una riga vuota tra i paragrafi. Usa `### ` per \
 i titoli di sezione quando la risposta è lunga. Rispondi in italiano, chiaro e ordinato.",
-        today = today_iso(),
+        now = now_block(),
         home = std::env::var("HOME").unwrap_or_else(|_| "~".to_string())
     );
     // Connected-service (Composio) tools are reached via a DISCOVERY meta-tool
@@ -6107,6 +6174,9 @@ RI-VERIFICA eseguendo. Una causa alla volta, niente tentativi alla cieca."
         // Unified capability discovery — find what to connect (MCP/skill/Composio)
         // for a need. Read-only (search), so offered to channels too.
         suggest_capabilities_tool_schema(),
+        // Deterministic date/time resolution (Layer C). Read-only and needed most
+        // on channels (e.g. WhatsApp "treni per domani"), so offered to everyone.
+        resolve_datetime_tool_schema(),
     ];
     if !read_only {
         base_tools.push(create_artifact_tool_schema());
@@ -7033,6 +7103,23 @@ non ripetere la stessa azione; prova un altro elemento, scrolla, oppure attendi 
                                             if let Some(sugg) = value.get("suggestions") {
                                                 out.push_str(&format!("\n[suggerimenti: {sugg}]"));
                                             }
+                                            // Guardrail (advisory, Layer C.3): if the model just
+                                            // typed/filled a date that is in the PAST, nudge it to
+                                            // re-resolve via resolve_datetime instead of submitting.
+                                            // Advisory (not a hard block) because some past dates are
+                                            // legitimate (birthdays, historical lookups).
+                                            if matches!(
+                                                args.get("kind").and_then(|k| k.as_str()),
+                                                Some("type") | Some("fill")
+                                            ) {
+                                                if let Some(typed) =
+                                                    args.get("text").and_then(|t| t.as_str())
+                                                {
+                                                    if let Some(hint) = past_date_hint(typed) {
+                                                        out.push_str(&hint);
+                                                    }
+                                                }
+                                            }
                                             Ok(out)
                                         }
                                         Err(error) => {
@@ -7592,6 +7679,58 @@ disponibili (per dati dal web usa il browser: browser_navigate sull'URL indicato
                         tokio::task::spawn_blocking(move || recall_memory(&st, &query))
                             .await
                             .unwrap_or_else(|e| format!("Errore di esecuzione: {e}"))
+                    } else if name == "resolve_datetime" {
+                        // Layer C: the orchestrator passes a STRUCTURED intent it
+                        // distilled from the user's phrasing (any language); jiff
+                        // does the arithmetic from the tz-aware "now" and validates
+                        // future/range. Deterministic — no model date math.
+                        let args_val = serde_json::from_str::<serde_json::Value>(args_raw)
+                            .unwrap_or_else(|_| serde_json::json!({}));
+                        let must_be_future = args_val
+                            .get("must_be_future")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(true);
+                        let anchor = now_local();
+                        match temporal::intent_from_json(&args_val).and_then(|intent| {
+                            temporal::resolve(
+                                &intent,
+                                &anchor,
+                                temporal::ResolveOpts { must_be_future },
+                            )
+                        }) {
+                            Ok(res) => {
+                                let _ = emit_stream_event(
+                                    &tx,
+                                    GenerateStreamEvent::Delta {
+                                        text: format!("‹‹ACT››🗓 Data risolta: {}‹‹/ACT››", res.human),
+                                    },
+                                )
+                                .await;
+                                let window = match &res.end {
+                                    Some(end) => format!(
+                                        " La finestra di tempo arriva fino alle {:02}:{:02}.",
+                                        end.hour(),
+                                        end.minute()
+                                    ),
+                                    None => String::new(),
+                                };
+                                format!(
+                                    "Data/ora risolta: {human}. Usa ESATTAMENTE «{iso}» come valore \
+(es. da scrivere nel form o passare a un altro strumento): NON ricalcolarla.{window} \
+(Adesso {now}.)",
+                                    human = res.human,
+                                    iso = res.iso,
+                                    window = window,
+                                    now = now_block(),
+                                )
+                            }
+                            Err(e) => format!(
+                                "⚠️ Non ho potuto risolvere la data: {e}. (Adesso {now}.) \
+Correggi i parametri (kind/offset_days/weekday/date/time) e riprova; non procedere con \
+una data incerta.",
+                                now = now_block(),
+                            ),
+                        }
                     } else if name == "record_decision" {
                         let args_val: serde_json::Value =
                             serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
@@ -8400,10 +8539,230 @@ Dimmi se vuoi che riprovi o riformuli."
         .expect("valid streaming response"))
 }
 
-/// Today's date (ISO `YYYY-MM-DD`), injected into prompts so the model can
-/// resolve relative dates ("10 giugno") and never acts as if it's date-blind.
+/// Persisted IANA timezone chosen by the user (e.g. "Europe/Rome"). A tiny JSON
+/// file like the other prefs; absent → fall back to the host's system timezone.
+fn user_timezone_path() -> Option<PathBuf> {
+    gateway_data_dir().ok().map(|dir| dir.join("user-prefs.json"))
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct UserPrefs {
+    /// IANA name (e.g. "Europe/Rome"). None/empty → system timezone.
+    #[serde(default)]
+    timezone: Option<String>,
+}
+
+fn load_user_prefs() -> UserPrefs {
+    user_timezone_path()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn save_user_prefs(prefs: &UserPrefs) -> Result<(), String> {
+    let path = user_timezone_path().ok_or_else(|| "data dir non disponibile".to_string())?;
+    let json = serde_json::to_string_pretty(prefs).map_err(|e| e.to_string())?;
+    fs::write(path, json).map_err(|e| e.to_string())
+}
+
+/// The IANA name we resolve "now" against everywhere (prompt injection AND the
+/// container, via `LFPA_TZ`). User preference wins; else the host's system zone;
+/// else "UTC" as a last resort so the value is always concrete.
+fn effective_user_tz_name() -> String {
+    if let Some(name) = load_user_prefs().timezone.filter(|s| !s.trim().is_empty()) {
+        if jiff::tz::TimeZone::get(&name).is_ok() {
+            return name;
+        }
+    }
+    jiff::tz::TimeZone::system()
+        .iana_name()
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "UTC".to_string())
+}
+
+/// The user's effective timezone as a jiff `TimeZone` (DST-aware, IANA-correct).
+fn user_tz() -> jiff::tz::TimeZone {
+    let name = effective_user_tz_name();
+    jiff::tz::TimeZone::get(&name).unwrap_or_else(|_| jiff::tz::TimeZone::system())
+}
+
+/// "Now" in the user's timezone — the single source of truth for date logic.
+fn now_local() -> jiff::Zoned {
+    jiff::Timestamp::now().to_zoned(user_tz())
+}
+
+/// Today's date (ISO `YYYY-MM-DD`) in the USER's timezone — never UTC, so it is
+/// correct across the day boundary (the old UTC version returned "yesterday"
+/// between local midnight and the UTC offset).
 fn today_iso() -> String {
-    time::OffsetDateTime::now_utc().date().to_string()
+    now_local().date().to_string()
+}
+
+/// Advisory guardrail: if `typed` contains a calendar date (ISO `YYYY-MM-DD` or
+/// `DD/MM/YYYY`/`DD-MM-YYYY`) that is strictly before today (user tz), return a
+/// hint nudging the model to re-resolve via resolve_datetime. Returns None when
+/// no date is found or it's today/future — so legitimate past dates aren't blocked,
+/// only flagged.
+fn past_date_hint(typed: &str) -> Option<String> {
+    let today = now_local().date();
+    // Scan whitespace/comma-separated tokens for a date-like substring.
+    for raw in typed.split(|c: char| c.is_whitespace() || c == ',' || c == ';') {
+        let tok = raw.trim();
+        if tok.len() < 8 {
+            continue;
+        }
+        let parsed: Option<jiff::civil::Date> = if tok.contains('-') && tok.starts_with(|c: char| c.is_ascii_digit()) && tok.split('-').next().map(|y| y.len() == 4).unwrap_or(false) {
+            tok.parse().ok() // ISO YYYY-MM-DD
+        } else {
+            // DD/MM/YYYY or DD-MM-YYYY (European order — the app's locale).
+            let parts: Vec<&str> = tok.split(['/', '-']).collect();
+            if parts.len() == 3 {
+                match (parts[0].parse::<i8>(), parts[1].parse::<i8>(), parts[2].parse::<i16>()) {
+                    (Ok(d), Ok(m), Ok(y)) if y >= 1000 => {
+                        jiff::civil::Date::new(y, m, d).ok()
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        };
+        if let Some(d) = parsed {
+            if d < today {
+                return Some(format!(
+                    "\n[⚠️ attenzione: «{tok}» sembra una data PASSATA (oggi è {today}). Se intendevi \
+una data futura, NON inviare: chiama resolve_datetime per ricavare la data giusta e reinseriscila.]"
+                ));
+            }
+        }
+    }
+    None
+}
+
+#[derive(Debug, Serialize)]
+struct TimezoneView {
+    /// User's explicit choice (None → following the system zone).
+    selected: Option<String>,
+    /// The zone actually in effect (choice or detected system zone).
+    effective: String,
+    /// Live "now" line in the effective zone, so the UI can show what the model sees.
+    now: String,
+}
+
+async fn get_user_timezone() -> Json<TimezoneView> {
+    Json(TimezoneView {
+        selected: load_user_prefs().timezone.filter(|s| !s.trim().is_empty()),
+        effective: effective_user_tz_name(),
+        now: now_block(),
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct SetTimezoneRequest {
+    /// IANA name (e.g. "Europe/Rome"); empty/null → follow the system zone.
+    timezone: Option<String>,
+}
+
+async fn set_user_timezone(
+    Json(request): Json<SetTimezoneRequest>,
+) -> Result<Json<TimezoneView>, GatewayError> {
+    let trimmed = request
+        .timezone
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    // Validate the IANA name before persisting: a bad zone would silently fall
+    // back to system and confuse the user.
+    if let Some(name) = trimmed {
+        if jiff::tz::TimeZone::get(name).is_err() {
+            return Err(GatewayError {
+                status: StatusCode::BAD_REQUEST,
+                code: "invalid_timezone",
+                message: format!("Fuso orario IANA non valido: «{name}»"),
+            });
+        }
+    }
+    save_user_prefs(&UserPrefs {
+        timezone: trimmed.map(|s| s.to_string()),
+    })
+    .map_err(|message| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "timezone_save",
+        message,
+    })?;
+    // Propagate to the contained computer so its clock (and Chromium's) matches:
+    // if it's running, recycle it now so the next use recreates it with the new
+    // TZ (Layer D reads effective_user_tz_name() at launch). Best-effort, and we
+    // don't spin Docker up just to set a preference.
+    let _ = tokio::task::spawn_blocking(|| {
+        if sandbox::container_up() {
+            sandbox::recycle_container();
+        }
+    })
+    .await;
+    Ok(Json(TimezoneView {
+        selected: trimmed.map(|s| s.to_string()),
+        effective: effective_user_tz_name(),
+        now: now_block(),
+    }))
+}
+
+pub(crate) fn weekday_it(w: jiff::civil::Weekday) -> &'static str {
+    use jiff::civil::Weekday::*;
+    match w {
+        Monday => "lunedì",
+        Tuesday => "martedì",
+        Wednesday => "mercoledì",
+        Thursday => "giovedì",
+        Friday => "venerdì",
+        Saturday => "sabato",
+        Sunday => "domenica",
+    }
+}
+
+fn month_it(m: i8) -> &'static str {
+    match m {
+        1 => "gennaio",
+        2 => "febbraio",
+        3 => "marzo",
+        4 => "aprile",
+        5 => "maggio",
+        6 => "giugno",
+        7 => "luglio",
+        8 => "agosto",
+        9 => "settembre",
+        10 => "ottobre",
+        11 => "novembre",
+        _ => "dicembre",
+    }
+}
+
+/// UTC offset formatted as `+HH:MM` / `-HH:MM` from a jiff zoned datetime.
+fn offset_hhmm(z: &jiff::Zoned) -> String {
+    let secs = z.offset().seconds();
+    let sign = if secs < 0 { '-' } else { '+' };
+    let abs = secs.abs();
+    format!("{sign}{:02}:{:02}", abs / 3600, (abs % 3600) / 60)
+}
+
+/// Rich, timezone-aware "now" line injected into prompts (Italian): weekday +
+/// full date + time-of-day + IANA zone + UTC offset. Replaces the bare ISO date
+/// so the model knows the weekday AND the current time (it can tell that "07:00
+/// today" is already past) and is never tripped by the UTC midnight boundary.
+fn now_block() -> String {
+    let z = now_local();
+    let tz = effective_user_tz_name();
+    format!(
+        "oggi è {wd} {day} {month} {year}, sono le {h:02}:{m:02} (fuso {tz}, UTC{off})",
+        wd = weekday_it(z.weekday()),
+        day = z.day(),
+        month = month_it(z.month()),
+        year = z.year(),
+        h = z.hour(),
+        m = z.minute(),
+        tz = tz,
+        off = offset_hhmm(&z),
+    )
 }
 
 /// Global lock serializing `browse_web` runs: the contained browser is a single
