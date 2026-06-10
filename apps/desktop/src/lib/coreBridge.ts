@@ -1643,7 +1643,9 @@ export const coreBridge = {
   memoryDashboard: () => electronMemoryDashboard(),
   exportLocalData: () => electronExportLocalData(),
   memoryItems: () => electronMemoryItems(),
-  ensureProjectGraph: (workspace: string) => electronEnsureProjectGraph(workspace),
+  ensureProjectGraph: (workspace: string, subpath?: string) =>
+    electronEnsureProjectGraph(workspace, subpath),
+  projectGraphSubdirs: (workspace: string) => electronProjectGraphSubdirs(workspace),
   decideMemory: (
     reference: string,
     action: "confirm" | "reject" | "delete" | "edit",
@@ -2100,18 +2102,37 @@ async function electronMemoryItems(): Promise<{ items: CoreMemoryItem[]; scopes:
 
 /// Ensure a project's code graph is fresh (builds it transparently on open).
 /// Returns true if a build was kicked off; UI reloads on the project_graph.ready event.
-async function electronEnsureProjectGraph(workspace: string): Promise<boolean> {
+/// An optional `subpath` scopes the map to one subtree (huge-repo escape hatch).
+async function electronEnsureProjectGraph(workspace: string, subpath?: string): Promise<boolean> {
   try {
     const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/memory/project-graph/ensure`, {
       method: "POST",
       headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify({ workspace }),
+      body: JSON.stringify({ workspace, subpath }),
     });
     if (!response.ok) return false;
     const body = (await response.json()) as { building?: boolean };
     return body.building ?? false;
   } catch {
     return false;
+  }
+}
+
+export type ProjectSubdir = { name: string; code_files: number };
+
+/// Lists a project's code subfolders (with code-file counts) so a huge repo can be
+/// mapped one subtree at a time.
+async function electronProjectGraphSubdirs(workspace: string): Promise<ProjectSubdir[]> {
+  try {
+    const response = await fetch(
+      `${DESKTOP_GATEWAY_URL}/api/memory/project-graph/subdirs?workspace=${encodeURIComponent(workspace)}`,
+      { headers: gatewayHeaders() },
+    );
+    if (!response.ok) return [];
+    const body = (await response.json()) as { subdirs?: ProjectSubdir[] };
+    return body.subdirs ?? [];
+  } catch {
+    return [];
   }
 }
 

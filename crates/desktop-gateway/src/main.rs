@@ -539,6 +539,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/memory/graph", get(memory_graph))
         .route("/api/memory/graphify/import", post(memory_graphify_import))
         .route("/api/memory/project-graph/ensure", post(project_graph_ensure))
+        .route("/api/memory/project-graph/subdirs", get(project_graph_subdirs))
         .route("/api/memory/wiki", get(memory_wiki).put(memory_wiki_save))
         .route("/api/memory/consolidate", post(memory_consolidate))
         .route("/api/memory/decide", post(memory_decide))
@@ -19900,8 +19901,35 @@ fn import_graphify_value(
     (entities, rels)
 }
 
-/// Newest mtime among a project's SOURCE files (excludes .git/node_modules/target/…),
-/// for staleness: rebuild the code graph only when the project changed since last build.
+/// Directories that are vendored deps / build output / caches — never the user's
+/// source. Excluded from BOTH the staleness walk and the code-file count, and mirrored
+/// by the container's rsync. `site-packages` catches any Python venv regardless of name.
+fn is_noise_dir(name: &str) -> bool {
+    matches!(
+        name,
+        ".git" | "node_modules" | "site-packages" | "target" | "vendor" | ".venv" | "venv"
+            | ".tox" | ".mypy_cache" | ".pytest_cache" | ".ruff_cache" | ".next" | "coverage"
+            | "dist" | "build" | "__pycache__" | "graphify-out"
+    ) || name.ends_with(".egg-info")
+}
+
+/// Whether a filename is a source file Graphify can extract (so the size guard reflects
+/// real code, not data dumps). Mirrors Graphify's tree-sitter language coverage.
+fn is_code_file(name: &str) -> bool {
+    let ext = match name.rsplit_once('.') {
+        Some((_, e)) => e.to_lowercase(),
+        None => return false,
+    };
+    matches!(
+        ext.as_str(),
+        "py" | "pyi" | "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "rs" | "go" | "java"
+            | "rb" | "c" | "cc" | "cpp" | "cxx" | "h" | "hpp" | "cs" | "php" | "swift"
+            | "kt" | "kts" | "scala" | "m" | "lua" | "sh" | "bash"
+    )
+}
+
+/// Newest mtime among a project's SOURCE files (excludes vendored/build trees), for
+/// staleness: rebuild the code graph only when the project changed since last build.
 fn project_newest_mtime(root: &std::path::Path) -> Option<std::time::SystemTime> {
     fn walk(dir: &std::path::Path, newest: &mut Option<std::time::SystemTime>, depth: usize) {
         if depth > 12 {
@@ -19911,19 +19939,18 @@ fn project_newest_mtime(root: &std::path::Path) -> Option<std::time::SystemTime>
         for entry in entries.flatten() {
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            if matches!(
-                name.as_ref(),
-                ".git" | "node_modules" | "target" | ".venv" | "venv" | "dist" | "build" | "__pycache__" | "graphify-out"
-            ) {
+            if is_noise_dir(&name) {
                 continue;
             }
             let path = entry.path();
             if let Ok(ft) = entry.file_type() {
                 if ft.is_dir() {
                     walk(&path, newest, depth + 1);
-                } else if let Ok(m) = entry.metadata().and_then(|md| md.modified()) {
-                    if newest.map(|n| m > n).unwrap_or(true) {
-                        *newest = Some(m);
+                } else if is_code_file(&name) {
+                    if let Ok(m) = entry.metadata().and_then(|md| md.modified()) {
+                        if newest.map(|n| m > n).unwrap_or(true) {
+                            *newest = Some(m);
+                        }
                     }
                 }
             }
@@ -19934,10 +19961,11 @@ fn project_newest_mtime(root: &std::path::Path) -> Option<std::time::SystemTime>
     newest
 }
 
-/// Count source files under a project, stopping early at `cap` (cheap guard). Same
-/// exclusions as the extraction; used to skip auto-mapping of pathologically large
-/// trees that would make the on-open build take minutes (transparent degradation).
-fn project_file_count_capped(root: &std::path::Path, cap: usize) -> usize {
+/// Count CODE files under a project, stopping early at `cap` (cheap guard). Counts only
+/// real source (excludes vendored deps + data files) so the size cap reflects how much
+/// the user's project actually is — a 57k-file repo that's mostly venvs/data still
+/// counts small. Drives the auto-map skip + the "map a subfolder" hint for huge repos.
+fn project_code_file_count_capped(root: &std::path::Path, cap: usize) -> usize {
     fn walk(dir: &std::path::Path, n: &mut usize, cap: usize, depth: usize) {
         if *n >= cap || depth > 12 {
             return;
@@ -19949,15 +19977,12 @@ fn project_file_count_capped(root: &std::path::Path, cap: usize) -> usize {
             }
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            if matches!(
-                name.as_ref(),
-                ".git" | "node_modules" | "target" | ".venv" | "venv" | "dist" | "build" | "__pycache__" | "graphify-out"
-            ) {
+            if is_noise_dir(&name) {
                 continue;
             }
             match entry.file_type() {
                 Ok(ft) if ft.is_dir() => walk(&entry.path(), n, cap, depth + 1),
-                Ok(_) => *n += 1,
+                Ok(_) if is_code_file(&name) => *n += 1,
                 _ => {}
             }
         }
@@ -19977,17 +20002,29 @@ fn graphify_out_dir(workspace_id: &str) -> std::path::PathBuf {
 /// Graphify container and import it. Skips the rebuild when the project is unchanged
 /// since the last build (staleness via newest source mtime). Best-effort, blocking
 /// (callers run it on a spawned task). Emits `project_graph.ready` on success.
-fn build_project_graph(state: &AppState, workspace_id: &str, folder: &str) {
-    let root = std::path::PathBuf::from(folder);
+fn build_project_graph(state: &AppState, workspace_id: &str, folder: &str, subpath: Option<&str>) {
+    let mut root = std::path::PathBuf::from(folder);
+    // Subfolder scoping: a huge repo (e.g. a scraper monorepo) maps just the subtree the
+    // user points at. Sanitised (no absolute paths / `..`) so it stays under the project.
+    if let Some(sub) = subpath.map(str::trim).filter(|s| !s.is_empty()) {
+        let safe: std::path::PathBuf = std::path::Path::new(sub)
+            .components()
+            .filter(|c| matches!(c, std::path::Component::Normal(_)))
+            .collect();
+        root = root.join(safe);
+    }
     if !root.is_dir() {
         return;
     }
-    // Guard: pathologically large trees (e.g. 57k files) would make the on-open build
-    // take minutes. Skip the auto-map (transparent degradation) above the cap; the
-    // project is still usable, just without an automatic code graph.
-    const MAX_FILES: usize = 8000;
-    if project_file_count_capped(&root, MAX_FILES) >= MAX_FILES {
-        eprintln!("project-graph: {workspace_id} troppo grande (>{MAX_FILES} file) — auto-map saltato");
+    // Guard: skip the auto-map above a CODE-file cap (counting only real source — venvs
+    // and data don't count) so a genuinely huge codebase doesn't make the on-open build
+    // take minutes. The project stays usable; the UI offers "map a subfolder" instead.
+    const MAX_CODE_FILES: usize = 6000;
+    if subpath.is_none() && project_code_file_count_capped(&root, MAX_CODE_FILES) >= MAX_CODE_FILES {
+        eprintln!("project-graph: {workspace_id} grande (>{MAX_CODE_FILES} file di codice) — auto-map saltato, mappa una sottocartella");
+        publish_app_event(serde_json::json!({
+            "type": "project_graph.too_large", "workspace": workspace_id
+        }));
         return;
     }
     let out = graphify_out_dir(workspace_id);
@@ -20019,12 +20056,16 @@ fn build_project_graph(state: &AppState, workspace_id: &str, folder: &str) {
 #[derive(Deserialize)]
 struct ProjectGraphEnsureRequest {
     workspace: String,
+    /// Optional subtree to map (for huge repos: map just the part you care about).
+    #[serde(default)]
+    subpath: Option<String>,
 }
 
 /// Transparent entry point: ensure a project's code graph is fresh. Resolves the
 /// workspace's folder; if it has one, kicks off an async (stale-gated) build and
 /// returns immediately. The UI shows a neutral "mapping the project…" state and
 /// reloads on the `project_graph.ready` event. The user never sees "Graphify".
+/// An optional `subpath` scopes the map to one subtree (huge-repo escape hatch).
 async fn project_graph_ensure(
     State(state): State<AppState>,
     Json(req): Json<ProjectGraphEnsureRequest>,
@@ -20039,8 +20080,50 @@ async fn project_graph_ensure(
     };
     let st = state.clone();
     let ws = req.workspace.clone();
-    tokio::task::spawn_blocking(move || build_project_graph(&st, &ws, &folder));
+    let subpath = req.subpath.clone();
+    tokio::task::spawn_blocking(move || build_project_graph(&st, &ws, &folder, subpath.as_deref()));
     Ok(Json(serde_json::json!({ "building": true })))
+}
+
+/// Lists a project's immediate subfolders that contain code (with a rough code-file
+/// count), so the UI can offer "map this part" on a huge repo. Cheap, non-recursive
+/// beyond a shallow scan per child.
+#[derive(Deserialize)]
+struct ProjectSubdirsQuery {
+    workspace: String,
+}
+
+async fn project_graph_subdirs(
+    State(_state): State<AppState>,
+    Query(q): Query<ProjectSubdirsQuery>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let folder = load_workspaces_file()
+        .workspaces
+        .into_iter()
+        .find(|w| w.id == q.workspace)
+        .and_then(|w| w.folder)
+        .filter(|f| !f.trim().is_empty());
+    let mut subdirs: Vec<serde_json::Value> = Vec::new();
+    if let Some(folder) = folder {
+        if let Ok(entries) = std::fs::read_dir(&folder) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if is_noise_dir(&name) || name.starts_with('.') {
+                    continue;
+                }
+                if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                    let count = project_code_file_count_capped(&entry.path(), 6000);
+                    if count > 0 {
+                        subdirs.push(serde_json::json!({ "name": name, "code_files": count }));
+                    }
+                }
+            }
+        }
+    }
+    subdirs.sort_by(|a, b| {
+        b["code_files"].as_u64().unwrap_or(0).cmp(&a["code_files"].as_u64().unwrap_or(0))
+    });
+    Ok(Json(serde_json::json!({ "subdirs": subdirs })))
 }
 
 async fn memory_graph(
