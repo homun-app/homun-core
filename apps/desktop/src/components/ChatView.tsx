@@ -56,6 +56,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ForceGraph2D from "react-force-graph-2d";
 import type {
   ChangeEvent,
   ClipboardEvent,
@@ -63,7 +64,6 @@ import type {
   FormEvent,
   KeyboardEvent,
   MouseEvent as ReactMouseEvent,
-  WheelEvent as ReactWheelEvent,
 } from "react";
 import {
   coreBridge,
@@ -3025,8 +3025,8 @@ type WorkbenchTab = "files" | "artifacts" | "memoria" | "activity" | "plan";
  *  scattered header affordances. */
 // Navigable visual graph of the project's memory: project at the centre, decisions
 // linked to the files they affect and the alternatives they rejected, plus facts and
-// preferences. Self-rendered SVG (no graph lib): a small deterministic force layout +
-// pan/zoom + click-to-inspect. Data from GET /api/memory/graph.
+// preferences. Rendered with react-force-graph-2d (canvas + continuous d3-force):
+// zoom/pan/drag, hover highlights neighbours, click inspects. Data from /api/memory/graph.
 const GRAPH_KIND_STYLE: Record<string, { fill: string; r: number; label: string }> = {
   project: { fill: "#6366f1", r: 16, label: "Spazio" },
   decision: { fill: "#0ea5e9", r: 11, label: "Decisione" },
@@ -3056,72 +3056,6 @@ function graphStyleKey(node: { kind: string; entity_type?: string }): string {
   return node.kind;
 }
 
-type LaidOutNode = MemoryGraphNode & { x: number; y: number };
-
-function layoutMemoryGraph(
-  nodes: MemoryGraphNode[],
-  edges: MemoryGraphEdge[],
-): LaidOutNode[] {
-  const n = nodes.length;
-  if (n === 0) return [];
-  const pos = new Map<string, { x: number; y: number; vx: number; vy: number }>();
-  nodes.forEach((node, i) => {
-    const angle = (i / n) * Math.PI * 2;
-    const radius = node.kind === "project" ? 0 : 140 + (i % 6) * 26;
-    pos.set(node.id, { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius, vx: 0, vy: 0 });
-  });
-  for (let iter = 0; iter < 220; iter++) {
-    for (let a = 0; a < n; a++) {
-      for (let b = a + 1; b < n; b++) {
-        const pa = pos.get(nodes[a].id)!;
-        const pb = pos.get(nodes[b].id)!;
-        let dx = pa.x - pb.x;
-        let dy = pa.y - pb.y;
-        const d2 = dx * dx + dy * dy + 0.01;
-        const d = Math.sqrt(d2);
-        const force = 5200 / d2;
-        pa.vx += (dx / d) * force;
-        pa.vy += (dy / d) * force;
-        pb.vx -= (dx / d) * force;
-        pb.vy -= (dy / d) * force;
-      }
-    }
-    for (const e of edges) {
-      const pa = pos.get(e.source);
-      const pb = pos.get(e.target);
-      if (!pa || !pb) continue;
-      const dx = pb.x - pa.x;
-      const dy = pb.y - pa.y;
-      const d = Math.sqrt(dx * dx + dy * dy) + 0.01;
-      const force = (d - 96) * 0.018;
-      pa.vx += (dx / d) * force;
-      pa.vy += (dy / d) * force;
-      pb.vx -= (dx / d) * force;
-      pb.vy -= (dy / d) * force;
-    }
-    for (const node of nodes) {
-      const p = pos.get(node.id)!;
-      if (node.kind === "project") {
-        p.x = 0;
-        p.y = 0;
-        p.vx = 0;
-        p.vy = 0;
-        continue;
-      }
-      p.vx -= p.x * 0.0024;
-      p.vy -= p.y * 0.0024;
-      p.vx *= 0.84;
-      p.vy *= 0.84;
-      p.x += p.vx;
-      p.y += p.vy;
-    }
-  }
-  return nodes.map((node) => {
-    const p = pos.get(node.id)!;
-    return { ...node, x: p.x, y: p.y };
-  });
-}
-
 export function MemoryGraphPanel({
   threadId,
   workspace,
@@ -3137,7 +3071,7 @@ export function MemoryGraphPanel({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  const [view, setView] = useState({ x: 0, y: 0, k: 1 });
+  const [hoverId, setHoverId] = useState<string | null>(null);
   const [internalMode, setInternalMode] = useState<"graph" | "wiki">("graph");
   const mode = controlledMode ?? internalMode;
   const setMode = setInternalMode;
@@ -3148,9 +3082,9 @@ export function MemoryGraphPanel({
   // viewBox tracks the container's pixel size (centred at origin) so the graph FILLS
   // the panel and adapts when it's expanded/fullscreen — no fixed-aspect letterboxing.
   const [size, setSize] = useState({ w: 760, h: 600 });
-  const svgRef = useRef<SVGSVGElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
-  const dragRef = useRef<{ x: number; y: number } | null>(null);
+  // react-force-graph imperative handle (zoom / zoomToFit).
+  const fgRef = useRef<any>(null);
 
   useEffect(() => {
     const el = canvasRef.current;
@@ -3192,53 +3126,45 @@ export function MemoryGraphPanel({
     reload();
   }, [reload]);
 
-  const laidOut = useMemo(
-    () => (graph ? layoutMemoryGraph(graph.nodes, graph.edges) : []),
-    [graph],
-  );
-  const posById = useMemo(() => {
-    const map = new Map<string, LaidOutNode>();
-    for (const node of laidOut) map.set(node.id, node);
+  // Lookups + force-graph data. react-force-graph owns the layout (continuous
+  // d3-force): we hand it nodes (colour/size by ontology) and links, and it settles
+  // them, supporting zoom/pan/drag natively. graphData is rebuilt only when the graph
+  // changes (so node positions persist across hover/select state changes).
+  const nodeById = useMemo(() => {
+    const map = new Map<string, MemoryGraphNode>();
+    if (graph) for (const node of graph.nodes) map.set(node.id, node);
     return map;
-  }, [laidOut]);
+  }, [graph]);
+  const neighbors = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    if (graph)
+      for (const e of graph.edges) {
+        map.set(e.source, (map.get(e.source) ?? new Set()).add(e.target));
+        map.set(e.target, (map.get(e.target) ?? new Set()).add(e.source));
+      }
+    return map;
+  }, [graph]);
+  const graphData = useMemo(() => {
+    if (!graph) return { nodes: [], links: [] };
+    return {
+      nodes: graph.nodes.map((n) => {
+        const style = GRAPH_KIND_STYLE[graphStyleKey(n)] ?? GRAPH_KIND_STYLE.entity;
+        return { id: n.id, label: n.label, kind: n.kind, color: style.fill, r: style.r };
+      }),
+      links: graph.edges.map((e) => ({ source: e.source, target: e.target, label: e.label })),
+    };
+  }, [graph]);
 
-  const selectedNode = selected ? posById.get(selected) : null;
+  const selectedNode = selected ? nodeById.get(selected) ?? null : null;
   const selectedEdges = useMemo(() => {
     if (!graph || !selected) return [];
     return graph.edges
       .filter((e) => e.source === selected || e.target === selected)
       .map((e) => {
         const otherId = e.source === selected ? e.target : e.source;
-        return { label: e.label, other: posById.get(otherId)?.label ?? otherId };
+        return { label: e.label, other: nodeById.get(otherId)?.label ?? otherId };
       });
-  }, [graph, selected, posById]);
-
-  const onWheel = (event: ReactWheelEvent) => {
-    event.preventDefault();
-    setView((v) => {
-      const k = Math.min(Math.max(v.k * (event.deltaY < 0 ? 1.12 : 0.89), 0.3), 3);
-      return { ...v, k };
-    });
-  };
-  const onPointerDown = (event: ReactMouseEvent) => {
-    if ((event.target as Element).closest(".memory-graph-node")) return;
-    dragRef.current = { x: event.clientX, y: event.clientY };
-    setSelected(null);
-  };
-  const onPointerMove = (event: ReactMouseEvent) => {
-    if (!dragRef.current || !svgRef.current) return;
-    const rect = svgRef.current.getBoundingClientRect();
-    const scale = size.w / Math.max(rect.width, 1); // viewBox units per px
-    setView((v) => ({
-      ...v,
-      x: v.x + (event.clientX - dragRef.current!.x) * scale,
-      y: v.y + (event.clientY - dragRef.current!.y) * scale,
-    }));
-    dragRef.current = { x: event.clientX, y: event.clientY };
-  };
-  const endDrag = () => {
-    dragRef.current = null;
-  };
+  }, [graph, selected, nodeById]);
 
   if (loading) {
     return (
@@ -3291,13 +3217,13 @@ export function MemoryGraphPanel({
         </span>
         {mode === "graph" && (
           <div className="memory-graph-zoom">
-            <button type="button" onClick={() => setView((v) => ({ ...v, k: Math.min(v.k * 1.2, 3) }))} aria-label="Zoom +">
+            <button type="button" onClick={() => fgRef.current?.zoom((fgRef.current?.zoom() ?? 1) * 1.3, 300)} aria-label="Zoom +">
               +
             </button>
-            <button type="button" onClick={() => setView((v) => ({ ...v, k: Math.max(v.k * 0.83, 0.3) }))} aria-label="Zoom −">
+            <button type="button" onClick={() => fgRef.current?.zoom((fgRef.current?.zoom() ?? 1) * 0.77, 300)} aria-label="Zoom −">
               −
             </button>
-            <button type="button" onClick={() => setView({ x: 0, y: 0, k: 1 })} aria-label="Reimposta vista">
+            <button type="button" onClick={() => fgRef.current?.zoomToFit(400, 50)} aria-label="Adatta alla vista">
               ⟲
             </button>
           </div>
@@ -3364,70 +3290,58 @@ export function MemoryGraphPanel({
       ) : (
         <>
       <div className="memory-graph-canvas" ref={canvasRef}>
-        <svg
-          ref={svgRef}
-          viewBox={`${-size.w / 2} ${-size.h / 2} ${size.w} ${size.h}`}
-          preserveAspectRatio="xMidYMid meet"
-          onWheel={onWheel}
-          onMouseDown={onPointerDown}
-          onMouseMove={onPointerMove}
-          onMouseUp={endDrag}
-          onMouseLeave={endDrag}
-        >
-          <g transform={`translate(${view.x} ${view.y}) scale(${view.k})`}>
-            {graph.edges.map((edge, i) => {
-              const a = posById.get(edge.source);
-              const b = posById.get(edge.target);
-              if (!a || !b) return null;
-              const active = selected === edge.source || selected === edge.target;
-              const dashed = edge.label === "scartata";
-              return (
-                <g key={i}>
-                  <line
-                    x1={a.x}
-                    y1={a.y}
-                    x2={b.x}
-                    y2={b.y}
-                    stroke={active ? "#475569" : "#cbd5e1"}
-                    strokeWidth={active ? 1.6 : 0.9}
-                    strokeDasharray={dashed ? "4 3" : undefined}
-                  />
-                </g>
-              );
-            })}
-            {laidOut.map((node) => {
-              const style = GRAPH_KIND_STYLE[graphStyleKey(node)] ?? GRAPH_KIND_STYLE.entity;
-              const isSel = selected === node.id;
-              const short = node.label.length > 22 ? `${node.label.slice(0, 21)}…` : node.label;
-              return (
-                <g
-                  key={node.id}
-                  className="memory-graph-node"
-                  transform={`translate(${node.x} ${node.y})`}
-                  onClick={() => setSelected(node.id)}
-                  style={{ cursor: "pointer" }}
-                >
-                  <circle
-                    r={style.r + (isSel ? 3 : 0)}
-                    fill={style.fill}
-                    stroke={isSel ? "#0f172a" : "#fff"}
-                    strokeWidth={isSel ? 2 : 1}
-                  />
-                  {(node.kind === "project" || node.kind === "decision" || node.kind === "file" || isSel) && (
-                    <text
-                      x={style.r + 4}
-                      y={3}
-                      fontSize={node.kind === "project" ? 11 : 9}
-                      fill="#1e293b"
-                    >
-                      {short}
-                    </text>
-                  )}
-                </g>
-              );
-            })}
-          </g>
-        </svg>
+        <ForceGraph2D
+          ref={fgRef}
+          width={size.w}
+          height={size.h}
+          graphData={graphData}
+          backgroundColor="rgba(0,0,0,0)"
+          nodeRelSize={2.2}
+          nodeVal={(n: any) => (n.r ?? 8) * (n.r ?? 8) * 0.06}
+          cooldownTicks={140}
+          onEngineStop={() => fgRef.current?.zoomToFit(400, 60)}
+          onNodeClick={(n: any) => setSelected(n.id)}
+          onNodeHover={(n: any) => setHoverId(n?.id ?? null)}
+          onBackgroundClick={() => setSelected(null)}
+          nodeColor={(n: any) => {
+            if (!hoverId) return n.color;
+            if (n.id === hoverId || neighbors.get(hoverId)?.has(n.id)) return n.color;
+            return "rgba(148,163,184,0.22)"; // dim non-neighbours on hover
+          }}
+          linkColor={(l: any) => {
+            const s = typeof l.source === "object" ? l.source.id : l.source;
+            const t = typeof l.target === "object" ? l.target.id : l.target;
+            const active =
+              (hoverId && (s === hoverId || t === hoverId)) ||
+              (selected && (s === selected || t === selected));
+            if (active) return "#475569";
+            return hoverId ? "rgba(203,213,225,0.18)" : "#cbd5e1";
+          }}
+          linkWidth={(l: any) => {
+            const s = typeof l.source === "object" ? l.source.id : l.source;
+            const t = typeof l.target === "object" ? l.target.id : l.target;
+            return (hoverId && (s === hoverId || t === hoverId)) ||
+              (selected && (s === selected || t === selected))
+              ? 1.8
+              : 0.7;
+          }}
+          linkLineDash={(l: any) => (l.label === "scartata" ? [4, 3] : null)}
+          nodeCanvasObjectMode={() => "after"}
+          nodeCanvasObject={(node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
+            // Label only the hubs and the hovered/selected node, so the canvas stays
+            // legible instead of a wall of overlapping text.
+            const important = node.kind === "project" || node.id === selected || node.id === hoverId;
+            if (!important) return;
+            const text = node.label.length > 26 ? `${node.label.slice(0, 25)}…` : node.label;
+            const fontSize = 12 / globalScale;
+            ctx.font = `${fontSize}px -apple-system, system-ui, sans-serif`;
+            ctx.textAlign = "left";
+            ctx.textBaseline = "middle";
+            ctx.fillStyle = "#1e293b";
+            const off = (Math.sqrt((node.r ?? 8) * (node.r ?? 8) * 0.06) * 2.2 + 3) / globalScale;
+            ctx.fillText(text, node.x + off, node.y);
+          }}
+        />
         {selectedNode && (
           <div className="memory-graph-detail">
             <div
