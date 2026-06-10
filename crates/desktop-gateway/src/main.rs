@@ -13345,7 +13345,13 @@ domande passate, non sollecitare risposte a domande precedenti. Conciso. NON com
         .unwrap_or_else(|| "Nessuna risposta generata per il task pianificato.".to_string());
 
     if let Ok(store) = lock_store(state) {
-        let _ = store.append_assistant_message(&thread_id, &channel_chat_message("user", &goal));
+        // The goal is an INTERNAL instruction: in the Homun thread it must not
+        // appear as a user bubble (the conversation is Homun speaking first).
+        // Scheduled threads keep it — there it documents what the task was asked.
+        if deliver_thread != Some("homun") {
+            let _ =
+                store.append_assistant_message(&thread_id, &channel_chat_message("user", &goal));
+        }
         let _ =
             store.append_assistant_message(&thread_id, &channel_chat_message("assistant", &answer));
         // The curiosity was asked: durable no-repeat (never re-delivered nor re-mined).
