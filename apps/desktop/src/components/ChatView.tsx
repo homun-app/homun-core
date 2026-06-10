@@ -3083,12 +3083,17 @@ export function MemoryGraphPanel({
   // the panel and adapts when it's expanded/fullscreen — no fixed-aspect letterboxing.
   const [size, setSize] = useState({ w: 760, h: 600 });
   const canvasRef = useRef<HTMLDivElement | null>(null);
-  // react-force-graph imperative handle (zoom / zoomToFit).
+  // react-force-graph imperative handle (zoom / zoomToFit / centerAt).
   const fgRef = useRef<any>(null);
+  // Theme-aware node-label colour, captured from the panel's computed style.
+  const labelColorRef = useRef<string>("#1e293b");
 
   useEffect(() => {
     const el = canvasRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
+    // Canvas can't use CSS vars: capture the panel's inherited text colour so node
+    // labels stay legible in both light and dark themes.
+    labelColorRef.current = getComputedStyle(el).color || "#1e293b";
     const observer = new ResizeObserver((entries) => {
       const rect = entries[0]?.contentRect;
       if (rect && rect.width > 0 && rect.height > 0) {
@@ -3146,10 +3151,27 @@ export function MemoryGraphPanel({
   }, [graph]);
   const graphData = useMemo(() => {
     if (!graph) return { nodes: [], links: [] };
+    const degree = new Map<string, number>();
+    for (const e of graph.edges) {
+      degree.set(e.source, (degree.get(e.source) ?? 0) + 1);
+      degree.set(e.target, (degree.get(e.target) ?? 0) + 1);
+    }
     return {
       nodes: graph.nodes.map((n) => {
         const style = GRAPH_KIND_STYLE[graphStyleKey(n)] ?? GRAPH_KIND_STYLE.entity;
-        return { id: n.id, label: n.label, kind: n.kind, color: style.fill, r: style.r };
+        const isRoot = n.kind === "project";
+        const deg = degree.get(n.id) ?? 0;
+        return {
+          id: n.id,
+          label: n.label,
+          kind: n.kind,
+          color: style.fill,
+          // Node AREA scales with connections: hubs (many edges) read big, isolated
+          // facts stay small. The scope root is the biggest and pinned at centre.
+          val: isRoot ? 9 : 1 + deg * 0.7,
+          // Anchor the root at the origin so everything orbits it (hub-and-spoke).
+          ...(isRoot ? { fx: 0, fy: 0 } : {}),
+        };
       }),
       links: graph.edges.map((e) => ({ source: e.source, target: e.target, label: e.label })),
     };
@@ -3296,13 +3318,27 @@ export function MemoryGraphPanel({
           height={size.h}
           graphData={graphData}
           backgroundColor="rgba(0,0,0,0)"
-          nodeRelSize={2.2}
-          nodeVal={(n: any) => (n.r ?? 8) * (n.r ?? 8) * 0.06}
+          nodeRelSize={4}
+          nodeVal={(n: any) => n.val}
           cooldownTicks={140}
           onEngineStop={() => fgRef.current?.zoomToFit(400, 60)}
-          onNodeClick={(n: any) => setSelected(n.id)}
+          onNodeClick={(n: any) => {
+            setSelected(n.id);
+            // Focus: centre + zoom onto the clicked node and its neighbourhood.
+            if (typeof n.x === "number" && typeof n.y === "number") {
+              fgRef.current?.centerAt(n.x, n.y, 600);
+              fgRef.current?.zoom(2.4, 600);
+            }
+          }}
           onNodeHover={(n: any) => setHoverId(n?.id ?? null)}
           onBackgroundClick={() => setSelected(null)}
+          linkDirectionalParticles={(l: any) => {
+            const s = typeof l.source === "object" ? l.source.id : l.source;
+            const t = typeof l.target === "object" ? l.target.id : l.target;
+            return hoverId && (s === hoverId || t === hoverId) ? 4 : 0;
+          }}
+          linkDirectionalParticleWidth={2.2}
+          linkDirectionalParticleSpeed={0.006}
           nodeColor={(n: any) => {
             if (!hoverId) return n.color;
             if (n.id === hoverId || neighbors.get(hoverId)?.has(n.id)) return n.color;
@@ -3337,8 +3373,9 @@ export function MemoryGraphPanel({
             ctx.font = `${fontSize}px -apple-system, system-ui, sans-serif`;
             ctx.textAlign = "left";
             ctx.textBaseline = "middle";
-            ctx.fillStyle = "#1e293b";
-            const off = (Math.sqrt((node.r ?? 8) * (node.r ?? 8) * 0.06) * 2.2 + 3) / globalScale;
+            ctx.fillStyle = labelColorRef.current;
+            // Offset past the node's radius (radius = sqrt(val) * nodeRelSize).
+            const off = (Math.sqrt(node.val ?? 1) * 4 + 3) / globalScale;
             ctx.fillText(text, node.x + off, node.y);
           }}
         />
