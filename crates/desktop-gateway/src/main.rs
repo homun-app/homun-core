@@ -537,6 +537,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/memory/export", get(memory_export))
         .route("/api/memory/items", get(memory_items))
         .route("/api/memory/graph", get(memory_graph))
+        .route("/api/memory/graphify/import", post(memory_graphify_import))
         .route("/api/memory/wiki", get(memory_wiki).put(memory_wiki_save))
         .route("/api/memory/consolidate", post(memory_consolidate))
         .route("/api/memory/decide", post(memory_decide))
@@ -19642,6 +19643,102 @@ fn graph_push_node(
             entity_type: entity_type.to_string(),
         });
     }
+}
+
+/// Spike (Graphify per progetti): import a code knowledge graph produced by the
+/// Graphify CLI (`graph.json`: nodes id/label/source_file, links source/target/
+/// relation) into a project workspace as entities + entity↔entity relations. The
+/// memory_graph projection then renders it with the force-directed viz, for free.
+/// Adopt-the-extractor, own-the-graph: Graphify does the multi-language AST work;
+/// the graph, query and UI stay in our SQLite.
+#[derive(Deserialize)]
+struct GraphifyImportRequest {
+    workspace_id: String,
+    /// Directory containing graphify-out/graph.json (the project root or the out dir).
+    dir: String,
+}
+
+async fn memory_graphify_import(
+    State(state): State<AppState>,
+    Json(req): Json<GraphifyImportRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let mut path = std::path::PathBuf::from(&req.dir);
+    if path.join("graphify-out/graph.json").exists() {
+        path = path.join("graphify-out/graph.json");
+    } else if path.join("graph.json").exists() {
+        path = path.join("graph.json");
+    }
+    let raw = std::fs::read_to_string(&path).map_err(|e| GatewayError {
+        status: StatusCode::BAD_REQUEST,
+        code: "graphify_no_file",
+        message: format!("graph.json non trovato in {}: {e}", req.dir),
+    })?;
+    let graph: serde_json::Value = serde_json::from_str(&raw).map_err(|e| GatewayError {
+        status: StatusCode::BAD_REQUEST,
+        code: "graphify_bad_json",
+        message: e.to_string(),
+    })?;
+    let user = gateway_memory_user_id();
+    let ws = MemoryWorkspaceId::new(&req.workspace_id);
+    let nodes = graph.get("nodes").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let links = graph
+        .get("links")
+        .or_else(|| graph.get("edges"))
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let facade = lock_memory_facade(&state)?;
+    let mut id_to_ref: std::collections::HashMap<String, MemoryRef> = std::collections::HashMap::new();
+    let mut entities = 0usize;
+    for node in &nodes {
+        let Some(id) = node.get("id").and_then(|v| v.as_str()) else { continue };
+        let label = node.get("label").and_then(|v| v.as_str()).unwrap_or(id);
+        let reference = MemoryRef::generated(MemoryRefKind::Entity, user.clone(), ws.clone());
+        let entity = MemoryEntity {
+            reference: reference.clone(),
+            user_id: user.clone(),
+            workspace_id: ws.clone(),
+            entity_type: "tool".to_string(), // code symbols → "tool" tier in the ontology
+            name: label.to_string(),
+            canonical_key: format!("code:{id}"),
+            aliases: vec![id.to_string()],
+            privacy_domain: PrivacyDomain::new("personal"),
+            sensitivity: MemoryDataSensitivity::Internal,
+            metadata: serde_json::json!({
+                "source": "graphify",
+                "source_file": node.get("source_file").and_then(|v| v.as_str()).unwrap_or(""),
+                "source_location": node.get("source_location").and_then(|v| v.as_str()).unwrap_or(""),
+            }),
+        };
+        if facade.upsert_entity(&entity).is_ok() {
+            id_to_ref.insert(id.to_string(), reference);
+            entities += 1;
+        }
+    }
+    let mut rels = 0usize;
+    for link in &links {
+        let s = link.get("source").and_then(|v| v.as_str());
+        let t = link.get("target").and_then(|v| v.as_str());
+        let (Some(s), Some(t)) = (s, t) else { continue };
+        let (Some(src), Some(tgt)) = (id_to_ref.get(s), id_to_ref.get(t)) else { continue };
+        let relation = MemoryRelation {
+            reference: MemoryRef::generated(MemoryRefKind::Relation, user.clone(), ws.clone()),
+            user_id: user.clone(),
+            workspace_id: ws.clone(),
+            source_ref: src.clone(),
+            relation_type: link.get("relation").and_then(|v| v.as_str()).unwrap_or("collega").to_string(),
+            target_ref: tgt.clone(),
+            confidence: 0.9,
+            privacy_domain: PrivacyDomain::new("personal"),
+            sensitivity: MemoryDataSensitivity::Internal,
+            evidence: Vec::new(),
+            metadata: serde_json::json!({ "source": "graphify" }),
+        };
+        if facade.upsert_relation(&relation).is_ok() {
+            rels += 1;
+        }
+    }
+    Ok(Json(serde_json::json!({ "entities": entities, "relations": rels })))
 }
 
 async fn memory_graph(
