@@ -7008,3 +7008,51 @@ e opzionale. Le euristiche di PIANO (operational_plan_for_goal ecc.) erano la
 vera stampella e ora sono fuori dal percorso capace.
 
 lib 24 + bin 61 verdi.
+
+## 2026-06-11 — Memoria F1-F6, proattivita' (apprendista + agisci), grafo-codice
+
+Sessione lunga, tutto committato su `feat/contacts-book`, build/test/tsc verdi.
+
+### Memoria: intervento F1-F6 (grafo invariante + lifecycle coerente)
+Diagnosi di 3 sintomi (memoria cancellata che riaffiora, doppioni nel grafo
+personale, progetti "vuoti") -> UNA causa: parafrasi duplicate sopravvissute alla
+cancellazione + linking grafo forward-only/one-shot + orphan-sweep distruttivo.
+- **F1** grafo rigenerabile: `regenerate_graph_links` (clear mention-linker + sweep)
+  + `link_mentions_core(resurrect)` che usa `list_entities_including_tombstoned` +
+  `untombstone_entity` (un'entita' tombata per errore da uno sweep precedente
+  bloccava il re-link — data-loss auto-rinforzante). Sweep ungated all'avvio.
+- **F2** canonicalizzazione: `unify_owner_identity` (one-shot) fonde le identita'
+  di canale del proprietario in `person:self` (self-contact inclusa), self-protect.
+- **F3** dedup fatti: pre-pass strutturale (>=2 token di contenuto condivisi oltre
+  il nome entita', robusto all'asimmetria di lunghezza) + fuzzy fallback.
+- **F4** forget per argomento: traversa mentions -> cancella memorie + tombstone
+  entita' (no person:self / contatti). Un'informazione cancellata NON riaffiora.
+- **F5** pulizia progetti vuoti (scope nascosti, guscio eliminabile).
+- **F6** wiki markdown = vista generata (`rebuild_profile_wiki`), terza gamba.
+- Fix grafo: pagine-vista (profilo/decisioni) escluse dalla proiezione (niente hub
+  wiki duplicato del personale).
+
+### Proattivita'
+- **Apprendista**: tabella `curiosities` (chat_store), mining follow-up-first +
+  consegna dalla coda (no generatore libero che ripeteva domande), idle reale
+  (`LAST_USER_ACTIVITY`, gate 20min, env override). Goal interno non mostrato come
+  bolla nel thread homun.
+- **Agisci**: `automation_candidate` (stati) + `mine_automations` (proposte dalla
+  memoria, ricorrenza validata da `next_occurrence`, dedup title+goal) +
+  approve->`schedule_proactive_task` / reject; endpoint + UI.
+
+### Grafo: visualizzatore + grafo-codice
+- Viz: `react-force-graph-2d` (fisica continua, hover-highlight, zoom-to-fit,
+  radice ancorata, nodi per grado, particelle al hover, click=focus).
+- **Grafo-codice trasparente** (Graphify come estrattore invisibile): immagine
+  Docker `runtimes/graphify` (one-shot, no-egress, mount read-only, watchdog
+  timeout); `build_project_graph` (staleness mtime, import condiviso idempotente
+  `clear_graphify`+`import_graphify_value`, evento `project_graph.ready`); endpoint
+  `project-graph/ensure` (+`subpath`) e `subdirs`; `memory_items` -> `{items,scopes}`
+  coi folder-project. Nodi tipizzati (code_symbol/file/doc/rationale) con colori.
+  Tool **`query_code_graph`** (chi chiama X / cosa usa X) sulle relazioni SQL.
+  Progetti giganti: esclusioni robuste (site-packages/venv/dati) + guard conta solo
+  CODICE (cap 6000) + scoping a sottocartella (picker su `too_large`). Verificato:
+  taskline mappata in ~8s; idra (57k file, monorepo scraper) -> picker -> subpath
+  `misc` = 1016 entita'-codice.
+- Test memoria: allineate le asserzioni audit residue a 0 (audit disattivato).

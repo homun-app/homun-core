@@ -1,6 +1,6 @@
 # Roadmap Operativa
 
-> Stato aggiornato al 2026-06-07.
+> Stato aggiornato al 2026-06-11.
 > - Cronologia dettagliata degli interventi: `docs/work-memory.md`.
 > - Roadmap strategica per fasi: `docs/architecture/final-roadmap.md`.
 > - Mappa componenti: `docs/architecture/system-map.md`.
@@ -130,6 +130,25 @@ Pilastri completati e in esercizio (dettaglio task in work-memory):
   set-of-marks e vision. E' il default in chat.
 - **Build hygiene**: `incremental=false` + `scripts/cargo-gc.sh` per tenere
   `target/` snello.
+- **Memoria avanzata + grafo come invariante (F1-F6, giu 2026)**: il grafo e' una
+  PROIEZIONE rigenerabile della verita' SQL (rigenerata all'avvio, non patchata),
+  canonicalizzazione entita' (merge self-protected), dedup fatti
+  strutturale+fuzzy, **forget per argomento** (traversa mentions -> cancella +
+  tombstone, un'informazione cancellata non riaffiora), pulizia progetti vuoti, e
+  la **wiki markdown come terza gamba** (vista generata). Le tre gambe
+  (SQL verita' / grafo / wiki) sono coerenti per costruzione.
+- **Proattivita' "apprendista" + "agisci" (giu 2026)**: coda persistente di
+  curiosita' (no-repeat, mining follow-up-first, idle reale 20min) e proposte di
+  automazione minate dalla memoria (ricorrenza validata, dedup) che, approvate,
+  diventano task ricorrenti pianificati.
+- **Grafo-codice trasparente per i progetti (giu 2026)**: apri un progetto e vedi
+  "la mappa del codice" (mai "Graphify"). Sidecar Docker on-demand (no-egress,
+  read-only) estrae il grafo tree-sitter, importato come entita'/relazioni e reso
+  dallo stesso force-graph; build on-open con staleness; progetti giganti
+  (venv/dati esclusi, conta solo il codice) -> scoping a sottocartella. Tool
+  `query_code_graph` (chi chiama X / cosa usa X), in casa sulle relazioni SQL.
+- **Visualizzatore grafo**: `react-force-graph-2d` (fisica continua,
+  hover-highlight, zoom-to-fit, radice ancorata, nodi dimensionati per grado).
 
 ## Fase corrente
 
