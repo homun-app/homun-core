@@ -75,6 +75,7 @@ import {
   type FsEntry,
   type FsFilePayload,
   type McpRegistryServer,
+  type HomunAutomation,
   type HomunCuriosity,
   type MemoryGraph,
   type MemoryGraphEdge,
@@ -5976,6 +5977,84 @@ function ChatEmptyHero({ onPick, threadId }: { onPick: (text: string) => void; t
       </div>
       {isHomun && <HomunProactiveToggle />}
       {isHomun && <HomunCuriosityQueue />}
+      {isHomun && <HomunAutomationProposals />}
+    </div>
+  );
+}
+
+// Apprendista "agisci": automations Homun could run for you. Approve → becomes a
+// real recurring task (read-only, gated); reject → never proposed again.
+function HomunAutomationProposals() {
+  const [items, setItems] = useState<HomunAutomation[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const reload = () =>
+    coreBridge
+      .homunAutomations()
+      .then(setItems)
+      .catch(() => {});
+  useEffect(() => {
+    void reload();
+  }, []);
+  const mine = () => {
+    setBusy(true);
+    coreBridge
+      .mineHomunAutomations()
+      .then(() => reload())
+      .catch(() => {})
+      .finally(() => setBusy(false));
+  };
+  if (items.length === 0) {
+    return (
+      <button type="button" className="ghost-button homun-automations-cta" onClick={mine} disabled={busy}>
+        {busy ? "Cerco…" : "Cosa posso automatizzare per te?"}
+      </button>
+    );
+  }
+  return (
+    <div className="homun-curiosities homun-automations">
+      <div className="homun-curiosities-head">
+        <span>Posso occuparmene io</span>
+        <button type="button" className="ghost-button" disabled={busy} onClick={mine}>
+          {busy ? "Cerco…" : "Cerca altre"}
+        </button>
+      </div>
+      {note && <p className="set-hint" style={{ margin: "0 0 6px" }}>{note}</p>}
+      <ul>
+        {items.map((a) => (
+          <li key={a.reference} title={a.summary}>
+            <span className="homun-curiosity-text">
+              <strong>{a.title}</strong> · {a.trigger}
+            </span>
+            <button
+              type="button"
+              className="set-btn"
+              onClick={() => {
+                coreBridge
+                  .approveHomunAutomation(a.reference)
+                  .then(() => {
+                    setNote(`Attivata: ${a.title}.`);
+                    void reload();
+                  })
+                  .catch(() => {});
+              }}
+            >
+              Attiva
+            </button>
+            <button
+              type="button"
+              className="fact-forget"
+              title="No grazie"
+              aria-label="Rifiuta"
+              onClick={() => {
+                void coreBridge.rejectHomunAutomation(a.reference).then(() => reload());
+              }}
+            >
+              ×
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

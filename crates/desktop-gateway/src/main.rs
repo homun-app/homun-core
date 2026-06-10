@@ -74,6 +74,7 @@ use local_first_local_computer_session::{
 };
 use local_first_local_computer_session::{LocalComputerReadModel, LocalComputerSessionStore};
 use local_first_memory::{
+    AutomationCandidateCreateRequest, AutomationCandidateStatus, AutomationRiskLevel,
     DataSensitivity as MemoryDataSensitivity, ExtractedEntity, ExtractedMemory, ExtractedRelation,
     MemoryAccessRequest, MemoryCreateRequest, MemoryDashboard, MemoryEntity,
     MemoryExtraction,
@@ -427,6 +428,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(homun_curiosities_list).post(homun_curiosities_mine),
         )
         .route("/api/homun/curiosities/dismiss", post(homun_curiosity_dismiss))
+        .route(
+            "/api/homun/automations",
+            get(homun_automations_list).post(homun_automations_mine),
+        )
+        .route("/api/homun/automations/approve", post(homun_automation_approve))
+        .route("/api/homun/automations/reject", post(homun_automation_reject))
         .route("/api/homun/greet", post(homun_greet))
         .route("/api/chat/threads/{thread_id}", delete(delete_chat_thread))
         .route("/api/chat/threads/{thread_id}/messages", get(chat_messages))
@@ -821,6 +828,126 @@ fatto deriva\"}]} — al massimo 6 voci, anche 0 se non c'è nulla di non banale
     queued
 }
 
+/// "Agisci" mining: from the personal memory, propose RECURRING automations the
+/// user can approve — read-only, grounded in real patterns. Each candidate carries
+/// a parseable `recurrence` + a read-only `goal` in `proposal_json`. Dedup against
+/// ALL existing candidates (approved/rejected never re-proposed). Returns count.
+async fn mine_automations(state: &AppState) -> usize {
+    let user = gateway_memory_user_id();
+    let workspace = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
+    let (personal, _) = gather_profile_memory(state);
+    if personal.is_empty() {
+        return 0;
+    }
+    let listing = personal
+        .iter()
+        .rev()
+        .take(60)
+        .rev()
+        .map(|t| format!("- {t}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    // Dedup horizon: every candidate ever proposed (approved/rejected included), keyed
+    // on title + the ACTION GOAL — the stable identity (a paraphrased title for the
+    // same recurring action is the same automation). Goals are more robust than titles.
+    let candidate_goal = |c: &local_first_memory::AutomationCandidateRecord| -> String {
+        c.proposal_json
+            .get("goal")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .or_else(|| c.actions.first().cloned())
+            .unwrap_or_default()
+    };
+    let known: Vec<std::collections::HashSet<String>> = {
+        let Ok(facade) = lock_memory_facade(state) else { return 0 };
+        facade
+            .list_automation_candidates_for_ui(&user, &workspace)
+            .unwrap_or_default()
+            .iter()
+            .map(|c| dedup_tokens(&format!("{} {}", c.title, candidate_goal(c))))
+            .collect()
+    };
+    let system = "Sei l'APPRENDISTA D'AZIONE dell'utente. Dalle sue memorie proponi AUTOMAZIONI \
+ricorrenti UTILI, fondate su pattern REALI e ripetuti (es. cerca spesso treni Napoli-Roma → un \
+riepilogo settimanale; segue un tennista → aggiornamenti pre-torneo). REGOLE: (1) solo azioni \
+READ-ONLY (cercare, riassumere, ricordare) — MAI acquisti, login, invii, prenotazioni; (2) ogni \
+proposta deve avere una cadenza naturale; (3) niente proposte generiche o senza un pattern chiaro \
+in memoria; (4) breve, in italiano. Rispondi SOLO con JSON: {\"automations\":[{\"title\":\"nome \
+breve\",\"summary\":\"cosa farei e perché, in una frase\",\"trigger\":\"quando (umano, es. 'ogni \
+venerdì alle 9')\",\"recurrence\":\"daily@HH:MM | weekly@<mon..sun|lun..dom>@HH:MM | every Nd\",\
+\"goal\":\"l'istruzione READ-ONLY da eseguire a ogni occorrenza\"}]} — max 4, anche 0 se non c'è \
+un pattern solido.";
+    let Some(root) =
+        call_memory_json(state, system, &format!("MEMORIE DELL'UTENTE:\n{listing}")).await
+    else {
+        return 0;
+    };
+    let items = root
+        .get("automations")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    if items.is_empty() {
+        return 0;
+    }
+    let tz = effective_user_tz_name();
+    let now = OffsetDateTime::now_utc();
+    let Ok(facade) = lock_memory_facade(state) else { return 0 };
+    let mut proposed = 0usize;
+    let mut seen_now: Vec<std::collections::HashSet<String>> = Vec::new();
+    for item in &items {
+        let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let goal = item.get("goal").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let recurrence = item.get("recurrence").and_then(|v| v.as_str()).unwrap_or("").trim();
+        if title.is_empty() || goal.is_empty() || recurrence.is_empty() {
+            continue;
+        }
+        // A proposal that can't be scheduled is useless — drop it here, never
+        // create a broken task later.
+        if local_first_task_runtime::next_occurrence(recurrence, Some(&tz), now).is_none() {
+            continue;
+        }
+        let summary = item.get("summary").and_then(|v| v.as_str()).unwrap_or("");
+        let trigger = item.get("trigger").and_then(|v| v.as_str()).unwrap_or(recurrence);
+        // Identity = title + goal (the action). A rejected automation's paraphrase
+        // must not slip back: lower threshold + containment, since automations are
+        // few and re-proposing a declined one breaks trust more than a near-miss.
+        let tokens = dedup_tokens(&format!("{title} {goal}"));
+        if known.iter().chain(seen_now.iter()).any(|k| {
+            jaccard(&tokens, k) >= 0.5 || (tokens.len() >= 3 && (tokens.is_subset(k) || k.is_subset(&tokens)))
+        }) {
+            continue;
+        }
+        let create = AutomationCandidateCreateRequest {
+            request: MemoryLifecycleRequest {
+                actor_id: "automation-miner".to_string(),
+                user_id: user.clone(),
+                workspace_id: workspace.clone(),
+                purpose: "propose_automation".to_string(),
+            },
+            routine_ref: None,
+            title: title.to_string(),
+            summary: summary.to_string(),
+            trigger: trigger.to_string(),
+            actions: vec![goal.to_string()],
+            risk_level: AutomationRiskLevel::Low,
+            autonomy_level: 2, // needs the user's explicit approval to activate
+            status: AutomationCandidateStatus::Candidate,
+            privacy_domain: PrivacyDomain::new("personal"),
+            sensitivity: MemoryDataSensitivity::Internal,
+            evidence_refs: Vec::new(),
+            proposal_json: serde_json::json!({
+                "recurrence": recurrence, "tz": tz, "goal": goal
+            }),
+        };
+        if facade.propose_automation(create).is_ok() {
+            seen_now.push(tokens);
+            proposed += 1;
+        }
+    }
+    proposed
+}
+
 /// One-shot bootstrap: register the questions Homun ALREADY asked in the existing
 /// thread as 'delivered' queue rows, so the durable dedup blocks re-asking them
 /// (the empirical bug: "c'è una regola fissa…" was re-asked on every check-in).
@@ -1003,6 +1130,136 @@ async fn homun_curiosity_dismiss(
         code: "curiosity_dismiss",
         message: e.to_string(),
     })?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// Pending automation proposals (what Homun could take off your hands).
+async fn homun_automations_list(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let user = gateway_memory_user_id();
+    let workspace = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
+    let facade = lock_memory_facade(&state)?;
+    let items: Vec<serde_json::Value> = facade
+        .list_automation_candidates_for_ui(&user, &workspace)
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "automations_list",
+            message: e,
+        })?
+        .into_iter()
+        .filter(|c| matches!(c.status, AutomationCandidateStatus::Candidate))
+        .map(|c| {
+            serde_json::json!({
+                "reference": c.reference.to_string(),
+                "title": c.title,
+                "summary": c.summary,
+                "trigger": c.trigger,
+            })
+        })
+        .collect();
+    Ok(Json(serde_json::json!({ "automations": items })))
+}
+
+/// Mine the memory for new automation proposals NOW (manual / test).
+async fn homun_automations_mine(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let proposed = mine_automations(&state).await;
+    Ok(Json(serde_json::json!({ "proposed": proposed })))
+}
+
+#[derive(Deserialize)]
+struct AutomationRefRequest {
+    reference: String,
+}
+
+/// Approve a proposal → it becomes a REAL recurring task (read-only, gated), then
+/// the candidate is marked Executed.
+async fn homun_automation_approve(
+    State(state): State<AppState>,
+    Json(req): Json<AutomationRefRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let reference = req.reference.parse::<MemoryRef>().map_err(|message| GatewayError {
+        status: StatusCode::BAD_REQUEST,
+        code: "automation_bad_ref",
+        message,
+    })?;
+    let user = gateway_memory_user_id();
+    let workspace = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
+    // Read the proposal (goal + recurrence) off the candidate.
+    let candidate = {
+        let facade = lock_memory_facade(&state)?;
+        facade
+            .list_automation_candidates_for_ui(&user, &workspace)
+            .map_err(|e| GatewayError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "automations_list",
+                message: e,
+            })?
+            .into_iter()
+            .find(|c| c.reference == reference)
+            .ok_or_else(|| GatewayError {
+                status: StatusCode::NOT_FOUND,
+                code: "automation_not_found",
+                message: "proposta non trovata".to_string(),
+            })?
+    };
+    let goal = candidate
+        .proposal_json
+        .get("goal")
+        .and_then(|v| v.as_str())
+        .unwrap_or(candidate.actions.first().map(String::as_str).unwrap_or(""))
+        .to_string();
+    let recurrence = candidate
+        .proposal_json
+        .get("recurrence")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let tz = candidate
+        .proposal_json
+        .get("tz")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    if goal.is_empty() || recurrence.is_empty() {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "automation_incomplete",
+            message: "proposta priva di goal o ricorrenza".to_string(),
+        });
+    }
+    // Reuse the exact machinery the Homun check-in uses: a recurring read-only
+    // proactive_prompt delivered into the "Pianificato" thread.
+    let scheduled = schedule_proactive_task(&state, &goal, &recurrence, tz.as_deref());
+    {
+        let facade = lock_memory_facade(&state)?;
+        let _ =
+            facade.update_automation_status(&reference, &user, &workspace, AutomationCandidateStatus::Executed);
+    }
+    Ok(Json(serde_json::json!({ "ok": true, "scheduled": scheduled })))
+}
+
+/// Decline a proposal → never re-proposed (dedup horizon includes Rejected).
+async fn homun_automation_reject(
+    State(state): State<AppState>,
+    Json(req): Json<AutomationRefRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let reference = req.reference.parse::<MemoryRef>().map_err(|message| GatewayError {
+        status: StatusCode::BAD_REQUEST,
+        code: "automation_bad_ref",
+        message,
+    })?;
+    let user = gateway_memory_user_id();
+    let workspace = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
+    let facade = lock_memory_facade(&state)?;
+    facade
+        .update_automation_status(&reference, &user, &workspace, AutomationCandidateStatus::Rejected)
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "automation_reject",
+            message: e.to_string(),
+        })?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 

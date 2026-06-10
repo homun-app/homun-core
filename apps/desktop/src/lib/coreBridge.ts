@@ -748,6 +748,51 @@ async function electronDismissHomunCuriosity(id: number): Promise<void> {
   }).catch(() => undefined);
 }
 
+export type HomunAutomation = {
+  reference: string;
+  title: string;
+  summary: string;
+  trigger: string;
+};
+
+async function electronHomunAutomations(): Promise<HomunAutomation[]> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/homun/automations`, {
+    headers: gatewayHeaders(),
+  });
+  if (!response.ok) return [];
+  const body = (await response.json()) as { automations: HomunAutomation[] };
+  return body.automations ?? [];
+}
+
+async function electronMineHomunAutomations(): Promise<number> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/homun/automations`, {
+    method: "POST",
+    headers: gatewayHeaders(),
+  });
+  if (!response.ok) return 0;
+  const body = (await response.json()) as { proposed: number };
+  return body.proposed ?? 0;
+}
+
+async function electronApproveHomunAutomation(reference: string): Promise<string> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/homun/automations/approve`, {
+    method: "POST",
+    headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ reference }),
+  });
+  if (!response.ok) throw new Error(`approve automation HTTP ${response.status}`);
+  const body = (await response.json()) as { scheduled?: string };
+  return body.scheduled ?? "";
+}
+
+async function electronRejectHomunAutomation(reference: string): Promise<void> {
+  await fetch(`${DESKTOP_GATEWAY_URL}/api/homun/automations/reject`, {
+    method: "POST",
+    headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ reference }),
+  }).catch(() => undefined);
+}
+
 async function electronConsolidateMemory(
   workspace?: string,
 ): Promise<{ merged: number; dropped: number }> {
@@ -1577,6 +1622,10 @@ export const coreBridge = {
   homunCuriosities: () => electronHomunCuriosities(),
   mineHomunCuriosities: () => electronMineHomunCuriosities(),
   dismissHomunCuriosity: (id: number) => electronDismissHomunCuriosity(id),
+  homunAutomations: () => electronHomunAutomations(),
+  mineHomunAutomations: () => electronMineHomunAutomations(),
+  approveHomunAutomation: (reference: string) => electronApproveHomunAutomation(reference),
+  rejectHomunAutomation: (reference: string) => electronRejectHomunAutomation(reference),
   setChatThreadPinned: (threadId: string, pinned: boolean) =>
     chatApi.setChatThreadPinned(threadId, pinned),
   archiveChatThread: (threadId: string) =>

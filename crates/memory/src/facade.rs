@@ -1,5 +1,6 @@
 use crate::{
     AccessDecisionKind, AutomationCandidateCreateRequest, AutomationCandidateRecord,
+    AutomationCandidateStatus,
     DataSensitivity, GraphifyArtifacts, GraphifyCli, GraphifyImport, GraphifyImportSummary,
     GraphifyOperation, GraphifyQueryRequest, GraphifyQueryResult, MemoryAccessDecision,
     MemoryAccessRequest, MemoryBackupReport, MemoryContextItem, MemoryContextPack,
@@ -454,6 +455,20 @@ impl MemoryFacade {
         };
         self.store.upsert_automation_candidate(&candidate)?;
         Ok(candidate)
+    }
+
+    /// Transition an automation candidate (approve/reject/execute/stale). The
+    /// "agisci" loop calls this when the user accepts or declines a proposal.
+    pub fn update_automation_status(
+        &self,
+        reference: &MemoryRef,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        status: AutomationCandidateStatus,
+    ) -> MemoryResult<()> {
+        Ok(self
+            .store
+            .set_automation_candidate_status(reference, user_id, workspace_id, &status)?)
     }
 
     pub fn context_pack(&self, request: &MemoryAccessRequest) -> MemoryResult<MemoryContextPack> {

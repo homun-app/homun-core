@@ -1,9 +1,9 @@
 use crate::{
-    AutomationCandidateRecord, DataSensitivity, EncryptedJson, KeyProvider, MemoryAccessDecision,
-    MemoryAccessRequest, MemoryBackupReport, MemoryEntity, MemoryEvent, MemoryEvidence,
-    MemoryHealth, MemoryMaintenanceReport, MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation,
-    MemoryRestoreMode, PrivacyDomain, RoutineRecord, UserId, WikiPage, WorkspaceId, decrypt_json,
-    encrypt_json,
+    AutomationCandidateRecord, AutomationCandidateStatus, DataSensitivity, EncryptedJson,
+    KeyProvider, MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryEntity,
+    MemoryEvent, MemoryEvidence, MemoryHealth, MemoryMaintenanceReport, MemoryRecord, MemoryRef,
+    MemoryRefKind, MemoryRelation, MemoryRestoreMode, PrivacyDomain, RoutineRecord, UserId,
+    WikiPage, WorkspaceId, current_timestamp, decrypt_json, encrypt_json,
 };
 use rusqlite::{Connection, Row, params};
 use std::fs;
@@ -860,6 +860,31 @@ impl SQLiteMemoryStore {
             }
         }
         Ok(routines)
+    }
+
+    /// Targeted status transition for an automation candidate (approve/reject/
+    /// execute/stale) — the gateway's "agisci" loop drives it. Scoped to user/ws.
+    pub fn set_automation_candidate_status(
+        &self,
+        reference: &MemoryRef,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        status: &AutomationCandidateStatus,
+    ) -> Result<(), String> {
+        self.conn
+            .execute(
+                "update automation_candidates set status = ?1, updated_at = ?2
+                 where ref = ?3 and user_id = ?4 and workspace_id = ?5",
+                params![
+                    enum_name(status)?,
+                    current_timestamp(),
+                    reference.to_string(),
+                    user_id.as_str(),
+                    workspace_id.as_str(),
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
     }
 
     pub fn upsert_automation_candidate(
