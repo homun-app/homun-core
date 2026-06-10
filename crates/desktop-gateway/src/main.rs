@@ -390,6 +390,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_active_workspace_from_disk();
     backfill_contacts(&state);
     backfill_mentions(&state);
+    sweep_graph_on_startup(&state);
     start_task_executor_worker(state.clone());
     spawn_thread_browser_session_reaper(state.clone());
     spawn_contained_computer_idle_reaper(state.clone());
@@ -2053,6 +2054,58 @@ fn link_memory_mentions(
     }
 }
 
+/// G5 — "re-optimize" after deletions: first re-link live memories to entities
+/// (idempotent — also heals links missed when a duplicate memory was deduped
+/// away), then tombstone entities left with ZERO edges, so the graph never
+/// keeps orphans. Protected from the sweep: the user node (person:self),
+/// channel identities, and entities backing a curated contact (entity_ref).
+fn sweep_graph_orphans(state: &AppState, workspace: &MemoryWorkspaceId) {
+    // Contact-backed entity refs are sacred — the address book links to them.
+    // Collected FIRST so the chat-store lock is dropped before facade work.
+    let protected: std::collections::HashSet<String> = lock_store(state)
+        .ok()
+        .and_then(|store| store.list_contacts().ok())
+        .map(|contacts| contacts.into_iter().filter_map(|c| c.entity_ref).collect())
+        .unwrap_or_default();
+    let user = gateway_memory_user_id();
+    let Ok(facade) = lock_memory_facade(state) else {
+        return;
+    };
+    let items: Vec<(MemoryRef, String)> = facade
+        .list_memories_for_ui(&user, workspace)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|m| !matches!(m.status, MemoryStatus::Deleted | MemoryStatus::Rejected))
+        .filter(|m| matches!(m.memory_type.as_str(), "fact" | "preference" | "decision"))
+        .map(|m| (m.reference, m.text))
+        .collect();
+    link_memory_mentions(&facade, &user, workspace, &items);
+    let touched: std::collections::HashSet<String> = facade
+        .list_relations_for_ui(&user, workspace)
+        .unwrap_or_default()
+        .into_iter()
+        .flat_map(|r| [r.source_ref.to_string(), r.target_ref.to_string()])
+        .collect();
+    for entity in facade.list_entities_for_ui(&user, workspace).unwrap_or_default() {
+        let id = entity.reference.to_string();
+        let is_channel_identity = entity.canonical_key.starts_with("person:whatsapp:")
+            || entity.canonical_key.starts_with("person:telegram:");
+        if touched.contains(&id)
+            || entity.canonical_key == "person:self"
+            || is_channel_identity
+            || protected.contains(&id)
+        {
+            continue;
+        }
+        let _ = facade.tombstone_entity(
+            &entity.reference,
+            &user,
+            workspace,
+            "orfana: nessuna memoria viva la riguarda",
+        );
+    }
+}
+
 /// M2/M3: after a chat turn, mine the exchange for durable facts, preferences and
 /// DECISIONS (with the why), plus graph entities/relations — routing each to its
 /// scope (personal vs active project) and auto-confirming the low-risk ones.
@@ -2630,6 +2683,15 @@ fn forget_memory(state: &AppState, args: &serde_json::Value) -> String {
     }
     // Cascade: the graph already hides Deleted; refresh the wiki projection too.
     rebuild_decisions_wiki(&facade, &user, &active);
+    // G5: deletions can orphan entities — re-optimize the touched scopes (the
+    // facade lock must be released first; sweep re-locks).
+    drop(facade);
+    if !deleted.is_empty() {
+        sweep_graph_orphans(state, &active);
+        if active.as_str() != PERSONAL_WORKSPACE {
+            sweep_graph_orphans(state, &MemoryWorkspaceId::new(PERSONAL_WORKSPACE));
+        }
+    }
     if deleted.is_empty() {
         format!("Non ho trovato in memoria nulla che corrisponda a «{query}».")
     } else {
@@ -10758,6 +10820,34 @@ fn backfill_mentions(state: &AppState) {
     eprintln!("mentions-backfill: completato su {linked_scopes} scope");
     if let Ok(store) = lock_store(state) {
         let _ = store.set_flag("mentions_backfill_v1", "1");
+    }
+}
+
+/// One-shot startup sweep (G5): clears entities orphaned by deletions that
+/// happened BEFORE the cascade existed. Ongoing hygiene is handled by the
+/// sweeps triggered on each delete (decide endpoint + forget tool).
+fn sweep_graph_on_startup(state: &AppState) {
+    if let Ok(store) = lock_store(state) {
+        if store.flag("graph_sweep_v1").ok().flatten().is_some() {
+            return;
+        }
+    } else {
+        return;
+    }
+    let mut workspaces: Vec<String> = vec![PERSONAL_WORKSPACE.to_string()];
+    workspaces.extend(
+        load_workspaces_file()
+            .workspaces
+            .into_iter()
+            .map(|w| w.id)
+            .filter(|id| id != PERSONAL_WORKSPACE),
+    );
+    for id in workspaces {
+        sweep_graph_orphans(state, &MemoryWorkspaceId::new(id));
+    }
+    eprintln!("graph-sweep: passata iniziale completata");
+    if let Ok(store) = lock_store(state) {
+        let _ = store.set_flag("graph_sweep_v1", "1");
     }
 }
 
@@ -20000,6 +20090,12 @@ async fn memory_decide(
                 message: "azione non valida (confirm|reject|delete)".to_string(),
             });
         }
+    }
+    // G5: a deletion can orphan entities and leave dangling edges — re-optimize
+    // the graph of the touched scope. Facade lock released first (non-reentrant).
+    drop(facade);
+    if matches!(request.action.as_str(), "delete" | "reject") {
+        sweep_graph_orphans(&state, &reference.workspace_id);
     }
     Ok(Json(serde_json::json!({ "ok": true })))
 }
