@@ -21505,12 +21505,20 @@ fn gateway_memory_user_id() -> MemoryUserId {
 fn gateway_memory_workspace_id() -> MemoryWorkspaceId {
     // Prefer the per-turn memory scope (the conversation's project) if set, else the
     // user's selected workspace.
-    if let Ok(guard) = MEMORY_WORKSPACE.read() {
-        if let Some(id) = guard.as_ref().filter(|id| !id.trim().is_empty()) {
-            return MemoryWorkspaceId::new(id.clone());
-        }
+    let raw = MEMORY_WORKSPACE
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().filter(|id| !id.trim().is_empty()).cloned())
+        .unwrap_or_else(active_workspace_id);
+    // The base/default space ("Predefinito") IS the personal space for MEMORY: route
+    // it to __personal__ so the default chat doesn't accumulate a separate
+    // "Predefinito" bucket distinct from "Personale". Only NAMED projects (their own
+    // workspace ids) keep a project-scoped memory. NB: this is memory-only — chat
+    // threads and capabilities still use the base workspace id.
+    if raw == base_workspace_id() {
+        return MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
     }
-    MemoryWorkspaceId::new(active_workspace_id())
+    MemoryWorkspaceId::new(raw)
 }
 
 fn gateway_capability_user_id() -> CapabilityUserId {
