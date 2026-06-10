@@ -19817,10 +19817,17 @@ async fn memory_graph(
         }
     }
 
-    // Wiki pages (the markdown face) join the graph through their linked_refs —
-    // they were ALREADY stored linked to the memories they cite, just never shown.
+    // Wiki pages join the graph through their linked_refs — but NOT the auto-generated
+    // VIEW pages (profilo.md, decisioni.md). Those are projections OF the memory we
+    // build FROM the graph; re-projecting them back in is circular and, since the
+    // profile links every fact, creates a hub that visually duplicates the scope root.
+    // They live in the wiki tab. Only hand-authored/specific pages appear as nodes.
+    let is_generated_view = |path: &str| matches!(path, "profilo.md" | "decisioni.md");
     if let Ok(pages) = facade.list_wiki_pages_for_ui(&user, &ws) {
         for page in pages {
+            if is_generated_view(&page.path) {
+                continue;
+            }
             let page_id = format!("wiki::{}", page.path);
             let mut linked_any = false;
             for linked in &page.linked_refs {
