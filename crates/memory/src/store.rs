@@ -923,6 +923,22 @@ impl SQLiteMemoryStore {
                 ),
             )
             .map_err(|error| error.to_string())?;
+        // Cascade: a dead ref must not keep edges in the graph — drop every
+        // relation touching it (memory→entity "mentions", entity↔entity links).
+        // Both delete paths (delete_memory and tombstone_entity) funnel through
+        // here, so this single seam keeps the relations table free of danglers.
+        self.conn
+            .execute(
+                "delete from relations
+                 where user_id = ?1 and workspace_id = ?2
+                   and (source_ref = ?3 or target_ref = ?3)",
+                (
+                    user_id.as_str(),
+                    workspace_id.as_str(),
+                    reference.to_string(),
+                ),
+            )
+            .map_err(|error| error.to_string())?;
         Ok(())
     }
 
