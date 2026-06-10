@@ -457,6 +457,40 @@ impl MemoryFacade {
         Ok(candidate)
     }
 
+    /// Entities of a scope INCLUDING tombstoned ones, each with its tombstoned flag.
+    /// Regeneration uses this to resurrect entities a previous orphan-sweep killed.
+    pub fn list_entities_including_tombstoned(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> MemoryResult<Vec<(MemoryEntity, bool)>> {
+        Ok(self
+            .store
+            .list_entities_including_tombstoned(user_id, workspace_id)?)
+    }
+
+    /// Resurrect an entity (drop its tombstone) — used when a live memory references it.
+    pub fn untombstone_entity(
+        &self,
+        reference: &MemoryRef,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> MemoryResult<()> {
+        Ok(self
+            .store
+            .untombstone_entity(reference, user_id, workspace_id)?)
+    }
+
+    /// Wipe the auto-derived "mentions" edges for a scope (graph regeneration
+    /// deletes-then-rebuilds them from the live facts). Returns how many removed.
+    pub fn clear_mention_links(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> MemoryResult<usize> {
+        Ok(self.store.clear_mention_links(user_id, workspace_id)?)
+    }
+
     /// Transition an automation candidate (approve/reject/execute/stale). The
     /// "agisci" loop calls this when the user accepts or declines a proposal.
     pub fn update_automation_status(

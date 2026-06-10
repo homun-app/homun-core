@@ -400,6 +400,54 @@ impl SQLiteMemoryStore {
         Ok(entities)
     }
 
+    /// Like `list_entities` but INCLUDING tombstoned ones — the graph regeneration
+    /// needs to see entities a previous orphan-sweep killed, so a live memory that
+    /// mentions one can RESURRECT it (the sweep tombstoned it only because the
+    /// forward-only linker had never connected it). Returns `(entity, tombstoned)`.
+    pub fn list_entities_including_tombstoned(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Vec<(MemoryEntity, bool)>, String> {
+        let mut statement = self
+            .conn
+            .prepare(
+                "select ref, user_id, workspace_id, entity_type, name, canonical_key,
+                        aliases_json, privacy_domain, sensitivity, metadata_json
+                 from entities
+                 where user_id = ?1 and workspace_id = ?2
+                 order by ref",
+            )
+            .map_err(|error| error.to_string())?;
+        let mut rows = statement
+            .query((user_id.as_str(), workspace_id.as_str()))
+            .map_err(|error| error.to_string())?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+            let entity = entity_from_row(row)?;
+            let dead = self.is_tombstoned(&entity.reference, user_id, workspace_id)?;
+            out.push((entity, dead));
+        }
+        Ok(out)
+    }
+
+    /// Resurrect an entity: drop its tombstone so it reappears in the graph. Used by
+    /// regeneration when a live memory references a wrongly-orphaned entity.
+    pub fn untombstone_entity(
+        &self,
+        reference: &MemoryRef,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<(), String> {
+        self.conn
+            .execute(
+                "delete from tombstones where ref = ?1 and user_id = ?2 and workspace_id = ?3",
+                params![reference.to_string(), user_id.as_str(), workspace_id.as_str()],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
     pub fn upsert_entity(&self, entity: &MemoryEntity) -> Result<(), String> {
         self.conn
             .execute(
@@ -471,6 +519,26 @@ impl SQLiteMemoryStore {
             )
             .map_err(|error| error.to_string())?;
         Ok(())
+    }
+
+    /// Wipe the auto-derived "mentions" edges for a scope (those tagged
+    /// `metadata.source = "mention-linker"`). The graph-regeneration invariant
+    /// deletes these before re-deriving them from the live facts, so stale edges
+    /// (from edited/merged memories) never accumulate. Hand-authored entity↔entity
+    /// or decision edges are left untouched. Returns how many were removed.
+    pub fn clear_mention_links(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<usize, String> {
+        self.conn
+            .execute(
+                "delete from relations
+                 where user_id = ?1 and workspace_id = ?2 and relation_type = 'mentions'
+                   and json_extract(metadata_json, '$.source') = 'mention-linker'",
+                params![user_id.as_str(), workspace_id.as_str()],
+            )
+            .map_err(|error| error.to_string())
     }
 
     pub fn relations_for(
