@@ -2273,6 +2273,36 @@ async fn consolidate_scope(
         return (0, 0);
     }
 
+    // 1a. STRUCTURAL signal: which entities each memory is linked to (mentions edges).
+    // Two facts of the same type that talk about the SAME set of entities are very
+    // likely paraphrases — a signal lexical/cosine thresholds miss (the "Sinner ×2"
+    // case). Built from the now-complete graph (F1).
+    let (entity_sets, entity_name_tokens): (
+        std::collections::HashMap<String, std::collections::BTreeSet<String>>,
+        std::collections::HashSet<String>,
+    ) = {
+        let mut map: std::collections::HashMap<String, std::collections::BTreeSet<String>> =
+            Default::default();
+        let mut name_tokens: std::collections::HashSet<String> = Default::default();
+        if let Ok(facade) = lock_memory_facade(state) {
+            for rel in facade.list_relations_for_ui(user, workspace).unwrap_or_default() {
+                if rel.relation_type == "mentions" {
+                    map.entry(rel.source_ref.to_string())
+                        .or_default()
+                        .insert(rel.target_ref.to_string());
+                }
+            }
+            // Entity-name tokens (e.g. "jannik","sinner") so the structural check can
+            // require shared content BEYOND the entity name itself.
+            for entity in facade.list_entities_for_ui(user, workspace).unwrap_or_default() {
+                for tok in dedup_tokens(&entity.name) {
+                    name_tokens.insert(tok);
+                }
+            }
+        }
+        (map, name_tokens)
+    };
+
     // 1b. DETERMINISTIC pre-pass: collapse obvious paraphrase/subset duplicates
     // (the LLM curator alone was too conservative — "Trenitalia ×4" survived). Same
     // criterion as the read-time dedup: same type AND (lexical Jaccard ∨ token
@@ -2281,24 +2311,43 @@ async fn consolidate_scope(
     let mut order: Vec<usize> = (0..mems.len()).collect();
     order.sort_by_key(|&i| std::cmp::Reverse(mems[i].2.chars().count()));
     let mut survivor_idx: Vec<usize> = Vec::new();
-    let mut kept_meta: Vec<(String, std::collections::HashSet<String>, Option<Vec<f32>>)> = Vec::new();
+    type KeptMeta = (
+        String,
+        std::collections::HashSet<String>,
+        Option<Vec<f32>>,
+        std::collections::BTreeSet<String>,
+    );
+    let mut kept_meta: Vec<KeptMeta> = Vec::new();
     let mut redundant: Vec<MemoryRef> = Vec::new();
     for &i in &order {
         let (reference, mtype, text) = &mems[i];
         let tokens = dedup_tokens(text);
         let vector = embeddings.get(&reference.to_string()).cloned();
-        let duplicate = kept_meta.iter().any(|(kt, ktok, kvec)| {
+        let entset = entity_sets.get(&reference.to_string()).cloned().unwrap_or_default();
+        let duplicate = kept_meta.iter().any(|(kt, ktok, kvec, kent)| {
             kt == mtype
                 && (jaccard(&tokens, ktok) >= DEDUP_JACCARD
                     || (tokens.len() >= 2 && tokens.is_subset(ktok))
                     || matches!((vector.as_ref(), kvec.as_ref()),
-                        (Some(a), Some(b)) if cosine(a, b) >= DEDUP_COSINE))
+                        (Some(a), Some(b)) if cosine(a, b) >= DEDUP_COSINE)
+                    // STRUCTURAL: same entity set (non-empty) AND ≥2 shared content
+                    // tokens BEYOND the entity name. "interesse per le CONDIZIONI di
+                    // SALUTE di Sinner" ×2 share {condizioni,salute} beyond {jannik,
+                    // sinner} → merge; "AMA Sinner" vs "Sinner INFORTUNATO" share only
+                    // the name → kept distinct. Robust to length asymmetry (no jaccard).
+                    || (!entset.is_empty()
+                        && &entset == kent
+                        && tokens
+                            .intersection(ktok)
+                            .filter(|t| !entity_name_tokens.contains(*t))
+                            .count()
+                            >= 2))
         });
         if duplicate {
             redundant.push(reference.clone());
         } else {
             survivor_idx.push(i);
-            kept_meta.push((mtype.clone(), tokens, vector));
+            kept_meta.push((mtype.clone(), tokens, vector, entset));
         }
     }
     let mut merged = 0usize;
