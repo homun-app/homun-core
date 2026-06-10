@@ -2323,6 +2323,8 @@ async function electronDeleteContact(reference: string): Promise<void> {
 }
 
 export type CoreContactFact = {
+  /** Memory record ref — lets the UI delete this single fact from the graph. */
+  reference: string;
   text: string;
   /** "durable" | "transient" | "event" */
   temporality: string;
@@ -2330,8 +2332,8 @@ export type CoreContactFact = {
   date: string;
 };
 export type CoreContactProfile = {
+  /** Read live from the memory graph — always fresh (a deleted fact isn't returned). */
   facts: CoreContactFact[];
-  stale: boolean;
   episode_count: number;
 };
 
@@ -2345,7 +2347,7 @@ async function electronContactProfile(reference: string): Promise<CoreContactPro
     if (!response.ok) throw new Error(`contact profile HTTP ${response.status}`);
     return response.json() as Promise<CoreContactProfile>;
   } catch {
-    return { facts: [], stale: false, episode_count: 0 };
+    return { facts: [], episode_count: 0 };
   }
 }
 
