@@ -1310,6 +1310,41 @@ fn jaccard(a: &std::collections::HashSet<String>, b: &std::collections::HashSet<
 /// language-agnostic — no stopword list).
 const DEDUP_JACCARD: f32 = 0.55;
 
+/// "Soppressione permanente" del forget: the texts of DELETED/REJECTED memories in
+/// the always-on scopes ARE the suppression list — no extra table needed. Anything
+/// the user forgot must not resurface (re-derived contact facts, re-extracted
+/// memories), even though the raw source messages stay. A forget directive ("vuole
+/// che i ricordi su Berlino vengano dimenticati") is itself a deleted memory, so its
+/// topic terms suppress too.
+fn forgotten_token_sets(
+    facade: &MemoryFacade,
+    user: &MemoryUserId,
+) -> Vec<std::collections::HashSet<String>> {
+    let mut out = Vec::new();
+    for ws in [PERSONAL_WORKSPACE, THREADS_WORKSPACE] {
+        // list_forgotten_texts bypasses the tombstone filter that hides deleted rows
+        // from list_memories_for_ui — we NEED the forgotten texts here.
+        if let Ok(texts) = facade.list_forgotten_texts(user, &MemoryWorkspaceId::new(ws)) {
+            for text in texts {
+                let tokens = dedup_tokens(&text);
+                if !tokens.is_empty() {
+                    out.push(tokens);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// True when `text` substantially overlaps any forgotten text → it must be suppressed.
+fn is_suppressed(text: &str, forgotten: &[std::collections::HashSet<String>]) -> bool {
+    if forgotten.is_empty() {
+        return false;
+    }
+    let tokens = dedup_tokens(text);
+    forgotten.iter().any(|f| jaccard(&tokens, f) >= DEDUP_JACCARD)
+}
+
 // ---- Embeddings (multilingual semantic layer) -----------------------------------
 // A multilingual embedding model (nomic-embed-text-v2-moe by default, via the local
 // Ollama) gives language-agnostic SEMANTIC similarity — fuses paraphrases of the same
@@ -1491,9 +1526,15 @@ fn persist_scope_memories(
                 .collect()
         })
         .unwrap_or_default();
+    // Permanent forget: drop anything the user has deleted before it re-enters
+    // memory — a still-live source message must not resurrect a forgotten fact.
+    let forgotten = forgotten_token_sets(facade, user_id);
     // Also fold duplicates WITHIN this batch.
     let mut batch_seen: Vec<(String, std::collections::HashSet<String>)> = Vec::new();
     memories.retain(|m| {
+        if is_suppressed(&m.text, &forgotten) {
+            return false;
+        }
         let tokens = dedup_tokens(&m.text);
         let duplicate = existing
             .iter()
@@ -19978,17 +20019,16 @@ async fn contact_profile(
         (handles, facts_json)
     };
     let user = gateway_memory_user_id();
-    let episode_count = {
+    let (episode_count, forgotten) = {
         let facade = lock_memory_facade(&state)?;
-        episode_texts_by_handles(&facade, &user, &handles).len()
+        let count = episode_texts_by_handles(&facade, &user, &handles).len();
+        (count, forgotten_token_sets(&facade, &user))
     };
-    let (facts, facts_count) = read_cached_facts(&facts_json);
-    // Cached facts are a distilled SNAPSHOT of the episodes at refresh time. If the
-    // live episode count has DROPPED below it, episodes were deleted since — the
-    // cached facts may describe removed information, so don't show them (the user
-    // regenerates from the current, deletion-aware episodes). Additions only (count
-    // grew) keep the facts visible — still valid, just incomplete — flagged stale.
-    let facts = if episode_count < facts_count { Vec::new() } else { facts };
+    let (mut facts, facts_count) = read_cached_facts(&facts_json);
+    // Permanent forget: drop any cached fact that overlaps something the user
+    // deleted — even though the raw source message survives. Applied at READ time
+    // so it takes effect immediately, with no regeneration.
+    facts.retain(|f| !is_suppressed(&f.text, &forgotten));
     Ok(Json(ContactProfile {
         stale: facts_count != episode_count,
         episode_count,
@@ -20018,12 +20058,18 @@ async fn contact_profile_refresh(
         (contact.name, handles)
     };
     let user = gateway_memory_user_id();
-    let episodes = {
+    let (episodes, forgotten) = {
         let facade = lock_memory_facade(&state)?;
-        episodes_dated_by_handles(&facade, &user, &handles)
+        (
+            episodes_dated_by_handles(&facade, &user, &handles),
+            forgotten_token_sets(&facade, &user),
+        )
     };
     let episode_count = episodes.len();
-    let facts = extract_contact_facts(&state, &name, &episodes).await;
+    let mut facts = extract_contact_facts(&state, &name, &episodes).await;
+    // Permanent forget: never re-cache a fact the user has deleted, even though it
+    // was just re-distilled from a still-live source message.
+    facts.retain(|f| !is_suppressed(&f.text, &forgotten));
     {
         let store = lock_store(&state)?;
         let json = serde_json::json!({ "facts": facts, "count": episode_count }).to_string();
