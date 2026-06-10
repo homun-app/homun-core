@@ -3607,6 +3607,93 @@ fn build_plan_markdown(steps: &[serde_json::Value]) -> String {
     lines.join("\n")
 }
 
+/// Read-only query over the active project's CODE graph (imported by the project-map
+/// builder). Answers "what calls X / what does X call / where does X live" by
+/// traversing the calls/contains/method edges already in SQLite — no Graphify needed.
+fn query_code_graph_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "query_code_graph",
+            "description": "Interroga la mappa del codice del progetto attivo: dato un simbolo \
+(funzione, file, classe), elenca chi lo chiama, cosa chiama e dove si trova. Usalo per \
+domande sull'architettura/struttura del codice del progetto corrente.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "symbol": { "type": "string", "description": "Nome del simbolo da esplorare (es. \"cmd_add\", \"main.py\")" }
+                },
+                "required": ["symbol"]
+            }
+        }
+    })
+}
+
+fn query_code_graph(state: &AppState, symbol: &str) -> String {
+    let needle = symbol.trim().to_lowercase();
+    if needle.is_empty() {
+        return "Indica un simbolo (funzione/file) da esplorare.".to_string();
+    }
+    let Ok(facade) = lock_memory_facade(state) else {
+        return "Memoria non disponibile.".to_string();
+    };
+    let user = gateway_memory_user_id();
+    let ws = gateway_memory_workspace_id();
+    let entities = facade.list_entities_for_ui(&user, &ws).unwrap_or_default();
+    // Only the code graph (entities imported from the project map).
+    let code: Vec<_> = entities
+        .iter()
+        .filter(|e| e.entity_type.starts_with("code_"))
+        .collect();
+    if code.is_empty() {
+        return "Per questo progetto non c'è ancora una mappa del codice.".to_string();
+    }
+    let Some(target) = code
+        .iter()
+        .find(|e| e.name.to_lowercase() == needle)
+        .or_else(|| code.iter().find(|e| e.name.to_lowercase().contains(&needle)))
+    else {
+        return format!("Non trovo «{symbol}» nella mappa del codice del progetto.");
+    };
+    let tref = target.reference.to_string();
+    let name_by_ref: std::collections::HashMap<String, String> =
+        entities.iter().map(|e| (e.reference.to_string(), e.name.clone())).collect();
+    let rels = facade.list_relations_for_ui(&user, &ws).unwrap_or_default();
+    let mut calls: Vec<String> = Vec::new(); // target → X (outgoing)
+    let mut callers: Vec<String> = Vec::new(); // X → target (incoming)
+    let mut container: Option<String> = None;
+    for r in &rels {
+        let s = r.source_ref.to_string();
+        let t = r.target_ref.to_string();
+        if s == tref {
+            if r.relation_type == "contains" {
+                continue; // target contains children — list as calls below if relevant
+            }
+            if let Some(n) = name_by_ref.get(&t) { calls.push(n.clone()); }
+        } else if t == tref {
+            if r.relation_type == "contains" {
+                container = name_by_ref.get(&s).cloned();
+            } else if let Some(n) = name_by_ref.get(&s) {
+                callers.push(n.clone());
+            }
+        }
+    }
+    calls.sort(); calls.dedup(); calls.truncate(20);
+    callers.sort(); callers.dedup(); callers.truncate(20);
+    let mut out = format!("**{}**", target.name);
+    if let Some(c) = container { out.push_str(&format!(" (in {c})")); }
+    out.push('\n');
+    if callers.is_empty() {
+        out.push_str("- Nessun chiamante noto.\n");
+    } else {
+        out.push_str(&format!("- Chiamato da: {}\n", callers.join(", ")));
+    }
+    if !calls.is_empty() {
+        out.push_str(&format!("- Usa/chiama: {}\n", calls.join(", ")));
+    }
+    out
+}
+
 fn resolve_datetime_tool_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "function",
@@ -7210,6 +7297,7 @@ RI-VERIFICA eseguendo. Una causa alla volta, niente tentativi alla cieca."
         browser_tabs_tool_schema(),
         browser_dialog_tool_schema(),
         recall_memory_tool_schema(),
+        query_code_graph_tool_schema(),
         // Unified capability discovery — find what to connect (MCP/skill/Composio)
         // for a need. Read-only (search), so offered to channels too.
         suggest_capabilities_tool_schema(),
@@ -8759,6 +8847,22 @@ disponibili (per dati dal web usa il browser: browser_navigate sull'URL indicato
                         .await;
                         let st = state_owned.clone();
                         tokio::task::spawn_blocking(move || recall_memory(&st, &query))
+                            .await
+                            .unwrap_or_else(|e| format!("Errore di esecuzione: {e}"))
+                    } else if name == "query_code_graph" {
+                        let symbol = serde_json::from_str::<serde_json::Value>(args_raw)
+                            .ok()
+                            .and_then(|a| a.get("symbol").and_then(|s| s.as_str()).map(String::from))
+                            .unwrap_or_default();
+                        let _ = emit_stream_event(
+                            &tx,
+                            GenerateStreamEvent::Delta {
+                                text: format!("‹‹ACT››🗺️ Esploro la mappa del codice: {symbol}‹‹/ACT››"),
+                            },
+                        )
+                        .await;
+                        let st = state_owned.clone();
+                        tokio::task::spawn_blocking(move || query_code_graph(&st, &symbol))
                             .await
                             .unwrap_or_else(|e| format!("Errore di esecuzione: {e}"))
                     } else if name == "resolve_datetime" {
@@ -19733,12 +19837,24 @@ fn import_graphify_value(
     for node in &nodes {
         let Some(id) = node.get("id").and_then(|v| v.as_str()) else { continue };
         let label = node.get("label").and_then(|v| v.as_str()).unwrap_or(id);
+        let file_type = node.get("file_type").and_then(|v| v.as_str()).unwrap_or("code");
+        // Type the code node by shape so the graph reads at a glance: functions/methods
+        // (label ends in "()") vs files (a filename) vs docs/rationale.
+        let entity_type = if label.trim_end().ends_with(')') {
+            "code_symbol"
+        } else if file_type == "document" {
+            "code_doc"
+        } else if file_type == "rationale" {
+            "code_rationale"
+        } else {
+            "code_file"
+        };
         let reference = MemoryRef::generated(MemoryRefKind::Entity, user.clone(), ws.clone());
         let entity = MemoryEntity {
             reference: reference.clone(),
             user_id: user.clone(),
             workspace_id: ws.clone(),
-            entity_type: "tool".to_string(), // code symbols → "tool" tier in the ontology
+            entity_type: entity_type.to_string(),
             name: label.to_string(),
             canonical_key: format!("code:{id}"),
             aliases: vec![id.to_string()],

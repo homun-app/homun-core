@@ -3046,6 +3046,11 @@ const GRAPH_KIND_STYLE: Record<string, { fill: string; r: number; label: string 
   "entity:topic": { fill: "#eab308", r: 8, label: "Interesse" },
   "entity:tool": { fill: "#64748b", r: 7, label: "Strumento" },
   "entity:project": { fill: "#818cf8", r: 8, label: "Progetto" },
+  // Code graph (project map): functions/methods, files, docs, rationale.
+  "entity:code_symbol": { fill: "#0ea5e9", r: 7, label: "Funzione" },
+  "entity:code_file": { fill: "#10b981", r: 9, label: "File" },
+  "entity:code_doc": { fill: "#94a3b8", r: 7, label: "Documento" },
+  "entity:code_rationale": { fill: "#a78bfa", r: 7, label: "Nota" },
 };
 
 /// Entity nodes get a per-type style when the ontology knows the type.

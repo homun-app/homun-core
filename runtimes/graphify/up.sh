@@ -2,6 +2,8 @@
 # Build (lazily) the Graphify image and run a ONE-SHOT code-graph extraction on a
 # project, writing graph.json into a gateway-managed output dir. The user's repo is
 # mounted READ-ONLY and never modified. Network is disabled at run time (local-first).
+# A watchdog hard-stops the container after a timeout so a pathological tree can never
+# run forever (the graph.json on the mounted /out survives a successful run).
 #
 #   up.sh <project-dir> <out-dir>
 #
@@ -10,6 +12,7 @@ set -euo pipefail
 
 IMAGE="homun-graphify"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TIMEOUT="${GRAPHIFY_TIMEOUT_SECS:-240}"
 
 PROJECT="${1:?uso: up.sh <project-dir> <out-dir>}"
 OUT="${2:?uso: up.sh <project-dir> <out-dir>}"
@@ -19,16 +22,27 @@ if ! docker version >/dev/null 2>&1; then
   exit 1
 fi
 
-# Lazy build: only when the image is missing (build needs network for pip; run does not).
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   echo "==> building ${IMAGE}" >&2
   docker build -t "$IMAGE" "$HERE" >&2
 fi
 
 mkdir -p "$OUT"
+NAME="homun-graphify-$$-$RANDOM"
 
-# Read-only source mount + writable out mount; no network during extraction.
-docker run --rm --network none \
+# Detached, named run so a watchdog can hard-stop it on timeout. Read-only source
+# mount + writable out mount; no network during extraction.
+docker run -d --name "$NAME" --network none \
   -v "$PROJECT":/src:ro \
   -v "$OUT":/out \
-  "$IMAGE"
+  "$IMAGE" >/dev/null
+
+# Watchdog: force-remove the container if it outlives the timeout.
+( sleep "$TIMEOUT"; docker rm -f "$NAME" >/dev/null 2>&1 ) &
+WATCH=$!
+
+# Block until the container exits (normally, or killed by the watchdog).
+docker wait "$NAME" >/dev/null 2>&1 || true
+kill "$WATCH" >/dev/null 2>&1 || true
+docker logs "$NAME" >&2 2>&1 || true
+docker rm -f "$NAME" >/dev/null 2>&1 || true
