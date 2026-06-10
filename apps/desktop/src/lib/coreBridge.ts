@@ -572,6 +572,23 @@ async function electronSetRuntimeModel(model: string): Promise<{ active: string 
   return gatewayPostJson<{ active: string }>("/api/runtime/model", { model });
 }
 
+export interface TimezoneInfo {
+  /** User's explicit IANA choice, or null when following the system zone. */
+  selected: string | null;
+  /** The zone actually in effect (choice or detected system zone). */
+  effective: string;
+  /** Live "now" line in the effective zone, as the model sees it. */
+  now: string;
+}
+
+async function electronTimezone(): Promise<TimezoneInfo> {
+  return gatewayGetJson<TimezoneInfo>("/api/prefs/timezone");
+}
+
+async function electronSetTimezone(timezone: string | null): Promise<TimezoneInfo> {
+  return gatewayPostJson<TimezoneInfo>("/api/prefs/timezone", { timezone });
+}
+
 async function electronImprovePrompt(prompt: string): Promise<string> {
   const { improved } = await gatewayPostJson<{ improved: string }>(
     "/api/chat/improve_prompt",
@@ -1426,6 +1443,8 @@ export const coreBridge = {
   runtimeModel: () => electronRuntimeModel(),
   runtimeModels: () => electronRuntimeModels(),
   setRuntimeModel: (model: string) => electronSetRuntimeModel(model),
+  timezone: () => electronTimezone(),
+  setTimezone: (timezone: string | null) => electronSetTimezone(timezone),
   runtimeProvider: () => electronRuntimeProvider(),
   setRuntimeProvider: (input: { base_url?: string; model?: string; api_key?: string }) =>
     electronSetRuntimeProvider(input),

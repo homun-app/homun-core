@@ -28,9 +28,15 @@ mkdir -p "${ARTIFACTS_DIR}"
 # Publish to loopback only. --shm-size avoids Chromium crashes on small /dev/shm.
 # Port 9100→9000: on-device Whisper STT server. Named volume persists the model
 # download (~/.cache) across the --rm container lifecycle.
+# TZ: the gateway passes the user's effective IANA zone (LFPA_TZ); default UTC.
+# Combined with tzdata in the image, this anchors the container clock — and
+# Chromium's `new Date()` — to the user, so date-defaulting web forms don't pick
+# the wrong day near the UTC midnight boundary.
+TZ_NAME="${LFPA_TZ:-UTC}"
 docker run -d --rm --name "${NAME}" \
   --shm-size=512m \
   --tmpfs /tmp:rw,exec,nosuid,nodev,size=512m,mode=1777 \
+  -e TZ="${TZ_NAME}" \
   -p 127.0.0.1:9222:9222 \
   -p 127.0.0.1:6080:6080 \
   -p 127.0.0.1:9100:9000 \
