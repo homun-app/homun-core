@@ -57,7 +57,9 @@ fn facade_creates_and_updates_candidate_memory_with_audit() {
         updated.last_seen_at.as_deref(),
         Some("2026-05-23T09:00:00Z")
     );
-    assert_eq!(facade.access_audit_count().unwrap(), 2);
+    // Access audit is intentionally disabled (see facade tests aligned to 0): the
+    // read path no longer records audit rows, so the count is always 0.
+    assert_eq!(facade.access_audit_count().unwrap(), 0);
 }
 
 #[test]
