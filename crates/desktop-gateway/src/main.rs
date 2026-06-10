@@ -6477,6 +6477,46 @@ questo elenco, chiedi di allegarlo (non cercarlo nella sandbox o nelle cartelle)
                         Ok(value) if value.status().is_success() => break Some(value),
                         Ok(value) => {
                             let code = value.status();
+                            // DIAGNOSTIC (task #105): log the upstream error body —
+                            // swallowing it turned a payload bug (400 on the mid-turn
+                            // model switch) into a generic, undebuggable fallback.
+                            let err_body: String = value
+                                .text()
+                                .await
+                                .unwrap_or_default()
+                                .chars()
+                                .take(600)
+                                .collect();
+                            eprintln!(
+                                "[model-error] {code} model={model} endpoint={endpoint} body={err_body}"
+                            );
+                            // Shape map of the failing payload: which message carries
+                            // tool_calls with non-string arguments (the classic
+                            // cross-provider 400).
+                            if let Some(arr) = payload.get("messages").and_then(|m| m.as_array()) {
+                                let shapes: Vec<String> = arr
+                                    .iter()
+                                    .map(|m| {
+                                        let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("?");
+                                        match m.get("tool_calls").and_then(|t| t.as_array()) {
+                                            None => role.to_string(),
+                                            Some(calls) => {
+                                                let kinds = calls
+                                                    .iter()
+                                                    .map(|c| match c.pointer("/function/arguments") {
+                                                        Some(serde_json::Value::String(_)) => "str",
+                                                        Some(_) => "OBJ",
+                                                        None => "none",
+                                                    })
+                                                    .collect::<Vec<_>>()
+                                                    .join(",");
+                                                format!("{role}[tc:{kinds}]")
+                                            }
+                                        }
+                                    })
+                                    .collect();
+                                eprintln!("[model-error] shapes: {}", shapes.join(" | "));
+                            }
                             let transient = matches!(code.as_u16(), 408 | 429 | 500 | 502 | 503 | 504);
                             if transient && attempt < 2 {
                                 attempt += 1;
@@ -6794,10 +6834,13 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                                         base_url = b_url;
                                         model = b_model;
                                         api_key = b_key;
-                                        endpoint = format!(
-                                            "{}/chat/completions",
-                                            base_url.trim_end_matches('/')
-                                        );
+                                        // Provider-aware endpoint: an Ollama-based
+                                        // browser role needs native /api/chat — the
+                                        // old hardcoded "/chat/completions" sent
+                                        // NATIVE-shaped payloads (object arguments)
+                                        // to the strict /v1 endpoint → 400 on every
+                                        // mid-turn model switch (task #105).
+                                        endpoint = chat_endpoint(&base_url);
                                     }
                                 }
                             }
