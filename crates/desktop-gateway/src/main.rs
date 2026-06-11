@@ -6877,7 +6877,7 @@ fn enabled_skills_summary() -> Vec<(String, String, String)> {
         .collect()
 }
 
-/// The CoderSteroids/HomunCoder methodology skill ids (from the sync manifest). Used to
+/// The HomunCoder methodology skill ids (from the sync manifest). Used to
 /// scope the methodology to PROJECT chats (HomunCoder mode) instead of flooding every
 /// chat, and to group them in Settings.
 fn homuncoder_skill_ids() -> std::collections::HashSet<String> {
