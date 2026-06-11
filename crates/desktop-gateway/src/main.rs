@@ -4727,6 +4727,35 @@ fn fire_channel_event_automations(state: &AppState, channel: &str, message: &Cha
     }
 }
 
+/// Readable SERVICE/toolkit name from a Composio slug prefix (the part before the first `_`),
+/// so the picker groups by service (Gmail, Google Calendar, …) not by "Composio". Known
+/// multi-word toolkits are mapped; otherwise the prefix is title-cased.
+fn composio_toolkit_name(slug: &str) -> String {
+    let prefix = slug.split('_').next().unwrap_or(slug);
+    match prefix.to_ascii_uppercase().as_str() {
+        "GMAIL" => "Gmail".to_string(),
+        "GOOGLECALENDAR" => "Google Calendar".to_string(),
+        "GOOGLEDRIVE" => "Google Drive".to_string(),
+        "GOOGLEDOCS" => "Google Docs".to_string(),
+        "GOOGLESHEETS" => "Google Sheets".to_string(),
+        "GOOGLEMEET" => "Google Meet".to_string(),
+        "GITHUB" => "GitHub".to_string(),
+        "LINKEDIN" => "LinkedIn".to_string(),
+        "WHATSAPP" => "WhatsApp".to_string(),
+        "YOUTUBE" => "YouTube".to_string(),
+        "TYPEFORM" => "Typeform".to_string(),
+        "ONEDRIVE" => "OneDrive".to_string(),
+        "OUTLOOK" => "Outlook".to_string(),
+        other => {
+            let mut chars = other.chars();
+            chars
+                .next()
+                .map(|f| f.to_uppercase().collect::<String>() + &chars.as_str().to_lowercase())
+                .unwrap_or_default()
+        }
+    }
+}
+
 /// Best-guess item-id field for a connector tool (the manual picker pre-fills it; the user
 /// can edit). Heuristic by slug — good enough for common services, editable for the rest.
 fn guess_key_field(tool: &str) -> &'static str {
@@ -4758,10 +4787,14 @@ async fn automation_event_sources(State(state): State<AppState>) -> Json<serde_j
         if composio.writes.contains(name) {
             continue; // events poll READS, not writes
         }
+        // Group by SERVICE (Gmail, Calendar, …); label is just the action (drop the
+        // redundant "· Toolkit" suffix since the group already names the service).
+        let full = humanize_composio_tool(name);
+        let label = full.split(" · ").next().unwrap_or(&full).to_string();
         connectors.push(serde_json::json!({
-            "group": "Composio",
+            "group": composio_toolkit_name(name),
             "tool": name,
-            "label": humanize_composio_tool(name),
+            "label": label,
             "key_field": guess_key_field(name),
         }));
     }
@@ -4772,14 +4805,20 @@ async fn automation_event_sources(State(state): State<AppState>) -> Json<serde_j
         if mcp.writes.contains(name) {
             continue;
         }
-        let label = name
-            .strip_prefix("mcp__")
-            .map(|r| r.replacen("__", " · ", 1))
-            .unwrap_or_else(|| name.to_string());
+        // mcp__<server>__<tool>: group by the server, label is the tool name.
+        let rest = name.strip_prefix("mcp__").unwrap_or(name);
+        let (server, tool) = rest.split_once("__").unwrap_or((rest, rest));
+        let group = {
+            let mut chars = server.chars();
+            chars
+                .next()
+                .map(|f| f.to_uppercase().collect::<String>() + chars.as_str())
+                .unwrap_or_else(|| "MCP".to_string())
+        };
         connectors.push(serde_json::json!({
-            "group": "MCP",
+            "group": group,
             "tool": name,
-            "label": label,
+            "label": tool.replace('_', " "),
             "key_field": guess_key_field(name),
         }));
     }
