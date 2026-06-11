@@ -7101,7 +7101,6 @@ chiede di salvare/esportare un file in una cartella."
 /// Common across most turns: memory, dates, planning, skills, project code/files, discovery.
 const CORE_TOOL_NAMES: &[&str] = &[
     "find_capability",
-    "find_connected_tools",
     "suggest_capabilities",
     "recall_memory",
     "resolve_datetime",
@@ -7136,50 +7135,73 @@ fn find_capability_tool_schema() -> serde_json::Value {
     })
 }
 
-/// Keyword search over the DEFERRED tool registry (name weighted over description), for
-/// `find_capability`. Returns up to `limit` best matches; an empty/no-match query yields a
-/// small sample so the model still sees what exists.
-fn search_deferred_tools(
-    registry: &[serde_json::Value],
-    intent: &str,
-    limit: usize,
-) -> Vec<serde_json::Value> {
-    let q = intent.to_lowercase();
-    let terms: Vec<String> = q
+/// One searchable capability in the UNIFIED registry: a deferred native tool, an installed
+/// skill, or a connected connector tool. `schema` is Some for tools/connectors (pushed into
+/// the live tool set on match); None for skills (the model loads them with `use_skill`).
+#[derive(Clone)]
+struct CapabilityEntry {
+    key: String,
+    desc: String,
+    text: String,
+    schema: Option<serde_json::Value>,
+    is_skill: bool,
+    is_connector: bool,
+}
+
+fn cap_tokenize(s: &str) -> Vec<String> {
+    s.to_lowercase()
         .split(|c: char| !c.is_alphanumeric())
         .filter(|t| t.chars().count() >= 2)
         .map(str::to_string)
-        .collect();
-    if terms.is_empty() {
-        return registry.iter().take(limit).cloned().collect();
+        .collect()
+}
+
+/// Real BM25 ranking — IDF (rare terms weigh more), TF saturation (k1), and length
+/// normalization (b) — over the unified capability corpus. This is the lexical search the
+/// SOTA (Anthropic Tool Search) uses by default; no embeddings needed at this scale. An
+/// empty/no-match query yields a small sample so the model still sees what exists.
+fn bm25_rank<'a>(
+    corpus: &'a [CapabilityEntry],
+    query: &str,
+    limit: usize,
+) -> Vec<&'a CapabilityEntry> {
+    let mut q_terms = cap_tokenize(query);
+    q_terms.sort();
+    q_terms.dedup();
+    if q_terms.is_empty() || corpus.is_empty() {
+        return corpus.iter().take(limit).collect();
     }
-    let mut scored: Vec<(i32, serde_json::Value)> = registry
+    let docs: Vec<Vec<String>> = corpus.iter().map(|e| cap_tokenize(&e.text)).collect();
+    let n = corpus.len() as f64;
+    let avgdl = (docs.iter().map(|d| d.len()).sum::<usize>() as f64 / n).max(1.0);
+    let (k1, b) = (1.5_f64, 0.75_f64);
+    let df: std::collections::HashMap<&str, f64> = q_terms
         .iter()
-        .filter_map(|schema| {
-            let name = schema.pointer("/function/name").and_then(|v| v.as_str()).unwrap_or("");
-            let desc = schema
-                .pointer("/function/description")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let name_l = name.to_lowercase();
-            let desc_l = desc.to_lowercase();
-            let mut score = 0;
-            for t in &terms {
-                if name_l.contains(t) {
-                    score += 3;
-                } else if desc_l.contains(t) {
-                    score += 1;
-                }
-            }
-            if score > 0 {
-                Some((score, schema.clone()))
-            } else {
-                None
-            }
+        .map(|t| {
+            let c = docs.iter().filter(|d| d.iter().any(|w| w == t)).count() as f64;
+            (t.as_str(), c)
         })
         .collect();
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
-    scored.into_iter().take(limit).map(|(_, s)| s).collect()
+    let mut scored: Vec<(f64, usize)> = docs
+        .iter()
+        .enumerate()
+        .filter_map(|(i, d)| {
+            let dl = d.len() as f64;
+            let mut score = 0.0;
+            for t in &q_terms {
+                let f = d.iter().filter(|w| *w == t).count() as f64;
+                if f == 0.0 {
+                    continue;
+                }
+                let nq = *df.get(t.as_str()).unwrap_or(&0.0);
+                let idf = (((n - nq + 0.5) / (nq + 0.5)) + 1.0).ln();
+                score += idf * (f * (k1 + 1.0)) / (f + k1 * (1.0 - b + b * dl / avgdl));
+            }
+            (score > 0.0).then_some((score, i))
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    scored.into_iter().take(limit).map(|(_, i)| &corpus[i]).collect()
 }
 
 fn find_connected_tools_schema() -> serde_json::Value {
@@ -7381,8 +7403,8 @@ sandbox, creare artefatti, pianificare task ricorrenti, …) chiama PRIMA `find_
 descrivendo cosa vuoi fare: ti attiva lo strumento giusto, richiamabile subito dopo. Il \
 browser NON è di base e si attiva da `find_capability`: usalo come ULTIMA risorsa, solo se \
 nessuno strumento più diretto (es. `github_search` per GitHub) copre la richiesta.\n\
-SERVIZI ESTERNI (email, calendario, GitHub, …): chiama `find_connected_tools` per \
-scoprire lo strumento adatto e usalo; se non trova nulla di adatto, chiama \
+SERVIZI ESTERNI (email, calendario, GitHub, …): chiama `find_capability` per \
+scoprire lo strumento adatto (cerca anche tra i servizi collegati) e usalo; se non trova nulla, chiama \
 `suggest_capabilities` per proporre cosa collegare. Mai lasciare l'utente con una \
 non-risposta.\n\
 \n\
@@ -7496,13 +7518,13 @@ file per domande a cui mappa o storia rispondono già."
     } else {
         format!(
             "{system}\n\nSTRUMENTI SERVIZI COLLEGATI: l'utente ha collegato dei servizi (es. Gmail, \
-Google Calendar). Per accedervi NON dire che non puoi: chiama `find_connected_tools` con una query \
+Google Calendar). Per accedervi NON dire che non puoi: chiama `find_capability` con una query \
 sull'intento (es. \"unread emails\", \"send email\", \"calendar events today\") per scoprire lo \
 strumento adatto, poi CHIAMA lo strumento trovato con gli argomenti completi.\n\
 SCELTA STRUMENTO: usa UN SOLO strumento che corrisponde ESATTAMENTE all'intento — per \
 AGGIUNGERE/CREARE usa create/add/quick_add, per LEGGERE usa fetch/list. NON chiamare MAI strumenti \
-distruttivi (delete/remove/cancel) se l'utente non lo chiede esplicitamente. find_connected_tools \
-restituisce TUTTI gli strumenti del servizio: per MODIFICARE qualcosa di esistente (es. la data di \
+distruttivi (delete/remove/cancel) se l'utente non lo chiede esplicitamente. find_capability \
+trova gli strumenti del servizio: per MODIFICARE qualcosa di esistente (es. la data di \
 un evento) usa update/patch (NON 'move', che sposta tra calendari). NON concludere che manca uno \
 strumento dopo una sola ricerca.\n\
 DATE E ORE: calcola SEMPRE la data/ora ASSOLUTA partendo da 'Oggi è ...' sopra (es. domani = oggi \
@@ -7921,9 +7943,9 @@ RI-VERIFICA eseguendo. Una causa alla volta, niente tentativi alla cieca."
             base_tools.push(customize_addon_tool_schema());
         }
     }
-    if has_composio {
-        base_tools.push(find_connected_tools_schema());
-    }
+    // NB: find_connected_tools is no longer offered separately — `find_capability` now
+    // searches connectors too (unified discovery). The connectors still enter the corpus
+    // below via `catalog_index` (gated by has_composio).
     if has_skills {
         base_tools.push(use_skill_tool_schema());
     }
@@ -7944,6 +7966,63 @@ RI-VERIFICA eseguendo. Una causa alla volta, niente tentativi alla cieca."
                 .unwrap_or(false)
         });
     base_tools.push(find_capability_tool_schema());
+    // Unified capability corpus for `find_capability`: deferred native tools + installed
+    // skills + connected connector tools, all in one BM25-searchable list. One discovery
+    // path instead of three (find_capability subsumes find_connected_tools).
+    let mut capability_corpus: Vec<CapabilityEntry> = Vec::new();
+    for schema in deferred_tools {
+        let name = schema
+            .pointer("/function/name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if name.is_empty() {
+            continue;
+        }
+        let desc = schema
+            .pointer("/function/description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let text = format!("{name} {desc}");
+        capability_corpus.push(CapabilityEntry {
+            desc: desc.chars().take(140).collect(),
+            key: name,
+            text,
+            schema: Some(schema),
+            is_skill: false,
+            is_connector: false,
+        });
+    }
+    if has_skills {
+        for (id, sname, sdesc) in &enabled_skills {
+            capability_corpus.push(CapabilityEntry {
+                key: id.clone(),
+                desc: sdesc.chars().take(140).collect(),
+                text: format!("{id} {sname} {sdesc}"),
+                schema: None,
+                is_skill: true,
+                is_connector: false,
+            });
+        }
+    }
+    for (name, haystack, schema) in &catalog_index {
+        let desc = schema
+            .pointer("/function/description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .chars()
+            .take(140)
+            .collect::<String>();
+        capability_corpus.push(CapabilityEntry {
+            key: name.clone(),
+            desc,
+            text: haystack.clone(),
+            schema: Some(schema.clone()),
+            is_skill: false,
+            is_connector: true,
+        });
+    }
     // Attachments (persistent): ingest NEW files off-runtime, PERSIST them on the
     // thread, then load the thread's FULL set so a file stays usable across turns
     // (no re-attach). A manifest lists the available files so the model uses their
@@ -9644,39 +9723,43 @@ una data incerta.",
                             },
                         )
                         .await;
-                        let matches = search_deferred_tools(&deferred_tools, &intent, 5);
+                        let matches = bm25_rank(&capability_corpus, &intent, 6);
                         if matches.is_empty() {
-                            "Nessuno strumento aggiuntivo corrisponde. Riformula con cosa vuoi \
-fare (es. \"navigare il web\", \"cercare su GitHub\", \"leggere file dell'utente\")."
+                            "Nessuna capacità corrisponde. Riformula con cosa vuoi fare (es. \
+\"navigare il web\", \"cercare su GitHub\", \"leggere file dell'utente\", \"inviare un'email\")."
                                 .to_string()
                         } else {
                             let mut lines = Vec::new();
-                            for schema in &matches {
-                                let tname = schema
-                                    .pointer("/function/name")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("")
-                                    .to_string();
-                                if tname.is_empty() {
+                            for entry in &matches {
+                                // Channels (read-only) expose only READ connector tools.
+                                if entry.is_connector
+                                    && read_only
+                                    && !composio_tool_is_read(&entry.key)
+                                {
                                     continue;
                                 }
-                                if loaded_tools.insert(tname.clone()) {
-                                    tool_schemas.push(schema.clone());
+                                if entry.is_skill {
+                                    lines.push(format!(
+                                        "- skill «{}»: {} → caricala con use_skill(\"{}\")",
+                                        entry.key, entry.desc, entry.key
+                                    ));
+                                } else if let Some(schema) = &entry.schema {
+                                    if loaded_tools.insert(entry.key.clone()) {
+                                        tool_schemas.push(schema.clone());
+                                    }
+                                    lines.push(format!("- {}: {}", entry.key, entry.desc));
                                 }
-                                let desc = schema
-                                    .pointer("/function/description")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("")
-                                    .chars()
-                                    .take(140)
-                                    .collect::<String>();
-                                lines.push(format!("- {tname}: {desc}"));
                             }
-                            format!(
-                                "Strumenti attivati (ora RICHIAMABILI — chiama quello giusto con i \
-suoi argomenti):\n{}",
-                                lines.join("\n")
-                            )
+                            if lines.is_empty() {
+                                "Per questa richiesta servono solo strumenti con effetti non \
+disponibili dal canale (richiedono la tua conferma nell'app).".to_string()
+                            } else {
+                                format!(
+                                    "Capacità trovate (i tool sono ora RICHIAMABILI; le skill si \
+caricano con use_skill):\n{}",
+                                    lines.join("\n")
+                                )
+                            }
                         }
                     } else if name == "find_connected_tools" {
                         // Discovery: search the catalog, inject the matching tool
