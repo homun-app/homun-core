@@ -21,6 +21,34 @@ pub struct StoredAttachment {
     pub images: Vec<String>,
 }
 
+/// One connector tool execution to append to the audit log (roadmap #6).
+#[derive(Debug, Clone)]
+pub struct ToolRunInput<'a> {
+    pub thread_id: Option<&'a str>,
+    pub tool: &'a str,
+    /// "composio" | "mcp".
+    pub kind: &'a str,
+    pub ok: bool,
+    /// classify_connector_error category on failure; None on success/unknown.
+    pub error_kind: Option<&'a str>,
+    pub duration_ms: Option<i64>,
+    /// Short, redacted one-line preview (never raw secrets/args).
+    pub summary: Option<&'a str>,
+}
+
+/// A recorded connector tool execution (newest-first in the panel).
+#[derive(Debug, Clone)]
+pub struct ToolRunRow {
+    pub ts: i64,
+    pub thread_id: Option<String>,
+    pub tool: String,
+    pub kind: String,
+    pub ok: bool,
+    pub error_kind: Option<String>,
+    pub duration_ms: Option<i64>,
+    pub summary: Option<String>,
+}
+
 /// A curated contact (rubrica). Knowledge ABOUT them lives in the memory DB,
 /// linked by handle (`channel:identifier`); this row is just the address-book entry.
 #[derive(Debug, Clone)]
@@ -1281,6 +1309,25 @@ impl ChatStore {
             create index if not exists idx_thread_attachments_thread
                 on thread_attachments(thread_id);
 
+            -- Audit log of connector tool executions (Composio + MCP) — powers the
+            -- connector status panel (roadmap #6). Append-only; pruned to a recent
+            -- window. error_kind mirrors classify_connector_error
+            -- (auth/rate_limit/forbidden/unavailable/other) so the UI can flag a
+            -- broken connector at a glance.
+            create table if not exists tool_runs (
+                id integer primary key autoincrement,
+                ts integer not null,
+                thread_id text,
+                tool text not null,
+                kind text not null,
+                ok integer not null,
+                error_kind text,
+                duration_ms integer,
+                summary text
+            );
+
+            create index if not exists idx_tool_runs_ts on tool_runs(ts desc);
+
             -- Contact book (curated rubrica). A contact is a person we communicate
             -- with — created from a channel identity (someone messaged us) or added
             -- by hand — NOT every person merely mentioned in chat. Knowledge ABOUT a
@@ -1513,6 +1560,61 @@ impl ChatStore {
                 let images_json: String = row.get(3)?;
                 let images: Vec<String> = serde_json::from_str(&images_json).unwrap_or_default();
                 Ok(StoredAttachment { display_name, mime_type, text, images })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Append one connector tool execution to the audit log (roadmap #6). Best-effort:
+    /// logging must never break a tool call, so callers ignore the result. Bounds the
+    /// table to the most recent ~1000 rows so it never grows unboundedly.
+    pub fn record_tool_run(&self, run: &ToolRunInput) -> rusqlite::Result<()> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        self.conn.execute(
+            "insert into tool_runs (ts, thread_id, tool, kind, ok, error_kind, duration_ms, summary)
+             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                now,
+                run.thread_id,
+                run.tool,
+                run.kind,
+                run.ok as i64,
+                run.error_kind,
+                run.duration_ms,
+                run.summary,
+            ],
+        )?;
+        // Retain only the most recent runs (cheap, runs rarely).
+        self.conn.execute(
+            "delete from tool_runs where id <= (
+                select max(id) from tool_runs
+             ) - 1000",
+            [],
+        )?;
+        Ok(())
+    }
+
+    /// Recent connector tool executions, newest first (for the status panel).
+    pub fn recent_tool_runs(&self, limit: usize) -> rusqlite::Result<Vec<ToolRunRow>> {
+        let mut stmt = self.conn.prepare(
+            "select ts, thread_id, tool, kind, ok, error_kind, duration_ms, summary
+               from tool_runs order by id desc limit ?1",
+        )?;
+        let rows = stmt
+            .query_map(params![limit as i64], |row| {
+                Ok(ToolRunRow {
+                    ts: row.get(0)?,
+                    thread_id: row.get(1)?,
+                    tool: row.get(2)?,
+                    kind: row.get(3)?,
+                    ok: row.get::<_, i64>(4)? != 0,
+                    error_kind: row.get(5)?,
+                    duration_ms: row.get(6)?,
+                    summary: row.get(7)?,
+                })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)

@@ -519,6 +519,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(get_approval_routing).post(set_approval_routing),
         )
         .route("/api/prefs/channel-identities", get(channel_identities))
+        .route("/api/tools/runs", get(tool_runs_list))
         .route(
             "/api/runtime/provider",
             get(runtime_provider).post(set_runtime_provider),
@@ -11098,29 +11099,52 @@ card di conferma nell'interfaccia. NON dire che è stata eseguita."
                             let tool = mcp_tool.clone();
                             let args: serde_json::Value = serde_json::from_str(args_raw)
                                 .unwrap_or_else(|_| serde_json::json!({}));
+                            let mcp_started = std::time::Instant::now();
                             let exec = tokio::task::spawn_blocking(move || {
                                 run_mcp_chat_tool(&st, &prov, &tool, args)
                             });
-                            match tokio::time::timeout(mcp_call_timeout(), exec).await {
+                            let mut run_ok = false;
+                            let mut run_err: Option<&'static str> = None;
+                            let mcp_result = match tokio::time::timeout(mcp_call_timeout(), exec).await {
                                 Ok(Ok(Ok(value))) => {
+                                    run_ok = true;
                                     value.to_string().chars().take(COMPOSIO_RESULT_CHARS).collect()
                                 }
                                 Ok(Ok(Err(error))) => {
                                     // Classify the failure so a broken MCP server tells the user
                                     // what to do (reconnect / wait) instead of a raw error.
+                                    run_err = classify_connector_error(&error.to_string())
+                                        .map(connector_error_kind_str)
+                                        .or(Some("other"));
                                     let hint = mcp_error_hint(&error.to_string())
                                         .map(|h| format!(" {h}"))
                                         .unwrap_or_default();
                                     format!("Errore strumento MCP: {error}.{hint}")
                                 }
-                                Ok(Err(_join)) => "Errore: esecuzione MCP interrotta.".to_string(),
-                                Err(_elapsed) => format!(
-                                    "Lo strumento MCP non ha risposto entro {}s (timeout): il server \
+                                Ok(Err(_join)) => {
+                                    run_err = Some("other");
+                                    "Errore: esecuzione MCP interrotta.".to_string()
+                                }
+                                Err(_elapsed) => {
+                                    run_err = Some("unavailable");
+                                    format!(
+                                        "Lo strumento MCP non ha risposto entro {}s (timeout): il server \
 potrebbe essere bloccato o offline. Di' all'utente di verificarlo/riconnetterlo da Impostazioni → \
 Connettori → MCP; NON dichiarare che è fatto.",
-                                    mcp_call_timeout().as_secs()
-                                ),
-                            }
+                                        mcp_call_timeout().as_secs()
+                                    )
+                                }
+                            };
+                            record_connector_run(
+                                &state_owned,
+                                thread_id.as_deref(),
+                                name,
+                                "mcp",
+                                run_ok,
+                                run_err,
+                                mcp_started.elapsed(),
+                            );
+                            mcp_result
                         }
                     } else if !name.is_empty() {
                         // A connected-service (Composio) tool. Writes need explicit
@@ -11169,15 +11193,21 @@ card di conferma nell'interfaccia. NON dire che è stata eseguita."
                             let tool = name.to_string();
                             let args: serde_json::Value =
                                 serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+                            let composio_started = std::time::Instant::now();
                             let outcome = tokio::task::spawn_blocking(move || {
                                 composio_execute_tool(&st, &tool, &args)
                             })
                             .await;
-                            match outcome {
+                            let mut run_ok = false;
+                            let mut run_err: Option<&'static str> = None;
+                            let composio_result = match outcome {
                                 Ok(Ok(value)) => match composio_execution_error(&value) {
                                     // Composio returned 200 but the tool failed: tell the
                                     // model so it reports the failure, not a false success.
                                     Some(error) => {
+                                        run_err = classify_connector_error(&error)
+                                            .map(connector_error_kind_str)
+                                            .or(Some("other"));
                                         let hint = connector_error_hint(&error)
                                             .map(|h| format!(" {h}"))
                                             .unwrap_or_default();
@@ -11187,17 +11217,34 @@ Dillo all'utente in modo chiaro; NON dichiarare che è fatto."
                                         )
                                     }
                                     None => {
+                                        run_ok = true;
                                         value.to_string().chars().take(COMPOSIO_RESULT_CHARS).collect()
                                     }
                                 },
                                 Ok(Err(error)) => {
+                                    run_err = classify_connector_error(&error.message)
+                                        .map(connector_error_kind_str)
+                                        .or(Some("other"));
                                     let hint = connector_error_hint(&error.message)
                                         .map(|h| format!(" {h}"))
                                         .unwrap_or_default();
                                     format!("Errore dello strumento {name}: {}.{hint}", error.message)
                                 }
-                                Err(error) => format!("Errore di esecuzione dello strumento: {error}"),
-                            }
+                                Err(error) => {
+                                    run_err = Some("other");
+                                    format!("Errore di esecuzione dello strumento: {error}")
+                                }
+                            };
+                            record_connector_run(
+                                &state_owned,
+                                thread_id.as_deref(),
+                                name,
+                                "composio",
+                                run_ok,
+                                run_err,
+                                composio_started.elapsed(),
+                            );
+                            composio_result
                         }
                     } else {
                         format!("Strumento non disponibile: {name}")
@@ -11712,6 +11759,39 @@ async fn channel_identities(
         }
     }
     Json(serde_json::json!({ "identities": out }))
+}
+
+#[derive(Debug, Deserialize)]
+struct ToolRunsQuery {
+    limit: Option<usize>,
+}
+
+/// GET /api/tools/runs?limit=N — recent connector tool executions (audit log, #6).
+async fn tool_runs_list(
+    State(state): State<AppState>,
+    axum::extract::Query(q): axum::extract::Query<ToolRunsQuery>,
+) -> Json<serde_json::Value> {
+    let limit = q.limit.unwrap_or(50).clamp(1, 500);
+    let runs = lock_store(&state)
+        .ok()
+        .and_then(|s| s.recent_tool_runs(limit).ok())
+        .unwrap_or_default();
+    let items: Vec<serde_json::Value> = runs
+        .into_iter()
+        .map(|r| {
+            serde_json::json!({
+                "ts": r.ts,
+                "thread_id": r.thread_id,
+                "tool": r.tool,
+                "kind": r.kind,
+                "ok": r.ok,
+                "error_kind": r.error_kind,
+                "duration_ms": r.duration_ms,
+                "summary": r.summary,
+            })
+        })
+        .collect();
+    Json(serde_json::json!({ "runs": items }))
 }
 
 pub(crate) fn weekday_it(w: jiff::civil::Weekday) -> &'static str {
@@ -18116,6 +18196,40 @@ suggerisci di ricollegare il servizio concedendo gli scope necessari.",
             "Il servizio non è al momento raggiungibile: dillo all'utente e proponi di riprovare più \
 tardi. NON ritentare subito in loop.",
         ),
+    }
+}
+
+/// Stable string for the audit log / UI badge.
+fn connector_error_kind_str(k: ConnectorErrorKind) -> &'static str {
+    match k {
+        ConnectorErrorKind::Auth => "auth",
+        ConnectorErrorKind::RateLimit => "rate_limit",
+        ConnectorErrorKind::Forbidden => "forbidden",
+        ConnectorErrorKind::Unavailable => "unavailable",
+    }
+}
+
+/// Append a connector tool execution to the audit log (roadmap #6). Best-effort —
+/// logging must never break a tool call, so a failed lock/insert is swallowed.
+fn record_connector_run(
+    state: &AppState,
+    thread_id: Option<&str>,
+    tool: &str,
+    kind: &str,
+    ok: bool,
+    error_kind: Option<&str>,
+    dur: std::time::Duration,
+) {
+    if let Ok(store) = lock_store(state) {
+        let _ = store.record_tool_run(&chat_store::ToolRunInput {
+            thread_id,
+            tool,
+            kind,
+            ok,
+            error_kind,
+            duration_ms: Some(dur.as_millis() as i64),
+            summary: None,
+        });
     }
 }
 
