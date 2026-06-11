@@ -61,10 +61,6 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
   // Full-width tabs (Info list / Grafo / Wiki) so each gets the whole pane — the old
   // side-by-side list+graph squeezed the graph into a tiny column.
   const [memTab, setMemTab] = useState<"info" | "graph" | "wiki">("info");
-  // Goals picker (LLM-free, user-driven): promote decisions → goals + add custom.
-  const [goalSel, setGoalSel] = useState<Set<string>>(new Set());
-  const [newGoal, setNewGoal] = useState("");
-  const [goalBusy, setGoalBusy] = useState(false);
   // Memory at-a-glance counts + export (moved here from the old "Dati" section).
   const [dashboard, setDashboard] = useState<CoreMemoryDashboard | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -155,39 +151,6 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
       .finally(() => setBusy(false));
   };
   const graphWorkspace = workspaceFilter !== "all" ? workspaceFilter : undefined;
-
-  // Goals manager: a specific PROJECT scope is selected (not "all"/personal/threads).
-  const projectScope =
-    graphWorkspace && graphWorkspace !== "__personal__" && graphWorkspace !== "__threads__"
-      ? graphWorkspace
-      : undefined;
-  const projectGoals = projectScope ? all.filter((it) => it.memory_type === "goal") : [];
-  const promotableDecisions = projectScope
-    ? all.filter((it) => it.memory_type === "decision")
-    : [];
-  const promoteSelected = () => {
-    if (!projectScope || goalSel.size === 0) return;
-    setGoalBusy(true);
-    coreBridge
-      .promoteGoals(projectScope, Array.from(goalSel))
-      .then(() => {
-        setGoalSel(new Set());
-        reload();
-      })
-      .finally(() => setGoalBusy(false));
-  };
-  const addNewGoal = () => {
-    const text = newGoal.trim();
-    if (!projectScope || !text) return;
-    setGoalBusy(true);
-    coreBridge
-      .addGoal(projectScope, text)
-      .then(() => {
-        setNewGoal("");
-        reload();
-      })
-      .finally(() => setGoalBusy(false));
-  };
 
   return (
     <div className="memview">
@@ -305,58 +268,6 @@ export function MemoryView({ embedded = false }: { embedded?: boolean } = {}) {
 
       {memTab === "info" && (
         <div className="memview-info">
-      {projectScope && (
-        <div className="goals-manager">
-          <div className="goals-head">🎯 Obiettivi del progetto</div>
-          {projectGoals.length > 0 ? (
-            <ul className="goals-list">
-              {projectGoals.map((g) => (
-                <li key={g.reference}>{g.text}</li>
-              ))}
-            </ul>
-          ) : (
-            <p className="muted">Nessun obiettivo ancora. Flagga una decisione qui sotto o aggiungine uno.</p>
-          )}
-          <div className="goals-add">
-            <input
-              type="text"
-              placeholder="Aggiungi un obiettivo…"
-              value={newGoal}
-              onChange={(e) => setNewGoal(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && addNewGoal()}
-              disabled={goalBusy}
-            />
-            <button onClick={addNewGoal} disabled={goalBusy || !newGoal.trim()}>
-              Aggiungi
-            </button>
-          </div>
-          {promotableDecisions.length > 0 && (
-            <details className="goals-promote">
-              <summary>Promuovi una decisione a obiettivo ({promotableDecisions.length})</summary>
-              <div className="goals-promote-list">
-                {promotableDecisions.slice(0, 40).map((d) => (
-                  <label key={d.reference} className="goals-promote-item">
-                    <input
-                      type="checkbox"
-                      checked={goalSel.has(d.reference)}
-                      onChange={(e) => {
-                        const next = new Set(goalSel);
-                        if (e.target.checked) next.add(d.reference);
-                        else next.delete(d.reference);
-                        setGoalSel(next);
-                      }}
-                    />
-                    <span>{d.text.split("\n")[0].slice(0, 120)}</span>
-                  </label>
-                ))}
-              </div>
-              <button onClick={promoteSelected} disabled={goalBusy || goalSel.size === 0}>
-                Promuovi {goalSel.size > 0 ? `(${goalSel.size})` : ""} a obiettivo
-              </button>
-            </details>
-          )}
-        </div>
-      )}
       <div className="memview-timeline" role="group" aria-label="Timeline">
         {timeline.length === 0 ? (
           <span className="memview-empty">Nessuna informazione</span>

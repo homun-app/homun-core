@@ -547,6 +547,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/memory/graphify/import", post(memory_graphify_import))
         .route("/api/memory/project-graph/ensure", post(project_graph_ensure))
         .route("/api/memory/project-graph/subdirs", get(project_graph_subdirs))
+        .route("/api/memory/goals", get(memory_goals_list))
         .route("/api/memory/goals/promote", post(memory_goals_promote))
         .route("/api/memory/goals/add", post(memory_goals_add))
         .route("/api/memory/wiki", get(memory_wiki).put(memory_wiki_save))
@@ -20576,6 +20577,54 @@ async fn project_graph_subdirs(
         b["code_files"].as_u64().unwrap_or(0).cmp(&a["code_files"].as_u64().unwrap_or(0))
     });
     Ok(Json(serde_json::json!({ "subdirs": subdirs })))
+}
+
+#[derive(Deserialize)]
+struct GoalsListQuery {
+    #[serde(default)]
+    thread: Option<String>,
+    #[serde(default)]
+    workspace: Option<String>,
+}
+
+/// Goals + promotable decisions for the Workbench "Obiettivi" tab. Resolves the scope
+/// from the chat thread (like memory_graph), so the panel works from a thread id alone.
+async fn memory_goals_list(
+    State(state): State<AppState>,
+    Query(q): Query<GoalsListQuery>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let user = gateway_memory_user_id();
+    let ws = if let Some(tid) = q.thread.as_deref().filter(|t| !t.trim().is_empty()) {
+        lock_store(&state)
+            .ok()
+            .and_then(|s| s.workspace_for_thread(tid).ok())
+            .filter(|w| !w.trim().is_empty())
+            .map(MemoryWorkspaceId::new)
+            .unwrap_or_else(gateway_memory_workspace_id)
+    } else if let Some(w) = q.workspace.filter(|w| !w.trim().is_empty()) {
+        MemoryWorkspaceId::new(w)
+    } else {
+        gateway_memory_workspace_id()
+    };
+    let is_project = ws.as_str() != PERSONAL_WORKSPACE && ws.as_str() != THREADS_WORKSPACE;
+    let facade = lock_memory_facade(&state)?;
+    let items = facade.list_memories_for_ui(&user, &ws).unwrap_or_default();
+    let pick = |t: &str| -> Vec<serde_json::Value> {
+        items
+            .iter()
+            .filter(|m| {
+                m.memory_type == t
+                    && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+            })
+            .map(|m| serde_json::json!({ "reference": m.reference.to_string(), "text": m.text }))
+            .collect()
+    };
+    Ok(Json(serde_json::json!({
+        "workspace": ws.as_str(),
+        "is_project": is_project,
+        "goals": pick("goal"),
+        "decisions": pick("decision"),
+    })))
 }
 
 #[derive(Deserialize)]

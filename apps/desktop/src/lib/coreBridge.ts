@@ -1647,6 +1647,7 @@ export const coreBridge = {
   memoryDashboard: () => electronMemoryDashboard(),
   exportLocalData: () => electronExportLocalData(),
   memoryItems: () => electronMemoryItems(),
+  projectGoals: (threadId: string) => electronProjectGoals(threadId),
   promoteGoals: (workspace: string, refs: string[]) => electronPromoteGoals(workspace, refs),
   addGoal: (workspace: string, text: string) => electronAddGoal(workspace, text),
   ensureProjectGraph: (workspace: string, subpath?: string) =>
@@ -2109,6 +2110,27 @@ async function electronMemoryItems(): Promise<{ items: CoreMemoryItem[]; scopes:
 /// Ensure a project's code graph is fresh (builds it transparently on open).
 /// Returns true if a build was kicked off; UI reloads on the project_graph.ready event.
 /// An optional `subpath` scopes the map to one subtree (huge-repo escape hatch).
+export type ProjectGoalsData = {
+  workspace: string;
+  is_project: boolean;
+  goals: { reference: string; text: string }[];
+  decisions: { reference: string; text: string }[];
+};
+
+/// Goals + promotable decisions for the active chat's project (resolved from threadId).
+async function electronProjectGoals(threadId: string): Promise<ProjectGoalsData | null> {
+  try {
+    const response = await fetch(
+      `${DESKTOP_GATEWAY_URL}/api/memory/goals?thread=${encodeURIComponent(threadId)}`,
+      { headers: gatewayHeaders() },
+    );
+    if (!response.ok) return null;
+    return (await response.json()) as ProjectGoalsData;
+  } catch {
+    return null;
+  }
+}
+
 /// Promote selected memories (decisions the user flagged) to project goals — LLM-free,
 /// user-driven. Returns how many were promoted. Refreshes the project brief.
 async function electronPromoteGoals(workspace: string, refs: string[]): Promise<number> {

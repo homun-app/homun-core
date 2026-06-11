@@ -45,6 +45,7 @@ import {
   RotateCcw,
   Search,
   Share2,
+  Target,
   CheckSquare,
   ShieldCheck,
   Sparkles,
@@ -73,6 +74,7 @@ import {
   type CoreComputerSessionSnapshot,
   type CorePromptSubmissionResult,
   type CoreTaskQueueSnapshot,
+  type ProjectGoalsData,
   type FsEntry,
   type FsFilePayload,
   type McpRegistryServer,
@@ -3020,7 +3022,7 @@ function InlineArtifactPreview({ artifact }: { artifact: ParsedArtifact }) {
  *  project directory tree); "artifacts" = generated outputs; "activity" =
  *  background/scheduled tasks; "plan" = the orchestrator's operational plan.
  *  (Computer stays docked above the composer by design.) */
-type WorkbenchTab = "files" | "artifacts" | "memoria" | "activity" | "plan";
+type WorkbenchTab = "files" | "artifacts" | "memoria" | "goals" | "activity" | "plan";
 
 /** The Workbench: one toggle → a docked right panel with tabs, consolidating the
  *  assistant's tools/outputs (Claude-Code / IDE inspector pattern). Replaces the
@@ -3061,6 +3063,98 @@ function graphStyleKey(node: { kind: string; entity_type?: string }): string {
     if (GRAPH_KIND_STYLE[key]) return key;
   }
   return node.kind;
+}
+
+/** Workbench "Obiettivi" tab: the LLM-free, user-driven goals manager. Shows current
+ * goals + lets the user promote decisions to goals or add a custom one. Mutations hit
+ * the gateway (which regenerates the injected project brief) then refetch. */
+function GoalsPanel({
+  data,
+  onRefresh,
+}: {
+  data: ProjectGoalsData;
+  onRefresh: () => void;
+}) {
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [newGoal, setNewGoal] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const promote = () => {
+    if (sel.size === 0) return;
+    setBusy(true);
+    void coreBridge
+      .promoteGoals(data.workspace, Array.from(sel))
+      .then(() => {
+        setSel(new Set());
+        onRefresh();
+      })
+      .finally(() => setBusy(false));
+  };
+  const add = () => {
+    const text = newGoal.trim();
+    if (!text) return;
+    setBusy(true);
+    void coreBridge
+      .addGoal(data.workspace, text)
+      .then(() => {
+        setNewGoal("");
+        onRefresh();
+      })
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <div className="goals-manager">
+      <div className="goals-head">🎯 Obiettivi del progetto</div>
+      {data.goals.length > 0 ? (
+        <ul className="goals-list">
+          {data.goals.map((g) => (
+            <li key={g.reference}>{g.text}</li>
+          ))}
+        </ul>
+      ) : (
+        <p className="muted">Nessun obiettivo ancora. Flagga una decisione o aggiungine uno.</p>
+      )}
+      <div className="goals-add">
+        <input
+          type="text"
+          placeholder="Aggiungi un obiettivo…"
+          value={newGoal}
+          onChange={(e) => setNewGoal(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && add()}
+          disabled={busy}
+        />
+        <button onClick={add} disabled={busy || !newGoal.trim()}>
+          Aggiungi
+        </button>
+      </div>
+      {data.decisions.length > 0 && (
+        <details className="goals-promote">
+          <summary>Promuovi una decisione a obiettivo ({data.decisions.length})</summary>
+          <div className="goals-promote-list">
+            {data.decisions.slice(0, 50).map((d) => (
+              <label key={d.reference} className="goals-promote-item">
+                <input
+                  type="checkbox"
+                  checked={sel.has(d.reference)}
+                  onChange={(e) => {
+                    const next = new Set(sel);
+                    if (e.target.checked) next.add(d.reference);
+                    else next.delete(d.reference);
+                    setSel(next);
+                  }}
+                />
+                <span>{d.text.split("\n")[0].slice(0, 120)}</span>
+              </label>
+            ))}
+          </div>
+          <button onClick={promote} disabled={busy || sel.size === 0}>
+            Promuovi {sel.size > 0 ? `(${sel.size})` : ""} a obiettivo
+          </button>
+        </details>
+      )}
+    </div>
+  );
 }
 
 export function MemoryGraphPanel({
@@ -3579,6 +3673,8 @@ function Workbench({
   // Background/scheduled tasks (Attività tab), fetched lazily when the tab opens.
   const [tasks, setTasks] = useState<CoreTaskQueueSnapshot | null>(null);
   const [tasksLoading, setTasksLoading] = useState(false);
+  // Project goals (Obiettivi tab): goals + promotable decisions, resolved from the thread.
+  const [goalsData, setGoalsData] = useState<ProjectGoalsData | null>(null);
   // Open file viewer (File tab): content + git diff toggle.
   const [openFile, setOpenFile] = useState<FsFilePayload | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
@@ -3654,6 +3750,8 @@ function Workbench({
           return artifacts.length > 0;
         case "memoria":
           return true;
+        case "goals":
+          return !!goalsData?.is_project;
         case "activity":
           return (tasks ? tasks.active.length + tasks.queued.length + tasks.blocked.length : 0) > 0;
         case "plan":
@@ -3661,10 +3759,21 @@ function Workbench({
       }
     };
     if (!populated(tab)) {
-      const order: WorkbenchTab[] = ["files", "artifacts", "plan", "activity", "memoria"];
+      const order: WorkbenchTab[] = ["files", "artifacts", "plan", "goals", "activity", "memoria"];
       onTab(order.find(populated) ?? "memoria");
     }
-  }, [open, tab, uploadedFiles.length, fsRoot, artifacts.length, tasks, operationalPlanMarkdown, onTab]);
+  }, [open, tab, uploadedFiles.length, fsRoot, artifacts.length, tasks, operationalPlanMarkdown, goalsData, onTab]);
+  // Load project goals (Obiettivi tab) when the panel opens — resolves scope from thread.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void coreBridge.projectGoals(threadId).then((d) => {
+      if (!cancelled) setGoalsData(d);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, threadId]);
   // Load the task queue when the Attività tab is shown (and refresh on re-open).
   useEffect(() => {
     if (!open || tab !== "activity") return;
@@ -3687,6 +3796,10 @@ function Workbench({
   }, [open, tab, threadId]);
 
   if (!open) return null;
+  const refreshGoals = () => {
+    void coreBridge.projectGoals(threadId).then(setGoalsData);
+  };
+  const goalsAvailable = !!goalsData?.is_project;
   const planItems = parseOperationalPlanItems(operationalPlanMarkdown);
   const activeTasks = tasks
     ? [...tasks.active, ...tasks.queued, ...tasks.blocked]
@@ -3713,6 +3826,12 @@ function Workbench({
       icon: Share2,
     },
     {
+      key: "goals",
+      label: "Obiettivi",
+      icon: Target,
+      badge: goalsData?.goals.length || undefined,
+    },
+    {
       key: "activity",
       label: "Attività",
       icon: Clock3,
@@ -3730,6 +3849,7 @@ function Workbench({
     files: uploadedFiles.length > 0 || fsRoot != null,
     artifacts: artifacts.length > 0,
     memoria: true,
+    goals: goalsAvailable,
     activity: activeTasks.length > 0,
     plan: planItems.length > 0,
   };
@@ -3925,6 +4045,9 @@ function Workbench({
             </div>
           ))}
         {tab === "memoria" && <MemoryGraphPanel threadId={threadId} />}
+        {tab === "goals" && goalsData && (
+          <GoalsPanel data={goalsData} onRefresh={refreshGoals} />
+        )}
         {tab === "activity" && (
           <div className="workbench-files">
             {tasksLoading && activeTasks.length === 0 ? (
