@@ -4144,7 +4144,7 @@ una-tantum immediate (quelle falle ora).",
                     },
                     "every": {
                         "type": "string",
-                        "description": "Quando/ogni quanto ripetere. INTERVALLO: \"every 30m\", \"every 6h\", \"every 1d\", \"every 1w\" (prima esecuzione dopo un intervallo da ora). Oppure ANCORATO a un orario: \"daily@08:00\" (ogni giorno alle 8), \"weekly@mon@09:30\" (ogni lunedì alle 9:30; giorni mon..sun o lun..dom)."
+                        "description": "Quando/ogni quanto ripetere. INTERVALLO: \"every 30m\", \"every 6h\", \"every 1d\", \"every 1w\". ANCORATO: \"daily@08:00\", \"weekly@mon@09:30\". PIÙ GIORNI/ORARI: \"dow@mon,wed,fri@08:00,12:00,18:00\" (o \"dow@*@09:00\" per ogni giorno). Giorni: mon..sun o lun..dom."
                     },
                     "timezone": {
                         "type": "string",
@@ -4203,10 +4203,53 @@ struct AutomationCreateRequest {
     source: Option<AutomationSource>,
 }
 
+/// Human label for a recurrence rule (handles the flexible `dow@days@times` form).
+fn humanize_recurrence(rec: &str) -> String {
+    fn day_label(d: &str) -> &str {
+        match d.trim() {
+            "mon" => "Lun",
+            "tue" => "Mar",
+            "wed" => "Mer",
+            "thu" => "Gio",
+            "fri" => "Ven",
+            "sat" => "Sab",
+            "sun" => "Dom",
+            other => other,
+        }
+    }
+    let lower = rec.trim().to_ascii_lowercase();
+    if let Some(rest) = lower.strip_prefix("dow") {
+        if let Some((days, times)) = rest.trim_start_matches(['@', ' ']).split_once('@') {
+            let times_h = times.split(',').map(str::trim).collect::<Vec<_>>().join(", ");
+            let days_h = if matches!(days.trim(), "*" | "all" | "daily" | "") {
+                "Ogni giorno".to_string()
+            } else {
+                days.split(',').map(day_label).collect::<Vec<_>>().join(", ")
+            };
+            return format!("{days_h} · {times_h}");
+        }
+    }
+    if let Some(t) = lower.strip_prefix("daily") {
+        return format!("Ogni giorno · {}", t.trim_start_matches(['@', ' ']).trim());
+    }
+    if let Some(rest) = lower.strip_prefix("weekly") {
+        let rest = rest.trim_start_matches(['@', ' ']);
+        if let Some((d, t)) = rest.split_once(['@', ' ']) {
+            return format!("{} · {}", day_label(d), t.trim_start_matches(['@', ' ']).trim());
+        }
+    }
+    if lower.starts_with("every") {
+        return rec.replacen("every", "Ogni", 1);
+    }
+    rec.to_string()
+}
+
 /// Human one-line summary of a trigger for the list view.
 fn automation_trigger_summary(trigger: &AutomationTrigger) -> String {
     match trigger {
-        AutomationTrigger::Schedule { recurrence, .. } => format!("Orario · {recurrence}"),
+        AutomationTrigger::Schedule { recurrence, .. } => {
+            format!("Orario · {}", humanize_recurrence(recurrence))
+        }
         AutomationTrigger::Event { event } => match event {
             EventTrigger::ChannelMessage { channel, from } => {
                 let ch = channel.as_deref().unwrap_or("qualsiasi canale");
@@ -4314,7 +4357,7 @@ fn create_automation_tool_schema() -> serde_json::Value {
                     "title": { "type": "string", "description": "Titolo breve dell'automazione" },
                     "prompt": { "type": "string", "description": "Cosa fare quando scatta, in linguaggio naturale" },
                     "trigger_type": { "type": "string", "enum": ["schedule", "event"], "description": "schedule = a orario; event = a un messaggio in arrivo su un canale" },
-                    "recurrence": { "type": "string", "description": "Solo schedule: daily@HH:MM | weekly@<lun..dom>@HH:MM | every Nh | every Nd" },
+                    "recurrence": { "type": "string", "description": "Solo schedule. Formati: daily@HH:MM | weekly@<gg>@HH:MM | dow@<gg,gg,…>@<HH:MM,HH:MM,…> per PIÙ GIORNI e PIÙ ORARI (es. \"dow@mon,wed,fri@08:00,12:00,18:00\"; usa dow@*@HH:MM,… per ogni giorno) | every Nh | every Nd. Giorni: mon,tue,wed,thu,fri,sat,sun." },
                     "timezone": { "type": "string", "description": "Solo schedule: fuso IANA (default: fuso dell'utente)" },
                     "event_channel": { "type": "string", "description": "Solo event: whatsapp | telegram (vuoto = qualsiasi canale)" },
                     "event_from": { "type": "string", "description": "Solo event: nome o numero del mittente (vuoto = chiunque)" },

@@ -21,6 +21,14 @@ enum Rule {
         hour: i8,
         minute: i8,
     },
+    /// Flexible calendar: a set of weekdays × a set of times-of-day. An empty
+    /// `weekdays` means "every day". Format: `dow@mon,wed,fri@08:00,12:00,18:00`
+    /// (or `dow@*@09:00` for every day). The next occurrence is the soonest
+    /// (weekday, time) combination strictly after `after`.
+    MultiCalendar {
+        weekdays: Vec<jiff::civil::Weekday>,
+        times: Vec<(i8, i8)>,
+    },
 }
 
 /// Next occurrence strictly after `after`, or `None` when `rule` is unparseable
@@ -40,6 +48,7 @@ pub fn next_occurrence(
             hour,
             minute,
         } => next_weekly(after, tz, weekday, hour, minute),
+        Rule::MultiCalendar { weekdays, times } => next_multi(after, tz, &weekdays, &times),
     }
 }
 
@@ -66,6 +75,30 @@ fn parse(rule: &str) -> Option<Rule> {
             hour,
             minute,
         });
+    }
+    // dow@<days>@<times> — flexible: comma-separated weekdays (or *|all|daily for
+    // every day) × comma-separated HH:MM. e.g. "dow@mon,wed,fri@08:00,12:00,18:00".
+    if let Some(rest) = normalized.strip_prefix("dow") {
+        let rest = rest.trim_start_matches(['@', ' ']);
+        let (days_str, times_str) = rest.split_once('@')?;
+        let days_str = days_str.trim();
+        let weekdays: Vec<jiff::civil::Weekday> =
+            if matches!(days_str, "*" | "all" | "daily" | "") {
+                Vec::new()
+            } else {
+                days_str
+                    .split(',')
+                    .map(|d| parse_weekday(d.trim()))
+                    .collect::<Option<Vec<_>>>()?
+            };
+        let times: Vec<(i8, i8)> = times_str
+            .split(',')
+            .map(|t| parse_hhmm(t.trim()))
+            .collect::<Option<Vec<_>>>()?;
+        if times.is_empty() {
+            return None;
+        }
+        return Some(Rule::MultiCalendar { weekdays, times });
     }
     None
 }
@@ -187,6 +220,39 @@ fn next_weekly(
     None
 }
 
+/// Soonest (weekday, time) combination strictly after `after`. Scans forward day by
+/// day; the first day that matches a weekday (or any day when `weekdays` is empty)
+/// AND has a future time wins, returning that day's earliest future time.
+fn next_multi(
+    after: OffsetDateTime,
+    tz: Option<&str>,
+    weekdays: &[jiff::civil::Weekday],
+    times: &[(i8, i8)],
+) -> Option<OffsetDateTime> {
+    use jiff::ToSpan;
+    let now = zoned_from(after, tz)?;
+    for day_offset in 0..8_i64 {
+        let base = now.checked_add(day_offset.days()).ok()?;
+        if !weekdays.is_empty() && !weekdays.contains(&base.weekday()) {
+            continue;
+        }
+        let mut best: Option<jiff::Zoned> = None;
+        for (hour, minute) in times {
+            let candidate = at_time(&base, *hour, *minute)?;
+            if candidate.timestamp() > now.timestamp() {
+                best = match best {
+                    Some(b) if b.timestamp() <= candidate.timestamp() => Some(b),
+                    _ => Some(candidate),
+                };
+            }
+        }
+        if let Some(b) = best {
+            return to_offset_datetime(&b);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,5 +314,28 @@ mod tests {
         // Italian abbreviation works too.
         let mon_it = next_occurrence("weekly lun 00:00", Some("UTC"), after).unwrap();
         assert_eq!(mon_it.unix_timestamp(), 4 * 86_400);
+    }
+
+    #[test]
+    fn multi_calendar_picks_soonest_day_and_time() {
+        // 1970-01-01 is a Thursday, 00:00 UTC.
+        let after = OffsetDateTime::from_unix_timestamp(0).unwrap();
+
+        // Thu/Fri at 08:00,12:00 → soonest is today (Thu) 08:00.
+        let r = next_occurrence("dow@thu,fri@08:00,12:00", Some("UTC"), after).unwrap();
+        assert_eq!(r.unix_timestamp(), 8 * 3600);
+
+        // Every day, multiple times → today 06:00.
+        let daily = next_occurrence("dow@*@06:00,18:00", Some("UTC"), after).unwrap();
+        assert_eq!(daily.unix_timestamp(), 6 * 3600);
+
+        // At 09:00 Thursday, with times 08:00 & 12:00 today → the 08:00 is past, so 12:00.
+        let at_nine = OffsetDateTime::from_unix_timestamp(9 * 3600).unwrap();
+        let r2 = next_occurrence("dow@thu@08:00,12:00", Some("UTC"), at_nine).unwrap();
+        assert_eq!(r2.unix_timestamp(), 12 * 3600);
+
+        // Mon only, from Thursday → next Monday (+4 days) at 09:00.
+        let mon = next_occurrence("dow@mon@09:00", Some("UTC"), after).unwrap();
+        assert_eq!(mon.unix_timestamp(), 4 * 86_400 + 9 * 3600);
     }
 }
