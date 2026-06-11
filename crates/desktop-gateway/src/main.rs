@@ -18526,7 +18526,7 @@ fn composio_auth_config_id(
     let body = if api_key {
         serde_json::json!({
             "toolkit": { "slug": toolkit_slug },
-            "auth_config": { "type": "use_custom_auth", "auth_scheme": "API_KEY", "credentials": {} }
+            "auth_config": { "type": "use_custom_auth", "authScheme": "API_KEY", "credentials": {} }
         })
     } else {
         serde_json::json!({
@@ -18596,7 +18596,7 @@ fn composio_auth_config_resolve(
         serde_json::json!({
             "name": format!("{toolkit_slug} (Homun)"),
             "type": "use_composio_managed_auth",
-            "auth_scheme": scheme,
+            "authScheme": scheme,
         })
     } else {
         // Composio's create-auth-config validates a `name` and, for OAuth2, a redirect URI in
@@ -18616,7 +18616,7 @@ fn composio_auth_config_resolve(
         serde_json::json!({
             "name": format!("{toolkit_slug} (Homun)"),
             "type": "use_custom_auth",
-            "auth_scheme": scheme,
+            "authScheme": scheme,
             "credentials": creds,
         })
     };
@@ -19286,20 +19286,38 @@ impl ComposioTransport for GatewayComposioTransport {
             // message (not just the status code) so tool/auth failures are
             // actionable instead of an opaque "composio_status:400".
             let code = status.as_u16();
-            let detail = response
-                .text()
+            let body_text = response.text().unwrap_or_default();
+            // Full body to the log — Composio's top-level "message" is often generic
+            // ("Validation error…"); the offending field lives in a nested array.
+            eprintln!("[composio] {method} {path} -> {code} body={body_text}");
+            let detail = serde_json::from_str::<serde_json::Value>(&body_text)
                 .ok()
-                .and_then(|body| serde_json::from_str::<serde_json::Value>(&body).ok())
                 .and_then(|value| {
-                    value
-                        .get("error")
-                        .and_then(|err| err.get("message"))
+                    let err = value.get("error").cloned().unwrap_or(value);
+                    let msg = err
+                        .get("message")
                         .and_then(serde_json::Value::as_str)
-                        .map(str::to_string)
+                        .unwrap_or("")
+                        .to_string();
+                    // Append any nested field-level validation details.
+                    let mut parts = Vec::new();
+                    for key in ["details", "errors", "validation_errors", "issues"] {
+                        if let Some(arr) = err.get(key).and_then(serde_json::Value::as_array) {
+                            for it in arr {
+                                parts.push(it.to_string());
+                            }
+                        }
+                    }
+                    let combined = if parts.is_empty() {
+                        msg
+                    } else {
+                        format!("{msg} | {}", parts.join("; "))
+                    };
+                    (!combined.trim().is_empty()).then_some(combined)
                 });
             return Err(CapabilityError::ProviderUnavailable(match detail {
                 Some(message) => format!("composio_status:{code}:{message}"),
-                None => format!("composio_status:{code}"),
+                None => format!("composio_status:{code}:{}", body_text.chars().take(300).collect::<String>()),
             }));
         }
         response
