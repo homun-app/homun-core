@@ -7552,6 +7552,9 @@ const CORE_TOOL_NAMES: &[&str] = &[
     // (not behind find_capability) so "ricordami ogni…" / "quando mi scrive X…" land reliably.
     "create_automation",
     "schedule_task",
+    // Sending a channel message is common + safety-gated (confirm card) — keep it core so
+    // "manda/girami su WhatsApp" works without a find_capability hop.
+    "send_message",
     "query_code_graph",
     "query_git_history",
     "read_file",
@@ -7941,6 +7944,9 @@ file per domande a cui mappa o storia rispondono già."
             }
         }
     }
+    // `send_message` is a side-effecting action → route it through the same write-confirm
+    // card as Composio/MCP writes (the confirm endpoint dispatches it to channel_send).
+    composio_writes.insert("send_message".to_string());
     let composio_writes = composio_writes; // freeze: (Composio + MCP) write tools
     let has_composio = !catalog_index.is_empty();
     let system = if !has_composio {
@@ -8348,6 +8354,7 @@ RI-VERIFICA eseguendo. Una causa alla volta, niente tentativi alla cieca."
         base_tools.push(update_plan_tool_schema());
         base_tools.push(schedule_task_tool_schema());
         base_tools.push(create_automation_tool_schema());
+        base_tools.push(send_message_tool_schema());
         base_tools.push(list_scheduled_tasks_tool_schema());
         base_tools.push(cancel_scheduled_task_tool_schema());
         // Shell execution is a general capability (run scripts, process data, and
@@ -16990,11 +16997,81 @@ collegarla (i percorsi tra parentesi). NON dichiarare di averle già collegate."
 }
 
 /// Executes a Composio tool for the current entity and returns its raw output.
+fn send_message_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "send_message",
+            "description": "Invia un messaggio su un canale collegato dell'utente (WhatsApp o Telegram). Usalo per \"manda/scrivi/inoltra/girami un messaggio\". Il destinatario DEVE essere un numero o un ID di chat esplicito (per «a me» chiedi il numero se non lo conosci, NON inventarlo). L'invio richiede la conferma dell'utente prima di partire.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "channel": { "type": "string", "enum": ["whatsapp", "telegram"], "description": "Canale su cui inviare" },
+                    "to": { "type": "string", "description": "Destinatario: numero (es. 39333…) o ID di chat. NON un nome generico." },
+                    "text": { "type": "string", "description": "Testo del messaggio" }
+                },
+                "required": ["channel", "to", "text"]
+            }
+        }
+    })
+}
+
+/// Routes the agent's `send_message` tool (confirmed via the standard write-confirm card) to
+/// the channel sidecar. The recipient must be an explicit id/number — a bare name that isn't
+/// id-like is refused so the agent asks the user instead of guessing. Returns a Composio-shaped
+/// `{successful, …}` value so the existing confirm card + result handling work unchanged.
+fn execute_send_message(
+    state: &AppState,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, GatewayError> {
+    let channel = args
+        .get("channel")
+        .and_then(|v| v.as_str())
+        .unwrap_or("whatsapp")
+        .trim()
+        .to_lowercase();
+    let to = args.get("to").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    if to.is_empty() || text.is_empty() {
+        return Ok(serde_json::json!({
+            "successful": false,
+            "error": "Servono il destinatario (to) e il testo (text)."
+        }));
+    }
+    let looks_like_id =
+        to.chars().any(|c| c.is_ascii_digit()) || to.contains('@') || to.starts_with('+');
+    if !looks_like_id {
+        return Ok(serde_json::json!({
+            "successful": false,
+            "error": format!("Destinatario «{to}» ambiguo: passa un numero o un ID di chat, non solo il nome.")
+        }));
+    }
+    let port = if channel == "telegram" {
+        TELEGRAM_HTTP_PORT
+    } else {
+        WHATSAPP_HTTP_PORT
+    };
+    let st = state.clone();
+    let recipient = to.clone();
+    let body = text.clone();
+    let sent = tokio::runtime::Handle::current()
+        .block_on(async move { channel_send(&st, port, &recipient, &body).await });
+    match sent {
+        Ok(()) => Ok(serde_json::json!({ "successful": true, "data": { "channel": channel, "to": to } })),
+        Err(e) => Ok(serde_json::json!({ "successful": false, "error": format!("Invio non riuscito: {e}") })),
+    }
+}
+
 fn composio_execute_tool(
     state: &AppState,
     tool: &str,
     arguments: &serde_json::Value,
 ) -> Result<serde_json::Value, GatewayError> {
+    // `send_message` is our own channel-send pseudo-tool (not Composio): route it before
+    // touching the Composio transport, so it works even without Composio configured.
+    if tool == "send_message" {
+        return execute_send_message(state, arguments);
+    }
     let transport = composio_transport_for(state)?;
     // Diagnostic: surface exactly what we send so date/arg bugs are visible in the
     // log (e.g. a calendar event that landed on the wrong day) instead of guessed.
