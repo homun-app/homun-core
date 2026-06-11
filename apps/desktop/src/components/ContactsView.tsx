@@ -642,8 +642,9 @@ function ContactCard({
             >
               <option value="">Eredita (impostazioni canali)</option>
               <option value="automatic">Automatica — rispondi subito</option>
+              <option value="approve">Approva — preparo la risposta, la confermi prima dell'invio</option>
               <option value="draft">Bozza — registra senza rispondere</option>
-              <option value="silent">Silenziosa — ignora i messaggi</option>
+              <option value="silent">Silenziosa — non rispondere a questo contatto</option>
             </select>
           </label>
           <label className="rk">
