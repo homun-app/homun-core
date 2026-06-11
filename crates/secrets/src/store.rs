@@ -77,6 +77,14 @@ impl<K: SecretKeyProvider> EncryptedFileSecretStore<K> {
             secrets: entries.values().cloned().collect(),
         };
         fs::write(&self.path, serde_json::to_vec_pretty(&file)?)?;
+        // Owner-only: the ciphertext must not be world-readable. Defence in depth alongside
+        // the encryption (the decryption key sits in the same directory), so a stray 0644
+        // blob isn't readable by other local users or casual backups.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&self.path, fs::Permissions::from_mode(0o600));
+        }
         Ok(())
     }
 }
