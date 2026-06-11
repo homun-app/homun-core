@@ -9751,21 +9751,19 @@ Dimmi se vuoi che riprovi o riformuli."
                 .await;
             });
         }
-        // Keep the code map FRESH: if this turn MODIFIED code in a project, re-extract
-        // (incremental). So the next "how/why" question queries the CURRENT structure,
-        // not a stale snapshot. Staleness-gated → a no-op when nothing actually changed.
+        // Keep the code map FRESH on every turn in a mapped project — driven by GIT,
+        // not by who edited: spawn_project_graph_refresh re-extracts only if the git
+        // fingerprint changed since the last build, so it catches the AGENT's writes AND
+        // the user's own editor edits (and checkout/pull) made between messages, while
+        // being a cheap no-op when nothing changed. Only refreshes already-mapped
+        // projects (never auto-builds one the user hasn't opened).
         if !read_only {
-            let touched_code = tool_trace.iter().any(|a| {
-                a.contains("modificato file") || a.contains("eseguito nel progetto")
-            });
-            if touched_code {
-                if let Some(ws) = thread_id
-                    .as_deref()
-                    .and_then(|tid| lock_store(&state_owned).ok().and_then(|s| s.workspace_for_thread(tid).ok()))
-                    .filter(|w| !w.trim().is_empty())
-                {
-                    spawn_project_graph_refresh(&state_owned, &ws);
-                }
+            if let Some(ws) = thread_id
+                .as_deref()
+                .and_then(|tid| lock_store(&state_owned).ok().and_then(|s| s.workspace_for_thread(tid).ok()))
+                .filter(|w| !w.trim().is_empty())
+            {
+                spawn_project_graph_refresh(&state_owned, &ws);
             }
         }
         // Mark the resume entry finished and evict it after a grace window so a
@@ -20033,6 +20031,39 @@ fn project_newest_mtime(root: &std::path::Path) -> Option<std::time::SystemTime>
     newest
 }
 
+/// Authoritative "has the code changed?" signal for a project: git HEAD + a hash of
+/// `git status --porcelain` (tracked + untracked working-tree changes). Catches edits by
+/// ANYONE — the agent, the user's own editor, checkout/pull/commit — unlike mtime
+/// (heuristic) or the agent's tool-trace (only ITS writes). Falls back to the newest
+/// source mtime for non-git projects. Cheap (git uses its index); safe to call per-turn.
+fn project_change_fingerprint(root: &std::path::Path) -> String {
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(args)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+    };
+    if let Some(head) = git(&["rev-parse", "HEAD"]) {
+        let status = git(&["status", "--porcelain", "--untracked-files=all"]).unwrap_or_default();
+        // FNV-1a hash so the fingerprint stays small even on a large dirty tree.
+        let mut h: u64 = 0xcbf29ce484222325;
+        for b in status.as_bytes() {
+            h ^= u64::from(*b);
+            h = h.wrapping_mul(0x100000001b3);
+        }
+        return format!("git:{}:{:x}", head.trim(), h);
+    }
+    // Non-git project: newest source-file mtime as the change signal.
+    match project_newest_mtime(root).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()) {
+        Some(d) => format!("mtime:{}", d.as_secs()),
+        None => "none".to_string(),
+    }
+}
+
 /// Count CODE files under a project, stopping early at `cap` (cheap guard). Counts only
 /// real source (excludes vendored deps + data files) so the size cap reflects how much
 /// the user's project actually is — a 57k-file repo that's mostly venvs/data still
@@ -20080,6 +20111,13 @@ fn graphify_out_dir(workspace_id: &str) -> std::path::PathBuf {
 /// Cheap: build_project_graph skips when nothing changed, and the persistent mirror +
 /// graphify cache make a real refresh incremental (seconds).
 fn spawn_project_graph_refresh(state: &AppState, workspace_id: &str) {
+    // Only REFRESH an already-mapped project — never auto-build one the user hasn't
+    // opened (mapping happens on the graph view via `ensure`). Keeps "chat in a project"
+    // from silently extracting every repo. The git-fingerprint check inside makes the
+    // actual rebuild a no-op when nothing changed.
+    if !graphify_out_dir(workspace_id).join("graph.json").is_file() {
+        return;
+    }
     let folder = load_workspaces_file()
         .workspaces
         .into_iter()
@@ -20113,13 +20151,17 @@ fn build_project_graph(state: &AppState, workspace_id: &str, folder: &str, subpa
     // optional focus filter, not a gate. Viz readability for big graphs = clustering.
     let out = graphify_out_dir(workspace_id);
     let graph_path = out.join("graph.json");
-    // Staleness: skip if a graph exists and no source file is newer than it.
-    if let (Ok(built), Some(newest)) = (
-        std::fs::metadata(&graph_path).and_then(|m| m.modified()),
-        project_newest_mtime(&root),
-    ) {
-        if built >= newest {
-            return; // fresh — nothing changed
+    let fp_path = out.join(".fingerprint");
+    // Staleness driven by GIT (or mtime fallback): skip the rebuild when the project's
+    // working-tree content hasn't changed since the last extraction. This catches edits
+    // from ANY source (agent, the user's editor, git checkout/pull) — the authoritative
+    // signal — so the graph stays in lock-step with the code.
+    let current_fp = project_change_fingerprint(&root);
+    if graph_path.is_file() {
+        if let Ok(prev) = std::fs::read_to_string(&fp_path) {
+            if prev == current_fp {
+                return; // unchanged since last extraction
+            }
         }
     }
     if let Err(err) = crate::sandbox::run_graphify(&root, &out) {
@@ -20134,6 +20176,7 @@ fn build_project_graph(state: &AppState, workspace_id: &str, folder: &str, subpa
         let (n, e) = import_graphify_value(&facade, &user, &ws, &graph);
         eprintln!("project-graph: {workspace_id} → {n} nodi, {e} archi");
     }
+    let _ = std::fs::write(&fp_path, &current_fp); // remember what we just extracted
     publish_app_event(serde_json::json!({ "type": "project_graph.ready", "workspace": workspace_id }));
 }
 
