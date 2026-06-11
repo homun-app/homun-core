@@ -4204,6 +4204,48 @@ fn automation_to_json(a: &Automation) -> serde_json::Value {
     serde_json::to_value(a).unwrap_or_else(|_| serde_json::json!({}))
 }
 
+/// For a Schedule automation, create the recurring TaskRecord that DRIVES it and return its
+/// id (tagged with `automation_id` so the run + queue can trace it back). Event automations
+/// return `None` — their runs are materialized when the event fires (Auto-C). Validates the
+/// recurrence (so an invalid rule fails here, not silently at run time).
+fn materialize_automation_task(
+    store: &TaskStore,
+    automation: &Automation,
+) -> Result<Option<String>, String> {
+    let (recurrence, tz) = match &automation.trigger {
+        AutomationTrigger::Schedule { recurrence, tz } => (recurrence.clone(), tz.clone()),
+        AutomationTrigger::Event { .. } => return Ok(None),
+    };
+    let now = OffsetDateTime::now_utc();
+    let next = local_first_task_runtime::next_occurrence(&recurrence, tz.as_deref(), now)
+        .ok_or_else(|| format!("ricorrenza '{recurrence}' non valida"))?;
+    let task_id = format!("autorun_{}", uuid::Uuid::new_v4().simple());
+    let mut task = TaskRecord::new(
+        task_id.clone(),
+        gateway_user_id(),
+        gateway_workspace_id(),
+        "proactive_prompt",
+        automation.prompt.clone(),
+        serde_json::json!({ "automation_id": automation.id, "approval": automation.approval }),
+    );
+    task.not_before = Some(next);
+    task.recurrence = Some(recurrence);
+    task.recurrence_tz = tz;
+    store.insert_task(&task).map_err(|e| e.to_string())?;
+    Ok(Some(task_id))
+}
+
+/// Stop an automation's driving task (cancel all future occurrences). Best-effort.
+fn cancel_automation_task(store: &TaskStore, task_id: &str) {
+    let _ = store.update_task_status(
+        &local_first_task_runtime::TaskId::new(task_id),
+        &gateway_user_id(),
+        &gateway_workspace_id(),
+        TaskStatus::Cancelled,
+        Some("automazione disattivata o eliminata"),
+    );
+}
+
 /// GET /api/automations — list the user's automations (rules), newest first.
 async fn automations_list(
     State(state): State<AppState>,
@@ -4230,7 +4272,7 @@ async fn automation_create(
         }
     }
     let now = OffsetDateTime::now_utc();
-    let automation = Automation {
+    let mut automation = Automation {
         id: format!("auto_{}", uuid::Uuid::new_v4().simple()),
         user_id: gateway_user_id(),
         workspace_id: gateway_workspace_id(),
@@ -4247,6 +4289,9 @@ async fn automation_create(
     };
     let store = lock_task_store(&state)
         .map_err(|_| GatewayError { status: StatusCode::SERVICE_UNAVAILABLE, code: "task_store", message: "store dei task non disponibile".into() })?;
+    // Schedule + enabled → materialize the recurring task that drives it now.
+    automation.task_id = materialize_automation_task(&store, &automation)
+        .map_err(|msg| GatewayError { status: StatusCode::BAD_REQUEST, code: "bad_recurrence", message: msg })?;
     store.upsert_automation(&automation)
         .map_err(|e| GatewayError { status: StatusCode::INTERNAL_SERVER_ERROR, code: "automation_create", message: e.to_string() })?;
     Ok(Json(automation_to_json(&automation)))
@@ -4265,6 +4310,16 @@ async fn automation_toggle(
         .ok_or_else(|| GatewayError { status: StatusCode::NOT_FOUND, code: "automation_missing", message: "automazione non trovata".into() })?;
     automation.enabled = !automation.enabled;
     automation.updated_at = OffsetDateTime::now_utc();
+    if automation.enabled {
+        // Re-enable: (re)create the driving task for a schedule automation.
+        if automation.task_id.is_none() {
+            automation.task_id = materialize_automation_task(&store, &automation)
+                .map_err(|msg| GatewayError { status: StatusCode::BAD_REQUEST, code: "bad_recurrence", message: msg })?;
+        }
+    } else if let Some(tid) = automation.task_id.take() {
+        // Disable: stop the recurring task (set task_id back to None so re-enable is fresh).
+        cancel_automation_task(&store, &tid);
+    }
     store.upsert_automation(&automation)
         .map_err(|e| GatewayError { status: StatusCode::INTERNAL_SERVER_ERROR, code: "automation_toggle", message: e.to_string() })?;
     Ok(Json(automation_to_json(&automation)))
@@ -4277,6 +4332,12 @@ async fn automation_delete(
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let store = lock_task_store(&state)
         .map_err(|_| GatewayError { status: StatusCode::SERVICE_UNAVAILABLE, code: "task_store", message: "store dei task non disponibile".into() })?;
+    // Stop the driving task (if any) before removing the rule.
+    if let Ok(Some(existing)) = store.get_automation(&id, &gateway_user_id(), &gateway_workspace_id()) {
+        if let Some(tid) = existing.task_id.as_deref() {
+            cancel_automation_task(&store, tid);
+        }
+    }
     store.delete_automation(&id, &gateway_user_id(), &gateway_workspace_id())
         .map_err(|e| GatewayError { status: StatusCode::INTERNAL_SERVER_ERROR, code: "automation_delete", message: e.to_string() })?;
     Ok(Json(serde_json::json!({ "deleted": id })))
