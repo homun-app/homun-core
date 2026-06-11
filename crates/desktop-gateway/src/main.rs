@@ -4828,7 +4828,7 @@ async fn automation_event_sources(State(state): State<AppState>) -> Json<serde_j
             .ok()
             .map(|t| composio_connected_toolkits(&t))
             .unwrap_or_default();
-        (connected, composio_chat_tools(&st, 500), mcp_chat_tools(&st, 500))
+        (connected, composio_chat_tools_cached(&st, 500), mcp_chat_tools(&st, 500))
     })
     .await
     .unwrap_or_else(|_| (Vec::new(), ComposioChatTools::default(), McpChatTools::default()));
@@ -8287,7 +8287,7 @@ file per domande a cui mappa o storia rispondono già."
     // pattern Composio/Claude use.
     let catalog = {
         let st = state.clone();
-        tokio::task::spawn_blocking(move || composio_chat_tools(&st, COMPOSIO_CATALOG_CAP))
+        tokio::task::spawn_blocking(move || composio_chat_tools_cached(&st, COMPOSIO_CATALOG_CAP))
             .await
             .unwrap_or_default()
     };
@@ -16756,6 +16756,7 @@ fn connect_composio_blocking(
             .map_err(GatewayError::capability)?;
     }
 
+    composio_catalog_invalidate(); // new account → next turn sees its toolkits
     Ok(ConnectComposioResponse {
         provider_id: provider_id.as_str().to_string(),
         tools_cached,
@@ -16951,7 +16952,7 @@ fn composio_entity_id() -> String {
 
 /// Composio function tools to expose to the chat model, plus the subset that are
 /// writes (need confirmation before running).
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct ComposioChatTools {
     /// OpenAI-style function tool schemas (name = tool slug).
     schemas: Vec<serde_json::Value>,
@@ -17039,6 +17040,51 @@ fn composio_connected_toolkits(transport: &GatewayComposioTransport) -> Vec<(Str
         }
     }
     by_slug.into_iter().collect()
+}
+
+type ComposioCatalogCache =
+    std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<usize, (std::time::Instant, ComposioChatTools)>>>;
+
+fn composio_catalog_cache(
+) -> &'static std::sync::Mutex<std::collections::HashMap<usize, (std::time::Instant, ComposioChatTools)>>
+{
+    static CELL: ComposioCatalogCache = std::sync::OnceLock::new();
+    CELL.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+fn composio_catalog_ttl() -> std::time::Duration {
+    let secs = std::env::var("LFPA_COMPOSIO_CACHE_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(60);
+    std::time::Duration::from_secs(secs)
+}
+
+/// Drop the cached connector catalog — call after any change to connected accounts so a
+/// freshly connected/disconnected service is reflected on the next turn (no TTL wait).
+fn composio_catalog_invalidate() {
+    if let Ok(mut cache) = composio_catalog_cache().lock() {
+        cache.clear();
+    }
+}
+
+/// Cached wrapper over `composio_chat_tools`: that call is an N-toolkit `/tools` HTTP fan-out
+/// rebuilt every chat turn. Cache per `cap` with a short TTL (LFPA_COMPOSIO_CACHE_SECS, default
+/// 60s); `composio_catalog_invalidate()` clears it on connect/link/disconnect for immediacy.
+fn composio_chat_tools_cached(state: &AppState, cap: usize) -> ComposioChatTools {
+    let now = std::time::Instant::now();
+    if let Ok(cache) = composio_catalog_cache().lock() {
+        if let Some((stamped, tools)) = cache.get(&cap) {
+            if now.duration_since(*stamped) < composio_catalog_ttl() {
+                return tools.clone();
+            }
+        }
+    }
+    let fresh = composio_chat_tools(state, cap);
+    if let Ok(mut cache) = composio_catalog_cache().lock() {
+        cache.insert(cap, (now, fresh.clone()));
+    }
+    fresh
 }
 
 /// Fetches the executable tools (with input schemas) for the connected toolkits
@@ -18671,6 +18717,7 @@ fn composio_link_blocking(
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default()
         .to_string();
+    composio_catalog_invalidate(); // newly linked toolkit → next turn sees its tools
     Ok(ComposioLinkResponse {
         redirect_url,
         connected_account_id,
@@ -18751,6 +18798,7 @@ fn composio_disconnect_blocking(state: &AppState, id: &str) -> Result<(), Gatewa
     transport
         .request("DELETE", &format!("/connected_accounts/{id}"), None)
         .map_err(GatewayError::capability)?;
+    composio_catalog_invalidate(); // removed account → drop its tools from the catalog
     Ok(())
 }
 

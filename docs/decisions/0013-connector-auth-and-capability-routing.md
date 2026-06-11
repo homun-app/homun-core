@@ -69,10 +69,12 @@ with empty creds); **Spotify connected end-to-end (ACTIVE)** with the user's rea
 `bm25_rank` ordering (unit); `search_composio_catalog` / `composio_tool_is_read` (unit).
 
 **Pending / caveats:**
-- Two parallel auth-config builders (`composio_auth_config_id` legacy + `composio_auth_config_resolve`
-  schema-driven) — a future Composio shape change must touch both. Consolidation debt.
-- Per-turn catalog rebuild (`/tools?toolkit_slug=` fan-out, one blocking call per connected
-  toolkit, no cross-turn cache) — latency scales with connected toolkits; not measured.
+- ~~Two parallel auth-config builders~~ **DONE**: the legacy `composio_auth_config_id` was
+  removed; the legacy link path now expresses itself through `composio_auth_config_resolve`
+  (api_key→API_KEY/custom, else→OAUTH2/managed). One builder to maintain.
+- ~~Per-turn catalog rebuild~~ **DONE**: `composio_chat_tools_cached` caches the `/tools` fan-out
+  per `cap` with a short TTL (`LFPA_COMPOSIO_CACHE_SECS`, default 60s), invalidated on
+  connect/link/disconnect. Measured: cold ~10s → cached ~0.4s on this setup (4 toolkits).
 - Verbose Composio diagnostics are now opt-in behind `LFPA_DEBUG` (error bodies can echo
   submitted credentials).
 
