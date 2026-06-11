@@ -3116,20 +3116,27 @@ function GoalsPanel({
   };
 
   return (
-    <div className="goals-manager">
-      <div className="goals-head">
-        <span className="goals-head-icon" aria-hidden="true">
-          <Target size={13} />
+    <section className="goals-manager" aria-label="Obiettivo del progetto">
+      <header className="goals-head">
+        <span className="goals-head-title">
+          <Target size={16} />
+          <strong>Obiettivo del progetto</strong>
         </span>
-        Obiettivo del progetto
-      </div>
+        {data.goals.length > 0 && (
+          <small>
+            {data.goals.length} {data.goals.length === 1 ? "obiettivo" : "obiettivi"}
+          </small>
+        )}
+      </header>
 
       {data.goals.length > 0 ? (
-        <div className="goals-cards">
+        <div className="goals-steps">
           {data.goals.map((g) => (
-            <div key={g.reference} className="goals-card">
-              <span className="goals-card-dot" aria-hidden="true" />
-              <span>{g.text}</span>
+            <div className="goals-step" key={g.reference}>
+              <span className="timeline-state" aria-hidden="true">
+                <Target size={12} />
+              </span>
+              <div>{g.text}</div>
             </div>
           ))}
         </div>
@@ -3150,14 +3157,16 @@ function GoalsPanel({
       />
       <div className="goals-actions">
         <button
-          className="goals-btn-primary"
+          className="goals-btn goals-btn-accent"
           onClick={() => add(newGoal)}
           disabled={busy || !newGoal.trim()}
         >
           Aggiungi obiettivo
         </button>
-        <button className="goals-btn-ghost" onClick={suggest} disabled={suggesting || busy}>
-          <span className="goals-spark" aria-hidden="true">✨</span>
+        <button className="goals-btn" onClick={suggest} disabled={suggesting || busy}>
+          <span className="goals-spark" aria-hidden="true">
+            <Sparkles size={13} />
+          </span>
           {suggesting ? "Sto proponendo…" : "Proponi"}
         </button>
       </div>
@@ -3169,7 +3178,7 @@ function GoalsPanel({
           ) : (
             <>
               <div className="goals-section-label">Proposte dal progetto — modificabili</div>
-              <div className="goals-cards">
+              <div className="goals-steps">
                 {drafts.map((d, i) => (
                   <div key={i} className="goals-draft-card">
                     <textarea
@@ -3184,8 +3193,12 @@ function GoalsPanel({
                       disabled={busy}
                     />
                     <div className="goals-draft-foot">
-                      <button className="goals-chip" onClick={() => add(d)} disabled={busy || !d.trim()}>
-                        <i aria-hidden="true">+</i> Aggiungi
+                      <button
+                        className="goals-btn goals-btn-sm"
+                        onClick={() => add(d)}
+                        disabled={busy || !d.trim()}
+                      >
+                        Aggiungi
                       </button>
                     </div>
                   </div>
@@ -3216,12 +3229,12 @@ function GoalsPanel({
               </label>
             ))}
           </div>
-          <button className="goals-btn-ghost" onClick={promote} disabled={busy || sel.size === 0}>
+          <button className="goals-btn goals-btn-sm" onClick={promote} disabled={busy || sel.size === 0}>
             Eleva {sel.size > 0 ? `(${sel.size})` : ""} a obiettivo
           </button>
         </details>
       )}
-    </div>
+    </section>
   );
 }
 
