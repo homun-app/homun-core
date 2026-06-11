@@ -589,6 +589,24 @@ async function electronSetTimezone(timezone: string | null): Promise<TimezoneInf
   return gatewayPostJson<TimezoneInfo>("/api/prefs/timezone", { timezone });
 }
 
+export interface ApprovalRouting {
+  /** "in_app" | "telegram" | "whatsapp". */
+  channel: string;
+  /** The user's own number/chat id on that channel (only it can authorize remotely). */
+  target: string | null;
+}
+
+async function electronApprovalRouting(): Promise<ApprovalRouting> {
+  return gatewayGetJson<ApprovalRouting>("/api/prefs/approval-routing");
+}
+
+async function electronSetApprovalRouting(
+  channel: string,
+  target: string | null,
+): Promise<ApprovalRouting> {
+  return gatewayPostJson<ApprovalRouting>("/api/prefs/approval-routing", { channel, target });
+}
+
 async function electronImprovePrompt(prompt: string): Promise<string> {
   const { improved } = await gatewayPostJson<{ improved: string }>(
     "/api/chat/improve_prompt",
@@ -1674,6 +1692,9 @@ export const coreBridge = {
   setRuntimeModel: (model: string) => electronSetRuntimeModel(model),
   timezone: () => electronTimezone(),
   setTimezone: (timezone: string | null) => electronSetTimezone(timezone),
+  approvalRouting: () => electronApprovalRouting(),
+  setApprovalRouting: (channel: string, target: string | null) =>
+    electronSetApprovalRouting(channel, target),
   runtimeProvider: () => electronRuntimeProvider(),
   setRuntimeProvider: (input: { base_url?: string; model?: string; api_key?: string }) =>
     electronSetRuntimeProvider(input),
