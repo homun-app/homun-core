@@ -10374,24 +10374,34 @@ disponibili (per dati dal web usa il browser: browser_navigate sull'URL indicato
                         .await
                         .unwrap_or_else(|e| format!("Errore di salvataggio: {e}"))
                     } else if name == "recall_memory" {
-                        let query = serde_json::from_str::<serde_json::Value>(args_raw)
-                            .ok()
-                            .and_then(|a| a.get("query").and_then(|q| q.as_str()).map(String::from))
-                            .unwrap_or_default();
-                        let _ = emit_stream_event(
-                            &tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!(
-                                    "‹‹ACT››🧠 Cerco in memoria: {}‹‹/ACT››",
-                                    if query.is_empty() { "(query)" } else { query.as_str() }
-                                ),
-                            },
-                        )
-                        .await;
-                        let st = state_owned.clone();
-                        tokio::task::spawn_blocking(move || recall_memory(&st, &query))
-                            .await
-                            .unwrap_or_else(|e| format!("Errore di esecuzione: {e}"))
+                        // PERIMETER (anti-exfiltration): a `contact_only` turn (a non-self
+                        // contact on a channel) must NOT reach personal/Secret memory or the
+                        // relationship graph. recall_memory is perimeter-blind by design, so we
+                        // refuse it here — the contact's own conversation is already in context.
+                        if contact_only {
+                            "Memoria personale non accessibile in una conversazione con questo \
+contatto: usa solo i messaggi di questa chat. NON rivelare dati personali dell'utente o di terzi."
+                                .to_string()
+                        } else {
+                            let query = serde_json::from_str::<serde_json::Value>(args_raw)
+                                .ok()
+                                .and_then(|a| a.get("query").and_then(|q| q.as_str()).map(String::from))
+                                .unwrap_or_default();
+                            let _ = emit_stream_event(
+                                &tx,
+                                GenerateStreamEvent::Delta {
+                                    text: format!(
+                                        "‹‹ACT››🧠 Cerco in memoria: {}‹‹/ACT››",
+                                        if query.is_empty() { "(query)" } else { query.as_str() }
+                                    ),
+                                },
+                            )
+                            .await;
+                            let st = state_owned.clone();
+                            tokio::task::spawn_blocking(move || recall_memory(&st, &query))
+                                .await
+                                .unwrap_or_else(|e| format!("Errore di esecuzione: {e}"))
+                        }
                     } else if name == "query_code_graph" {
                         let symbol = serde_json::from_str::<serde_json::Value>(args_raw)
                             .ok()
@@ -10581,7 +10591,9 @@ una data incerta.",
                         }
                         // Connected services (toolkit-aware): activate the matching toolkit's
                         // tools so the model sees its full CRUD together. Channels: READ only.
-                        if !catalog_index.is_empty() {
+                        // contact_only turns: don't surface connected services at all (the
+                        // dispatch refuses them anyway — this just avoids a wasted round).
+                        if !catalog_index.is_empty() && !contact_only {
                             for (slug, schema) in
                                 search_composio_catalog(&catalog_index, &intent, COMPOSIO_DISCOVERY_RESULTS)
                             {
@@ -10972,6 +10984,15 @@ collegare i connettori suggeriti (skill/MCP/Composio). NON dire che hai già col
                         tokio::task::spawn_blocking(move || cancel_scheduled_task(&st, &task_id))
                             .await
                             .unwrap_or_else(|e| format!("Errore: {e}"))
+                    } else if contact_only && !name.is_empty() {
+                        // PERIMETER (anti-exfiltration): a `contact_only` turn must not reach the
+                        // user's connected services. All builtins are matched in earlier arms, so
+                        // any tool reaching here is a connected Composio/MCP tool — refuse it so a
+                        // contact can't make the assistant read Gmail/Calendar/etc. and leak them.
+                        "Strumenti dei servizi collegati non disponibili in una conversazione con \
+questo contatto. Rispondi solo con ciò che è in questa chat; non rivelare dati personali \
+dell'utente o di terzi."
+                            .to_string()
                     } else if read_only && !name.is_empty() && composio_writes.contains(name) {
                         // Channel (read-only) turn: never run a write tool, never even
                         // surface a confirm card (no UI on the channel). Phase 2 routes

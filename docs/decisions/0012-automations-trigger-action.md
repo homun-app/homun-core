@@ -89,6 +89,21 @@ grouped (Gmail/Calendar/Spotify live).
   semantics. Chat configuration (agent resolves tool/args/key) is the precise path.
 - Forward-declared triggers (EmailReceived/FileChanged/MemoryUpdated) are no-ops until wired.
 
+## Channel anti-exfiltration (perimeter hard-enforced)
+
+A security audit found that on a `contact_only` channel turn (a non-self contact messaging the
+assistant), the perimeter was a HARD gate only for PASSIVE memory injection — but `recall_memory`
+(perimeter-blind: `max_sensitivity: Secret`, all domains, relationship graph) and connected-service
+READ tools (Gmail/Calendar) were still reachable and could be summarized into an auto-sent reply.
+Writes were already hard-blocked by `read_only`, but the read→reply path leaked.
+
+Fix (dispatch-level, deterministic): when `contact_only`, the chat loop refuses `recall_memory`
+and ALL connected Composio/MCP tools (builtins are matched in earlier arms, so any tool reaching
+the connector arms is a connected tool), and `find_capability` no longer surfaces connectors.
+Normal app chat (`contact_only=false`) is unaffected (verified: recall_memory still works). The
+strong write-block + this read-block together close the exfiltration path; the residual risk is
+that the reply text itself is still auto-sent without per-reply approval (tracked).
+
 ## Consequences
 
 The engine stays domain-neutral (ADR 0011): a generic rule→run→agentic-action model + a generic
