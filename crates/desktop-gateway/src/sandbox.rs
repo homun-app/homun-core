@@ -343,43 +343,119 @@ Avvialo con runtimes/contained-computer/up.sh."
         .to_string())
 }
 
-/// Locates `runtimes/graphify/up.sh` (env override, else repo-relative).
-fn graphify_up_script() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("LOCAL_FIRST_GRAPHIFY_UP") {
-        let path = PathBuf::from(p);
-        if path.is_file() {
-            return Some(path);
+/// Source-tree noise excluded from extraction: vendored deps (site-packages catches
+/// any venv), build output, caches, and heavy data files + shell wrappers that aren't
+/// the project's program structure. Mirrors the gateway's `is_noise_dir`/`is_code_file`.
+const GRAPHIFY_EXCLUDES: &[&str] = &[
+    ".git", "node_modules", "site-packages", "target", "vendor", ".venv", "venv",
+    "*.egg-info", ".tox", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".next",
+    "coverage", "dist", "build", "__pycache__", "graphify-out",
+    "*.csv", "*.log", "*.so", "*.mat", "*.sav", "*.db", "*.dat", "*.jsonl",
+    "*.parquet", "*.lock", "*.sh", "*.bash",
+];
+
+/// PATH with `~/.local/bin` prepended — where `uv tool install` puts CLIs (graphify,
+/// like the pypi MCP servers). Lets us find host-managed tools without a login shell.
+fn host_tools_path() -> String {
+    let base = std::env::var("PATH").unwrap_or_default();
+    match std::env::var("HOME") {
+        Ok(home) => {
+            let local = format!("{home}/.local/bin");
+            if base.split(':').any(|p| p == local) {
+                base
+            } else {
+                format!("{local}:{base}")
+            }
         }
+        Err(_) => base,
     }
-    for base in ["runtimes/graphify/up.sh", "../runtimes/graphify/up.sh"] {
-        let path = PathBuf::from(base);
-        if path.is_file() {
-            return Some(path);
-        }
-    }
-    None
 }
 
-/// One-shot: build the code knowledge graph of `project` into `out/graph.json` using
-/// the isolated Graphify container (read-only project mount, no network). Blocks until
-/// the container exits. The user never sees Python/Graphify — invisible infrastructure.
+/// Ensures the `graphify` CLI is on the host, installing it via `uv` if missing — the
+/// same host-managed pattern as the pypi MCP servers (uvx). Best-effort.
+fn ensure_graphify() -> Result<(), String> {
+    let path = host_tools_path();
+    let present = Command::new("graphify")
+        .arg("--help")
+        .env("PATH", &path)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if present {
+        return Ok(());
+    }
+    let install = Command::new("uv")
+        .args(["tool", "install", "graphifyy"])
+        .env("PATH", &path)
+        .output()
+        .map_err(|e| format!("graphify assente e `uv` non disponibile sull'host: {e}"))?;
+    if !install.status.success() {
+        return Err(format!(
+            "installazione graphify via uv fallita: {}",
+            String::from_utf8_lossy(&install.stderr)
+        ));
+    }
+    Ok(())
+}
+
+/// One-shot HOST extraction: copy the project into a temp workdir (excluding vendored/
+/// data trees — the user's repo is never written), build the code graph with graphify
+/// (`--no-cluster` = tree-sitter only, offline, no LLM), and write graph.json into `out`.
+/// Runs on the host (managed via `uv`, like the MCP servers): ~2.4x faster than the
+/// Docker sidecar on macOS and no memory cap. `--no-cluster` is offline, so dropping
+/// container isolation here costs nothing (it only reads code and writes JSON).
 pub fn run_graphify(project: &Path, out: &Path) -> Result<(), String> {
-    ensure_docker()?;
-    let script = graphify_up_script().ok_or_else(|| "runtimes/graphify/up.sh non trovato".to_string())?;
-    let output = Command::new("bash")
-        .arg(&script)
-        .arg(project)
-        .arg(out)
-        .env("PATH", path_with_docker_dir())
+    ensure_graphify()?;
+    let path = host_tools_path();
+    std::fs::create_dir_all(out).map_err(|e| e.to_string())?;
+    let work = out.join("_work");
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+
+    // Mirror the project, excluding noise — native rsync (fast; incremental on re-runs).
+    // `--inplace` skips temp-file+rename (avoids mkstempat errors on live trees where
+    // scrapers write during the copy). We do NOT hard-fail on rsync's non-zero exit:
+    // codes 23/24 mean "some source files changed/vanished mid-copy" — expected on a
+    // live project and harmless (the graph is built from whatever copied). The real
+    // gate is whether graphify produces a graph.json below.
+    let mut rsync = Command::new("rsync");
+    rsync.arg("-a").arg("--inplace");
+    for pattern in GRAPHIFY_EXCLUDES {
+        rsync.arg(format!("--exclude={pattern}"));
+    }
+    rsync
+        .arg(format!("{}/", project.display()))
+        .arg(format!("{}/", work.display()));
+    let copied = rsync
+        .env("PATH", &path)
+        .output()
+        .map_err(|e| format!("rsync fallito ad avviarsi: {e}"))?;
+    if !copied.status.success() {
+        eprintln!(
+            "project-graph: rsync ha segnalato file cambiati durante la copia (continuo): {}",
+            String::from_utf8_lossy(&copied.stderr).lines().next_back().unwrap_or("")
+        );
+    }
+
+    // Code-only graph: deterministic tree-sitter, no LLM, no network.
+    let extracted = Command::new("graphify")
+        .args(["update"])
+        .arg(&work)
+        .arg("--no-cluster")
+        .env("PATH", &path)
         .output()
         .map_err(|e| format!("graphify: avvio fallito: {e}"))?;
-    if !out.join("graph.json").is_file() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    let produced = work.join("graphify-out/graph.json");
+    if !produced.is_file() {
+        let stderr = String::from_utf8_lossy(&extracted.stderr);
+        let _ = std::fs::remove_dir_all(&work);
         return Err(format!(
             "graphify: nessun graph.json prodotto. {}",
             stderr.lines().rev().take(3).collect::<Vec<_>>().join(" | ")
         ));
     }
+    std::fs::copy(&produced, out.join("graph.json")).map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_dir_all(&work);
     Ok(())
 }
 

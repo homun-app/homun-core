@@ -22,10 +22,10 @@ if ! docker version >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
-  echo "==> building ${IMAGE}" >&2
-  docker build -t "$IMAGE" "$HERE" >&2
-fi
+# Always build: Docker's layer cache makes this ~instant when nothing changed, and
+# it guarantees a stale image (e.g. after editing entrypoint.sh's exclusions) is never
+# silently reused — the lazy "only if missing" build was a real footgun.
+docker build -t "$IMAGE" "$HERE" >&2
 
 mkdir -p "$OUT"
 NAME="homun-graphify-$$-$RANDOM"
@@ -33,6 +33,7 @@ NAME="homun-graphify-$$-$RANDOM"
 # Detached, named run so a watchdog can hard-stop it on timeout. Read-only source
 # mount + writable out mount; no network during extraction.
 docker run -d --name "$NAME" --network none \
+  --memory="${GRAPHIFY_MEMORY:-6g}" --memory-swap="${GRAPHIFY_MEMORY:-6g}" \
   -v "$PROJECT":/src:ro \
   -v "$OUT":/out \
   "$IMAGE" >/dev/null
