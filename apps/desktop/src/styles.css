@@ -3173,6 +3173,32 @@ body.resizing-drawer {
   opacity: 0.5;
   cursor: default;
 }
+.goals-hint {
+  font-size: 12px;
+  margin: 0 0 10px;
+  line-height: 1.4;
+}
+.goals-suggest {
+  width: 100%;
+  margin-bottom: 8px;
+}
+.goals-drafts {
+  margin-bottom: 10px;
+}
+.goals-draft {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.goals-draft input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+}
 .goals-promote summary {
   cursor: pointer;
   font-size: 12px;

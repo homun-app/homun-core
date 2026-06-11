@@ -1648,6 +1648,7 @@ export const coreBridge = {
   exportLocalData: () => electronExportLocalData(),
   memoryItems: () => electronMemoryItems(),
   projectGoals: (threadId: string) => electronProjectGoals(threadId),
+  suggestGoals: (threadId: string) => electronSuggestGoals(threadId),
   promoteGoals: (workspace: string, refs: string[]) => electronPromoteGoals(workspace, refs),
   addGoal: (workspace: string, text: string) => electronAddGoal(workspace, text),
   ensureProjectGraph: (workspace: string, subpath?: string) =>
@@ -2128,6 +2129,23 @@ async function electronProjectGoals(threadId: string): Promise<ProjectGoalsData 
     return (await response.json()) as ProjectGoalsData;
   } catch {
     return null;
+  }
+}
+
+/// Ask the assistant to PROPOSE objectives (north star) from the project context. The
+/// user edits/confirms before any is saved. Returns draft objective strings.
+async function electronSuggestGoals(threadId: string): Promise<string[]> {
+  try {
+    const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/memory/goals/suggest`, {
+      method: "POST",
+      headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ thread: threadId }),
+    });
+    if (!response.ok) return [];
+    const body = (await response.json()) as { objectives?: string[] };
+    return body.objectives ?? [];
+  } catch {
+    return [];
   }
 }
 

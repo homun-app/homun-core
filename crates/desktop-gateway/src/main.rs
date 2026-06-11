@@ -548,6 +548,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/memory/project-graph/ensure", post(project_graph_ensure))
         .route("/api/memory/project-graph/subdirs", get(project_graph_subdirs))
         .route("/api/memory/goals", get(memory_goals_list))
+        .route("/api/memory/goals/suggest", post(memory_goals_suggest))
         .route("/api/memory/goals/promote", post(memory_goals_promote))
         .route("/api/memory/goals/add", post(memory_goals_add))
         .route("/api/memory/wiki", get(memory_wiki).put(memory_wiki_save))
@@ -2382,8 +2383,46 @@ Le modifiche restano. È ciò che l'assistente tiene SEMPRE presente del progett
     let _ = facade.record_wiki_page_for_ui(&page);
 }
 
+/// The project's OBJECTIVE (north star) — injected FIRST, with a focus directive, so every
+/// turn is anchored to where the project is going. A goal is the intent to steer BY
+/// (forward-looking: "where we must arrive / how this must work"), distinct from a decision
+/// (a backward-looking record of a choice). Built from `goal` memories only; None until an
+/// objective is set. This is what keeps the assistant from drifting off-focus.
+fn project_objective_block(state: &AppState) -> Option<String> {
+    let ws = gateway_memory_workspace_id();
+    if ws.as_str() == PERSONAL_WORKSPACE || ws.as_str() == THREADS_WORKSPACE {
+        return None;
+    }
+    let facade = lock_memory_facade(state).ok()?;
+    let user = gateway_memory_user_id();
+    let goals: Vec<String> = facade
+        .list_memories_for_ui(&user, &ws)
+        .ok()?
+        .into_iter()
+        .filter(|m| {
+            m.memory_type == "goal"
+                && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+        })
+        .map(|m| m.text.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect();
+    if goals.is_empty() {
+        return None;
+    }
+    let mut block = String::from(
+        "🎯 OBIETTIVO DEL PROGETTO — è la STELLA POLARE. Ogni implementazione, modifica o \
+documento deve SERVIRE questo obiettivo. Mantieni il focus: se la richiesta sembra \
+deviare, allargarsi oltre l'obiettivo, o reintrodurre qualcosa che gli va contro, \
+FALLO NOTARE prima di procedere. Gli obiettivi:",
+    );
+    for g in &goals {
+        block.push_str(&format!("\n- {g}"));
+    }
+    Some(block)
+}
+
 /// Reads the active project's `brief.md` for INJECTION into the briefing (push): the
-/// goals + recent state the assistant should always hold. None for personal/threads or
+/// recent state the assistant should always hold. None for personal/threads or
 /// when no brief exists yet. Capped so it never dominates the prompt.
 fn project_brief_block(state: &AppState) -> Option<String> {
     let ws = gateway_memory_workspace_id();
@@ -7515,8 +7554,14 @@ salvare/esportare un file in una cartella, chiama save_artifact(file, destinatio
             Some(block) => format!("{system}\n\n{block}"),
             None => system,
         };
-        // Project BRIEF (always-on): goals + recent state, so "where this project is
-        // going" is present every turn — not just when the prompt happens to match.
+        // Project OBJECTIVE (always-on, FIRST): the north star + focus directive, so the
+        // assistant keeps every implementation aligned and flags drift.
+        let system = match project_objective_block(state) {
+            Some(block) => format!("{system}\n\n{block}"),
+            None => system,
+        };
+        // Project BRIEF (always-on): recent state, so "where this project is" is present
+        // every turn — not just when the prompt happens to match.
         let system = match project_brief_block(state) {
             Some(block) => format!("{system}\n\n{block}"),
             None => system,
@@ -20711,6 +20756,90 @@ async fn memory_goals_add(
     let _ = facade.confirm_memory(&lifecycle, &record.reference, "goal added by user");
     rebuild_project_brief(&facade, &user, &ws);
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct SuggestGoalsRequest {
+    #[serde(default)]
+    thread: Option<String>,
+    #[serde(default)]
+    workspace: Option<String>,
+}
+
+/// Assistant PROPOSES objectives (the north star) from the project context — this is the
+/// logic to DEFINE goals, not derive them from decisions. The model drafts forward-looking
+/// objectives; the user edits/confirms (LLM proposes, user disposes).
+async fn memory_goals_suggest(
+    State(state): State<AppState>,
+    Json(req): Json<SuggestGoalsRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let user = gateway_memory_user_id();
+    let ws = if let Some(tid) = req.thread.as_deref().filter(|t| !t.trim().is_empty()) {
+        lock_store(&state)
+            .ok()
+            .and_then(|s| s.workspace_for_thread(tid).ok())
+            .filter(|w| !w.trim().is_empty())
+            .map(MemoryWorkspaceId::new)
+            .unwrap_or_else(gateway_memory_workspace_id)
+    } else if let Some(w) = req.workspace.clone().filter(|w| !w.trim().is_empty()) {
+        MemoryWorkspaceId::new(w)
+    } else {
+        gateway_memory_workspace_id()
+    };
+    let name = load_workspaces_file()
+        .workspaces
+        .into_iter()
+        .find(|w| w.id.as_str() == ws.as_str())
+        .map(|w| w.name)
+        .unwrap_or_else(|| "(senza nome)".to_string());
+    // Collect context as OWNED strings, then DROP the facade before the await (the lock
+    // guard isn't Send across an await point).
+    let (decisions, existing): (Vec<String>, Vec<String>) = {
+        let facade = lock_memory_facade(&state)?;
+        let items = facade.list_memories_for_ui(&user, &ws).unwrap_or_default();
+        let dec = items
+            .iter()
+            .filter(|m| {
+                m.memory_type == "decision"
+                    && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+            })
+            .map(|m| m.text.lines().next().unwrap_or(&m.text).trim().to_string())
+            .take(20)
+            .collect();
+        let goals = items
+            .iter()
+            .filter(|m| {
+                m.memory_type == "goal"
+                    && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+            })
+            .map(|m| m.text.trim().to_string())
+            .collect();
+        (dec, goals)
+    };
+    let context = format!(
+        "PROGETTO: {name}\n\nDECISIONI PRESE FINORA:\n- {}\n\nOBIETTIVI GIÀ DEFINITI (non ripeterli):\n- {}",
+        if decisions.is_empty() { "(nessuna)".to_string() } else { decisions.join("\n- ") },
+        if existing.is_empty() { "(nessuno)".to_string() } else { existing.join("\n- ") },
+    );
+    let system = "Sei uno stratega di prodotto. Dato il contesto di un progetto (nome, decisioni prese), \
+proponi da 1 a 3 OBIETTIVI di ALTO LIVELLO: la STELLA POLARE — DOVE deve arrivare il progetto, oppure \
+COME un modulo chiave deve funzionare. Un obiettivo guarda AVANTI (la direzione/il traguardo da \
+raggiungere); NON è una decisione tecnica già presa (quella guarda indietro). Inferisci la direzione \
+dalle decisioni, ma formula l'INTENTO, non l'elenco di ciò che è stato fatto. Frasi brevi e concrete, \
+nella lingua del progetto. Non ripetere obiettivi già definiti. Rispondi SOLO con JSON: \
+{\"objectives\":[\"...\"]}.";
+    let objectives = call_memory_json(&state, system, &context)
+        .await
+        .and_then(|v| {
+            v.get("objectives").and_then(|a| a.as_array()).map(|arr| {
+                arr.iter()
+                    .filter_map(|s| s.as_str().map(|t| t.trim().to_string()))
+                    .filter(|t| !t.is_empty())
+                    .collect::<Vec<_>>()
+            })
+        })
+        .unwrap_or_default();
+    Ok(Json(serde_json::json!({ "objectives": objectives, "workspace": ws.as_str() })))
 }
 
 async fn memory_graph(
