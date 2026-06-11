@@ -488,6 +488,17 @@ impl MemoryFacade {
         Ok(self.store.clear_graphify(user_id, workspace_id)?)
     }
 
+    /// Find imported code entities whose name matches any term (briefing "already exists").
+    pub fn search_code_entities(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        terms: &[String],
+        limit: usize,
+    ) -> MemoryResult<Vec<(String, String, String)>> {
+        Ok(self.store.search_code_entities(user_id, workspace_id, terms, limit)?)
+    }
+
     /// Bulk-replace a scope's imported code graph in one transaction (clear + insert).
     /// Returns (entities, relations) written. Scales to tens of thousands of records.
     pub fn import_graphify_batch(
