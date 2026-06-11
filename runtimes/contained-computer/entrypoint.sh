@@ -52,6 +52,8 @@ chromium \
   --window-position=0,0 \
   --window-size="${GEO/x/,}" \
   --start-maximized \
+  --disable-blink-features=AutomationControlled \
+  --lang="${CHROME_LANG:-it-IT}" \
   about:blank &
 CHROMIUM_PID=$!
 

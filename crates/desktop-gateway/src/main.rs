@@ -8634,9 +8634,12 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                             match reused {
                                 Some(existing) => browser_session = Some(existing),
                                 None => {
-                                    // Self-heal: if the contained-computer CDP is wedged,
-                                    // recycle + recreate the container BEFORE connecting, so
-                                    // the sidecar's connectOverCDP doesn't time out.
+                                    // Self-heal: a wedged contained-computer CDP makes the
+                                    // sidecar's connectOverCDP time out. Health-check BEFORE
+                                    // connecting; and if the spawn/connect fails anyway (a
+                                    // race, or a container that wedged after the check),
+                                    // recycle + recreate and retry once — resolve the block
+                                    // automatically instead of reporting "non disponibile".
                                     if !browser_cdp_ok(&state_owned).await {
                                         let _ = emit_stream_event(
                                             &tx,
@@ -8647,21 +8650,32 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                                         .await;
                                         ensure_browser_cdp_healthy(&state_owned).await;
                                     }
-                                    let st = state_owned.clone();
-                                    let spawned = tokio::task::spawn_blocking(move || {
-                                        spawn_browser_sidecar_for_chat(&st)
-                                    })
-                                    .await;
-                                    match spawned {
-                                        Ok(Ok(session)) => {
-                                            browser_session =
-                                                Some(BrowserAutomationClient::new(session));
+                                    for attempt in 0u8..2 {
+                                        let st = state_owned.clone();
+                                        let spawned = tokio::task::spawn_blocking(move || {
+                                            spawn_browser_sidecar_for_chat(&st)
+                                        })
+                                        .await;
+                                        match spawned {
+                                            Ok(Ok(session)) => {
+                                                browser_session =
+                                                    Some(BrowserAutomationClient::new(session));
+                                                break;
+                                            }
+                                            // First failure → recycle the container + retry.
+                                            _ if attempt == 0 => {
+                                                let _ = emit_stream_event(
+                                                    &tx,
+                                                    GenerateStreamEvent::Delta {
+                                                        text: "‹‹ACT››🔧 Browser non raggiungibile: riavvio e riprovo…‹‹/ACT››".to_string(),
+                                                    },
+                                                )
+                                                .await;
+                                                ensure_browser_cdp_healthy(&state_owned).await;
+                                            }
+                                            // Second failure → give up; reported below.
+                                            _ => {}
                                         }
-                                        Ok(Err(_error)) => {
-                                            // Spawn failed: fall through with no
-                                            // session → the None arm below reports it.
-                                        }
-                                        Err(_) => {}
                                     }
                                 }
                             }
