@@ -37,9 +37,9 @@ export const navItems: NavItem[] = [
   { id: "chat", label: "Nuovo compito", icon: MessageSquare },
   // "Apprendimento" è confluito in Homun. "Memoria" è stata unificata nelle
   // Impostazioni → Memoria (un'unica superficie, fuori più pulito).
-  { id: "tasks", label: "Pianificato", icon: CalendarClock },
-  // Automazioni di prima classe: regole trigger→azione (orario o evento).
-  { id: "automations", label: "Automazioni", icon: Sparkles },
+  // "Pianificato" (coda dei run) è confluito in Automazioni: la regola è la cosa
+  // di prima classe; i run si vedono nei thread. Manteniamo l'icona-calendario.
+  { id: "automations", label: "Automazioni", icon: CalendarClock },
 ];
 
 export const chatMessages: ChatMessage[] = [
