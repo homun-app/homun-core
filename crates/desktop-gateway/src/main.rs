@@ -7572,6 +7572,25 @@ salvare/esportare un file in una cartella, chiama save_artifact(file, destinatio
             Some(block) => format!("{system}\n\n{block}"),
             None => system,
         };
+        // Goal-propose affordance (projects only): when the model articulates the project's
+        // objective, it emits a marker → the UI shows a "Salva come obiettivo" card. This is
+        // content-contextual via a MODEL-emitted affordance (not keyword parsing).
+        let system = {
+            let ws = gateway_memory_workspace_id();
+            if ws.as_str() != PERSONAL_WORKSPACE && ws.as_str() != THREADS_WORKSPACE {
+                format!(
+                    "{system}\n\nSe ARTICOLI o PROPONI l'OBIETTIVO o la direzione di QUESTO progetto \
+(es. l'utente chiede \"proponi un obiettivo\", oppure stai definendo dove deve arrivare il \
+progetto), emetti su una riga a sé il marker \
+‹‹GOAL_PROPOSE››{{\"objectives\":[\"obiettivo 1\",\"obiettivo 2\"]}}‹‹/GOAL_PROPOSE›› con 1-3 \
+obiettivi BREVI e rivolti in AVANTI (la direzione/il traguardo, NON decisioni già prese). \
+L'utente vedrà una scheda per salvarli. Usalo SOLO per veri obiettivi del progetto, mai per \
+risposte normali."
+                )
+            } else {
+                system
+            }
+        };
         // RAG: inject memory relevant to THIS prompt (decisions/facts), so the model
         // answers from what was already decided instead of saying it has nothing.
         let system = match relevant_memory_for_prompt(state, &request.prompt).await {

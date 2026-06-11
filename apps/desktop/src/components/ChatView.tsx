@@ -2608,8 +2608,10 @@ const CHOICES_RE = /‹‹CHOICES››([\s\S]*?)‹‹\/CHOICES››/;
 // Plan-mode: the model proposes a plan and STOPS; the card gates execution behind
 // Accetta / Modifica (the answer becomes the next user message).
 const PLAN_PROPOSE_RE = /‹‹PLAN_PROPOSE››([\s\S]*?)‹‹\/PLAN_PROPOSE››/;
+// Goal-propose: the model proposes the project's objective(s); the card lets the user save.
+const GOAL_PROPOSE_RE = /‹‹GOAL_PROPOSE››([\s\S]*?)‹‹\/GOAL_PROPOSE››/;
 const COMPOSIO_MARKERS_RE =
-  /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|CHOICES|PLAN_PROPOSE|PLAN)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|CHOICES|PLAN_PROPOSE|PLAN)››/g;
+  /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››/g;
 
 /** One clickable suggestion in an in-chat connect-card. */
 interface ConnectSuggestItem {
@@ -4704,6 +4706,7 @@ function parseComposioConfirm(text: string): {
   connectSuggest: ConnectSuggest | null;
   choices: ChoicePrompt | null;
   planPropose: PlanProposal | null;
+  goalPropose: string[] | null;
   planSteps: PlanStep[];
 } {
   let action: ComposioPendingAction | null = null;
@@ -4789,6 +4792,20 @@ function parseComposioConfirm(text: string): {
       /* malformed → just hide it */
     }
   }
+  // Goal proposal (projects): forward-looking objectives the model proposed → card to save.
+  let goalPropose: string[] | null = null;
+  const gpoMatch = text.match(GOAL_PROPOSE_RE);
+  if (gpoMatch) {
+    try {
+      const parsed = JSON.parse(gpoMatch[1]) as { objectives?: unknown };
+      const objectives = Array.isArray(parsed?.objectives)
+        ? parsed.objectives.filter((o): o is string => typeof o === "string" && o.trim().length > 0)
+        : [];
+      if (objectives.length > 0) goalPropose = objectives;
+    } catch {
+      /* malformed → just hide it */
+    }
+  }
   // Live operational plan (update_plan): take the LATEST ‹‹PLAN›› in the message and
   // render it inline with per-step status. PLAN_RE is global → matchAll gives all.
   let planSteps: PlanStep[] = [];
@@ -4811,6 +4828,7 @@ function parseComposioConfirm(text: string): {
     connectSuggest,
     choices,
     planPropose,
+    goalPropose,
     planSteps,
   };
 }
@@ -4849,6 +4867,7 @@ function AssistantMessageBody({
     connectSuggest,
     choices,
     planPropose,
+    goalPropose,
     planSteps,
   } = useMemo(() => parseComposioConfirm(text), [text]);
   const readable = useMemo(() => humanizeToolSlugs(visible), [visible]);
@@ -4889,6 +4908,9 @@ function AssistantMessageBody({
       {planPropose && !streaming && onChoose && (
         <PlanProposeCard plan={planPropose} onAnswer={onChoose} />
       )}
+      {goalPropose && !streaming && threadId && (
+        <GoalProposeCard objectives={goalPropose} threadId={threadId} />
+      )}
     </>
   );
 }
@@ -4896,6 +4918,62 @@ function AssistantMessageBody({
 /** Plan-mode card: the model proposed a plan and stopped. Accetta sends the approval
  *  (the agent executes next turn); Modifica reveals a box to request changes. The
  *  answer becomes the next user message. */
+/** Inline affordance: the model proposed the project's objective(s) — save them with one
+ * click (content-contextual via a model-emitted marker, not keyword parsing). Resolves the
+ * project workspace from the thread, then saves each chosen objective as a `goal`. */
+function GoalProposeCard({ objectives, threadId }: { objectives: string[]; threadId: string }) {
+  const [workspace, setWorkspace] = useState<string | null>(null);
+  const [saved, setSaved] = useState<Set<number>>(new Set());
+  const [busy, setBusy] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void coreBridge.projectGoals(threadId).then((d) => {
+      if (!cancelled) setWorkspace(d?.workspace ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [threadId]);
+  const save = (i: number, text: string) => {
+    if (!workspace || saved.has(i)) return;
+    setBusy(i);
+    void coreBridge
+      .addGoal(workspace, text)
+      .then((ok) => {
+        if (ok) setSaved((prev) => new Set(prev).add(i));
+      })
+      .finally(() => setBusy(null));
+  };
+  return (
+    <div className="goal-propose-card">
+      <div className="goal-propose-head">
+        <Target size={14} />
+        <span>Obiettivi proposti — salvali nel progetto</span>
+      </div>
+      <div className="goal-propose-list">
+        {objectives.map((o, i) => (
+          <div key={i} className="goal-propose-item">
+            <span>{o}</span>
+            <button
+              className="goals-btn goals-btn-sm"
+              disabled={busy !== null || saved.has(i) || !workspace}
+              onClick={() => save(i, o)}
+            >
+              {saved.has(i) ? (
+                <>
+                  <Check size={13} /> Salvato
+                </>
+              ) : (
+                "Salva"
+              )}
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function PlanProposeCard({
   plan,
   onAnswer,
