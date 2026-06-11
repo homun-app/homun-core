@@ -3646,6 +3646,95 @@ domande sull'architettura/struttura del codice del progetto corrente.",
     })
 }
 
+/// Read-only query over the active project's GIT HISTORY — the "why over time" leg of
+/// memory. Commit messages = the why; `-S` (pickaxe) = when code containing a term
+/// changed. Complements query_code_graph (current structure) and the decision wiki
+/// (conversational why). No writes.
+fn query_git_history_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "query_git_history",
+            "description": "Interroga la STORIA git del progetto attivo: dato un file, un simbolo o un \
+tema, restituisce i commit rilevanti (messaggio = il PERCHÉ, con data) e quando il codice \
+relativo è cambiato. Usalo per 'perché/quando è cambiato X', 'la storia di Y', 'cosa è \
+successo a questo file'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "File, simbolo o tema (es. \"trello_wrapper.py\", \"retry\", \"cache\")" }
+                },
+                "required": ["query"]
+            }
+        }
+    })
+}
+
+fn query_git_history(query: &str) -> String {
+    let q = query.trim();
+    if q.is_empty() {
+        return "Indica un file, simbolo o tema.".to_string();
+    }
+    let ws = gateway_memory_workspace_id();
+    let folder = load_workspaces_file()
+        .workspaces
+        .into_iter()
+        .find(|w| w.id == ws.as_str())
+        .and_then(|w| w.folder)
+        .filter(|f| !f.trim().is_empty());
+    let Some(folder) = folder else {
+        return "Questo scope non è un progetto con cartella.".to_string();
+    };
+    let root = std::path::Path::new(&folder);
+    let is_git = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if !is_git {
+        return "Questo progetto non è ancora sotto git (nessuna storia da consultare).".to_string();
+    }
+    let run = |args: &[&str]| -> String {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(args)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default()
+    };
+    let fmt = "--pretty=format:%h %ad %s";
+    let date = "--date=short";
+    // Commit MESSAGES mentioning the term (the explicit "why").
+    let by_msg = run(&["log", fmt, date, "-n", "10", "-i", &format!("--grep={q}")]);
+    // Commits that CHANGED code containing the term (pickaxe: when X appeared/changed).
+    let by_code = run(&["log", fmt, date, "-n", "10", &format!("-S{q}")]);
+    // If the query is (or matches) a path, its file history too.
+    let by_path = if q.contains('.') || q.contains('/') {
+        run(&["log", fmt, date, "-n", "10", "--", &format!("*{q}*")])
+    } else {
+        String::new()
+    };
+    if by_msg.is_empty() && by_code.is_empty() && by_path.is_empty() {
+        return format!("Nessun commit trovato per «{q}» (forse è codice non ancora committato).");
+    }
+    let mut out = format!("Storia git per «{q}»:\n");
+    if !by_msg.is_empty() {
+        out.push_str(&format!("\n**Commit che la citano (perché):**\n{by_msg}\n"));
+    }
+    if !by_path.is_empty() {
+        out.push_str(&format!("\n**Storia del file:**\n{by_path}\n"));
+    }
+    if !by_code.is_empty() {
+        out.push_str(&format!("\n**Quando il codice con «{q}» è cambiato:**\n{by_code}\n"));
+    }
+    out
+}
+
 fn query_code_graph(state: &AppState, symbol: &str) -> String {
     let needle = symbol.trim().to_lowercase();
     if needle.is_empty() {
@@ -6951,10 +7040,11 @@ i titoli di sezione quando la risposta è lunga. Rispondi in italiano, chiaro e 
             "{system}\n\nMAPPA DEL CODICE: questo progetto ha una mappa del codice \
 indicizzata. Per domande su STRUTTURA o DIPENDENZE del codice — \"che metodi/funzioni \
 ha X\", \"chi chiama/usa Y\", \"cosa usa Z\", \"dove è definito/quali file usano W\" — \
-chiama PRIMA `query_code_graph` (è istantaneo e autorevole). Ricorri a \
-read_file/list_files/run_in_project SOLO se la mappa non basta (es. leggere il CORPO di \
-una funzione o un dettaglio non strutturale). NON grepare/elencare file per domande a \
-cui la mappa risponde già."
+chiama PRIMA `query_code_graph` (è istantaneo e autorevole). Per la STORIA o il PERCHÉ \
+NEL TEMPO — \"perché/quando è cambiato X\", \"la storia di Y\" — usa `query_git_history` \
+(i messaggi di commit sono il perché). Ricorri a read_file/list_files/run_in_project SOLO \
+se mappa e storia non bastano (es. leggere il CORPO di una funzione). NON grepare/elencare \
+file per domande a cui mappa o storia rispondono già."
         )
     } else {
         system
@@ -7348,6 +7438,7 @@ RI-VERIFICA eseguendo. Una causa alla volta, niente tentativi alla cieca."
         browser_dialog_tool_schema(),
         recall_memory_tool_schema(),
         query_code_graph_tool_schema(),
+        query_git_history_tool_schema(),
         // Unified capability discovery — find what to connect (MCP/skill/Composio)
         // for a need. Read-only (search), so offered to channels too.
         suggest_capabilities_tool_schema(),
@@ -8913,6 +9004,21 @@ disponibili (per dati dal web usa il browser: browser_navigate sull'URL indicato
                         .await;
                         let st = state_owned.clone();
                         tokio::task::spawn_blocking(move || query_code_graph(&st, &symbol))
+                            .await
+                            .unwrap_or_else(|e| format!("Errore di esecuzione: {e}"))
+                    } else if name == "query_git_history" {
+                        let query = serde_json::from_str::<serde_json::Value>(args_raw)
+                            .ok()
+                            .and_then(|a| a.get("query").and_then(|s| s.as_str()).map(String::from))
+                            .unwrap_or_default();
+                        let _ = emit_stream_event(
+                            &tx,
+                            GenerateStreamEvent::Delta {
+                                text: format!("‹‹ACT››🕰️ Consulto la storia git: {query}‹‹/ACT››"),
+                            },
+                        )
+                        .await;
+                        tokio::task::spawn_blocking(move || query_git_history(&query))
                             .await
                             .unwrap_or_else(|e| format!("Errore di esecuzione: {e}"))
                     } else if name == "resolve_datetime" {
