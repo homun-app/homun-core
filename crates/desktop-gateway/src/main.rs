@@ -11105,11 +11105,19 @@ card di conferma nell'interfaccia. NON dire che è stata eseguita."
                                 Ok(Ok(Ok(value))) => {
                                     value.to_string().chars().take(COMPOSIO_RESULT_CHARS).collect()
                                 }
-                                Ok(Ok(Err(error))) => format!("Errore strumento MCP: {error}"),
+                                Ok(Ok(Err(error))) => {
+                                    // Classify the failure so a broken MCP server tells the user
+                                    // what to do (reconnect / wait) instead of a raw error.
+                                    let hint = mcp_error_hint(&error.to_string())
+                                        .map(|h| format!(" {h}"))
+                                        .unwrap_or_default();
+                                    format!("Errore strumento MCP: {error}.{hint}")
+                                }
                                 Ok(Err(_join)) => "Errore: esecuzione MCP interrotta.".to_string(),
                                 Err(_elapsed) => format!(
-                                    "Lo strumento MCP non ha risposto entro {}s (timeout). \
-Dillo all'utente, NON dichiarare che è fatto.",
+                                    "Lo strumento MCP non ha risposto entro {}s (timeout): il server \
+potrebbe essere bloccato o offline. Di' all'utente di verificarlo/riconnetterlo da Impostazioni → \
+Connettori → MCP; NON dichiarare che è fatto.",
                                     mcp_call_timeout().as_secs()
                                 ),
                             }
@@ -18039,7 +18047,23 @@ fn composio_execute_tool(
 /// calendar add/delete that silently failed but showed "Azione eseguita").
 /// Maps a connector error message to an ACTIONABLE instruction for the model — so a
 /// broken integration becomes "reconnect"/"rate-limited", not a vague failure.
-fn connector_error_hint(error: &str) -> Option<&'static str> {
+/// Actionable category of a connector tool failure, classified from the error
+/// text (heuristic — providers don't return a stable machine code). Shared by the
+/// Composio and MCP error paths so a broken connector tells the user WHAT TO DO
+/// (reconnect / wait / re-grant) instead of dumping a raw error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConnectorErrorKind {
+    /// 401 / expired token / no connected account → reconnect.
+    Auth,
+    /// 429 / quota → wait and retry later.
+    RateLimit,
+    /// 403 / missing scope → reconnect granting more permissions.
+    Forbidden,
+    /// transport down / unreachable / connection closed → the service/server is offline.
+    Unavailable,
+}
+
+fn classify_connector_error(error: &str) -> Option<ConnectorErrorKind> {
     let e = error.to_lowercase();
     if e.contains("401")
         || e.contains("unauthorized")
@@ -18048,23 +18072,69 @@ fn connector_error_hint(error: &str) -> Option<&'static str> {
         || e.contains("not connected")
         || e.contains("no connected account")
     {
-        Some(
+        Some(ConnectorErrorKind::Auth)
+    } else if e.contains("429") || e.contains("rate limit") || e.contains("too many requests") {
+        Some(ConnectorErrorKind::RateLimit)
+    } else if e.contains("403")
+        || e.contains("forbidden")
+        || e.contains("permission")
+        || e.contains("scope")
+    {
+        Some(ConnectorErrorKind::Forbidden)
+    } else if e.contains("connection refused")
+        || e.contains("econnrefused")
+        || e.contains("unreachable")
+        || e.contains("connection closed")
+        || e.contains("broken pipe")
+        || e.contains("transport")
+        || e.contains("server disconnected")
+    {
+        Some(ConnectorErrorKind::Unavailable)
+    } else {
+        None
+    }
+}
+
+/// Composio-flavored actionable hint (reconnect via the OAuth toolkit → emits the
+/// in-chat ‹‹COMPOSIO_RECONNECT›› card).
+fn connector_error_hint(error: &str) -> Option<&'static str> {
+    match classify_connector_error(error)? {
+        ConnectorErrorKind::Auth => Some(
             "La connessione è SCADUTA o non autorizzata: di' all'utente di RICOLLEGARE il servizio \
 ed emetti su una riga a sé il marker ‹‹COMPOSIO_RECONNECT››<slug>‹‹/COMPOSIO_RECONNECT›› con lo slug \
 del toolkit. NON ritentare la chiamata.",
-        )
-    } else if e.contains("429") || e.contains("rate limit") || e.contains("too many requests") {
-        Some(
+        ),
+        ConnectorErrorKind::RateLimit => Some(
             "Limite di frequenza raggiunto (rate limit): dillo all'utente e proponi di riprovare tra \
 qualche minuto. NON ritentare subito.",
-        )
-    } else if e.contains("403") || e.contains("forbidden") || e.contains("permission") || e.contains("scope") {
-        Some(
+        ),
+        ConnectorErrorKind::Forbidden => Some(
             "Permesso negato (scope insufficiente): l'account collegato non ha i permessi richiesti; \
 suggerisci di ricollegare il servizio concedendo gli scope necessari.",
-        )
-    } else {
-        None
+        ),
+        ConnectorErrorKind::Unavailable => Some(
+            "Il servizio non è al momento raggiungibile: dillo all'utente e proponi di riprovare più \
+tardi. NON ritentare subito in loop.",
+        ),
+    }
+}
+
+/// MCP-flavored actionable hint. MCP servers don't have an OAuth toolkit slug, so
+/// "reconnect" points to Impostazioni → Connettori → MCP instead of the card.
+fn mcp_error_hint(error: &str) -> Option<&'static str> {
+    match classify_connector_error(error)? {
+        ConnectorErrorKind::Auth | ConnectorErrorKind::Forbidden => Some(
+            "Il server MCP ha rifiutato le credenziali (scadute o senza permessi): di' all'utente di \
+RICONNETTERE il server da Impostazioni → Connettori → MCP (aggiornando token/permessi). NON ritentare.",
+        ),
+        ConnectorErrorKind::RateLimit => Some(
+            "Limite di frequenza del server MCP: dillo all'utente e proponi di riprovare tra qualche \
+minuto. NON ritentare subito.",
+        ),
+        ConnectorErrorKind::Unavailable => Some(
+            "Il server MCP non è raggiungibile (spento o disconnesso): di' all'utente di verificarlo / \
+riconnetterlo da Impostazioni → Connettori → MCP. NON ritentare in loop.",
+        ),
     }
 }
 
@@ -26691,6 +26761,10 @@ mod tests {
         composio_tool_is_read,
         tool_touches_calendar,
         tool_touches_contacts,
+        classify_connector_error,
+        connector_error_hint,
+        mcp_error_hint,
+        ConnectorErrorKind,
         resolve_active_model,
         rewrite_confirm_to_done,
         search_composio_catalog,
@@ -26749,6 +26823,33 @@ mod tests {
         assert!(tool_touches_contacts("GOOGLE_PEOPLE_LIST"));
         assert!(!tool_touches_contacts("GOOGLECALENDAR_EVENTS_LIST"));
         assert!(!tool_touches_contacts("GMAIL_FETCH_EMAILS"));
+    }
+
+    #[test]
+    fn connector_errors_classify_into_actionable_kinds() {
+        use ConnectorErrorKind::*;
+        // Auth (reconnect): HTTP 401, expired tokens, no connected account.
+        assert_eq!(classify_connector_error("HTTP 401 Unauthorized"), Some(Auth));
+        assert_eq!(classify_connector_error("token has expired"), Some(Auth));
+        assert_eq!(classify_connector_error("invalid_grant"), Some(Auth));
+        assert_eq!(classify_connector_error("no connected account for GMAIL"), Some(Auth));
+        // Rate limit (wait).
+        assert_eq!(classify_connector_error("429 Too Many Requests"), Some(RateLimit));
+        // Forbidden (re-grant scopes).
+        assert_eq!(classify_connector_error("403 Forbidden: missing scope"), Some(Forbidden));
+        // Unavailable (server/service down).
+        assert_eq!(classify_connector_error("connection refused"), Some(Unavailable));
+        assert_eq!(classify_connector_error("ECONNREFUSED 127.0.0.1:7000"), Some(Unavailable));
+        assert_eq!(classify_connector_error("mcp server disconnected"), Some(Unavailable));
+        // Unknown → no hint (model just relays the raw error).
+        assert_eq!(classify_connector_error("weird domain-specific failure"), None);
+
+        // Both formatters produce a hint for a classified error and none otherwise,
+        // with the connector-appropriate reconnect path.
+        assert!(connector_error_hint("401").unwrap().contains("COMPOSIO_RECONNECT"));
+        assert!(mcp_error_hint("401").unwrap().contains("Impostazioni"));
+        assert!(connector_error_hint("ok, all good").is_none());
+        assert!(mcp_error_hint("ok, all good").is_none());
     }
 
     #[test]
