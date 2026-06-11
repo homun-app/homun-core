@@ -1,6 +1,8 @@
 # Roadmap Operativa
 
 > Stato aggiornato al 2026-06-11.
+> - **Sintesi audit allineata (2026-06-13): `docs/state-of-project-2026-06-13.md`** — cosa
+>   abbiamo / cosa è rotto (proattività) / blocker / drift roadmap. Leggi quella per prima.
 > - Cronologia dettagliata degli interventi: `docs/work-memory.md`.
 > - Roadmap strategica per fasi: `docs/architecture/final-roadmap.md`.
 > - Mappa componenti: `docs/architecture/system-map.md`.
