@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { AutomationsView } from "./components/AutomationsView";
 import { ChatView } from "./components/ChatView";
 import { ContainedComputerView } from "./components/ContainedComputerView";
 import { LearningView } from "./components/LearningView";
@@ -21,6 +22,8 @@ import {
   coreBridge,
   subscribeAppEvents,
   type AppEvent,
+  type AutomationCreateInput,
+  type ManagedAutomation,
   type CoreApprovalItem,
   type CoreChatAttachment,
   type CoreChatMessage,
@@ -435,6 +438,7 @@ export default function App() {
   });
   const [taskItems, setTaskItems] = useState<TaskItem[]>(tasks);
   const [approvalItems, setApprovalItems] = useState<ApprovalItem[]>(approvals);
+  const [automationItems, setAutomationItems] = useState<ManagedAutomation[]>([]);
   const [runtimeItems] = useState<RuntimeHealth[]>(runtimeHealth);
   const [memoryDashboard, setMemoryDashboard] =
     useState<MemorySummary>(memorySummary);
@@ -774,6 +778,41 @@ export default function App() {
     }
   }
 
+  async function loadAutomations() {
+    try {
+      setAutomationItems(await coreBridge.automations());
+    } catch (error) {
+      console.warn("automations unavailable", error);
+    }
+  }
+
+  async function handleCreateAutomation(input: AutomationCreateInput) {
+    try {
+      await coreBridge.createAutomation(input);
+      await loadAutomations();
+    } catch (error) {
+      console.warn("create automation failed", error);
+    }
+  }
+
+  async function handleToggleAutomation(id: string) {
+    try {
+      await coreBridge.toggleAutomation(id);
+      await loadAutomations();
+    } catch (error) {
+      console.warn("toggle automation failed", error);
+    }
+  }
+
+  async function handleDeleteAutomation(id: string) {
+    try {
+      await coreBridge.deleteAutomation(id);
+      await loadAutomations();
+    } catch (error) {
+      console.warn("delete automation failed", error);
+    }
+  }
+
   async function loadMemoryAndCapabilities() {
     try {
       setMemoryDashboard(
@@ -893,11 +932,17 @@ export default function App() {
   useEffect(() => {
     void loadMemoryAndCapabilities();
     void loadTaskQueue();
+    void loadAutomations();
     const interval = window.setInterval(() => {
       void loadTaskQueue();
     }, 4_000);
     return () => window.clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (activeView === "automations") void loadAutomations();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeView]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1071,15 +1116,11 @@ export default function App() {
           />
         )}
         {activeView === "automations" && (
-          <ShallowView
-            title="Automazioni"
-            eyebrow="Proposte e pianificate"
-            description="Le routine diventano task durevoli con approvazioni e policy, non job nascosti."
-            stats={[
-              { label: "Attive", value: "3" },
-              { label: "In revisione", value: "1" },
-              { label: "Sospese", value: "0" },
-            ]}
+          <AutomationsView
+            automations={automationItems}
+            onCreate={handleCreateAutomation}
+            onToggle={handleToggleAutomation}
+            onDelete={handleDeleteAutomation}
           />
         )}
         {activeView === "browser" && <ContainedComputerView />}

@@ -4203,8 +4203,61 @@ struct AutomationCreateRequest {
     source: Option<AutomationSource>,
 }
 
+/// Human one-line summary of a trigger for the list view.
+fn automation_trigger_summary(trigger: &AutomationTrigger) -> String {
+    match trigger {
+        AutomationTrigger::Schedule { recurrence, .. } => format!("Orario · {recurrence}"),
+        AutomationTrigger::Event { event } => match event {
+            EventTrigger::ChannelMessage { channel, from } => {
+                let ch = channel.as_deref().unwrap_or("qualsiasi canale");
+                match from {
+                    Some(f) => format!("Quando {f} scrive su {ch}"),
+                    None => format!("Messaggio su {ch}"),
+                }
+            }
+            EventTrigger::EmailReceived { from } => match from {
+                Some(f) => format!("Email da {f}"),
+                None => "Email ricevuta".to_string(),
+            },
+            EventTrigger::FileChanged { path } => format!("File modificato: {path}"),
+            EventTrigger::MemoryUpdated { topic } => match topic {
+                Some(t) => format!("Memoria aggiornata: {t}"),
+                None => "Memoria aggiornata".to_string(),
+            },
+        },
+    }
+}
+
+/// Clean UI-facing DTO: unix-second timestamps (the `time` crate's default serde is a numeric
+/// array — useless for the frontend), a human trigger summary, and next_run for schedules.
+/// `trigger` stays a typed object so the editor can round-trip it.
 fn automation_to_json(a: &Automation) -> serde_json::Value {
-    serde_json::to_value(a).unwrap_or_else(|_| serde_json::json!({}))
+    let next_run = match &a.trigger {
+        AutomationTrigger::Schedule { recurrence, tz } if a.enabled => {
+            local_first_task_runtime::next_occurrence(
+                recurrence,
+                tz.as_deref(),
+                OffsetDateTime::now_utc(),
+            )
+            .map(|t| t.unix_timestamp())
+        }
+        _ => None,
+    };
+    serde_json::json!({
+        "id": a.id,
+        "title": a.title,
+        "trigger": a.trigger,
+        "trigger_summary": automation_trigger_summary(&a.trigger),
+        "prompt": a.prompt,
+        "approval": a.approval,
+        "enabled": a.enabled,
+        "source": a.source,
+        "task_id": a.task_id,
+        "created_at": a.created_at.unix_timestamp(),
+        "updated_at": a.updated_at.unix_timestamp(),
+        "last_fired_at": a.last_fired_at.map(|t| t.unix_timestamp()),
+        "next_run": next_run,
+    })
 }
 
 /// For a Schedule automation, create the recurring TaskRecord that DRIVES it and return its
