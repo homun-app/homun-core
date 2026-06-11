@@ -599,6 +599,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/channels/telegram/connect", post(telegram_connect))
         .route("/api/channels/telegram/disconnect", post(telegram_disconnect))
         .route("/api/channels/telegram/inbound", post(telegram_inbound))
+        .route("/api/channels/telegram/callback", post(telegram_callback))
         .route("/api/capabilities/snapshot", get(capability_snapshot))
         .route(
             "/api/workspaces",
@@ -13118,6 +13119,45 @@ async fn telegram_inbound(
     handle_channel_inbound(&state, "telegram", TELEGRAM_HTTP_PORT, message).await
 }
 
+#[derive(Debug, Deserialize)]
+struct TelegramCallbackRequest {
+    /// The tapping user's id (== the private chat id) — checked against the self target.
+    from: String,
+    /// `approve:<code>` or `cancel:<code>` (the inline button's callback_data).
+    data: String,
+}
+
+/// Telegram inline-button tap for a remote approval. SECURITY: only when Telegram is the
+/// configured approval channel AND the tapper is the self target. Executes/cancels the pending
+/// action and messages the outcome back.
+async fn telegram_callback(
+    State(state): State<AppState>,
+    Json(req): Json<TelegramCallbackRequest>,
+) -> Json<serde_json::Value> {
+    let prefs = load_user_prefs();
+    let target = prefs.approval_target.unwrap_or_default();
+    let authorized = prefs.approval_channel.as_deref() == Some("telegram")
+        && !target.trim().is_empty()
+        && req.from.trim().eq_ignore_ascii_case(target.trim());
+    if !authorized {
+        return Json(serde_json::json!({ "ok": false, "reason": "unauthorized" }));
+    }
+    let Some((verb, code)) = req.data.split_once(':') else {
+        return Json(serde_json::json!({ "ok": false, "reason": "bad_data" }));
+    };
+    let approve = verb.eq_ignore_ascii_case("approve");
+    let reply = if approve {
+        execute_pending_approval(&state, code).await
+    } else {
+        match take_pending_approval(code) {
+            Some(_) => format!("❌ Annullato ({code})."),
+            None => format!("Codice {code} non valido o scaduto."),
+        }
+    };
+    let _ = channel_send(&state, TELEGRAM_HTTP_PORT, target.trim(), &reply).await;
+    Json(serde_json::json!({ "ok": true, "approved": approve }))
+}
+
 /// Shared inbound pipeline for every channel: applies the C0 policy, records the
 /// message into memory, and (on allowlist) auto-replies via the channel's sidecar
 /// with a live typing indicator. `channel` is the tag ("whatsapp"/"telegram");
@@ -13145,37 +13185,11 @@ async fn handle_channel_inbound(
                 || id_matches(message.sender_pn.as_deref()));
         if is_self {
             if let Some((approve, code)) = parse_approval_reply(&message.content) {
-                let reply = if !approve {
-                    match take_pending_approval(&code) {
-                        Some(_) => format!("❌ Annullato ({code})."),
-                        None => format!("Codice {code} non valido o scaduto."),
-                    }
+                let reply = if approve {
+                    execute_pending_approval(state, &code).await
                 } else {
                     match take_pending_approval(&code) {
-                        Some((tool, args)) => {
-                            let st = state.clone();
-                            // Route MCP (mcp__…) vs Composio/send_message; normalize to a
-                            // single Result<Value,String> so the reply is uniform.
-                            let result: Result<serde_json::Value, String> =
-                                tokio::task::spawn_blocking(move || {
-                                    if let Some((prov, mtool)) = parse_mcp_chat_name(&tool) {
-                                        run_mcp_chat_tool(&st, &prov, &mtool, args.clone())
-                                            .map_err(|e| e.to_string())
-                                    } else {
-                                        composio_execute_tool(&st, &tool, &args)
-                                            .map_err(|e| e.message)
-                                    }
-                                })
-                                .await
-                                .unwrap_or_else(|_| Err("esecuzione interrotta".to_string()));
-                            match result {
-                                Ok(value) => match composio_execution_error(&value) {
-                                    None => format!("✅ Fatto ({code})."),
-                                    Some(err) => format!("⚠️ Non riuscito ({code}): {err}"),
-                                },
-                                Err(e) => format!("⚠️ Errore ({code}): {e}"),
-                            }
-                        }
+                        Some(_) => format!("❌ Annullato ({code})."),
                         None => format!("Codice {code} non valido o scaduto."),
                     }
                 };
@@ -17678,8 +17692,61 @@ fn take_pending_approval(code: &str) -> Option<(String, serde_json::Value)> {
     Some((p.tool, p.args))
 }
 
+/// Execute a confirmed pending approval (by code) → user-facing reply text. Routes MCP vs
+/// Composio/send_message. Shared by the inbound-text path AND the Telegram inline-button callback.
+async fn execute_pending_approval(state: &AppState, code: &str) -> String {
+    match take_pending_approval(code) {
+        Some((tool, args)) => {
+            let st = state.clone();
+            let result: Result<serde_json::Value, String> = tokio::task::spawn_blocking(move || {
+                if let Some((prov, mtool)) = parse_mcp_chat_name(&tool) {
+                    run_mcp_chat_tool(&st, &prov, &mtool, args.clone()).map_err(|e| e.to_string())
+                } else {
+                    composio_execute_tool(&st, &tool, &args).map_err(|e| e.message)
+                }
+            })
+            .await
+            .unwrap_or_else(|_| Err("esecuzione interrotta".to_string()));
+            match result {
+                Ok(value) => match composio_execution_error(&value) {
+                    None => format!("✅ Fatto ({code})."),
+                    Some(err) => format!("⚠️ Non riuscito ({code}): {err}"),
+                },
+                Err(e) => format!("⚠️ Errore ({code}): {e}"),
+            }
+        }
+        None => format!("Codice {code} non valido o scaduto."),
+    }
+}
+
+/// POST an outbound message to a channel sidecar WITH an inline keyboard (Telegram only).
+/// `buttons` = `[[label, callback_data], …]`.
+async fn channel_send_buttons(
+    state: &AppState,
+    port: u16,
+    recipient: &str,
+    text: &str,
+    buttons: Vec<[String; 2]>,
+) -> Result<(), String> {
+    let url = format!("http://127.0.0.1:{port}/send");
+    let response = state
+        .http
+        .post(&url)
+        .timeout(std::time::Duration::from_secs(30))
+        .json(&serde_json::json!({ "recipient": recipient, "text": text, "buttons": buttons }))
+        .send()
+        .await
+        .map_err(|error| format!("sidecar non raggiungibile: {error}"))?;
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        Err(format!("sidecar /send ha risposto {}", response.status()))
+    }
+}
+
 /// If the user routes approvals to a channel, deliver this pending action to their OWN number so
 /// they can authorize remotely. No-op (returns false) when the approval channel is in-app/unset.
+/// Telegram gets tappable buttons (+ code fallback); WhatsApp gets the code text.
 async fn deliver_remote_approval(
     state: &AppState,
     tool: &str,
@@ -17687,20 +17754,33 @@ async fn deliver_remote_approval(
     label: &str,
 ) -> bool {
     let prefs = load_user_prefs();
-    let port = match prefs.approval_channel.as_deref().unwrap_or("in_app") {
-        "telegram" => TELEGRAM_HTTP_PORT,
-        "whatsapp" => WHATSAPP_HTTP_PORT,
-        _ => return false,
-    };
+    let channel = prefs.approval_channel.as_deref().unwrap_or("in_app").to_string();
     let target = prefs.approval_target.unwrap_or_default();
-    if target.trim().is_empty() {
+    if target.trim().is_empty() || channel == "in_app" {
         return false;
     }
     let code = create_pending_approval(tool, args, label);
-    let text = format!(
-        "🔐 Homun chiede la tua conferma:\n{label}\n\nAutorizza: OK {code}\nAnnulla: NO {code}\n(scade tra 10 minuti)"
-    );
-    channel_send(state, port, target.trim(), &text).await.is_ok()
+    match channel.as_str() {
+        "telegram" => {
+            let text = format!(
+                "🔐 Homun chiede la tua conferma:\n{label}\n\n(oppure rispondi: OK {code} / NO {code} — scade tra 10 min)"
+            );
+            let buttons = vec![
+                ["✅ Autorizza".to_string(), format!("approve:{code}")],
+                ["❌ Annulla".to_string(), format!("cancel:{code}")],
+            ];
+            channel_send_buttons(state, TELEGRAM_HTTP_PORT, target.trim(), &text, buttons)
+                .await
+                .is_ok()
+        }
+        "whatsapp" => {
+            let text = format!(
+                "🔐 Homun chiede la tua conferma:\n{label}\n\nAutorizza: OK {code}\nAnnulla: NO {code}\n(scade tra 10 minuti)"
+            );
+            channel_send(state, WHATSAPP_HTTP_PORT, target.trim(), &text).await.is_ok()
+        }
+        _ => false,
+    }
 }
 
 /// Parse a remote-approval control reply: `OK 7F3` / `SI 7F3` (approve) or `NO 7F3` (cancel).
