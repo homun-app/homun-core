@@ -3865,6 +3865,72 @@ successo a questo file'.",
     })
 }
 
+fn github_search_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "github_search",
+            "description": "Cerca REPOSITORY su GitHub via API (veloce e strutturato, NIENTE browser). \
+Usalo per \"cerca su GitHub\", trovare progetti simili/concorrenti, valutare l'unicità di un'idea, o \
+ispezionare repo per stelle/linguaggio/freschezza. Restituisce i top repo ordinati per stelle. \
+PREFERISCILO SEMPRE al browser per le query su GitHub.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Termini di ricerca (nome, keyword di problema/implementazione). Supporta i qualificatori GitHub, es. \"todo cli language:python stars:>50\"." }
+                },
+                "required": ["query"]
+            }
+        }
+    })
+}
+
+/// Searches GitHub repositories via the public Search API (no auth needed for public repos;
+/// fast + structured — the model should prefer this over driving the browser).
+async fn github_search(state: &AppState, query: &str) -> String {
+    let resp = state
+        .http
+        .get("https://api.github.com/search/repositories")
+        .query(&[
+            ("q", query),
+            ("sort", "stars"),
+            ("order", "desc"),
+            ("per_page", "8"),
+        ])
+        .header("User-Agent", "Homun")
+        .header("Accept", "application/vnd.github+json")
+        .timeout(std::time::Duration::from_secs(20))
+        .send()
+        .await;
+    let resp = match resp {
+        Ok(r) if r.status().is_success() => r,
+        Ok(r) => return format!("Ricerca GitHub fallita (HTTP {}).", r.status()),
+        Err(_) => return "Ricerca GitHub non riuscita (rete).".to_string(),
+    };
+    let Ok(json) = resp.json::<serde_json::Value>().await else {
+        return "Risposta GitHub illeggibile.".to_string();
+    };
+    let items = json.get("items").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    if items.is_empty() {
+        return format!("Nessun repository trovato su GitHub per «{query}».");
+    }
+    let mut out = format!("Risultati GitHub per «{query}» (top per stelle):");
+    for it in items.iter().take(8) {
+        let name = it.get("full_name").and_then(|v| v.as_str()).unwrap_or("?");
+        let stars = it.get("stargazers_count").and_then(|v| v.as_u64()).unwrap_or(0);
+        let lang = it.get("language").and_then(|v| v.as_str()).unwrap_or("—");
+        let desc = it.get("description").and_then(|v| v.as_str()).unwrap_or("");
+        let url = it.get("html_url").and_then(|v| v.as_str()).unwrap_or("");
+        let pushed = it.get("pushed_at").and_then(|v| v.as_str()).unwrap_or("");
+        let desc_short: String = desc.chars().take(140).collect();
+        out.push_str(&format!(
+            "\n- {name} ⭐{stars} [{lang}] — {desc_short}\n  {url}  (aggiornato {})",
+            pushed.get(0..10).unwrap_or(pushed)
+        ));
+    }
+    out
+}
+
 fn query_git_history(query: &str) -> String {
     let q = query.trim();
     if q.is_empty() {
@@ -7721,6 +7787,7 @@ RI-VERIFICA eseguendo. Una causa alla volta, niente tentativi alla cieca."
         recall_memory_tool_schema(),
         query_code_graph_tool_schema(),
         query_git_history_tool_schema(),
+        github_search_tool_schema(),
         // Unified capability discovery — find what to connect (MCP/skill/Composio)
         // for a need. Read-only (search), so offered to channels too.
         suggest_capabilities_tool_schema(),
@@ -9012,6 +9079,24 @@ Usa lo snapshot testuale."
                         match outcome {
                             Ok(text) => text,
                             Err(text) => text,
+                        }
+                    } else if name == "github_search" {
+                        // Fast, structured GitHub repo search via the API (no browser).
+                        let query = serde_json::from_str::<serde_json::Value>(args_raw)
+                            .ok()
+                            .and_then(|a| a.get("query").and_then(|v| v.as_str()).map(String::from))
+                            .unwrap_or_default();
+                        if query.trim().is_empty() {
+                            "Query vuota.".to_string()
+                        } else {
+                            let _ = emit_stream_event(
+                                &tx,
+                                GenerateStreamEvent::Delta {
+                                    text: format!("‹‹ACT››🔎 Cerco su GitHub: «{query}»‹‹/ACT››"),
+                                },
+                            )
+                            .await;
+                            github_search(&state_owned, &query).await
                         }
                     } else if name == "use_skill" {
                         // Progressive disclosure L2: load the full SKILL.md so the
