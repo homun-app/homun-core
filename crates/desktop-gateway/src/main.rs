@@ -12542,6 +12542,9 @@ enum InboundAction {
     Draft,
     /// Send a text reply automatically (allowlisted sender only).
     AutoReply,
+    /// Draft a reply, then route it to the USER for approval (remote card) before sending it
+    /// to the contact — the per-contact "ask before send" permission.
+    ApproveReply,
 }
 
 /// Decides how to handle an inbound message. Kill-switch wins; auto-reply only for
@@ -13216,6 +13219,7 @@ async fn handle_channel_inbound(
         });
         match contact_mode.as_deref() {
             Some("automatic") => InboundAction::AutoReply,
+            Some("approve") => InboundAction::ApproveReply,
             Some("silent") => InboundAction::Ignore,
             Some(_) => InboundAction::Draft,
             None => global_action,
@@ -13341,7 +13345,9 @@ async fn handle_channel_inbound(
         });
     }
     match action {
-        InboundAction::AutoReply => {
+        InboundAction::AutoReply | InboundAction::ApproveReply => {
+            // ApproveReply: same draft, but routed to the USER for approval before sending.
+            let approve_mode = matches!(action, InboundAction::ApproveReply);
             let st = state.clone();
             // Reply-target preference: phone-number JID (most reliable) > chat id
             // (WhatsApp @lid / Telegram chat id) > bare sender. Sending to a raw
@@ -13447,6 +13453,24 @@ async fn handle_channel_inbound(
                 }
 
                 match reply {
+                    Some(reply) if approve_mode => {
+                        // Per-contact "ask before send": route the DRAFT to the user for approval
+                        // (remote card) as a send_message to this contact; nothing goes to the
+                        // contact until the user approves. No-op delivery if no approval channel.
+                        let preview: String = reply.chars().take(160).collect();
+                        let lbl = format!("Risposta a {name} su {label}: «{preview}»");
+                        let args = serde_json::json!({
+                            "channel": channel, "to": reply_to, "text": reply
+                        });
+                        let delivered =
+                            deliver_remote_approval(&st, "send_message", &args, &lbl).await;
+                        let _ = channel_set_presence(&st, port, &reply_to, "paused").await;
+                        if delivered {
+                            eprintln!("channel/{channel}: bozza inviata per approvazione (contatto {reply_to})");
+                        } else {
+                            eprintln!("channel/{channel}: approve mode senza canale di approvazione — bozza solo in-app (thread)");
+                        }
+                    }
                     Some(reply) => match channel_send(&st, port, &reply_to, &reply).await {
                         Ok(()) => {
                             eprintln!("channel/{channel}: auto-reply inviata a {reply_to}")
@@ -13463,7 +13487,9 @@ async fn handle_channel_inbound(
                     }
                 }
             });
-            Json(serde_json::json!({ "action": "auto_reply" }))
+            Json(serde_json::json!({
+                "action": if approve_mode { "approve_reply" } else { "auto_reply" }
+            }))
         }
         // Draft surface in the chat UI is a follow-up; for now we recorded it.
         _ => Json(serde_json::json!({ "action": "draft" })),
