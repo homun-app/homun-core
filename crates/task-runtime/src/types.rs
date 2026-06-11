@@ -321,6 +321,20 @@ pub enum EventTrigger {
         #[serde(default)]
         topic: Option<String>,
     },
+    /// GENERIC poll on a connected capability (Composio slug or MCP tool). A background
+    /// poller calls `tool(args)`, treats the response items as events, and fires on each
+    /// item whose `key_field` value hasn't been seen before. Works for ANY connector —
+    /// Gmail "new email", Calendar "new event", Slack messages, Notion rows, … — without
+    /// hardcoding the service. The agent configures `tool`/`args`/`key_field` at creation
+    /// (it knows the tool's shape via find_capability).
+    ConnectorPoll {
+        tool: String,
+        #[serde(default)]
+        args: Value,
+        key_field: String,
+        #[serde(default)]
+        label: Option<String>,
+    },
 }
 
 /// Whether the automation's run may act autonomously or must ask first. Defaults to
@@ -371,6 +385,10 @@ pub struct Automation {
     pub updated_at: OffsetDateTime,
     #[serde(default)]
     pub last_fired_at: Option<OffsetDateTime>,
+    /// Per-automation runtime state — e.g. the ConnectorPoll watermark
+    /// (`{"seen": [...keys], "initialized": true}`). Opaque to the store.
+    #[serde(default)]
+    pub state: Option<Value>,
 }
 
 impl Automation {
