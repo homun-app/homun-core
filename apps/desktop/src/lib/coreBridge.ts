@@ -1647,6 +1647,8 @@ export const coreBridge = {
   memoryDashboard: () => electronMemoryDashboard(),
   exportLocalData: () => electronExportLocalData(),
   memoryItems: () => electronMemoryItems(),
+  promoteGoals: (workspace: string, refs: string[]) => electronPromoteGoals(workspace, refs),
+  addGoal: (workspace: string, text: string) => electronAddGoal(workspace, text),
   ensureProjectGraph: (workspace: string, subpath?: string) =>
     electronEnsureProjectGraph(workspace, subpath),
   projectGraphSubdirs: (workspace: string) => electronProjectGraphSubdirs(workspace),
@@ -2107,6 +2109,37 @@ async function electronMemoryItems(): Promise<{ items: CoreMemoryItem[]; scopes:
 /// Ensure a project's code graph is fresh (builds it transparently on open).
 /// Returns true if a build was kicked off; UI reloads on the project_graph.ready event.
 /// An optional `subpath` scopes the map to one subtree (huge-repo escape hatch).
+/// Promote selected memories (decisions the user flagged) to project goals — LLM-free,
+/// user-driven. Returns how many were promoted. Refreshes the project brief.
+async function electronPromoteGoals(workspace: string, refs: string[]): Promise<number> {
+  try {
+    const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/memory/goals/promote`, {
+      method: "POST",
+      headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ workspace, refs }),
+    });
+    if (!response.ok) return 0;
+    const body = (await response.json()) as { promoted?: number };
+    return body.promoted ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+/// Add a fresh project goal authored by the user.
+async function electronAddGoal(workspace: string, text: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/memory/goals/add`, {
+      method: "POST",
+      headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ workspace, text }),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 async function electronEnsureProjectGraph(workspace: string, subpath?: string): Promise<boolean> {
   try {
     const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/memory/project-graph/ensure`, {

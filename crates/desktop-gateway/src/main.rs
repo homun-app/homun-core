@@ -547,6 +547,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/memory/graphify/import", post(memory_graphify_import))
         .route("/api/memory/project-graph/ensure", post(project_graph_ensure))
         .route("/api/memory/project-graph/subdirs", get(project_graph_subdirs))
+        .route("/api/memory/goals/promote", post(memory_goals_promote))
+        .route("/api/memory/goals/add", post(memory_goals_add))
         .route("/api/memory/wiki", get(memory_wiki).put(memory_wiki_save))
         .route("/api/memory/consolidate", post(memory_consolidate))
         .route("/api/memory/decide", post(memory_decide))
@@ -20574,6 +20576,92 @@ async fn project_graph_subdirs(
         b["code_files"].as_u64().unwrap_or(0).cmp(&a["code_files"].as_u64().unwrap_or(0))
     });
     Ok(Json(serde_json::json!({ "subdirs": subdirs })))
+}
+
+#[derive(Deserialize)]
+struct PromoteGoalsRequest {
+    #[serde(default)]
+    workspace: Option<String>,
+    refs: Vec<String>,
+}
+
+/// Promote selected memories (the `decision`s the user flagged) to `goal` — the
+/// LLM-free, language-agnostic way to set project objectives: the user picks, no keyword
+/// guessing, no fighting the extractor's bias. Regenerates the brief so ## Obiettivi
+/// reflects them.
+async fn memory_goals_promote(
+    State(state): State<AppState>,
+    Json(req): Json<PromoteGoalsRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let user = gateway_memory_user_id();
+    let ws = req
+        .workspace
+        .filter(|w| !w.trim().is_empty())
+        .map(MemoryWorkspaceId::new)
+        .unwrap_or_else(gateway_memory_workspace_id);
+    let facade = lock_memory_facade(&state)?;
+    let mut promoted = 0usize;
+    for raw in &req.refs {
+        if let Ok(reference) = raw.parse::<MemoryRef>() {
+            if facade.set_memory_type(&reference, &user, &ws, "goal").is_ok() {
+                promoted += 1;
+            }
+        }
+    }
+    rebuild_project_brief(&facade, &user, &ws);
+    Ok(Json(serde_json::json!({ "promoted": promoted })))
+}
+
+#[derive(Deserialize)]
+struct AddGoalRequest {
+    #[serde(default)]
+    workspace: Option<String>,
+    text: String,
+}
+
+/// Add a fresh project goal authored by the user (created confirmed; brief refreshed).
+async fn memory_goals_add(
+    State(state): State<AppState>,
+    Json(req): Json<AddGoalRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let text = req.text.trim().to_string();
+    if text.is_empty() {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "empty_goal",
+            message: "obiettivo vuoto".to_string(),
+        });
+    }
+    let user = gateway_memory_user_id();
+    let ws = req
+        .workspace
+        .filter(|w| !w.trim().is_empty())
+        .map(MemoryWorkspaceId::new)
+        .unwrap_or_else(gateway_memory_workspace_id);
+    let facade = lock_memory_facade(&state)?;
+    let lifecycle = MemoryLifecycleRequest {
+        actor_id: "desktop-chat".to_string(),
+        user_id: user.clone(),
+        workspace_id: ws.clone(),
+        purpose: "add_goal".to_string(),
+    };
+    let record = facade
+        .create_memory_candidate(MemoryCreateRequest {
+            request: lifecycle.clone(),
+            memory_type: "goal".to_string(),
+            text,
+            aliases: Vec::new(),
+            language_hints: Vec::new(),
+            confidence: 1.0,
+            privacy_domain: PrivacyDomain::new("work"),
+            sensitivity: MemoryDataSensitivity::Internal,
+            evidence_refs: Vec::new(),
+            metadata: serde_json::json!({ "source": "add_goal", "scope": "project" }),
+        })
+        .map_err(|e| GatewayError::memory(e.to_string()))?;
+    let _ = facade.confirm_memory(&lifecycle, &record.reference, "goal added by user");
+    rebuild_project_brief(&facade, &user, &ws);
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 async fn memory_graph(

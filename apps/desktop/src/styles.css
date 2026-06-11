@@ -3125,6 +3125,73 @@ body.resizing-drawer {
   font-size: 13px;
 }
 
+/* Goals manager (project memory): promote decisions → goals + add custom. */
+.goals-manager {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  background: var(--surface, transparent);
+}
+.goals-head {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.goals-list {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  font-size: 13px;
+}
+.goals-list li {
+  margin-bottom: 3px;
+}
+.goals-add {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.goals-add input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+}
+.goals-manager button {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.goals-manager button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.goals-promote summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.goals-promote-item {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 13px;
+  padding: 3px 0;
+}
+.goals-promote-list {
+  max-height: 220px;
+  overflow-y: auto;
+  margin-bottom: 8px;
+}
+
 /* Big code graph: backbone-only render notice (overlay on the canvas). */
 .memory-graph-truncated {
   position: absolute;
