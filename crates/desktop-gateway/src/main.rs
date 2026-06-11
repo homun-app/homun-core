@@ -9751,6 +9751,23 @@ Dimmi se vuoi che riprovi o riformuli."
                 .await;
             });
         }
+        // Keep the code map FRESH: if this turn MODIFIED code in a project, re-extract
+        // (incremental). So the next "how/why" question queries the CURRENT structure,
+        // not a stale snapshot. Staleness-gated → a no-op when nothing actually changed.
+        if !read_only {
+            let touched_code = tool_trace.iter().any(|a| {
+                a.contains("modificato file") || a.contains("eseguito nel progetto")
+            });
+            if touched_code {
+                if let Some(ws) = thread_id
+                    .as_deref()
+                    .and_then(|tid| lock_store(&state_owned).ok().and_then(|s| s.workspace_for_thread(tid).ok()))
+                    .filter(|w| !w.trim().is_empty())
+                {
+                    spawn_project_graph_refresh(&state_owned, &ws);
+                }
+            }
+        }
         // Mark the resume entry finished and evict it after a grace window so a
         // client that reloaded right at the end can still reattach and read it.
         tx.entry
@@ -20057,6 +20074,24 @@ fn graphify_out_dir(workspace_id: &str) -> std::path::PathBuf {
 /// Graphify container and import it. Skips the rebuild when the project is unchanged
 /// since the last build (staleness via newest source mtime). Best-effort, blocking
 /// (callers run it on a spawned task). Emits `project_graph.ready` on success.
+/// Spawn an async, staleness-gated refresh of a project's code graph. Called after a
+/// turn that MODIFIED code, so the "how" (structure) tracks the latest source — paired
+/// with the per-turn decision capture (the "why"), the graph + wiki never go stale.
+/// Cheap: build_project_graph skips when nothing changed, and the persistent mirror +
+/// graphify cache make a real refresh incremental (seconds).
+fn spawn_project_graph_refresh(state: &AppState, workspace_id: &str) {
+    let folder = load_workspaces_file()
+        .workspaces
+        .into_iter()
+        .find(|w| w.id == workspace_id)
+        .and_then(|w| w.folder)
+        .filter(|f| !f.trim().is_empty());
+    let Some(folder) = folder else { return };
+    let st = state.clone();
+    let ws = workspace_id.to_string();
+    tokio::task::spawn_blocking(move || build_project_graph(&st, &ws, &folder, None));
+}
+
 fn build_project_graph(state: &AppState, workspace_id: &str, folder: &str, subpath: Option<&str>) {
     let mut root = std::path::PathBuf::from(folder);
     // Subfolder scoping: a huge repo (e.g. a scraper monorepo) maps just the subtree the

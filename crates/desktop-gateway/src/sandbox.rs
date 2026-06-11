@@ -408,18 +408,22 @@ pub fn run_graphify(project: &Path, out: &Path) -> Result<(), String> {
     ensure_graphify()?;
     let path = host_tools_path();
     std::fs::create_dir_all(out).map_err(|e| e.to_string())?;
-    let work = out.join("_work");
-    let _ = std::fs::remove_dir_all(&work);
+    // PERSISTENT mirror (not a throwaway _work): kept between runs so both rsync AND
+    // graphify are INCREMENTAL — rsync copies only changed files, graphify (its AST
+    // cache lives in _mirror/graphify-out/cache) re-parses only those. This makes the
+    // "refresh when code changes" path cost seconds, not a full re-extraction. The
+    // mirror is gateway-managed (outside the user's repo); the source is never written.
+    let work = out.join("_mirror");
     std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
 
-    // Mirror the project, excluding noise — native rsync (fast; incremental on re-runs).
-    // `--inplace` skips temp-file+rename (avoids mkstempat errors on live trees where
-    // scrapers write during the copy). We do NOT hard-fail on rsync's non-zero exit:
-    // codes 23/24 mean "some source files changed/vanished mid-copy" — expected on a
-    // live project and harmless (the graph is built from whatever copied). The real
-    // gate is whether graphify produces a graph.json below.
+    // Mirror the project, excluding noise. `--inplace` skips temp-file+rename (avoids
+    // mkstempat errors on live trees where scrapers write during the copy). `--delete`
+    // drops files removed from the source so the graph stays accurate on deletions. We
+    // do NOT hard-fail on rsync's non-zero exit: codes 23/24 mean "some source files
+    // changed/vanished mid-copy" — expected on a live project. The real gate is whether
+    // graphify produces a graph.json below.
     let mut rsync = Command::new("rsync");
-    rsync.arg("-a").arg("--inplace");
+    rsync.arg("-a").arg("--inplace").arg("--delete").arg("--exclude=graphify-out");
     for pattern in GRAPHIFY_EXCLUDES {
         rsync.arg(format!("--exclude={pattern}"));
     }
@@ -448,14 +452,13 @@ pub fn run_graphify(project: &Path, out: &Path) -> Result<(), String> {
     let produced = work.join("graphify-out/graph.json");
     if !produced.is_file() {
         let stderr = String::from_utf8_lossy(&extracted.stderr);
-        let _ = std::fs::remove_dir_all(&work);
         return Err(format!(
             "graphify: nessun graph.json prodotto. {}",
             stderr.lines().rev().take(3).collect::<Vec<_>>().join(" | ")
         ));
     }
     std::fs::copy(&produced, out.join("graph.json")).map_err(|e| e.to_string())?;
-    let _ = std::fs::remove_dir_all(&work);
+    // Keep _mirror (+ its graphify-out/cache) so the next refresh is incremental.
     Ok(())
 }
 
