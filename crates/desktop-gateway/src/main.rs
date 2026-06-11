@@ -89,10 +89,10 @@ use local_first_subagents::{
     GenerateJsonRequest, GenerateStreamEvent, SubagentTaskExecutor, TokenMetrics,
 };
 use local_first_task_runtime::{
-    ApprovalGate, ApprovalRequest, ExecutorResult, LeaseManager, ResourceClass, ResourceGovernor,
-    ResourceLimits, TaskExecutor, TaskId, TaskQueueSnapshot, TaskRecord, TaskRuntimeError,
-    TaskScheduler, TaskStatus, TaskStore, TaskUiDetail, TaskUiItem, TaskUiReadModel, UserId,
-    WorkspaceId,
+    ApprovalGate, ApprovalPolicy, ApprovalRequest, Automation, AutomationSource, AutomationTrigger,
+    ExecutorResult, LeaseManager, ResourceClass, ResourceGovernor, ResourceLimits, TaskExecutor,
+    TaskId, TaskQueueSnapshot, TaskRecord, TaskRuntimeError, TaskScheduler, TaskStatus, TaskStore,
+    TaskUiDetail, TaskUiItem, TaskUiReadModel, UserId, WorkspaceId,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -524,6 +524,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/tasks/run_next", post(run_next_task))
         .route("/api/tasks/{task_id}/cancel", post(cancel_task))
         .route("/api/tasks/{task_id}", get(task_detail))
+        .route("/api/automations", get(automations_list).post(automation_create))
+        .route("/api/automations/{id}/toggle", post(automation_toggle))
+        .route("/api/automations/{id}", delete(automation_delete))
         .route(
             "/api/approvals/{approval_id}/approve",
             post(approve_approval),
@@ -4181,6 +4184,102 @@ Ti aggiornerò nel thread «Pianificato»."
         },
         Err(_) => "Store dei task non disponibile: pianificazione non riuscita.".to_string(),
     }
+}
+
+/// Body for creating an Automation (the user-facing rule). `trigger` is a typed
+/// `AutomationTrigger` ({"type":"schedule","recurrence":"daily@08:00","tz":"Europe/Rome"}
+/// or {"type":"event","event":{"kind":"channel_message","from":"Mario"}}).
+#[derive(Deserialize)]
+struct AutomationCreateRequest {
+    title: String,
+    trigger: AutomationTrigger,
+    prompt: String,
+    #[serde(default)]
+    approval: Option<ApprovalPolicy>,
+    #[serde(default)]
+    source: Option<AutomationSource>,
+}
+
+fn automation_to_json(a: &Automation) -> serde_json::Value {
+    serde_json::to_value(a).unwrap_or_else(|_| serde_json::json!({}))
+}
+
+/// GET /api/automations — list the user's automations (rules), newest first.
+async fn automations_list(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let store = lock_task_store(&state)
+        .map_err(|_| GatewayError { status: StatusCode::SERVICE_UNAVAILABLE, code: "task_store", message: "store dei task non disponibile".into() })?;
+    let items = store
+        .list_automations(&gateway_user_id(), &gateway_workspace_id())
+        .map_err(|e| GatewayError { status: StatusCode::INTERNAL_SERVER_ERROR, code: "automations_list", message: e.to_string() })?;
+    let json: Vec<_> = items.iter().map(automation_to_json).collect();
+    Ok(Json(serde_json::json!({ "automations": json })))
+}
+
+/// POST /api/automations — create an automation (the rule). Phase A persists it;
+/// schedule/event wiring (it actually firing) lands in Auto-B / Auto-C.
+async fn automation_create(
+    State(state): State<AppState>,
+    Json(req): Json<AutomationCreateRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    // Validate a schedule trigger's recurrence up front (fail fast, like schedule_task).
+    if let AutomationTrigger::Schedule { recurrence, tz } = &req.trigger {
+        if local_first_task_runtime::next_occurrence(recurrence, tz.as_deref(), OffsetDateTime::now_utc()).is_none() {
+            return Err(GatewayError { status: StatusCode::BAD_REQUEST, code: "bad_recurrence", message: format!("ricorrenza '{recurrence}' non valida") });
+        }
+    }
+    let now = OffsetDateTime::now_utc();
+    let automation = Automation {
+        id: format!("auto_{}", uuid::Uuid::new_v4().simple()),
+        user_id: gateway_user_id(),
+        workspace_id: gateway_workspace_id(),
+        title: req.title,
+        trigger: req.trigger,
+        prompt: req.prompt,
+        approval: req.approval.unwrap_or_default(),
+        enabled: true,
+        source: req.source.unwrap_or(AutomationSource::Manual),
+        task_id: None,
+        created_at: now,
+        updated_at: now,
+        last_fired_at: None,
+    };
+    let store = lock_task_store(&state)
+        .map_err(|_| GatewayError { status: StatusCode::SERVICE_UNAVAILABLE, code: "task_store", message: "store dei task non disponibile".into() })?;
+    store.upsert_automation(&automation)
+        .map_err(|e| GatewayError { status: StatusCode::INTERNAL_SERVER_ERROR, code: "automation_create", message: e.to_string() })?;
+    Ok(Json(automation_to_json(&automation)))
+}
+
+/// POST /api/automations/{id}/toggle — enable/disable a rule.
+async fn automation_toggle(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let store = lock_task_store(&state)
+        .map_err(|_| GatewayError { status: StatusCode::SERVICE_UNAVAILABLE, code: "task_store", message: "store dei task non disponibile".into() })?;
+    let mut automation = store
+        .get_automation(&id, &gateway_user_id(), &gateway_workspace_id())
+        .map_err(|e| GatewayError { status: StatusCode::INTERNAL_SERVER_ERROR, code: "automation_get", message: e.to_string() })?
+        .ok_or_else(|| GatewayError { status: StatusCode::NOT_FOUND, code: "automation_missing", message: "automazione non trovata".into() })?;
+    automation.enabled = !automation.enabled;
+    automation.updated_at = OffsetDateTime::now_utc();
+    store.upsert_automation(&automation)
+        .map_err(|e| GatewayError { status: StatusCode::INTERNAL_SERVER_ERROR, code: "automation_toggle", message: e.to_string() })?;
+    Ok(Json(automation_to_json(&automation)))
+}
+
+/// DELETE /api/automations/{id} — remove a rule.
+async fn automation_delete(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let store = lock_task_store(&state)
+        .map_err(|_| GatewayError { status: StatusCode::SERVICE_UNAVAILABLE, code: "task_store", message: "store dei task non disponibile".into() })?;
+    store.delete_automation(&id, &gateway_user_id(), &gateway_workspace_id())
+        .map_err(|e| GatewayError { status: StatusCode::INTERNAL_SERVER_ERROR, code: "automation_delete", message: e.to_string() })?;
+    Ok(Json(serde_json::json!({ "deleted": id })))
 }
 
 fn list_scheduled_tasks_tool_schema() -> serde_json::Value {

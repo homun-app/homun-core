@@ -274,3 +274,111 @@ impl TaskRecord {
         self
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Automation: the user-facing RULE (trigger → agentic action). Distinct from a
+// TaskRecord (a single execution). SOTA model: IFTTT-clarity triggers + agentic
+// action. A Schedule automation drives a recurring TaskRecord; an Event automation
+// materializes a one-shot TaskRecord when its event fires.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// What starts an automation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AutomationTrigger {
+    /// Time-based — a recurrence rule ("daily@08:00", "weekly@mon@09:00", "every 6h")
+    /// parsed by `recurrence::next_occurrence`, with an optional IANA timezone.
+    Schedule {
+        recurrence: String,
+        #[serde(default)]
+        tz: Option<String>,
+    },
+    /// Event-based — fires when a matching event occurs (channel message, email, …).
+    Event { event: EventTrigger },
+}
+
+/// The concrete event an Event automation listens for. Filters are optional; absent
+/// means "any". Only `ChannelMessage` is wired in v1; the rest are forward-declared.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum EventTrigger {
+    /// An inbound message on a connected channel (WhatsApp/Telegram).
+    ChannelMessage {
+        #[serde(default)]
+        channel: Option<String>,
+        #[serde(default)]
+        from: Option<String>,
+    },
+    /// An inbound email (forward-declared; wired in a later phase).
+    EmailReceived {
+        #[serde(default)]
+        from: Option<String>,
+    },
+    /// A watched file changed (forward-declared).
+    FileChanged { path: String },
+    /// Memory updated, optionally on a topic (forward-declared).
+    MemoryUpdated {
+        #[serde(default)]
+        topic: Option<String>,
+    },
+}
+
+/// Whether the automation's run may act autonomously or must ask first. Defaults to
+/// `Confirm` — the safe choice for anything that sends/publishes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalPolicy {
+    Confirm,
+    Autonomous,
+}
+
+impl Default for ApprovalPolicy {
+    fn default() -> Self {
+        ApprovalPolicy::Confirm
+    }
+}
+
+/// How the automation came to exist (for provenance + UI grouping).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutomationSource {
+    Chat,
+    Mining,
+    Manual,
+}
+
+/// A first-class automation: trigger + agentic action + policy. The action is a
+/// natural-language `prompt` the agent runs with its full toolset (skills/MCP/browser
+/// via the capability router) — NOT a deterministic node graph.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Automation {
+    pub id: String,
+    pub user_id: UserId,
+    pub workspace_id: WorkspaceId,
+    pub title: String,
+    pub trigger: AutomationTrigger,
+    /// The agentic action: what the agent should do when the trigger fires.
+    pub prompt: String,
+    #[serde(default)]
+    pub approval: ApprovalPolicy,
+    pub enabled: bool,
+    pub source: AutomationSource,
+    /// For Schedule automations: the recurring TaskRecord that drives it (1:1).
+    /// `None` for Event automations (runs are materialized on the fly).
+    #[serde(default)]
+    pub task_id: Option<String>,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
+    #[serde(default)]
+    pub last_fired_at: Option<OffsetDateTime>,
+}
+
+impl Automation {
+    /// `"schedule"` | `"event"` — used by the store index + UI grouping.
+    pub fn trigger_kind(&self) -> &'static str {
+        match self.trigger {
+            AutomationTrigger::Schedule { .. } => "schedule",
+            AutomationTrigger::Event { .. } => "event",
+        }
+    }
+}

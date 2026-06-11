@@ -1,6 +1,6 @@
 use crate::{
-    ApprovalRequest, ResourceClass, TaskCheckpoint, TaskDependencyOutput, TaskId, TaskRecord,
-    TaskRuntimeError, TaskRuntimeResult, TaskStatus, UserId, WorkspaceId,
+    ApprovalRequest, Automation, ResourceClass, TaskCheckpoint, TaskDependencyOutput, TaskId,
+    TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus, UserId, WorkspaceId,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
@@ -108,8 +108,23 @@ impl TaskStore {
             CREATE INDEX IF NOT EXISTS idx_task_approvals_task
                 ON task_approvals(user_id, workspace_id, task_id, created_at);
 
+            CREATE TABLE IF NOT EXISTS automations (
+                id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                enabled INTEGER NOT NULL,
+                trigger_kind TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                automation_json TEXT NOT NULL,
+                PRIMARY KEY (id, user_id, workspace_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_automations_scope
+                ON automations(user_id, workspace_id, enabled);
+
             INSERT INTO task_runtime_metadata(key, value)
-            VALUES ('schema_version', '1')
+            VALUES ('schema_version', '2')
             ON CONFLICT(key) DO UPDATE SET value = excluded.value;
             ",
         )?;
@@ -232,6 +247,117 @@ impl TaskStore {
             tasks.push(serde_json::from_str::<TaskRecord>(&row?)?);
         }
         Ok(tasks)
+    }
+
+    // ── Automations (the user-facing rules; runs are TaskRecords) ──────────────
+
+    pub fn upsert_automation(&self, automation: &Automation) -> TaskRuntimeResult<()> {
+        self.connection.execute(
+            "
+            INSERT INTO automations (
+                id, user_id, workspace_id, enabled, trigger_kind,
+                created_at, updated_at, automation_json
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            ON CONFLICT(id, user_id, workspace_id) DO UPDATE SET
+                enabled = excluded.enabled,
+                trigger_kind = excluded.trigger_kind,
+                updated_at = excluded.updated_at,
+                automation_json = excluded.automation_json
+            ",
+            params![
+                automation.id,
+                automation.user_id.as_str(),
+                automation.workspace_id.as_str(),
+                automation.enabled as i64,
+                automation.trigger_kind(),
+                automation.created_at.unix_timestamp(),
+                automation.updated_at.unix_timestamp(),
+                serde_json::to_string(automation)?,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_automation(
+        &self,
+        id: &str,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> TaskRuntimeResult<Option<Automation>> {
+        self.connection
+            .query_row(
+                "
+                SELECT automation_json
+                FROM automations
+                WHERE id = ?1 AND user_id = ?2 AND workspace_id = ?3
+                ",
+                params![id, user_id.as_str(), workspace_id.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .map(|json| Ok(serde_json::from_str::<Automation>(&json)?))
+            .transpose()
+    }
+
+    pub fn list_automations(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> TaskRuntimeResult<Vec<Automation>> {
+        let mut statement = self.connection.prepare(
+            "
+            SELECT automation_json
+            FROM automations
+            WHERE user_id = ?1 AND workspace_id = ?2
+            ORDER BY created_at DESC, id ASC
+            ",
+        )?;
+        let rows = statement.query_map(
+            params![user_id.as_str(), workspace_id.as_str()],
+            |row| row.get::<_, String>(0),
+        )?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(serde_json::from_str::<Automation>(&row?)?);
+        }
+        Ok(out)
+    }
+
+    /// All ENABLED Event automations across every workspace for a user — the set an
+    /// inbound event is matched against. Filtering by event kind/filters happens in
+    /// the caller (cheap; the enabled set is small).
+    pub fn list_enabled_event_automations(
+        &self,
+        user_id: &UserId,
+    ) -> TaskRuntimeResult<Vec<Automation>> {
+        let mut statement = self.connection.prepare(
+            "
+            SELECT automation_json
+            FROM automations
+            WHERE user_id = ?1 AND enabled = 1 AND trigger_kind = 'event'
+            ORDER BY created_at ASC
+            ",
+        )?;
+        let rows = statement.query_map(params![user_id.as_str()], |row| row.get::<_, String>(0))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(serde_json::from_str::<Automation>(&row?)?);
+        }
+        Ok(out)
+    }
+
+    pub fn delete_automation(
+        &self,
+        id: &str,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> TaskRuntimeResult<()> {
+        self.connection.execute(
+            "DELETE FROM automations WHERE id = ?1 AND user_id = ?2 AND workspace_id = ?3",
+            params![id, user_id.as_str(), workspace_id.as_str()],
+        )?;
+        Ok(())
     }
 
     pub fn add_dependency(
