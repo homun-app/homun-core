@@ -18512,74 +18512,6 @@ async fn composio_toolkit_auth(
     })))
 }
 
-/// Resolves a Composio-managed auth_config id for a toolkit, reusing an existing
-/// one or creating a managed OAuth2 config. (Grounded on the real v3 shapes.)
-/// Resolves (reusing, else creating) an auth config for `toolkit_slug`. With
-/// `api_key=true` we want a CUSTOM API-key config (the user brings their own
-/// credentials); otherwise a Composio-managed OAuth config. We never reuse a
-/// config of the wrong kind — that's exactly what produced the
-/// "Default auth config not found / no managed credentials" 400 for API-key-only
-/// toolkits like openweather.
-fn composio_auth_config_id(
-    transport: &GatewayComposioTransport,
-    toolkit_slug: &str,
-    api_key: bool,
-) -> Result<String, GatewayError> {
-    let extract_id = |item: &serde_json::Value| {
-        item.get("id")
-            .or_else(|| item.get("auth_config").and_then(|ac| ac.get("id")))
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_string)
-    };
-    let is_api_key_scheme = |item: &serde_json::Value| {
-        let scheme = item
-            .get("auth_scheme")
-            .or_else(|| item.get("authScheme"))
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("")
-            .to_ascii_uppercase();
-        scheme == "API_KEY" || scheme == "BEARER_TOKEN"
-    };
-
-    let existing = transport
-        .request("GET", &format!("/auth_configs?toolkit_slug={toolkit_slug}"), None)
-        .map_err(GatewayError::capability)?;
-    let reusable = existing
-        .get("items")
-        .and_then(serde_json::Value::as_array)
-        .and_then(|items| items.iter().find(|item| is_api_key_scheme(item) == api_key))
-        .and_then(extract_id);
-    if let Some(id) = reusable {
-        return Ok(id);
-    }
-
-    let body = if api_key {
-        serde_json::json!({
-            "toolkit": { "slug": toolkit_slug },
-            "auth_config": { "type": "use_custom_auth", "authScheme": "API_KEY", "credentials": {} }
-        })
-    } else {
-        serde_json::json!({
-            "toolkit": { "slug": toolkit_slug },
-            "auth_config": { "type": "use_composio_managed_auth" }
-        })
-    };
-    let created = transport
-        .request("POST", "/auth_configs", Some(body))
-        .map_err(GatewayError::capability)?;
-    created
-        .get("auth_config")
-        .and_then(|ac| ac.get("id"))
-        .or_else(|| created.get("id"))
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| GatewayError {
-            status: StatusCode::BAD_GATEWAY,
-            code: "composio_auth_config_failed",
-            message: "Composio auth_config response missing id".to_string(),
-        })
-}
-
 /// Resolves (reusing, else creating) an auth_config for an EXPLICIT scheme — the
 /// schema-driven path. Managed → `use_composio_managed_auth`; custom → `use_custom_auth`
 /// with the chosen `auth_scheme` and the user's creation `credentials` (e.g. OAuth
@@ -18693,9 +18625,21 @@ fn composio_link_blocking(
         let cfg = has_init.then(|| serde_json::json!({ "auth_scheme": scheme, "val": init }));
         (id, cfg)
     } else {
-        // Legacy: api_key custom flow, else managed OAuth.
+        // Legacy (no explicit scheme): an `api_key` → custom API_KEY config, else managed OAuth.
+        // Expressed via the same resolver as the schema-driven path — one builder to maintain.
         let use_api_key = req.api_key.as_ref().is_some_and(|k| !k.trim().is_empty());
-        let id = composio_auth_config_id(&transport, toolkit_slug, use_api_key)?;
+        let (scheme, managed) = if use_api_key {
+            ("API_KEY", false)
+        } else {
+            ("OAUTH2", true)
+        };
+        let id = composio_auth_config_resolve(
+            &transport,
+            toolkit_slug,
+            scheme,
+            managed,
+            &serde_json::json!({}),
+        )?;
         let cfg = req
             .api_key
             .as_ref()
