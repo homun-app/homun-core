@@ -2303,6 +2303,107 @@ fn rebuild_profile_wiki(
     let _ = facade.record_wiki_page_for_ui(&page);
 }
 
+/// Project BRIEF (`brief.md`): the always-on "where this project is going" page —
+/// goals + recent state. Generated & editable like profilo.md/decisioni.md (manual
+/// edits win). Injected at turn start (push) so the assistant holds the project's
+/// direction without being asked. Projects only (not personal/threads).
+fn rebuild_project_brief(
+    facade: &MemoryFacade,
+    user_id: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+) {
+    if workspace.as_str() == PERSONAL_WORKSPACE || workspace.as_str() == THREADS_WORKSPACE {
+        return;
+    }
+    if wiki_is_edited(workspace, "brief.md") {
+        return;
+    }
+    let Ok(memories) = facade.list_memories_for_ui(user_id, workspace) else {
+        return;
+    };
+    let goals: Vec<String> = memories
+        .iter()
+        .filter(|m| {
+            m.memory_type == "goal"
+                && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+        })
+        .map(|m| m.text.trim().to_string())
+        .collect();
+    let decisions: Vec<String> = memories
+        .iter()
+        .filter(|m| {
+            m.memory_type == "decision"
+                && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+        })
+        .map(|m| m.text.lines().next().unwrap_or(&m.text).trim().to_string())
+        .collect();
+    if goals.is_empty() && decisions.is_empty() {
+        return; // nothing to brief yet
+    }
+    let mut body = String::from(
+        "# Brief del progetto\n\n> Vista generata (modificabile a mano): obiettivi + stato. \
+Le modifiche restano. È ciò che l'assistente tiene SEMPRE presente del progetto.\n\n## Obiettivi\n\n",
+    );
+    if goals.is_empty() {
+        body.push_str("_Nessun obiettivo registrato — modifica questa pagina per definire dove sta andando il progetto._\n\n");
+    } else {
+        for g in &goals {
+            body.push_str(&format!("- {g}\n"));
+        }
+        body.push('\n');
+    }
+    if !decisions.is_empty() {
+        body.push_str("## Stato e decisioni recenti\n\n");
+        for d in decisions.iter().take(6) {
+            body.push_str(&format!("- {d}\n"));
+        }
+        body.push('\n');
+    }
+    let path = "brief.md";
+    let reference = facade
+        .list_wiki_pages_for_ui(user_id, workspace)
+        .ok()
+        .and_then(|pages| pages.into_iter().find(|p| p.path == path).map(|p| p.reference))
+        .unwrap_or_else(|| MemoryRef::generated(MemoryRefKind::Wiki, user_id.clone(), workspace.clone()));
+    let page = WikiPage {
+        reference,
+        user_id: user_id.clone(),
+        workspace_id: workspace.clone(),
+        path: path.to_string(),
+        title: "Brief del progetto".to_string(),
+        body,
+        linked_refs: Vec::new(),
+        privacy_domain: PrivacyDomain::new("personal"),
+        sensitivity: MemoryDataSensitivity::Internal,
+    };
+    let _ = facade.record_wiki_page_for_ui(&page);
+}
+
+/// Reads the active project's `brief.md` for INJECTION into the briefing (push): the
+/// goals + recent state the assistant should always hold. None for personal/threads or
+/// when no brief exists yet. Capped so it never dominates the prompt.
+fn project_brief_block(state: &AppState) -> Option<String> {
+    let ws = gateway_memory_workspace_id();
+    if ws.as_str() == PERSONAL_WORKSPACE || ws.as_str() == THREADS_WORKSPACE {
+        return None;
+    }
+    let facade = lock_memory_facade(state).ok()?;
+    let user = gateway_memory_user_id();
+    let page = facade
+        .list_wiki_pages_for_ui(&user, &ws)
+        .ok()?
+        .into_iter()
+        .find(|p| p.path == "brief.md")?;
+    let body = page.body.trim();
+    if body.is_empty() {
+        return None;
+    }
+    let capped: String = body.chars().take(2000).collect();
+    Some(format!(
+        "BRIEF DEL PROGETTO (obiettivi e stato — dove sta andando; tienilo presente, non deviare):\n{capped}"
+    ))
+}
+
 /// One-shot JSON call to the memory role model (same path as the extractor).
 async fn call_memory_json(
     state: &AppState,
@@ -2477,6 +2578,7 @@ async fn consolidate_scope(
     if mems.len() < 3 {
         if let Ok(facade) = lock_memory_facade(state) {
             rebuild_decisions_wiki(&facade, user, workspace);
+            rebuild_project_brief(&facade, user, workspace);
         }
         return (merged, 0);
     }
@@ -2501,6 +2603,7 @@ Se non c'è nulla da fare: {\"merges\":[],\"drops\":[]}.";
         // LLM curator unavailable: keep the deterministic merges already applied.
         if let Ok(facade) = lock_memory_facade(state) {
             rebuild_decisions_wiki(&facade, user, workspace);
+            rebuild_project_brief(&facade, user, workspace);
         }
         return (merged, 0);
     };
@@ -2565,6 +2668,7 @@ Se non c'è nulla da fare: {\"merges\":[],\"drops\":[]}.";
         }
     }
     rebuild_decisions_wiki(&facade, user, workspace);
+    rebuild_project_brief(&facade, user, workspace);
     (merged, dropped)
 }
 
@@ -7365,6 +7469,12 @@ salvare/esportare un file in una cartella, chiama save_artifact(file, destinatio
             &memory_project,
             CHAT_MEMORY_BUDGET_CHARS,
         ) {
+            Some(block) => format!("{system}\n\n{block}"),
+            None => system,
+        };
+        // Project BRIEF (always-on): goals + recent state, so "where this project is
+        // going" is present every turn — not just when the prompt happens to match.
+        let system = match project_brief_block(state) {
             Some(block) => format!("{system}\n\n{block}"),
             None => system,
         };
@@ -20370,6 +20480,11 @@ async fn project_graph_ensure(
         // git change-signal then work uniformly. Then (re)build the code graph.
         crate::sandbox::ensure_project_git(std::path::Path::new(&folder));
         build_project_graph(&st, &ws, &folder, subpath.as_deref());
+        // Refresh the project BRIEF (goals + recent state) from current memory, so the
+        // always-on injected briefing is fresh whenever the project is opened.
+        if let Ok(facade) = lock_memory_facade(&st) {
+            rebuild_project_brief(&facade, &gateway_memory_user_id(), &MemoryWorkspaceId::new(&ws));
+        }
     });
     Ok(Json(serde_json::json!({ "building": true })))
 }
