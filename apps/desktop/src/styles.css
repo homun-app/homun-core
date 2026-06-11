@@ -3125,6 +3125,26 @@ body.resizing-drawer {
   font-size: 13px;
 }
 
+/* Methodology indicator: a small pill above the composer showing which methodology is
+   steering the project (HomunCoder, etc.). */
+.methodology-bar {
+  display: flex;
+  justify-content: center;
+  padding: 4px 0 0;
+}
+.methodology-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--brand-strong);
+  background: var(--brand-soft);
+  border: 1px solid var(--brand-soft);
+  border-radius: var(--radius-pill);
+  padding: 3px 10px;
+}
+
 /* Goals manager (Workbench): define the project's objective. Mirrors the operational
    plan panel's visual language for consistency (same card, header, step rhythm). */
 .goals-manager {
@@ -7561,6 +7581,49 @@ body.resizing-drawer {
   background: var(--surface-hover, rgba(148, 163, 184, 0.2));
   border-radius: 999px;
   padding: 0 6px;
+}
+/* Enable/disable the whole skill group at once (toggle next to the group header). */
+.mdl-rail-group-row {
+  display: flex;
+  align-items: center;
+}
+.mdl-rail-group-row .mdl-rail-group.toggle {
+  width: auto;
+  flex: 1;
+}
+.skl-group-switch {
+  flex-shrink: 0;
+  width: 28px;
+  height: 16px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-muted);
+  position: relative;
+  cursor: pointer;
+  margin-right: var(--s2);
+  padding: 0;
+  transition: background 0.15s;
+}
+.skl-group-switch.on {
+  background: var(--brand);
+  border-color: var(--brand);
+}
+.skl-group-switch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.skl-group-switch-knob {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s;
+}
+.skl-group-switch.on .skl-group-switch-knob {
+  transform: translateX(12px);
 }
 .mdl-rail-item {
   display: flex;

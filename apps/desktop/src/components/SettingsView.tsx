@@ -2394,8 +2394,25 @@ function SkillsPane() {
   const [personalOpen, setPersonalOpen] = useState(true);
   const [homuncoderOpen, setHomuncoderOpen] = useState(false);
   const skills = resp?.skills ?? [];
-  // Group the methodology (CoderSteroids) skills under "HomunCoder" in the rail.
+  // Group the methodology skills under "HomunCoder" in the rail.
   const homuncoderSkills = skills.filter((s) => s.source === "homuncoder");
+  // Enable/disable the WHOLE HomunCoder group at once. Each call returns the full updated
+  // skills state; the last one reflects every change.
+  const toggleGroup = async (enabled: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      let last = resp;
+      for (const s of homuncoderSkills) {
+        if (s.enabled !== enabled) last = await coreBridge.setSkillEnabled(s.id, enabled);
+      }
+      if (last) setResp(last);
+    } catch (e) {
+      setError(`Aggiornamento gruppo non riuscito: ${(e as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
   const personalSkills = skills.filter((s) => s.source !== "homuncoder");
   const renderRailItem = (s: (typeof skills)[number]) => (
     <button
@@ -2429,15 +2446,31 @@ function SkillsPane() {
         {skills.length === 0 && <p className="mdl-rail-empty">Nessuna skill</p>}
         {homuncoderSkills.length > 0 && (
           <>
-            <button
-              type="button"
-              className="mdl-rail-group toggle"
-              onClick={() => setHomuncoderOpen((v) => !v)}
-            >
-              {homuncoderOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-              <span>HomunCoder</span>
-              <span className="mdl-rail-group-count">{homuncoderSkills.length}</span>
-            </button>
+            <div className="mdl-rail-group-row">
+              <button
+                type="button"
+                className="mdl-rail-group toggle"
+                onClick={() => setHomuncoderOpen((v) => !v)}
+              >
+                {homuncoderOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                <span>HomunCoder</span>
+                <span className="mdl-rail-group-count">{homuncoderSkills.length}</span>
+              </button>
+              <button
+                type="button"
+                className={`skl-group-switch ${homuncoderSkills.every((s) => s.enabled) ? "on" : "off"}`}
+                disabled={busy}
+                title={
+                  homuncoderSkills.every((s) => s.enabled)
+                    ? "Disabilita tutto il gruppo"
+                    : "Abilita tutto il gruppo"
+                }
+                aria-label="Abilita/disabilita gruppo HomunCoder"
+                onClick={() => void toggleGroup(!homuncoderSkills.every((s) => s.enabled))}
+              >
+                <span className="skl-group-switch-knob" />
+              </button>
+            </div>
             {homuncoderOpen && homuncoderSkills.map(renderRailItem)}
           </>
         )}
