@@ -8530,6 +8530,15 @@ salvare/esportare un file in una cartella, chiama save_artifact(file, destinatio
         .as_ref()
         .map(|c| c.perimeter.memory_scope == "contact_only")
         .unwrap_or(false);
+    // Finer-grained perimeter axes, independent of memory_scope. A contact opted into
+    // "personal" memory (NOT contact_only) can still have can_see_contacts/can_see_calendar
+    // = false; these are enforced HARD at dispatch below (not only in the prompt), so the
+    // address book / calendar can't be exfiltrated even when broad memory is allowed.
+    // No contact perimeter (self / in-app turn) → unrestricted.
+    let (can_see_contacts, can_see_calendar) = contact_ctx
+        .as_ref()
+        .map(|c| (c.perimeter.can_see_contacts, c.perimeter.can_see_calendar))
+        .unwrap_or((true, true));
     let system = if contact_only {
         let cx = contact_ctx.as_ref().expect("contact_only implies contact_ctx");
         let episodes = {
@@ -10384,7 +10393,11 @@ disponibili (per dati dal web usa il browser: browser_navigate sull'URL indicato
                         // contact on a channel) must NOT reach personal/Secret memory or the
                         // relationship graph. recall_memory is perimeter-blind by design, so we
                         // refuse it here — the contact's own conversation is already in context.
-                        if contact_only {
+                        // Also refused when can_see_contacts is off (even on a "personal"-scope
+                        // contact): recall traverses the relationship graph, which IS the address
+                        // book — perimeter-blind recall has no way to strip other people out, so
+                        // fail-closed is to block it entirely.
+                        if contact_only || !can_see_contacts {
                             "Memoria personale non accessibile in una conversazione con questo \
 contatto: usa solo i messaggi di questa chat. NON rivelare dati personali dell'utente o di terzi."
                                 .to_string()
@@ -10604,6 +10617,14 @@ una data incerta.",
                                 search_composio_catalog(&catalog_index, &intent, COMPOSIO_DISCOVERY_RESULTS)
                             {
                                 if read_only && !composio_tool_is_read(&slug) {
+                                    continue;
+                                }
+                                // PERIMETER: don't even surface calendar/contacts tools when the
+                                // matching axis is off (the dispatch refuses them anyway).
+                                if !can_see_calendar && tool_touches_calendar(&slug) {
+                                    continue;
+                                }
+                                if !can_see_contacts && tool_touches_contacts(&slug) {
                                     continue;
                                 }
                                 if loaded_tools.insert(slug.clone()) {
@@ -10990,6 +11011,21 @@ collegare i connettori suggeriti (skill/MCP/Composio). NON dire che hai già col
                         tokio::task::spawn_blocking(move || cancel_scheduled_task(&st, &task_id))
                             .await
                             .unwrap_or_else(|e| format!("Errore: {e}"))
+                    } else if !can_see_calendar && !name.is_empty() && tool_touches_calendar(name) {
+                        // PERIMETER (anti-exfiltration): the can_see_calendar axis is enforced
+                        // HARD here, independent of memory_scope — a "personal"-scope contact that
+                        // is NOT contact_only still can't pull the user's calendar. All builtins
+                        // are matched in earlier arms, so this only catches calendar connectors.
+                        "Il calendario dell'utente non è accessibile in questa conversazione. \
+Non rivelare impegni, appuntamenti o eventi."
+                            .to_string()
+                    } else if !can_see_contacts && !name.is_empty() && tool_touches_contacts(name) {
+                        // PERIMETER (anti-exfiltration): the can_see_contacts axis, enforced HARD
+                        // here too — block the user's address book (Google Contacts / People etc.)
+                        // even on a non-contact_only turn.
+                        "La rubrica dell'utente non è accessibile in questa conversazione. \
+Non rivelare altri contatti, persone o relazioni dell'utente."
+                            .to_string()
                     } else if contact_only && !name.is_empty() {
                         // PERIMETER (anti-exfiltration): a `contact_only` turn must not reach the
                         // user's connected services. All builtins are matched in earlier arms, so
@@ -17233,6 +17269,23 @@ fn composio_tool_is_read(slug: &str) -> bool {
     let has_write = tokens.iter().any(|t| WRITE_VERBS.contains(t));
     let has_read = tokens.iter().any(|t| READ_VERBS.contains(t));
     has_read && !has_write
+}
+
+/// Does this connector tool touch the user's CALENDAR? Used to enforce the
+/// `can_see_calendar` perimeter axis at dispatch. Matches Composio toolkits
+/// (GOOGLECALENDAR_*, OUTLOOK_CALENDAR_*, …) and any MCP tool whose name carries
+/// "calendar". Heuristic by design — builtins are matched by exact name earlier,
+/// so only connector tools ever reach this classifier.
+fn tool_touches_calendar(name: &str) -> bool {
+    name.to_ascii_uppercase().contains("CALENDAR")
+}
+
+/// Does this connector tool touch the user's ADDRESS BOOK / contacts? Used to
+/// enforce the `can_see_contacts` perimeter axis at dispatch (Google Contacts,
+/// the People API, Outlook contacts, …).
+fn tool_touches_contacts(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    upper.contains("CONTACT") || upper.contains("PEOPLE_API") || upper.contains("GOOGLE_PEOPLE")
 }
 
 /// Human-readable tool name from a Composio slug, e.g. GMAIL_SEND_EMAIL →
@@ -26582,6 +26635,8 @@ mod tests {
         capability_call_completed_outcome,
         collect_member_counts,
         composio_tool_is_read,
+        tool_touches_calendar,
+        tool_touches_contacts,
         resolve_active_model,
         rewrite_confirm_to_done,
         search_composio_catalog,
@@ -26623,6 +26678,23 @@ mod tests {
         assert!(jail_in_root(&root, "/etc/passwd").is_err());
         assert!(jail_in_root(&root, "a/../../b").is_err());
         assert!(jail_in_root(&root, "").is_err());
+    }
+
+    #[test]
+    fn perimeter_classifies_calendar_and_contacts_connectors() {
+        // Calendar connectors (Composio + MCP) are recognized; unrelated tools are not.
+        assert!(tool_touches_calendar("GOOGLECALENDAR_EVENTS_LIST"));
+        assert!(tool_touches_calendar("OUTLOOK_CALENDAR_GET_EVENT"));
+        assert!(tool_touches_calendar("mcp__gcal__calendar_search"));
+        assert!(!tool_touches_calendar("GMAIL_FETCH_EMAILS"));
+        assert!(!tool_touches_calendar("recall_memory"));
+
+        // Address-book connectors are recognized; calendar/mail are not "contacts".
+        assert!(tool_touches_contacts("GOOGLE_CONTACTS_SEARCH_PEOPLE"));
+        assert!(tool_touches_contacts("OUTLOOK_GET_CONTACT"));
+        assert!(tool_touches_contacts("GOOGLE_PEOPLE_LIST"));
+        assert!(!tool_touches_contacts("GOOGLECALENDAR_EVENTS_LIST"));
+        assert!(!tool_touches_contacts("GMAIL_FETCH_EMAILS"));
     }
 
     #[test]
