@@ -242,6 +242,27 @@ Stato attuale:
   autonomo;
 - manca collegare browser/shell live come executor reali degli step pianificati.
 
+### Automazioni (trigger → azione agentica)
+
+Vedi ADR 0012. Modello di prima classe sopra il Task Runtime: la REGOLA (`Automation`) è
+distinta dal RUN (`TaskRecord`).
+
+Responsabilita':
+
+- una regola = trigger (orario o evento) → un prompt eseguito come run agentico;
+- trigger orario su ricorrenza flessibile (`dow@giorni@orari`, intervalli, jiff/DST);
+- trigger evento: messaggio canale (WhatsApp/Telegram) e `ConnectorPoll` GENERICO su
+  qualsiasi connettore Composio/MCP (poller in background + watermark anti-doppione);
+- i run possono AGIRE proponendo conferma (`send_message` e scritture → card di conferma);
+- creabili da chat (`create_automation`/`schedule_task`) e da UI (`AutomationsView` + picker
+  sorgente raggruppato per servizio connesso).
+
+Stato attuale:
+
+- modello + store + recurrence + poller + UI implementati e verificati (A–G2);
+- pendenti: fire reale ConnectorPoll su connettore vivo (lato utente), salto-conferma per
+  automazioni autonome, trigger email/file/memoria (forward-declared).
+
 ### Resource Governor
 
 Responsabilita':
@@ -276,7 +297,10 @@ Responsabilita':
 - descrivere provider, tool, grants, privacy domains, sensitivity e resource
   hints;
 - offrire al Brain tool card compatte;
-- collegare capability a task durevoli tramite bridge.
+- collegare capability a task durevoli tramite bridge;
+- routing dei tool con pattern Tool Search (ADR 0013): core piccolo sempre caricato +
+  resto scoperto via `find_capability` (BM25); connessione Composio schema-driven (legge
+  gli auth reali del toolkit, non li indovina).
 
 Provider previsti:
 
