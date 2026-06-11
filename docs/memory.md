@@ -126,7 +126,7 @@ modificare codice/documenti → `recall_memory`; **dopo** una scelta non banale 
 
 ## HomunCoder (metodologia di coding)
 
-- Le skill CoderSteroids (evidence-first) sono installabili in Homun via
+- Le skill HomunCoder (evidence-first) sono installabili in Homun via
   `scripts/sync-homuncoder-skills.sh` (stesso formato SKILL.md). L'agente le scopre
   (L1) e le carica con `use_skill`. Le abitudini centrali sono già native qui:
   memoria del perché, `update_plan`, recall-before-edit, verifica eseguendo.
