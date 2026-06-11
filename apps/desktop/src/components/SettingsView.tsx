@@ -1977,6 +1977,26 @@ function ConnectModal({
                 }}
               />
             ))}
+
+            {/* Custom OAuth: the user's own OAuth app MUST whitelist Composio's callback,
+                otherwise the consent step fails. This is the usual reason a custom-OAuth
+                connect "does nothing". */}
+            {!legacy && active?.mode === "OAUTH2" && !active.managed && (
+              <p className="cmp-modal-callback">
+                Nell'app OAuth di {kit.name} (pannello sviluppatore) aggiungi questo{" "}
+                <strong>Redirect URI</strong>, altrimenti il consenso fallisce:
+                <code
+                  onClick={() =>
+                    void navigator.clipboard?.writeText(
+                      "https://backend.composio.dev/api/v3.1/toolkits/auth/callback",
+                    )
+                  }
+                  title="Clic per copiare"
+                >
+                  https://backend.composio.dev/api/v3.1/toolkits/auth/callback
+                </code>
+              </p>
+            )}
           </>
         )}
 
