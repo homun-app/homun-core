@@ -615,6 +615,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/connect/mark", post(connect_mark))
         .route("/api/capabilities/composio/connect", post(connect_composio))
         .route("/api/capabilities/composio/toolkits", get(composio_toolkits))
+        .route(
+            "/api/capabilities/composio/toolkits/{slug}/auth",
+            get(composio_toolkit_auth),
+        )
         .route("/api/capabilities/composio/link", post(composio_link))
         .route("/api/capabilities/composio/connections", get(composio_connections))
         .route("/api/capabilities/composio/connections/{id}", delete(composio_disconnect))
@@ -16878,9 +16882,22 @@ fn composio_toolkits_blocking(state: &AppState) -> Result<ComposioToolkitsRespon
 #[derive(Debug, Deserialize)]
 struct ComposioLinkRequest {
     toolkit_slug: String,
-    /// When present, run the custom API-key flow instead of managed OAuth.
+    /// Legacy: when present, run the custom API-key flow instead of managed OAuth.
     #[serde(default)]
     api_key: Option<String>,
+    /// Schema-driven path: the chosen auth scheme (OAUTH2 | API_KEY | …) from the toolkit's
+    /// real auth_config_details. When set, supersedes `api_key`.
+    #[serde(default)]
+    scheme: Option<String>,
+    /// Use Composio's managed credentials for this scheme (no custom client_id/secret).
+    #[serde(default)]
+    managed: Option<bool>,
+    /// Fields for auth_config CREATION (e.g. OAuth client_id/client_secret).
+    #[serde(default)]
+    credentials: Option<serde_json::Value>,
+    /// Fields for connection INITIATION (e.g. an API key value).
+    #[serde(default)]
+    initiation: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -18348,6 +18365,123 @@ async fn mcp_execute(
     }
 }
 
+/// Parse one field-set (`auth_config_creation` or `connected_account_initiation`) of a
+/// Composio scheme into UI field descriptors. Handles both snake_case and camelCase keys.
+fn parse_composio_fields(fields: Option<&serde_json::Value>, section: &str) -> Vec<serde_json::Value> {
+    let Some(sect) = fields.and_then(|f| f.get(section)) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (req_key, required) in [("required", true), ("optional", false)] {
+        let Some(arr) = sect.get(req_key).and_then(serde_json::Value::as_array) else {
+            continue;
+        };
+        for f in arr {
+            let Some(name) = f.get("name").and_then(serde_json::Value::as_str) else {
+                continue;
+            };
+            let label = f
+                .get("displayName")
+                .or_else(|| f.get("display_name"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(name)
+                .to_string();
+            let ftype = f
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("string")
+                .to_ascii_lowercase();
+            let lname = name.to_ascii_lowercase();
+            let secret = ftype.contains("secret")
+                || ftype.contains("password")
+                || lname.contains("secret")
+                || lname.contains("password")
+                || lname.ends_with("_key")
+                || lname == "api_key";
+            out.push(serde_json::json!({
+                "name": name,
+                "label": label,
+                "required": required,
+                "secret": secret,
+            }));
+        }
+    }
+    out
+}
+
+/// GET /api/capabilities/composio/toolkits/{slug}/auth — the REAL auth schemes Composio
+/// declares for a toolkit, with the fields the user must provide. Replaces the old guess
+/// (everything non-managed → "API key"): now Spotify correctly surfaces OAUTH2 + client_id
+/// + client_secret, and any toolkit gets the form Composio actually requires.
+async fn composio_toolkit_auth(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let s = slug.clone();
+    let detail = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, GatewayError> {
+        let transport = composio_transport_for(&state)?;
+        transport
+            .request("GET", &format!("/toolkits/{s}"), None)
+            .map_err(GatewayError::capability)
+    })
+    .await
+    .map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "composio_toolkit_auth_join",
+        message: error.to_string(),
+    })??;
+
+    let managed: Vec<String> = detail
+        .get("composio_managed_auth_schemes")
+        .and_then(serde_json::Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(|s| s.to_ascii_uppercase()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut schemes = Vec::new();
+    if let Some(details) = detail.get("auth_config_details").and_then(serde_json::Value::as_array) {
+        for d in details {
+            let mode = d
+                .get("mode")
+                .or_else(|| d.get("name"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_ascii_uppercase();
+            if mode.is_empty() || mode == "NO_AUTH" {
+                continue;
+            }
+            let fields = d.get("fields");
+            schemes.push(serde_json::json!({
+                "mode": mode,
+                "managed": managed.iter().any(|m| *m == mode),
+                "creation_fields": parse_composio_fields(fields, "auth_config_creation"),
+                "initiation_fields": parse_composio_fields(fields, "connected_account_initiation"),
+            }));
+        }
+    }
+    let no_auth = detail
+        .get("no_auth")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+        || detail
+            .get("auth_config_details")
+            .and_then(serde_json::Value::as_array)
+            .map(|a| a.iter().any(|d| {
+                d.get("mode").or_else(|| d.get("name")).and_then(serde_json::Value::as_str)
+                    == Some("NO_AUTH")
+            }))
+            .unwrap_or(false);
+
+    Ok(Json(serde_json::json!({
+        "slug": slug,
+        "no_auth": no_auth,
+        "schemes": schemes,
+    })))
+}
+
 /// Resolves a Composio-managed auth_config id for a toolkit, reusing an existing
 /// one or creating a managed OAuth2 config. (Grounded on the real v3 shapes.)
 /// Resolves (reusing, else creating) an auth config for `toolkit_slug`. With
@@ -18416,28 +18550,117 @@ fn composio_auth_config_id(
         })
 }
 
-/// Links a toolkit. With an `api_key` we run Composio's custom API-key flow
-/// (create a `use_custom_auth` config, then initiate with the key in
-/// `config.val`) — the connection is active immediately, no redirect. Without a
-/// key we run the managed-OAuth flow, which returns a `redirect_url` to open.
+/// Resolves (reusing, else creating) an auth_config for an EXPLICIT scheme — the
+/// schema-driven path. Managed → `use_composio_managed_auth`; custom → `use_custom_auth`
+/// with the chosen `auth_scheme` and the user's creation `credentials` (e.g. OAuth
+/// client_id/client_secret). Reuse matches on the scheme so we don't proliferate configs.
+fn composio_auth_config_resolve(
+    transport: &GatewayComposioTransport,
+    toolkit_slug: &str,
+    scheme: &str,
+    managed: bool,
+    credentials: &serde_json::Value,
+) -> Result<String, GatewayError> {
+    let extract_id = |item: &serde_json::Value| {
+        item.get("id")
+            .or_else(|| item.get("auth_config").and_then(|ac| ac.get("id")))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+    };
+    let existing = transport
+        .request("GET", &format!("/auth_configs?toolkit_slug={toolkit_slug}"), None)
+        .map_err(GatewayError::capability)?;
+    let reusable = existing
+        .get("items")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|items| {
+            items.iter().find(|item| {
+                let item_scheme = item
+                    .get("auth_scheme")
+                    .or_else(|| item.get("authScheme"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .to_ascii_uppercase();
+                let item_managed = item
+                    .get("is_composio_managed")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+                item_scheme == scheme && item_managed == managed
+            })
+        })
+        .and_then(extract_id);
+    if let Some(id) = reusable {
+        return Ok(id);
+    }
+    let auth_config = if managed {
+        serde_json::json!({ "type": "use_composio_managed_auth", "auth_scheme": scheme })
+    } else {
+        serde_json::json!({
+            "type": "use_custom_auth",
+            "auth_scheme": scheme,
+            "credentials": credentials,
+        })
+    };
+    let created = transport
+        .request(
+            "POST",
+            "/auth_configs",
+            Some(serde_json::json!({ "toolkit": { "slug": toolkit_slug }, "auth_config": auth_config })),
+        )
+        .map_err(GatewayError::capability)?;
+    created
+        .get("auth_config")
+        .and_then(|ac| ac.get("id"))
+        .or_else(|| created.get("id"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "composio_auth_config_failed",
+            message: "Composio auth_config response missing id".to_string(),
+        })
+}
+
+/// Links a toolkit. Schema-driven path (a `scheme` is given): create/reuse the auth_config for
+/// that scheme (custom credentials for OAuth2 client_id/secret, or managed), then initiate —
+/// OAuth flows return a `redirect_url`; key/secret flows pass `initiation` in `config.val` and
+/// connect immediately. Legacy path (only `api_key`, or nothing) preserved for back-compat.
 fn composio_link_blocking(
     state: &AppState,
     toolkit_slug: &str,
-    api_key: Option<String>,
+    req: ComposioLinkRequest,
 ) -> Result<ComposioLinkResponse, GatewayError> {
     let transport = composio_transport_for(state)?;
-    let use_api_key = api_key.as_ref().is_some_and(|k| !k.trim().is_empty());
-    let auth_config_id = composio_auth_config_id(&transport, toolkit_slug, use_api_key)?;
+
+    let (auth_config_id, init_config) = if let Some(scheme) =
+        req.scheme.as_deref().map(str::to_ascii_uppercase).filter(|s| !s.is_empty())
+    {
+        // Schema-driven.
+        let managed = req.managed.unwrap_or(false);
+        let credentials = req.credentials.clone().unwrap_or_else(|| serde_json::json!({}));
+        let id = composio_auth_config_resolve(&transport, toolkit_slug, &scheme, managed, &credentials)?;
+        let init = req.initiation.clone().unwrap_or_else(|| serde_json::json!({}));
+        let has_init = init.as_object().map(|o| !o.is_empty()).unwrap_or(false);
+        let cfg = has_init.then(|| serde_json::json!({ "auth_scheme": scheme, "val": init }));
+        (id, cfg)
+    } else {
+        // Legacy: api_key custom flow, else managed OAuth.
+        let use_api_key = req.api_key.as_ref().is_some_and(|k| !k.trim().is_empty());
+        let id = composio_auth_config_id(&transport, toolkit_slug, use_api_key)?;
+        let cfg = req
+            .api_key
+            .as_ref()
+            .filter(|k| !k.trim().is_empty())
+            .map(|key| serde_json::json!({ "auth_scheme": "API_KEY", "val": { "api_key": key.trim() } }));
+        (id, cfg)
+    };
 
     let mut body = serde_json::json!({
         "auth_config_id": auth_config_id,
         "user_id": composio_entity_id(),
     });
-    if let Some(key) = api_key.filter(|k| !k.trim().is_empty()) {
-        body["config"] = serde_json::json!({
-            "auth_scheme": "API_KEY",
-            "val": { "api_key": key.trim() },
-        });
+    if let Some(cfg) = init_config {
+        body["config"] = cfg;
     }
 
     let link = transport
@@ -18466,7 +18689,8 @@ async fn composio_link(
     Json(request): Json<ComposioLinkRequest>,
 ) -> Result<Json<ComposioLinkResponse>, GatewayError> {
     tokio::task::spawn_blocking(move || {
-        composio_link_blocking(&state, &request.toolkit_slug, request.api_key)
+        let slug = request.toolkit_slug.clone();
+        composio_link_blocking(&state, &slug, request)
     })
         .await
         .map_err(|error| GatewayError {

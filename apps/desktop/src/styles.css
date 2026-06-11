@@ -8919,3 +8919,12 @@ body.resizing-drawer {
 .auto-src-item:hover { background: var(--surface-muted); }
 .auto-src-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .auto-src-empty { font-size: 13px; color: var(--muted); padding: 10px 8px; }
+
+/* Connettori: toggle OAuth gestito vs credenziali proprie nel modale di connessione */
+.cmp-auth-toggle { display: flex; gap: 6px; margin: 4px 0 10px; }
+.cmp-auth-toggle button {
+  font: inherit; font-size: 13px; flex: 1; padding: 7px 10px; cursor: pointer;
+  border: 1px solid var(--line); border-radius: var(--radius-control);
+  background: var(--surface); color: var(--muted);
+}
+.cmp-auth-toggle button.active { background: var(--surface-muted); color: var(--text); border-color: var(--line-strong); }
