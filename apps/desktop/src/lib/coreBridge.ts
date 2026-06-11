@@ -797,6 +797,81 @@ async function electronRejectHomunAutomation(reference: string): Promise<void> {
   }).catch(() => undefined);
 }
 
+// ── First-class automations (the trigger→action rules) ────────────────────────
+export type AutomationEventJson =
+  | { kind: "channel_message"; channel?: string | null; from?: string | null }
+  | { kind: "email_received"; from?: string | null }
+  | { kind: "file_changed"; path: string }
+  | { kind: "memory_updated"; topic?: string | null };
+
+export type AutomationTriggerJson =
+  | { type: "schedule"; recurrence: string; tz?: string | null }
+  | { type: "event"; event: AutomationEventJson };
+
+export type ManagedAutomation = {
+  id: string;
+  title: string;
+  trigger: AutomationTriggerJson;
+  trigger_summary: string;
+  prompt: string;
+  approval: "confirm" | "autonomous";
+  enabled: boolean;
+  source: "chat" | "mining" | "manual";
+  task_id: string | null;
+  created_at: number;
+  updated_at: number;
+  last_fired_at: number | null;
+  next_run: number | null;
+};
+
+export type AutomationCreateInput = {
+  title: string;
+  trigger: AutomationTriggerJson;
+  prompt: string;
+  approval?: "confirm" | "autonomous";
+  source?: "chat" | "mining" | "manual";
+};
+
+async function electronAutomations(): Promise<ManagedAutomation[]> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/automations`, {
+    headers: gatewayHeaders(),
+  });
+  if (!response.ok) return [];
+  const body = (await response.json()) as { automations: ManagedAutomation[] };
+  return body.automations ?? [];
+}
+
+async function electronCreateAutomation(
+  input: AutomationCreateInput,
+): Promise<ManagedAutomation> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/automations`, {
+    method: "POST",
+    headers: { ...gatewayHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(`create automation HTTP ${response.status} ${detail}`);
+  }
+  return (await response.json()) as ManagedAutomation;
+}
+
+async function electronToggleAutomation(id: string): Promise<ManagedAutomation> {
+  const response = await fetch(
+    `${DESKTOP_GATEWAY_URL}/api/automations/${encodeURIComponent(id)}/toggle`,
+    { method: "POST", headers: gatewayHeaders() },
+  );
+  if (!response.ok) throw new Error(`toggle automation HTTP ${response.status}`);
+  return (await response.json()) as ManagedAutomation;
+}
+
+async function electronDeleteAutomation(id: string): Promise<void> {
+  await fetch(`${DESKTOP_GATEWAY_URL}/api/automations/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: gatewayHeaders(),
+  }).catch(() => undefined);
+}
+
 async function electronConsolidateMemory(
   workspace?: string,
 ): Promise<{ merged: number; dropped: number }> {
@@ -1628,6 +1703,10 @@ export const coreBridge = {
   dismissHomunCuriosity: (id: number) => electronDismissHomunCuriosity(id),
   homunAutomations: () => electronHomunAutomations(),
   mineHomunAutomations: () => electronMineHomunAutomations(),
+  automations: () => electronAutomations(),
+  createAutomation: (input: AutomationCreateInput) => electronCreateAutomation(input),
+  toggleAutomation: (id: string) => electronToggleAutomation(id),
+  deleteAutomation: (id: string) => electronDeleteAutomation(id),
   approveHomunAutomation: (reference: string) => electronApproveHomunAutomation(reference),
   rejectHomunAutomation: (reference: string) => electronRejectHomunAutomation(reference),
   setChatThreadPinned: (threadId: string, pinned: boolean) =>
