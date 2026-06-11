@@ -3070,15 +3070,39 @@ function graphStyleKey(node: { kind: string; entity_type?: string }): string {
  * the gateway (which regenerates the injected project brief) then refetch. */
 function GoalsPanel({
   data,
+  threadId,
   onRefresh,
 }: {
   data: ProjectGoalsData;
+  threadId: string;
   onRefresh: () => void;
 }) {
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [newGoal, setNewGoal] = useState("");
   const [busy, setBusy] = useState(false);
+  // Assistant-proposed objectives (north star), editable before saving.
+  const [drafts, setDrafts] = useState<string[] | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
 
+  const add = (text: string) => {
+    const clean = text.trim();
+    if (!clean) return;
+    setBusy(true);
+    void coreBridge
+      .addGoal(data.workspace, clean)
+      .then(() => {
+        setNewGoal("");
+        onRefresh();
+      })
+      .finally(() => setBusy(false));
+  };
+  const suggest = () => {
+    setSuggesting(true);
+    void coreBridge
+      .suggestGoals(threadId)
+      .then((objs) => setDrafts(objs))
+      .finally(() => setSuggesting(false));
+  };
   const promote = () => {
     if (sel.size === 0) return;
     setBusy(true);
@@ -3090,22 +3114,14 @@ function GoalsPanel({
       })
       .finally(() => setBusy(false));
   };
-  const add = () => {
-    const text = newGoal.trim();
-    if (!text) return;
-    setBusy(true);
-    void coreBridge
-      .addGoal(data.workspace, text)
-      .then(() => {
-        setNewGoal("");
-        onRefresh();
-      })
-      .finally(() => setBusy(false));
-  };
 
   return (
     <div className="goals-manager">
-      <div className="goals-head">🎯 Obiettivi del progetto</div>
+      <div className="goals-head">🎯 Obiettivo del progetto</div>
+      <p className="muted goals-hint">
+        La stella polare: dove deve arrivare il progetto, come un modulo deve funzionare.
+        È iniettato a ogni turno per non perdere il focus — diverso dalle decisioni (cosa è già stato scelto).
+      </p>
       {data.goals.length > 0 ? (
         <ul className="goals-list">
           {data.goals.map((g) => (
@@ -3113,24 +3129,55 @@ function GoalsPanel({
           ))}
         </ul>
       ) : (
-        <p className="muted">Nessun obiettivo ancora. Flagga una decisione o aggiungine uno.</p>
+        <p className="muted">Nessun obiettivo ancora — definiscine uno o fattelo proporre.</p>
       )}
       <div className="goals-add">
         <input
           type="text"
-          placeholder="Aggiungi un obiettivo…"
+          placeholder="Scrivi un obiettivo (la direzione)…"
           value={newGoal}
           onChange={(e) => setNewGoal(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && add()}
+          onKeyDown={(e) => e.key === "Enter" && add(newGoal)}
           disabled={busy}
         />
-        <button onClick={add} disabled={busy || !newGoal.trim()}>
+        <button onClick={() => add(newGoal)} disabled={busy || !newGoal.trim()}>
           Aggiungi
         </button>
       </div>
+      <button className="goals-suggest" onClick={suggest} disabled={suggesting || busy}>
+        ✨ {suggesting ? "Sto proponendo…" : "Proponi obiettivi dal progetto"}
+      </button>
+      {drafts && (
+        <div className="goals-drafts">
+          {drafts.length === 0 ? (
+            <p className="muted">Nessuna proposta — prova a scriverne uno tu.</p>
+          ) : (
+            <>
+              <p className="muted">Proposte (modificabili) — aggiungi quelle giuste:</p>
+              {drafts.map((d, i) => (
+                <div key={i} className="goals-draft">
+                  <input
+                    type="text"
+                    value={d}
+                    onChange={(e) => {
+                      const next = [...drafts];
+                      next[i] = e.target.value;
+                      setDrafts(next);
+                    }}
+                    disabled={busy}
+                  />
+                  <button onClick={() => add(d)} disabled={busy || !d.trim()}>
+                    Aggiungi
+                  </button>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      )}
       {data.decisions.length > 0 && (
         <details className="goals-promote">
-          <summary>Promuovi una decisione a obiettivo ({data.decisions.length})</summary>
+          <summary>Oppure eleva una decisione direzionale a obiettivo ({data.decisions.length})</summary>
           <div className="goals-promote-list">
             {data.decisions.slice(0, 50).map((d) => (
               <label key={d.reference} className="goals-promote-item">
@@ -3149,7 +3196,7 @@ function GoalsPanel({
             ))}
           </div>
           <button onClick={promote} disabled={busy || sel.size === 0}>
-            Promuovi {sel.size > 0 ? `(${sel.size})` : ""} a obiettivo
+            Eleva {sel.size > 0 ? `(${sel.size})` : ""} a obiettivo
           </button>
         </details>
       )}
@@ -4046,7 +4093,7 @@ function Workbench({
           ))}
         {tab === "memoria" && <MemoryGraphPanel threadId={threadId} />}
         {tab === "goals" && goalsData && (
-          <GoalsPanel data={goalsData} onRefresh={refreshGoals} />
+          <GoalsPanel data={goalsData} threadId={threadId} onRefresh={refreshGoals} />
         )}
         {tab === "activity" && (
           <div className="workbench-files">
