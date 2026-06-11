@@ -482,6 +482,17 @@ impl MemoryFacade {
             .repoint_relations(from_ref, to_ref, user_id, workspace_id)?)
     }
 
+    /// Change a memory's type (e.g. promote a decision to a goal). User-driven, no LLM.
+    pub fn set_memory_type(
+        &self,
+        reference: &MemoryRef,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        new_type: &str,
+    ) -> MemoryResult<()> {
+        Ok(self.store.set_memory_type(reference, user_id, workspace_id, new_type)?)
+    }
+
     /// Drop a scope's imported code-graph (entities/relations source="graphify"),
     /// before a re-import (idempotent project-graph rebuild).
     pub fn clear_graphify(&self, user_id: &UserId, workspace_id: &WorkspaceId) -> MemoryResult<()> {

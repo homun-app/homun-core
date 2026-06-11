@@ -460,6 +460,26 @@ impl SQLiteMemoryStore {
         Ok(())
     }
 
+    /// Change a memory's type in place — e.g. promote a `decision` to `goal` when the
+    /// user flags it as an objective (the LLM-free, language-agnostic path). Direct
+    /// column update; the structured row stays canonical.
+    pub fn set_memory_type(
+        &self,
+        reference: &MemoryRef,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        new_type: &str,
+    ) -> Result<(), String> {
+        self.conn
+            .execute(
+                "update memories set memory_type = ?1, updated_at = current_timestamp \
+                 where ref = ?2 and user_id = ?3 and workspace_id = ?4",
+                params![new_type, reference.to_string(), user_id.as_str(), workspace_id.as_str()],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
     /// Drop all imported code-graph data for a scope (entities + relations tagged
     /// `metadata.source = "graphify"`). Called before a re-import so a rebuilt project
     /// graph replaces the old one instead of accumulating. Derived data → hard delete.
