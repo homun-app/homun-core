@@ -1,4 +1,6 @@
 import {
+  Activity,
+  AlertTriangle,
   Boxes,
   Check,
   ChevronDown,
@@ -51,6 +53,7 @@ import {
   type CatalogPreview,
   type CatalogSkill,
   type ChannelIdentity,
+  type ConnectorToolRun,
   type SkillCatalogResponse,
   type RoleView,
   type RoutingDecision,
@@ -1438,6 +1441,18 @@ function ConnectorsPane() {
           </span>
           <span className="mdl-rail-name">Aggiungi manuale</span>
         </button>
+
+        <div className="mdl-rail-group">Diagnostica</div>
+        <button
+          type="button"
+          className={`mdl-rail-item ${selected === "activity" ? "active" : ""}`}
+          onClick={() => pick("activity")}
+        >
+          <span className="conn-avatar">
+            <Activity size={14} />
+          </span>
+          <span className="mdl-rail-name">Attività</span>
+        </button>
       </aside>
 
       <section className="mdl-detail">
@@ -1469,12 +1484,89 @@ function ConnectorsPane() {
             onDisconnected={() => pick("composio")}
           />
         )}
+        {selected === "activity" && <ConnectorActivityDetail />}
         {note && (
           <p className="set-hint" style={{ marginTop: "var(--s4)" }}>
             {note}
           </p>
         )}
       </section>
+    </div>
+  );
+}
+
+// Recent connector tool executions — the audit half of roadmap #6. Shows what the
+// assistant actually ran (Composio/MCP), with a failure category so a broken
+// connector is visible at a glance (auth → reconnect, rate_limit → wait, …).
+const RUN_ERROR_LABEL: Record<string, string> = {
+  auth: "autenticazione",
+  rate_limit: "rate limit",
+  forbidden: "permessi",
+  unavailable: "non raggiungibile",
+  other: "errore",
+};
+
+function runRelTime(ts: number): string {
+  const secs = Math.max(0, Math.floor(Date.now() / 1000 - ts));
+  if (secs < 60) return "ora";
+  if (secs < 3600) return `${Math.floor(secs / 60)} min fa`;
+  if (secs < 86400) return `${Math.floor(secs / 3600)} h fa`;
+  return `${Math.floor(secs / 86400)} g fa`;
+}
+
+function ConnectorActivityDetail() {
+  const [runs, setRuns] = useState<ConnectorToolRun[] | null>(null);
+  const load = () => {
+    coreBridge
+      .toolRuns(100)
+      .then(setRuns)
+      .catch(() => setRuns([]));
+  };
+  useEffect(() => {
+    load();
+  }, []);
+
+  return (
+    <div className="conn-activity">
+      <div className="conn-activity-head">
+        <div>
+          <h3 className="conn-activity-title">Attività dei connettori</h3>
+          <p className="set-hint" style={{ margin: 0 }}>
+            Ultime esecuzioni degli strumenti collegati (Composio e MCP) nelle chat.
+          </p>
+        </div>
+        <button type="button" className="set-btn" onClick={load}>
+          Aggiorna
+        </button>
+      </div>
+      {runs === null ? (
+        <p className="set-hint">Carico…</p>
+      ) : runs.length === 0 ? (
+        <p className="set-hint">Ancora nessuna esecuzione registrata.</p>
+      ) : (
+        <div className="tool-runs">
+          {runs.map((r, i) => (
+            <div className={`tool-run ${r.ok ? "ok" : "fail"}`} key={`${r.ts}-${i}`}>
+              <span className="tool-run-icon" title={r.ok ? "Riuscito" : "Fallito"}>
+                {r.ok ? <Check size={13} /> : <AlertTriangle size={13} />}
+              </span>
+              <span className="tool-run-tool" title={r.tool}>
+                {r.tool}
+              </span>
+              <span className="mdl-tag tool-run-kind">{r.kind}</span>
+              {!r.ok && r.error_kind && (
+                <span className="tool-run-err">
+                  {RUN_ERROR_LABEL[r.error_kind] ?? r.error_kind}
+                </span>
+              )}
+              {r.duration_ms != null && (
+                <span className="tool-run-dur">{r.duration_ms} ms</span>
+              )}
+              <span className="tool-run-time">{runRelTime(r.ts)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

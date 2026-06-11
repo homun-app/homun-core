@@ -504,8 +504,14 @@ Verso la prima release:
    il nuovo utente non parte da schermate vuote.
 5. **Skill: gestione.** Install dal marketplace fluido, rilevamento update, override
    security consapevole (oggi blocco opaco).
-6. **Status connettori + audit.** Dashboard stato (Composio/MCP attivi, tool count,
-   account collegati) + log esecuzioni tool.
+6. **Status connettori + audit.** FATTO (2026-06-12, `67e8cc1`/Fase 2). Lo **stato**
+   (account Composio ACTIVE/EXPIRED + rimozione, server MCP + tool count) era già in
+   Impostazioni → Connettori. Aggiunto il **log esecuzioni tool**: tabella `tool_runs`
+   (chat_store, append-only, pruned ~1000) scritta al dispatch dei tool connettori
+   (Composio + MCP) con tool/kind/ok/error_kind/durata/thread; endpoint
+   `GET /api/tools/runs`; pannello **Connettori → Attività** (esiti ✓/✗, categoria
+   errore, durata, tempo relativo, refresh). RESTA (nice-to-have): log anche dei tool
+   builtin/browser; filtri per connettore.
 7. **Hardening release.** Packaging, retention/GC degli store, export/delete.
 
 DOPO la prima release (ADR 0011): esecutore addon fatturazione end-to-end +

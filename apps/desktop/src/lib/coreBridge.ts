@@ -1551,6 +1551,28 @@ async function electronComposioConnections(): Promise<ComposioConnection[]> {
   return payload.connections ?? [];
 }
 
+export interface ConnectorToolRun {
+  ts: number;
+  thread_id: string | null;
+  tool: string;
+  kind: string; // "composio" | "mcp"
+  ok: boolean;
+  error_kind: string | null; // auth | rate_limit | forbidden | unavailable | other
+  duration_ms: number | null;
+  summary: string | null;
+}
+
+async function electronToolRuns(limit = 50): Promise<ConnectorToolRun[]> {
+  try {
+    const payload = await gatewayGetJson<{ runs: ConnectorToolRun[] }>(
+      `/api/tools/runs?limit=${limit}`,
+    );
+    return payload.runs ?? [];
+  } catch {
+    return [];
+  }
+}
+
 async function electronComposioDisconnect(id: string): Promise<void> {
   const response = await fetch(
     `${DESKTOP_GATEWAY_URL}/api/capabilities/composio/connections/${encodeURIComponent(id)}`,
@@ -1754,6 +1776,7 @@ export const coreBridge = {
   composioLink: (toolkitSlug: string, input?: ComposioLinkInput) =>
     electronComposioLink(toolkitSlug, input),
   composioConnections: () => electronComposioConnections(),
+  toolRuns: (limit?: number) => electronToolRuns(limit),
   composioDisconnect: (id: string) => electronComposioDisconnect(id),
   composioExecute: (
     tool: string,
