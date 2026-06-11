@@ -217,10 +217,6 @@ export function ChatView({
   // the Obiettivi compose when promoting a chat message to a goal.
   const [threadIsProject, setThreadIsProject] = useState(false);
   const [goalSeed, setGoalSeed] = useState<string | null>(null);
-  // Active methodologies in this (project) chat — methodology-agnostic: any installed
-  // skill GROUP (by source) that is enabled. Shown as a visible badge so it's clear which
-  // methodology is steering the work (HomunCoder, and any future one like Superpowers).
-  const [methodologies, setMethodologies] = useState<string[]>([]);
   const [followUps, setFollowUps] = useState<string[]>([]);
   const [followUpsFor, setFollowUpsFor] = useState<string | null>(null);
   const titledThreadsRef = useRef<Set<string>>(new Set());
@@ -987,31 +983,6 @@ export function ChatView({
       cancelled = true;
     };
   }, [thread.threadId]);
-
-  // Which methodologies are active here (project + enabled skill groups). Generic: a
-  // source→label map, so installing another methodology (e.g. Superpowers) shows up too.
-  useEffect(() => {
-    if (!threadIsProject) {
-      setMethodologies([]);
-      return;
-    }
-    let cancelled = false;
-    const LABELS: Record<string, string> = { homuncoder: "HomunCoder", superpowers: "Superpowers" };
-    void coreBridge.skills().then((resp) => {
-      if (cancelled) return;
-      const active = Array.from(
-        new Set(
-          (resp?.skills ?? [])
-            .filter((s) => s.enabled && s.source && LABELS[s.source])
-            .map((s) => LABELS[s.source as string]),
-        ),
-      );
-      setMethodologies(active);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [threadIsProject]);
 
   // Promote a chat message to a project objective: hand the text off to the Obiettivi
   // panel's compose (open Workbench → Obiettivi tab, pre-filled) so the user trims and
@@ -1865,15 +1836,6 @@ export function ChatView({
       />
 
       <ChatComputerPanel />
-
-      {methodologies.length > 0 && (
-        <div className="methodology-bar" title="Metodologia attiva in questo progetto">
-          <span className="methodology-pill">
-            <Sparkles size={12} />
-            {methodologies.join(" · ")}
-          </span>
-        </div>
-      )}
 
       <Composer
         disabled={promptSubmitting}

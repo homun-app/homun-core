@@ -7476,9 +7476,10 @@ calendario dell'utente.",
         let methodology = if is_project && enabled_skills.iter().any(|(id, _, _)| homuncoder.contains(id)) {
             "\nMETODOLOGIA (HomunCoder) — per il lavoro di SVILUPPO segui le abitudini evidence-first: \
 pianifica con update_plan, RICORDA/registra le decisioni col loro perché, e VERIFICA eseguendo \
-(build/test/lint) prima di dire \"fatto\". Carica con use_skill la skill di metodologia adatta \
-(roadmap-first-planning, systematic-debugging, test-first-development, verification-before-completion, \
-code-review-discipline) quando la situazione lo richiede."
+(build/test/lint) prima di dire \"fatto\". Quando applichi una di queste discipline, chiama PRIMA \
+`use_skill` con la skill adatta (roadmap-first-planning, systematic-debugging, test-first-development, \
+verification-before-completion, code-review-discipline, …) — così l'utente VEDE quale metodologia \
+stai seguendo — e poi seguine le istruzioni. Non limitarti a citarla: caricala davvero con use_skill."
         } else {
             ""
         };
@@ -9019,9 +9020,26 @@ Usa lo snapshot testuale."
                             .ok()
                             .and_then(|a| a.get("id").and_then(|v| v.as_str()).map(String::from))
                             .unwrap_or_default();
+                        // Narrate the skill use with its READABLE name (id → Title Case),
+                        // so the activity stream reads like reasoning: "Uso la skill Code
+                        // Review Discipline" (as Claude Code / Codex do).
+                        let readable = id
+                            .split('-')
+                            .filter(|w| !w.is_empty())
+                            .map(|w| {
+                                let mut chars = w.chars();
+                                match chars.next() {
+                                    Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                                    None => String::new(),
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" ");
                         let _ = emit_stream_event(
                             &tx,
-                            GenerateStreamEvent::Delta { text: format!("‹‹ACT››📖 Apro la skill {id}‹‹/ACT››") },
+                            GenerateStreamEvent::Delta {
+                                text: format!("‹‹ACT››📖 Uso la skill «{readable}»‹‹/ACT››"),
+                            },
                         )
                         .await;
                         let id_for_load = id.clone();
