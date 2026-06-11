@@ -392,7 +392,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     backfill_contacts(&state);
     backfill_mentions(&state);
     unify_owner_identity(&state);
-    sweep_graph_on_startup(&state);
+    // Graph regeneration runs in the BACKGROUND so it never blocks the HTTP bind. With a
+    // whole-project code graph (tens of thousands of entities) a synchronous sweep here
+    // would delay startup by minutes. Eventual consistency is fine: the graph projection
+    // reads whatever is current, and the regen settles shortly after boot.
+    {
+        let st = state.clone();
+        tokio::task::spawn_blocking(move || sweep_graph_on_startup(&st));
+    }
     seed_homun_asked_questions(&state);
     start_task_executor_worker(state.clone());
     spawn_thread_browser_session_reaper(state.clone());
@@ -2819,11 +2826,19 @@ fn sweep_graph_orphans(state: &AppState, workspace: &MemoryWorkspaceId) {
     // Re-link against ALL entities INCLUDING tombstoned ones, resurrecting any that a
     // live memory still names (heals entities a prior orphan-sweep wrongly killed —
     // they had 0 edges only because the forward-only linker never connected them).
+    // EXCLUDE the imported code graph (source="graphify"): those entities are rebuilt
+    // wholesale by build_project_graph, not mention-linked from personal facts. Skipping
+    // them keeps the sweep cheap on big repos (idra ~48k code entities) — otherwise
+    // mention-matching would be O(facts × 48k) and loading them is pure waste here.
+    let is_graphify = |e: &MemoryEntity| {
+        e.metadata.get("source").and_then(|v| v.as_str()) == Some("graphify")
+    };
     let all_entities: Vec<MemoryEntity> = facade
         .list_entities_including_tombstoned(&user, workspace)
         .unwrap_or_default()
         .into_iter()
         .map(|(entity, _dead)| entity)
+        .filter(|e| !is_graphify(e))
         .collect();
     link_mentions_core(&facade, &user, workspace, &items, &all_entities, true);
     let touched: std::collections::HashSet<String> = facade
@@ -2840,6 +2855,7 @@ fn sweep_graph_orphans(state: &AppState, workspace: &MemoryWorkspaceId) {
             || entity.canonical_key == "person:self"
             || is_channel_identity
             || protected.contains(&id)
+            || is_graphify(&entity)
         {
             continue;
         }
