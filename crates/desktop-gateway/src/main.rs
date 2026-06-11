@@ -8634,6 +8634,19 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                             match reused {
                                 Some(existing) => browser_session = Some(existing),
                                 None => {
+                                    // Self-heal: if the contained-computer CDP is wedged,
+                                    // recycle + recreate the container BEFORE connecting, so
+                                    // the sidecar's connectOverCDP doesn't time out.
+                                    if !browser_cdp_ok(&state_owned).await {
+                                        let _ = emit_stream_event(
+                                            &tx,
+                                            GenerateStreamEvent::Delta {
+                                                text: "‹‹ACT››🔧 Browser bloccato: riavvio il computer contenuto…‹‹/ACT››".to_string(),
+                                            },
+                                        )
+                                        .await;
+                                        ensure_browser_cdp_healthy(&state_owned).await;
+                                    }
                                     let st = state_owned.clone();
                                     let spawned = tokio::task::spawn_blocking(move || {
                                         spawn_browser_sidecar_for_chat(&st)
@@ -23460,6 +23473,45 @@ fn parse_docker_mem_mb(usage: &str) -> Option<u64> {
         value // MiB/MB
     };
     Some(mb.round() as u64)
+}
+
+/// Is the contained-computer CDP responding? `/json/version` with a short timeout. Returns
+/// true when there's no contained CDP (host-browser mode → nothing to heal). The self-heal
+/// gate before connecting the browser sidecar.
+async fn browser_cdp_ok(state: &AppState) -> bool {
+    let Some(endpoint) = contained_computer_cdp_endpoint() else {
+        return true;
+    };
+    state
+        .http
+        .get(format!("{}/json/version", endpoint.trim_end_matches('/')))
+        .timeout(std::time::Duration::from_millis(1500))
+        .send()
+        .await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
+}
+
+/// Self-heal a wedged browser: if the contained-computer CDP doesn't answer (Chrome
+/// alive-but-stuck, or the container died), recycle the container (`docker rm -f`) and
+/// recreate it, then wait for CDP to come back. No-op (fast) when already healthy.
+async fn ensure_browser_cdp_healthy(state: &AppState) -> bool {
+    if browser_cdp_ok(state).await {
+        return true;
+    }
+    let _ = tokio::task::spawn_blocking(|| {
+        crate::sandbox::recycle_container();
+        let _ = crate::sandbox::ensure_contained_computer();
+    })
+    .await;
+    // Poll for Chrome to relaunch + bind CDP (cold container start).
+    for _ in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+        if browser_cdp_ok(state).await {
+            return true;
+        }
+    }
+    false
 }
 
 /// System/Computer status for Settings: Docker (installed/running + the contained
