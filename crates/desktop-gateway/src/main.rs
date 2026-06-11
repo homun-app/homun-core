@@ -500,6 +500,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(get_user_timezone).post(set_user_timezone),
         )
         .route(
+            "/api/prefs/approval-routing",
+            get(get_approval_routing).post(set_approval_routing),
+        )
+        .route(
             "/api/runtime/provider",
             get(runtime_provider).post(set_runtime_provider),
         )
@@ -11019,6 +11023,11 @@ richiedono la tua conferma nell'app. Proponila e fermati."
                             accumulated.push_str(&card);
                             let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: card })
                                 .await;
+                            // Also route the approval to the user's channel (if configured) so
+                            // it can be authorized remotely. No-op when approval channel = in-app.
+                            let _ =
+                                deliver_remote_approval(&state_owned, name, &args_val, &mcp_tool)
+                                    .await;
                             pending_confirm = true;
                             "IN ATTESA DI CONFERMA UTENTE: l'azione è stata proposta tramite una \
 card di conferma nell'interfaccia. NON dire che è stata eseguita."
@@ -11074,6 +11083,15 @@ Dillo all'utente, NON dichiarare che è fatto.",
                             accumulated.push_str(&card);
                             let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: card })
                                 .await;
+                            // Also route the approval to the user's channel (if configured) for
+                            // remote authorization. No-op when approval channel = in-app.
+                            let _ = deliver_remote_approval(
+                                &state_owned,
+                                name,
+                                &args_val,
+                                &humanize_composio_tool(name),
+                            )
+                            .await;
                             pending_confirm = true;
                             "IN ATTESA DI CONFERMA UTENTE: l'azione è stata proposta tramite una \
 card di conferma nell'interfaccia. NON dire che è stata eseguita."
@@ -11369,6 +11387,15 @@ struct UserPrefs {
     /// IANA name (e.g. "Europe/Rome"). None/empty → system timezone.
     #[serde(default)]
     timezone: Option<String>,
+    /// Where confirmation requests are delivered so they can be authorized remotely:
+    /// "in_app" (default) | "telegram" | "whatsapp". When a channel, also routes the
+    /// approval to `approval_target` (the USER's own number/chat — only it can approve).
+    #[serde(default)]
+    approval_channel: Option<String>,
+    /// The user's own number/chat id on `approval_channel`. SECURITY: only an inbound from
+    /// this exact id may authorize a pending approval.
+    #[serde(default)]
+    approval_target: Option<String>,
 }
 
 fn load_user_prefs() -> UserPrefs {
@@ -11501,9 +11528,10 @@ async fn set_user_timezone(
             });
         }
     }
-    save_user_prefs(&UserPrefs {
-        timezone: trimmed.map(|s| s.to_string()),
-    })
+    // Preserve other prefs (approval routing) — only update the timezone field.
+    let mut prefs = load_user_prefs();
+    prefs.timezone = trimmed.map(|s| s.to_string());
+    save_user_prefs(&prefs)
     .map_err(|message| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "timezone_save",
@@ -11524,6 +11552,63 @@ async fn set_user_timezone(
         effective: effective_user_tz_name(),
         now: now_block(),
     }))
+}
+
+#[derive(Debug, Serialize)]
+struct ApprovalRoutingView {
+    /// "in_app" (default) | "telegram" | "whatsapp".
+    channel: String,
+    /// The user's own number/chat id on that channel (only it can authorize remotely).
+    target: Option<String>,
+}
+
+async fn get_approval_routing() -> Json<ApprovalRoutingView> {
+    let prefs = load_user_prefs();
+    Json(ApprovalRoutingView {
+        channel: prefs.approval_channel.unwrap_or_else(|| "in_app".to_string()),
+        target: prefs.approval_target.filter(|s| !s.trim().is_empty()),
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct SetApprovalRoutingRequest {
+    channel: Option<String>,
+    target: Option<String>,
+}
+
+async fn set_approval_routing(
+    Json(request): Json<SetApprovalRoutingRequest>,
+) -> Result<Json<ApprovalRoutingView>, GatewayError> {
+    let channel = request
+        .channel
+        .map(|c| c.trim().to_ascii_lowercase())
+        .filter(|c| !c.is_empty())
+        .unwrap_or_else(|| "in_app".to_string());
+    if !matches!(channel.as_str(), "in_app" | "telegram" | "whatsapp") {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "invalid_approval_channel",
+            message: "Canale di approvazione non valido (in_app | telegram | whatsapp).".to_string(),
+        });
+    }
+    let target = request.target.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+    // A non-in-app channel needs a target (the user's own number) to be usable.
+    if channel != "in_app" && target.is_none() {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "approval_target_required",
+            message: "Per Telegram/WhatsApp serve il tuo numero/chat (solo da lì potrai autorizzare).".to_string(),
+        });
+    }
+    let mut prefs = load_user_prefs();
+    prefs.approval_channel = Some(channel.clone());
+    prefs.approval_target = target.clone();
+    save_user_prefs(&prefs).map_err(|message| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "approval_routing_save",
+        message,
+    })?;
+    Ok(Json(ApprovalRoutingView { channel, target }))
 }
 
 pub(crate) fn weekday_it(w: jiff::civil::Weekday) -> &'static str {
@@ -13043,6 +13128,64 @@ async fn handle_channel_inbound(
     port: u16,
     message: ChannelInbound,
 ) -> Json<serde_json::Value> {
+    // Remote-approval control reply: if the USER's own number (the configured approval_target
+    // on THIS channel) replies "OK <code>" / "NO <code>", authorize or cancel the pending action
+    // and stop — it's a control message, not a conversation. SECURITY: only the self target.
+    {
+        let prefs = load_user_prefs();
+        let routed_here = prefs.approval_channel.as_deref() == Some(channel);
+        let target = prefs.approval_target.clone().unwrap_or_default();
+        let id_matches = |v: Option<&str>| {
+            v.map(|s| s.trim().eq_ignore_ascii_case(target.trim())).unwrap_or(false)
+        };
+        let is_self = routed_here
+            && !target.trim().is_empty()
+            && (id_matches(Some(message.sender.as_str()))
+                || id_matches(message.chat.as_deref())
+                || id_matches(message.sender_pn.as_deref()));
+        if is_self {
+            if let Some((approve, code)) = parse_approval_reply(&message.content) {
+                let reply = if !approve {
+                    match take_pending_approval(&code) {
+                        Some(_) => format!("❌ Annullato ({code})."),
+                        None => format!("Codice {code} non valido o scaduto."),
+                    }
+                } else {
+                    match take_pending_approval(&code) {
+                        Some((tool, args)) => {
+                            let st = state.clone();
+                            // Route MCP (mcp__…) vs Composio/send_message; normalize to a
+                            // single Result<Value,String> so the reply is uniform.
+                            let result: Result<serde_json::Value, String> =
+                                tokio::task::spawn_blocking(move || {
+                                    if let Some((prov, mtool)) = parse_mcp_chat_name(&tool) {
+                                        run_mcp_chat_tool(&st, &prov, &mtool, args.clone())
+                                            .map_err(|e| e.to_string())
+                                    } else {
+                                        composio_execute_tool(&st, &tool, &args)
+                                            .map_err(|e| e.message)
+                                    }
+                                })
+                                .await
+                                .unwrap_or_else(|_| Err("esecuzione interrotta".to_string()));
+                            match result {
+                                Ok(value) => match composio_execution_error(&value) {
+                                    None => format!("✅ Fatto ({code})."),
+                                    Some(err) => format!("⚠️ Non riuscito ({code}): {err}"),
+                                },
+                                Err(e) => format!("⚠️ Errore ({code}): {e}"),
+                            }
+                        }
+                        None => format!("Codice {code} non valido o scaduto."),
+                    }
+                };
+                let _ = channel_send(state, port, &message.sender, &reply).await;
+                return Json(serde_json::json!({
+                    "action": "approval", "code": code, "approved": approve
+                }));
+            }
+        }
+    }
     // Global policy first (the kill-switch always wins via Ignore)…
     let global_action = inbound_action(&load_channel_settings(), &message.sender);
     // …then the curated contact's response_mode refines it: automatic → reply now,
@@ -17484,6 +17627,97 @@ collegarla (i percorsi tra parentesi). NON dichiarare di averle già collegate."
 /// tool arguments, channel context, or Composio error bodies that may include secrets/PII.
 fn verbose_debug() -> bool {
     std::env::var("LFPA_DEBUG").is_ok()
+}
+
+/// A confirmation routed to a channel for REMOTE authorization (the user approves from their
+/// phone with `OK <code>` / `NO <code>`). 10-minute TTL; in-memory (short-lived by design).
+struct PendingApproval {
+    code: String,
+    tool: String,
+    args: serde_json::Value,
+    label: String,
+    expires_at: std::time::Instant,
+}
+
+fn pending_approvals() -> &'static std::sync::Mutex<Vec<PendingApproval>> {
+    static CELL: std::sync::OnceLock<std::sync::Mutex<Vec<PendingApproval>>> =
+        std::sync::OnceLock::new();
+    CELL.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+}
+
+/// Register a pending remote approval; returns its short code. Prunes expired + bounds the list.
+fn create_pending_approval(tool: &str, args: &serde_json::Value, label: &str) -> String {
+    let raw = uuid::Uuid::new_v4().simple().to_string();
+    let code = raw[..4].to_uppercase();
+    let now = std::time::Instant::now();
+    if let Ok(mut list) = pending_approvals().lock() {
+        list.retain(|p| p.expires_at > now);
+        if list.len() > 50 {
+            let drop = list.len() - 50;
+            list.drain(0..drop);
+        }
+        list.push(PendingApproval {
+            code: code.clone(),
+            tool: tool.to_string(),
+            args: args.clone(),
+            label: label.to_string(),
+            expires_at: now + std::time::Duration::from_secs(600),
+        });
+    }
+    code
+}
+
+/// Take (remove) a non-expired pending approval by code → (tool, args).
+fn take_pending_approval(code: &str) -> Option<(String, serde_json::Value)> {
+    let code = code.trim().to_uppercase();
+    let now = std::time::Instant::now();
+    let mut list = pending_approvals().lock().ok()?;
+    list.retain(|p| p.expires_at > now);
+    let idx = list.iter().position(|p| p.code == code)?;
+    let p = list.remove(idx);
+    Some((p.tool, p.args))
+}
+
+/// If the user routes approvals to a channel, deliver this pending action to their OWN number so
+/// they can authorize remotely. No-op (returns false) when the approval channel is in-app/unset.
+async fn deliver_remote_approval(
+    state: &AppState,
+    tool: &str,
+    args: &serde_json::Value,
+    label: &str,
+) -> bool {
+    let prefs = load_user_prefs();
+    let port = match prefs.approval_channel.as_deref().unwrap_or("in_app") {
+        "telegram" => TELEGRAM_HTTP_PORT,
+        "whatsapp" => WHATSAPP_HTTP_PORT,
+        _ => return false,
+    };
+    let target = prefs.approval_target.unwrap_or_default();
+    if target.trim().is_empty() {
+        return false;
+    }
+    let code = create_pending_approval(tool, args, label);
+    let text = format!(
+        "🔐 Homun chiede la tua conferma:\n{label}\n\nAutorizza: OK {code}\nAnnulla: NO {code}\n(scade tra 10 minuti)"
+    );
+    channel_send(state, port, target.trim(), &text).await.is_ok()
+}
+
+/// Parse a remote-approval control reply: `OK 7F3` / `SI 7F3` (approve) or `NO 7F3` (cancel).
+/// Returns `(approve, code)`. Tolerant of leading emoji/spacing; case-insensitive.
+fn parse_approval_reply(text: &str) -> Option<(bool, String)> {
+    let t = text.trim();
+    let mut it = t.split_whitespace();
+    let verb = it.next()?.to_ascii_uppercase();
+    let code = it.next()?.trim().to_ascii_uppercase();
+    if code.is_empty() {
+        return None;
+    }
+    match verb.as_str() {
+        "OK" | "SI" | "SÌ" | "YES" | "APPROVA" => Some((true, code)),
+        "NO" | "ANNULLA" | "CANCEL" => Some((false, code)),
+        _ => None,
+    }
 }
 
 fn send_message_tool_schema() -> serde_json::Value {
@@ -26444,6 +26678,18 @@ data: [DONE]\n";
         // Master toggle off → draft even for allowlisted.
         settings.auto_reply = false;
         assert_eq!(inbound_action(&settings, "alice"), InboundAction::Draft);
+    }
+
+    #[test]
+    fn parse_approval_reply_parses_verb_and_code() {
+        use super::parse_approval_reply;
+        assert_eq!(parse_approval_reply("OK 7F3"), Some((true, "7F3".to_string())));
+        assert_eq!(parse_approval_reply("si a1b"), Some((true, "A1B".to_string())));
+        assert_eq!(parse_approval_reply("NO 7F3"), Some((false, "7F3".to_string())));
+        assert_eq!(parse_approval_reply("annulla 7f3"), Some((false, "7F3".to_string())));
+        // Not a control reply → None (handled as a normal conversation message).
+        assert_eq!(parse_approval_reply("ciao come stai"), None);
+        assert_eq!(parse_approval_reply("ok"), None); // no code
     }
 
     #[test]
