@@ -3176,6 +3176,7 @@ dependencies = [
  "futures-util",
  "image",
  "jiff",
+ "libc",
  "local-first-browser-automation",
  "local-first-capabilities",
  "local-first-context-compression",

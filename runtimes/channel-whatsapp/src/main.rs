@@ -251,6 +251,13 @@ async fn serve_send(client: Arc<Client>, port: u16) {
 }
 
 fn main() -> anyhow::Result<()> {
+    // SECURITY (data at rest): the WhatsApp session DB holds the credentials that
+    // authenticate this account — born owner-only (0600), not world-readable.
+    #[cfg(unix)]
+    // SAFETY: libc::umask has no preconditions; called once before any file is created.
+    unsafe {
+        libc::umask(0o077 as libc::mode_t);
+    }
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
