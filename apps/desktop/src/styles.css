@@ -8878,3 +8878,44 @@ body.resizing-drawer {
   color: var(--text);
   outline: none;
 }
+
+/* ── Automazioni: picker sorgente evento (search + gruppi, stile selettore modelli) ── */
+.auto-evt { display: flex; flex-direction: column; gap: 12px; }
+.auto-src { position: relative; }
+.auto-src-btn {
+  font: inherit; font-size: 14px; width: 100%;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 9px 11px; border: 1px solid var(--line); border-radius: var(--radius-control);
+  background: var(--surface); color: var(--text); cursor: pointer;
+}
+.auto-src-btn span { display: inline-flex; align-items: center; gap: 7px; }
+.auto-src-btn:hover { background: var(--surface-hover); }
+.auto-src-pop {
+  position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0;
+  background: var(--surface); border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control); box-shadow: 0 8px 28px rgba(0,0,0,0.12);
+  max-height: 320px; overflow: auto; padding: 6px;
+}
+.auto-src-search {
+  display: flex; align-items: center; gap: 7px; padding: 4px 8px 8px;
+  color: var(--muted); border-bottom: 1px solid var(--line);
+}
+.auto-src-search input {
+  font: inherit; font-size: 14px; border: none; background: transparent;
+  color: var(--text); outline: none; flex: 1;
+}
+.auto-src-list { display: flex; flex-direction: column; padding-top: 4px; }
+.auto-src-group { padding: 4px 0; }
+.auto-src-group-label {
+  font-size: 11px; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--muted); padding: 4px 8px;
+}
+.auto-src-item {
+  font: inherit; font-size: 13.5px; width: 100%; text-align: left;
+  display: flex; align-items: center; gap: 8px; padding: 7px 9px;
+  border: none; background: transparent; color: var(--text);
+  cursor: pointer; border-radius: var(--radius-control);
+}
+.auto-src-item:hover { background: var(--surface-muted); }
+.auto-src-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.auto-src-empty { font-size: 13px; color: var(--muted); padding: 10px 8px; }

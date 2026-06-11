@@ -528,6 +528,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/tasks/run_next", post(run_next_task))
         .route("/api/tasks/{task_id}/cancel", post(cancel_task))
         .route("/api/tasks/{task_id}", get(task_detail))
+        .route("/api/automations/event-sources", get(automation_event_sources))
         .route("/api/automations", get(automations_list).post(automation_create))
         .route("/api/automations/{id}/toggle", post(automation_toggle))
         .route("/api/automations/{id}", delete(automation_delete))
@@ -4724,6 +4725,71 @@ fn fire_channel_event_automations(state: &AppState, channel: &str, message: &Cha
             eprintln!("automation/{}: fired on {channel} message from {speaker}", fired.id);
         }
     }
+}
+
+/// Best-guess item-id field for a connector tool (the manual picker pre-fills it; the user
+/// can edit). Heuristic by slug — good enough for common services, editable for the rest.
+fn guess_key_field(tool: &str) -> &'static str {
+    let t = tool.to_ascii_uppercase();
+    if t.contains("GMAIL") || t.contains("EMAIL") {
+        "messageId"
+    } else if t.contains("CALENDAR") || t.contains("EVENT") {
+        "id"
+    } else {
+        "id"
+    }
+}
+
+/// GET /api/automations/event-sources — the manual event picker's options (mirrors the model
+/// selector: searchable + grouped). Channels (always) + READ tools of connected Composio/MCP
+/// services (an event polls a read/list tool). Returns suggested key_field per connector tool.
+async fn automation_event_sources(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let st = state.clone();
+    let (composio, mcp) = tokio::task::spawn_blocking(move || {
+        (composio_chat_tools(&st, 500), mcp_chat_tools(&st, 500))
+    })
+    .await
+    .unwrap_or_else(|_| (ComposioChatTools::default(), McpChatTools::default()));
+    let mut connectors = Vec::new();
+    for schema in &composio.schemas {
+        let Some(name) = schema.pointer("/function/name").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if composio.writes.contains(name) {
+            continue; // events poll READS, not writes
+        }
+        connectors.push(serde_json::json!({
+            "group": "Composio",
+            "tool": name,
+            "label": humanize_composio_tool(name),
+            "key_field": guess_key_field(name),
+        }));
+    }
+    for schema in &mcp.schemas {
+        let Some(name) = schema.pointer("/function/name").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if mcp.writes.contains(name) {
+            continue;
+        }
+        let label = name
+            .strip_prefix("mcp__")
+            .map(|r| r.replacen("__", " · ", 1))
+            .unwrap_or_else(|| name.to_string());
+        connectors.push(serde_json::json!({
+            "group": "MCP",
+            "tool": name,
+            "label": label,
+            "key_field": guess_key_field(name),
+        }));
+    }
+    Json(serde_json::json!({
+        "channels": [
+            { "id": "whatsapp", "label": "WhatsApp" },
+            { "id": "telegram", "label": "Telegram" },
+        ],
+        "connectors": connectors,
+    }))
 }
 
 /// GET /api/automations — list the user's automations (rules), newest first.
