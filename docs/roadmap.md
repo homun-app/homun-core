@@ -363,7 +363,7 @@ Aggiornato 2026-06-08. Ordine consigliato, rivedibile.
   filtri progetto, ricerca, grafo+wiki, elimina); **oblio** (`forget_memory` + elimina
   nodo); **consolidamento** (fonde frammenti + elimina rumore + importanza);
   **stato epistemico** (ricerca ≠ fatto: niente "viaggio programmato" da una ricerca
-  prezzi); doc `docs/memory-architecture.md`. **HomunCoder**: skill CoderSteroids
+  prezzi); doc `docs/memory-architecture.md`. **HomunCoder**: skill HomunCoder
   installate, mode nelle chat di progetto, raggruppate/collassabili nei Settings.
 - **Fix regressione + design capability**: lo scope memoria non muta più il workspace
   attivo globale (`MEMORY_WORKSPACE` separato); **capability globali** (Composio/Gmail,
