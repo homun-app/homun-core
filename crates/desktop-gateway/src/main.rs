@@ -407,6 +407,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     start_task_executor_worker(state.clone());
     spawn_thread_browser_session_reaper(state.clone());
     spawn_contained_computer_idle_reaper(state.clone());
+    spawn_connector_event_poller(state.clone());
     reconnect_channels_on_startup();
     let chat_routes = Router::new()
         .route(
@@ -4267,6 +4268,10 @@ fn automation_trigger_summary(trigger: &AutomationTrigger) -> String {
                 Some(t) => format!("Memoria aggiornata: {t}"),
                 None => "Memoria aggiornata".to_string(),
             },
+            EventTrigger::ConnectorPoll { tool, label, .. } => match label {
+                Some(l) => format!("Evento · {l}"),
+                None => format!("Evento · {tool}"),
+            },
         },
     }
 }
@@ -4359,8 +4364,11 @@ fn create_automation_tool_schema() -> serde_json::Value {
                     "trigger_type": { "type": "string", "enum": ["schedule", "event"], "description": "schedule = a orario; event = a un messaggio in arrivo su un canale" },
                     "recurrence": { "type": "string", "description": "Solo schedule. Formati: daily@HH:MM | weekly@<gg>@HH:MM | dow@<gg,gg,…>@<HH:MM,HH:MM,…> per PIÙ GIORNI e PIÙ ORARI (es. \"dow@mon,wed,fri@08:00,12:00,18:00\"; usa dow@*@HH:MM,… per ogni giorno) | every Nh | every Nd. Giorni: mon,tue,wed,thu,fri,sat,sun." },
                     "timezone": { "type": "string", "description": "Solo schedule: fuso IANA (default: fuso dell'utente)" },
-                    "event_channel": { "type": "string", "description": "Solo event: whatsapp | telegram (vuoto = qualsiasi canale)" },
-                    "event_from": { "type": "string", "description": "Solo event: nome o numero del mittente (vuoto = chiunque)" },
+                    "event_channel": { "type": "string", "description": "Solo event su canale: whatsapp | telegram (vuoto = qualsiasi canale)" },
+                    "event_from": { "type": "string", "description": "Solo event su canale: nome o numero del mittente (vuoto = chiunque)" },
+                    "event_tool": { "type": "string", "description": "Solo event su SERVIZIO COLLEGATO (Gmail/Calendar/Slack/MCP/…): il nome ESATTO del tool di lettura da interrogare ciclicamente (scoprilo con find_capability), es. \"GMAIL_FETCH_EMAILS\". Lascia vuoto per un evento su canale." },
+                    "event_args": { "type": "object", "description": "Solo con event_tool: gli argomenti della query (es. {\"query\":\"is:unread from:mario\"})" },
+                    "event_key_field": { "type": "string", "description": "Solo con event_tool: il campo che identifica univocamente un elemento (per non rifare scattare i già visti), es. \"messageId\", \"id\"." },
                     "require_confirmation": { "type": "boolean", "description": "true (default) = chiede conferma prima di inviare/pubblicare; false = autonoma" }
                 },
                 "required": ["title", "prompt", "trigger_type"]
@@ -4388,11 +4396,29 @@ fn create_automation_from_chat(state: &AppState, args_raw: &str) -> String {
         return "Per creare un'automazione servono almeno il titolo e cosa fare (prompt).".to_string();
     }
     let trigger = if s("trigger_type") == "event" {
-        AutomationTrigger::Event {
-            event: EventTrigger::ChannelMessage {
-                channel: opt("event_channel"),
-                from: opt("event_from"),
-            },
+        // Event on a connected service (Gmail/Calendar/Slack/MCP/…) via polling, when a
+        // tool is given; otherwise an inbound channel message (WhatsApp/Telegram).
+        if let Some(tool) = opt("event_tool") {
+            let key_field = s("event_key_field");
+            if key_field.is_empty() {
+                return "Per un evento su un servizio collegato serve event_key_field (il campo che identifica un elemento, es. \"messageId\").".to_string();
+            }
+            let event_args = args.get("event_args").cloned().unwrap_or_else(|| serde_json::json!({}));
+            AutomationTrigger::Event {
+                event: EventTrigger::ConnectorPoll {
+                    tool,
+                    args: event_args,
+                    key_field,
+                    label: opt("event_label").or_else(|| Some(title.clone())),
+                },
+            }
+        } else {
+            AutomationTrigger::Event {
+                event: EventTrigger::ChannelMessage {
+                    channel: opt("event_channel"),
+                    from: opt("event_from"),
+                },
+            }
         }
     } else {
         let recurrence = s("recurrence");
@@ -4449,6 +4475,7 @@ fn create_automation_from_chat(state: &AppState, args_raw: &str) -> String {
         created_at: now,
         updated_at: now,
         last_fired_at: None,
+        state: None,
     };
     match materialize_automation_task(&store, &automation) {
         Ok(task_id) => automation.task_id = task_id,
@@ -4462,6 +4489,177 @@ fn create_automation_from_chat(state: &AppState, args_raw: &str) -> String {
         automation.title,
         automation_trigger_summary(&automation.trigger)
     )
+}
+
+/// How often the connector-event poller checks each ConnectorPoll automation (min 30s).
+fn connector_poll_interval() -> std::time::Duration {
+    let secs = std::env::var("LFPA_CONNECTOR_POLL_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|&v| v >= 30)
+        .unwrap_or(300);
+    std::time::Duration::from_secs(secs)
+}
+
+/// The result items of a poll: the first array whose elements are objects carrying
+/// `key_field`. Tying extraction to the agent-configured key makes it robust across
+/// arbitrary connector response shapes (Gmail messages, Calendar events, Slack, …).
+fn extract_poll_items(value: &serde_json::Value, key_field: &str) -> Vec<serde_json::Value> {
+    fn search(v: &serde_json::Value, key: &str) -> Option<Vec<serde_json::Value>> {
+        match v {
+            serde_json::Value::Array(arr) => {
+                let hits: Vec<serde_json::Value> =
+                    arr.iter().filter(|e| e.get(key).is_some()).cloned().collect();
+                if !hits.is_empty() {
+                    return Some(hits);
+                }
+                for e in arr {
+                    if let Some(found) = search(e, key) {
+                        return Some(found);
+                    }
+                }
+                None
+            }
+            serde_json::Value::Object(map) => {
+                for val in map.values() {
+                    if let Some(found) = search(val, key) {
+                        return Some(found);
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+    search(value, key_field).unwrap_or_default()
+}
+
+/// Background poller for `ConnectorPoll` automations: every interval, calls each rule's
+/// connected tool, fires a run for each NEW item (by `key_field`), and keeps a bounded
+/// watermark on the automation. The FIRST poll only seeds the watermark (no firing) so
+/// creating a rule doesn't immediately fire on everything already present.
+fn spawn_connector_event_poller(state: AppState) {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(connector_poll_interval()).await;
+            connector_poll_tick(&state).await;
+        }
+    });
+}
+
+async fn connector_poll_tick(state: &AppState) {
+    let automations = match lock_task_store(state) {
+        Ok(store) => store
+            .list_enabled_event_automations(&gateway_user_id())
+            .unwrap_or_default(),
+        Err(_) => return,
+    };
+    for automation in automations {
+        let (tool, args, key_field, label) = match &automation.trigger {
+            AutomationTrigger::Event {
+                event: EventTrigger::ConnectorPoll { tool, args, key_field, label },
+            } => (tool.clone(), args.clone(), key_field.clone(), label.clone()),
+            _ => continue,
+        };
+        // Execute the connected tool: MCP name → MCP path; otherwise a Composio slug.
+        let st = state.clone();
+        let tname = tool.clone();
+        let av = args.clone();
+        let exec: Option<serde_json::Value> = if let Some((prov, mcp_tool)) =
+            parse_mcp_chat_name(&tname)
+        {
+            tokio::task::spawn_blocking(move || run_mcp_chat_tool(&st, &prov, &mcp_tool, av))
+                .await
+                .ok()
+                .and_then(Result::ok)
+        } else {
+            tokio::task::spawn_blocking(move || composio_execute_tool(&st, &tname, &av))
+                .await
+                .ok()
+                .and_then(Result::ok)
+        };
+        let Some(value) = exec else { continue };
+        let items = extract_poll_items(&value, &key_field);
+        if items.is_empty() {
+            continue;
+        }
+        let mut seen: std::collections::BTreeSet<String> = automation
+            .state
+            .as_ref()
+            .and_then(|s| s.get("seen"))
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+            .unwrap_or_default();
+        let initialized = automation
+            .state
+            .as_ref()
+            .and_then(|s| s.get("initialized"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let mut fresh = Vec::new();
+        for item in &items {
+            let key = item.get(&key_field).map(|v| v.to_string()).unwrap_or_default();
+            if key.is_empty() {
+                continue;
+            }
+            if seen.insert(key) {
+                fresh.push(item.clone());
+            }
+        }
+        let mut fired_any = false;
+        if initialized {
+            for item in &fresh {
+                connector_fire_run(state, &automation, label.as_deref().unwrap_or(&tool), item);
+                fired_any = true;
+            }
+        }
+        // Persist a bounded watermark + mark initialized.
+        let mut seen_vec: Vec<String> = seen.into_iter().collect();
+        if seen_vec.len() > 1000 {
+            let drop = seen_vec.len() - 1000;
+            seen_vec.drain(0..drop);
+        }
+        let mut updated = automation.clone();
+        updated.state = Some(serde_json::json!({ "seen": seen_vec, "initialized": true }));
+        if fired_any {
+            updated.last_fired_at = Some(OffsetDateTime::now_utc());
+        }
+        if let Ok(store) = lock_task_store(state) {
+            let _ = store.upsert_automation(&updated);
+        }
+    }
+}
+
+/// Materialize a one-shot run for a fired ConnectorPoll item (the item is the event context).
+fn connector_fire_run(
+    state: &AppState,
+    automation: &Automation,
+    label: &str,
+    item: &serde_json::Value,
+) {
+    let store = match lock_task_store(state) {
+        Ok(store) => store,
+        Err(_) => return,
+    };
+    let item_str: String = serde_json::to_string(item)
+        .unwrap_or_default()
+        .chars()
+        .take(2000)
+        .collect();
+    let goal = format!(
+        "{}\n\n[Evento scatenante: {label}]\nDato dell'evento (JSON):\n{item_str}",
+        automation.prompt
+    );
+    let mut task = TaskRecord::new(
+        format!("autorun_{}", uuid::Uuid::new_v4().simple()),
+        gateway_user_id(),
+        gateway_workspace_id(),
+        "proactive_prompt",
+        goal,
+        serde_json::json!({ "automation_id": automation.id, "approval": automation.approval }),
+    );
+    task.not_before = Some(OffsetDateTime::now_utc());
+    let _ = store.insert_task(&task);
 }
 
 /// Fire enabled Event automations matching an inbound channel message: each materializes a
@@ -4568,6 +4766,7 @@ async fn automation_create(
         created_at: now,
         updated_at: now,
         last_fired_at: None,
+        state: None,
     };
     let store = lock_task_store(&state)
         .map_err(|_| GatewayError { status: StatusCode::SERVICE_UNAVAILABLE, code: "task_store", message: "store dei task non disponibile".into() })?;
@@ -7829,7 +8028,10 @@ AUTOMAZIONI: per richieste RICORRENTI o REATTIVE usa `create_automation` (crea u
 visibile nella sezione Automazioni), non limitarti a rispondere. «ogni venerdì / ogni mattina \
 / ogni lunedì …» → trigger_type=schedule con la ricorrenza. «quando mi scrive X / quando \
 arriva un messaggio da Y …» → trigger_type=event (NON è una richiesta di accesso al canale: è \
-una regola che scatta su quel messaggio).\n\
+una regola che scatta su quel messaggio). «quando arriva una mail/evento da un SERVIZIO \
+COLLEGATO (Gmail, Calendar, …)» → trigger_type=event con event_tool (scoprilo con \
+find_capability: il tool di lettura del servizio), event_args (la query) e event_key_field \
+(il campo id, es. messageId): un poller lo controlla e scatta sui nuovi elementi.\n\
 STRUMENTI: hai un set di BASE ridotto. Per capacità che NON vedi tra i tuoi tool (navigare \
 il web, cercare su GitHub, leggere/elencare file e cartelle dell'utente, eseguire comandi in \
 sandbox, creare artefatti, pianificare task ricorrenti, …) chiama PRIMA `find_capability` \
@@ -25760,6 +25962,23 @@ data: [DONE]\n";
         // Master toggle off → draft even for allowlisted.
         settings.auto_reply = false;
         assert_eq!(inbound_action(&settings, "alice"), InboundAction::Draft);
+    }
+
+    #[test]
+    fn extract_poll_items_finds_array_by_key_field() {
+        use super::extract_poll_items;
+        // Items nested under data → found by the key field.
+        let v = serde_json::json!({
+            "data": { "messages": [{"messageId": "a", "subj": "x"}, {"messageId": "b"}] }
+        });
+        let items = extract_poll_items(&v, "messageId");
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].get("messageId").unwrap(), "a");
+        // Top-level array.
+        let v2 = serde_json::json!([{"id": 1}, {"id": 2}, {"id": 3}]);
+        assert_eq!(extract_poll_items(&v2, "id").len(), 3);
+        // No matching key → empty.
+        assert!(extract_poll_items(&v, "nope").is_empty());
     }
 
     #[test]
