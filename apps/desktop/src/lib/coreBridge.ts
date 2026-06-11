@@ -802,7 +802,39 @@ export type AutomationEventJson =
   | { kind: "channel_message"; channel?: string | null; from?: string | null }
   | { kind: "email_received"; from?: string | null }
   | { kind: "file_changed"; path: string }
-  | { kind: "memory_updated"; topic?: string | null };
+  | { kind: "memory_updated"; topic?: string | null }
+  | {
+      kind: "connector_poll";
+      tool: string;
+      args?: unknown;
+      key_field: string;
+      label?: string | null;
+    };
+
+export type EventSource = { group: string; tool: string; label: string; key_field: string };
+export type EventSources = {
+  channels: { id: string; label: string }[];
+  connectors: EventSource[];
+};
+
+async function electronAutomationEventSources(): Promise<EventSources> {
+  const fallback: EventSources = {
+    channels: [
+      { id: "whatsapp", label: "WhatsApp" },
+      { id: "telegram", label: "Telegram" },
+    ],
+    connectors: [],
+  };
+  try {
+    const r = await fetch(`${DESKTOP_GATEWAY_URL}/api/automations/event-sources`, {
+      headers: gatewayHeaders(),
+    });
+    if (!r.ok) return fallback;
+    return (await r.json()) as EventSources;
+  } catch {
+    return fallback;
+  }
+}
 
 export type AutomationTriggerJson =
   | { type: "schedule"; recurrence: string; tz?: string | null }
@@ -1704,6 +1736,7 @@ export const coreBridge = {
   homunAutomations: () => electronHomunAutomations(),
   mineHomunAutomations: () => electronMineHomunAutomations(),
   automations: () => electronAutomations(),
+  automationEventSources: () => electronAutomationEventSources(),
   createAutomation: (input: AutomationCreateInput) => electronCreateAutomation(input),
   toggleAutomation: (id: string) => electronToggleAutomation(id),
   deleteAutomation: (id: string) => electronDeleteAutomation(id),

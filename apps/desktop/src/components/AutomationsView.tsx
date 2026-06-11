@@ -1,20 +1,29 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Bolt,
+  ChevronDown,
   Clock3,
   MessageSquare,
+  Plug,
   Plus,
   Power,
+  Search,
   ShieldCheck,
   Sparkles,
   Trash2,
   X,
 } from "lucide-react";
+import { coreBridge } from "../lib/coreBridge";
 import type {
   AutomationCreateInput,
   AutomationTriggerJson,
+  EventSources,
   ManagedAutomation,
 } from "../lib/coreBridge";
+
+type SelectedSource =
+  | { kind: "channel"; id: string; label: string }
+  | { kind: "connector"; tool: string; label: string; keyField: string };
 
 interface AutomationsViewProps {
   automations: ManagedAutomation[];
@@ -49,9 +58,22 @@ export function AutomationsView({
   const [times, setTimes] = useState<string[]>(["09:00"]);
   const [intervalN, setIntervalN] = useState(6);
   const [intervalUnit, setIntervalUnit] = useState<"h" | "d">("h");
-  const [eventChannel, setEventChannel] = useState("");
   const [eventFrom, setEventFrom] = useState("");
   const [autonomous, setAutonomous] = useState(false);
+  // Event source picker (searchable + grouped, like the model selector).
+  const [eventSources, setEventSources] = useState<EventSources>({ channels: [], connectors: [] });
+  const [srcOpen, setSrcOpen] = useState(false);
+  const [srcQuery, setSrcQuery] = useState("");
+  const [source, setSource] = useState<SelectedSource | null>(null);
+  const [connectorArgs, setConnectorArgs] = useState("");
+  const [connectorKey, setConnectorKey] = useState("id");
+
+  // Load the event sources when the editor opens (channels + connected Composio/MCP tools).
+  useEffect(() => {
+    if (composing && eventSources.channels.length === 0 && eventSources.connectors.length === 0) {
+      void coreBridge.automationEventSources().then(setEventSources);
+    }
+  }, [composing, eventSources.channels.length, eventSources.connectors.length]);
 
   const active = automations.filter((a) => a.enabled).length;
 
@@ -81,9 +103,12 @@ export function AutomationsView({
     scheduleMode === "interval"
       ? intervalN >= 1
       : times.length > 0 && (scheduleMode === "daily" || days.length > 0);
+  const eventValid =
+    source !== null && (source.kind !== "connector" || connectorKey.trim().length > 0);
   // Title is optional — derived from the prompt when empty. What matters is the action.
   const canSave =
-    prompt.trim().length > 0 && (triggerKind === "event" || scheduleValid);
+    prompt.trim().length > 0 &&
+    (triggerKind === "schedule" ? scheduleValid : eventValid);
 
   const reset = () => {
     setTitle("");
@@ -94,25 +119,58 @@ export function AutomationsView({
     setTimes(["09:00"]);
     setIntervalN(6);
     setIntervalUnit("h");
-    setEventChannel("");
     setEventFrom("");
+    setSource(null);
+    setConnectorArgs("");
+    setConnectorKey("id");
+    setSrcOpen(false);
+    setSrcQuery("");
     setAutonomous(false);
     setComposing(false);
   };
 
+  // Parse the connector filter: a "key: value" or "key=value" → {key:value}; bare text →
+  // {query: text}; valid JSON → as-is; empty → {}.
+  const parseConnectorArgs = (raw: string): unknown => {
+    const t = raw.trim();
+    if (!t) return {};
+    try {
+      const parsed = JSON.parse(t);
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch {
+      /* not JSON */
+    }
+    const m = t.match(/^([\w.]+)\s*[:=]\s*(.+)$/);
+    if (m) return { [m[1]]: m[2].trim() };
+    return { query: t };
+  };
+
   const save = () => {
     if (!canSave) return;
-    const trigger: AutomationTriggerJson =
-      triggerKind === "schedule"
-        ? { type: "schedule", recurrence: composeRecurrence() }
-        : {
-            type: "event",
-            event: {
-              kind: "channel_message",
-              channel: eventChannel.trim() || null,
-              from: eventFrom.trim() || null,
-            },
-          };
+    let trigger: AutomationTriggerJson;
+    if (triggerKind === "schedule") {
+      trigger = { type: "schedule", recurrence: composeRecurrence() };
+    } else if (source?.kind === "connector") {
+      trigger = {
+        type: "event",
+        event: {
+          kind: "connector_poll",
+          tool: source.tool,
+          args: parseConnectorArgs(connectorArgs),
+          key_field: connectorKey.trim() || "id",
+          label: source.label,
+        },
+      };
+    } else {
+      trigger = {
+        type: "event",
+        event: {
+          kind: "channel_message",
+          channel: source?.kind === "channel" ? source.id || null : null,
+          from: eventFrom.trim() || null,
+        },
+      };
+    }
     const finalTitle = title.trim() || prompt.trim().slice(0, 48);
     onCreate({
       title: finalTitle,
@@ -122,6 +180,48 @@ export function AutomationsView({
       source: "manual",
     });
     reset();
+  };
+
+  // Event sources, filtered by query + grouped (Canali / Composio / MCP) — like the model menu.
+  const sourceGroups = useMemo(() => {
+    const q = srcQuery.trim().toLowerCase();
+    const groups: Array<{
+      group: string;
+      items: Array<{ key: string; label: string; sel: SelectedSource }>;
+    }> = [];
+    const channels = eventSources.channels
+      .filter((c) => !q || c.label.toLowerCase().includes(q))
+      .map((c) => ({
+        key: `ch:${c.id}`,
+        label: c.label,
+        sel: { kind: "channel" as const, id: c.id, label: c.label },
+      }));
+    if (channels.length) groups.push({ group: "Canali", items: channels });
+    const byGroup = new Map<
+      string,
+      Array<{ key: string; label: string; sel: SelectedSource }>
+    >();
+    for (const c of eventSources.connectors) {
+      if (q && ![c.label, c.tool, c.group].some((s) => s.toLowerCase().includes(q))) {
+        continue;
+      }
+      const arr = byGroup.get(c.group) ?? [];
+      arr.push({
+        key: `co:${c.tool}`,
+        label: c.label,
+        sel: { kind: "connector", tool: c.tool, label: c.label, keyField: c.key_field },
+      });
+      byGroup.set(c.group, arr);
+    }
+    for (const [g, items] of byGroup) groups.push({ group: g, items });
+    return groups;
+  }, [eventSources, srcQuery]);
+
+  const pickSource = (sel: SelectedSource) => {
+    setSource(sel);
+    if (sel.kind === "connector") setConnectorKey(sel.keyField || "id");
+    setSrcOpen(false);
+    setSrcQuery("");
   };
 
   const DAYS: Array<[string, string]> = [
@@ -273,23 +373,102 @@ export function AutomationsView({
               )}
             </div>
           ) : (
-            <div className="auto-row">
+            <div className="auto-evt">
               <div className="auto-field">
-                <label>Canale</label>
-                <select value={eventChannel} onChange={(e) => setEventChannel(e.target.value)}>
-                  <option value="">Qualsiasi</option>
-                  <option value="whatsapp">WhatsApp</option>
-                  <option value="telegram">Telegram</option>
-                </select>
+                <label>Sorgente</label>
+                <div className="auto-src">
+                  <button
+                    type="button"
+                    className="auto-src-btn"
+                    onClick={() => setSrcOpen((o) => !o)}
+                  >
+                    <span>
+                      {source ? (
+                        <>
+                          {source.kind === "channel" ? (
+                            <MessageSquare size={14} aria-hidden />
+                          ) : (
+                            <Plug size={14} aria-hidden />
+                          )}{" "}
+                          {source.label}
+                        </>
+                      ) : (
+                        "Scegli una sorgente…"
+                      )}
+                    </span>
+                    <ChevronDown size={14} aria-hidden />
+                  </button>
+                  {srcOpen && (
+                    <div className="auto-src-pop" role="menu">
+                      <div className="auto-src-search">
+                        <Search size={14} aria-hidden />
+                        <input
+                          autoFocus
+                          placeholder="Cerca canali, Composio, MCP…"
+                          value={srcQuery}
+                          onChange={(e) => setSrcQuery(e.target.value)}
+                        />
+                      </div>
+                      <div className="auto-src-list">
+                        {sourceGroups.length === 0 && (
+                          <p className="auto-src-empty">Nessuna sorgente</p>
+                        )}
+                        {sourceGroups.map((g) => (
+                          <div key={g.group} className="auto-src-group">
+                            <div className="auto-src-group-label">{g.group}</div>
+                            {g.items.map((it) => (
+                              <button
+                                key={it.key}
+                                type="button"
+                                className="auto-src-item"
+                                onClick={() => pickSource(it.sel)}
+                              >
+                                {it.sel.kind === "channel" ? (
+                                  <MessageSquare size={14} aria-hidden />
+                                ) : (
+                                  <Plug size={14} aria-hidden />
+                                )}
+                                <span>{it.label}</span>
+                              </button>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="auto-field">
-                <label>Da (nome o numero, opzionale)</label>
-                <input
-                  value={eventFrom}
-                  onChange={(e) => setEventFrom(e.target.value)}
-                  placeholder="es. Mario Rossi"
-                />
-              </div>
+
+              {source?.kind === "channel" && (
+                <div className="auto-field">
+                  <label>Da (nome o numero, opzionale)</label>
+                  <input
+                    value={eventFrom}
+                    onChange={(e) => setEventFrom(e.target.value)}
+                    placeholder="es. Mario Rossi"
+                  />
+                </div>
+              )}
+              {source?.kind === "connector" && (
+                <div className="auto-row">
+                  <div className="auto-field">
+                    <label>Filtro (opzionale)</label>
+                    <input
+                      value={connectorArgs}
+                      onChange={(e) => setConnectorArgs(e.target.value)}
+                      placeholder="es. from:mario is:unread"
+                    />
+                  </div>
+                  <div className="auto-field">
+                    <label>Campo identificativo</label>
+                    <input
+                      value={connectorKey}
+                      onChange={(e) => setConnectorKey(e.target.value)}
+                      placeholder="es. messageId"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
