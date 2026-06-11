@@ -481,11 +481,16 @@ Verso la prima release:
    niente più "autorizza e riprova" né `markConnected` ottimistico. Lo usano
    `ConnectSuggestRow.linkComposio` (suggerimenti) e `ComposioReconnectCard`
    (riconnessione su EXPIRED).
-2. **Errori azionabili + token.** PARZIALE (2026-06-08): il **401 del modello** ora ha
-   messaggio azionabile (`:cloud` → `ollama signin`/chiave) + **fallback automatico**
-   al binding orchestratore + preset **Ollama Cloud** (`9d63b88`/`84432aa`/`c8bd089`).
-   Resta: mappare gli errori **Composio/MCP/skill** ("401 → ricollega", "429 → rate
-   limit") e rotazione/scoping del token gateway.
+2. **Errori azionabili + token.** PARZIALE → quasi FATTO (2026-06-12). Il **401 del
+   modello** ha messaggio azionabile + fallback automatico + preset Ollama Cloud
+   (`9d63b88`/`84432aa`/`c8bd089`). Errori **connettori** ora classificati e azionabili:
+   `classify_connector_error` (Auth/RateLimit/Forbidden/Unavailable) con due voci —
+   **Composio** (`connector_error_hint` → "401/scaduto → ricollega" + marker
+   ‹‹COMPOSIO_RECONNECT›› con slug, "429 → rate limit", "403 → re-grant scope",
+   "non raggiungibile → riprova") e **MCP** (`mcp_error_hint` → riconnetti da
+   Impostazioni → MCP / server offline / rate limit), cablate nei path d'errore di
+   esecuzione (Composio + MCP, incl. timeout). RESTA: rotazione/scoping del token
+   gateway; mappare gli errori **skill**.
 3. **MCP: usabile + sfogliabile + gestibile.** FATTO in gran parte (2026-06-07,
    in attesa di test manuale — vedi "Test da fare"): MCP **cablato nel loop chat**
    (discovery + dispatch, read auto / write con conferma, timeout sulle call);
