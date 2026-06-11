@@ -13,7 +13,7 @@ export async function connectComposioToolkit(
   const { apiKey, onStatus } = opts;
   let redirect = "";
   try {
-    const result = await coreBridge.composioLink(slug, apiKey);
+    const result = await coreBridge.composioLink(slug, apiKey ? { apiKey } : undefined);
     redirect = result.redirect_url || "";
   } catch {
     onStatus?.("failed");

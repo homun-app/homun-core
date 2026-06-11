@@ -1375,13 +1375,52 @@ async function electronComposioToolkits(): Promise<ComposioToolkit[]> {
   return payload.toolkits ?? [];
 }
 
+export interface ComposioAuthField {
+  name: string;
+  label: string;
+  required: boolean;
+  secret: boolean;
+}
+export interface ComposioAuthScheme {
+  mode: string;
+  managed: boolean;
+  creation_fields: ComposioAuthField[];
+  initiation_fields: ComposioAuthField[];
+}
+export interface ComposioToolkitAuth {
+  slug: string;
+  no_auth: boolean;
+  schemes: ComposioAuthScheme[];
+}
+
+async function electronComposioToolkitAuth(slug: string): Promise<ComposioToolkitAuth> {
+  const r = await fetch(
+    `${DESKTOP_GATEWAY_URL}/api/capabilities/composio/toolkits/${encodeURIComponent(slug)}/auth`,
+    { headers: gatewayHeaders() },
+  );
+  if (!r.ok) return { slug, no_auth: false, schemes: [] };
+  return (await r.json()) as ComposioToolkitAuth;
+}
+
+export interface ComposioLinkInput {
+  scheme?: string;
+  managed?: boolean;
+  credentials?: Record<string, string>;
+  initiation?: Record<string, string>;
+  apiKey?: string;
+}
+
 async function electronComposioLink(
   toolkitSlug: string,
-  apiKey?: string,
+  input?: ComposioLinkInput,
 ): Promise<ComposioLinkResult> {
   return gatewayPostJson<ComposioLinkResult>("/api/capabilities/composio/link", {
     toolkit_slug: toolkitSlug,
-    ...(apiKey ? { api_key: apiKey } : {}),
+    ...(input?.scheme ? { scheme: input.scheme } : {}),
+    ...(input?.managed != null ? { managed: input.managed } : {}),
+    ...(input?.credentials ? { credentials: input.credentials } : {}),
+    ...(input?.initiation ? { initiation: input.initiation } : {}),
+    ...(input?.apiKey ? { api_key: input.apiKey } : {}),
   });
 }
 
@@ -1670,8 +1709,9 @@ export const coreBridge = {
   mcpDisconnect: (providerId: string) => electronMcpDisconnect(providerId),
   composioConnect: (apiKey: string) => electronComposioConnect(apiKey),
   composioToolkits: () => electronComposioToolkits(),
-  composioLink: (toolkitSlug: string, apiKey?: string) =>
-    electronComposioLink(toolkitSlug, apiKey),
+  composioToolkitAuth: (slug: string) => electronComposioToolkitAuth(slug),
+  composioLink: (toolkitSlug: string, input?: ComposioLinkInput) =>
+    electronComposioLink(toolkitSlug, input),
   composioConnections: () => electronComposioConnections(),
   composioDisconnect: (id: string) => electronComposioDisconnect(id),
   composioExecute: (

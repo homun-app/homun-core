@@ -39,6 +39,8 @@ import {
   type ArtifactDestination,
   type ArtifactsUsage,
   type ComposioToolkit,
+  type ComposioToolkitAuth,
+  type ComposioLinkInput,
   type ContainedComputerLive,
   type CoreCapabilitySnapshot,
   type CoreChannelSettings,
@@ -1689,12 +1691,12 @@ function ComposioToolkitBrowser({
   // Link a toolkit. With an apiKey we run Composio's custom API-key flow (active
   // immediately, no browser); otherwise managed OAuth → open the redirect and
   // poll until Composio reports the account ACTIVE ("detect automatically").
-  const connect = async (kit: ComposioToolkit, apiKey?: string) => {
+  const connect = async (kit: ComposioToolkit, input?: ComposioLinkInput) => {
     onNote(null);
     setModalKit(null);
     let redirect = "";
     try {
-      const result = await coreBridge.composioLink(kit.slug, apiKey);
+      const result = await coreBridge.composioLink(kit.slug, input);
       redirect = result.redirect_url || "";
     } catch (error) {
       onNote(`Collegamento non riuscito: ${(error as Error).message}`);
@@ -1784,7 +1786,7 @@ function ComposioToolkitBrowser({
           kit={modalKit}
           state={stateOf(modalKit.slug)}
           onClose={() => setModalKit(null)}
-          onConnect={(apiKey) => void connect(modalKit, apiKey)}
+          onConnect={(input) => void connect(modalKit, input)}
         />
       )}
     </>
@@ -1827,14 +1829,87 @@ function ConnectModal({
   kit: ComposioToolkit;
   state: KitState;
   onClose: () => void;
-  onConnect: (apiKey?: string) => void;
+  onConnect: (input?: ComposioLinkInput) => void;
 }) {
   const [imgOk, setImgOk] = useState(Boolean(kit.logo));
-  const [apiKey, setApiKey] = useState("");
-  // Toolkits that are neither managed-OAuth nor no-auth need the user's own
-  // credentials (e.g. openweather): collect the API key here.
-  const needsKey = !kit.no_auth && !kit.managed_oauth;
-  const canSubmit = !needsKey || apiKey.trim().length > 0;
+  const [auth, setAuth] = useState<ComposioToolkitAuth | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [useManaged, setUseManaged] = useState(true);
+  const [values, setValues] = useState<Record<string, string>>({});
+
+  // Fetch the toolkit's REAL auth schemes (Composio declares them per toolkit). The form is
+  // built from them — no more guessing "API key" for every non-managed toolkit.
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    coreBridge
+      .composioToolkitAuth(kit.slug)
+      .then((a) => {
+        if (!alive) return;
+        setAuth(a);
+        setUseManaged(a.schemes.some((s) => s.managed)); // prefer managed when available
+      })
+      .catch(() => alive && setAuth({ slug: kit.slug, no_auth: false, schemes: [] }))
+      .finally(() => alive && setLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, [kit.slug]);
+
+  const managedScheme = auth?.schemes.find((s) => s.managed) ?? null;
+  const customScheme = auth?.schemes.find((s) => !s.managed) ?? null;
+  const noAuth = auth?.no_auth ?? false;
+  // No schemes from the endpoint → legacy fallback (managed flag, else a bare API key).
+  const legacy = !loading && (auth?.schemes.length ?? 0) === 0;
+  const active = noAuth
+    ? null
+    : useManaged && managedScheme
+      ? managedScheme
+      : customScheme ?? managedScheme;
+  const fields =
+    active && !active.managed ? [...active.creation_fields, ...active.initiation_fields] : [];
+  const legacyNeedsKey = legacy && !kit.no_auth && !kit.managed_oauth;
+
+  const requiredFilled = fields
+    .filter((f) => f.required)
+    .every((f) => (values[f.name] ?? "").trim().length > 0);
+  const legacyOk = !legacyNeedsKey || (values.api_key ?? "").trim().length > 0;
+  const canSubmit = loading ? false : legacy ? legacyOk : noAuth || !active || active.managed || requiredFilled;
+
+  const submit = () => {
+    if (!canSubmit) return;
+    if (legacy) {
+      onConnect(legacyNeedsKey ? { apiKey: (values.api_key ?? "").trim() } : undefined);
+      return;
+    }
+    if (noAuth || !active) {
+      onConnect(undefined);
+      return;
+    }
+    if (active.managed) {
+      onConnect({ scheme: active.mode, managed: true });
+      return;
+    }
+    const creation: Record<string, string> = {};
+    for (const f of active.creation_fields) {
+      const v = (values[f.name] ?? "").trim();
+      if (v) creation[f.name] = v;
+    }
+    const initiation: Record<string, string> = {};
+    for (const f of active.initiation_fields) {
+      const v = (values[f.name] ?? "").trim();
+      if (v) initiation[f.name] = v;
+    }
+    onConnect({ scheme: active.mode, managed: false, credentials: creation, initiation });
+  };
+
+  const isOAuthManaged = (active?.managed ?? false) || (legacy && kit.managed_oauth);
+  const renderFields = legacy
+    ? legacyNeedsKey
+      ? [{ name: "api_key", label: "API key", required: true, secret: true }]
+      : []
+    : fields;
+
   return (
     <div className="cmp-modal-overlay" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="cmp-modal" onClick={(e) => e.stopPropagation()}>
@@ -1849,43 +1924,73 @@ function ConnectModal({
           <div className="conn-detail-titletext">
             <h3 className="mdl-detail-title">Collega {kit.name}</h3>
             <p className="mdl-detail-sub">
-              {state === "connected"
-                ? `${kit.name} è già connesso.`
-                : `Collega il tuo account ${kit.name}.`}
+              {state === "connected" ? `${kit.name} è già connesso.` : `Collega il tuo account ${kit.name}.`}
             </p>
           </div>
           <button className="mdl-icon-btn" type="button" aria-label="Chiudi" onClick={onClose}>
             <X size={16} />
           </button>
         </div>
-        <div className="cmp-modal-note">
-          {needsKey
-            ? `${kit.name} usa una tua API key. Inseriscila qui: viene salvata cifrata sul dispositivo e usata solo verso Composio. La connessione diventa attiva subito, senza browser.`
-            : "Apriremo una finestra del browser: autorizzi l'accesso lì e l'app rileva la connessione automaticamente. I permessi degli agenti restano governati dai gate di approvazione."}
-        </div>
-        {needsKey && (
-          <input
-            className="set-input"
-            type="password"
-            placeholder="API key"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && canSubmit) onConnect(apiKey.trim());
-            }}
-          />
+
+        {loading ? (
+          <div className="cmp-modal-note">Leggo cosa richiede {kit.name}…</div>
+        ) : (
+          <>
+            <div className="cmp-modal-note">
+              {isOAuthManaged
+                ? "Apriremo una finestra del browser: autorizzi l'accesso lì e l'app rileva la connessione automaticamente. I permessi degli agenti restano governati dai gate di approvazione."
+                : renderFields.length > 0
+                  ? `${kit.name} richiede le credenziali qui sotto (dal pannello sviluppatore del servizio). Sono salvate cifrate sul dispositivo e usate solo verso Composio.`
+                  : "Apriremo una finestra del browser per autorizzare l'accesso."}
+            </div>
+
+            {/* Both managed + custom available → let the user pick. */}
+            {managedScheme && customScheme && (
+              <div className="cmp-auth-toggle">
+                <button
+                  type="button"
+                  className={useManaged ? "active" : ""}
+                  onClick={() => setUseManaged(true)}
+                >
+                  OAuth (consigliato)
+                </button>
+                <button
+                  type="button"
+                  className={!useManaged ? "active" : ""}
+                  onClick={() => setUseManaged(false)}
+                >
+                  Credenziali mie
+                </button>
+              </div>
+            )}
+
+            {renderFields.map((f) => (
+              <input
+                key={f.name}
+                className="set-input"
+                type={f.secret ? "password" : "text"}
+                placeholder={f.label + (f.required ? "" : " (opzionale)")}
+                value={values[f.name] ?? ""}
+                onChange={(e) => setValues((p) => ({ ...p, [f.name]: e.target.value }))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && canSubmit) submit();
+                }}
+              />
+            ))}
+          </>
         )}
+
         <button
           className="set-btn primary cmp-modal-btn"
           type="button"
           disabled={!canSubmit}
-          onClick={() => onConnect(needsKey ? apiKey.trim() : undefined)}
+          onClick={submit}
         >
-          {needsKey
-            ? `Collega con API key`
-            : state === "connected"
+          {isOAuthManaged || renderFields.length === 0
+            ? state === "connected"
               ? `Riconnetti ${kit.name}`
-              : `Collega ${kit.name}`}
+              : `Collega ${kit.name}`
+            : `Collega ${kit.name}`}
         </button>
       </div>
     </div>
