@@ -2056,7 +2056,13 @@ const THREADS_WORKSPACE: &str = "__threads__";
 /// M4: store a one-line episodic summary of a conversation turn, tagged with its
 /// thread, in the thread scope. Confirmed directly (a factual record), retrievable
 /// later via recall ("cosa dicevamo l'altra volta").
-fn store_episode(facade: &MemoryFacade, user_id: &MemoryUserId, thread_id: &str, summary: &str) {
+fn store_episode(
+    facade: &MemoryFacade,
+    user_id: &MemoryUserId,
+    thread_id: &str,
+    summary: &str,
+    origin_workspace: &str,
+) {
     let summary = summary.trim();
     if summary.is_empty() {
         return;
@@ -2071,7 +2077,9 @@ fn store_episode(facade: &MemoryFacade, user_id: &MemoryUserId, thread_id: &str,
         privacy_domain: PrivacyDomain::new("personal"),
         sensitivity: MemoryDataSensitivity::Internal,
         evidence_refs: Vec::new(),
-        metadata: serde_json::json!({ "thread_id": thread_id, "scope": "thread" }),
+        // `workspace` = the scope this conversation belongs to, so episodic recall can be
+        // ISOLATED per project (a project recalls only its own conversations, not personal).
+        metadata: serde_json::json!({ "thread_id": thread_id, "scope": "thread", "workspace": origin_workspace }),
     };
     let extraction = MemoryExtraction {
         memories: vec![extracted],
@@ -3427,9 +3435,9 @@ aggiornamenti sostanziali rispetto a queste):\n{known_decisions}"
             graph_relations,
             has_project.then_some(&active),
         );
-        // Episodic memory (M4): one line per turn, in the thread scope.
+        // Episodic memory (M4): one line per turn, tagged with the conversation's scope.
         if let Some(tid) = thread_id {
-            store_episode(&facade, &user_id, tid, &episode);
+            store_episode(&facade, &user_id, tid, &episode, active.as_str());
         }
     }
     // Lock released — incrementally embed new memories (semantic layer) off the hot
@@ -5235,12 +5243,11 @@ async fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<St
             })
             .unwrap_or_default()
     };
+    // PROJECT ISOLATION: recall is scoped to the ACTIVE workspace only. In a project we do
+    // NOT cross-search the personal scope — "di cosa abbiamo discusso?" must stay about THIS
+    // project, not surface personal facts/episodes. (Stable personal PREFERENCES still reach
+    // the model via the always-on briefing, gather_profile_memory — that's separate.)
     let mut lines: Vec<String> = search(active.clone()).into_iter().map(|t| format!("- {t}")).collect();
-    if active.as_str() != PERSONAL_WORKSPACE {
-        for t in search(MemoryWorkspaceId::new(PERSONAL_WORKSPACE)) {
-            lines.push(format!("- {t}"));
-        }
-    }
     // Semantic recall: nearest memories by embedding — catches paraphrases and OTHER
     // LANGUAGES the keyword search misses. Best-effort (skipped if no query vector).
     if let Some(query_vec) = query_vec.as_ref() {
@@ -5264,10 +5271,8 @@ async fn relevant_memory_for_prompt(state: &AppState, prompt: &str) -> Option<St
                 }
             }
         };
+        // Same project isolation as the keyword pass: active scope only.
         consider(active.clone());
-        if active.as_str() != PERSONAL_WORKSPACE {
-            consider(MemoryWorkspaceId::new(PERSONAL_WORKSPACE));
-        }
         scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
         for (_, text) in scored.into_iter().take(5) {
             let line = format!("- {text}");
@@ -5335,30 +5340,35 @@ fn recall_memory(state: &AppState, query: &str) -> String {
     // context (capped, so it can't drown out the project facts). This is the fix for
     // "project memory isn't isolated": asking "cosa c'è in memoria" inside a project
     // used to surface personal info first (LLM primacy bias) and bury the project.
+    // PROJECT ISOLATION: in a project, recall ONLY the project's own memory — never the
+    // personal scope. "Di cosa abbiamo discusso?" inside a project must stay about THIS
+    // project. (Stable personal PREFERENCES still reach the model via the always-on briefing.)
     let in_project = active.as_str() != PERSONAL_WORKSPACE;
     let mut lines = Vec::new();
-    if in_project {
-        for (kind, text) in search(active.clone()) {
-            lines.push(format!("- [{kind}, progetto] {text}"));
-        }
-        for (kind, text) in search(MemoryWorkspaceId::new(PERSONAL_WORKSPACE))
+    for (kind, text) in search(active.clone()) {
+        lines.push(format!("- [{kind}] {text}"));
+    }
+    // Episodic memory (M4): past conversations — SCOPED to the active workspace via the
+    // episode's origin tag, so a project recalls only its own conversations.
+    if let Ok(episodes) = facade.list_memories_for_ui(&user, &MemoryWorkspaceId::new(THREADS_WORKSPACE)) {
+        let needle = query.to_lowercase();
+        let terms: Vec<&str> = needle.split_whitespace().filter(|w| w.chars().count() >= 4).collect();
+        let mut hits: Vec<String> = episodes
             .into_iter()
-            .take(4)
-        {
-            lines.push(format!("- [{kind}, personale] {text}"));
-        }
-    } else {
-        for (kind, text) in search(MemoryWorkspaceId::new(PERSONAL_WORKSPACE)) {
-            lines.push(format!("- [{kind}] {text}"));
-        }
+            .filter(|m| m.memory_type == "episode")
+            .filter(|m| m.metadata.get("workspace").and_then(|w| w.as_str()) == Some(active.as_str()))
+            .filter(|m| {
+                terms.is_empty() || terms.iter().any(|t| m.text.to_lowercase().contains(t))
+            })
+            .map(|m| format!("- [conversazione] {}", m.text))
+            .collect();
+        hits.truncate(8);
+        lines.extend(hits);
     }
-    // Episodic memory (M4): what we discussed in past conversations.
-    for (_kind, text) in search(MemoryWorkspaceId::new(THREADS_WORKSPACE)) {
-        lines.push(format!("- [conversazione] {text}"));
-    }
-    // Graph traversal: surface known relationships (resolved to entity names) so
-    // the model can answer relational questions ("chi è la nonna di…").
+    // Graph traversal: personal relationships ("chi è la nonna di…") — only OUTSIDE a
+    // project (it's personal-scope knowledge; a project must not surface it).
     let personal = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
+    if !in_project {
     if let Ok(relations) = facade.list_relations_for_ui(&user, &personal) {
         if !relations.is_empty() {
             let names: std::collections::HashMap<String, String> = facade
@@ -5377,13 +5387,11 @@ fn recall_memory(state: &AppState, query: &str) -> String {
             }
         }
     }
+    }
     if lines.is_empty() {
         format!("Nessun ricordo pertinente a «{query}».")
     } else if in_project {
-        format!(
-            "Ricordi pertinenti (memoria di PROGETTO in evidenza; «personale» è solo contesto):\n{}",
-            lines.join("\n")
-        )
+        format!("Ricordi pertinenti a QUESTO progetto:\n{}", lines.join("\n"))
     } else {
         format!("Ricordi pertinenti dalla memoria:\n{}", lines.join("\n"))
     }
@@ -12543,6 +12551,7 @@ fn record_channel_message(state: &AppState, channel: &str, message: &ChannelInbo
         &user,
         &handle,
         &format!("{label} da {display}: {}", message.content),
+        PERSONAL_WORKSPACE,
     );
 }
 
