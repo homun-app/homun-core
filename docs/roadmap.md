@@ -345,6 +345,22 @@ col pulsante per fare la cosa. Pattern condiviso coi confirm-card Composio/MCP.
 4. **Doc drift.** Mantenere allineati `roadmap.md`, `system-map.md`,
    `final-roadmap.md` quando cambia lo stato (questo riallineamento e' il primo
    passo).
+5. **Cifratura del DB at-rest (SQLCipher) — RIMANDATA (non ora).** Stato attuale
+   (`0d9edc9`, giu 2026): i dati personali sono SQLite **in chiaro** ma **owner-only
+   0600** (umask 0077 a startup gateway+sidecar + sweep dei file esistenti); le API
+   key sono cifrate (XChaCha20 in `secrets.json`, chiave `secret-key` 0600). Per il
+   threat model attuale (desktop mono-utente) i 0600 coprono ~l'80% del rischio:
+   altri utenti/processi locali e i backup non leggono piu' memoria/contatti/messaggi.
+   Il **vero** at-rest e' cifrare l'intero DB. SOTA: **SQLCipher** (rusqlite feature
+   `bundled-sqlcipher`) con la **master key nella OS Keychain** (`SystemKeychainSecretStore`
+   gia' esiste, shell-out a `security`). Arco a se' — non banale: (a) swap del driver
+   + migrazione dei DB esistenti (`memory.sqlite` ~231MB) verso il formato cifrato;
+   (b) gestione chiave nel Keychain con il trade-off dev/headless (rebuild → ACL
+   mismatch → prompt; cron senza unlock interattivo si rompe) → serve un fallback
+   file-key sotto flag; (c) costo runtime per pagina. Da fare **dopo la prima
+   release**, come decisione dedicata. Collegato: cablare la Keychain per la sola
+   `secret-key` e' un sotto-passo opzionale e a basso guadagno (la chiave 0600 e il
+   Keychain del login si sbloccano per lo stesso utente).
 
 ## Blockers
 
