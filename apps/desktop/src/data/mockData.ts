@@ -38,6 +38,8 @@ export const navItems: NavItem[] = [
   // "Apprendimento" è confluito in Homun. "Memoria" è stata unificata nelle
   // Impostazioni → Memoria (un'unica superficie, fuori più pulito).
   { id: "tasks", label: "Pianificato", icon: CalendarClock },
+  // Automazioni di prima classe: regole trigger→azione (orario o evento).
+  { id: "automations", label: "Automazioni", icon: Sparkles },
 ];
 
 export const chatMessages: ChatMessage[] = [
