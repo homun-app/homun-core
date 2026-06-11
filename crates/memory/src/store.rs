@@ -481,6 +481,40 @@ impl SQLiteMemoryStore {
         Ok(())
     }
 
+    /// Replace a scope's imported code graph in ONE transaction: clears the prior
+    /// graphify data, then bulk-inserts the new entities + relations. Batching is
+    /// essential at scale — a big repo is tens of thousands of nodes/edges, and per-row
+    /// autocommit would fsync each insert (minutes). One transaction = seconds.
+    pub fn import_graphify_batch(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        entities: &[MemoryEntity],
+        relations: &[MemoryRelation],
+    ) -> Result<(usize, usize), String> {
+        self.conn.execute_batch("BEGIN").map_err(|e| e.to_string())?;
+        let run = || -> Result<(usize, usize), String> {
+            self.clear_graphify(user_id, workspace_id)?;
+            for entity in entities {
+                self.upsert_entity(entity)?;
+            }
+            for relation in relations {
+                self.upsert_relation(relation)?;
+            }
+            Ok((entities.len(), relations.len()))
+        };
+        match run() {
+            Ok(counts) => {
+                self.conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
+                Ok(counts)
+            }
+            Err(error) => {
+                let _ = self.conn.execute_batch("ROLLBACK");
+                Err(error)
+            }
+        }
+    }
+
     /// Resurrect an entity: drop its tombstone so it reappears in the graph. Used by
     /// regeneration when a live memory references a wrongly-orphaned entity.
     pub fn untombstone_entity(

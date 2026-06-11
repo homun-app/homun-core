@@ -19825,7 +19825,6 @@ fn import_graphify_value(
     ws: &MemoryWorkspaceId,
     graph: &serde_json::Value,
 ) -> (usize, usize) {
-    let _ = facade.clear_graphify(user, ws);
     let nodes = graph.get("nodes").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     let links = graph
         .get("links")
@@ -19833,8 +19832,11 @@ fn import_graphify_value(
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default();
+    // Build entities + relations IN MEMORY first, then write them in ONE transaction.
+    // At scale (a whole repo = tens of thousands of records) per-row autocommit would
+    // take minutes; the batch is seconds.
     let mut id_to_ref: std::collections::HashMap<String, MemoryRef> = std::collections::HashMap::new();
-    let mut entities = 0usize;
+    let mut entities: Vec<MemoryEntity> = Vec::with_capacity(nodes.len());
     for node in &nodes {
         let Some(id) = node.get("id").and_then(|v| v.as_str()) else { continue };
         let label = node.get("label").and_then(|v| v.as_str()).unwrap_or(id);
@@ -19851,7 +19853,7 @@ fn import_graphify_value(
             "code_file"
         };
         let reference = MemoryRef::generated(MemoryRefKind::Entity, user.clone(), ws.clone());
-        let entity = MemoryEntity {
+        entities.push(MemoryEntity {
             reference: reference.clone(),
             user_id: user.clone(),
             workspace_id: ws.clone(),
@@ -19866,13 +19868,10 @@ fn import_graphify_value(
                 "source_file": node.get("source_file").and_then(|v| v.as_str()).unwrap_or(""),
                 "source_location": node.get("source_location").and_then(|v| v.as_str()).unwrap_or(""),
             }),
-        };
-        if facade.upsert_entity(&entity).is_ok() {
-            id_to_ref.insert(id.to_string(), reference);
-            entities += 1;
-        }
+        });
+        id_to_ref.insert(id.to_string(), reference);
     }
-    let mut rels = 0usize;
+    let mut relations: Vec<MemoryRelation> = Vec::with_capacity(links.len());
     for link in &links {
         let (Some(s), Some(t)) = (
             link.get("source").and_then(|v| v.as_str()),
@@ -19881,7 +19880,7 @@ fn import_graphify_value(
             continue;
         };
         let (Some(src), Some(tgt)) = (id_to_ref.get(s), id_to_ref.get(t)) else { continue };
-        let relation = MemoryRelation {
+        relations.push(MemoryRelation {
             reference: MemoryRef::generated(MemoryRefKind::Relation, user.clone(), ws.clone()),
             user_id: user.clone(),
             workspace_id: ws.clone(),
@@ -19893,12 +19892,12 @@ fn import_graphify_value(
             sensitivity: MemoryDataSensitivity::Internal,
             evidence: Vec::new(),
             metadata: serde_json::json!({ "source": "graphify" }),
-        };
-        if facade.upsert_relation(&relation).is_ok() {
-            rels += 1;
-        }
+        });
     }
-    (entities, rels)
+    // One transaction: clear prior graphify data + bulk insert. Returns (entities, relations).
+    facade
+        .import_graphify_batch(user, ws, &entities, &relations)
+        .unwrap_or((0, 0))
 }
 
 /// Directories that are vendored deps / build output / caches — never the user's
@@ -20016,17 +20015,11 @@ fn build_project_graph(state: &AppState, workspace_id: &str, folder: &str, subpa
     if !root.is_dir() {
         return;
     }
-    // Guard: skip the auto-map above a CODE-file cap (counting only real source — venvs
-    // and data don't count) so a genuinely huge codebase doesn't make the on-open build
-    // take minutes. The project stays usable; the UI offers "map a subfolder" instead.
-    const MAX_CODE_FILES: usize = 6000;
-    if subpath.is_none() && project_code_file_count_capped(&root, MAX_CODE_FILES) >= MAX_CODE_FILES {
-        eprintln!("project-graph: {workspace_id} grande (>{MAX_CODE_FILES} file di codice) — auto-map saltato, mappa una sottocartella");
-        publish_app_event(serde_json::json!({
-            "type": "project_graph.too_large", "workspace": workspace_id
-        }));
-        return;
-    }
+    // Map the WHOLE project: the code graph is extracted on the host (fast) and queried
+    // via SQL traversal, where node count is irrelevant. We no longer cap by file count
+    // (a huge repo like idra ~9.4k files → 53k nodes builds in ~2 min and is fully
+    // queryable). The build is async + cached + incremental; `subpath` stays as an
+    // optional focus filter, not a gate. Viz readability for big graphs = clustering.
     let out = graphify_out_dir(workspace_id);
     let graph_path = out.join("graph.json");
     // Staleness: skip if a graph exists and no source file is newer than it.

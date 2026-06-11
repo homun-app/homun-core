@@ -488,6 +488,20 @@ impl MemoryFacade {
         Ok(self.store.clear_graphify(user_id, workspace_id)?)
     }
 
+    /// Bulk-replace a scope's imported code graph in one transaction (clear + insert).
+    /// Returns (entities, relations) written. Scales to tens of thousands of records.
+    pub fn import_graphify_batch(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        entities: &[MemoryEntity],
+        relations: &[MemoryRelation],
+    ) -> MemoryResult<(usize, usize)> {
+        Ok(self
+            .store
+            .import_graphify_batch(user_id, workspace_id, entities, relations)?)
+    }
+
     /// Resurrect an entity (drop its tombstone) — used when a live memory references it.
     pub fn untombstone_entity(
         &self,

@@ -37,6 +37,7 @@ rsync -a \
   --exclude='*.csv' --exclude='*.log' --exclude='*.so' --exclude='*.mat' \
   --exclude='*.sav' --exclude='*.db' --exclude='*.dat' --exclude='*.jsonl' \
   --exclude='*.parquet' --exclude='*.lock' \
+  --exclude='*.sh' --exclude='*.bash' \
   "$SRC"/ "$WORK"/
 
 # Code-only graph: deterministic tree-sitter, no LLM, no network.
