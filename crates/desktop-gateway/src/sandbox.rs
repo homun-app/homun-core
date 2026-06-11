@@ -371,6 +371,68 @@ fn host_tools_path() -> String {
     }
 }
 
+/// Protective default ignores for an auto-initialised project repo: keep SECRETS and
+/// heavy/vendored trees out of the very first commit (a fresh `git init` + add-all would
+/// otherwise capture .env/keys). Only written when the folder has no .gitignore.
+const DEFAULT_GITIGNORE: &str = "# Generato da Homun all'attivazione del versioning.\n\
+.env\n.env.*\n*.key\n*.pem\n*.p12\n*.pfx\nsecrets/\n.secrets/\ncredentials*\n\
+.DS_Store\nnode_modules/\n.venv/\nvenv/\n__pycache__/\n*.pyc\ntarget/\ndist/\n\
+build/\n.next/\ncoverage/\n*.log\n";
+
+/// Ensure a project folder is under git, so versioning + history-back + the git change
+/// signal work uniformly across ALL projects. Respects an EXISTING repo (never re-inits,
+/// never touches its history); only `git init`s a folder that is NOT a repo, writing a
+/// protective .gitignore FIRST (no secrets in the baseline) then a single baseline commit
+/// so there's a state to revert to. Homun's own future commits go on a dedicated branch
+/// (caller's concern); this never rewrites history. Returns true if the folder is git-backed.
+pub fn ensure_project_git(folder: &Path) -> bool {
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .arg("-C")
+            .arg(folder)
+            .args(args)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    };
+    // Already a git work-tree (or inside one)? Use it as-is.
+    let inside = Command::new("git")
+        .arg("-C")
+        .arg(folder)
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .output()
+        .map(|o| o.status.success() && String::from_utf8_lossy(&o.stdout).trim() == "true")
+        .unwrap_or(false);
+    if inside {
+        return true;
+    }
+    if !git(&["init"]) {
+        return false;
+    }
+    // Protective .gitignore BEFORE the baseline add (so secrets are excluded from it).
+    let gitignore = folder.join(".gitignore");
+    if !gitignore.exists() {
+        let _ = std::fs::write(&gitignore, DEFAULT_GITIGNORE);
+    }
+    // Baseline commit with an inline identity so it works without a global git config,
+    // and gpgsign off so a signing-required setup can't block it.
+    let identity = [
+        "-c",
+        "user.name=Homun",
+        "-c",
+        "user.email=homun@local",
+        "-c",
+        "commit.gpgsign=false",
+    ];
+    let mut add = identity.to_vec();
+    add.extend(["add", "-A"]);
+    git(&add);
+    let mut commit = identity.to_vec();
+    commit.extend(["commit", "-m", "Homun: baseline iniziale (versioning attivato)"]);
+    git(&commit);
+    true
+}
+
 /// Ensures the `graphify` CLI is on the host, installing it via `uv` if missing — the
 /// same host-managed pattern as the pypi MCP servers (uvx). Best-effort.
 fn ensure_graphify() -> Result<(), String> {
