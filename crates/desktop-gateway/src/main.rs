@@ -7145,7 +7145,6 @@ struct CapabilityEntry {
     text: String,
     schema: Option<serde_json::Value>,
     is_skill: bool,
-    is_connector: bool,
 }
 
 fn cap_tokenize(s: &str) -> Vec<String> {
@@ -7202,26 +7201,6 @@ fn bm25_rank<'a>(
         .collect();
     scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
     scored.into_iter().take(limit).map(|(_, i)| &corpus[i]).collect()
-}
-
-fn find_connected_tools_schema() -> serde_json::Value {
-    serde_json::json!({
-        "type": "function",
-        "function": {
-            "name": "find_connected_tools",
-            "description": "Cerca tra gli strumenti dei servizi collegati dall'utente (Gmail, Google Calendar, …) quelli adatti all'intento. Restituisce gli strumenti rilevanti, che diventano poi richiamabili. Chiamalo PRIMA di dire che non hai accesso a un servizio.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Intento o parole chiave, es. 'unread emails', 'calendar events today', 'send email'."
-                    }
-                },
-                "required": ["query"]
-            }
-        }
-    })
 }
 
 /// Keyword search over the connected-tool catalog. Scores each tool by how many
@@ -7991,7 +7970,6 @@ RI-VERIFICA eseguendo. Una causa alla volta, niente tentativi alla cieca."
             text,
             schema: Some(schema),
             is_skill: false,
-            is_connector: false,
         });
     }
     if has_skills {
@@ -8002,27 +7980,12 @@ RI-VERIFICA eseguendo. Una causa alla volta, niente tentativi alla cieca."
                 text: format!("{id} {sname} {sdesc}"),
                 schema: None,
                 is_skill: true,
-                is_connector: false,
             });
         }
     }
-    for (name, haystack, schema) in &catalog_index {
-        let desc = schema
-            .pointer("/function/description")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .chars()
-            .take(140)
-            .collect::<String>();
-        capability_corpus.push(CapabilityEntry {
-            key: name.clone(),
-            desc,
-            text: haystack.clone(),
-            schema: Some(schema.clone()),
-            is_skill: false,
-            is_connector: true,
-        });
-    }
+    // Connectors are NOT flattened into the BM25 corpus: they're searched via the
+    // toolkit-aware `search_composio_catalog` inside find_capability (returns a service's
+    // full CRUD set together, so the model picks the right verb).
     // Attachments (persistent): ingest NEW files off-runtime, PERSIST them on the
     // thread, then load the thread's FULL set so a file stays usable across turns
     // (no re-attach). A manifest lists the available files so the model uses their
@@ -9723,81 +9686,35 @@ una data incerta.",
                             },
                         )
                         .await;
-                        let matches = bm25_rank(&capability_corpus, &intent, 6);
-                        if matches.is_empty() {
-                            "Nessuna capacità corrisponde. Riformula con cosa vuoi fare (es. \
-\"navigare il web\", \"cercare su GitHub\", \"leggere file dell'utente\", \"inviare un'email\")."
-                                .to_string()
-                        } else {
-                            let mut lines = Vec::new();
-                            for entry in &matches {
-                                // Channels (read-only) expose only READ connector tools.
-                                if entry.is_connector
-                                    && read_only
-                                    && !composio_tool_is_read(&entry.key)
-                                {
-                                    continue;
+                        let mut lines = Vec::new();
+                        // In-house tools + skills (BM25 over the unified corpus).
+                        for entry in bm25_rank(&capability_corpus, &intent, 6) {
+                            if entry.is_skill {
+                                lines.push(format!(
+                                    "- skill «{}»: {} → caricala con use_skill(\"{}\")",
+                                    entry.key, entry.desc, entry.key
+                                ));
+                            } else if let Some(schema) = &entry.schema {
+                                if loaded_tools.insert(entry.key.clone()) {
+                                    tool_schemas.push(schema.clone());
                                 }
-                                if entry.is_skill {
-                                    lines.push(format!(
-                                        "- skill «{}»: {} → caricala con use_skill(\"{}\")",
-                                        entry.key, entry.desc, entry.key
-                                    ));
-                                } else if let Some(schema) = &entry.schema {
-                                    if loaded_tools.insert(entry.key.clone()) {
-                                        tool_schemas.push(schema.clone());
-                                    }
-                                    lines.push(format!("- {}: {}", entry.key, entry.desc));
-                                }
-                            }
-                            if lines.is_empty() {
-                                "Per questa richiesta servono solo strumenti con effetti non \
-disponibili dal canale (richiedono la tua conferma nell'app).".to_string()
-                            } else {
-                                format!(
-                                    "Capacità trovate (i tool sono ora RICHIAMABILI; le skill si \
-caricano con use_skill):\n{}",
-                                    lines.join("\n")
-                                )
+                                lines.push(format!("- {}: {}", entry.key, entry.desc));
                             }
                         }
-                    } else if name == "find_connected_tools" {
-                        // Discovery: search the catalog, inject the matching tool
-                        // schemas so the model can call them next round.
-                        let query = serde_json::from_str::<serde_json::Value>(args_raw)
-                            .ok()
-                            .and_then(|a| a.get("query").and_then(|q| q.as_str()).map(String::from))
-                            .unwrap_or_default();
-                        let _ = emit_stream_event(
-                            &tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!(
-                                    "‹‹ACT››🔎 Cerco strumenti: {}‹‹/ACT››",
-                                    if query.is_empty() { "(intento)" } else { query.as_str() }
-                                ),
-                            },
-                        )
-                        .await;
-                        let matches =
-                            search_composio_catalog(&catalog_index, &query, COMPOSIO_DISCOVERY_RESULTS);
-                        if matches.is_empty() {
-                            "Nessuno strumento corrisponde. Riformula con parole chiave del \
-servizio (es. \"email\", \"calendar\", \"drive\")."
-                                .to_string()
-                        } else {
-                            let mut lines = Vec::new();
-                            for (slug, schema) in &matches {
-                                // Channel (read-only) turns expose only Composio READ
-                                // tools; writes are withheld (Phase 2 → approval).
-                                if read_only && !composio_tool_is_read(slug) {
+                        // Connected services (toolkit-aware): activate the matching toolkit's
+                        // tools so the model sees its full CRUD together. Channels: READ only.
+                        if !catalog_index.is_empty() {
+                            for (slug, schema) in
+                                search_composio_catalog(&catalog_index, &intent, COMPOSIO_DISCOVERY_RESULTS)
+                            {
+                                if read_only && !composio_tool_is_read(&slug) {
                                     continue;
                                 }
                                 if loaded_tools.insert(slug.clone()) {
                                     tool_schemas.push(schema.clone());
                                 }
                                 let desc = schema
-                                    .get("function")
-                                    .and_then(|f| f.get("description"))
+                                    .pointer("/function/description")
                                     .and_then(|d| d.as_str())
                                     .unwrap_or("")
                                     .chars()
@@ -9805,16 +9722,17 @@ servizio (es. \"email\", \"calendar\", \"drive\")."
                                     .collect::<String>();
                                 lines.push(format!("- {slug}: {desc}"));
                             }
-                            if lines.is_empty() {
-                                "Per questa richiesta servono solo strumenti con effetti, non \
-disponibili dal canale (richiedono la tua conferma nell'app).".to_string()
-                            } else {
-                                format!(
-                                    "Strumenti trovati (ora richiamabili — chiama quello giusto con i \
-suoi argomenti):\n{}",
-                                    lines.join("\n")
-                                )
-                            }
+                        }
+                        if lines.is_empty() {
+                            "Nessuna capacità corrisponde. Riformula con cosa vuoi fare (es. \
+\"navigare il web\", \"cercare su GitHub\", \"leggere file dell'utente\", \"inviare un'email\")."
+                                .to_string()
+                        } else {
+                            format!(
+                                "Capacità trovate (i tool sono ora RICHIAMABILI; le skill si \
+caricano con use_skill):\n{}",
+                                lines.join("\n")
+                            )
                         }
                     } else if name == "schedule_task" {
                         let args_val: serde_json::Value =
