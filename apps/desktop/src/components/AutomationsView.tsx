@@ -450,23 +450,18 @@ export function AutomationsView({
                 </div>
               )}
               {source?.kind === "connector" && (
-                <div className="auto-row">
-                  <div className="auto-field">
-                    <label>Filtro (opzionale)</label>
-                    <input
-                      value={connectorArgs}
-                      onChange={(e) => setConnectorArgs(e.target.value)}
-                      placeholder="es. from:mario is:unread"
-                    />
-                  </div>
-                  <div className="auto-field">
-                    <label>Campo identificativo</label>
-                    <input
-                      value={connectorKey}
-                      onChange={(e) => setConnectorKey(e.target.value)}
-                      placeholder="es. messageId"
-                    />
-                  </div>
+                <div className="auto-field">
+                  <label>Quando deve scattare? (descrivi, opzionale)</label>
+                  <input
+                    value={connectorArgs}
+                    onChange={(e) => setConnectorArgs(e.target.value)}
+                    placeholder="es. nuove email da Mario non lette"
+                  />
+                  <p className="auto-hint">
+                    Descrivilo a parole: ci penso io a tradurlo. Il campo tecnico per evitare
+                    doppioni è impostato in automatico ({connectorKey}). Per setup precisi,
+                    chiedimelo in chat.
+                  </p>
                 </div>
               )}
             </div>
