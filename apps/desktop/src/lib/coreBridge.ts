@@ -664,6 +664,10 @@ export type MemoryGraph = {
   workspace: string;
   nodes: MemoryGraphNode[];
   edges: MemoryGraphEdge[];
+  /** True when a large code graph was reduced to its most-connected backbone for drawing. */
+  truncated?: boolean;
+  /** Total nodes before truncation (for the "N di M" banner). */
+  total_nodes?: number;
 };
 
 function scopeQuery(thread?: string, workspace?: string): string {

@@ -3389,6 +3389,13 @@ export function MemoryGraphPanel({
       ) : (
         <>
       <div className="memory-graph-canvas" ref={canvasRef}>
+        {graph?.truncated && (
+          <div className="memory-graph-truncated">
+            Grafo grande: mostro i {graph.nodes.length.toLocaleString("it-IT")} nodi più
+            connessi di {(graph.total_nodes ?? graph.nodes.length).toLocaleString("it-IT")}.
+            Per il resto, chiedi in chat (le query usano l'intero grafo).
+          </div>
+        )}
         <ForceGraph2D
           ref={fgRef}
           width={size.w}
