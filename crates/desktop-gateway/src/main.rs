@@ -4816,14 +4816,20 @@ fn pick_poll_tool(tools: &[String]) -> String {
 /// read tool (auto-picked) and the agent decides the rest at run time.
 async fn automation_event_sources(State(state): State<AppState>) -> Json<serde_json::Value> {
     let st = state.clone();
-    let (composio, mcp) = tokio::task::spawn_blocking(move || {
-        (composio_chat_tools(&st, 500), mcp_chat_tools(&st, 500))
+    let (connected, composio, mcp) = tokio::task::spawn_blocking(move || {
+        // Authoritative list of CONNECTED Composio toolkits (same source as the Connettori
+        // view) — we list exactly these, not whatever the tool catalogue happens to contain.
+        let connected = composio_transport_for(&st)
+            .ok()
+            .map(|t| composio_connected_toolkits(&t))
+            .unwrap_or_default();
+        (connected, composio_chat_tools(&st, 500), mcp_chat_tools(&st, 500))
     })
     .await
-    .unwrap_or_else(|_| (ComposioChatTools::default(), McpChatTools::default()));
-    // Group READ tools per service (Composio toolkit / MCP server), then collapse each
-    // service to ONE pickable entry whose `tool` is its best poll tool.
-    let mut services: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    .unwrap_or_else(|_| (Vec::new(), ComposioChatTools::default(), McpChatTools::default()));
+    // Index the catalogue's READ tools by toolkit prefix, so each connected service can be
+    // matched to a poll tool (the agent picks the actual operation at run time).
+    let mut tools_by_kit: std::collections::BTreeMap<String, Vec<String>> = Default::default();
     for schema in &composio.schemas {
         let Some(name) = schema.pointer("/function/name").and_then(|v| v.as_str()) else {
             continue;
@@ -4831,10 +4837,22 @@ async fn automation_event_sources(State(state): State<AppState>) -> Json<serde_j
         if composio.writes.contains(name) {
             continue;
         }
-        services
-            .entry(composio_toolkit_name(name))
-            .or_default()
-            .push(name.to_string());
+        let kit = name.split('_').next().unwrap_or(name).to_ascii_uppercase();
+        tools_by_kit.entry(kit).or_default().push(name.to_string());
+    }
+    // One entry per CONNECTED + active toolkit (the user declares the service).
+    let mut services: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    for (slug, active) in &connected {
+        if !active {
+            continue;
+        }
+        let kit = slug.split('_').next().unwrap_or(slug).to_ascii_uppercase();
+        if let Some(tools) = tools_by_kit.get(&kit) {
+            services
+                .entry(composio_toolkit_name(slug))
+                .or_default()
+                .extend(tools.iter().cloned());
+        }
     }
     for schema in &mcp.schemas {
         let Some(name) = schema.pointer("/function/name").and_then(|v| v.as_str()) else {
