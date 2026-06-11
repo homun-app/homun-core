@@ -3125,6 +3125,25 @@ body.resizing-drawer {
   font-size: 13px;
 }
 
+/* Big code graph: backbone-only render notice (overlay on the canvas). */
+.memory-graph-truncated {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  max-width: 90%;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface, rgba(20, 20, 20, 0.82));
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: center;
+  pointer-events: none;
+}
+
 /* Huge-repo escape hatch: pick a subfolder to map. */
 .project-map-subdirs {
   display: flex;

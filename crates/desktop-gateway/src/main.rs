@@ -19770,6 +19770,13 @@ struct MemoryGraphResponse {
     workspace: String,
     nodes: Vec<GraphNode>,
     edges: Vec<GraphEdge>,
+    /// True when a large code graph was reduced to its most-connected "backbone" for
+    /// rendering (the full graph stays queryable via query_code_graph). UI shows a banner.
+    #[serde(default)]
+    truncated: bool,
+    /// Total nodes before any truncation (so the UI can say "N di M").
+    #[serde(default)]
+    total_nodes: usize,
 }
 
 fn graph_push_node(
@@ -20351,10 +20358,44 @@ async fn memory_graph(
         }
     }
 
+    // Large code graphs (idra ~53k nodes) would freeze the force-graph. Render only the
+    // most-connected "backbone": keep all non-entity nodes (project/facts/decisions —
+    // always few) + the top entity nodes by degree, then drop edges to pruned nodes. The
+    // FULL graph stays queryable via query_code_graph; this only bounds what's DRAWN.
+    const GRAPH_RENDER_CAP: usize = 2000;
+    let total_nodes = nodes.len();
+    let truncated = total_nodes > GRAPH_RENDER_CAP;
+    if truncated {
+        let mut degree: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for edge in &edges {
+            *degree.entry(edge.source.clone()).or_default() += 1;
+            *degree.entry(edge.target.clone()).or_default() += 1;
+        }
+        // Entity nodes ranked by degree; everything else (the few non-entity nodes) kept.
+        let mut entity_nodes: Vec<&GraphNode> = nodes.iter().filter(|n| n.kind == "entity").collect();
+        entity_nodes.sort_by(|a, b| {
+            degree.get(&b.id).unwrap_or(&0).cmp(degree.get(&a.id).unwrap_or(&0))
+        });
+        let non_entity = total_nodes - entity_nodes.len();
+        let entity_budget = GRAPH_RENDER_CAP.saturating_sub(non_entity);
+        let mut keep: std::collections::HashSet<String> = nodes
+            .iter()
+            .filter(|n| n.kind != "entity")
+            .map(|n| n.id.clone())
+            .collect();
+        for node in entity_nodes.into_iter().take(entity_budget) {
+            keep.insert(node.id.clone());
+        }
+        nodes.retain(|n| keep.contains(&n.id));
+        edges.retain(|e| keep.contains(&e.source) && keep.contains(&e.target));
+    }
+
     Ok(Json(MemoryGraphResponse {
         workspace: ws.as_str().to_string(),
         nodes,
         edges,
+        truncated,
+        total_nodes,
     }))
 }
 
