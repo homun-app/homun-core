@@ -25169,7 +25169,9 @@ mod tests {
         extract_source_urls,
         fonti_section,
         format_memory_block,
+        humanize_task_kind,
         is_auto_confirmable,
+        is_internal_task_kind,
         is_salient_exchange,
         normalize_for_dedup,
         strip_json_fences,
@@ -25437,6 +25439,22 @@ data: [DONE]\n";
         // Master toggle off → draft even for allowlisted.
         settings.auto_reply = false;
         assert_eq!(inbound_action(&settings, "alice"), InboundAction::Draft);
+    }
+
+    #[test]
+    fn queue_hides_internal_subtasks_and_humanizes_kinds() {
+        // Execution sub-tasks are internal → hidden from the user-facing queue.
+        assert!(is_internal_task_kind("capability.browser.snapshot"));
+        assert!(is_internal_task_kind("capability.github.search"));
+        assert!(is_internal_task_kind("subagent.code_reviewer"));
+        // User-meaningful runs are NOT internal.
+        assert!(!is_internal_task_kind("proactive_prompt"));
+        assert!(!is_internal_task_kind("browser_task"));
+        // Human labels.
+        assert_eq!(humanize_task_kind("proactive_prompt"), "Automazione");
+        assert_eq!(humanize_task_kind("capability.browser.snapshot"), "Browser: snapshot");
+        assert_eq!(humanize_task_kind("capability.github.find_repos"), "Github: find repos");
+        assert_eq!(humanize_task_kind("subagent.code_reviewer"), "Sub-agente: code_reviewer");
     }
 
     #[test]
