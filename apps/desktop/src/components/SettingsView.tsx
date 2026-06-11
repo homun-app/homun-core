@@ -50,6 +50,7 @@ import {
   type McpRegistryServer,
   type CatalogPreview,
   type CatalogSkill,
+  type ChannelIdentity,
   type SkillCatalogResponse,
   type RoleView,
   type RoutingDecision,
@@ -299,6 +300,7 @@ function ApprovalRoutingRow() {
   const [target, setTarget] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [detected, setDetected] = useState<ChannelIdentity[]>([]);
 
   useEffect(() => {
     void coreBridge
@@ -309,6 +311,19 @@ function ApprovalRoutingRow() {
       })
       .catch(() => {});
   }, []);
+
+  // When a remote channel is chosen, look up the chat ids we've actually seen on it,
+  // so the user can pick their OWN id instead of guessing chat-id-vs-phone-number.
+  useEffect(() => {
+    if (channel === "in_app") {
+      setDetected([]);
+      return;
+    }
+    void coreBridge
+      .channelIdentities(channel)
+      .then(setDetected)
+      .catch(() => setDetected([]));
+  }, [channel]);
 
   const save = async (nextChannel: string, nextTarget: string) => {
     setBusy(true);
@@ -357,20 +372,51 @@ function ApprovalRoutingRow() {
       {needsTarget && (
         <div className="set-trow">
           <div>
-            <div className="tt">Il tuo numero / chat su {channel === "telegram" ? "Telegram" : "WhatsApp"}</div>
-            <div className="td">Numero o chat id da cui autorizzerai (es. 39333…).</div>
+            <div className="tt">
+              Il tuo chat id su {channel === "telegram" ? "Telegram" : "WhatsApp"}
+            </div>
+            <div className="td">
+              {channel === "telegram"
+                ? "L'id della chat (numerico) da cui autorizzerai — non è il numero di telefono."
+                : "Il numero (con prefisso) da cui autorizzerai."}
+            </div>
           </div>
-          <input
-            className="set-input set-row-input"
-            disabled={busy}
-            value={target}
-            placeholder="es. 393331234567"
-            onChange={(e) => setTarget(e.target.value)}
-            onBlur={() => void save(channel, target)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void save(channel, target);
-            }}
-          />
+          <div className="approval-target-field">
+            <input
+              className="set-input set-row-input"
+              disabled={busy}
+              value={target}
+              placeholder={channel === "telegram" ? "es. 8205578468 (chat id)" : "es. 393331234567"}
+              onChange={(e) => setTarget(e.target.value)}
+              onBlur={() => void save(channel, target)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void save(channel, target);
+              }}
+            />
+            {detected.length > 0 && (
+              <div className="approval-detected">
+                <span className="approval-detected-label">Rilevati di recente:</span>
+                {detected.map((d) => {
+                  const active = d.id === target.trim();
+                  return (
+                    <button
+                      key={d.id}
+                      type="button"
+                      className={`approval-chip${active ? " is-active" : ""}`}
+                      disabled={busy}
+                      title={`Usa ${d.id}`}
+                      onClick={() => {
+                        setTarget(d.id);
+                        void save(channel, d.id);
+                      }}
+                    >
+                      {d.name ? `${d.name} · ${d.id}` : d.id}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
       {note && <p className="set-hint">{note}</p>}

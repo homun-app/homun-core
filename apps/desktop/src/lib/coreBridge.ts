@@ -600,6 +600,25 @@ async function electronApprovalRouting(): Promise<ApprovalRouting> {
   return gatewayGetJson<ApprovalRouting>("/api/prefs/approval-routing");
 }
 
+export interface ChannelIdentity {
+  id: string;
+  name: string;
+}
+
+async function electronChannelIdentities(channel: string): Promise<ChannelIdentity[]> {
+  try {
+    const r = await fetch(
+      `${DESKTOP_GATEWAY_URL}/api/prefs/channel-identities?channel=${encodeURIComponent(channel)}`,
+      { headers: gatewayHeaders() },
+    );
+    if (!r.ok) return [];
+    const data = (await r.json()) as { identities?: ChannelIdentity[] };
+    return data.identities ?? [];
+  } catch {
+    return [];
+  }
+}
+
 async function electronSetApprovalRouting(
   channel: string,
   target: string | null,
@@ -1695,6 +1714,7 @@ export const coreBridge = {
   approvalRouting: () => electronApprovalRouting(),
   setApprovalRouting: (channel: string, target: string | null) =>
     electronSetApprovalRouting(channel, target),
+  channelIdentities: (channel: string) => electronChannelIdentities(channel),
   runtimeProvider: () => electronRuntimeProvider(),
   setRuntimeProvider: (input: { base_url?: string; model?: string; api_key?: string }) =>
     electronSetRuntimeProvider(input),

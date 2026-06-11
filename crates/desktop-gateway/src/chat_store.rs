@@ -825,6 +825,27 @@ impl ChatStore {
         Ok(mode.filter(|m| !m.trim().is_empty()))
     }
 
+    /// The curated contact's display name for a channel identity, if one exists.
+    /// Used to label "recently seen" chat ids cleanly instead of the thread title
+    /// (which can be the text of a message).
+    pub fn contact_name_for_identity(
+        &self,
+        channel: &str,
+        identifier: &str,
+    ) -> rusqlite::Result<Option<String>> {
+        let name: Option<String> = self
+            .conn
+            .query_row(
+                "select c.name from contacts c
+                 join contact_identities i on i.contact_id = c.id
+                 where i.channel = ?1 and i.identifier = ?2",
+                params![channel, identifier],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(name.filter(|n| !n.trim().is_empty()))
+    }
+
     /// The contact's isolation perimeter; a missing row = the safe default.
     pub fn perimeter_or_default(&self, contact_id: i64) -> StoredPerimeter {
         let row: Option<(String, String, String, String, i64, i64)> = self
