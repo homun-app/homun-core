@@ -7795,6 +7795,29 @@ body.resizing-drawer {
 .conn-detail-titletext { min-width: 0; }
 .conn-detail-title .set-badge { margin-left: auto; }
 
+/* Connector activity (audit log) panel — roadmap #6. */
+.conn-activity { display: flex; flex-direction: column; gap: var(--s3); }
+.conn-activity-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s3); }
+.conn-activity-title { margin: 0 0 2px; font-size: 14px; font-weight: 600; }
+.tool-runs { display: flex; flex-direction: column; gap: 2px; max-height: 60vh; overflow-y: auto; }
+.tool-run {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 12.5px;
+}
+.tool-run:hover { background: var(--surface-muted); }
+.tool-run-icon { display: inline-flex; flex: 0 0 auto; }
+.tool-run.ok .tool-run-icon { color: var(--green); }
+.tool-run.fail .tool-run-icon { color: #b42318; }
+.tool-run-tool { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono, ui-monospace, monospace); }
+.tool-run-kind { flex: 0 0 auto; text-transform: capitalize; }
+.tool-run-err { flex: 0 0 auto; color: #b42318; background: #b4231811; border-radius: 999px; padding: 1px 8px; font-size: 11px; }
+.tool-run-dur { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
+.tool-run-time { flex: 0 0 auto; color: var(--muted); font-size: 11px; min-width: 48px; text-align: right; }
+
 .conn-search {
   display: flex;
   align-items: center;
