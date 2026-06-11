@@ -81,10 +81,9 @@ export function AutomationsView({
     scheduleMode === "interval"
       ? intervalN >= 1
       : times.length > 0 && (scheduleMode === "daily" || days.length > 0);
+  // Title is optional — derived from the prompt when empty. What matters is the action.
   const canSave =
-    title.trim().length > 0 &&
-    prompt.trim().length > 0 &&
-    (triggerKind === "event" || scheduleValid);
+    prompt.trim().length > 0 && (triggerKind === "event" || scheduleValid);
 
   const reset = () => {
     setTitle("");
@@ -114,8 +113,9 @@ export function AutomationsView({
               from: eventFrom.trim() || null,
             },
           };
+    const finalTitle = title.trim() || prompt.trim().slice(0, 48);
     onCreate({
-      title: title.trim(),
+      title: finalTitle,
       trigger,
       prompt: prompt.trim(),
       approval: autonomous ? "autonomous" : "confirm",
@@ -167,7 +167,7 @@ export function AutomationsView({
         <div className="auto-editor">
           <input
             className="auto-title-input"
-            placeholder="Titolo (es. Riassunto del venerdì)"
+            placeholder="Titolo (opzionale)"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
           />
