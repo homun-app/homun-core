@@ -10466,8 +10466,31 @@ fn strip_tag_blocks(input: &str, open: &str, close: &str) -> String {
 /// (notably MiniMax via Ollama's OpenAI-compat shim) leak their native tool-call
 /// or reasoning template tokens into the assistant `content` instead of the
 /// structured fields. Conservative: only known control markup is removed.
+/// Removes `<…｜…>` / `</…｜…>` tokens (fullwidth bar U+FF5C) that some models (GLM/Zhipu)
+/// leak as text instead of using structured tool calls — e.g. `<｜tool▁calls▁begin｜>` or
+/// `</｜DSML｜tool_calls>`. A leaked end-token can also replace a marker's proper close, so
+/// stripping it keeps the marker parseable.
+fn strip_fullwidth_bar_tokens(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '<' {
+            if let Some(rel) = chars[i..].iter().position(|&c| c == '>') {
+                if chars[i..=i + rel].iter().any(|&c| c == '｜') {
+                    i += rel + 1;
+                    continue;
+                }
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
 fn sanitize_model_text(text: &str) -> String {
-    let mut s = text.replace("]<]minimax[>[", "");
+    let mut s = strip_fullwidth_bar_tokens(&text.replace("]<]minimax[>[", ""));
     for (open, close) in [
         ("<tool_call>", "</tool_call>"),
         ("<invoke", "</invoke>"),

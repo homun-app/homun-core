@@ -2607,9 +2607,14 @@ const COMPOSIO_RECONNECT_RE = /‹‹COMPOSIO_RECONNECT››([\s\S]*?)‹‹\/C
 const CHOICES_RE = /‹‹CHOICES››([\s\S]*?)‹‹\/CHOICES››/;
 // Plan-mode: the model proposes a plan and STOPS; the card gates execution behind
 // Accetta / Modifica (the answer becomes the next user message).
-const PLAN_PROPOSE_RE = /‹‹PLAN_PROPOSE››([\s\S]*?)‹‹\/PLAN_PROPOSE››/;
+// Tolerant of a MISSING close (`…|$`): some models open the marker but emit their native
+// tool-call end-token instead of `‹‹/…››`, leaving it unterminated. The JSON payload is
+// self-delimiting, so capture-to-end still parses correctly.
+const PLAN_PROPOSE_RE = /‹‹PLAN_PROPOSE››([\s\S]*?)(?:‹‹\/PLAN_PROPOSE››|$)/;
 // Goal-propose: the model proposes the project's objective(s); the card lets the user save.
-const GOAL_PROPOSE_RE = /‹‹GOAL_PROPOSE››([\s\S]*?)‹‹\/GOAL_PROPOSE››/;
+const GOAL_PROPOSE_RE = /‹‹GOAL_PROPOSE››([\s\S]*?)(?:‹‹\/GOAL_PROPOSE››|$)/;
+// Strips an UNCLOSED plan/goal marker (open present, no close) from the visible prose.
+const UNCLOSED_PROPOSE_RE = /‹‹(?:PLAN_PROPOSE|GOAL_PROPOSE)››[\s\S]*$/;
 const COMPOSIO_MARKERS_RE =
   /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››/g;
 
@@ -4709,6 +4714,11 @@ function parseComposioConfirm(text: string): {
   goalPropose: string[] | null;
   planSteps: PlanStep[];
 } {
+  // Some models (GLM/Zhipu) leak their NATIVE tool-call delimiter tokens as text — they
+  // use a fullwidth bar (U+FF5C), e.g. `<｜tool▁calls▁begin｜>` or `</｜DSML｜tool_calls>`.
+  // Strip them before anything else so they never render and don't break marker matching
+  // (a leaked end-token replaces a marker's proper close → the marker would leak whole).
+  text = text.replace(/<\/?[^<>]*｜[^<>]*>/g, "");
   let action: ComposioPendingAction | null = null;
   const confirm = text.match(COMPOSIO_CONFIRM_RE);
   if (confirm) {
@@ -4817,7 +4827,12 @@ function parseComposioConfirm(text: string): {
   const doneTool = done ? done[1].trim() : null;
   const reconnectMatch = text.match(COMPOSIO_RECONNECT_RE);
   const reconnectSlug = reconnectMatch ? reconnectMatch[1].trim() : null;
-  const visible = text.replace(COMPOSIO_MARKERS_RE, "").trim();
+  const visible = text
+    .replace(COMPOSIO_MARKERS_RE, "")
+    // Also drop an UNCLOSED plan/goal marker (model didn't emit its proper close): its
+    // JSON payload is for a card, never prose.
+    .replace(UNCLOSED_PROPOSE_RE, "")
+    .trim();
   // A persisted "done" marker wins: never reopen the editable card.
   return {
     visible,
